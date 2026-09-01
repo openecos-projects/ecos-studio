@@ -8,10 +8,10 @@ from typing import Protocol
 
 from ecos_agent.optimization_contracts import (
     OptimizationKnob,
+    OptimizationOutcomeKind,
     OptimizationProposal,
     RequestedKnobValue,
 )
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")

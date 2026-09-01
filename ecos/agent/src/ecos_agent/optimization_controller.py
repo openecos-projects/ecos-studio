@@ -21,9 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from ecos_agent.codex_rpc import CodexProviderError
 from ecos_agent.effective_domain import (
     EffectiveDomainError,
-    EffectiveDomainSnapshot,
     compile_effective_domain,
-    validate_optimization_proposal_v2,
 )
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization_contracts import (
@@ -64,17 +62,14 @@ from ecos_agent.optimization_execution import (
     candidate_target_step,
 )
 from ecos_agent.optimization_knowledge_compiler import (
-    SupportedActionView,
     build_state_evidence_request,
     compile_supported_action_view,
 )
 from ecos_agent.optimization_knowledge_cases import (
-    EmpiricalCaseAudit,
     EmpiricalCaseAuditReplay,
     EmpiricalCaseAuditStore,
     EmpiricalCaseDiagnostic,
     EmpiricalOutcome,
-    TerminalEmpiricalCase,
     build_empirical_case_audit,
     build_terminal_empirical_case,
     select_empirical_cases,
@@ -94,10 +89,16 @@ from ecos_agent.optimization_ledger import (
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
 from ecos_agent.optimization_planning import (
     OptimizationHistory,
+    OptimizationPlannerTurn,
     OptimizationPlanningContext,
     OptimizationProposalPlanner,
     optimization_history_payload,
     planning_context_payload,
+    v2_domains,
+    v2_provider_payload_sha256,
+    v2_to_v1,
+    validate_planner_proposal,
+    validate_v2_proposal,
 )
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
@@ -105,10 +106,12 @@ from ecos_agent.optimization_retrieval import (
 )
 from ecos_agent.optimization_rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
+    IncumbentComparison,
     IncumbentDecision,
     legal_actions,
     native_receipt_is_effective,
     select_requested_value,
+    terminal_candidate_is_promotable,
 )
 from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
@@ -148,14 +151,6 @@ class OptimizationControlResult:
     requested: RequestedKnobValue | None = None
     rejection_reason: str | None = None
     planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
-
-
-@dataclass(frozen=True)
-class _PlannerTurn:
-    proposal: OptimizationProposal
-    requested: RequestedKnobValue | None = None
-    provider_payload_sha256: str | None = None
-    proposal_v2: OptimizationProposalV2 | None = None
 
 
 class _PersistedEpisodeState(BaseModel):
@@ -369,6 +364,14 @@ class OptimizationEpisodeController:
             raise OptimizationEpisodeControllerError(
                 "candidate terminal observation is not eligible"
             )
+        self._set_incumbent(candidate, evidence)
+        self._persist()
+
+    def _set_incumbent(
+        self,
+        candidate: TerminalObservation,
+        evidence: CandidateExecutionEvidence | None,
+    ) -> None:
         self._incumbent = candidate
         self._incumbent_candidate_root_ref = (
             evidence.candidate_root_ref if evidence else None
@@ -379,7 +382,6 @@ class OptimizationEpisodeController:
         self._incumbent_candidate_manifest_sha256 = (
             evidence.candidate_manifest_sha256 if evidence else None
         )
-        self._persist()
 
     @property
     def budget(self) -> BudgetSnapshot:
@@ -426,11 +428,11 @@ class OptimizationEpisodeController:
         planning_entry = self._append_planning_audit(context)
         self._persist()
         planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
-        planner_turn: _PlannerTurn | None = None
+        planner_turn: OptimizationPlannerTurn | None = None
         provider_payload_sha256 = None
         if self._v2_enabled():
             try:
-                provider_payload_sha256 = self._v2_provider_payload_sha256(context)
+                provider_payload_sha256 = v2_provider_payload_sha256(context)
             except EffectiveDomainError:
                 return self._defer_or_fallback(
                     planning_entry,
@@ -487,7 +489,7 @@ class OptimizationEpisodeController:
             self._budget = self._consume(planning_calls=1)
             context = self._planning_context(observation, retrieval, current_values)
             planning_entry = self._append_planning_audit(context)
-            provider_payload_sha256 = self._v2_provider_payload_sha256(context)
+            provider_payload_sha256 = v2_provider_payload_sha256(context)
             self._persist()
             try:
                 planner_turn = self._invoke_planner(context)
@@ -543,7 +545,12 @@ class OptimizationEpisodeController:
         assert planner_turn is not None
         proposal = planner_turn.proposal
 
-        rejection_reason = self._validate_proposal(proposal, context)
+        rejection_reason = validate_planner_proposal(
+            proposal,
+            context,
+            require_knowledge=self.mode == OptimizationAgentMode.FULL_AGENT,
+            forbid_knowledge=self.mode == OptimizationAgentMode.LLM_NO_KNOWLEDGE,
+        )
         if rejection_reason is not None:
             return self._defer_or_fallback(
                 planning_entry,
@@ -1326,34 +1333,14 @@ class OptimizationEpisodeController:
         )
         return enabled
 
-    @staticmethod
-    def _v2_domains(
-        context: OptimizationPlanningContext,
-    ) -> tuple[EffectiveDomainSnapshot, ...]:
-        legal_knobs = {action.knob_id for action in context.legal_actions}
-        return tuple(
-            domain
-            for domain in context.effective_domains
-            if domain.knob_id in legal_knobs and domain.allowed_requested_values
-        )
-
-    def _v2_provider_payload_sha256(self, context: OptimizationPlanningContext) -> str:
-        domains = self._v2_domains(context)
-        if not domains:
-            raise EffectiveDomainError("v2 planning domain is unavailable")
-        payload = planning_context_payload(context)
-        if len(domains) == 1:
-            payload["effective_domain"] = domains[0].model_dump(mode="json")
-        else:
-            payload["effective_domains"] = [
-                item.model_dump(mode="json") for item in domains
-            ]
-        return canonical_sha256(payload)
-
-    def _invoke_planner(self, context: OptimizationPlanningContext) -> _PlannerTurn:
+    def _invoke_planner(
+        self, context: OptimizationPlanningContext
+    ) -> OptimizationPlannerTurn:
         if not self._v2_enabled():
-            return _PlannerTurn(self._parse_proposal(self.planner.propose(context)))
-        domains = self._v2_domains(context)
+            return OptimizationPlannerTurn(
+                self._parse_proposal(self.planner.propose(context))
+            )
+        domains = v2_domains(context)
         if not domains:
             raise EffectiveDomainError("v2 planning domain is unavailable")
         propose_v2 = getattr(self.planner, "propose_v2", None)
@@ -1368,36 +1355,19 @@ class OptimizationEpisodeController:
         except (TypeError, ValueError) as exc:
             raise EffectiveDomainError("optimization proposal v2 is invalid") from exc
         if parsed.action is None:
-            return _PlannerTurn(
-                self._v2_to_v1(parsed),
+            return OptimizationPlannerTurn(
+                v2_to_v1(parsed),
                 None,
-                self._v2_provider_payload_sha256(context),
+                v2_provider_payload_sha256(context),
             )
-        domain = next(
-            (item for item in domains if item.knob_id == parsed.action.knob_id),
-            None,
-        )
-        if domain is None:
-            raise EffectiveDomainError("v2 proposal knob is not legal")
-        proposal = validate_optimization_proposal_v2(
+        proposal = validate_v2_proposal(
             parsed,
-            domain,
-            context_ref=context.context_ref.model_dump(mode="json"),
+            context,
             attempted=self._attempted_requests(),
-            supported_action=(
-                self._supported_v2_action(context, parsed)
-                if self.mode == OptimizationAgentMode.FULL_AGENT
-                else None
-            ),
+            require_knowledge_support=self.mode == OptimizationAgentMode.FULL_AGENT,
         )
-        if proposal.action is not None and not any(
-            item.knob_id == proposal.action.knob_id
-            and item.direction == proposal.action.direction
-            for item in context.legal_actions
-        ):
-            raise EffectiveDomainError("v2 proposal action is not legal")
-        return _PlannerTurn(
-            self._v2_to_v1(proposal),
+        return OptimizationPlannerTurn(
+            v2_to_v1(proposal),
             (
                 RequestedKnobValue(
                     knob_id=proposal.action.knob_id,
@@ -1406,113 +1376,8 @@ class OptimizationEpisodeController:
                 if proposal.action is not None
                 else None
             ),
-            self._v2_provider_payload_sha256(context),
+            v2_provider_payload_sha256(context),
             proposal,
-        )
-
-    @staticmethod
-    def _supported_v2_action(
-        context: OptimizationPlanningContext,
-        proposal: OptimizationProposalV2,
-    ) -> Mapping[str, object]:
-        action = proposal.action
-        if action is None or context.supported_action_view is None:
-            raise EffectiveDomainError("v2 proposal has no compiled knowledge support")
-        matches = tuple(
-            item
-            for item in context.supported_action_view.actions
-            if item.claim_ref.entity_id == action.claim_id
-            and item.claim_sha256 == action.claim_sha256
-            and item.binding_id == action.binding_id
-            and item.binding_sha256 == action.binding_sha256
-            and item.knob_id == action.knob_id
-            and item.direction == action.direction
-            and item.effective_domain_sha256 == action.effective_domain_sha256
-        )
-        if len(matches) != 1:
-            raise EffectiveDomainError(
-                "v2 proposal does not uniquely match compiled knowledge support"
-            )
-        return matches[0].model_dump(mode="json")
-
-    @staticmethod
-    def _v2_to_v1(proposal: OptimizationProposalV2) -> OptimizationProposal:
-        payload = proposal.model_dump(mode="json")
-        payload["schema_version"] = "ecos.optimization_proposal.v1"
-        try:
-            payload["reason_code"] = ProposalReason(proposal.reason_code).value
-        except ValueError as exc:
-            raise EffectiveDomainError("v2 proposal reason code is invalid") from exc
-        if proposal.action is not None:
-            payload["action"] = {
-                "knob_id": proposal.action.knob_id.value,
-                "direction": proposal.action.direction.value,
-                "expected_effects": [
-                    item.model_dump(mode="json")
-                    for item in proposal.action.expected_effects
-                ],
-            }
-        return OptimizationProposal.model_validate(payload)
-
-    def _validate_proposal(
-        self,
-        proposal: OptimizationProposal,
-        context: OptimizationPlanningContext,
-    ) -> str | None:
-        if proposal.context_ref != context.context_ref:
-            return "context_reference"
-        if tuple(proposal.observation_refs) != (context.observation_ref,):
-            return "observation_reference"
-        if not self._history_refs_are_current(proposal, context):
-            return "history_reference"
-        proposed_knowledge = _knowledge_keys(proposal.knowledge_refs)
-        available_knowledge = _knowledge_keys(context.knowledge_refs)
-        if self.mode == OptimizationAgentMode.LLM_NO_KNOWLEDGE and proposed_knowledge:
-            return "no_knowledge_reference"
-        if not proposed_knowledge.issubset(available_knowledge):
-            return "knowledge_reference"
-        proposed_memory = {item.summary_sha256 for item in proposal.task_memory_refs}
-        available_memory = (
-            {item.reference.summary_sha256 for item in context.task_memory.summaries}
-            if context.task_memory is not None
-            else set()
-        )
-        if not proposed_memory.issubset(available_memory):
-            return "task_memory_reference"
-        if proposal.decision == OptimizationDecision.PROPOSE:
-            if self.mode == OptimizationAgentMode.FULL_AGENT and not proposed_knowledge:
-                return "knowledge_reference"
-            if proposal.action is None:
-                return "proposal_action"
-            if self.mode == OptimizationAgentMode.FULL_AGENT and not any(
-                item.knob_id == proposal.action.knob_id
-                and item.direction == proposal.action.direction
-                and (
-                    item.claim_ref.entity_id,
-                    item.claim_ref.chunk_sha256,
-                )
-                in proposed_knowledge
-                for item in (
-                    context.supported_action_view.actions
-                    if context.supported_action_view is not None
-                    else ()
-                )
-            ):
-                return "knowledge_action_support"
-        return None
-
-    def _history_refs_are_current(
-        self,
-        proposal: OptimizationProposal,
-        context: OptimizationPlanningContext,
-    ) -> bool:
-        available = {
-            (item.reference.intervention_id, item.reference.outcome_sha256)
-            for item in context.history
-        }
-        return all(
-            (item.intervention_id, item.outcome_sha256) in available
-            for item in proposal.history_refs
         )
 
     def _history(
@@ -1761,6 +1626,24 @@ class OptimizationEpisodeController:
                 receipt.parameter_application_receipt,
                 terminal_observation,
             )
+        comparison = (
+            IncumbentDecision(incumbent_decision)
+            if incumbent_decision is not None
+            else None
+        )
+        if terminal_candidate_is_promotable(
+            execution_outcome=receipt.outcome,
+            candidate=terminal_observation,
+            comparison=(
+                None
+                if comparison is None
+                else IncumbentComparison(comparison, decisive_metric)
+            ),
+            requested=self._requested,
+            parameter_receipt=receipt.parameter_application_receipt,
+        ):
+            assert terminal_observation is not None
+            self._set_incumbent(terminal_observation, receipt.evidence)
         self._pending_intervention_id = None
         self._pending_execution_id = None
         self._cancel_requested = False
@@ -2267,10 +2150,6 @@ class OptimizationEpisodeController:
             raise OptimizationEpisodeControllerError(
                 "episode pending execution does not match ledger trace"
             )
-
-
-def _knowledge_keys(references: tuple[KnowledgeReference, ...]) -> set[tuple[str, str]]:
-    return {(reference.entity_id, reference.chunk_sha256) for reference in references}
 
 
 def _pending_tuple(intervention_id: str | None) -> tuple[str, ...]:

@@ -1960,7 +1960,7 @@ def test_sibling_promoted_receipt_does_not_replace_new_episode_baseline(
     assert density_domain.thresholds[0].value == 0.8
 
 
-def test_promoted_receipt_is_current_only_for_its_bound_incumbent(
+def test_completed_terminal_receipt_is_bound_to_promoted_incumbent(
     tmp_path: Path,
 ) -> None:
     evidence = CandidateExecutionEvidence(
@@ -1993,8 +1993,6 @@ def test_promoted_receipt_is_current_only_for_its_bound_incumbent(
         incumbent_decision="candidate_better",
     )
 
-    assert controller._native_receipts(promoted_only=True) == ()
-    controller.promote_incumbent(_eligible_terminal(), evidence)
     assert len(controller._native_receipts(promoted_only=True)) == 1
 
     next_values = {

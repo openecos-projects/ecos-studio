@@ -17,6 +17,7 @@ from ecos_agent.optimization_contracts import (
     ObjectiveMetric,
     OptimizationKnob,
     OptimizationObjectiveContract,
+    OptimizationOutcomeKind,
     OptimizationObjectiveProposal,
     ProposalAction,
     RequestedKnobValue,
@@ -69,6 +70,13 @@ class CoordinateDirection(StrEnum):
 class IncumbentComparison:
     decision: IncumbentDecision
     decisive_metric: SelectionMetric | None
+
+
+@dataclass(frozen=True)
+class TerminalCandidateClassification:
+    comparison: IncumbentComparison | None
+    outcome: OptimizationOutcomeKind
+    promote: bool
 
 
 @dataclass(frozen=True)
@@ -132,6 +140,102 @@ def native_receipt_is_effective(receipt: ParameterApplicationReceipt) -> bool:
         receipt.requested.get("knob_id") == OptimizationKnob.ROUTABILITY_OPT.value
         and receipt.requested.get("value") is False
         and receipt.activation.status == "not_activated"
+    )
+
+
+def terminal_quality_outcome(
+    execution_outcome: OptimizationOutcomeKind,
+    comparison: IncumbentComparison | None,
+) -> OptimizationOutcomeKind:
+    if execution_outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED:
+        return execution_outcome
+    if comparison is None:
+        return execution_outcome
+    return {
+        IncumbentDecision.INITIALIZED: OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+        IncumbentDecision.CANDIDATE_BETTER: OptimizationOutcomeKind.IMPROVED,
+        IncumbentDecision.INCUMBENT_RETAINED: OptimizationOutcomeKind.DEGRADED,
+        IncumbentDecision.NOISE_TIE: OptimizationOutcomeKind.TRADEOFF,
+        IncumbentDecision.CANDIDATE_INELIGIBLE: (
+            OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+        ),
+    }[comparison.decision]
+
+
+def terminal_candidate_is_promotable(
+    *,
+    execution_outcome: OptimizationOutcomeKind,
+    candidate: TerminalObservation | None,
+    comparison: IncumbentComparison | None,
+    requested: RequestedKnobValue | None,
+    parameter_receipt: ParameterApplicationReceipt | None,
+) -> bool:
+    return bool(
+        candidate is not None
+        and execution_outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+        and candidate.schema_version == "ecos.terminal_observation.v3"
+        and candidate.eligible_for_incumbent
+        and comparison is not None
+        and comparison.decision
+        in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
+        and requested is not None
+        and parameter_receipt is not None
+        and native_receipt_is_effective(parameter_receipt)
+    )
+
+
+def classify_terminal_candidate(
+    *,
+    execution_outcome: OptimizationOutcomeKind,
+    candidate: TerminalObservation | None,
+    incumbent: TerminalObservation | None,
+    objective: RoutabilityObjectiveContract | None,
+    semantic_objective: OptimizationObjectiveContract | None,
+    baseline_eligibility_exempt: bool,
+    requested: RequestedKnobValue | None,
+    parameter_receipt: ParameterApplicationReceipt | None,
+) -> TerminalCandidateClassification:
+    comparison: IncumbentComparison | None = None
+    if candidate is not None and objective is not None:
+        if not candidate.eligible_for_incumbent:
+            comparison = IncumbentComparison(
+                IncumbentDecision.CANDIDATE_INELIGIBLE, None
+            )
+        elif incumbent is None or (
+            baseline_eligibility_exempt and not incumbent.eligible_for_incumbent
+        ):
+            comparison = IncumbentComparison(IncumbentDecision.INITIALIZED, None)
+        else:
+            comparison = compare_incumbent(
+                incumbent=incumbent,
+                candidate=candidate,
+                objective=objective,
+                semantic_objective=semantic_objective,
+            )
+    if execution_outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED or (
+        candidate is not None
+        and candidate.schema_version != "ecos.terminal_observation.v3"
+    ):
+        comparison = IncumbentComparison(
+            IncumbentDecision.CANDIDATE_INELIGIBLE, None
+        )
+    if requested is not None and (
+        parameter_receipt is None
+        or not native_receipt_is_effective(parameter_receipt)
+    ):
+        comparison = IncumbentComparison(
+            IncumbentDecision.CANDIDATE_INELIGIBLE, None
+        )
+    return TerminalCandidateClassification(
+        comparison=comparison,
+        outcome=terminal_quality_outcome(execution_outcome, comparison),
+        promote=terminal_candidate_is_promotable(
+            execution_outcome=execution_outcome,
+            candidate=candidate,
+            comparison=comparison,
+            requested=requested,
+            parameter_receipt=parameter_receipt,
+        ),
     )
 
 

@@ -124,6 +124,19 @@ class OptimizationEpisodeState(StrEnum):
     QUARANTINED = "quarantined"
 
 
+class OptimizationOutcomeKind(StrEnum):
+    IMPROVED = "improved"
+    DEGRADED = "degraded"
+    TRADEOFF = "tradeoff"
+    INFEASIBLE = "infeasible"
+    EXECUTION_SUCCEEDED = "execution_succeeded"
+    CANDIDATE_INELIGIBLE = "candidate_ineligible"
+    EXECUTION_FAILED = "execution_failed"
+    EVIDENCE_INVALID = "evidence_invalid"
+    TIMED_OUT_CANCELLED = "timed_out_cancelled"
+    INDETERMINATE = "indeterminate"
+
+
 class _ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

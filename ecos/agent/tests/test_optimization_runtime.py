@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
@@ -20,6 +21,7 @@ from ecos_agent.optimization_controller import CandidateExecutionReceipt
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_rules import freeze_optimization_objective
 from ecos_agent.optimization_runtime import (
+    OptimizationRuntimeContext,
     OptimizationRuntimeError,
     _current_values,
     _design_id,
@@ -285,6 +287,23 @@ def test_runtime_requires_a_hash_bound_optimization_objective() -> None:
         OptimizationRuntimeError, match="optimization objective is invalid"
     ):
         _optimization_objective(objective)
+
+
+def test_runtime_context_rejects_unknown_and_coerced_fields(tmp_path: Path) -> None:
+    payload = {
+        "workspace": str(tmp_path),
+        "episode_id": "episode-1",
+        "objective": _semantic_objective(),
+    }
+
+    context = OptimizationRuntimeContext.model_validate(payload)
+
+    assert context.seed == 0
+    assert context.receipt_aware_planning is True
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        OptimizationRuntimeContext.model_validate({**payload, "unknown": 1})
+    with pytest.raises(ValidationError, match="seed"):
+        OptimizationRuntimeContext.model_validate({**payload, "seed": True})
 
 
 def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt() -> (

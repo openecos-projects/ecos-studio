@@ -9,15 +9,23 @@ import re
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
-from pydantic import ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StrictInt,
+    ValidationError,
+    field_validator,
+)
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     OptimizationObjectiveContract,
+    RoutabilityObjectiveContract,
     TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
@@ -38,6 +46,7 @@ from ecos_agent.optimization_ledger import (
     build_optimization_artifact_manifest,
 )
 from ecos_agent.optimization_memory import (
+    OptimizationTaskMemoryScope,
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
 )
@@ -75,31 +84,60 @@ _OPTIMIZATION_RERUN_STAGES = (
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
 
+class OptimizationRuntimeContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    session_id: str | None = None
+    episode_id: str
+    workspace: str
+    objective: OptimizationObjectiveContract
+    reference_runtime_seconds: float | int | None = None
+    agent_mode: OptimizationAgentMode = OptimizationAgentMode.FULL_AGENT
+    knowledge_case_shots: Literal[0, 3] = 0
+    knowledge_case_pool_root: str | None = None
+    receipt_aware_planning: StrictBool = True
+    baseline_eligibility_exempt: StrictBool = False
+    seed: StrictInt = 0
+
+    @field_validator("session_id", "episode_id", "workspace")
+    @classmethod
+    def validate_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("runtime context text is invalid")
+        return value.strip()
+
+    @field_validator("reference_runtime_seconds", mode="before")
+    @classmethod
+    def validate_reference_runtime(cls, value: object) -> object:
+        if value is None:
+            return None
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError("reference runtime is invalid")
+        return value
+
+
 def create_optimization_runner(
     context: Mapping[str, Any], planner: object
 ) -> OptimizationEpisodeRunner:
-    workspace = _workspace(context.get("workspace"))
-    episode_id = _text(context.get("episode_id"), "episode_id")
-    objective = _optimization_objective(context.get("objective"))
-    checkpoint_id = "place"
     try:
-        agent_mode = OptimizationAgentMode(
-            context.get("agent_mode", OptimizationAgentMode.FULL_AGENT)
-        )
-    except ValueError as exc:
-        raise OptimizationRuntimeError("optimization agent mode is invalid") from exc
-    knowledge_case_shots = context.get("knowledge_case_shots", 0)
-    if type(knowledge_case_shots) is not int or knowledge_case_shots not in {0, 3}:
-        raise OptimizationRuntimeError("knowledge case shots must be zero or three")
+        runtime = OptimizationRuntimeContext.model_validate(context)
+    except ValidationError as exc:
+        raise OptimizationRuntimeError("optimization runtime context is invalid") from exc
+    workspace = _workspace(runtime.workspace)
+    episode_id = runtime.episode_id
+    objective = runtime.objective
+    checkpoint_id = "place"
     knowledge_case_pool_root = _knowledge_case_pool_root(
-        context.get("knowledge_case_pool_root")
+        runtime.knowledge_case_pool_root
     )
-    receipt_aware_planning = context.get("receipt_aware_planning", True)
-    if type(receipt_aware_planning) is not bool:
-        raise OptimizationRuntimeError("receipt-aware planning flag is invalid")
-    baseline_eligibility_exempt = context.get("baseline_eligibility_exempt", False)
-    if type(baseline_eligibility_exempt) is not bool:
-        raise OptimizationRuntimeError("baseline eligibility exemption is invalid")
+    baseline_eligibility_exempt = runtime.baseline_eligibility_exempt
     terminal_observation = build_terminal_observation(workspace)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
@@ -108,7 +146,7 @@ def create_optimization_runner(
         terminal_observation,
         allow_ineligible_baseline=baseline_eligibility_exempt,
     )
-    reference_runtime = context.get("reference_runtime_seconds")
+    reference_runtime = runtime.reference_runtime_seconds
     if reference_runtime is None:
         reference_runtime = _optimization_rerun_runtime_seconds(workspace)
     if (
@@ -130,15 +168,58 @@ def create_optimization_runner(
         objective_contract_sha256=objective.contract_sha256,
     )
     memory_store = OptimizationTaskMemoryStore(ledger_root.parent, memory_scope)
-    rpc = EccContentLengthRpcClient(_ecc_executable())
     ledger = _ledger(ledger_root)
+    executor, execution_context = _open_execution_adapter(
+        runtime=runtime,
+        workspace=workspace,
+        site_width_dbu=site_width_dbu,
+        parent_manifest=parent_manifest,
+        design_id=design_id,
+    )
+    try:
+        controller = _recover_or_create_controller(
+            runtime=runtime,
+            planner=planner,
+            executor=executor,
+            ledger=ledger,
+            ledger_root=ledger_root,
+            memory_scope=memory_scope,
+            memory_store=memory_store,
+            budget=budget,
+            terminal_observation=terminal_observation,
+            parent_manifest=parent_manifest,
+            execution_context=execution_context,
+            knowledge_case_pool_root=knowledge_case_pool_root,
+        )
+    except Exception:
+        executor.close()
+        raise
+    return _assemble_runner(
+        runtime=runtime,
+        workspace=workspace,
+        controller=controller,
+        executor=executor,
+        routability_objective=routability_objective,
+        site_width_dbu=site_width_dbu,
+    )
+
+
+def _open_execution_adapter(
+    *,
+    runtime: OptimizationRuntimeContext,
+    workspace: Path,
+    site_width_dbu: int,
+    parent_manifest: str,
+    design_id: str,
+) -> tuple[EccCandidateRerunAdapter, dict[str, object]]:
+    rpc = EccContentLengthRpcClient(_ecc_executable())
     try:
         ecc_revision = rpc.ecc_revision()
         try:
             execution_context = _optimization_execution_context(
                 workspace,
                 site_width_dbu,
-                context.get("seed", 0),
+                runtime.seed,
                 parent_manifest,
                 ecc_revision,
                 design_id=design_id,
@@ -146,91 +227,152 @@ def create_optimization_runner(
         except OptimizationRuntimeError:
             if (workspace / "origin").exists():
                 raise
-            if type(context.get("seed", 0)) is not int:
-                raise OptimizationRuntimeError("optimization seed is invalid")
-            # Legacy unit fixtures have no materialized inputs; production workspaces do.
-            execution_context = {
-                "design_sha256": parent_manifest,
-                "design_id": design_id,
-                "parent_lineage_sha256": parent_manifest,
-                "ecc_revision": ecc_revision,
-                "site_width_dbu": site_width_dbu,
-                "seed": context.get("seed", 0),
-            }
-        workspace_id = rpc.open_workspace(workspace)
+            execution_context = _legacy_execution_context(
+                runtime, design_id, parent_manifest, ecc_revision, site_width_dbu
+            )
         executor = EccCandidateRerunAdapter(
             rpc,
-            workspace_id=workspace_id,
+            workspace_id=rpc.open_workspace(workspace),
             site_width_dbu=site_width_dbu,
             workspace_root=workspace,
         )
-        state_path = ledger_root / "optimization-episode-state.v6.json"
-        legacy_state_paths = (
-            ledger_root / "optimization-episode-state.v2.json",
-            ledger_root / "optimization-episode-state.v3.json",
-            ledger_root / "optimization-episode-state.v4.json",
-            ledger_root / "optimization-episode-state.v5.json",
-        )
-        if state_path.is_file():
-            memory_store.verify_episode_scope(ledger_root)
-            controller = OptimizationEpisodeController.recover(
-                planner=planner,
-                executor=executor,
-                ledger=ledger,
-                clock=_monotonic,
-                task_memory_scope_sha256=memory_scope.scope_sha256,
-                task_memory_supplier=memory_store.snapshot,
-                execution_context=execution_context,
-                receipt_aware_planning=receipt_aware_planning,
-                knowledge_case_shots=knowledge_case_shots,
-                knowledge_case_pool_root=knowledge_case_pool_root,
-            )
-            if controller.objective != objective:
-                raise OptimizationRuntimeError(
-                    "optimization objective does not match the recovered episode"
-                )
-            if controller.parent_manifest_sha256 != parent_manifest:
-                raise OptimizationRuntimeError(
-                    "optimization workspace does not match the recovered episode"
-                )
-            if (
-                controller.mode != agent_mode
-                or controller.knowledge_case_shots != knowledge_case_shots
-            ):
-                raise OptimizationRuntimeError(
-                    "optimization treatment does not match the recovered episode"
-                )
-        elif any(path.is_file() for path in legacy_state_paths):
-            raise OptimizationRuntimeError(
-                "pre-policy episode cannot be recovered; start a new optimization episode"
-            )
-        elif ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
-            raise OptimizationRuntimeError("optimization episode state is missing")
-        else:
-            memory_store.ensure_episode_scope(ledger_root)
-            controller = OptimizationEpisodeController(
-                episode_id=episode_id,
-                checkpoint_id=checkpoint_id,
-                mode=agent_mode,
-                budget=budget,
-                planner=planner,
-                executor=executor,
-                ledger=ledger,
-                clock=_monotonic,
-                incumbent=terminal_observation,
-                parent_manifest_sha256=parent_manifest,
-                objective=objective,
-                task_memory_scope_sha256=memory_scope.scope_sha256,
-                task_memory_supplier=memory_store.snapshot,
-                execution_context=execution_context,
-                receipt_aware_planning=receipt_aware_planning,
-                knowledge_case_shots=knowledge_case_shots,
-                knowledge_case_pool_root=knowledge_case_pool_root,
-            )
     except Exception:
         rpc.close()
         raise
+    return executor, execution_context
 
+
+def _legacy_execution_context(
+    runtime: OptimizationRuntimeContext,
+    design_id: str,
+    parent_manifest: str,
+    ecc_revision: str,
+    site_width_dbu: int,
+) -> dict[str, object]:
+    """Compatibility for unit fixtures without production materialized inputs."""
+    return {
+        "design_sha256": parent_manifest,
+        "design_id": design_id,
+        "parent_lineage_sha256": parent_manifest,
+        "ecc_revision": ecc_revision,
+        "site_width_dbu": site_width_dbu,
+        "seed": runtime.seed,
+    }
+
+
+def _recover_or_create_controller(
+    *,
+    runtime: OptimizationRuntimeContext,
+    planner: object,
+    executor: EccCandidateRerunAdapter,
+    ledger: OptimizationLedger,
+    ledger_root: Path,
+    memory_scope: OptimizationTaskMemoryScope,
+    memory_store: OptimizationTaskMemoryStore,
+    budget: BudgetSnapshot,
+    terminal_observation: TerminalObservation,
+    parent_manifest: str,
+    execution_context: Mapping[str, object],
+    knowledge_case_pool_root: Path | None,
+) -> OptimizationEpisodeController:
+    state_path = ledger_root / "optimization-episode-state.v6.json"
+    legacy_state_paths = tuple(
+        ledger_root / f"optimization-episode-state.v{version}.json"
+        for version in range(2, 6)
+    )
+    if state_path.is_file():
+        return _recover_controller(
+            runtime,
+            planner,
+            executor,
+            ledger,
+            ledger_root,
+            memory_scope,
+            memory_store,
+            parent_manifest,
+            execution_context,
+            knowledge_case_pool_root,
+        )
+    if any(path.is_file() for path in legacy_state_paths):
+        raise OptimizationRuntimeError(
+            "pre-policy episode cannot be recovered; start a new optimization episode"
+        )
+    if ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
+        raise OptimizationRuntimeError("optimization episode state is missing")
+    memory_store.ensure_episode_scope(ledger_root)
+    return OptimizationEpisodeController(
+        episode_id=runtime.episode_id,
+        checkpoint_id="place",
+        mode=runtime.agent_mode,
+        budget=budget,
+        planner=planner,
+        executor=executor,
+        ledger=ledger,
+        clock=_monotonic,
+        incumbent=terminal_observation,
+        parent_manifest_sha256=parent_manifest,
+        objective=runtime.objective,
+        task_memory_scope_sha256=memory_scope.scope_sha256,
+        task_memory_supplier=memory_store.snapshot,
+        execution_context=execution_context,
+        receipt_aware_planning=runtime.receipt_aware_planning,
+        knowledge_case_shots=runtime.knowledge_case_shots,
+        knowledge_case_pool_root=knowledge_case_pool_root,
+    )
+
+
+def _recover_controller(
+    runtime: OptimizationRuntimeContext,
+    planner: object,
+    executor: EccCandidateRerunAdapter,
+    ledger: OptimizationLedger,
+    ledger_root: Path,
+    memory_scope: OptimizationTaskMemoryScope,
+    memory_store: OptimizationTaskMemoryStore,
+    parent_manifest: str,
+    execution_context: Mapping[str, object],
+    knowledge_case_pool_root: Path | None,
+) -> OptimizationEpisodeController:
+    memory_store.verify_episode_scope(ledger_root)
+    controller = OptimizationEpisodeController.recover(
+        planner=planner,
+        executor=executor,
+        ledger=ledger,
+        clock=_monotonic,
+        task_memory_scope_sha256=memory_scope.scope_sha256,
+        task_memory_supplier=memory_store.snapshot,
+        execution_context=execution_context,
+        receipt_aware_planning=runtime.receipt_aware_planning,
+        knowledge_case_shots=runtime.knowledge_case_shots,
+        knowledge_case_pool_root=knowledge_case_pool_root,
+    )
+    if controller.objective != runtime.objective:
+        raise OptimizationRuntimeError(
+            "optimization objective does not match the recovered episode"
+        )
+    if controller.parent_manifest_sha256 != parent_manifest:
+        raise OptimizationRuntimeError(
+            "optimization workspace does not match the recovered episode"
+        )
+    if (
+        controller.mode != runtime.agent_mode
+        or controller.knowledge_case_shots != runtime.knowledge_case_shots
+    ):
+        raise OptimizationRuntimeError(
+            "optimization treatment does not match the recovered episode"
+        )
+    return controller
+
+
+def _assemble_runner(
+    *,
+    runtime: OptimizationRuntimeContext,
+    workspace: Path,
+    controller: OptimizationEpisodeController,
+    executor: EccCandidateRerunAdapter,
+    routability_objective: RoutabilityObjectiveContract,
+    site_width_dbu: int,
+) -> OptimizationEpisodeRunner:
     retrieval = OptimizationKnowledgeRetriever()
     stop_event = threading.Event()
     current_values = _current_values(
@@ -239,24 +381,26 @@ def create_optimization_runner(
     )
 
     def observation_supplier(current_budget: BudgetSnapshot):
-        return build_stage_observation(workspace, checkpoint_id, budget=current_budget)
+        return build_stage_observation(workspace, "place", budget=current_budget)
 
     def retrieval_supplier(observation, previous: OptimizationOutcomeKind | None):
         request = build_optimization_retrieval_request(
-            task_id=episode_id,
+            task_id=runtime.episode_id,
             observation=observation,
             previous_intervention_outcome=previous,
-            primary_metric=objective.primary_metric,
-            preserve_metrics=objective.preserve_metrics,
+            primary_metric=runtime.objective.primary_metric,
+            preserve_metrics=runtime.objective.preserve_metrics,
         )
         return retrieval.retrieve(request)
 
     def terminal_waiter(execution_id: str):
-        remaining = controller.budget.remaining_wall_time_seconds
         return _wait_for_terminal_receipt(
             executor,
             execution_id,
-            timeout_seconds=min(_terminal_timeout_seconds(), remaining),
+            timeout_seconds=min(
+                _terminal_timeout_seconds(),
+                controller.budget.remaining_wall_time_seconds,
+            ),
             stop_event=stop_event,
         )
 
@@ -275,7 +419,7 @@ def create_optimization_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
-        baseline_eligibility_exempt=baseline_eligibility_exempt,
+        baseline_eligibility_exempt=runtime.baseline_eligibility_exempt,
         stop_event=stop_event,
         site_width_dbu=site_width_dbu,
     )
@@ -439,12 +583,6 @@ def _incumbent_workspace(workspace: Path, candidate_root_ref: str | None) -> Pat
     if not resolved.is_dir():
         raise OptimizationRuntimeError("incumbent candidate workspace is invalid")
     return resolved
-
-
-def _text(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise OptimizationRuntimeError(f"optimization {label} is missing")
-    return value.strip()
 
 
 def _design_id(workspace: Path) -> str:

@@ -9,7 +9,6 @@ import re
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Iterator, Literal
 
@@ -28,6 +27,7 @@ from ecos_agent.optimization_contracts import (
     BudgetSnapshot,
     HistoryReference,
     OptimizationTaskMemoryReference,
+    OptimizationOutcomeKind,
     PlanningProviderEvidence,
     ProposalAction,
     ProposalContextRef,
@@ -73,19 +73,6 @@ class OptimizationArtifactManifestError(OptimizationLedgerError):
 
 class _LedgerModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class OptimizationOutcomeKind(StrEnum):
-    IMPROVED = "improved"
-    DEGRADED = "degraded"
-    TRADEOFF = "tradeoff"
-    INFEASIBLE = "infeasible"
-    EXECUTION_SUCCEEDED = "execution_succeeded"
-    CANDIDATE_INELIGIBLE = "candidate_ineligible"
-    EXECUTION_FAILED = "execution_failed"
-    EVIDENCE_INVALID = "evidence_invalid"
-    TIMED_OUT_CANCELLED = "timed_out_cancelled"
-    INDETERMINATE = "indeterminate"
 
 
 class OptimizationArtifactEntry(_LedgerModel):

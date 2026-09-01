@@ -24,10 +24,8 @@ from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import (
     IncumbentComparison,
-    IncumbentDecision,
-    compare_incumbent,
+    classify_terminal_candidate,
     coordinate_value_from_native_receipt,
-    native_receipt_is_effective,
 )
 
 
@@ -156,25 +154,25 @@ class OptimizationEpisodeRunner:
             )
         except Exception:
             return self._indeterminate_turn(observation, retrieval, planning, execution)
-        comparison = self._compare(terminal_observation)
-        if receipt.outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED or (
-            terminal_observation is not None
-            and terminal_observation.schema_version != "ecos.terminal_observation.v3"
-        ):
-            comparison = IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
-        if planning.requested is not None and (
-            receipt.parameter_application_receipt is None
-            or not native_receipt_is_effective(receipt.parameter_application_receipt)
-        ):
-            comparison = IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
+        classification = classify_terminal_candidate(
+            execution_outcome=receipt.outcome,
+            candidate=terminal_observation,
+            incumbent=self._controller.incumbent,
+            objective=self._objective,
+            semantic_objective=self._controller.objective,
+            baseline_eligibility_exempt=self._baseline_eligibility_exempt,
+            requested=planning.requested,
+            parameter_receipt=receipt.parameter_application_receipt,
+        )
+        comparison = classification.comparison
         completed = self._controller.complete_terminal(
             receipt,
             terminal_observation,
-            outcome=self._quality_outcome(receipt.outcome, comparison),
+            outcome=classification.outcome,
             incumbent_decision=comparison.decision.value if comparison else None,
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
-        self._promote(terminal_observation, comparison, receipt, planning.requested)
+        self._update_current_value(receipt, planning.requested, classification.promote)
         return OptimizationEpisodeTurn(
             observation,
             retrieval,
@@ -184,76 +182,27 @@ class OptimizationEpisodeRunner:
             comparison,
         )
 
-    @staticmethod
-    def _quality_outcome(
-        execution_outcome: OptimizationOutcomeKind,
-        comparison: IncumbentComparison | None,
-    ) -> OptimizationOutcomeKind:
-        if execution_outcome != OptimizationOutcomeKind.EXECUTION_SUCCEEDED:
-            return execution_outcome
-        if comparison is None:
-            return execution_outcome
-        return {
-            IncumbentDecision.INITIALIZED: OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
-            IncumbentDecision.CANDIDATE_BETTER: OptimizationOutcomeKind.IMPROVED,
-            IncumbentDecision.INCUMBENT_RETAINED: OptimizationOutcomeKind.DEGRADED,
-            IncumbentDecision.NOISE_TIE: OptimizationOutcomeKind.TRADEOFF,
-            IncumbentDecision.CANDIDATE_INELIGIBLE: OptimizationOutcomeKind.CANDIDATE_INELIGIBLE,
-        }[comparison.decision]
-
     def _previous_outcome(self) -> OptimizationOutcomeKind | None:
         outcomes = self._controller.ledger.replay().terminal_outcomes
         return outcomes[-1].outcome if outcomes else None
 
-    def _compare(
-        self, candidate: TerminalObservation | None
-    ) -> IncumbentComparison | None:
-        if candidate is None or self._objective is None:
-            return None
-        if not candidate.eligible_for_incumbent:
-            return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
-        incumbent = self._controller.incumbent
-        if incumbent is None or (
-            self._baseline_eligibility_exempt and not incumbent.eligible_for_incumbent
-        ):
-            return IncumbentComparison(IncumbentDecision.INITIALIZED, None)
-        comparison = compare_incumbent(
-            incumbent=incumbent,
-            candidate=candidate,
-            objective=self._objective,
-            semantic_objective=self._controller.objective,
-        )
-        return comparison
-
-    def _promote(
+    def _update_current_value(
         self,
-        candidate: TerminalObservation | None,
-        comparison: IncumbentComparison | None,
         receipt: CandidateExecutionReceipt,
         requested: RequestedKnobValue | None,
+        promote: bool,
     ) -> None:
-        if (
-            candidate is not None
-            and receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
-            and candidate.schema_version == "ecos.terminal_observation.v3"
-            and candidate.eligible_for_incumbent
-            and comparison is not None
-            and comparison.decision
-            in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
-            and receipt.parameter_application_receipt is not None
-            and native_receipt_is_effective(receipt.parameter_application_receipt)
-        ):
-            self._controller.promote_incumbent(candidate, receipt.evidence)
-            if requested is not None:
-                value = (
-                    coordinate_value_from_native_receipt(
-                        receipt.parameter_application_receipt,
-                        site_width_dbu=self._site_width_dbu,
-                    )
-                    if self._controller.receipt_aware_planning
-                    else requested.value
-                )
-                self._current_values[requested.knob_id.value] = value
+        if not promote or requested is None or receipt.parameter_application_receipt is None:
+            return
+        value = (
+            coordinate_value_from_native_receipt(
+                receipt.parameter_application_receipt,
+                site_width_dbu=self._site_width_dbu,
+            )
+            if self._controller.receipt_aware_planning
+            else requested.value
+        )
+        self._current_values[requested.knob_id.value] = value
 
     def _indeterminate_turn(
         self,
