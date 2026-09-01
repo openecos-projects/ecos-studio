@@ -77,6 +77,12 @@ def test_obsolete_script_lanes_are_removed() -> None:
     assert not (SCRIPT_ROOT / "run_equal_budget_experiment.py").exists()
 
 
+def test_retired_pilot_runner_is_removed() -> None:
+    assert not (
+        PACKAGE_ROOT / "optimization" / "experiments" / "baseline_runner.py"
+    ).exists()
+
+
 def test_tests_are_grouped_by_domain() -> None:
     assert sorted(path.name for path in TEST_ROOT.glob("test_*.py")) == [
         "test_package_architecture.py"

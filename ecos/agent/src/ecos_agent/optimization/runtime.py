@@ -451,15 +451,6 @@ def _wait_for_terminal_receipt(
     return executor.cancel(execution_id)
 
 
-def _optimization_objective(value: object) -> OptimizationObjectiveContract:
-    if value is None:
-        raise OptimizationRuntimeError("optimization objective is missing")
-    try:
-        return OptimizationObjectiveContract.model_validate(value)
-    except (TypeError, ValidationError, ValueError) as exc:
-        raise OptimizationRuntimeError("optimization objective is invalid") from exc
-
-
 def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> str:
     checkpoint_manifest = build_optimization_artifact_manifest(
         workspace,

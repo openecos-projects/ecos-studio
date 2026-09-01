@@ -28,7 +28,6 @@ from ecos_agent.optimization.runtime import (
     _incumbent_workspace,
     _knowledge_case_pool_root,
     _optimization_execution_context,
-    _optimization_objective,
     _optimization_rerun_runtime_seconds,
     _parent_manifest_sha256,
     _wait_for_terminal_receipt,
@@ -269,24 +268,6 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
             "sdc_sha256": context["sdc_sha256"],
         }
     )
-
-
-def test_runtime_requires_a_hash_bound_optimization_objective() -> None:
-    objective = _semantic_objective()
-
-    assert (
-        _optimization_objective(objective).primary_metric
-        == ObjectiveMetric.ROUTE_WIRELENGTH
-    )
-    with pytest.raises(
-        OptimizationRuntimeError, match="optimization objective is missing"
-    ):
-        _optimization_objective(None)
-    objective["primary_metric"] = ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
-    with pytest.raises(
-        OptimizationRuntimeError, match="optimization objective is invalid"
-    ):
-        _optimization_objective(objective)
 
 
 def test_runtime_context_rejects_unknown_and_coerced_fields(tmp_path: Path) -> None:

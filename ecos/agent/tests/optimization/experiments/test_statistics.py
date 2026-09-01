@@ -2,13 +2,39 @@ from __future__ import annotations
 
 import pytest
 
+from ecos_agent.optimization.contracts import (
+    GateResult,
+    ObjectiveMetric,
+    SignoffGates,
+    TerminalObservation,
+    TimingMetric,
+)
 from ecos_agent.optimization.experiments.statistics import (
+    baseline_design_statistics,
     exact_paired_permutation_p_value,
     holm_adjust,
     paired_design_statistics,
     success_curve_auc,
     summarize_design_blocks,
 )
+
+HASH = "sha256:" + "a" * 64
+
+
+def _terminal(violations: float, overflow: float, wirelength: float) -> TerminalObservation:
+    return TerminalObservation(
+        observation_id="terminal-Harden",
+        evidence_manifest_sha256=HASH,
+        evidence_valid=True,
+        harden_artifacts_complete=True,
+        signoff_gates=SignoffGates.all(GateResult.PASS),
+        metrics={
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: violations,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: overflow,
+            ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
+        },
+        timing_guardrail={metric: 0.0 for metric in TimingMetric},
+    )
 
 
 def test_success_curve_auc_uses_every_candidate_in_the_fixed_budget() -> None:
@@ -92,3 +118,52 @@ def test_holm_adjustment_is_monotone_in_sorted_p_values() -> None:
 def test_paired_statistics_reject_unpaired_designs() -> None:
     with pytest.raises(ValueError, match="same designs"):
         paired_design_statistics({"a": 1.0}, {"b": 1.0})
+
+
+def test_design_block_statistics_reports_win_tie_loss_and_holm() -> None:
+    baseline = _terminal(10, 5, 100).model_dump(mode="json")
+    better = _terminal(9, 5, 100).model_dump(mode="json")
+    epsilon = {
+        **{metric.value: 0.0 for metric in ObjectiveMetric},
+        **{metric.value: 0.0 for metric in TimingMetric},
+    }
+
+    def method(auc, success, observation):
+        return {
+            "auc_success_at_20": auc,
+            "lex_success_at_20": success,
+            "best_terminal_observation": observation,
+        }
+
+    summary = baseline_design_statistics(
+        {
+            "gcd": {
+                "noise_profile": {"epsilon": epsilon},
+                "methods": {
+                    "default_ecos": {"terminal_observation": baseline},
+                    "controlled_coordinate": method(0.5, True, better),
+                    "random_action": method(0.0, False, baseline),
+                    "rule_guided_direction": method(0.0, False, baseline),
+                },
+            },
+            "i2c": {
+                "noise_profile": {"epsilon": epsilon},
+                "methods": {
+                    "default_ecos": {"terminal_observation": baseline},
+                    "controlled_coordinate": method(0.0, False, baseline),
+                    "random_action": method(1.0, True, better),
+                    "rule_guided_direction": method(0.0, False, baseline),
+                },
+            },
+        }
+    )
+
+    controlled = summary["methods"]["controlled_coordinate"]
+    assert controlled["design_count"] == 2
+    assert controlled["median_auc_success_at_20"] == pytest.approx(0.25)
+    assert controlled["lex_success_at_20_count"] == 1
+    assert controlled["win_tie_loss_vs_default"] == {"win": 1, "tie": 1, "loss": 0}
+    comparisons = summary["paired_auc_permutation_tests"]
+    comparison = comparisons["controlled_coordinate__vs__random_action"]
+    assert comparison["n_designs"] == 2
+    assert comparison["holm_adjusted_p_value"] >= comparison["p_value"]

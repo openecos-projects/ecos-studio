@@ -1,4 +1,4 @@
-"""Deterministic non-LLM policies for the two-design optimization pilot."""
+"""Deterministic non-LLM optimization policies."""
 
 from __future__ import annotations
 

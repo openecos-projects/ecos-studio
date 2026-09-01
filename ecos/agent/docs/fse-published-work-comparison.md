@@ -123,6 +123,9 @@ are bound into the terminal observation and its artifact manifest.
 5. Run knowledge and history ablations only after the main task is discriminative.
 6. Add one mature autotuner only when the expanded scope requires it.
 
+The retired gcd/i2c pilot runner is not an execution path for this plan. Future
+baseline evaluation must use the current frozen design manifest and equal-budget protocol.
+
 The FSE research claim should continue only if the Full Agent produces a stable
 terminal-utility or control-utility finding across designs. If coordinate,
 random, or rule-guided search matches the Full Agent, the result should be
