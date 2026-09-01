@@ -1,9 +1,0 @@
-{
-  "design_id": "gcd",
-  "episode_id": "phase8-phase8-20260828-7knob-gcd-requested-only",
-  "mode": "requested-only",
-  "planning_calls": 2,
-  "schema_version": "ecos.phase8_design_mode.v1",
-  "started_candidates": 2,
-  "trace_sha256": "sha256:eb69d986be9230a88576a3e450f11fc898afcc16d2e307264ce9186f1f360ed2"
-}

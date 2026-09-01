@@ -1,9 +1,0 @@
-{
-  "design_id": "i2c",
-  "episode_id": "phase8-phase8-20260828-7knob-i2c-requested-only",
-  "mode": "requested-only",
-  "planning_calls": 2,
-  "schema_version": "ecos.phase8_design_mode.v1",
-  "started_candidates": 2,
-  "trace_sha256": "sha256:6edb56669ef152523902569f29576ea212a16cb60c0a983fa8035013b52777dd"
-}

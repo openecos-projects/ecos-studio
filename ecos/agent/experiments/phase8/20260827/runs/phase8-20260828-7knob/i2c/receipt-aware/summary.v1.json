@@ -1,9 +1,0 @@
-{
-  "design_id": "i2c",
-  "episode_id": "phase8-phase8-20260828-7knob-i2c-receipt-aware",
-  "mode": "receipt-aware",
-  "planning_calls": 2,
-  "schema_version": "ecos.phase8_design_mode.v1",
-  "started_candidates": 2,
-  "trace_sha256": "sha256:a1bd09f32c39e6d0c38a478e1fd026b70fd3c6e67f51368532a58e6715b0d519"
-}

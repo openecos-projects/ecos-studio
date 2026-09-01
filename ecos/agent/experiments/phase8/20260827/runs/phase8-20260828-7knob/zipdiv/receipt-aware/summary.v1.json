@@ -1,9 +1,0 @@
-{
-  "design_id": "zipdiv",
-  "episode_id": "phase8-phase8-20260828-7knob-zipdiv-receipt-aware",
-  "mode": "receipt-aware",
-  "planning_calls": 2,
-  "schema_version": "ecos.phase8_design_mode.v1",
-  "started_candidates": 2,
-  "trace_sha256": "sha256:c32bd13b7b169d12552d48af6107964364955d4575b22b5f44c9bb8e05a71dc5"
-}

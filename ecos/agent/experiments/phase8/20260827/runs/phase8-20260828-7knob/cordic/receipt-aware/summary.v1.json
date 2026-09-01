@@ -1,9 +1,0 @@
-{
-  "design_id": "cordic",
-  "episode_id": "phase8-phase8-20260828-7knob-cordic-receipt-aware",
-  "mode": "receipt-aware",
-  "planning_calls": 2,
-  "schema_version": "ecos.phase8_design_mode.v1",
-  "started_candidates": 2,
-  "trace_sha256": "sha256:be669d14faf4f67ee3ff091c6e181e5cdb717a13cfd96d0789ef05043384af9f"
-}
