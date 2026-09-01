@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 
-from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever
-from ecos_agent.optimization_knowledge_compiler import (
+from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever
+from ecos_agent.optimization.knowledge.compiler import (
     knowledge_support_catalog_from_bundles,
 )
-from ecos_agent.provider import EcosAgentProvider
-from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
-from ecos_agent.step_knowledge import (
+from ecos_agent.gui.provider import EcosAgentProvider
+from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
+from ecos_agent.knowledge.step import (
     GENERAL_KNOWLEDGE_METRICS,
     GENERAL_KNOWLEDGE_SPEC,
     STEP_KNOWLEDGE_SPECS,

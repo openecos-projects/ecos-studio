@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
     OptimizationKnob,
@@ -13,7 +13,7 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_knowledge_cases import (
+from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditError,
     EmpiricalCaseAuditIntegrityError,
     EmpiricalCaseAuditRecoveryRequired,
@@ -26,11 +26,11 @@ from ecos_agent.optimization_knowledge_cases import (
     replay_empirical_case_selection,
     select_empirical_cases,
 )
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.ledger import (
     OptimizationOutcomeKind,
     OptimizationTerminalOutcome,
 )
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     ConsumerEvidence,
     EffectiveValue,

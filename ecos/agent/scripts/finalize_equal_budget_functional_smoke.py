@@ -10,8 +10,8 @@ import statistics
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import ObjectiveMetric, TerminalObservation
-from ecos_agent.optimization_equal_budget import Mode, export_episode_traces
+from ecos_agent.optimization.contracts import ObjectiveMetric, TerminalObservation
+from ecos_agent.optimization.experiments.equal_budget import Mode, export_episode_traces
 
 FUNCTIONAL_SMOKE_DESIGN_IDS = ("gcd", "i2c", "cia", "zipdiv", "cordic", "xtea")
 

@@ -8,8 +8,8 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
-from ecos_agent.knowledge_retriever import tokenize
-from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge
+from ecos_agent.knowledge.retriever import tokenize
+from ecos_agent.knowledge.step import STEP_KNOWLEDGE_SPECS, StepKnowledge
 
 
 AGENT_ROOT = Path(__file__).parents[1]

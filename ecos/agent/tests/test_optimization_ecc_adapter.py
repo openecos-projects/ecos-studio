@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     ExpectedEffectDirection,
     KnowledgeReference,
     ObjectiveMetric,
@@ -21,18 +21,18 @@ from ecos_agent.optimization_contracts import (
     RequestedKnobValue,
     StrategyDirection,
 )
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization.controller import (
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
 )
-from ecos_agent.optimization_ecc_adapter import (
+from ecos_agent.optimization.ecc.adapter import (
     EccCandidateRerunAdapter,
     EccContentLengthRpcClient,
     OptimizationEccAdapterError,
     _step_render_ack,
 )
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.parameter_semantics import load_parameter_cards
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64

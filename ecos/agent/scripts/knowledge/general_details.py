@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ecos_agent.parameter_semantics import CARD_ROOT, card_hash, load_parameter_cards
-from ecos_agent.parameter_evidence_contracts import ParameterSemanticsCard
+from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
+from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 
 from .steps import STAGES, _add, _json, _sha256, _source_inventory
 

@@ -6,28 +6,28 @@ from types import SimpleNamespace
 import pytest
 
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
     SignoffGates,
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_equal_budget import (
+from ecos_agent.optimization.experiments.equal_budget import (
     CandidateTrace,
     EqualBudgetConfig,
     _candidate_resources,
     build_candidate_trace,
     evaluate_equal_budget,
 )
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_metric_contracts import (
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
     EvaluationMetricDirection,
     EvaluationMetricRole,
     TerminalEvaluationMetric,
 )
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     EffectiveValue,
     MaterializationRef,

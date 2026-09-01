@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.codex_provider import (
+from ecos_agent.codex.provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
     _build_prompt,
     _optimization_proposal_output_schema_v2,
     create_required_codex_provider,
 )
-from ecos_agent.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     ExpectedEffectDirection,
     HistoryReference,
     KnowledgeReference,
@@ -30,18 +30,18 @@ from ecos_agent.optimization_contracts import (
     RequestedKnobValue,
     StrategyDirection,
 )
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization.controller import (
     OptimizationHistory,
     OptimizationPlanningContext,
 )
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
 )
-from ecos_agent.parameter_semantics import load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64

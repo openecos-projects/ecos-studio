@@ -8,19 +8,19 @@ from types import SimpleNamespace
 
 import pytest
 
-import ecos_agent.optimization_baseline_runner as baseline_runner
-from ecos_agent.optimization_baseline_runner import (
+import ecos_agent.optimization.experiments.baseline_runner as baseline_runner
+from ecos_agent.optimization.experiments.baseline_runner import (
     BaselineCandidateExecution,
     BaselineCandidateFailure,
     evaluate_online_method,
 )
-from ecos_agent.optimization_baselines import (
+from ecos_agent.optimization.experiments.baselines import (
     ONLINE_BASELINE_METHODS,
     BaselineMethod,
     rule_guided_policy_manifest,
     select_baseline_candidate,
 )
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
     RequestedKnobValue,
@@ -28,9 +28,9 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_gate0 import load_gate0_config
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_statistics import baseline_design_statistics
+from ecos_agent.optimization.experiments.gate0 import load_gate0_config
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.experiments.statistics import baseline_design_statistics
 
 HASH = "sha256:" + "a" * 64
 

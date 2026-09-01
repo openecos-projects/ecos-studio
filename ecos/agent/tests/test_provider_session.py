@@ -1,6 +1,6 @@
 import pytest
 
-from ecos_agent.provider_session import (
+from ecos_agent.gui.session import (
     GuiPhase,
     OptimizationUiPhase,
     ProviderSession,

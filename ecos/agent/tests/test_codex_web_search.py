@@ -1,7 +1,7 @@
 import pytest
 
-from ecos_agent.codex_provider import CodexAppServerProposalProvider
-from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient
+from ecos_agent.codex.provider import CodexAppServerProposalProvider
+from ecos_agent.codex.rpc import CodexProviderError, _JsonLineRpcProcessClient
 
 
 def _provider(tmp_path, **env_overrides) -> CodexAppServerProposalProvider:
@@ -67,7 +67,7 @@ def test_approval_policy_stays_never_because_no_handler_exists(tmp_path) -> None
     source = (
         __import__("pathlib")
         .Path(__file__)
-        .parent.parent.joinpath("src/ecos_agent/codex_provider.py")
+            .parent.parent.joinpath("src/ecos_agent/codex/provider.py")
         .read_text(encoding="utf-8")
     )
     assert '"approvalPolicy": "granular"' not in source

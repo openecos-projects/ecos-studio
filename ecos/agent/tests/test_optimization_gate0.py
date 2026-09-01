@@ -6,10 +6,10 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-import ecos_agent.optimization_gate0 as gate0
+import ecos_agent.optimization.experiments.gate0 as gate0
 import pytest
 from ecos_agent.hashing import file_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
     RequestedKnobValue,
@@ -18,11 +18,11 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization.controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
 )
-from ecos_agent.optimization_gate0 import (
+from ecos_agent.optimization.experiments.gate0 import (
     Gate0Error,
     PilotCandidateExecutionError,
     compare_observations,
@@ -33,7 +33,7 @@ from ecos_agent.optimization_gate0 import (
     require_terminal_receipt,
     run_pilot_candidate,
 )
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 
 HASH = "sha256:" + "a" * 64
 

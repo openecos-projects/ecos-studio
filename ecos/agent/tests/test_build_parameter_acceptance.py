@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
-from ecos_agent import optimization_memory
+from ecos_agent.optimization import memory as optimization_memory
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.effective_domain import EffectiveDomainSnapshot
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
@@ -28,29 +28,29 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationTerminalOutcome,
 )
-from ecos_agent.optimization_memory import (
+from ecos_agent.optimization.memory import (
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
 )
-from ecos_agent.optimization_metric_contracts import (
+from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
     EvaluationMetricDirection,
     EvaluationMetricRole,
     TerminalEvaluationMetric,
 )
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ParameterSemanticsCard,
 )
-from ecos_agent.parameter_semantics import card_hash
+from ecos_agent.optimization.parameters.semantics import card_hash
 
 _SCRIPT = Path(__file__).parents[1] / "scripts" / "build_parameter_acceptance.py"
 _SPEC = importlib.util.spec_from_file_location("build_parameter_acceptance", _SCRIPT)

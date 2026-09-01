@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.contracts import GUI_WORKSPACE_FLOW_STEPS
+from ecos_agent.workspace.contracts import GUI_WORKSPACE_FLOW_STEPS
 from ecos_agent.ecc_contracts import ECCParameterPatch, ECCStepName
-from ecos_agent.knob_registry import knob_spec
-from ecos_agent.parameter_authorization import authorized_knobs_for_step
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
+from ecos_agent.workspace.knob_registry import knob_spec
+from ecos_agent.workspace.authorization import authorized_knobs_for_step
+from ecos_agent.workspace.rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
 
 
 def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:

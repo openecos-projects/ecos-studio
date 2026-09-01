@@ -1,5 +1,5 @@
-from ecos_agent.optimization_contracts import OptimizationKnob
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization.contracts import OptimizationKnob
+from ecos_agent.optimization.controller import (
     CandidateExecutionEvidence as LegacyCandidateExecutionEvidence,
     CandidateExecutionReceipt as LegacyCandidateExecutionReceipt,
     CandidateExecutionRequest as LegacyCandidateExecutionRequest,
@@ -9,7 +9,7 @@ from ecos_agent.optimization_controller import (
     OptimizationProposalPlanner as LegacyOptimizationProposalPlanner,
     planning_context_payload as legacy_planning_context_payload,
 )
-from ecos_agent.optimization_execution import (
+from ecos_agent.optimization.execution import (
     CANDIDATE_END_STEP,
     CANDIDATE_EXECUTION_SCOPE,
     CandidateExecutionEvidence,
@@ -18,7 +18,7 @@ from ecos_agent.optimization_execution import (
     OptimizationExecutionAdapter,
     candidate_target_step,
 )
-from ecos_agent.optimization_planning import (
+from ecos_agent.optimization.planning import (
     OptimizationHistory,
     OptimizationPlanningContext,
     OptimizationProposalPlanner,

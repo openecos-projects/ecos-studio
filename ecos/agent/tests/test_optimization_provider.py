@@ -5,9 +5,9 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from ecos_agent.optimization_contracts import OptimizationEpisodeState
-from ecos_agent.optimization_runner import OptimizationEpisodeRunner
-from ecos_agent.provider import EcosAgentProvider
+from ecos_agent.optimization.contracts import OptimizationEpisodeState
+from ecos_agent.optimization.runner import OptimizationEpisodeRunner
+from ecos_agent.gui.provider import EcosAgentProvider
 
 
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:

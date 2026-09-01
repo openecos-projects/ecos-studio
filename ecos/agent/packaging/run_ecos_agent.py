@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from ecos_agent.provider import main
+from ecos_agent.gui.protocol import main
 
 
 def entrypoint() -> int:

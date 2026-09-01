@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from ecos_agent.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
@@ -21,8 +21,8 @@ from ecos_agent.optimization_contracts import (
     ProposalReason,
     StrategyDirection,
 )
-from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -31,7 +31,7 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
     build_optimization_artifact_manifest,
 )
-from ecos_agent.optimization_replication import (
+from ecos_agent.optimization.experiments.replication import (
     OptimizationReplicationError,
     export_replication_package,
     verify_replication_package,

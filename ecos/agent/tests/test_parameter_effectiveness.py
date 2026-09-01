@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from ecos_agent.effective_domain import (
+from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainError,
     build_context_fingerprint,
     compile_effective_domain,
@@ -16,8 +16,8 @@ from ecos_agent.effective_domain import (
     validate_optimization_proposal_v2,
 )
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import OptimizationKnob
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.contracts import OptimizationKnob
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     EffectiveValue,
     MaterializationRef,
@@ -27,7 +27,7 @@ from ecos_agent.parameter_evidence_contracts import (
     OptimizationProposalV2,
     ToolRef,
 )
-from ecos_agent.parameter_semantics import (
+from ecos_agent.optimization.parameters.semantics import (
     CARD_ROOT,
     ParameterSemanticsError,
     card_hash,
@@ -275,7 +275,7 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
         [
             sys.executable,
             "-c",
-            "from ecos_agent.parameter_semantics import load_parameter_cards; assert len(load_parameter_cards()) == 8",
+            "from ecos_agent.optimization.parameters.semantics import load_parameter_cards; assert len(load_parameter_cards()) == 8",
         ],
         cwd=tmp_path,
         env=env,

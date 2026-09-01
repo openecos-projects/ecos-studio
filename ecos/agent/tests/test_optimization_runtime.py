@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
     OptimizationObjectiveProposal,
@@ -17,10 +17,10 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_controller import CandidateExecutionReceipt
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_rules import freeze_optimization_objective
-from ecos_agent.optimization_runtime import (
+from ecos_agent.optimization.controller import CandidateExecutionReceipt
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.rules import freeze_optimization_objective
+from ecos_agent.optimization.runtime import (
     OptimizationRuntimeContext,
     OptimizationRuntimeError,
     _current_values,
@@ -210,7 +210,7 @@ def test_parent_manifest_binds_terminal_evidence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime.build_optimization_artifact_manifest",
+        "ecos_agent.optimization.runtime.build_optimization_artifact_manifest",
         lambda *_args: SimpleNamespace(manifest_sha256=_HASH),
     )
 
@@ -343,7 +343,7 @@ def test_terminal_waiter_cancels_when_timeout_expires_between_clock_reads(
     calls: list[str] = []
     clock = iter((0.0, 0.05, 0.2))
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._monotonic", lambda: next(clock)
+        "ecos_agent.optimization.runtime._monotonic", lambda: next(clock)
     )
 
     class Executor:
@@ -397,17 +397,17 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     )
     rpc = _FakeRpc(Path("ecc"))
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime.EccContentLengthRpcClient", lambda _path: rpc
+        "ecos_agent.optimization.runtime.EccContentLengthRpcClient", lambda _path: rpc
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime.build_terminal_observation",
+        "ecos_agent.optimization.runtime.build_terminal_observation",
         lambda _path: _terminal(),
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._site_width_dbu", lambda _path: 200
+        "ecos_agent.optimization.runtime._site_width_dbu", lambda _path: 200
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._current_values",
+        "ecos_agent.optimization.runtime._current_values",
         lambda _path, _site_width: {
             "place.target_density": 0.5,
             "place.cell_padding_x": 0,
@@ -415,11 +415,11 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         },
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._parent_manifest_sha256",
+        "ecos_agent.optimization.runtime._parent_manifest_sha256",
         lambda _path, _terminal: _HASH,
     )
     monkeypatch.setattr(
-        "ecos_agent.optimization_runtime._optimization_rerun_runtime_seconds",
+        "ecos_agent.optimization.runtime._optimization_rerun_runtime_seconds",
         lambda _path: 10.0,
     )
 

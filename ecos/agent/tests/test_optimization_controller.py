@@ -9,10 +9,10 @@ from typing import Callable
 import pytest
 from optimization_test_support import support_catalog
 
-from ecos_agent.codex_rpc import CodexProviderError
-from ecos_agent.effective_domain import build_context_fingerprint
+from ecos_agent.codex.rpc import CodexProviderError
+from ecos_agent.optimization.parameters.effective_domain import build_context_fingerprint
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
@@ -36,7 +36,7 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization.controller import (
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
@@ -45,48 +45,48 @@ from ecos_agent.optimization_controller import (
     OptimizationEpisodeControllerError,
     planning_context_payload,
 )
-from ecos_agent.optimization_decision_audit import (
+from ecos_agent.optimization.decision_audit import (
     OptimizationDecisionAudit,
     OptimizationDecisionAuditIntegrityError,
 )
-from ecos_agent.optimization_knowledge_compiler import BoundKnowledgeAction
-from ecos_agent.optimization_knowledge_cases import (
+from ecos_agent.optimization.knowledge.compiler import BoundKnowledgeAction
+from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditStore,
     EmpiricalCaseDiagnostic,
     EmpiricalOutcome,
     TerminalEmpiricalCase,
 )
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationPlanningProviderEvidenceAudit,
 )
-from ecos_agent.optimization_memory import (
+from ecos_agent.optimization.memory import (
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
 )
-from ecos_agent.optimization_metric_contracts import (
+from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
     EvaluationMetricDirection,
     EvaluationMetricRole,
     TerminalEvaluationMetric,
 )
-from ecos_agent.optimization_retrieval import (
+from ecos_agent.optimization.knowledge.retrieval import (
     KnowledgeChannel,
     KnowledgeChannelResult,
     OptimizationRetrievalRequest,
     OptimizationRetrievalResult,
 )
-from ecos_agent.optimization_rules import freeze_optimization_objective
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.rules import freeze_optimization_objective
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
     RuntimeTransition,
 )
-from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -1744,7 +1744,7 @@ def test_recovery_does_not_use_receipt_without_eligible_terminal_observation(
 
     planner = _FakeCodex(stop, stop)
     monkeypatch.setattr(
-        "ecos_agent.optimization_controller.legal_actions",
+        "ecos_agent.optimization.controller.legal_actions",
         lambda **_: (
             LegalAction(
                 knob_id="place.target_density",

@@ -5,16 +5,17 @@ from pathlib import Path
 
 import pytest
 
-import ecos_agent.provider_support as provider_support
-import ecos_agent.provider as provider_module
-from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
-from ecos_agent.contracts import GuiWorkspaceSetupProposal, StageRoutingProposal
+import ecos_agent.gui.support as provider_support
+import ecos_agent.gui.provider as provider_module
+from ecos_agent.codex.provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
+from ecos_agent.knowledge.contracts import StageRoutingProposal
+from ecos_agent.workspace.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.ecc_contracts import ECCStepName
-from ecos_agent.messages import EMPTY_CHOICE_VALUE, home_ready_prompt, operation_prompt
-from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
-from ecos_agent.source_retriever import SourceCodeRetriever
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
-from ecos_agent.workspace_setup import (
+from ecos_agent.gui.messages import EMPTY_CHOICE_VALUE, home_ready_prompt, operation_prompt
+from ecos_agent.gui.provider import EcosAgentProvider, PROVIDER_ID
+from ecos_agent.knowledge.source import SourceCodeRetriever
+from ecos_agent.workspace.rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
+from ecos_agent.workspace.setup import (
     WorkspaceInputs,
     display_path,
     recommended_workspace_name,
@@ -414,7 +415,7 @@ def test_session_chat_and_slash_commands_share_one_codex_provider(
 
     fake = FakeCodexProvider()
     monkeypatch.setattr(
-        "ecos_agent.provider.create_required_codex_provider", lambda **_kwargs: fake
+        "ecos_agent.gui.provider.create_required_codex_provider", lambda **_kwargs: fake
     )
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home", "directory": str(tmp_path)})[
@@ -470,7 +471,7 @@ def test_session_model_settings_use_dedicated_provider_methods(
 
     fake = FakeCodexProvider()
     monkeypatch.setattr(
-        "ecos_agent.provider.create_required_codex_provider", lambda **_kwargs: fake
+        "ecos_agent.gui.provider.create_required_codex_provider", lambda **_kwargs: fake
     )
     provider = EcosAgentProvider(emit=lambda _event: None)
     session_id = provider.start_session(
@@ -502,7 +503,7 @@ def test_slash_commands_fail_closed_without_shell_fallback(tmp_path: Path, monke
             pass
 
     monkeypatch.setattr(
-        "ecos_agent.provider.create_required_codex_provider",
+        "ecos_agent.gui.provider.create_required_codex_provider",
         lambda **_kwargs: FakeCodexProvider(),
     )
     provider = EcosAgentProvider(emit=events.append)
@@ -1619,7 +1620,7 @@ def test_unknown_stage_routing_proposal_falls_back_without_excluding_bm25() -> N
 def test_started_provider_enables_default_stage_routing(monkeypatch) -> None:
     events: list[dict[str, object]] = []
     stage_contexts: list[dict[str, object]] = []
-    monkeypatch.setattr("ecos_agent.provider.validate_required_codex_cli", lambda: "codex")
+    monkeypatch.setattr("ecos_agent.gui.provider.validate_required_codex_cli", lambda: "codex")
     provider = EcosAgentProvider(
         emit=events.append,
         chat_response_parser=lambda _context: _chat_response(answer="Clock-tree evidence is available."),
@@ -2113,7 +2114,7 @@ def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
 
 
 def test_invalid_choice_and_creation_failed_copy_point_to_cards() -> None:
-    from ecos_agent.messages import invalid_choice, workspace_creation_failed
+    from ecos_agent.gui.messages import invalid_choice, workspace_creation_failed
 
     assert "listed numbers" not in invalid_choice("en").lower()
     assert "enter 1" not in workspace_creation_failed("en", "disk full").lower()
@@ -3068,7 +3069,7 @@ def test_known_concepts_still_use_source_search_planning_by_default(
         chat_contexts.append(context)
         return _chat_response(answer="Codex-organized knowledge answer.")
 
-    monkeypatch.setattr("ecos_agent.provider._propose_gui_chat_response", chat_response)
+    monkeypatch.setattr("ecos_agent.gui.provider._propose_gui_chat_response", chat_response)
 
     provider = EcosAgentProvider(
         emit=events.append,

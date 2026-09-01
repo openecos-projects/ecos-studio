@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_equal_budget import (
+from ecos_agent.optimization.experiments.equal_budget import (
     CandidateTrace,
     EqualBudgetConfig,
     EqualBudgetSummary,

@@ -11,10 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError
-from ecos_agent.contracts import StageRoutingProposal
-from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
-from ecos_agent.step_knowledge import load_default_step_knowledge
+from ecos_agent.codex.provider import CodexAppServerProposalProvider, CodexProviderError
+from ecos_agent.knowledge.contracts import StageRoutingProposal
+from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
+from ecos_agent.knowledge.step import load_default_step_knowledge
 
 
 AGENT_ROOT = Path(__file__).parents[1]

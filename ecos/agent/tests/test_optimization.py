@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
@@ -23,12 +23,12 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_legacy_reader import (
+from ecos_agent.optimization.legacy_reader import (
     KnobApplicationReceipt,
     RuntimeAdjustment,
     RuntimeObservation,
 )
-from ecos_agent.optimization_rules import (
+from ecos_agent.optimization.rules import (
     CoordinateDirection,
     IncumbentDecision,
     compare_incumbent,

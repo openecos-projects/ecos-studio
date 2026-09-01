@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from ecos_agent.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     KnowledgeReference,
@@ -12,7 +12,7 @@ from ecos_agent.optimization_contracts import (
     StageEvidenceFeature,
     StageObservation,
 )
-from ecos_agent.optimization_knowledge_compiler import (
+from ecos_agent.optimization.knowledge.compiler import (
     BoundKnowledgeAction,
     GeneralDomainClaim,
     KnowledgeApplicability,

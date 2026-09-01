@@ -1,7 +1,7 @@
 import json
 import threading
 
-from ecos_agent.protocol import EcosAgentProtocolServer
+from ecos_agent.gui.protocol import EcosAgentProtocolServer
 
 
 class _BlockingProvider:

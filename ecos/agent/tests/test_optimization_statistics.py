@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ecos_agent.optimization_statistics import (
+from ecos_agent.optimization.experiments.statistics import (
     exact_paired_permutation_p_value,
     holm_adjust,
     paired_design_statistics,

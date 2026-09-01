@@ -2,6 +2,6 @@
   "providerId": "ecos_agent",
   "displayName": "ECOS Agent",
   "command": "uv",
-  "args": ["run", "--locked", "python", "-m", "ecos_agent.provider"],
+  "args": ["run", "--locked", "python", "-m", "ecos_agent.gui"],
   "protocolVersion": 1
 }

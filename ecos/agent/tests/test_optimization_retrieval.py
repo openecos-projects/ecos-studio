@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     ObjectiveMetric,
     StageObservation,
 )
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_retrieval import (
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.knowledge.retrieval import (
     KnowledgeChannel,
     OptimizationKnowledgeRetriever,
     build_optimization_retrieval_request,

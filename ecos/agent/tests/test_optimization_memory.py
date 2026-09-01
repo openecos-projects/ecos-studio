@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
@@ -26,8 +26,8 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -36,26 +36,26 @@ from ecos_agent.optimization_ledger import (
     _canonical_json,
     _new_entry,
 )
-from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
-from ecos_agent.optimization_memory import (
+from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
+from ecos_agent.optimization.memory import (
     OptimizationTaskMemoryIntegrityError,
     OptimizationTaskMemoryStore,
     build_task_memory_scope,
 )
-from ecos_agent.optimization_metric_contracts import (
+from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
     EvaluationMetricDirection,
     EvaluationMetricRole,
     TerminalEvaluationMetric,
 )
-from ecos_agent.optimization_rules import freeze_optimization_objective
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.rules import freeze_optimization_objective
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
 )
-from ecos_agent.parameter_semantics import card_hash, load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 WORKSPACE_HASH = "sha256:" + "b" * 64

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.ecc_contracts import ECCParameterPatchItem, ECCStepName
-from ecos_agent.knob_registry import (
+from ecos_agent.workspace.knob_registry import (
     KNOB_SPECS,
     WRITABLE_FILES,
     knob_spec,
@@ -12,9 +12,9 @@ from ecos_agent.knob_registry import (
     storage_value,
     validate_value,
 )
-from ecos_agent.provider import EcosAgentProvider
-from ecos_agent.provider_session import ProviderSession
-from ecos_agent.workspace_flow import WorkspaceFlow
+from ecos_agent.gui.provider import EcosAgentProvider
+from ecos_agent.gui.session import ProviderSession
+from ecos_agent.gui.workspace_flow import WorkspaceFlow
 
 
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:

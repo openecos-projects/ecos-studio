@@ -15,31 +15,31 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Mapping, NamedTuple
 
-from ecos_agent.codex_provider import CodexAppServerProposalProvider
-from ecos_agent.contracts import GUI_WORKSPACE_FLOW_STEPS
+from ecos_agent.codex.provider import CodexAppServerProposalProvider
+from ecos_agent.workspace.contracts import GUI_WORKSPACE_FLOW_STEPS
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     OptimizationEpisodeState,
     OptimizationObjectiveProposal,
     TerminalObservation,
 )
-from ecos_agent.optimization_ecc_adapter import EccContentLengthRpcClient
-from ecos_agent.optimization_equal_budget import (
+from ecos_agent.optimization.ecc.adapter import EccContentLengthRpcClient
+from ecos_agent.optimization.experiments.equal_budget import (
     EqualBudgetConfig,
     _verified_episode_state,
     export_episode_traces,
     validate_design_manifest,
 )
-from ecos_agent.optimization_knowledge_treatments import (
+from ecos_agent.optimization.experiments.knowledge_treatments import (
     KNOWLEDGE_TREATMENTS,
     KnowledgeTreatmentConfig,
     build_knowledge_treatment_report,
 )
-from ecos_agent.optimization_knowledge_cases import EmpiricalCaseAuditStore
-from ecos_agent.optimization_observations import build_terminal_observation
-from ecos_agent.optimization_rules import freeze_optimization_objective
-from ecos_agent.optimization_runtime import (
+from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
+from ecos_agent.optimization.observations import build_terminal_observation
+from ecos_agent.optimization.rules import freeze_optimization_objective
+from ecos_agent.optimization.runtime import (
     _ecc_executable,
     _optimization_rerun_runtime_seconds,
     create_optimization_runner,

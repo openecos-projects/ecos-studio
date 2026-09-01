@@ -3,7 +3,7 @@ import json
 import pytest
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import (
+from ecos_agent.optimization.contracts import (
     AppliedKnobValue,
     ExpectedEffect,
     ExpectedEffectDirection,
@@ -14,7 +14,7 @@ from ecos_agent.optimization_contracts import (
     RequestedKnobValue,
     StrategyDirection,
 )
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.ledger import (
     OptimizationArtifactManifestError,
     OptimizationInterventionStart,
     OptimizationLedger,
@@ -32,8 +32,8 @@ from ecos_agent.optimization_ledger import (
     verify_optimization_artifact_manifest,
     write_optimization_artifact_manifest,
 )
-from ecos_agent.optimization_legacy_reader import KnobApplicationReceipt
-from ecos_agent.parameter_evidence_contracts import (
+from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
+from ecos_agent.optimization.parameters.contracts import (
     ActivationEvidence,
     EffectiveValue,
     MaterializationRef,

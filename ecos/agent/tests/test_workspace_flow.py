@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.ecc_contracts import ECCStepName
-from ecos_agent.provider_session import ProviderSession
-from ecos_agent.workspace_flow import WorkspaceFlow
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunContract
+from ecos_agent.gui.session import ProviderSession
+from ecos_agent.gui.workspace_flow import WorkspaceFlow
+from ecos_agent.workspace.rerun import GuiWorkspaceRerunContract
 
 
 def _rerun_contract(tmp_path: Path) -> GuiWorkspaceRerunContract:

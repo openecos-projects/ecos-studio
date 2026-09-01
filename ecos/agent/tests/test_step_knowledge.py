@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, RetrievalConfig
-from ecos_agent.provider import EcosAgentProvider
-from ecos_agent.step_knowledge import (
+from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, RetrievalConfig
+from ecos_agent.gui.provider import EcosAgentProvider
+from ecos_agent.knowledge.step import (
     STEP_KNOWLEDGE_SPECS,
     StepKnowledge,
     StepKnowledgeError,

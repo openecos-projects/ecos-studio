@@ -246,7 +246,7 @@ ECOS_AGENT_CODEX_WEB_SEARCH=1
 ```bash
 cd ecos/agent
 uv sync --locked
-uv run python -m ecos_agent.provider
+uv run python -m ecos_agent.gui
 ```
 
 开发态 manifest 使用 `uv run --locked`；打包构建会将 provider 生成为独立的

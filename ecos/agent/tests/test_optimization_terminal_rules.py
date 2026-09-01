@@ -1,7 +1,7 @@
 import pytest
 
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_rules import (
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.rules import (
     IncumbentComparison,
     IncumbentDecision,
     terminal_quality_outcome,

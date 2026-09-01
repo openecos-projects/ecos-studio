@@ -1,5 +1,5 @@
 import pytest
-from ecos_agent.optimization_metric_contracts import TerminalEvaluationMetric
+from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from pydantic import ValidationError
 
 

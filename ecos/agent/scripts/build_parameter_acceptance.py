@@ -10,27 +10,27 @@ from pathlib import Path
 from typing import Mapping
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
-from ecos_agent.optimization_controller import CandidateExecutionEvidence
-from ecos_agent.optimization_decision_audit import OptimizationDecisionAudit
-from ecos_agent.optimization_ecc_evidence import (
+from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobValue
+from ecos_agent.optimization.controller import CandidateExecutionEvidence
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.ecc.evidence import (
     OptimizationEccAdapterError,
     validate_candidate_artifacts,
 )
-from ecos_agent.optimization_ledger import (
+from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationTerminalOutcome,
 )
-from ecos_agent.optimization_memory import (
+from ecos_agent.optimization.memory import (
     OptimizationTaskMemoryScope,
     OptimizationTaskMemoryStore,
 )
-from ecos_agent.optimization_observations import build_candidate_terminal_observation
-from ecos_agent.parameter_evidence_contracts import ParameterApplicationReceipt
-from ecos_agent.parameter_semantics import (
+from ecos_agent.optimization.observations import build_candidate_terminal_observation
+from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
+from ecos_agent.optimization.parameters.semantics import (
     load_parameter_cards,
     validate_application_receipt,
 )

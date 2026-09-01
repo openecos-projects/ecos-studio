@@ -1,5 +1,5 @@
-from ecos_agent.optimization_contracts import KnowledgeReference
-from ecos_agent.optimization_knowledge_compiler import (
+from ecos_agent.optimization.contracts import KnowledgeReference
+from ecos_agent.optimization.knowledge.compiler import (
     BoundKnowledgeAction,
     GeneralDomainClaim,
     KnowledgeSupportCatalog,

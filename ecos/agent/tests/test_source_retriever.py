@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.contracts import SourceSearchProposal
-from ecos_agent.source_retriever import SourceCodeRetriever
+from ecos_agent.knowledge.contracts import SourceSearchProposal
+from ecos_agent.knowledge.source import SourceCodeRetriever
 
 
 def _proposal(*queries: dict[str, str]) -> SourceSearchProposal:

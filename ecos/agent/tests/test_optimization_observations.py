@@ -6,22 +6,22 @@ from pathlib import Path
 
 import pytest
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.knowledge_bundle import KnowledgeAnswer
-from ecos_agent.optimization_contracts import (
+from ecos_agent.knowledge.bundle import KnowledgeAnswer
+from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     EpisodeBudget,
     OptimizationKnob,
     TimingMetric,
 )
-from ecos_agent.optimization_controller import CandidateExecutionEvidence
-from ecos_agent.optimization_ledger import OptimizationOutcomeKind
-from ecos_agent.optimization_observations import (
+from ecos_agent.optimization.controller import CandidateExecutionEvidence
+from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.observations import (
     OptimizationObservationError,
     build_candidate_terminal_observation,
     build_stage_observation,
     build_terminal_observation,
 )
-from ecos_agent.optimization_retrieval import (
+from ecos_agent.optimization.knowledge.retrieval import (
     KnowledgeChannel,
     OptimizationKnowledgeRetriever,
     build_optimization_retrieval_request,

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from ecos_agent.knowledge_bundle import KnowledgeBundle, KnowledgeBundleSpec, KnowledgeEntity
-from ecos_agent.knowledge_retriever import GlobalKnowledgeRetriever, RetrievalConfig
-from ecos_agent.step_knowledge import STEP_KNOWLEDGE_SPECS, StepKnowledge
+from ecos_agent.knowledge.bundle import KnowledgeBundle, KnowledgeBundleSpec, KnowledgeEntity
+from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, RetrievalConfig
+from ecos_agent.knowledge.step import STEP_KNOWLEDGE_SPECS, StepKnowledge
 
 
 AGENT_ROOT = Path(__file__).parents[1]

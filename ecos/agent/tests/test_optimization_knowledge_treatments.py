@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from ecos_agent.optimization_equal_budget import CandidateTrace, EqualBudgetConfig
-from ecos_agent.optimization_knowledge_treatments import (
+from ecos_agent.optimization.experiments.equal_budget import CandidateTrace, EqualBudgetConfig
+from ecos_agent.optimization.experiments.knowledge_treatments import (
     KNOWLEDGE_TREATMENTS,
     KnowledgeTreatment,
     build_knowledge_treatment_report,
