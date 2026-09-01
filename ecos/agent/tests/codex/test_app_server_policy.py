@@ -15,29 +15,7 @@ def _provider(tmp_path, **env_overrides) -> CodexAppServerProposalProvider:
     )
 
 
-def test_web_search_is_off_unless_the_deployment_opts_in(tmp_path) -> None:
-    assert _provider(tmp_path).web_search_enabled is False
-
-
-@pytest.mark.parametrize("value", ["1", "true", "TRUE", "on"])
-def test_web_search_opt_in_values(tmp_path, value: str) -> None:
-    provider = _provider(tmp_path, ECOS_AGENT_CODEX_WEB_SEARCH=value)
-    assert provider.web_search_enabled is True
-
-
-@pytest.mark.parametrize("value", ["0", "false", "no", "", "  "])
-def test_web_search_stays_off_for_other_values(tmp_path, value: str) -> None:
-    provider = _provider(tmp_path, ECOS_AGENT_CODEX_WEB_SEARCH=value)
-    assert provider.web_search_enabled is False
-
-
-@pytest.mark.parametrize(
-    ("enabled", "expected"),
-    [(True, "tools.web_search=true"), (False, "tools.web_search=false")],
-)
-def test_app_server_is_launched_with_an_explicit_web_search_setting(
-    tmp_path, monkeypatch, enabled: bool, expected: str
-) -> None:
+def test_app_server_always_disables_web_search(tmp_path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_init(self, **kwargs: object) -> None:
@@ -47,11 +25,10 @@ def test_app_server_is_launched_with_an_explicit_web_search_setting(
     monkeypatch.setattr(_JsonLineRpcProcessClient, "start", lambda self: None)
     monkeypatch.setattr(_JsonLineRpcProcessClient, "request", lambda self, *a, **k: {})
 
-    provider = _provider(tmp_path)
-    provider.web_search_enabled = enabled
+    provider = _provider(tmp_path, ECOS_AGENT_CODEX_WEB_SEARCH="1")
     provider._ensure_client()
 
-    assert expected in captured["args"]
+    assert "tools.web_search=false" in captured["args"]
 
 
 def test_rpc_diagnostics_are_opt_in(tmp_path) -> None:

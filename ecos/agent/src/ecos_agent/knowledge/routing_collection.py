@@ -228,7 +228,6 @@ def main(provider_factory: Callable[..., Any]) -> int:
         cwd=AGENT_ROOT,
         runtime_workspace_roots=(AGENT_ROOT,),
         timeout_seconds=args.timeout_seconds,
-        web_search_enabled=False,
     )
     try:
         records, attempts = _collect(

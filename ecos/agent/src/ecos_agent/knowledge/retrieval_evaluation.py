@@ -595,7 +595,7 @@ def _run_protocol(binary: Path) -> tuple[dict[str, object], float, int]:
     with tempfile.TemporaryDirectory(prefix="ecos-agent-audit-") as directory:
         trace_path = Path(directory) / "network.trace"
         environment = dict(os.environ)
-        environment.update({"ECOS_AGENT_CODEX_BIN": "/nonexistent/ecos-agent-codex", "ECOS_AGENT_CODEX_WEB_SEARCH": "0"})
+        environment["ECOS_AGENT_CODEX_BIN"] = "/nonexistent/ecos-agent-codex"
         process = subprocess.Popen(
             [strace, "-qq", "-f", "-e", "trace=network", "-o", str(trace_path), str(binary)],
             stdin=subprocess.PIPE,

@@ -11,7 +11,7 @@ ECOS Studio 负责 workspace、合同、执行和结果记录，使交互效率�
 
 ## 使用前准备
 
-打包版 ECOS Studio 已包含 Agent 的 Python 运行时，但**不包含 Codex CLI、
+Linux 打包版 ECOS Studio 已包含 Agent 的 Python 运行时，但**不包含 Codex CLI、
 登录状态或任何凭据**。Agent 依赖本机可用的 Codex CLI。
 
 ### 推荐：在 GUI 内一键就绪（Linux）
@@ -197,22 +197,6 @@ equal-budget artifact 中的 `terminal_utility` 只是冻结 objective metric �
 只是纵深防御，不能当作依据：Codex 的 Linux 沙箱依赖 bubblewrap user namespace，
 在很多主机（含开启 AppArmor 限制的 Ubuntu）上无法生效；而 app-server 对**任何
 未知字段都静默接受**，因此无法从外部确认某个字段是否真的被采纳。
-
-### 联网
-
-Codex 托管的 web search 默认关闭，需显式开启：
-
-```bash
-ECOS_AGENT_CODEX_WEB_SEARCH=1
-```
-
-开启后 Codex 可查询公开资料（例如工具选项含义、报错信息）来辅助生成提案，
-其检索动作会作为活动进度显示在聊天中。关闭时 Agent 全部功能仍可用，只是
-少了外部资料这一信息来源。
-
-需要注意：这一开关控制的是 Codex 的联网检索工具，**不是**数据外发的总开关——
-模型调用本身就要联网。密态设计应结合企业侧网络策略评估，Codex 侧目前没有可
-验证的域名白名单机制。
 
 ## TODO
 

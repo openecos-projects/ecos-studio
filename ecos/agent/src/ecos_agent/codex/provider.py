@@ -115,7 +115,6 @@ class CodexAppServerProposalProvider:
         timeout_seconds: int | None = None,
         runtime_workspace_roots: Iterable[str | Path] | None = None,
         progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
-        web_search_enabled: bool | None = None,
         diagnostics_path: Path | None = None,
         ephemeral: bool = True,
     ) -> None:
@@ -127,11 +126,6 @@ class CodexAppServerProposalProvider:
         )
         self.runtime_workspace_roots = _runtime_workspace_roots(
             runtime_workspace_roots or (self.cwd,)
-        )
-        self.web_search_enabled = (
-            _web_search_from_env(self.env)
-            if web_search_enabled is None
-            else web_search_enabled
         )
         self.diagnostics_path = diagnostics_path or _diagnostics_path_from_env(self.env)
         self.ephemeral = ephemeral
@@ -889,7 +883,7 @@ class CodexAppServerProposalProvider:
                     "-c",
                     "mcp_servers={}",
                     "-c",
-                    f"tools.web_search={'true' if self.web_search_enabled else 'false'}",
+                    "tools.web_search=false",
                     "--listen",
                     "stdio://",
                 ],
@@ -1073,7 +1067,6 @@ def create_required_codex_provider(
     cwd: Path | None = None,
     runtime_workspace_roots: Iterable[str | Path] | None = None,
     progress_callback: Callable[[str | dict[str, Any]], None] | None = None,
-    web_search_enabled: bool | None = None,
     diagnostics_path: Path | None = None,
     ephemeral: bool = True,
 ) -> CodexAppServerProposalProvider:
@@ -1081,7 +1074,6 @@ def create_required_codex_provider(
         cwd=cwd,
         runtime_workspace_roots=runtime_workspace_roots,
         progress_callback=progress_callback,
-        web_search_enabled=web_search_enabled,
         diagnostics_path=diagnostics_path,
         ephemeral=ephemeral,
     )
@@ -1129,19 +1121,6 @@ def _timeout_from_env(env: Mapping[str, str]) -> int:
             failure_class="missing_input",
         )
     return timeout
-
-
-def _web_search_from_env(env: Mapping[str, str]) -> bool:
-    """Codex's hosted web search, off unless the deployment opts in.
-
-    Fabs run ECOS on air-gapped or egress-filtered networks, and a PDK-bound
-    session should not reach the public web without someone deciding it should.
-    """
-    return env.get("ECOS_AGENT_CODEX_WEB_SEARCH", "").strip().casefold() in {
-        "1",
-        "true",
-        "on",
-    }
 
 
 def _diagnostics_path_from_env(env: Mapping[str, str]) -> Path | None:
