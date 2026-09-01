@@ -125,13 +125,13 @@ from ecos_agent.workspace_rerun import (
 from ecos_agent.provider_support import (
     CreateBootstrap,
     _allowed_operation_options,
-    _confirm_workspace_execution,
+    _deterministic_spec_correction,
     _deterministic_operation_choice,
+    _explicit_path_tokens,
     _extract_create_bootstrap,
     _flow_steps,
     _gui_workspace_codex_provider,
     _gui_workspace_request_context,
-    _handle_workspace_rerun_result,
     _workspace_continue_result,
     _workspace_signoff_inspection_result,
     _workspace_signoff_result,
@@ -148,16 +148,15 @@ from ecos_agent.provider_support import (
     _propose_gui_workspace_rerun_patch,
     _propose_gui_workspace_setup,
     _recommended_path,
-    _rerun_resolver,
+    _rerun_completion_message,
     _required_message,
-    _tunable_workspace_parameters,
     _validate_workspace_input_roots,
-    _validate_workspace_parameter_patch,
     _validated_path_recommendations,
     _workspace_creation_result,
     _workspace_inputs_payload,
     _workspace_rerun_execution_contract,
 )
+from ecos_agent.workspace_flow import WorkspaceFlow
 from ecos_agent.optimization_contracts import (
     OptimizationEpisodeState,
     OptimizationObjectiveProposal,
@@ -2278,7 +2277,8 @@ class EcosAgentProvider:
             return
         try:
             source = Path(normalize_path(workspace, label="Workspace", require_directory=True))
-            parameter_values = _tunable_workspace_parameters(source)
+            workspace_flow = WorkspaceFlow(session)
+            parameter_values = workspace_flow.tunable_parameters(source)
             if not parameter_values:
                 raise ValueError("No tunable parameters are available in this workspace yet")
             allowed_knobs = [knob_id for knob_id, _ in parameter_values]
@@ -2300,7 +2300,7 @@ class EcosAgentProvider:
             )
             self._check_interrupted(session)
             patch = [item.model_dump(mode="json") for item in proposal.parameter_patch]
-            _validate_workspace_parameter_patch(patch, current_values)
+            workspace_flow.validate_parameter_patch(patch, current_values)
             writes = [resolve_write(item) for item in proposal.parameter_patch]
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
@@ -2784,7 +2784,7 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _select_rerun_stage(self, session: _Session, message: str) -> None:
-        resolver = _rerun_resolver(session)
+        resolver = WorkspaceFlow(session).resolver
         discovery = session.rerun_discovery
         stage = None if discovery is None else numbered_choice(message, discovery.allowed_stages)
         if stage is None:
@@ -2820,7 +2820,7 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _select_rerun_parameter(self, session: _Session, message: str) -> None:
-        resolver = _rerun_resolver(session)
+        resolver = WorkspaceFlow(session).resolver
         discovery = session.rerun_discovery
         stage = session.rerun_stage
         if discovery is None or stage is None:
@@ -2853,7 +2853,7 @@ class EcosAgentProvider:
                     )
                 )
                 self._check_interrupted(session)
-                resolver._validate_patch(
+                resolver.validate_patch(
                     stage, [item.model_dump(mode="json") for item in proposal.parameter_patch]
                 )
             except (CodexProviderError, ValueError) as exc:
@@ -2890,7 +2890,7 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _select_rerun_scope(self, session: _Session, message: str) -> None:
-        resolver = _rerun_resolver(session)
+        resolver = WorkspaceFlow(session).resolver
         scope = numbered_choice(message, ("single_step", "full_flow"))
         if scope is None or session.rerun_discovery is None or session.rerun_stage is None:
             self._emit(session, "message", invalid_choice(session.language))
@@ -2958,7 +2958,82 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _confirm_workspace_execution(self, session: _Session, message: str) -> None:
-        _confirm_workspace_execution(self, session, message)
+        if message == "1":
+            setup_id = session.workspace_setup_id
+            if setup_id is None:
+                self._emit(session, "error", "Workspace setup session is invalid.")
+                return
+            self._emit(
+                session,
+                "workspace_create",
+                workspace_execution_started(session.language),
+                workspace_create_setup_id=setup_id,
+            )
+            session.phase = "workspace_creation_pending"
+            return
+        if message == "2":
+            self._reset(session)
+            self._emit(session, "message", cancellation_message(session.language))
+            self._emit_phase_choice(session)
+            return
+        try:
+            proposed = _deterministic_spec_correction(message)
+            if proposed is None:
+                proposed = GuiWorkspaceSetupProposal.model_validate(
+                    self.workspace_setup_parser(
+                        {
+                            "schema_version": "flow-agent.gui_workspace_setup_context.v2",
+                            "natural_language_choice": message,
+                            "stage": "spec",
+                            "recommended_defaults": session.workspace_setup.model_dump(
+                                mode="json"
+                            ),
+                            "workspace_inputs": _workspace_inputs_payload(
+                                session.workspace_inputs
+                            ),
+                            "filesystem_roots": list(
+                                workspace_search_roots(
+                                    session.workspace_inputs.project_root
+                                )
+                            ),
+                            "explicit_paths": _explicit_path_tokens(message),
+                            "_progress_callback": lambda text: self._progress(
+                                session, text
+                            ),
+                            "_register_interrupt": lambda callback: self._register_interrupt(
+                                session, callback
+                            ),
+                        }
+                    )
+                )
+                self._check_interrupted(session)
+            corrected_setup, corrected_inputs = self._corrected_workspace_state(
+                session, proposed, message
+            )
+            workspace_setup_contract(
+                corrected_setup,
+                corrected_inputs,
+                session.language,
+                session.workspace_setup_id or "pending",
+            )
+        except (CodexProviderError, ValueError) as exc:
+            self._check_interrupted(session)
+            self._raise_if_interrupted(exc)
+            self._emit(
+                session,
+                "error",
+                f"Unable to correct the workspace specification: {exc}",
+            )
+            self._emit(
+                session,
+                "message",
+                workspace_confirmation_prompt(session.language),
+            )
+            self._emit_phase_choice(session)
+            return
+        session.workspace_setup = corrected_setup
+        session.workspace_inputs = corrected_inputs
+        self._show_workspace_contract(session)
 
     def _handle_workspace_creation_result(self, session: _Session, message: str) -> None:
         result = _workspace_creation_result(message)
@@ -3029,7 +3104,29 @@ class EcosAgentProvider:
         session.phase = "workspace_rerun_pending"
 
     def _handle_workspace_rerun_result(self, session: _Session, message: str) -> None:
-        _handle_workspace_rerun_result(self, session, message)
+        try:
+            result = WorkspaceFlow(session).rerun_result(message)
+        except ValueError as exc:
+            self._emit(session, "error", str(exc))
+            return
+        contract = session.workspace_rerun_contract
+        assert contract is not None
+        if result.status == "succeeded":
+            if result.end_step and result.end_step.lower() == "harden":
+                self._begin_workspace_signoff(session, contract.target_workspace)
+                return
+            self._emit(
+                session,
+                "message",
+                _rerun_completion_message(session.language),
+            )
+            self._reset(session)
+            self._emit_phase_choice(session)
+            return
+        self._emit(session, "error", f"Workspace rerun failed: {result.error}")
+        self._emit(session, "message", confirmation_menu(session.language))
+        session.phase = "confirmation"
+        self._emit_phase_choice(session)
 
     def _number_or_repeat(
         self, session: _Session, message: str, label: str, lower: float, upper: float

@@ -316,9 +316,6 @@ class GuiWorkspaceRerunResolver:
             _validate_value(item)
         return patch
 
-    _validate_patch = validate_patch
-
-
 def catalog_end_step() -> ECCStepName:
     """Standard ECC flow terminus used by full_flow reruns."""
     return _CATALOG_END_STEP

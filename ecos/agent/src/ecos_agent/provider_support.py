@@ -17,7 +17,6 @@ from ecos_agent.contracts import (
     StageRoutingProposal,
 )
 from ecos_agent.messages import (
-    cancellation_message,
     confirmation_menu,
     default_value_prompt,
     design_name_prompt,
@@ -40,25 +39,21 @@ from ecos_agent.messages import (
     rtl_prompt,
     source_run_prompt,
     workspace_confirmation_prompt,
-    workspace_execution_started,
     workspace_name_prompt,
     workspace_parameter_request_prompt,
 )
-from ecos_agent.ecc_contracts import ECCStepName
-from ecos_agent.knob_registry import KNOB_SPECS
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
     GuiWorkspaceRerunParameterProposal,
-    GuiWorkspaceRerunResolver,
     catalog_end_step,
 )
+from ecos_agent.workspace_flow import WorkspaceFlow
 from ecos_agent.workspace_setup import (
     WorkspaceInputs,
     display_path,
     normalize_path,
     recommended_workspace_name,
     workspace_search_roots,
-    workspace_setup_contract,
 )
 
 
@@ -68,7 +63,6 @@ _NUMBER_TOKEN = re.compile(r"(?<![0-9.])(\d+(?:\.\d+)?)(?![0-9.])")
 _WORKSPACE_NAME_TOKEN = re.compile(r"\b(ws_\d{1,8})\b", re.IGNORECASE)
 _SPEC_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _WORKSPACE_CREATE_RESULT_PREFIX = "workspace_create_result:"
-_WORKSPACE_RERUN_RESULT_PREFIX = "workspace_rerun_result:"
 _WORKSPACE_CONTINUE_RESULT_PREFIX = "workspace_continue_result:"
 _WORKSPACE_SIGNOFF_INSPECTION_PREFIX = "workspace_signoff_inspection:"
 _WORKSPACE_SIGNOFF_RESULT_PREFIX = "workspace_signoff_result:"
@@ -93,137 +87,6 @@ _TEXT_FIELD_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("top module", "top_module", "顶层", "top"), "top_module"),
     (("clock", "时钟"), "clock_name"),
 )
-
-
-def _confirm_workspace_execution(provider: Any, session: Any, message: str) -> None:
-    if message == "1":
-        setup_id = session.workspace_setup_id
-        if setup_id is None:
-            provider._emit(session, "error", "Workspace setup session is invalid.")
-            return
-        provider._emit(
-            session,
-            "workspace_create",
-            workspace_execution_started(session.language),
-            workspace_create_setup_id=setup_id,
-        )
-        session.phase = "workspace_creation_pending"
-        return
-    if message == "2":
-        provider._reset(session)
-        provider._emit(session, "message", cancellation_message(session.language))
-        provider._emit_phase_choice(session)
-        return
-    try:
-        proposed = _deterministic_spec_correction(message)
-        if proposed is None:
-            proposed = GuiWorkspaceSetupProposal.model_validate(
-                provider.workspace_setup_parser(
-                    {
-                        "schema_version": "flow-agent.gui_workspace_setup_context.v2",
-                        "natural_language_choice": message,
-                        "stage": "spec",
-                        "recommended_defaults": session.workspace_setup.model_dump(mode="json"),
-                        "workspace_inputs": _workspace_inputs_payload(session.workspace_inputs),
-                        "filesystem_roots": list(
-                            workspace_search_roots(session.workspace_inputs.project_root)
-                        ),
-                        "explicit_paths": _explicit_path_tokens(message),
-                        "_progress_callback": lambda text: provider._progress(session, text),
-                        "_register_interrupt": lambda callback: provider._register_interrupt(
-                            session, callback
-                        ),
-                    }
-                )
-            )
-            provider._check_interrupted(session)
-        corrected_setup, corrected_inputs = provider._corrected_workspace_state(
-            session, proposed, message
-        )
-        workspace_setup_contract(
-            corrected_setup,
-            corrected_inputs,
-            session.language,
-            session.workspace_setup_id or "pending",
-        )
-    except (CodexProviderError, ValueError) as exc:
-        provider._check_interrupted(session)
-        provider._raise_if_interrupted(exc)
-        provider._emit(session, "error", f"Unable to correct the workspace specification: {exc}")
-        provider._emit(session, "message", workspace_confirmation_prompt(session.language))
-        provider._emit_phase_choice(session)
-        return
-    session.workspace_setup = corrected_setup
-    session.workspace_inputs = corrected_inputs
-    provider._show_workspace_contract(session)
-
-
-def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) -> None:
-    result = _workspace_rerun_result(message)
-    contract = session.workspace_rerun_contract
-    if result is None:
-        provider._emit(session, "error", "Workspace rerun result is malformed.")
-        return
-    if contract is None:
-        provider._emit(session, "error", "Workspace rerun contract is missing.")
-        return
-    if result[0] != contract.rerun_id:
-        provider._emit(session, "error", "Workspace rerun result does not match the pending contract.")
-        return
-    _, status, error, end_step = result
-    if status == "succeeded":
-        if end_step and end_step.strip().lower() == "harden":
-            provider._begin_workspace_signoff(session, contract.target_workspace)
-            return
-        provider._emit(session, "message", _rerun_completion_message(session.language))
-        provider._reset(session)
-        provider._emit_phase_choice(session)
-        return
-    provider._emit(session, "error", f"Workspace rerun failed: {error}")
-    provider._emit(session, "message", confirmation_menu(session.language))
-    session.phase = "confirmation"
-    provider._emit_phase_choice(session)
-
-
-def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
-    if session.rerun_resolver is None:
-        raise ValueError("Rerun workspace recommendation is missing")
-    return session.rerun_resolver
-
-
-def _tunable_workspace_parameters(workspace_path: Path) -> tuple[tuple[str, object], ...]:
-    """Every readable knob in the workspace.
-
-    Rerun needs completed-stage evidence; changing a parameter does not, so this
-    spans all steps rather than only the ones that have already run.
-    """
-    merged: dict[str, object] = {}
-    for step in ECCStepName:
-        try:
-            values = GuiWorkspaceRerunResolver.stage_parameter_values(workspace_path, step.value)
-        except ValueError:
-            continue
-        for knob_id, value in values:
-            merged.setdefault(knob_id, value)
-    return tuple(merged.items())
-
-
-def _validate_workspace_parameter_patch(
-    patch: list[dict[str, object]],
-    available: Mapping[str, object],
-) -> None:
-    if not patch:
-        raise ValueError(
-            "no parameter changes were proposed; describe a concrete knob change such as lower target density"
-        )
-    by_step: dict[str, list[dict[str, object]]] = {}
-    for item in patch:
-        knob_id = str(item.get("knob_id", ""))
-        if knob_id not in available or knob_id not in KNOB_SPECS:
-            raise ValueError(f"parameter {knob_id} is not available in this workspace")
-        by_step.setdefault(KNOB_SPECS[knob_id].step.value, []).append(item)
-    for step, items in by_step.items():
-        GuiWorkspaceRerunResolver._validate_patch(step, items)
 
 
 def _propose_gui_workspace_setup(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
@@ -626,7 +489,7 @@ def _prompt_for_phase(session: Any) -> str:
             session.language,
             ()
             if session.rerun_discovery is None or session.rerun_stage is None
-            else _rerun_resolver(session).parameter_values(
+            else WorkspaceFlow(session).resolver.parameter_values(
                 session.rerun_discovery.source, session.rerun_stage
             ),
         ),
@@ -979,36 +842,6 @@ def _workspace_creation_result(message: str) -> tuple[str, str, str, str | None,
     ):
         return None
     return setup_id, status, normalized_error, end_step.strip() if end_step else None, workspace
-
-
-def _workspace_rerun_result(message: str) -> tuple[str, str, str, str | None] | None:
-    if not message.startswith(_WORKSPACE_RERUN_RESULT_PREFIX):
-        return None
-    try:
-        payload = json.loads(message.removeprefix(_WORKSPACE_RERUN_RESULT_PREFIX))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict) or not {"rerun_id", "status", "error"}.issubset(payload):
-        return None
-    if set(payload) - {"rerun_id", "status", "error", "end_step"}:
-        return None
-    rerun_id, status, error = payload.get("rerun_id"), payload.get("status"), payload.get("error")
-    if (
-        not isinstance(rerun_id, str)
-        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", rerun_id)
-        or status not in {"succeeded", "failed"}
-        or not isinstance(error, str)
-    ):
-        return None
-    normalized_error = re.sub(r"[\x00-\x1f\x7f]+", " ", error).strip()[:512]
-    if status == "failed" and not normalized_error:
-        return None
-    end_step = payload.get("end_step")
-    if end_step is not None and (
-        not isinstance(end_step, str) or len(end_step) > 64 or not end_step.strip()
-    ):
-        return None
-    return rerun_id, status, normalized_error, end_step.strip() if end_step else None
 
 
 def _workspace_continue_result(message: str) -> tuple[str, str, str, str | None] | None:

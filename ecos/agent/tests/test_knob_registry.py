@@ -13,7 +13,8 @@ from ecos_agent.knob_registry import (
     validate_value,
 )
 from ecos_agent.provider import EcosAgentProvider
-from ecos_agent.provider_support import _tunable_workspace_parameters
+from ecos_agent.provider_session import ProviderSession
+from ecos_agent.workspace_flow import WorkspaceFlow
 
 
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
@@ -153,7 +154,9 @@ def test_in_range_values_are_accepted(knob_id: str, value: object) -> None:
 
 def test_global_parameters_are_tunable_before_any_stage_completes(tmp_path: Path) -> None:
     workspace = _workspace_without_completed_stages(tmp_path)
-    available = dict(_tunable_workspace_parameters(workspace))
+    available = dict(
+        WorkspaceFlow(ProviderSession(session_id="test")).tunable_parameters(workspace)
+    )
     assert available["design.frequency_max"] == 100
     assert available["floorplan.utilitization"] == 0.4
     assert available["floorplan.die_width"] == 100.0
