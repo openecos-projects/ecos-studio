@@ -229,8 +229,6 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 const props = defineProps<{
   projectName?: string | null
   hasWorkspace?: boolean
-  signoffPackageExportEnabled?: boolean
-  designReportExportEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -311,18 +309,20 @@ const menus = computed<Menu[]>(() => [
         event: appMenuActionIds.reconfigureWorkspace,
         disabled: !props.hasWorkspace,
       },
-      {
-        label: 'Export Signoff Package',
-        icon: 'ri-archive-line',
-        event: appMenuActionIds.exportSignoffPackage,
-        disabled: !props.signoffPackageExportEnabled,
-      },
-      {
-        label: 'Export Design Summary',
-        icon: 'ri-file-chart-line',
-        event: appMenuActionIds.exportDesignSummary,
-        disabled: !props.hasWorkspace && !props.designReportExportEnabled,
-      },
+      ...(isWorkspaceRoute.value
+        ? [
+            {
+              label: 'Export Signoff Package',
+              icon: 'ri-archive-line',
+              event: appMenuActionIds.exportSignoffPackage,
+            },
+            {
+              label: 'Export Design Summary',
+              icon: 'ri-file-chart-line',
+              event: appMenuActionIds.exportDesignSummary,
+            },
+          ]
+        : []),
     ],
   },
   ...(isWorkspaceRoute.value ? [editMenu.value] : []),

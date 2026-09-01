@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest'
 import appSource from './App.vue?raw'
 
 describe('App design report export wiring', () => {
-  it('wires useDesignReportExport composable and menu action in App.vue', () => {
+  it('restricts design report export actions to the workspace route', () => {
     expect(appSource).toContain('useDesignReportExport')
     expect(appSource).toContain('DesignReportExportDialog')
     expect(appSource).toContain('openDesignReportExport')
-    expect(appSource).toContain('exportDesignSummary: openDesignReportExport')
-    expect(appSource).toContain(
-      ':design-report-export-enabled="designReportExportEnabled"',
+    expect(appSource).not.toContain('design-report-export-enabled')
+    expect(appSource).toMatch(
+      /exportDesignSummary: \(\) => \{[\s\S]*if \(isWorkspaceRoute\.value\)[\s\S]*openDesignReportExport\(\)/,
+    )
+    expect(appSource).toMatch(
+      /appMenuActionIds\.exportDesignSummary,[\s\S]*workspaceRoute/,
     )
   })
 

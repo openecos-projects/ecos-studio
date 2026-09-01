@@ -1401,7 +1401,7 @@
                           "
                           @click="dieAreaMode = 'utilitization_margin'"
                         >
-                          Utilitization / Margin
+                          Core Utilization
                         </button>
                       </div>
                     </div>
@@ -1464,7 +1464,7 @@
                       </div>
                     </template>
 
-                    <div v-else class="grid gap-5 md:grid-cols-2">
+                    <div v-else>
                       <div>
                         <label
                           class="mb-2 block text-sm font-semibold text-(--text-primary)"
@@ -1476,19 +1476,6 @@
                           min="0.01"
                           max="1"
                           step="0.01"
-                          class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                          >Core Margin</label
-                        >
-                        <input
-                          v-model.number="config.parameters.margin"
-                          type="number"
-                          min="0"
-                          step="1"
                           class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                         />
                       </div>
@@ -3343,7 +3330,7 @@ function specReady() {
       !mpcDieAreaValidation.value.error
     )
   }
-  return Number(params.utilitization) > 0 && Number(params.margin) >= 0
+  return Number(params.utilitization) > 0
 }
 
 function syncWorkspaceConfig() {

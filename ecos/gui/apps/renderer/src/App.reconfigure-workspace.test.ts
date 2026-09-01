@@ -32,12 +32,13 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('delete nextQuery.openWorkspace')
   })
 
-  it('passes signoff eligibility to the visible top bar menu', () => {
-    expect(appSource).toContain(
-      ':signoff-package-export-enabled="signoffPackageExportEnabled"',
-    )
+  it('restricts signoff export actions to the workspace route', () => {
+    expect(appSource).not.toContain('signoff-package-export-enabled')
     expect(appSource).toContain('exportSignoffPackage,')
-    expect(appSource).toContain('signoffPackageExportEnabled,')
+    expect(appSource).toContain('appMenuActionIds.exportSignoffPackage')
+    expect(appSource).toContain(
+      'if (isWorkspaceRoute.value) return exportSignoffPackage()',
+    )
   })
 
   it('opens the shared workspace wizard with current workspace data from the File menu', () => {

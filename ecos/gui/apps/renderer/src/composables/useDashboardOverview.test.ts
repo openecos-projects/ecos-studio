@@ -178,6 +178,7 @@ describe('useDashboardOverview db feature metrics', () => {
       }
       if (path === DB_FEATURE_PATH) {
         return JSON.stringify({
+          'Design Layout': { core_area: 1848 },
           Instances: {
             macros: { num: 3, area: 41.25 },
             logic: { num: 316, area: 803.04 },
@@ -202,6 +203,7 @@ describe('useDashboardOverview db feature metrics', () => {
 
     const metric = (id: string) =>
       overview.keyMetrics.value.find((entry) => entry.id === id)
+    expect(metric('core-area')?.value).toBe(1848)
     expect(metric('instances')?.value).toBe(423)
     expect(metric('macro-number')?.value).toBe(3)
     expect(metric('macro-area')?.value).toBe(41.25)
