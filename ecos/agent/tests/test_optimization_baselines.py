@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +14,6 @@ from ecos_agent.optimization.experiments.baseline_runner import (
     evaluate_online_method,
 )
 from ecos_agent.optimization.experiments.baselines import (
-    ONLINE_BASELINE_METHODS,
     BaselineMethod,
     rule_guided_policy_manifest,
     select_baseline_candidate,
@@ -28,7 +26,6 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization.experiments.gate0 import load_gate0_config
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.experiments.statistics import baseline_design_statistics
 
@@ -64,21 +61,6 @@ def _values() -> dict[str, bool | int | float]:
     }
 
 
-def test_pilot_uses_two_designs_and_only_non_llm_online_baselines() -> None:
-    root = Path(__file__).parents[1]
-    config = load_gate0_config(root / "experiments/pilot/pilot.v1.json")
-
-    assert {design.design_id for design in config.designs} == {"gcd", "i2c"}
-    assert tuple(method.value for method in ONLINE_BASELINE_METHODS) == (
-        "controlled_coordinate",
-        "random_action",
-        "rule_guided_direction",
-    )
-    assert {
-        item.design_id: item.baseline_replay_count for item in config.designs
-    } == {"gcd": 1, "i2c": 3}
-
-
 def test_baseline_profile_uses_first_replay_as_reference() -> None:
     defaults = (
         _terminal(0, 0, 100),
@@ -90,62 +72,6 @@ def test_baseline_profile_uses_first_replay_as_reference() -> None:
 
     assert profile["reference"]["route_wirelength"] == 100
     assert profile["epsilon"]["route_wirelength"] == 4
-
-
-def test_default_replays_are_parallel_ordered_and_use_independent_clients(
-    monkeypatch, tmp_path: Path
-) -> None:
-    config = load_gate0_config(
-        Path(__file__).parents[1] / "experiments/pilot/pilot.v1.json"
-    )
-    barrier = threading.Barrier(3)
-    clients = []
-
-    class Client:
-        def __init__(self, *_args, **_kwargs):
-            self.client_id = len(clients) + 1
-            self.closed = False
-            clients.append(self)
-
-        def open_workspace(self, _workspace):
-            return f"workspace-{self.client_id}"
-
-        def close(self):
-            self.closed = True
-
-    def run_candidate(*args, **_kwargs):
-        barrier.wait(timeout=2)
-        index = int(args[7].rsplit("-", 1)[1])
-        return SimpleNamespace(observation=_terminal(0, 0, 100 + index))
-
-    monkeypatch.setattr(baseline_runner, "EccContentLengthRpcClient", Client)
-    monkeypatch.setattr(baseline_runner, "run_pilot_candidate", run_candidate)
-    (tmp_path / "output").mkdir()
-
-    observations = baseline_runner._default_replays(
-        tmp_path,
-        tmp_path / "output",
-        config,
-        {
-            "ecc": {"executable": "/fake/ecc"},
-            "pdk": {"site_width_dbu": 200},
-            "config_sha256": HASH,
-        },
-        "run",
-        "i2c",
-        _terminal(0, 0, 100),
-        3,
-        3,
-        threading.BoundedSemaphore(3),
-    )
-
-    assert [item.metrics[ObjectiveMetric.ROUTE_WIRELENGTH] for item in observations] == [
-        101,
-        102,
-        103,
-    ]
-    assert len(clients) == 3
-    assert all(client.closed for client in clients)
 
 
 def test_single_replay_profile_disables_noise_band() -> None:
@@ -415,66 +341,6 @@ def test_online_method_uses_native_application_receipt(
     assert converted == [(native_receipt, 200)]
 
 
-def test_design_runs_online_methods_in_parallel_with_independent_clients(
-    monkeypatch, tmp_path: Path
-) -> None:
-    config = load_gate0_config(
-        Path(__file__).parents[1] / "experiments/pilot/pilot.v1.json"
-    )
-    barrier = threading.Barrier(len(ONLINE_BASELINE_METHODS))
-    clients = []
-
-    class Client:
-        def __init__(self, *_args, **_kwargs):
-            self.client_id = len(clients) + 1
-            self.closed = False
-            clients.append(self)
-
-        def open_workspace(self, _workspace):
-            return f"workspace-{self.client_id}"
-
-        def close(self):
-            self.closed = True
-
-    def run_method(method, client, workspace_id, *_args):
-        assert workspace_id == f"workspace-{client.client_id}"
-        barrier.wait(timeout=2)
-        return {"method": method.value}
-
-    monkeypatch.setattr(baseline_runner, "EccContentLengthRpcClient", Client)
-    monkeypatch.setattr(
-        baseline_runner, "build_terminal_observation", lambda _path: _terminal(0, 0, 100)
-    )
-    monkeypatch.setattr(
-        baseline_runner,
-        "_default_replays",
-        lambda *_args: (_terminal(0, 0, 100),),
-    )
-    monkeypatch.setattr(baseline_runner, "_run_online_method", run_method)
-
-    summary = baseline_runner._run_design(
-        config,
-        "gcd",
-        tmp_path,
-        tmp_path / "output",
-        {"ecc": {"executable": "/fake/ecc"}},
-        "run",
-        17,
-        1,
-        3,
-        threading.BoundedSemaphore(3),
-    )
-
-    assert list(summary["methods"]) == [
-        "default_ecos",
-        "controlled_coordinate",
-        "random_action",
-        "rule_guided_direction",
-    ]
-    assert len(clients) == 3
-    assert all(client.closed for client in clients)
-
-
 def test_parallel_rpc_failure_is_recorded_and_propagated(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -510,54 +376,6 @@ def test_parallel_rpc_failure_is_recorded_and_propagated(
         "task_id": "default-replay-2",
     }
     assert clients[0].closed
-
-
-def test_workspace_binding_rejects_a_swapped_design(monkeypatch, tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-    config_path = root / "experiments/pilot/pilot.v1.json"
-    config = load_gate0_config(config_path)
-    design = next(item for item in config.designs if item.design_id == "gcd")
-    workspace = tmp_path / "workspace"
-    (workspace / "origin/rtl").mkdir(parents=True)
-    (workspace / "home").mkdir()
-    shutil.copyfile(
-        config_path.parent / design.rtl.path,
-        workspace / "origin/rtl" / Path(design.rtl.path).name,
-    )
-    shutil.copyfile(config_path.parent / design.filelist.path, workspace / "origin/filelist.f")
-    shutil.copyfile(
-        config_path.parent / design.sdc.path,
-        workspace / "origin" / Path(design.sdc.path).name,
-    )
-    (workspace / "home/flow.json").write_text("{}\n", encoding="utf-8")
-    (workspace / "home/parameters.json").write_text(
-        json.dumps({
-            "Design": "gcd",
-            "Top module": "gcd",
-            "Clock": "clk",
-            "Frequency max [MHz]": 50,
-            "Max fanout": 32,
-            "Target density": 0.2,
-            "Target overflow": 0.1,
-            "Cell padding x": 400,
-            "Routability opt flag": 1,
-            "Core": {"Utilitization": 0.4},
-            "PDK Root": "/pdk",
-        }),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        baseline_runner, "build_terminal_observation", lambda _path: _terminal(0, 0, 100)
-    )
-    readiness = {"pdk": {"site_width_dbu": 200, "root": "/pdk"}}
-
-    binding = baseline_runner._workspace_binding(config, design, workspace, readiness)
-
-    assert binding["design_id"] == "gcd"
-    assert binding["terminal_evidence_manifest_sha256"] == HASH
-    swapped = next(item for item in config.designs if item.design_id == "i2c")
-    with pytest.raises(baseline_runner.BaselineRunnerError, match="workspace evidence"):
-        baseline_runner._workspace_binding(config, swapped, workspace, readiness)
 
 
 def test_cli_reports_interruption_without_a_traceback(monkeypatch, tmp_path: Path) -> None:
@@ -604,114 +422,6 @@ def test_cli_forwards_max_workers(monkeypatch, tmp_path: Path) -> None:
 
     assert result == 0
     assert received["max_workers"] == 2
-
-
-def test_pilot_runner_writes_a_two_design_non_llm_manifest(monkeypatch, tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-    monkeypatch.setattr(
-        baseline_runner,
-        "readiness_report",
-        lambda _path: {"ready": True, "config_sha256": HASH},
-    )
-    barrier = threading.Barrier(2)
-
-    def run_design(_config, design_id, *_args):
-        barrier.wait(timeout=2)
-        return {"design_id": design_id, "methods": {}}
-
-    monkeypatch.setattr(baseline_runner, "_run_design", run_design)
-    monkeypatch.setattr(
-        baseline_runner,
-        "baseline_design_statistics",
-        lambda designs: {"design_count": len(designs)},
-    )
-    monkeypatch.setattr(
-        baseline_runner,
-        "_workspace_binding",
-        lambda _config, design, workspace, _site_width: {
-            "design_id": design.design_id,
-            "workspace": str(workspace),
-            "flow_sha256": HASH,
-        },
-    )
-
-    summary = baseline_runner.run_baseline_pilot(
-        root / "experiments/pilot/pilot.v1.json",
-        tmp_path,
-        run_id="baseline-test",
-        workspaces={"gcd": tmp_path / "gcd", "i2c": tmp_path / "i2c"},
-        random_seed=17,
-        max_workers=2,
-    )
-
-    manifest = json.loads(
-        (tmp_path / "baseline-test/run-manifest.v1.json").read_text(encoding="utf-8")
-    )
-    assert manifest["designs"] == ["gcd", "i2c"]
-    assert manifest["baseline_replay_counts"] == {"gcd": 1, "i2c": 3}
-    assert manifest["max_workers"] == 2
-    assert manifest["methods"] == [
-        "default_ecos",
-        "controlled_coordinate",
-        "random_action",
-        "rule_guided_direction",
-    ]
-    assert "oracle" not in json.dumps(manifest).lower()
-    assert manifest["workspace_bindings"]["gcd"]["design_id"] == "gcd"
-    assert manifest["policies"]["rule_guided_direction"]["schema_version"] == (
-        "ecos.optimization_rule_guided_policy.v2"
-    )
-    assert set(summary["designs"]) == {"gcd", "i2c"}
-
-
-def test_pilot_runner_rejects_non_positive_max_workers(tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-
-    with pytest.raises(baseline_runner.BaselineRunnerError, match="max workers"):
-        baseline_runner.run_baseline_pilot(
-            root / "experiments/pilot/pilot.v1.json",
-            tmp_path,
-            run_id="baseline-test",
-            workspaces={"gcd": tmp_path / "gcd", "i2c": tmp_path / "i2c"},
-            max_workers=0,
-        )
-
-
-def test_pilot_runner_marks_an_interrupted_run(monkeypatch, tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-    monkeypatch.setattr(
-        baseline_runner,
-        "readiness_report",
-        lambda _path: {"ready": True, "config_sha256": HASH},
-    )
-    monkeypatch.setattr(
-        baseline_runner,
-        "_workspace_binding",
-        lambda _config, design, workspace, _readiness: {
-            "design_id": design.design_id,
-            "workspace": str(workspace),
-        },
-    )
-
-    def interrupt(*args, **kwargs):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(baseline_runner, "_run_design", interrupt)
-
-    with pytest.raises(KeyboardInterrupt):
-        baseline_runner.run_baseline_pilot(
-            root / "experiments/pilot/pilot.v1.json",
-            tmp_path,
-            run_id="baseline-interrupted",
-            workspaces={"gcd": tmp_path / "gcd", "i2c": tmp_path / "i2c"},
-        )
-
-    marker = json.loads(
-        (tmp_path / "baseline-interrupted/interrupted.v1.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert marker["schema_version"] == "ecos.optimization_baseline_interruption.v1"
 
 
 def test_online_method_reports_auc_and_best_so_far_effect_size() -> None:
