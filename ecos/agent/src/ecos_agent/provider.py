@@ -10,7 +10,6 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -165,6 +164,7 @@ from ecos_agent.optimization_contracts import (
 )
 from ecos_agent.optimization_rules import freeze_optimization_objective
 from ecos_agent.optimization_runner import OptimizationEpisodeRunner
+from ecos_agent.provider_session import ProviderSession
 
 
 PROVIDER_ID = "ecos_agent"
@@ -394,58 +394,7 @@ _INTERACTION_DESCRIPTION_PHASES = {
 }
 
 
-@dataclass
-class _Session:
-    session_id: str
-    phase: str = "home_ready"
-    mode: str = "home"
-    language: str = "en"
-    language_locked: bool = False
-    project_root: str | None = None
-    known_projects: list[tuple[str, str]] = field(default_factory=list)
-    creating_project: bool = False
-    design_id: str | None = None
-    inherited_design_name: str | None = None
-    rerun_stage: str | None = None
-    rerun_resolver: GuiWorkspaceRerunResolver | None = None
-    rerun_workspace_path: str | None = None
-    rerun_discovery: GuiWorkspaceRerunDiscovery | None = None
-    rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)
-    workspace_rerun_contract: GuiWorkspaceRerunContract | None = None
-    workspace_setup: GuiWorkspaceSetupProposal = field(default_factory=recommended_workspace_setup)
-    workspace_inputs: WorkspaceInputs = field(default_factory=WorkspaceInputs)
-    path_recommendations: dict[str, str] = field(default_factory=dict)
-    workspace_setup_id: str | None = None
-    mpc_selection: bool | None = None
-    workspace_contract: dict[str, Any] | None = None
-    workspace_continue_id: str | None = None
-    workspace_parameter_update: dict[str, Any] | None = None
-    workspace_signoff_id: str | None = None
-    workspace_signoff_workspace: str | None = None
-    active_interrupt: Callable[[], None] | None = None
-    active_tool_message_id: str | None = None
-    active_turn_id: str | None = None
-    active_turn_started_at: int | None = None
-    active_local_activities: dict[str, dict[str, Any]] = field(default_factory=dict)
-    interrupt_requested: bool = False
-    running: bool = False
-    optimization_phase: str = "idle"
-    optimization_episode_id: str | None = None
-    optimization_runner: OptimizationEpisodeRunner | None = None
-    optimization_provider: CodexAppServerProposalProvider | None = None
-    optimization_thread: threading.Thread | None = None
-    optimization_stop: threading.Event = field(default_factory=threading.Event)
-    optimization_pause: threading.Event = field(default_factory=threading.Event)
-    optimization_turn_count: int = 0
-    optimization_objective: dict[str, Any] | None = None
-    optimization_objective_sha256: str | None = None
-    optimization_primary_metric: str | None = None
-    codex_provider: CodexAppServerProposalProvider | None = None
-    pending_interaction: dict[str, Any] | None = None
-    interaction_retry: dict[str, Any] | None = None
-    interaction_history: dict[str, str] = field(default_factory=dict)
-    interaction_undo: list[dict[str, Any]] = field(default_factory=list)
-    state_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+_Session = ProviderSession
 
 
 class EcosAgentProvider:
