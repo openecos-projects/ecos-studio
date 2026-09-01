@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
@@ -50,14 +49,8 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ParameterSemanticsCard,
 )
+from ecos_agent.optimization.parameters import acceptance
 from ecos_agent.optimization.parameters.semantics import card_hash
-
-_SCRIPT = Path(__file__).parents[1] / "scripts" / "build_parameter_acceptance.py"
-_SPEC = importlib.util.spec_from_file_location("build_parameter_acceptance", _SCRIPT)
-assert _SPEC is not None and _SPEC.loader is not None
-acceptance = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(acceptance)
-
 
 HASH = "sha256:" + "a" * 64
 CARD_PATH = (

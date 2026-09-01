@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import runpy
 import subprocess
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
 from ecos_agent.knowledge.retriever import tokenize
+from ecos_agent.knowledge.benchmark import _aliases_leak
+from ecos_agent.knowledge import routing_collection
 from ecos_agent.knowledge.step import STEP_KNOWLEDGE_SPECS, StepKnowledge
 
 
@@ -63,9 +64,8 @@ def test_semantic_cases_share_target_chunk_vocabulary() -> None:
 
 
 def test_alias_leak_check_ignores_aliases_without_tokens() -> None:
-    aliases_leak = runpy.run_path(AGENT_ROOT / "scripts" / "build_knowledge_benchmark.py")["_aliases_leak"]
-    assert not aliases_leak("Which phase prepares a cell netlist?", ("the",))
-    assert aliases_leak("Which phase prepares a mapped gate netlist?", ("mapped gate",))
+    assert not _aliases_leak("Which phase prepares a cell netlist?", ("the",))
+    assert _aliases_leak("Which phase prepares a mapped gate netlist?", ("mapped gate",))
 
 
 def test_frozen_benchmark_has_isolated_unique_coverage_and_manifest_dimensions() -> None:
@@ -209,7 +209,6 @@ def test_ablation_suite_replays_hash_locked_stage_proposals(tmp_path: Path) -> N
 
 
 def test_stage_routing_collector_uses_only_query_and_audited_catalog() -> None:
-    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
     cases = [
         json.loads(line)
         for line in (BENCHMARK_ROOT / "benchmark.v1.jsonl").read_text(encoding="utf-8").splitlines()
@@ -232,7 +231,7 @@ def test_stage_routing_collector_uses_only_query_and_audited_catalog() -> None:
                 "rationale": "test routing",
             }
 
-    records, attempts = collector["_collect"](
+    records, attempts = routing_collection._collect(
         FakeProvider(),
         [case],
         [{"stage": "place", "summary": "Audited placement stage.", "chunk_sha256": "a" * 64}],
@@ -246,10 +245,9 @@ def test_stage_routing_collector_uses_only_query_and_audited_catalog() -> None:
 
 
 def test_stage_routing_collector_audit_rejects_failed_or_partial_collection(tmp_path: Path) -> None:
-    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
     replay = tmp_path / "routing-proposals.v1.jsonl"
     replay.write_text("", encoding="utf-8")
-    audit = collector["_audit"](
+    audit = routing_collection._audit(
         SimpleNamespace(
             split="dev", max_cases=2, max_failures=1, attempts_per_case=2, timeout_seconds=30
         ),
@@ -273,7 +271,6 @@ def test_stage_routing_collector_audit_rejects_failed_or_partial_collection(tmp_
 
 
 def test_stage_routing_collector_counts_only_consecutive_failures() -> None:
-    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
     responses: list[object] = [
         ValueError("first failure"),
         {
@@ -302,7 +299,7 @@ def test_stage_routing_collector_counts_only_consecutive_failures() -> None:
             return response
 
     cases = [{"id": f"case-{index}", "query": f"query-{index}"} for index in range(4)]
-    records, attempts = collector["_collect"](
+    records, attempts = routing_collection._collect(
         FakeProvider(),
         cases,
         [{"stage": "place", "summary": "Audited placement stage.", "chunk_sha256": "a" * 64}],
@@ -314,7 +311,6 @@ def test_stage_routing_collector_counts_only_consecutive_failures() -> None:
 
 
 def test_stage_routing_collector_retries_a_transient_case_failure() -> None:
-    collector = runpy.run_path(AGENT_ROOT / "scripts" / "collect_stage_routing_proposals.py")
     responses: list[object] = [
         ValueError("transient failure"),
         {
@@ -339,7 +335,7 @@ def test_stage_routing_collector_retries_a_transient_case_failure() -> None:
             return response
 
     provider = FakeProvider()
-    records, attempts = collector["_collect"](
+    records, attempts = routing_collection._collect(
         provider,
         [{"id": "case-1", "query": "query-1"}],
         [{"stage": "place", "summary": "Audited placement stage.", "chunk_sha256": "a" * 64}],

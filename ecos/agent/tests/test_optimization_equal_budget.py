@@ -1,4 +1,3 @@
-import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +19,8 @@ from ecos_agent.optimization.experiments.equal_budget import (
     build_candidate_trace,
     evaluate_equal_budget,
 )
+from ecos_agent.optimization.experiments import knowledge_treatment_runner
+from ecos_agent.optimization.experiments import knowledge_treatment_execution
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
@@ -50,37 +51,12 @@ def test_candidate_resources_fail_closed_without_flow_evidence(tmp_path: Path) -
         )
 
 
-def _load_harness():
-    path = Path(__file__).parents[1] / "scripts" / "run_equal_budget_harness.py"
-    spec = importlib.util.spec_from_file_location("run_equal_budget_harness", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _load_experiment_runner():
-    path = Path(__file__).parents[1] / "scripts" / "run_equal_budget_experiment.py"
-    spec = importlib.util.spec_from_file_location("run_equal_budget_experiment", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return knowledge_treatment_runner
 
 
-def _load_functional_smoke_finalizer():
-    path = (
-        Path(__file__).parents[1]
-        / "scripts"
-        / "finalize_equal_budget_functional_smoke.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "finalize_equal_budget_functional_smoke", path
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _load_experiment_execution():
+    return knowledge_treatment_execution
 
 
 def test_equal_budget_counts_receipts_and_aliases() -> None:
@@ -434,376 +410,8 @@ def _terminal_observation() -> TerminalObservation:
     )
 
 
-def test_harness_keeps_preexecution_only_trace_not_run(tmp_path) -> None:
-    harness = _load_harness()
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"design_ids": [f"d{i}" for i in range(10)]}))
-    traces = tmp_path / "traces.jsonl"
-    traces.write_text(
-        json.dumps(
-            {
-                "design_id": "d0",
-                "candidate_id": "c1",
-                "started": False,
-                "terminal_success": False,
-                "planning_mode": "requested-only",
-            }
-        )
-        + "\n"
-    )
-
-    result = harness.run(
-        manifest,
-        tmp_path / "out",
-        traces,
-        None,
-        requested_only_planning_calls=1,
-        receipt_aware_planning_calls=1,
-    )
-
-    assert result["status"] == "not_run"
-
-
-def test_harness_requires_reproducibility_metadata_for_started_trace(tmp_path) -> None:
-    harness = _load_harness()
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"design_ids": [f"d{i}" for i in range(10)]}))
-    traces = tmp_path / "traces.jsonl"
-    traces.write_text(
-        json.dumps(
-            {
-                "design_id": "d0",
-                "candidate_id": "c1",
-                "started": True,
-                "terminal_success": False,
-                "planning_mode": "receipt-aware",
-                "receipt_status": "ok",
-            }
-        )
-        + "\n"
-    )
-
-    with pytest.raises(ValueError, match="reproducibility metadata"):
-        harness.run(
-            manifest,
-            tmp_path / "out",
-            None,
-            traces,
-            requested_only_planning_calls=1,
-            receipt_aware_planning_calls=1,
-        )
-
-
-def test_harness_requires_two_full_independent_design_covered_runs(tmp_path) -> None:
-    harness = _load_harness()
-    design_ids = [f"d{i}" for i in range(10)]
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"design_ids": design_ids}))
-    requested = tmp_path / "requested.jsonl"
-    receipt = tmp_path / "receipt.jsonl"
-    full = "".join(
-        json.dumps(
-            {
-                "design_id": design_ids[index % 10],
-                "candidate_id": f"c{index}",
-                "started": True,
-                "terminal_success": False,
-                "planning_mode": "requested-only",
-                "receipt_status": "ok",
-            }
-        )
-        + "\n"
-        for index in range(20)
-    )
-    requested.write_text(full)
-    receipt.write_text(
-        "".join(
-            json.dumps(
-                {
-                    "design_id": design_ids[index % 10],
-                    "candidate_id": f"r{index}",
-                    "started": True,
-                    "terminal_success": False,
-                    "planning_mode": "receipt-aware",
-                    "activation_status": "used",
-                    "application_signature": f"app-{index}",
-                    "response_signature": f"resp-{index}",
-                    "receipt_status": "ok",
-                }
-            )
-            + "\n"
-            for index in range(20)
-        )
-    )
-    metadata = {
-        "reference_runtime_seconds_by_design": {
-            design_id: 1.0 for design_id in design_ids
-        },
-        "elapsed_wall_time_seconds_by_mode": {
-            mode: {design_id: 1.0 for design_id in design_ids}
-            for mode in ("requested_only", "receipt_aware")
-        },
-        "seed": 0,
-        "tool_revision": "ecc-test",
-        "input_manifest_sha256": "sha256:" + "a" * 64,
-    }
-
-    completed = harness.run(
-        manifest,
-        tmp_path / "complete",
-        requested,
-        receipt,
-        requested_only_planning_calls=20,
-        receipt_aware_planning_calls=20,
-        **metadata,
-    )
-    incomplete = harness.run(
-        manifest,
-        tmp_path / "incomplete",
-        requested,
-        None,
-        requested_only_planning_calls=20,
-        receipt_aware_planning_calls=0,
-        **metadata,
-    )
-
-    assert completed["status"] == "completed"
-    assert completed["requested_only_raw_trace_sha256"] != ""
-    assert completed["receipt_aware_raw_trace_sha256"] != ""
-    assert completed["wall_time_limit_seconds_by_design"] == {
-        design_id: 22.0 for design_id in design_ids
-    }
-    assert incomplete["status"] == "incomplete"
-
-    over_budget_rows = [json.loads(line) for line in full.splitlines()]
-    over_budget_rows[0]["runtime_seconds"] = 23.0
-    over_budget = tmp_path / "over-budget.jsonl"
-    over_budget.write_text(
-        "".join(json.dumps(row) + "\n" for row in over_budget_rows),
-        encoding="utf-8",
-    )
-    exceeded = harness.run(
-        manifest,
-        tmp_path / "exceeded",
-        over_budget,
-        receipt,
-        requested_only_planning_calls=20,
-        receipt_aware_planning_calls=20,
-        **metadata,
-    )
-    assert exceeded["status"] == "incomplete"
-    assert exceeded["runtime_seconds_by_design"]["requested_only"]["d0"] == 23.0
-
-    with pytest.raises(ValueError, match="independent candidate executions"):
-        overlapping_receipt = tmp_path / "overlap.jsonl"
-        overlapping_receipt.write_text(
-            full.replace(
-                '"planning_mode": "requested-only"',
-                '"planning_mode": "receipt-aware"',
-            )
-        )
-        harness.run(
-            manifest,
-            tmp_path / "reused",
-            requested,
-            overlapping_receipt,
-            requested_only_planning_calls=20,
-            receipt_aware_planning_calls=20,
-            **metadata,
-        )
-
-
-def test_harness_separates_completed_functional_smoke_from_research_evaluation(
-    tmp_path,
-) -> None:
-    harness = _load_harness()
-    design_ids = [f"d{i}" for i in range(10)]
-    smoke_ids = design_ids[:6]
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"design_ids": design_ids}), encoding="utf-8")
-
-    def write_traces(path: Path, mode: str, prefix: str) -> None:
-        path.write_text(
-            "".join(
-                json.dumps(
-                        {
-                            "design_id": design_id,
-                            "candidate_id": f"{prefix}-{design_id}-{index}",
-                            "started": True,
-                            "terminal_success": True,
-                            "planning_mode": mode,
-                            "receipt_status": "ok",
-                            "application_status": "applied",
-                            "activation_status": "used",
-                        }
-                )
-                + "\n"
-                for design_id in smoke_ids
-                for index in range(2)
-            ),
-            encoding="utf-8",
-        )
-
-    requested = tmp_path / "requested.jsonl"
-    receipt = tmp_path / "receipt.jsonl"
-    write_traces(requested, "requested-only", "requested")
-    write_traces(receipt, "receipt-aware", "receipt")
-    runtimes = {design_id: 10.0 for design_id in smoke_ids}
-    elapsed = {
-        mode: {design_id: 100.0 for design_id in smoke_ids}
-        for mode in ("requested_only", "receipt_aware")
-    }
-
-    report = harness.run(
-        manifest,
-        tmp_path / "smoke",
-        requested,
-        receipt,
-        requested_only_planning_calls=12,
-        receipt_aware_planning_calls=12,
-        reference_runtime_seconds_by_design=runtimes,
-        elapsed_wall_time_seconds_by_mode=elapsed,
-        functional_smoke_design_ids=tuple(smoke_ids),
-        seed=0,
-        tool_revision="ecc-test",
-        input_manifest_sha256="sha256:" + "a" * 64,
-    )
-
-    assert report["status"] == "incomplete"
-    assert report["engineering_status"] == "completed"
-    assert report["engineering_classification"] == "Engineering Complete"
-    assert report["research_evaluation_status"] == "incomplete"
-    assert report["research_claim"] == "not_assessed"
-    assert report["research_classification"] == "Research Claim Not Assessed"
-    assert report["ignored_knobs"] == []
-    assert report["design_coverage"] == {
-        "observed": smoke_ids,
-        "missing": design_ids[6:],
-        "required": design_ids,
-    }
-    assert report["elapsed_wall_time_seconds_by_mode"] == elapsed
-
-    elapsed["receipt_aware"][smoke_ids[0]] = 221.0
-    over_budget = harness.run(
-        manifest,
-        tmp_path / "over-budget-smoke",
-        requested,
-        receipt,
-        requested_only_planning_calls=12,
-        receipt_aware_planning_calls=12,
-        reference_runtime_seconds_by_design=runtimes,
-        elapsed_wall_time_seconds_by_mode=elapsed,
-        functional_smoke_design_ids=tuple(smoke_ids),
-        seed=0,
-        tool_revision="ecc-test",
-        input_manifest_sha256="sha256:" + "a" * 64,
-    )
-    assert over_budget["engineering_status"] == "incomplete"
-
-    elapsed["receipt_aware"][smoke_ids[0]] = 100.0
-    rows = [json.loads(line) for line in requested.read_text(encoding="utf-8").splitlines()]
-    rows[0]["terminal_success"] = False
-    requested.write_text(
-        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
-    )
-    failed_terminal = harness.run(
-        manifest,
-        tmp_path / "failed-terminal-smoke",
-        requested,
-        receipt,
-        requested_only_planning_calls=12,
-        receipt_aware_planning_calls=12,
-        reference_runtime_seconds_by_design=runtimes,
-        elapsed_wall_time_seconds_by_mode=elapsed,
-        functional_smoke_design_ids=tuple(smoke_ids),
-        seed=0,
-        tool_revision="ecc-test",
-        input_manifest_sha256="sha256:" + "a" * 64,
-    )
-    assert failed_terminal["engineering_status"] == "incomplete"
-
-
-def test_started_trace_requires_mode_and_receipt_measurement(tmp_path) -> None:
-    harness = _load_harness()
-    design_ids = [f"d{i}" for i in range(10)]
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"design_ids": design_ids}))
-    trace = tmp_path / "trace.jsonl"
-    trace.write_text(
-        json.dumps(
-            {
-                "design_id": "d0",
-                "candidate_id": "c0",
-                "started": True,
-                "terminal_success": False,
-                "planning_mode": "receipt-aware",
-            }
-        )
-        + "\n"
-    )
-
-    with pytest.raises(ValueError, match="started trace lacks receipt measurement"):
-        harness.run(
-            manifest,
-            tmp_path / "out",
-            None,
-            trace,
-            requested_only_planning_calls=0,
-            receipt_aware_planning_calls=1,
-            reference_runtime_seconds_by_design={
-                design_id: 1.0 for design_id in design_ids
-            },
-            seed=0,
-            tool_revision="ecc-test",
-            input_manifest_sha256="sha256:" + "a" * 64,
-        )
-
-
-def test_requested_only_trace_keeps_posthoc_receipt_measurement(tmp_path) -> None:
-    harness = _load_harness()
-    design_ids = [f"d{i}" for i in range(10)]
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"design_ids": design_ids}))
-    trace = tmp_path / "trace.jsonl"
-    trace.write_text(
-        json.dumps(
-            {
-                "design_id": "d0",
-                "candidate_id": "c0",
-                "started": True,
-                "terminal_success": False,
-                "planning_mode": "requested-only",
-                "activation_status": "not_activated",
-                "receipt_status": "ok",
-            }
-        )
-        + "\n"
-    )
-
-    result = harness.run(
-        manifest,
-        tmp_path / "out",
-        trace,
-        None,
-        requested_only_planning_calls=1,
-        receipt_aware_planning_calls=0,
-        reference_runtime_seconds_by_design={
-            design_id: 1.0 for design_id in design_ids
-        },
-        elapsed_wall_time_seconds_by_mode={
-            mode: {"d0": 0.0}
-            for mode in ("requested_only", "receipt_aware")
-        },
-        seed=0,
-        tool_revision="ecc-test",
-        input_manifest_sha256="sha256:" + "a" * 64,
-    )
-
-    assert result["requested_only"]["not_activated"] == 1
-
-
 def test_phase8_runner_loads_hash_bound_ten_design_manifest(tmp_path) -> None:
-    runner = _load_experiment_runner()
+    runner = _load_experiment_execution()
     benchmark = tmp_path / "benchmarks"
     pdk = tmp_path / "pdk"
     tech = pdk / "prtech/techLEF/N551P6M_ecos.lef"
@@ -866,7 +474,7 @@ def test_phase8_runner_loads_hash_bound_ten_design_manifest(tmp_path) -> None:
 
 
 def test_phase8_runner_rejects_unsupported_filelist_entry(tmp_path) -> None:
-    runner = _load_experiment_runner()
+    runner = _load_experiment_execution()
     filelist = tmp_path / "filelist.f"
     filelist.write_text("-f nested.f\n", encoding="utf-8")
 
@@ -875,7 +483,7 @@ def test_phase8_runner_rejects_unsupported_filelist_entry(tmp_path) -> None:
 
 
 def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch) -> None:
-    runner = _load_experiment_runner()
+    runner = _load_experiment_execution()
     tech = tmp_path / "pdk/prtech/techLEF/N551P6M_ecos.lef"
     tech.parent.mkdir(parents=True)
     tech.write_text(
@@ -933,7 +541,7 @@ def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch)
 def test_phase8_runner_resumes_created_unstarted_workspace(
     tmp_path, monkeypatch
 ) -> None:
-    runner = _load_experiment_runner()
+    runner = _load_experiment_execution()
     workspace = tmp_path / "workspace"
     (workspace / "home").mkdir(parents=True)
     (workspace / "home/flow.json").write_text(
@@ -991,7 +599,7 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
 
 
 def test_phase8_calibration_uses_three_default_flow_replays(tmp_path, monkeypatch) -> None:
-    runner = _load_experiment_runner()
+    runner = _load_experiment_execution()
     workspace = tmp_path / "canonical"
     workspace.mkdir()
     (workspace / "marker.txt").write_text("canonical", encoding="utf-8")
@@ -1070,7 +678,6 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
         captured.update(context)
         return fake_runner
 
-    monkeypatch.setattr(module, "CodexAppServerProposalProvider", FakeProvider)
     monkeypatch.setattr(module, "create_optimization_runner", create_runner)
     monkeypatch.setattr(
         module,
@@ -1082,7 +689,7 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
         "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
     )
 
-    result = module._run_mode(
+    result = module._run_treatment(
         design,
         tmp_path / "workspace",
         _terminal_observation(),
@@ -1092,6 +699,7 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
         model="model",
         seed=1,
         treatment=module.KNOWLEDGE_TREATMENTS[0],
+        provider_factory=FakeProvider,
     )
 
     assert captured["baseline_eligibility_exempt"] is True
@@ -1164,103 +772,12 @@ def test_phase8_rejects_reusing_a_run_id(tmp_path: Path) -> None:
             tool_revision="tool",
             max_workers=1,
             terminal_timeout_seconds=1.0,
+            provider_factory=lambda **_kwargs: None,
         )
-
-
-def test_phase8_functional_smoke_finalizer_never_starts_eda(
-    tmp_path, monkeypatch
-) -> None:
-    module = _load_functional_smoke_finalizer()
-    runner = module.experiment
-    design_ids = ("gcd", "i2c", "cia", "zipdiv", "cordic", "xtea")
-    designs = tuple(
-        runner.DesignSpec(
-            design_id,
-            "top",
-            "clk",
-            tmp_path / f"{design_id}.f",
-            (),
-            tmp_path / f"{design_id}.sdc",
-        )
-        for design_id in design_ids
-    )
-    manifest = runner.ExperimentManifest(HASH, designs, {}, "ics55", tmp_path)
-    output = tmp_path / "output"
-    run_root = output / "runs" / "run"
-    run_root.mkdir(parents=True)
-    captured = {}
-
-    class FakeHarness:
-        @staticmethod
-        def run(*_args, **kwargs):
-            captured.update(kwargs)
-            return {
-                "status": "incomplete",
-                "engineering_status": "completed",
-                "research_evaluation_status": "incomplete",
-            }
-
-    monkeypatch.setattr(
-        runner,
-        "_verify_workspace_binding",
-        lambda *_args: None,
-    )
-    monkeypatch.setattr(
-        module,
-        "_load_existing_calibration",
-        lambda _path: (_terminal_observation(), 10.0),
-    )
-    monkeypatch.setattr(
-        module,
-        "_export_existing_mode",
-        lambda *_args, **kwargs: {
-            "traces": (
-                SimpleNamespace(
-                    design_id=kwargs["design_id"],
-                    candidate_id=f"{kwargs['mode']}-1",
-                    started=True,
-                ),
-                SimpleNamespace(
-                    design_id=kwargs["design_id"],
-                    candidate_id=f"{kwargs['mode']}-2",
-                    started=True,
-                ),
-            ),
-            "planning_calls": 2,
-            "elapsed_wall_time_seconds": 100.0,
-        },
-    )
-    monkeypatch.setattr(runner, "_load_harness", lambda: FakeHarness)
-    monkeypatch.setattr(
-        runner,
-        "_ensure_workspace",
-        lambda *_args, **_kwargs: pytest.fail("finalization started EDA"),
-    )
-
-    report = module.finalize_functional_smoke(
-        manifest,
-        tmp_path / "manifest.json",
-        output,
-        tmp_path / "workspaces",
-        run_id="run",
-        seed=1,
-        tool_revision="ecc-test",
-    )
-
-    assert report["engineering_status"] == "completed"
-    assert captured["functional_smoke_design_ids"] == design_ids
-    assert captured["reference_runtime_seconds_by_design"] == {
-        design_id: 10.0 for design_id in design_ids
-    }
-    assert captured["elapsed_wall_time_seconds_by_mode"] == {
-        mode: {design_id: 100.0 for design_id in design_ids}
-        for mode in ("requested_only", "receipt_aware")
-    }
-    assert (run_root / "run-manifest.v1.json").is_file()
 
 
 def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
-    runner = _load_experiment_runner()
+    runner = _load_experiment_execution()
     workspace = tmp_path / "workspace"
     source = tmp_path / "source"
     pdk = tmp_path / "pdk"

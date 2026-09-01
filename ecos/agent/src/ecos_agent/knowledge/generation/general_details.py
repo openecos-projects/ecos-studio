@@ -8,20 +8,20 @@ from pathlib import Path
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 
-from .steps import STAGES, _add, _json, _sha256, _source_inventory
+from .steps import AGENT_ROOT, STAGES, _add, _json, _sha256, _source_inventory
 
-GENERAL_DIR = Path(__file__).resolve().parent / "general"
+GENERAL_DIR = AGENT_ROOT / "knowledge_sources" / "general"
 GENERAL_SOURCE_PATHS = {
     "congestion": {
-        "general.statements": "ecos/agent/scripts/knowledge/general/statements.jsonl",
-        "general.bindings": "ecos/agent/scripts/knowledge/general/bindings.jsonl",
+        "general.statements": "ecos/agent/knowledge_sources/general/congestion/statements.jsonl",
+        "general.bindings": "ecos/agent/knowledge_sources/general/congestion/bindings.jsonl",
     },
     "wirelength": {
         "general.wirelength.statements": (
-            "ecos/agent/scripts/knowledge/general/wirelength/statements.jsonl"
+            "ecos/agent/knowledge_sources/general/wirelength/statements.jsonl"
         ),
         "general.wirelength.bindings": (
-            "ecos/agent/scripts/knowledge/general/wirelength/bindings.jsonl"
+            "ecos/agent/knowledge_sources/general/wirelength/bindings.jsonl"
         ),
     },
 }
@@ -49,7 +49,7 @@ _UNSUPPORTED_BOUND_KNOBS = frozenset(
 
 
 def _load_jsonl(metric: str, name: str) -> list[dict[str, object]]:
-    directory = GENERAL_DIR if metric == "congestion" else GENERAL_DIR / metric
+    directory = GENERAL_DIR / metric
     return [
         json.loads(line)
         for line in (directory / name).read_text(encoding="utf-8").splitlines()
@@ -229,7 +229,7 @@ def _binding_actions(
             raise ValueError(f"binding stage does not match parameter card: {knob['knob_id']}")
         card_ref = str(
             (CARD_ROOT / "cards" / f"{card.knob_id.value}.json").relative_to(
-                Path(__file__).parents[2]
+                AGENT_ROOT
             )
         )
         actions.append(

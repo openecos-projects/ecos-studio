@@ -69,10 +69,8 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
     assert general_catalog["schema_version"] == "ecos-general-catalog.v2"
     assert "strategy" in {entity["kind"] for entity in general_catalog["entities"]}
     assert "strategy" not in {entity["kind"] for entity in place_catalog["entities"]}
-    assert not (AGENT_ROOT / "scripts" / "knowledge" / "place.py").exists()
-    assert "from knowledge import steps" in (AGENT_ROOT / "scripts" / "build_knowledge.py").read_text(
-        encoding="utf-8"
-    )
+    assert not (AGENT_ROOT / "scripts" / "knowledge").exists()
+    assert (AGENT_ROOT / "src/ecos_agent/knowledge/generation/steps.py").is_file()
 
 
 def test_committed_stage_bundles_pass_generator_check() -> None:

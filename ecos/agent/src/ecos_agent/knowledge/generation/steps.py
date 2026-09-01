@@ -17,7 +17,7 @@ from .place_details import (
     add_place_entries,
 )
 
-AGENT_ROOT = Path(__file__).parents[2]
+AGENT_ROOT = Path(__file__).parents[4]
 ECOS_ROOT = AGENT_ROOT.parents[1]
 
 METRICS = {

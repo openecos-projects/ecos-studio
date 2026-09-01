@@ -20,7 +20,7 @@ AGENT_ROOT = Path(__file__).parents[1]
 CONGESTION_ROOT = AGENT_ROOT / "knowledge" / "general" / "congestion"
 WIRELENGTH_ROOT = AGENT_ROOT / "knowledge" / "general" / "wirelength"
 PLACE_ROOT = AGENT_ROOT / "knowledge" / "tool" / "place"
-GENERAL_SOURCE_ROOT = AGENT_ROOT / "scripts" / "knowledge" / "general"
+GENERAL_SOURCE_ROOT = AGENT_ROOT / "knowledge_sources" / "general"
 WIRELENGTH_SOURCE_ROOT = GENERAL_SOURCE_ROOT / "wirelength"
 
 
