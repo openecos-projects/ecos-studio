@@ -61,13 +61,17 @@ impl GraphicsEnvironment {
             && (std::env::var_os("WSL_DISTRO_NAME").is_some()
                 || std::env::var_os("WSL_INTEROP").is_some()
                 || Path::new("/dev/dxg").exists());
-        let has_dxg = Path::new("/dev/dxg").exists();
-        let has_d3d12_mesa = Path::new("/usr/lib/x86_64-linux-gnu/dri/d3d12_dri.so").exists()
-            || Path::new("/usr/lib/dri/d3d12_dri.so").exists();
-        let has_dzn = (Path::new("/usr/share/vulkan/icd.d/dzn_icd.json").exists()
-            || Path::new("/usr/share/vulkan/icd.d/dzn_icd.x86_64.json").exists())
-            && (Path::new("/usr/lib/x86_64-linux-gnu/libvulkan_dzn.so").exists()
-                || Path::new("/usr/lib/libvulkan_dzn.so").exists());
+        let has_dxg = is_wsl && Path::new("/dev/dxg").exists();
+        let has_d3d12_mesa = is_wsl
+            && (Path::new("/usr/lib/x86_64-linux-gnu/dri/d3d12_dri.so").exists()
+                || Path::new("/usr/lib/dri/d3d12_dri.so").exists());
+        let has_dzn = is_wsl
+            && [
+                "/usr/share/vulkan/icd.d/dzn_icd.json",
+                "/usr/share/vulkan/icd.d/dzn_icd.x86_64.json",
+            ]
+            .iter()
+            .any(|path| Path::new(path).exists());
 
         Self {
             is_wsl,
@@ -76,16 +80,23 @@ impl GraphicsEnvironment {
             has_dzn,
         }
     }
+}
 
-    fn configure_wsl_windowing(&self) {
-        if self.is_wsl {
-            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-                std::env::remove_var("WAYLAND_DISPLAY");
-            }
-            if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
-                std::env::set_var("WINIT_UNIX_BACKEND", "x11");
-            }
-        }
+fn configure_linux_window_backend() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    eprintln!(
+        "ECOS window environment: WAYLAND_DISPLAY={:?}, DISPLAY={:?}",
+        std::env::var_os("WAYLAND_DISPLAY"),
+        std::env::var_os("DISPLAY"),
+    );
+    if std::env::var_os("WINIT_UNIX_BACKEND").is_some() {
+        return;
+    }
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        std::env::set_var("WINIT_UNIX_BACKEND", "wayland");
+        eprintln!("ECOS: using Wayland window backend");
     }
 }
 
@@ -98,26 +109,46 @@ fn is_software_adapter(info: &wgpu::AdapterInfo) -> bool {
 }
 
 fn is_hardware_adapter(info: &wgpu::AdapterInfo) -> bool {
-    !is_software_adapter(info)
+    matches!(
+        info.device_type,
+        wgpu::DeviceType::IntegratedGpu
+            | wgpu::DeviceType::DiscreteGpu
+            | wgpu::DeviceType::VirtualGpu
+    ) && !is_software_adapter(info)
 }
 
-fn probe_wgpu_adapter(backends: wgpu::Backends) -> Option<wgpu::AdapterInfo> {
+fn probe_hardware_adapter(
+    backends: wgpu::Backends,
+) -> (Option<wgpu::AdapterInfo>, Option<wgpu::AdapterInfo>) {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
     });
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))?;
-    Some(adapter.get_info())
+    let mut first_info = None;
+    let mut hardware_info = None;
+
+    for adapter in instance.enumerate_adapters(backends) {
+        let info = adapter.get_info();
+        eprintln!(
+            "ECOS GPU probe: backend={:?}, type={:?}, name={}, driver={}",
+            info.backend, info.device_type, info.name, info.driver
+        );
+        if first_info.is_none() {
+            first_info = Some(info.clone());
+        }
+        if is_hardware_adapter(&info) && hardware_info.is_none() {
+            hardware_info = Some(info);
+        }
+    }
+
+    (hardware_info, first_info)
 }
 
 fn print_startup_diagnostics(
     env: &GraphicsEnvironment,
-    adapter_info: Option<&wgpu::AdapterInfo>,
-    has_hardware_gpu: bool,
+    hardware_adapter: Option<&wgpu::AdapterInfo>,
+    fallback_adapter: Option<&wgpu::AdapterInfo>,
+    preferred_gpu_available: bool,
 ) {
     let platform = if env.is_wsl {
         "WSL2 / WSLg"
@@ -131,19 +162,21 @@ fn print_startup_diagnostics(
         "Other"
     };
 
-    let gpu_device_str = adapter_info
-        .map(|info| info.name.clone())
-        .unwrap_or_else(|| "None / Unprobed".to_string());
+    let hw_gpu_str = hardware_adapter
+        .map(|info| format!("{} ({:?})", info.name, info.backend))
+        .unwrap_or_else(|| "Not detected / Unavailable".to_string());
 
-    let backend_str = adapter_info
-        .map(|info| format!("{:?}", info.backend))
+    let fallback_str = fallback_adapter
+        .map(|info| format!("{} ({:?})", info.name, info.backend))
         .unwrap_or_else(|| "None".to_string());
 
-    let driver_str = adapter_info
+    let active_info = hardware_adapter.or(fallback_adapter);
+
+    let driver_str = active_info
         .map(|info| info.driver.clone())
         .unwrap_or_else(|| "None".to_string());
 
-    let adapter_type_str = adapter_info
+    let adapter_type_str = active_info
         .map(|info| {
             if is_software_adapter(info) {
                 "Software / CPU rasterizer"
@@ -153,13 +186,13 @@ fn print_startup_diagnostics(
         })
         .unwrap_or("Unavailable");
 
-    let rendering_mode = if has_hardware_gpu {
+    let rendering_mode = if preferred_gpu_available {
         "GPU Canvas (Hardware Accelerated)"
     } else {
         "CPU 2D (Software Fallback)"
     };
 
-    let three_d_mode = if has_hardware_gpu {
+    let three_d_mode = if preferred_gpu_available {
         "Available (GPU Instanced)"
     } else {
         "Unavailable (Requires Hardware GPU)"
@@ -168,10 +201,10 @@ fn print_startup_diagnostics(
     eprintln!("============================================================");
     eprintln!("ECOS Chip Viewer Graphics Diagnostic");
     eprintln!("------------------------------------------------------------");
-    eprintln!("Platform:        {}", platform);
+    eprintln!("Platform:         {}", platform);
     if env.is_wsl {
         eprintln!(
-            "WSL /dev/dxg:    {}",
+            "WSL /dev/dxg:     {}",
             if env.has_dxg {
                 "Available"
             } else {
@@ -179,7 +212,7 @@ fn print_startup_diagnostics(
             }
         );
         eprintln!(
-            "Mesa D3D12:      {}",
+            "Mesa D3D12:       {}",
             if env.has_d3d12_mesa {
                 "Available"
             } else {
@@ -187,29 +220,29 @@ fn print_startup_diagnostics(
             }
         );
         eprintln!(
-            "Vulkan Dozen:    {}",
+            "Vulkan Dozen:     {}",
             if env.has_dzn {
                 "Available"
             } else {
-                "Not found"
+                "Not detected"
             }
         );
     }
-    eprintln!("Adapter Name:    {}", gpu_device_str);
-    eprintln!("Adapter Backend: {}", backend_str);
-    eprintln!("Adapter Driver:  {}", driver_str);
-    eprintln!("Adapter Type:    {}", adapter_type_str);
+    eprintln!("Hardware GPU:     {}", hw_gpu_str);
+    eprintln!("Fallback Adapter: {}", fallback_str);
+    eprintln!("Driver:           {}", driver_str);
+    eprintln!("Driver Type:      {}", adapter_type_str);
     eprintln!("------------------------------------------------------------");
-    eprintln!("Rendering Mode:  {}", rendering_mode);
-    eprintln!("3D Canvas:       {}", three_d_mode);
+    eprintln!("Rendering Mode:   {}", rendering_mode);
+    eprintln!("3D Canvas:        {}", three_d_mode);
     eprintln!("============================================================");
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    configure_linux_window_backend();
     let env = GraphicsEnvironment::detect();
-    env.configure_wsl_windowing();
 
     let force_cpu_env = std::env::var("ECOS_FORCE_CPU")
         .ok()
@@ -217,12 +250,57 @@ fn main() -> Result<()> {
         .unwrap_or(false);
 
     let wgpu_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
-    let probed_adapter = probe_wgpu_adapter(wgpu_backends);
-    let is_hardware_gpu = probed_adapter.as_ref().is_some_and(is_hardware_adapter)
-        && !args.force_cpu
-        && !force_cpu_env;
+    let (hardware_adapter, fallback_adapter) = probe_hardware_adapter(wgpu_backends);
+    let preferred_gpu_available = hardware_adapter.is_some() && !args.force_cpu && !force_cpu_env;
 
-    print_startup_diagnostics(&env, probed_adapter.as_ref(), is_hardware_gpu);
+    print_startup_diagnostics(
+        &env,
+        hardware_adapter.as_ref(),
+        fallback_adapter.as_ref(),
+        preferred_gpu_available,
+    );
+
+    let force_cpu = args.force_cpu || force_cpu_env;
+    let adapter_selector: egui_wgpu::NativeAdapterSelectorMethod = std::sync::Arc::new(
+        move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
+            if !force_cpu {
+                for adapter in adapters {
+                    let info = adapter.get_info();
+                    let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
+                    if surface_ok && is_hardware_adapter(&info) {
+                        eprintln!(
+                            "ECOS eframe: selected hardware GPU '{}' ({:?})",
+                            info.name, info.backend
+                        );
+                        return Ok(adapter.clone());
+                    }
+                }
+            }
+
+            for adapter in adapters {
+                let info = adapter.get_info();
+                let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
+                if surface_ok {
+                    eprintln!(
+                        "ECOS eframe: selected fallback adapter '{}' ({:?})",
+                        info.name, info.backend
+                    );
+                    return Ok(adapter.clone());
+                }
+            }
+
+            if let Some(adapter) = adapters.first() {
+                let info = adapter.get_info();
+                eprintln!(
+                    "ECOS eframe: fallback to first adapter '{}' ({:?})",
+                    info.name, info.backend
+                );
+                Ok(adapter.clone())
+            } else {
+                Err("No compatible graphics adapter found".to_string())
+            }
+        },
+    );
 
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -236,7 +314,8 @@ fn main() -> Result<()> {
                     backends: wgpu_backends,
                     ..Default::default()
                 },
-                power_preference: wgpu::PowerPreference::None,
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                native_adapter_selector: Some(adapter_selector),
                 device_descriptor: std::sync::Arc::new(|adapter| {
                     let adapter_limits = adapter.limits();
                     let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
@@ -246,7 +325,7 @@ fn main() -> Result<()> {
                     };
                     wgpu::DeviceDescriptor {
                         label: Some("egui wgpu device"),
-                        required_features: wgpu::Features::default(),
+                        required_features: wgpu::Features::empty(),
                         required_limits: base_limits,
                         memory_hints: wgpu::MemoryHints::default(),
                     }
@@ -290,7 +369,8 @@ fn main() -> Result<()> {
     ) {
         Ok(()) => Ok(()),
         Err(err) => {
-            eprintln!("Chip Viewer encountered a windowing error: {err}");
+            eprintln!("Chip Viewer windowing failure: {err}");
+            eprintln!("Check that your display server (Wayland or X11) is running and accessible.");
             std::process::exit(1);
         }
     }
