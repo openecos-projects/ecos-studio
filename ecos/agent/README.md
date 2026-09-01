@@ -62,24 +62,21 @@ Agent 区分 **Project**（含 `project.json` 的容器）与 **Workspace**（�
 flow 的子目录）。Design Name 是设计标识（`parameters.design`），不必等于
 Workspace 目录名。
 
-按上下文分流：
+Topbar Chat 按当前页面提供不同入口：
 
-- **未打开 workspace（首页）**：Topbar Chat 打开 Agent 聊天。开场给出主 CTA
-  「开始创建 Workspace」，也可直接用自然语言说明意图（例如已有 Project 路径、
-  Workspace 名、设计名）；寒暄或无关输入会留在开场；Agent 可提供只读答复，无法处理时会提示错误或重新展示可用选项。随后选择或新建Project，再创建其下的 Workspace 并运行完整流程。
-- **已打开 workspace**：Home / 步骤页共用 Topbar Chat。欢迎语同时展示 Project 与
-  Workspace。操作是「修改参数（只保存）」「从指定阶段重跑」
-  「继续未完成 flow」「在当前 Project 下新建 Workspace」。Standalone workspace
-  （无 `project.json` 父目录）不提供第 4 项。自然语言仅在能明确映射到上述操作时
-  前进；其他输入会给出只读答复并保留当前操作选项。
+- **首页**：手工创建 Workspace 并运行完整 RTL-to-GDS flow、从已完成的 baseline
+  Workspace 启动受约束优化，以及面向 GCD/ICS55 的 Quick Start。
+- **Workspace**：从指定阶段隔离重跑、继续未完成 flow、启动受约束优化；绑定了
+  Project Root 时还可在当前 Project 下新建 Workspace。参数只保存不是列表按钮，
+  需要直接说明明确的参数修改意图。
 
-Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为结构化选项；合同确认前
-不会执行流程。运行时状态条显示 Agent 状态，工具活动合并在可展开的 Tool 卡中。
-可以 Stop 中断当前 turn，也可排队一条后续消息。
+在空闲态也可询问 IC、EDA、ECOS Studio 或当前任务相关问题。Agent 会先做本地知识
+检索和受控源码检索，再返回只读答复、当前允许的一项操作或有限选项的澄清；无关
+请求不会改变会话状态。
 
 ### 1. 首页：先 Project，再 Workspace
 
-此功能用于在 Project 下创建 Workspace，并从 RTL 执行完整 ECC 流程。
+手工入口用于在 Project 下创建 Workspace，并从 RTL 执行指定终点的 ECC 流程。
 
 1. 在首页打开 Topbar Chat，点击「开始创建 Workspace 并运行完整 RTL 到 GDS
    流程」，或直接描述创建意图（可同时带上已有 Project 路径、Workspace 名、设计名，
@@ -95,37 +92,37 @@ Agent 会将操作、重跑源、阶段、执行范围和最终确认显示为�
 5. 点击“确认并开始运行”。ECOS Studio 创建 workspace，写入 `project.json`，进入
    工程并展开侧栏 Agent，再通过固定 ECC RPC 启动完整流程；点击“取消”不会创建
    workspace 或执行 ECC。
-6. 只有 ECC 返回终态成功后，Agent 才会报告该次 workspace 创建和流程执行成功；
-   失败会报告失败原因，不会将未完成流程标记为成功。
+6. Workspace shell 等待该次 runtime operation 结束后再回报成功或失败；到达 Harden
+   时继续检查 signoff checklist，并在没有 blocked 项时询问是否导出 signoff 包。
 
-### 2. Workspace：从特定阶段重跑
+### 2. 首页：Quick Start
 
-此功能用于基于当前已打开 workspace 的可验证产物，从指定阶段开始在隔离
-workspace 中重跑。原始 workspace 不会被覆盖。
+Quick Start 是 GUI 执行的固定 `ecos.quick_start.workflow.v1` 工作流，不由 Codex
+规划。它先检查 GCD 示例、ICS55 PDK 和 MPC 是否 Ready，再依次打开 Project
+Management、创建 Project 和 Workspace、切换到新 Workspace，并启动从 Synthesis
+到 Harden 的完整 flow。各步状态和资源快照写入 `quick_start_run.json`；聊天中显示
+“Quick Start 已完成”只代表设置完成且 flow 已启动，最终完成或失败由后台 runtime
+结果更新到该记录。设置和启动过程中可单独 Stop Quick Start；flow 已启动后不再由
+这个按钮停止。
 
-1. 在已打开的工程中展开 Agent，点击“从指定阶段重跑”。
-2. 确认当前 workspace 作为 source（可按需改选）；设计名由当前工程推断。
-3. Agent 从该 workspace 的流程记录和产物中发现允许重跑的阶段；只能选择有
-   完成证据的阶段。
-4. 选择起始阶段，描述需要调整的参数，并选择执行范围：
-   - 只重跑所选阶段后停止；或
-   - 从所选阶段重跑，并继续到**标准流程终点**（当前为 Harden；随 ECC
-     流程序列扩展而变化），而不是源 workspace 原先规划/跑到的终点。
-5. 检查冻结的重跑合同，包括源/目标 workspace、起始阶段、终点阶段、参数补丁和
-   执行范围。
-6. 点击“确认并开始运行”。ECOS Studio 创建隔离重跑 workspace，必要时把 flow
-   补齐到标准终点，并通过固定 ECC RPC 执行合同中的重跑动作；点击“取消”会返回
-   操作选择，不执行重跑。
+### 3. Workspace：重跑或继续 flow
 
-### 3. Workspace：继续未完成 flow
+“从指定阶段重跑”基于 source workspace 的流程记录和产物，只允许选择有完成证据
+的阶段。确认冻结合同后，GUI 创建隔离 target workspace，通过固定 ECC RPC 执行：
 
-对齐 Agent 接入前的 GUI：在当前 workspace 原地执行 `runAllFlow({ rerun: false })`。
-确认合同后不会创建隔离 target。
+- 只重跑所选阶段后停止；或
+- 从所选阶段继续到标准终点（当前为 Harden），而不是 source workspace 原先的终点。
+
+“继续未完成 flow”经确认后在当前 workspace 原地执行
+`runAllFlow({ rerun: false })`，不会创建隔离 target。重跑或继续到 Harden 后同样进入
+signoff checklist 检查与可选导出。
 
 ### 4. Workspace：修改参数（只保存）
 
-描述参数变更并确认合同后，GUI 将补丁写入当前 workspace 的
-`home/parameters.json`，**不会**自动跑 flow。
+在聊天中明确描述参数变更后，Agent 只接受当前 workspace 已发现的 tunable knobs，
+验证补丁并展示当前值到目标值的保存合同。确认后 GUI 按 knob registry 给出的目标
+写入 `home/parameters.json` 或对应 `config/*.json`，再通过 ECC sync/refresh 保持两个
+参数 surface 一致，**不会**自动跑 flow。
 
 ### 5. Workspace：在当前 Project 下新建 Workspace
 
@@ -133,20 +130,44 @@ workspace 中重跑。原始 workspace 不会被覆盖。
 Name 与 Design Name（可默认继承当前设计名），其余 setup 与首页相同；创建成功后
 仍自动 `runAllFlow` 并打开新 workspace。
 
+### 6. 受约束优化 episode
+
+首页入口先要求一个已完成到 Harden 的 baseline workspace；Workspace 入口直接使用
+当前 workspace。用户用自然语言描述目标后，Codex 只解析白名单内的主指标、保持
+指标和理由，本地 ECOS 补齐固定 signoff gates、冻结 objective hash，并再次要求明确
+确认。
+
+确认后，`OptimizationEpisodeRunner` 在由 baseline 重跑时间冻结的候选数、规划调用和
+墙钟预算内循环执行。每轮由 Codex 生成类型化参数提案，本地 controller 校验知识支持、
+有效参数域、预算和状态，再由固定 `candidate.rerun` ECC adapter 在隔离候选 workspace
+执行；GUI 持续报告 proposal、candidate 终态、incumbent 和审计状态。运行中只接受
+pause、resume 或 stop。缺失终态回执或观测时结果进入 indeterminate/quarantined 路径，
+不会按成功候选处理。
+
 交互卡作答后会保留“已选择”状态且不可重复点击。GUI 通过专用 answer channel
 提交后端生成的 `requestId`：点击选项提交 `optionId`，点击“其他”则在原选项位置输入
-并提交受控的 `text` 回答；表单一次性提交经过字段约束的 `values`。用户不需要手动输入状态机数字
-或执行值。
+并提交受控的 `text` 回答；表单一次性提交经过字段约束的 `values`。手工创建、重跑、
+继续、参数保存和优化均在结构化合同或授权确认后执行；Quick Start 则以用户点击固定
+workflow 入口作为启动授权。普通 turn 可 Stop，也可排队一条后续消息；优化 episode
+使用独立的 pause/resume/stop 控制。
 
 ## Codex CLI 在哪里发挥作用
 
-Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流程执行权限。
+ECOS Agent 通过 `codex app-server` 使用 Codex CLI。Codex 负责语言理解、只读检索规划
+和类型化提案，不持有 workspace 或流程执行权限。当前调用点包括：
 
-- 在完整流程中，它可在已确认的项目根目录内推荐 RTL、filelist、SDC 等候选路径，
-  并将自然语言修改建议转换为待验证的 workspace 设置提案。
-- 在特定阶段重跑中，它可将自然语言参数请求转换为受允许参数集合约束的候选补丁。
-- Codex 的建议必须经过本地校验并展示给用户确认。它不能执行 shell/ECC 命令、
-  不能自行选择没有证据的阶段、不能创建或覆盖 workspace，也不能宣称流程成功。
+- **聊天与操作路由**：将问题路由到最多 3 个流程阶段，选择本地知识和受控源码检索
+  查询，并返回 `flow-agent.gui_chat_response.v1`。它只能选择当前 `allowed_operations`
+  中唯一明确的一项，或返回只读答复/有限澄清；检索证据不授权执行。
+- **Workspace 设置与参数**：在允许的 filesystem roots 内只读发现 RTL、filelist、
+  SDC 等候选路径，将自然语言修正转换为 workspace setup 提案，并将参数请求限制为
+  当前 workspace 的 allowed knobs。Quick Start 的固定 GUI workflow 不经过这些提案。
+- **受约束优化**：先把自然语言目标解析为白名单 objective，再依据 observation、历史、
+  有效参数域和 `supported_action_view` 生成类型化规划提案。Codex 不生成 ECC RPC、
+  shell 命令、workspace 路径或执行指令。
+- **聊天会话管理**：`/model`、`/goal`、`/compact`、`/new`、`/resume`、`/fork`、
+  `/rename`、`/status`、`/permissions` 和只读 `/review` 映射到 app-server 能力；
+  `/shell`、`/exec`、`/terminal` 等命令明确拒绝。
 
 优化规划中的知识使用采用两阶段本地门禁。`ecos.optimization_retrieval_request.v2`
 继续作为 value-free、metric-ID-only baseline；目标路径另外生成
@@ -184,14 +205,17 @@ Agent 不从配置文本或日志推断缺失事实。L3 terminal observation �
 equal-budget artifact 中的 `terminal_utility` 只是冻结 objective metric 的相反数（越大越好），不是
 综合 QoR；研究判断必须同时检查可行性、`success@k`、PPA/DRC/timing/congestion、runtime 和 memory。
 
-项目根目录和重跑 source workspace 是 Codex 可读取建议的边界。Codex 不可用、
-超时或返回不符合合同的内容时，不会生成可执行合同或调用 ECC；Agent 会保留当前
-输入步骤，供用户修正输入后重试。
+Workspace 设置/路径发现只有这两类调用启用 `read_only_workspace` tool policy；其他
+提案默认禁止 tool activity。聊天源码证据由 ECOS 在批准的 repository source roots 中
+做本地 literal search，Codex 只选择固定文本查询和引用返回的 evidence ID。Codex 不可用、
+超时、触发越权 activity 或返回不符合 schema 的内容时，当前提案失败，不会因此调用 ECC。
 
 ### 边界靠什么保证
 
-真正的边界是**类型化提案链路**：Codex 只能返回受 schema 约束的 JSON 提案，
-写入动作全部由 ECOS 校验后执行，Codex 自身没有任何写入通道。
+真正的执行边界是**类型化提案链路**：只有受 schema 约束且通过本地 allowlist、状态、
+预算和证据校验的提案，才能进入 GUI 确认或 controller；普通聊天文本和检索结果永远
+不会被解释为命令。所有 workspace 写入、ECC RPC、终态判断和 ledger 记录都由 ECOS
+的固定代码路径完成。
 
 传给 app-server 的 `sandboxPolicy`、`runtimeWorkspaceRoots`、`permissions`
 只是纵深防御，不能当作依据：Codex 的 Linux 沙箱依赖 bubblewrap user namespace，
