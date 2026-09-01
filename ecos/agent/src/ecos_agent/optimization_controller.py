@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable, Literal, Mapping, Protocol
+from typing import Callable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -54,6 +54,15 @@ from ecos_agent.optimization_decision_audit import (
     OptimizationDecisionAudit,
     OptimizationDecisionAuditReplay,
 )
+from ecos_agent.optimization_execution import (
+    CANDIDATE_END_STEP,
+    CANDIDATE_EXECUTION_SCOPE,
+    CandidateExecutionEvidence,
+    CandidateExecutionReceipt,
+    CandidateExecutionRequest,
+    OptimizationExecutionAdapter,
+    candidate_target_step,
+)
 from ecos_agent.optimization_knowledge_compiler import (
     SupportedActionView,
     build_state_evidence_request,
@@ -83,6 +92,13 @@ from ecos_agent.optimization_ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization_memory import OptimizationTaskMemorySnapshot
+from ecos_agent.optimization_planning import (
+    OptimizationHistory,
+    OptimizationPlanningContext,
+    OptimizationProposalPlanner,
+    optimization_history_payload,
+    planning_context_payload,
+)
 from ecos_agent.optimization_retrieval import (
     KnowledgeChannel,
     OptimizationRetrievalResult,
@@ -113,16 +129,6 @@ _LEGACY_STATE_FILES = (
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
 )
-_TARGET_STEPS = {
-    OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
-    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
-    OptimizationKnob.SYNTH_MAX_FANOUT: "fixFanout",
-    OptimizationKnob.TARGET_DENSITY: "place",
-    OptimizationKnob.TARGET_OVERFLOW: "place",
-    OptimizationKnob.CELL_PADDING_X: "place",
-    OptimizationKnob.ROUTABILITY_OPT: "place",
-    OptimizationKnob.DENSITY_WEIGHT: "place",
-}
 
 
 class OptimizationEpisodeControllerError(ValueError):
@@ -133,195 +139,6 @@ class OptimizationAgentMode(StrEnum):
     FULL_AGENT = "full_agent"
     LLM_NO_KNOWLEDGE = "llm_no_knowledge"
     RAW_RAG = "raw_rag"
-
-
-@dataclass(frozen=True)
-class CandidateExecutionEvidence:
-    candidate_root_ref: str
-    candidate_manifest_ref: str
-    candidate_manifest_sha256: str
-    target_step: str | None = None
-    end_step: str | None = None
-    execution_scope: str | None = None
-
-    def __post_init__(self) -> None:
-        for value in (self.candidate_root_ref, self.candidate_manifest_ref):
-            if (
-                not value
-                or "\\" in value
-                or value.startswith("/")
-                or "." in value.split("/")
-                or ".." in value.split("/")
-            ):
-                raise ValueError("candidate evidence reference is invalid")
-        if not _SHA256.fullmatch(self.candidate_manifest_sha256):
-            raise ValueError("candidate manifest hash is invalid")
-
-
-@dataclass(frozen=True)
-class CandidateExecutionReceipt:
-    """The only execution status the M4 fake adapter may return."""
-
-    execution_id: str
-    started: bool
-    outcome: OptimizationOutcomeKind | None = None
-    evidence: CandidateExecutionEvidence | None = None
-    parameter_application_receipt: ParameterApplicationReceipt | None = None
-
-    def __post_init__(self) -> None:
-        if not _ID.fullmatch(self.execution_id):
-            raise ValueError("execution receipt id is invalid")
-        if not isinstance(self.started, bool):
-            raise ValueError("execution receipt started flag is invalid")
-        if self.outcome is not None and not isinstance(
-            self.outcome, OptimizationOutcomeKind
-        ):
-            raise ValueError("execution receipt outcome is invalid")
-        if self.evidence is not None and not isinstance(
-            self.evidence, CandidateExecutionEvidence
-        ):
-            raise ValueError("execution receipt evidence is invalid")
-        if self.parameter_application_receipt is not None and not isinstance(
-            self.parameter_application_receipt, ParameterApplicationReceipt
-        ):
-            raise ValueError("execution parameter receipt is invalid")
-
-
-@dataclass(frozen=True)
-class OptimizationPlanningContext:
-    """The entire, intentionally small input surface exposed to the planner."""
-
-    context_ref: ProposalContextRef
-    observation_ref: ObservationReference
-    incumbent: TerminalObservation | None
-    history: tuple["OptimizationHistory", ...]
-    knowledge_refs: tuple[KnowledgeReference, ...]
-    knowledge_chunks: tuple[str, ...]
-    observation: StageObservation | None = None
-    budget: BudgetSnapshot | None = None
-    current_values: Mapping[str, bool | int | float] | None = None
-    legal_actions: tuple[LegalAction, ...] = ()
-    objective: OptimizationObjectiveContract | None = None
-    task_memory: OptimizationTaskMemorySnapshot | None = None
-    excluded_surface_values: tuple[RequestedKnobValue, ...] = ()
-    effective_domains: tuple[EffectiveDomainSnapshot, ...] = ()
-    supported_action_view: SupportedActionView | None = None
-    empirical_cases: tuple[TerminalEmpiricalCase, ...] = ()
-    empirical_case_audit: EmpiricalCaseAudit | None = None
-
-
-@dataclass(frozen=True)
-class OptimizationHistory:
-    """A bounded, typed prior intervention exposed to the next planner turn."""
-
-    reference: HistoryReference
-    outcome: OptimizationOutcomeKind
-    action: ProposalAction
-    requested: RequestedKnobValue
-    terminal_observation: TerminalObservation | None = None
-    parameter_application_receipt: ParameterApplicationReceipt | None = None
-
-
-def _history_payload(item: OptimizationHistory) -> dict[str, object]:
-    payload = {
-        "reference": item.reference.model_dump(mode="json"),
-        "outcome": item.outcome.value,
-        "action": item.action.model_dump(mode="json"),
-        "requested": item.requested.model_dump(mode="json"),
-        "terminal_observation": (
-            item.terminal_observation.model_dump(mode="json")
-            if item.terminal_observation is not None
-            else None
-        ),
-    }
-    if item.parameter_application_receipt is not None:
-        payload["parameter_application_receipt"] = (
-            item.parameter_application_receipt.model_dump(mode="json")
-        )
-    return payload
-
-
-def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, object]:
-    """Return the canonical JSON payload exposed to a planner implementation."""
-    payload: dict[str, object] = {
-        "context_ref": context.context_ref.model_dump(mode="json"),
-        "observation_ref": context.observation_ref.model_dump(mode="json"),
-        "incumbent": (
-            context.incumbent.model_dump(mode="json")
-            if context.incumbent is not None
-            else None
-        ),
-        "history": [_history_payload(item) for item in context.history],
-        "knowledge_refs": [
-            item.model_dump(mode="json") for item in context.knowledge_refs
-        ],
-        "knowledge_chunks": list(context.knowledge_chunks),
-        "supported_action_view": (
-            {
-                **context.supported_action_view.model_dump(mode="json"),
-                "view_sha256": context.supported_action_view.view_sha256,
-            }
-            if context.supported_action_view is not None
-            else None
-        ),
-        "objective": (
-            context.objective.model_dump(mode="json")
-            if context.objective is not None
-            else None
-        ),
-    }
-    if context.observation is not None:
-        payload["observation"] = context.observation.model_dump(mode="json")
-    if context.budget is not None:
-        payload["budget"] = context.budget.model_dump(mode="json")
-    if context.current_values is not None:
-        payload["current_values"] = dict(sorted(context.current_values.items()))
-    payload["legal_actions"] = [
-        item.model_dump(mode="json") for item in context.legal_actions
-    ]
-    payload["excluded_surface_values"] = [
-        item.model_dump(mode="json") for item in context.excluded_surface_values
-    ]
-    if context.effective_domains:
-        payload["effective_domains"] = [
-            item.model_dump(mode="json") for item in context.effective_domains
-        ]
-    if context.task_memory is not None:
-        payload["task_memory"] = context.task_memory.model_dump(mode="json")
-    payload["empirical_cases"] = [
-        item.model_dump(mode="json") for item in context.empirical_cases
-    ]
-    payload["empirical_case_audit"] = (
-        context.empirical_case_audit.model_dump(mode="json")
-        if context.empirical_case_audit is not None
-        else None
-    )
-    return payload
-
-
-@dataclass(frozen=True)
-class CandidateExecutionRequest:
-    """A typed execution request with no command or unrestricted path field."""
-
-    intervention_id: str
-    episode_id: str
-    checkpoint_id: str
-    proposal: OptimizationProposal
-    requested: RequestedKnobValue
-    context_sha256: str
-    seed: int
-    ecc_revision: str
-    parent_candidate_root_ref: str | None = None
-
-    def __post_init__(self) -> None:
-        if type(self.seed) is not int:
-            raise ValueError("candidate execution seed is invalid")
-        if (
-            not isinstance(self.ecc_revision, str)
-            or not self.ecc_revision.strip()
-            or self.ecc_revision.strip() == "unknown"
-        ):
-            raise ValueError("candidate execution ECC revision is invalid")
 
 
 @dataclass(frozen=True)
@@ -339,18 +156,6 @@ class _PlannerTurn:
     requested: RequestedKnobValue | None = None
     provider_payload_sha256: str | None = None
     proposal_v2: OptimizationProposalV2 | None = None
-
-
-class OptimizationProposalPlanner(Protocol):
-    def propose(self, context: OptimizationPlanningContext) -> object: ...
-
-
-class OptimizationExecutionAdapter(Protocol):
-    def start(
-        self, request: CandidateExecutionRequest
-    ) -> CandidateExecutionReceipt: ...
-
-    def cancel(self, intervention_id: str) -> CandidateExecutionReceipt: ...
 
 
 class _PersistedEpisodeState(BaseModel):
@@ -1204,7 +1009,8 @@ class OptimizationEpisodeController:
                         if item.terminal_observation is not None
                     ),
                     history_sha256=tuple(
-                        canonical_sha256(_history_payload(item)) for item in history
+                        canonical_sha256(optimization_history_payload(item))
+                        for item in history
                     ),
                 ),
                 catalog=retrieval.support_catalog,
@@ -1294,7 +1100,9 @@ class OptimizationEpisodeController:
                         item.model_dump(mode="json") for item in available_actions
                     ],
                     "ledger_head": self.ledger.replay().chain_head_sha256,
-                    "history": [_history_payload(item) for item in history],
+                    "history": [
+                        optimization_history_payload(item) for item in history
+                    ],
                     "excluded_surface_values": [
                         item.model_dump(mode="json") for item in ineffective_requests
                     ],
@@ -1383,7 +1191,7 @@ class OptimizationEpisodeController:
             ),
             "parent_lineage_sha256": parent_lineage,
             "incumbent_state_sha256": canonical_sha256(incumbent_state),
-            "stage": _stage_name(knob_id),
+            "stage": candidate_target_step(knob_id),
             "backend": self._execution_context.get("backend", "ecc"),
             "tool_revision": tool_revision,
             "parameter_card_sha256": parameter_card_sha256,
@@ -1394,9 +1202,9 @@ class OptimizationEpisodeController:
             "current_values": dict(sorted(current_values.items())),
             "terminal_execution_contract_sha256": canonical_sha256(
                 {
-                    "target_step": _stage_name(knob_id),
-                    "end_step": "Harden",
-                    "execution_scope": "full_flow",
+                    "target_step": candidate_target_step(knob_id),
+                    "end_step": CANDIDATE_END_STEP,
+                    "execution_scope": CANDIDATE_EXECUTION_SCOPE,
                 }
             ),
         }
@@ -1765,9 +1573,9 @@ class OptimizationEpisodeController:
         self, request: CandidateExecutionRequest
     ) -> OptimizationInterventionStart:
         proposal_sha256 = canonical_sha256(request.proposal.model_dump(mode="json"))
-        target_step = _TARGET_STEPS[request.requested.knob_id]
-        execution_scope = "full_flow"
-        end_step = "Harden"
+        target_step = candidate_target_step(request.requested.knob_id)
+        execution_scope = CANDIDATE_EXECUTION_SCOPE
+        end_step = CANDIDATE_END_STEP
         execution_contract_sha256 = canonical_sha256(
             {
                 "intervention_id": request.intervention_id,
@@ -1849,9 +1657,9 @@ class OptimizationEpisodeController:
                 )
         if receipt.evidence is not None and self._requested is not None:
             expected_contract = (
-                _TARGET_STEPS[self._requested.knob_id],
-                "Harden",
-                "full_flow",
+                candidate_target_step(self._requested.knob_id),
+                CANDIDATE_END_STEP,
+                CANDIDATE_EXECUTION_SCOPE,
             )
             observed_contract = (
                 receipt.evidence.target_step,
@@ -1940,11 +1748,11 @@ class OptimizationEpisodeController:
             incumbent_decision=incumbent_decision,
             decisive_metric=decisive_metric,
             outcome_details_sha256=canonical_sha256(details),
-            target_step=_TARGET_STEPS[self._requested.knob_id]
+            target_step=candidate_target_step(self._requested.knob_id)
             if self._requested
             else "place",
-            end_step="Harden",
-            execution_scope="full_flow",
+            end_step=CANDIDATE_END_STEP,
+            execution_scope=CANDIDATE_EXECUTION_SCOPE,
         )
         self.ledger.append_terminal(terminal_outcome)
         if self.mode == OptimizationAgentMode.FULL_AGENT:
@@ -2463,17 +2271,6 @@ class OptimizationEpisodeController:
 
 def _knowledge_keys(references: tuple[KnowledgeReference, ...]) -> set[tuple[str, str]]:
     return {(reference.entity_id, reference.chunk_sha256) for reference in references}
-
-
-def _stage_name(knob_id: OptimizationKnob) -> str:
-    if knob_id in {
-        OptimizationKnob.FLOORPLAN_CORE_UTIL,
-        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
-    }:
-        return "Floorplan"
-    if knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
-        return "fixFanout"
-    return "place"
 
 
 def _pending_tuple(intervention_id: str | None) -> tuple[str, ...]:

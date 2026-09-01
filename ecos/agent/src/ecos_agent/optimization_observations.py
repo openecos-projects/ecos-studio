@@ -20,7 +20,7 @@ from ecos_agent.optimization_contracts import (
     StageObservation,
     TerminalObservation,
 )
-from ecos_agent.optimization_controller import CandidateExecutionEvidence
+from ecos_agent.optimization_execution import CandidateExecutionEvidence
 from ecos_agent.optimization_ledger import build_optimization_artifact_manifest
 from ecos_agent.optimization_metric_contracts import (
     EvaluationMetricCategory,

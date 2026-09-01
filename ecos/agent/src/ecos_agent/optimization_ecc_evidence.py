@@ -9,7 +9,11 @@ from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
-from ecos_agent.optimization_controller import CandidateExecutionEvidence
+from ecos_agent.optimization_execution import (
+    CANDIDATE_END_STEP,
+    CANDIDATE_EXECUTION_SCOPE,
+    CandidateExecutionEvidence,
+)
 from ecos_agent.parameter_evidence_contracts import MaterializationRef, ParameterApplicationReceipt
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -106,8 +110,8 @@ def _validate_candidate_manifest(
         "candidate_root_ref": candidate_ref,
         "parent_candidate_root_ref": parent_ref,
         "target_step": target_step,
-        "end_step": "Harden",
-        "execution_scope": "full_flow",
+        "end_step": CANDIDATE_END_STEP,
+        "execution_scope": CANDIDATE_EXECUTION_SCOPE,
     }
     allowed_terminal_states = (
         _TERMINAL_STATES if terminal_state == "cancelled" else {terminal_state}
@@ -122,8 +126,8 @@ def _validate_candidate_manifest(
         )
     if (evidence.target_step, evidence.end_step, evidence.execution_scope) != (
         target_step,
-        "Harden",
-        "full_flow",
+        CANDIDATE_END_STEP,
+        CANDIDATE_EXECUTION_SCOPE,
     ):
         raise OptimizationEccAdapterError("application receipt candidate evidence is incomplete")
     hashes = (
@@ -315,8 +319,8 @@ def _validate_parent_binding(
         "candidate_root_ref": parent_ref,
         "candidate_flow_sha256": manifest.get("parent_flow_sha256"),
         "candidate_state_sha256": materialization.parent_state_sha256,
-        "end_step": "Harden",
-        "execution_scope": "full_flow",
+        "end_step": CANDIDATE_END_STEP,
+        "execution_scope": CANDIDATE_EXECUTION_SCOPE,
         "terminal_state": "succeeded",
     }
     if (

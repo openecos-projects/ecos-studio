@@ -16,10 +16,13 @@ from typing import Protocol
 
 from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization_contracts import OptimizationKnob, RequestedKnobValue
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization_execution import (
+    CANDIDATE_END_STEP,
+    CANDIDATE_EXECUTION_SCOPE,
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
+    candidate_target_step,
 )
 from ecos_agent.optimization_ecc_evidence import (
     OptimizationEccAdapterError,
@@ -48,13 +51,6 @@ _ALLOWED_METHODS = frozenset(
     }
 )
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
-_TARGET_STEPS = {
-    OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
-    OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
-    OptimizationKnob.SYNTH_MAX_FANOUT: "fixFanout",
-}
-
-
 class EccRpcTransport(Protocol):
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]: ...
 
@@ -134,11 +130,11 @@ class EccCandidateRerunAdapter:
         candidate_ref = f".agent/candidates/{candidate_id}"
         params = {
             "workspaceId": self._workspace_id,
-            "targetStep": _TARGET_STEPS.get(requested.knob_id, "place"),
-            "endStep": "Harden",
+            "targetStep": candidate_target_step(requested.knob_id),
+            "endStep": CANDIDATE_END_STEP,
             "candidateId": candidate_id,
             "patch": [patch],
-            "executionScope": "full_flow",
+            "executionScope": CANDIDATE_EXECUTION_SCOPE,
             "idempotencyKey": idempotency_key,
             "contextSha256": context_sha256,
             "seed": seed,
@@ -294,9 +290,9 @@ class EccCandidateRerunAdapter:
         if all(value is None for value in fields):
             return
         if fields != (
-            _TARGET_STEPS.get(requested.knob_id, "place"),
-            "Harden",
-            "full_flow",
+            candidate_target_step(requested.knob_id),
+            CANDIDATE_END_STEP,
+            CANDIDATE_EXECUTION_SCOPE,
         ):
             raise OptimizationEccAdapterError(
                 "candidate execution contract does not match"
@@ -421,7 +417,7 @@ class EccCandidateRerunAdapter:
             candidate_ref=candidate_ref,
             parent_ref=parent_ref,
             terminal_state=state,
-            target_step=_TARGET_STEPS.get(requested.knob_id, "place"),
+            target_step=candidate_target_step(requested.knob_id),
             config_ref=cards[requested.knob_id].surface.file,
             config_json_path=cards[requested.knob_id].surface.json_path,
         )

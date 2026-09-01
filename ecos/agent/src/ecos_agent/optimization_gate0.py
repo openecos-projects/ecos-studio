@@ -47,10 +47,13 @@ from ecos_agent.optimization_contracts import (
     StrategyDirection,
     TerminalObservation,
 )
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization_execution import (
+    CANDIDATE_END_STEP,
+    CANDIDATE_EXECUTION_SCOPE,
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
+    candidate_target_step,
 )
 from ecos_agent.optimization_ecc_adapter import (
     EccCandidateRerunAdapter,
@@ -841,7 +844,7 @@ def _pilot_context_sha256(
         ecc_revision,
     )
     card = load_parameter_cards()[requested.knob_id]
-    target_step = _candidate_target_step(requested.knob_id)
+    target_step = candidate_target_step(requested.knob_id)
     context = {
         **execution_context,
         "incumbent_state_sha256": canonical_sha256(baseline.model_dump(mode="json")),
@@ -858,22 +861,13 @@ def _pilot_context_sha256(
         "terminal_execution_contract_sha256": canonical_sha256(
             {
                 "target_step": target_step,
-                "end_step": "Harden",
-                "execution_scope": "full_flow",
+                "end_step": CANDIDATE_END_STEP,
+                "execution_scope": CANDIDATE_EXECUTION_SCOPE,
             }
         ),
         "tool_source_sha256": card.tool.source_sha256,
     }
     return build_context_fingerprint(context)
-
-
-def _candidate_target_step(knob_id: OptimizationKnob) -> str:
-    if knob_id in {
-        OptimizationKnob.FLOORPLAN_CORE_UTIL,
-        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
-    }:
-        return "Floorplan"
-    return "fixFanout" if knob_id == OptimizationKnob.SYNTH_MAX_FANOUT else "place"
 
 
 def _baseline_values(baseline: Gate0Baseline) -> dict[str, bool | int | float]:

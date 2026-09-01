@@ -16,10 +16,10 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
-    CandidateExecutionReceipt,
     OptimizationControlResult,
     OptimizationEpisodeController,
 )
+from ecos_agent.optimization_execution import CandidateExecutionReceipt
 from ecos_agent.optimization_ledger import OptimizationOutcomeKind
 from ecos_agent.optimization_retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization_rules import (

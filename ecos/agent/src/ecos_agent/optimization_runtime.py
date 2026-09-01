@@ -21,13 +21,16 @@ from ecos_agent.optimization_contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization_controller import (
-    CandidateExecutionReceipt,
     OptimizationAgentMode,
     OptimizationEpisodeController,
 )
 from ecos_agent.optimization_ecc_adapter import (
     EccCandidateRerunAdapter,
     EccContentLengthRpcClient,
+)
+from ecos_agent.optimization_execution import (
+    CANDIDATE_END_STEP,
+    CandidateExecutionReceipt,
 )
 from ecos_agent.optimization_ledger import (
     OptimizationLedger,
@@ -67,7 +70,7 @@ _OPTIMIZATION_RERUN_STAGES = (
     "filler",
     "RCX",
     "sta",
-    "Harden",
+    CANDIDATE_END_STEP,
 )
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 

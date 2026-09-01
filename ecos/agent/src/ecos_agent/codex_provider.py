@@ -36,7 +36,7 @@ from ecos_agent.optimization_contracts import (
     PlanningProviderEvidence,
     ProposalReason,
 )
-from ecos_agent.optimization_controller import (
+from ecos_agent.optimization_planning import (
     OptimizationPlanningContext,
     planning_context_payload,
 )
