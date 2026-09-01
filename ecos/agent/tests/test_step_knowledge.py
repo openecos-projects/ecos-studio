@@ -243,6 +243,7 @@ def test_wheel_build_copies_external_knowledge_and_removes_legacy_paths(tmp_path
     with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
         names = wheel.namelist()
     assert "ecos_agent/knowledge/tool/place/catalog.json" in names
+    assert not any(name.startswith("ecos_agent/knowledge/inputs/") for name in names)
     assert "ecos_agent/place_knowledge.py" not in names
     assert not any("_knowledge/" in name for name in names)
     assert "graft knowledge" in (AGENT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
