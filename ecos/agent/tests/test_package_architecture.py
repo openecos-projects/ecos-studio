@@ -8,7 +8,13 @@ import pytest
 
 PACKAGE_ROOT = Path(__file__).parents[1] / "src" / "ecos_agent"
 SCRIPT_ROOT = Path(__file__).parents[1] / "scripts"
+TEST_ROOT = Path(__file__).parent
 TARGET_PACKAGES = ("optimization", "knowledge", "workspace", "codex", "gui")
+FORBIDDEN_TEST_MODULE_NAMES = {
+    "test_controller.py",
+    "test_optimization.py",
+    "test_provider.py",
+}
 FORBIDDEN_DEPENDENCIES = (
     ("optimization", "codex"),
     ("workspace", "gui"),
@@ -69,3 +75,27 @@ def test_obsolete_script_lanes_are_removed() -> None:
     assert not (SCRIPT_ROOT / "run_equal_budget_harness.py").exists()
     assert not (SCRIPT_ROOT / "finalize_equal_budget_functional_smoke.py").exists()
     assert not (SCRIPT_ROOT / "run_equal_budget_experiment.py").exists()
+
+
+def test_tests_are_grouped_by_domain() -> None:
+    assert sorted(path.name for path in TEST_ROOT.glob("test_*.py")) == [
+        "test_package_architecture.py"
+    ]
+
+
+def test_test_module_names_are_specific() -> None:
+    violations = sorted(
+        str(path.relative_to(TEST_ROOT))
+        for path in TEST_ROOT.rglob("test_*.py")
+        if path.name in FORBIDDEN_TEST_MODULE_NAMES
+    )
+    assert not violations, f"Generic test module names: {violations}"
+
+
+def test_test_modules_stay_reviewable() -> None:
+    violations = []
+    for path in TEST_ROOT.rglob("*.py"):
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        if line_count > 800:
+            violations.append(f"{path.relative_to(TEST_ROOT)}: {line_count} lines")
+    assert not violations, "Oversized test modules:\n" + "\n".join(violations)

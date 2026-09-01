@@ -507,7 +507,34 @@ def _select_dev_config(paths: list[Path], args: argparse.Namespace) -> dict[str,
     }
 
 
-def _protocol_lines(process: subprocess.Popen[bytes], request_id: str, records: list[dict[str, object]]) -> dict[str, object]:
+def _protocol_record_matches(
+    payload: dict[str, object],
+    request_id: str | None,
+    wait_for_resting: bool,
+) -> bool:
+    if request_id is not None:
+        return payload.get("id") == request_id
+    event = payload.get("event")
+    if not isinstance(event, dict):
+        return False
+    if wait_for_resting:
+        return event.get("type") == "status" and event.get("status") in {
+            "idle",
+            "awaiting_interaction",
+        }
+    return isinstance(event.get("contract"), dict)
+
+
+def _protocol_lines(
+    process: subprocess.Popen[bytes],
+    request_id: str | None,
+    records: list[dict[str, object]],
+    *,
+    wait_for_resting: bool = False,
+) -> dict[str, object]:
+    for payload in records:
+        if _protocol_record_matches(payload, request_id, wait_for_resting):
+            return payload
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         if process.stdout is None:
@@ -522,8 +549,11 @@ def _protocol_lines(process: subprocess.Popen[bytes], request_id: str, records: 
             break
         payload = json.loads(line)
         records.append(payload)
-        if payload.get("id") == request_id:
+        if _protocol_record_matches(payload, request_id, wait_for_resting):
             return payload
+    if request_id is None:
+        expected = "a resting status" if wait_for_resting else "a knowledge-answer contract"
+        raise RuntimeError(f"provider did not emit {expected}")
     raise RuntimeError(f"provider did not respond to {request_id}")
 
 
@@ -532,6 +562,30 @@ def _write_request(process: subprocess.Popen[bytes], payload: dict[str, object])
         raise RuntimeError("provider stdin is unavailable")
     process.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
     process.stdin.flush()
+
+
+def _interaction_answer_request(
+    started_session: dict[str, object],
+) -> dict[str, object]:
+    result = started_session.get("result")
+    session_id = result.get("sessionId") if isinstance(result, dict) else None
+    if not isinstance(session_id, str) or not session_id:
+        raise RuntimeError("provider did not return a session ID")
+    interaction = result.get("pendingInteraction")
+    request_id = interaction.get("requestId") if isinstance(interaction, dict) else None
+    kind = interaction.get("kind") if isinstance(interaction, dict) else None
+    if not isinstance(request_id, str) or not isinstance(kind, str):
+        raise RuntimeError("provider did not return a pending interaction")
+    return {
+        "id": "answer-1",
+        "method": "answerInteraction",
+        "params": {
+            "sessionId": session_id,
+            "requestId": request_id,
+            "kind": kind,
+            "text": _PROTOCOL_QUERY,
+        },
+    }
 
 
 def _run_protocol(binary: Path) -> tuple[dict[str, object], float, int]:
@@ -555,13 +609,14 @@ def _run_protocol(binary: Path) -> tuple[dict[str, object], float, int]:
         started = time.perf_counter()
         _write_request(process, {"id": "start-1", "method": "startSession", "params": {"mode": "home"}})
         started_session = _protocol_lines(process, "start-1", records)
-        result = started_session.get("result")
-        session_id = result.get("sessionId") if isinstance(result, dict) else None
-        if not isinstance(session_id, str) or not session_id:
-            raise RuntimeError("provider did not return a session ID")
+        answer_request = _interaction_answer_request(started_session)
         startup_ms = (time.perf_counter() - started) * 1000
-        _write_request(process, {"id": "message-1", "method": "sendMessage", "params": {"sessionId": session_id, "message": _PROTOCOL_QUERY}})
-        _protocol_lines(process, "message-1", records)
+        _write_request(process, answer_request)
+        _protocol_lines(process, "answer-1", records)
+        _protocol_lines(process, None, records)
+        _protocol_lines(process, None, records, wait_for_resting=True)
+        _write_request(process, {"id": "stop-1", "method": "stop", "params": {}})
+        _protocol_lines(process, "stop-1", records)
         if process.stdin is not None:
             process.stdin.close()
         process.wait(timeout=20)
