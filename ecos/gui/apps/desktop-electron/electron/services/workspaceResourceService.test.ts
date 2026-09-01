@@ -400,7 +400,6 @@ describe('WorkspaceResourceService', () => {
 
   it.each([
     ['Floorplan', 'ecc'],
-    ['fixFanout', 'ecc'],
     ['place', 'dreamplace'],
     ['CTS', 'ecc'],
     ['legalization', 'dreamplace'],
@@ -489,7 +488,6 @@ describe('WorkspaceResourceService', () => {
 
   it.each([
     ['Floorplan', 'floorplan_ecc.json'],
-    ['fixFanout', 'fixfanout_ecc.json'],
     ['CTS', 'cts_ecc.json'],
     ['route', 'route_ecc.json'],
     ['drc', 'drc_ecc.json'],

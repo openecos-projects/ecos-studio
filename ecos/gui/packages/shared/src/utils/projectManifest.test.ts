@@ -15,7 +15,6 @@ describe('project manifest parsing', () => {
     expect(projectManifestFlowSteps).toEqual([
       'Synth',
       'Floor',
-      'Fanout',
       'Place',
       'CTS',
       'Legal',

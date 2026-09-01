@@ -128,23 +128,23 @@ describe('WorkspaceService', () => {
 
   it('reads UTF-8 project text in bounded sequential chunks', async () => {
     const directory = await createTempDir('ecos-workspace-service-chunk-')
-    const filePath = join(directory, 'fixFanout_ecc', 'log', 'fixFanout.log')
-    await mkdir(join(directory, 'fixFanout_ecc', 'log'), { recursive: true })
+    const filePath = join(directory, 'place_dreamplace', 'log', 'place.log')
+    await mkdir(join(directory, 'place_dreamplace', 'log'), { recursive: true })
     await writeFile(filePath, 'ab中cd', 'utf8')
 
     const { service } = createWorkspaceService(directory, filePath)
     const first = await service.readOptionalProjectTextFileChunk(
-      '/workspace/fixFanout_ecc/log/fixFanout.log',
+      '/workspace/place_dreamplace/log/place.log',
       0,
       4,
     )
     const second = await service.readOptionalProjectTextFileChunk(
-      '/workspace/fixFanout_ecc/log/fixFanout.log',
+      '/workspace/place_dreamplace/log/place.log',
       first?.nextOffsetBytes ?? 0,
       4,
     )
     const third = await service.readOptionalProjectTextFileChunk(
-      '/workspace/fixFanout_ecc/log/fixFanout.log',
+      '/workspace/place_dreamplace/log/place.log',
       second?.nextOffsetBytes ?? 0,
       4,
     )

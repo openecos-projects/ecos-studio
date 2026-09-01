@@ -23,7 +23,6 @@ def test_flow_knowledge_specs_include_place_in_canonical_order() -> None:
     assert [spec.slug for spec in STEP_KNOWLEDGE_SPECS] == [
         "synthesis",
         "floorplan",
-        "fixfanout",
         "place",
         "cts",
         "legalization",
@@ -164,7 +163,7 @@ def test_provider_answers_cts_question_without_changing_operation_state() -> Non
 
     answer = next(event for event in reversed(events) if event["type"] == "message")
     assert "clock-tree" in str(answer["text"])
-    assert answer["contract"]["schema_version"] == "ecos-cts-answer.v1"
+    assert answer["contract"]["knowledge"]["schema_version"] == "ecos-cts-answer.v1"
     assert provider.sessions[session_id].phase == "home_ready"
 
 

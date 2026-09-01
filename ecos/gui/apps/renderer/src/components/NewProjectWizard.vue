@@ -1608,7 +1608,6 @@ type ProjectMode = 'select' | 'create'
 type FlowStepName =
   | 'Synthesis'
   | 'Floorplan'
-  | 'fixFanout'
   | 'place'
   | 'CTS'
   | 'legalization'
@@ -1750,7 +1749,6 @@ const steps = [
 const hardenFlowSteps: Array<{ name: FlowStepName; description: string }> = [
   { name: 'Synthesis', description: 'RTL synthesis entry.' },
   { name: 'Floorplan', description: 'Initial floorplan and die setup.' },
-  { name: 'fixFanout', description: 'Fanout repair before placement.' },
   { name: 'place', description: 'Standard cell placement.' },
   { name: 'CTS', description: 'Clock tree synthesis.' },
   { name: 'legalization', description: 'Placement legalization.' },
@@ -2045,8 +2043,6 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     synthesis: 'Synthesis',
     floor: 'Floorplan',
     floorplan: 'Floorplan',
-    fanout: 'fixFanout',
-    fixfanout: 'fixFanout',
     place: 'place',
     placement: 'place',
     cts: 'CTS',
@@ -2065,7 +2061,6 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
   const validSteps: FlowStepName[] = [
     'Synthesis',
     'Floorplan',
-    'fixFanout',
     'place',
     'CTS',
     'legalization',

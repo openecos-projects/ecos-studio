@@ -3,7 +3,6 @@ import type { PdkRequirement } from '../contracts/pdkInventory.ts'
 export const projectManifestFlowSteps = [
   'Synth',
   'Floor',
-  'Fanout',
   'Place',
   'CTS',
   'Legal',
@@ -197,8 +196,6 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   synth: 'Synth',
   floorplan: 'Floor',
   floor: 'Floor',
-  fixfanout: 'Fanout',
-  fanout: 'Fanout',
   place: 'Place',
   placement: 'Place',
   cts: 'CTS',

@@ -827,10 +827,6 @@ function addEccConfigResources(
     join(root, 'config', 'floorplan_ecc.json'),
     'config',
   )
-  resources.config.netlist_opt = createFile(
-    join(root, 'config', 'fixfanout_ecc.json'),
-    'config',
-  )
   resources.config.routing = createFile(join(root, 'config', 'route_ecc.json'), 'config')
   resources.config.rcx = createFile(join(root, 'config', 'rcx_ecc.json'), 'config')
   resources.config.sta = createFile(join(root, 'config', 'sta_ecc.json'), 'config')
@@ -852,8 +848,6 @@ function configResourceForEccStep(
       return config.routing
     case 'drc':
       return config.drc
-    case 'fixfanout':
-      return config.netlist_opt
     case 'filler':
       return config.filler
     case 'rcx':

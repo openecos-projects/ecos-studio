@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 GUI_WORKSPACE_FLOW_STEPS = (
     "Synthesis",
     "Floorplan",
-    "fixFanout",
     "place",
     "CTS",
     "legalization",
