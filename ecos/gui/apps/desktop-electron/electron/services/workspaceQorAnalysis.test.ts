@@ -46,23 +46,26 @@ const engineeringSnapshot = JSON.stringify({
   signoffAssessment: { status: 'ready' },
 })
 
+function workspace(id: string, name: string) {
+  return {
+    branch_from: null,
+    created_at: '2026-08-30T00:00:00.000Z',
+    end_step: 'Harden',
+    metrics_summary: {},
+    name,
+    parameter_patch: {},
+    source_workspace_id: null,
+    start_step: 'Synth',
+    status: 'success' as const,
+    step_metrics: {},
+    updated_at: '2026-08-30T00:00:00.000Z',
+    workspace_id: id,
+    workspace_path: `/project/${id}`,
+  }
+}
+
 describe('analyzeWorkspaceQor', () => {
   it('builds current QoR and the selected baseline comparison', () => {
-    const workspace = (id: string, name: string) => ({
-      branch_from: null,
-      created_at: '2026-08-30T00:00:00.000Z',
-      end_step: 'Harden',
-      metrics_summary: {},
-      name,
-      parameter_patch: {},
-      source_workspace_id: null,
-      start_step: 'Synth',
-      status: 'success' as const,
-      step_metrics: {},
-      updated_at: '2026-08-30T00:00:00.000Z',
-      workspace_id: id,
-      workspace_path: `/project/${id}`,
-    })
     const manifest = {
       project_id: 'project-1',
       name: 'demo',
@@ -112,5 +115,50 @@ describe('analyzeWorkspaceQor', () => {
     expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]?.overallScore).toBe(
       result.qor.status === 'ready' ? result.qor.data.score.value : null,
     )
+  })
+
+  it('restores step metrics directly from an authoritative snapshot', () => {
+    const metric = JSON.parse(metricText(5000)).metrics[0]
+    const snapshot = JSON.stringify({
+      metrics: [metric],
+      qorAssessment: {
+        metrics: [metric],
+        score: { gate: 'pass', threshold: 60, value: 73.5 },
+        steps: [
+          {
+            name: 'route',
+            order: 6,
+            status: 'pass',
+            stepId: 'route',
+            summaryMetricCount: 1,
+          },
+        ],
+      },
+      signoffAssessment: { status: 'ready' },
+    })
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [workspace('current', 'Current')],
+      qor_baseline: null,
+    } as ProjectManifest
+
+    const result = analyzeWorkspaceQor(manifest, 'current', {
+      current: { 'home/engineering-snapshot.json': snapshot },
+    })
+
+    expect(result.qor).toMatchObject({
+      data: {
+        metrics: [{ id: 'route_wirelength', stepId: 'Route', value: 5000 }],
+        score: { value: 73.5 },
+      },
+      status: 'ready',
+    })
+    expect(
+      result.qor.status === 'ready'
+        ? result.qor.data.steps.find((step) => step.stepId === 'Route')
+        : null,
+    ).toMatchObject({ status: 'pass', stepId: 'Route', summaryMetricCount: 1 })
   })
 })
