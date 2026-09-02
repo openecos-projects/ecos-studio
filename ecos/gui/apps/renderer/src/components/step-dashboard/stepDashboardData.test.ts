@@ -173,6 +173,20 @@ describe('step dashboard data', () => {
       tone: 'neutral',
       metrics: [],
     })
+    expect(lecInsights({ status: 'proven' })).toEqual({
+      status: 'unavailable',
+      tone: 'neutral',
+      metrics: [],
+    })
+    expect(
+      lecInsights({
+        status: 'proven',
+        golden_verilog: '/ws/golden.v',
+        gate_verilog: '/ws/gate.v',
+        golden_sha256: 'a'.repeat(64),
+        gate_sha256: 'b'.repeat(64),
+      }),
+    ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
     expect(lecInsights(null)).toBeNull()
     expect(lecInsights('nope')).toBeNull()
   })

@@ -861,9 +861,22 @@ function formatByteSize(value: number): string {
 export function lecInsights(value: unknown): StepDashboardLecInsights | null {
   const source = record(value)
   if (!source) return null
+  const goldenVerilog = textValue(source.golden_verilog, '')
+  const gateVerilog = textValue(source.gate_verilog, '')
+  const goldenSha256 = textValue(source.golden_sha256, '')
+  const gateSha256 = textValue(source.gate_sha256, '')
+  const goldenSizeBytes = finiteNumber(source.golden_size_bytes)
+  const gateSizeBytes = finiteNumber(source.gate_size_bytes)
+
+  // ECC only treats a proven result as valid with complete netlist paths,
+  // digests, and sizes; a partial payload must not render as a proof.
+  const complete =
+    Boolean(goldenVerilog && gateVerilog && goldenSha256 && gateSha256) &&
+    goldenSizeBytes !== null &&
+    gateSizeBytes !== null
   const rawStatus = textValue(source.status, '').trim().toLowerCase()
   const status =
-    rawStatus === 'proven'
+    rawStatus === 'proven' && complete
       ? ('proven' as const)
       : rawStatus === 'incomplete'
         ? ('incomplete' as const)
@@ -872,12 +885,6 @@ export function lecInsights(value: unknown): StepDashboardLecInsights | null {
     status === 'proven' ? 'good' : status === 'incomplete' ? 'bad' : 'neutral'
 
   const metrics: StepDashboardSynthesisValue[] = []
-  const goldenVerilog = textValue(source.golden_verilog, '')
-  const gateVerilog = textValue(source.gate_verilog, '')
-  const goldenSha256 = textValue(source.golden_sha256, '')
-  const gateSha256 = textValue(source.gate_sha256, '')
-  const goldenSizeBytes = finiteNumber(source.golden_size_bytes)
-  const gateSizeBytes = finiteNumber(source.gate_size_bytes)
   if (goldenVerilog)
     metrics.push({
       id: 'lec-golden-netlist',

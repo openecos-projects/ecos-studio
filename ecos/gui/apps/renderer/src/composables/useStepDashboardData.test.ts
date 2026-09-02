@@ -211,6 +211,56 @@ describe('useStepDashboardData cache', () => {
     expect(testState.getWorkspaceResourceIndexApi).toHaveBeenCalledTimes(2)
   })
 
+  it('loads the indexed LEC result JSON into the equivalence insights', async () => {
+    const lecIndex = {
+      flow: {
+        steps: [
+          {
+            name: 'postRouteLec',
+            tool: 'yosys_lec',
+            directory: '/projects/gcd/ws_0004/postRouteLec_yosys_lec',
+            resources: {
+              feature: {},
+              output: {
+                result: {
+                  exists: true,
+                  path: '/projects/gcd/ws_0004/postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json',
+                },
+              },
+              report: {},
+            },
+          },
+        ],
+      },
+    }
+    testState.route.params.step = 'postRouteLec'
+    testState.route.path = '/workspace/postRouteLec'
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue(lecIndex)
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({ info: {} })
+    testState.readOptionalProjectTextFile.mockImplementation(async (path: string) =>
+      path.endsWith('_result.json')
+        ? JSON.stringify({
+            status: 'proven',
+            golden_verilog: '/projects/gcd/ws_0004/Synthesis_yosys/output/gcd_golden.v',
+            gate_verilog: '/projects/gcd/ws_0004/filler_ecc/output/gcd_filler.v.gz',
+            golden_sha256: 'a'.repeat(64),
+            gate_sha256: 'b'.repeat(64),
+            golden_size_bytes: 512,
+            gate_size_bytes: 2048,
+          })
+        : '{}',
+    )
+
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => {
+      expect(dashboard.data.value?.lecInsights?.status).toBe('proven')
+    })
+    expect(dashboard.data.value?.lecInsights?.tone).toBe('good')
+    expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith(
+      expect.stringContaining('gcd_postRouteLec_result.json'),
+    )
+  })
+
   it("loads this step's own congestion maps for the Place dashboard", async () => {
     const placeRoot = '/projects/gcd/ws_0004/place_dreamplace'
     const placeIndex = {
