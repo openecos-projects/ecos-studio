@@ -315,7 +315,6 @@ const {
   runtimeBackendConnecting,
   runtimeBackendTitle,
   runtimeBackendSubtitle,
-  waitForRuntimeOperation,
 } = useWorkspace()
 const { runAllFlow } = useFlowRunner()
 const { loadPdks, pdkNameDialogVisible, pdkNameDraft, confirmPdkName, cancelPdkName } =
@@ -679,6 +678,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
         )
         await writeQuickStartRunRecord(api, workspacePath, {
           project: { name: project.name, root: project.root },
+          schema_version: 'ecos.quick_start.run.v1',
           snapshot: {
             flow: createdConfig.flow_config,
             resources: input.resources,
@@ -719,22 +719,6 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
           started_at: new Date().toISOString(),
           status: 'flow_running',
         })
-        if (typeof flowResult.operationId === 'string') {
-          void waitForRuntimeOperation(flowResult.operationId)
-            .then(() =>
-              writeQuickStartRunRecord(api, input.workspace.path, {
-                completed_at: new Date().toISOString(),
-                status: 'flow_completed',
-              }),
-            )
-            .catch((error: unknown) =>
-              writeQuickStartRunRecord(api, input.workspace.path, {
-                error: error instanceof Error ? error.message : String(error),
-                failed_at: new Date().toISOString(),
-                status: 'flow_failed',
-              }),
-            )
-        }
         return flowResult
       },
     }

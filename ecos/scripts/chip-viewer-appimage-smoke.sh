@@ -12,6 +12,8 @@ REQUIRED_ENTRIES=(
   "resources/binaries/chip-viewer-native"
   "resources/binaries/ecc"
   "resources/binaries/sizer/bin/Sizer"
+  "resources/binaries/sizer/libexec/Sizer"
+  "resources/binaries/sizer/lib/ld-linux-x86-64.so.2"
   "resources/binaries/sizer/src/sizer_os.tcl"
   "resources/binaries/_internal/ecc_tools_bin"
   "resources/binaries/_internal/ecc_tools_bin/lib"
@@ -20,7 +22,7 @@ REQUIRED_ENTRIES=(
   "resources/binaries/_internal/ecc_tools_bin/lib/libidb.so"
   "resources/binaries/_internal/dreamplace/Params.py"
   "resources/binaries/_internal/dreamplace/Placer.py"
-  "resources/binaries/_internal/dreamplace/ops/place_io/place_io_cpp.cpython-311-x86_64-linux-gnu.so"
+  "resources/binaries/_internal/dreamplace/ops/rc_timing/rc_timing_cpp.cpython-311-x86_64-linux-gnu.so"
   "resources/binaries/_internal/torch/lib/libtorch.so"
 )
 

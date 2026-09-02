@@ -568,19 +568,22 @@ def _keyword_operation_choice(
 ) -> str | None:
     text = message.casefold()
     if mode == "workspace":
+        parameter_keys = (
+            "parameter",
+            "参数",
+            "density",
+            "overflow",
+            "fanout",
+            "utilization",
+            "utilitization",
+        )
+        save_only_keys = ("save only", "only save", "without running", "仅保存", "只保存")
+        if any(key in text for key in parameter_keys) and any(
+            key in text for key in save_only_keys
+        ):
+            return "parameter"
         candidates: tuple[tuple[str, tuple[str, ...]], ...] = (
-            (
-                "parameter",
-                (
-                    "parameter",
-                    "参数",
-                    "density",
-                    "overflow",
-                    "fanout",
-                    "utilization",
-                    "utilitization",
-                ),
-            ),
+            ("parameter", parameter_keys),
             ("1", ("rerun", "重跑", "re-run", "re run")),
             ("2", ("continue", "继续", "unfinished")),
             (

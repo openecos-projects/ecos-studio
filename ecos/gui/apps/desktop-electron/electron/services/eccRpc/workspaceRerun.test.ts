@@ -153,6 +153,27 @@ describe('prepareWorkspaceRerun', () => {
     })
   })
 
+  it('replaces an inherited rerun owner marker in the isolated target', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const sourceOwner = 'source-rerun-owner'
+    await writeFile(join(source, '.flow_agent_workspace_rerun_owner'), sourceOwner)
+    const contract = contractFor(source, flow, artifact)
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    await expect(
+      readFile(join(source, '.flow_agent_workspace_rerun_owner'), 'utf8'),
+    ).resolves.toBe(sourceOwner)
+    await expect(
+      readFile(
+        join(contract.target_workspace, '.flow_agent_workspace_rerun_owner'),
+        'utf8',
+      ),
+    ).resolves.not.toBe(sourceOwner)
+  })
+
   it('preserves the predecessor checkpoint and empties the rerun suffix', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)

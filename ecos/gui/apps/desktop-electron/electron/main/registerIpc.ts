@@ -112,6 +112,7 @@ import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
 } from '../services/eccRpc/workspaceRerun'
+import { reconcileQuickStartRunReceipt } from '../services/eccRpc/quickStartRunReceipt'
 import type { QuickStartBuiltinResources } from '../services/quickStartResourceService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
@@ -892,6 +893,11 @@ export function registerIpc(
     designTool: DesignTool,
     payload: EccRuntimeEvent,
   ): void => {
+    if (designTool === 'backend') {
+      void reconcileQuickStartRunReceipt(payload).catch((error: unknown) => {
+        console.warn('Failed to reconcile Quick Start run receipt:', error)
+      })
+    }
     const workspaceHandle = readWorkspaceHandleFromEvent(payload)
     if (workspaceHandle) {
       const subscription = workspaceHandleSubscriptions.get(workspaceHandle)

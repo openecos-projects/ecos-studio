@@ -79,7 +79,16 @@ def test_knowledge_question_reports_local_observable_work_in_one_turn(
     }
 
 
-def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "natural_language_request",
+    (
+        "lower target density",
+        "Update place.target_density to 0.25 and save only. Do not run or rerun the flow.",
+    ),
+)
+def test_operation_keyword_routes_parameter_nl_without_codex(
+    tmp_path: Path, natural_language_request: str
+) -> None:
     workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []
     parser_contexts: list[dict[str, object]] = []
@@ -105,11 +114,11 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
-    _send(provider, session_id, "lower target density")
+    _send(provider, session_id, natural_language_request)
 
     assert operation_contexts == []
     assert provider.sessions[session_id].phase == "workspace_parameter_confirmation"
-    assert parser_contexts[0]["natural_language_request"] == "lower target density"
+    assert parser_contexts[0]["natural_language_request"] == natural_language_request
     assert _last_event(events, "contract")["contract"]["presentation"] == (
         "workspace_parameter_update"
     )

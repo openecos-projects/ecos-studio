@@ -162,12 +162,26 @@ describe('quick start resources', () => {
     const startFlowStart = source.indexOf('startFlow: async', handoffStart)
     const hostEnd = source.indexOf('await runQuickStartWorkflow', startFlowStart)
 
-    expect(source.slice(createWorkspaceStart, handoffStart)).toContain(
-      'writeQuickStartRunRecord(api, workspacePath',
-    )
+    const createWorkspaceSource = source.slice(createWorkspaceStart, handoffStart)
+    expect(createWorkspaceSource).toContain('writeQuickStartRunRecord(api, workspacePath')
+    expect(createWorkspaceSource).toContain("schema_version: 'ecos.quick_start.run.v1'")
     expect(source.slice(startFlowStart, hostEnd)).toContain(
       'writeQuickStartRunRecord(api, input.workspace.path',
     )
     expect(source.slice(handoffStart, startFlowStart)).not.toContain("quickStart: '1'")
+  })
+
+  it('leaves Quick Start terminal receipt reconciliation to the Electron runtime path', () => {
+    const startFlowStart = source.indexOf('startFlow: async')
+    const hostEnd = source.indexOf('await runQuickStartWorkflow', startFlowStart)
+    const startFlowSource = source.slice(startFlowStart, hostEnd)
+
+    expect(startFlowSource).toContain(
+      'writeQuickStartRunRecord(api, input.workspace.path',
+    )
+    expect(startFlowSource).toContain("status: 'flow_running'")
+    expect(startFlowSource).not.toContain('waitForRuntimeOperation')
+    expect(startFlowSource).not.toContain("status: 'flow_completed'")
+    expect(startFlowSource).not.toContain("status: 'flow_failed'")
   })
 })

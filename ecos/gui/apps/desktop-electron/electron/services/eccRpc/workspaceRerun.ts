@@ -164,6 +164,7 @@ export async function prepareWorkspaceRerun(
   try {
     await cp(verified.sourceWorkspace, stagedWorkspace, {
       errorOnExist: true,
+      filter: (source) => source !== join(verified.sourceWorkspace, OWNER_MARKER),
       force: false,
       recursive: true,
     })

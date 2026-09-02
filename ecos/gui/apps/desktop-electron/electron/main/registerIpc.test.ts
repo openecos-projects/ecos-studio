@@ -88,6 +88,12 @@ vi.mock('../services/eccRpc/workspaceRerun', () => ({
   prepareWorkspaceRerun: prepareWorkspaceRerunMock,
 }))
 
+const reconcileQuickStartRunReceiptMock = vi.hoisted(() => vi.fn())
+
+vi.mock('../services/eccRpc/quickStartRunReceipt', () => ({
+  reconcileQuickStartRunReceipt: reconcileQuickStartRunReceiptMock,
+}))
+
 import { registerIpc, type DesktopBridgeServices } from './registerIpc'
 import { workspaceWindowRegistry } from '../services/workspaceWindowRegistry'
 
@@ -283,6 +289,8 @@ describe('registerIpc', () => {
     getAllWindows.mockReset()
     getAllWindows.mockReturnValue([])
     electronLogger.warn.mockReset()
+    reconcileQuickStartRunReceiptMock.mockReset()
+    reconcileQuickStartRunReceiptMock.mockResolvedValue(false)
     openExternal.mockReset()
     openPath.mockReset()
     executeWorkspaceRerunMock.mockReset()
@@ -2139,6 +2147,44 @@ describe('registerIpc', () => {
     })
     expect(otherSend).not.toHaveBeenCalled()
     expect(getAllWindows).not.toHaveBeenCalled()
+  })
+
+  it('reconciles Quick Start receipts from backend runtime events while preserving delivery', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+      { sender },
+      { directory: '/work/demo' },
+    )
+
+    const payload: EccRuntimeEvent = {
+      event: {
+        eventId: 'evt-1',
+        kind: 'flow',
+        operationId: 'op-1',
+        origin: 'gui',
+        payload: {},
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.completed',
+        workspaceId: 'workspace-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+    }
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.(payload)
+
+    expect(reconcileQuickStartRunReceiptMock).toHaveBeenCalledWith(payload)
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, payload)
   })
 
   it('routes directory-scoped runtime.exited only to the matching workspace window', async () => {
