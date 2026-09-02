@@ -1,3 +1,5 @@
+import { ENGINEERING_SNAPSHOT_MAX_BYTES } from '@ecos-studio/shared'
+
 const HEADER_SEPARATOR = Buffer.from('\r\n\r\n', 'ascii')
 const CONTENT_LENGTH_PATTERN = /^Content-Length:\s*(\d+)$/i
 const CONTENT_LENGTH_PREFIX = Buffer.from('Content-Length:', 'ascii')
@@ -94,6 +96,11 @@ export class ContentLengthDecoder {
     const value = Number(match[1])
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new TransportError(`Invalid Content-Length value: ${match[1]}`)
+    }
+    if (value > ENGINEERING_SNAPSHOT_MAX_BYTES) {
+      throw new TransportError(
+        `Content-Length ${value} exceeds ${ENGINEERING_SNAPSHOT_MAX_BYTES} bytes.`,
+      )
     }
 
     return value

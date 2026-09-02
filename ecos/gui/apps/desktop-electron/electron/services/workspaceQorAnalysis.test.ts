@@ -42,12 +42,14 @@ function metricText(value: number): string {
 function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
   const metric = JSON.parse(metricText(metricValue)).metrics[0]
   return {
+    analysis: { steps: [] },
     artifacts: [],
     checklist: {},
     flow: { steps: [{ name: 'Route', state: 'Success' }] },
     metrics: [metric],
     parameters: {},
     qorAssessment: {
+      status: 'ready',
       metrics: [metric],
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [
@@ -139,12 +141,14 @@ describe('analyzeWorkspaceQor', () => {
   it('restores step metrics directly from an authoritative snapshot', () => {
     const metric = JSON.parse(metricText(5000)).metrics[0]
     const snapshot: EccEngineeringSnapshot = {
+      analysis: { steps: [] },
       artifacts: [],
       checklist: {},
       flow: { steps: [{ name: 'CustomSignoff', state: 'Success' }] },
       metrics: [metric],
       parameters: {},
       qorAssessment: {
+        status: 'ready',
         metrics: [metric],
         score: { gate: 'pass', threshold: 60, value: 73.5 },
         steps: [

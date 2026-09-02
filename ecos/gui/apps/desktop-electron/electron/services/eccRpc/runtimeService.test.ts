@@ -359,6 +359,7 @@ describe('EccRpcRuntimeService pool', () => {
     const pool = createPool()
     const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
     pool.clientFor('/work/demo').responses.push({
+      schemaVersion: 1,
       artifacts: [],
       checklist: {},
       flow: { steps: [] },
@@ -392,6 +393,7 @@ describe('EccRpcRuntimeService pool', () => {
       { directory: '/work/idle', workspaceId: 'id-/work/idle' },
       { recovered: [] },
       {
+        schemaVersion: 1,
         artifacts: [],
         checklist: {},
         flow: { steps: [] },
@@ -424,6 +426,7 @@ describe('EccRpcRuntimeService pool', () => {
       directory: workspaceDirectory,
     })
     pool.clientFor(workspaceDirectory).responses.push({
+      schemaVersion: 1,
       artifacts: [
         {
           artifactId: 'artifact-1',
@@ -445,6 +448,7 @@ describe('EccRpcRuntimeService pool', () => {
     expect(new TextDecoder().decode(chunk.data)).toBe('cde')
     expect(chunk).toMatchObject({ eof: false, nextOffset: 5, sizeBytes: 6 })
     pool.clientFor(workspaceDirectory).responses.push({
+      schemaVersion: 1,
       artifacts: [
         {
           artifactId: 'artifact-1',

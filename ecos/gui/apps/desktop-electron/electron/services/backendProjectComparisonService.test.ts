@@ -64,18 +64,30 @@ function engineeringSnapshot(
 ): EccEngineeringSnapshot {
   const value = workspacePath.endsWith('ws_1') ? 120 : 100
   const metric = {
-    direction: 'lower_is_better',
+    analysis_group: 'route',
+    category: 'routability_physical' as const,
+    confidence: 'high' as const,
+    corner: null,
+    corner_context: null,
+    direction: 'lower_is_better' as const,
     display_name: 'Wire length',
     id: 'wire_length',
+    project_role: 'final' as const,
+    rating: { gate: false, score: true, trend: true },
+    scope: 'route',
+    source: { kind: 'feature', path: 'feature/Route.step.json', selector: '/wire' },
+    step_role: 'primary' as const,
     value,
   }
   return {
+    analysis: { steps: [] },
     artifacts: [],
     checklist: {},
     flow: { steps: [{ name: step, state: 'Success' }] },
     metrics: [metric],
     parameters: {},
     qorAssessment: {
+      status: 'ready',
       metrics: [metric],
       score: { gate: 'pass', threshold: 60, value: 80 - value / 10 },
       steps: [

@@ -38,6 +38,7 @@ function resourceIndex(): WorkspaceResourceIndex {
 
 function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
   return {
+    analysis: { steps: [] },
     artifacts: [],
     checklist: { checklist: [] },
     flow: {
@@ -54,6 +55,7 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
     metrics: [],
     parameters: index.parameters ?? {},
     qorAssessment: {
+      status: 'ready',
       metrics: [],
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [],

@@ -2,8 +2,8 @@ import type {
   EccArtifactChunk,
   EccArtifactOpenRequest,
   EccArtifactReadRequest,
-  EccArtifactRef,
   EccEngineeringSnapshot,
+  EccPersistedEngineeringSnapshot,
   EccFlowRunRequest,
   EccFlowRunResult,
   EccFlowRunStepRequest,
@@ -46,6 +46,7 @@ import type {
   EccWorkspaceUpdateRequest,
   EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
+import { validateEngineeringSnapshot } from '@ecos-studio/shared'
 import { open, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -62,26 +63,6 @@ import {
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
-
-type RawSnapshot = Omit<EccEngineeringSnapshot, 'artifacts'> & {
-  artifacts: Array<EccArtifactRef & { reference: string; sizeBytes: number }>
-}
-
-function isRawSnapshot(value: unknown): value is RawSnapshot {
-  if (typeof value !== 'object' || value === null) return false
-  const artifacts = (value as { artifacts?: unknown }).artifacts
-  return (
-    Array.isArray(artifacts) &&
-    artifacts.every(
-      (artifact) =>
-        typeof artifact === 'object' &&
-        artifact !== null &&
-        typeof (artifact as { artifactId?: unknown }).artifactId === 'string' &&
-        typeof (artifact as { reference?: unknown }).reference === 'string' &&
-        Number.isSafeInteger((artifact as { sizeBytes?: unknown }).sizeBytes),
-    )
-  )
-}
 
 export interface EccRpcRuntimeServiceOptions {
   createSidecar(
@@ -422,13 +403,17 @@ export class EccRpcRuntimeService {
     return { opened: true }
   }
 
-  private async rawEngineeringSnapshot(workspaceHandle: string): Promise<RawSnapshot> {
+  private async rawEngineeringSnapshot(
+    workspaceHandle: string,
+  ): Promise<EccPersistedEngineeringSnapshot> {
     const snapshot = await this.runtimeForHandle(workspaceHandle).engineeringSnapshot({
       workspaceHandle,
     })
-    if (!isRawSnapshot(snapshot))
-      throw new Error('ECC returned an invalid Engineering Snapshot')
-    return snapshot
+    const validated = validateEngineeringSnapshot(snapshot)
+    if (!validated.ok) {
+      throw new Error(validated.issue.code)
+    }
+    return validated.snapshot
   }
 
   private async resolveArtifact(
@@ -439,6 +424,12 @@ export class EccRpcRuntimeService {
       (candidate) => candidate.artifactId === request.artifactId,
     )
     if (!artifact) throw new Error(`Artifact not found: ${request.artifactId}`)
+    if (
+      typeof artifact.sizeBytes !== 'number' ||
+      !Number.isSafeInteger(artifact.sizeBytes)
+    ) {
+      throw new Error('ENGINEERING_ARTIFACT_INVALID')
+    }
     const root = await realpath(this.requireDirectory(request.workspaceHandle))
     const path = await realpath(resolve(root, artifact.reference))
     if (!isPathWithinRoot(path, root))

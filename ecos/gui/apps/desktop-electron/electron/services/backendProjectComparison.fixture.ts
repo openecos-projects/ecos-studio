@@ -3,10 +3,12 @@ import {
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManifestFlowSteps,
   type DesktopProjectManagementWorkspaceTextsResult,
-  type EccEngineeringSnapshot,
+  type EccEngineeringMetric,
+  type EccPersistedEngineeringSnapshot,
   type ProjectManifest,
   type ProjectManifestFlowStep,
 } from '@ecos-studio/shared'
+import { createHash } from 'node:crypto'
 
 const metricIds: Partial<Record<ProjectManifestFlowStep, string[]>> = {
   Synth: ['synthesis_cell_area', 'runtime_seconds', 'peak_memory_mb'],
@@ -26,7 +28,7 @@ const metricIds: Partial<Record<ProjectManifestFlowStep, string[]>> = {
 
 export interface RepresentativeProjectComparisonFixture {
   manifest: ProjectManifest
-  engineeringSnapshots: Record<string, EccEngineeringSnapshot>
+  engineeringSnapshots: Record<string, EccPersistedEngineeringSnapshot>
   workspaceTexts: Record<string, DesktopProjectManagementWorkspaceTextsResult>
 }
 
@@ -86,18 +88,55 @@ export function representativeProjectComparisonFixture(
   }
 }
 
-function engineeringSnapshot(workspaceId: string, score: number): EccEngineeringSnapshot {
-  const metrics = projectManifestFlowSteps.flatMap((step, stepIndex) =>
-    stepMetrics(step, stepIndex, score > 80).map((metric) => ({
-      id: metric.id,
-      display_name: metric.display_name,
-      value: metric.value,
-      unit: metric.unit,
-      direction: metric.direction,
+function engineeringSnapshot(
+  workspaceId: string,
+  score: number,
+): EccPersistedEngineeringSnapshot {
+  const texts = analysisTexts(score > 80 ? 1 : 0).texts
+  const artifacts: EccPersistedEngineeringSnapshot['artifacts'] = []
+  const analysisFile = (stepId: string, kind: string, reference: string) => {
+    const text = texts[reference]!
+    const artifactId = `artifact-${createHash('sha256')
+      .update(`${workspaceId}\0${reference}`)
+      .digest('hex')
+      .slice(0, 32)}`
+    artifacts.push({
+      artifactId,
+      availability: 'available',
+      kind,
+      name: reference.split('/').at(-1)!,
+      reference,
+      sha256: createHash('sha256').update(text).digest('hex'),
+      sizeBytes: Buffer.byteLength(text),
+      stepId,
+    })
+    return { artifactId, status: 'available' as const, data: JSON.parse(text) }
+  }
+  const analysis = {
+    steps: projectManagementWorkspaceStepAnalysisSpecs.map((spec, order) => ({
+      stepId: spec.step,
+      toolId: spec.metricsPath.split('/')[0]!.split('_').at(-1)!,
+      order,
+      flowState: 'Success',
+      metrics: analysisFile(spec.step, 'qor_metrics', spec.metricsPath),
+      summary: analysisFile(spec.step, 'qor_summary', spec.summaryPath),
+      hotspots: analysisFile(spec.step, 'qor_hotspots', spec.hotspotsPath),
+      timingIssues:
+        spec.step === 'STA'
+          ? analysisFile(
+              spec.step,
+              'sta_timing_issues',
+              projectManagementStaTimingIssuesPath,
+            )
+          : null,
     })),
+  }
+  const metrics = projectManifestFlowSteps.flatMap((step, stepIndex) =>
+    stepMetrics(step, stepIndex, score > 80),
   )
   return {
-    artifacts: [],
+    analysis,
+    artifacts,
     checklist: {},
     flow: {
       steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
@@ -105,6 +144,7 @@ function engineeringSnapshot(workspaceId: string, score: number): EccEngineering
     metrics,
     parameters: {},
     qorAssessment: {
+      status: 'ready',
       metrics,
       score: { gate: 'pass', threshold: 60, value: score },
       steps: projectManifestFlowSteps.map((stepId, order) => {
@@ -202,7 +242,7 @@ function stepMetrics(
   step: ProjectManifestFlowStep,
   stepIndex: number,
   candidate: boolean,
-) {
+): EccEngineeringMetric[] {
   const preferred = metricIds[step] ?? []
   return Array.from({ length: metricCount(stepIndex) }, (_, index) => {
     const id = preferred[index] ?? `fixture_${step.toLowerCase()}_${index}`

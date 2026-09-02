@@ -138,7 +138,14 @@ export type {
   EccArtifactOpenRequest,
   EccArtifactReadRequest,
   EccArtifactRef,
+  EccEngineeringAnalysis,
+  EccEngineeringAnalysisArtifactRef,
+  EccEngineeringAnalysisFile,
+  EccEngineeringAnalysisFileStatus,
+  EccEngineeringAnalysisStep,
+  EccEngineeringMetric,
   EccEngineeringSnapshot,
+  EccPersistedEngineeringSnapshot,
   EccRpcHelloResult,
   EccRpcPingResult,
   EccRpcShutdownResult,
@@ -183,6 +190,14 @@ export type {
   EccWorkspaceUpdateResult,
   EccWorkspaceRuntimeSnapshot,
 } from './contracts/eccRuntime.ts'
+export {
+  ENGINEERING_SNAPSHOT_MAX_BYTES,
+  parseEngineeringSnapshotJson,
+  validateEngineeringSnapshot,
+  type EngineeringSnapshotIssue,
+  type EngineeringSnapshotSections,
+  type EngineeringSnapshotValidationResult,
+} from './utils/engineeringSnapshot.ts'
 export type {
   ResourceAction,
   ResourceImportLocalRequest,

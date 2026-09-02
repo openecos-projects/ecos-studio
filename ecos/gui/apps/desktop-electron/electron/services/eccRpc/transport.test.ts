@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ENGINEERING_SNAPSHOT_MAX_BYTES } from '@ecos-studio/shared'
 
 import {
   ContentLengthDecoder,
@@ -59,6 +60,16 @@ describe('ECC RPC stdio transport', () => {
 
     expect(() => decoder.feed('Content-Length: nope\r\n\r\nhello')).toThrow(
       TransportError,
+    )
+  })
+
+  it('rejects an oversized protocol body before buffering it', () => {
+    const decoder = new ContentLengthDecoder()
+
+    expect(() =>
+      decoder.feed(`Content-Length: ${ENGINEERING_SNAPSHOT_MAX_BYTES + 1}\r\n\r\n`),
+    ).toThrow(
+      `Content-Length ${ENGINEERING_SNAPSHOT_MAX_BYTES + 1} exceeds ${ENGINEERING_SNAPSHOT_MAX_BYTES} bytes.`,
     )
   })
 

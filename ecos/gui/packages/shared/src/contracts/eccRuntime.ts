@@ -346,17 +346,82 @@ export interface EccArtifactRef {
   stepId?: string
 }
 
+export interface EccEngineeringAnalysisArtifactRef extends EccArtifactRef {
+  reference: string
+}
+
+export interface EccEngineeringMetric extends Record<string, unknown> {
+  id: string
+  display_name: string
+  value: number
+  unit?: string | null
+  category:
+    | 'timing'
+    | 'power_integrity'
+    | 'routability_physical'
+    | 'area_cost'
+    | 'clock_robustness_dfm'
+    | 'runtime'
+  direction: 'higher_is_better' | 'lower_is_better' | 'target_range' | 'trend_only'
+  scope: string
+  corner: string | null
+  corner_context?: Record<string, unknown> | null
+  analysis_group: string
+  rating: { gate: boolean; score: boolean; trend: boolean }
+  project_role: 'final' | 'trend' | 'gate' | 'none'
+  step_role: 'primary' | 'secondary' | 'detail' | 'hidden'
+  confidence: 'high' | 'medium' | 'low'
+  source: Record<string, unknown>
+}
+
+export type EccEngineeringAnalysisFileStatus =
+  | 'available'
+  | 'missing'
+  | 'invalid'
+  | 'unsupported'
+  | 'unsafe'
+
+export interface EccEngineeringAnalysisFile {
+  artifactId: string
+  data: Record<string, unknown> | null
+  reasonCode?: string
+  status: EccEngineeringAnalysisFileStatus
+}
+
+export interface EccEngineeringAnalysisStep {
+  flowState: string
+  hotspots: EccEngineeringAnalysisFile
+  metrics: EccEngineeringAnalysisFile
+  order: number
+  stepId: string
+  summary: EccEngineeringAnalysisFile
+  timingIssues: EccEngineeringAnalysisFile | null
+  toolId: string
+}
+
+export interface EccEngineeringAnalysis {
+  steps: EccEngineeringAnalysisStep[]
+}
+
 export interface EccEngineeringSnapshot {
+  analysis: EccEngineeringAnalysis
   artifacts: EccArtifactRef[]
   checklist: Record<string, unknown>
   flow: Record<string, unknown>
-  metrics: unknown[]
+  metrics: EccEngineeringMetric[]
   parameters: Record<string, unknown>
   qorAssessment: Record<string, unknown>
   schemaVersion: 1
   signoffAssessment: EccWorkspaceInspectSignoffResult
   workspaceId: string
   workspaceRevision: number
+}
+
+export type EccPersistedEngineeringSnapshot = Omit<
+  EccEngineeringSnapshot,
+  'artifacts'
+> & {
+  artifacts: EccEngineeringAnalysisArtifactRef[]
 }
 
 export interface EccArtifactReadRequest extends EccWorkspaceHandleRequest {
