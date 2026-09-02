@@ -125,6 +125,7 @@ function registerHandlers(
       disposeWindow: vi.fn(),
       getComparison: vi.fn(),
       getExecutionSnapshot: vi.fn(),
+      getStepFindings: vi.fn(),
       invalidateExecution: vi.fn(),
       refreshComparison: vi.fn(),
       selectProject: vi.fn(),
@@ -415,6 +416,37 @@ describe('registerIpc', () => {
     expect(
       services.backendProjectComparisonService.getExecutionSnapshot,
     ).toHaveBeenCalledWith(7, 'context-1')
+  })
+
+  it('queries Step Findings without accepting a Renderer path', async () => {
+    const { handlers, services } = registerHandlers()
+    const request = {
+      projectComparisonContextId: 'context-1',
+      projectWorkspaceId: 'ws_1',
+      step: 'Route',
+    }
+    const result = { ok: false, code: 'FINDINGS_REFERENCE_MISSING' }
+    services.backendProjectComparisonService.getStepFindings.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonGetStepFindings)?.(
+        { sender: { id: 7 } },
+        request,
+      ),
+    ).resolves.toEqual(result)
+    expect(services.backendProjectComparisonService.getStepFindings).toHaveBeenCalledWith(
+      7,
+      request,
+    )
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonGetStepFindings)?.(
+        { sender: { id: 7 } },
+        { ...request, projectWorkspaceId: undefined, workspacePath: '/work/ws_1' },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { message: 'Backend project Findings query is invalid.' },
+    })
   })
 
   it('requires native confirmation before approving external frontend roots', async () => {

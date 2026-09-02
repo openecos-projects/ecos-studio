@@ -11,6 +11,7 @@ import {
   type BackendProjectComparisonQueryResult,
   type BackendProjectComparisonSelectResult,
   type BackendProjectExecutionSnapshotResult,
+  type BackendProjectStepFindingsResult,
   type EccPersistedEngineeringSnapshot,
   type EccRuntimeOperation,
   type ProjectAnalysisSnapshot,
@@ -28,7 +29,10 @@ import { buildProjectQorTrendSummary } from './qorAnalysis'
 import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { isPathWithinRoot } from './pathScope'
-import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
+import type {
+  ProjectEngineeringSnapshotReadResult,
+  VerifiedProjectArtifactsReadResult,
+} from './projectManagementReadService'
 import {
   ProjectComparisonFileWatcher,
   type ProjectComparisonFileWatcherCallbacks,
@@ -37,6 +41,10 @@ import {
   ProjectExecutionOverlay,
   type CommittedProjectWorkspace,
 } from './projectExecutionOverlay'
+import {
+  ProjectStepFindingsService,
+  type CommittedFindingsWorkspace,
+} from './projectStepFindingsService'
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
@@ -45,6 +53,11 @@ interface ProjectComparisonReader {
     projectRoot: string
     workspacePath: string
   }): Promise<ProjectEngineeringSnapshotReadResult>
+  readVerifiedArtifacts?(request: {
+    projectRoot: string
+    workspacePath: string
+    artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
+  }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
 interface ProjectComparisonContext {
@@ -79,6 +92,7 @@ export class BackendProjectComparisonService {
   private readonly contextsByWindow = new Map<number, ProjectComparisonContext>()
   private readonly listeners = new Set<InvalidationListener>()
   private readonly execution: ProjectExecutionOverlay
+  private readonly findings: ProjectStepFindingsService
 
   constructor(
     private readonly reader: ProjectComparisonReader,
@@ -87,6 +101,11 @@ export class BackendProjectComparisonService {
     activeOperations: () => EccRuntimeOperation[] = () => [],
   ) {
     this.execution = new ProjectExecutionOverlay(activeOperations)
+    this.findings = new ProjectStepFindingsService({
+      readVerifiedArtifacts: (request) =>
+        this.reader.readVerifiedArtifacts?.(request) ??
+        Promise.resolve({ ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }),
+    })
   }
 
   async selectProject(
@@ -97,6 +116,7 @@ export class BackendProjectComparisonService {
     if (previous) {
       this.contextsByWindow.delete(windowId)
       this.execution.unregister(previous.id)
+      this.findings.unregister(previous.id)
       await previous.watcher.close()
     }
     let watcher: ProjectComparisonFileWatcher | null = null
@@ -157,6 +177,7 @@ export class BackendProjectComparisonService {
       }
       this.contextsByWindow.set(windowId, context)
       this.execution.register(windowId, context.id)
+      this.findings.register(windowId, context.id, projectRoot)
       return {
         ok: true,
         projectComparisonContextId: context.id,
@@ -200,6 +221,7 @@ export class BackendProjectComparisonService {
     if (!context) return Promise.resolve({ ok: false, code: 'unknown-context' })
     context.snapshotCache.clear()
     context.generation += 1
+    this.findings.invalidate(context.id, context.generation)
     context.cache = null
     context.inFlight = null
     return this.getComparison(windowId, projectComparisonContextId)
@@ -210,6 +232,17 @@ export class BackendProjectComparisonService {
     projectComparisonContextId: string,
   ): Promise<BackendProjectExecutionSnapshotResult> {
     return Promise.resolve(this.execution.get(windowId, projectComparisonContextId))
+  }
+
+  getStepFindings(
+    windowId: number,
+    request: {
+      projectComparisonContextId: string
+      projectWorkspaceId: string
+      step: string
+    },
+  ): Promise<BackendProjectStepFindingsResult> {
+    return this.findings.get(windowId, request)
   }
 
   invalidateExecution(): void {
@@ -250,6 +283,7 @@ export class BackendProjectComparisonService {
 
   private invalidateContext(context: ProjectComparisonContext): void {
     context.generation += 1
+    this.findings.invalidate(context.id, context.generation)
     context.cache = null
     context.inFlight = null
     const event = {
@@ -272,6 +306,7 @@ export class BackendProjectComparisonService {
     if (!context) return
     this.contextsByWindow.delete(windowId)
     this.execution.unregister(context.id)
+    this.findings.unregister(context.id)
     await context.watcher.close()
   }
 
@@ -280,6 +315,7 @@ export class BackendProjectComparisonService {
     this.contextsByWindow.delete(windowId)
     if (context) {
       this.execution.unregister(context.id)
+      this.findings.unregister(context.id)
       void context.watcher.close()
     }
   }
@@ -536,6 +572,34 @@ export class BackendProjectComparisonService {
         inputs.map((input) => [input.workspaceId, input.stepStatuses]),
       )
       const stepComparisons = buildStepComparisons(manifest, inputs, trend)
+      const analysisByWorkspace = new Map(
+        snapshots.map((snapshot) => [snapshot.workspaceId, snapshot]),
+      )
+      this.findings.commit(
+        context.id,
+        generation,
+        manifest.workspaces.flatMap((workspace) => {
+          const snapshot = context.snapshotCache.get(resolve(workspace.workspace_path))
+          const analysis = analysisByWorkspace.get(workspace.workspace_id)
+          if (!snapshot?.ok || !analysis) return []
+          return [
+            {
+              analysis,
+              comparisonMetrics: Object.fromEntries(
+                stepComparisons.map((comparison) => [
+                  comparison.stepId,
+                  comparison.workspaces.find(
+                    (candidate) => candidate.workspaceId === workspace.workspace_id,
+                  )?.metrics ?? [],
+                ]),
+              ),
+              engineeringSnapshot: snapshot.snapshot,
+              projectWorkspaceId: workspace.workspace_id,
+              workspacePath: workspace.workspace_path,
+            } satisfies CommittedFindingsWorkspace,
+          ]
+        }),
+      )
       const recommendation = selectRecommendation(trend.workspaces)
       const data: BackendProjectComparison = {
         identity: {

@@ -773,4 +773,39 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(source.text()).toBe('QoR metrics: missing')
     expect(source.attributes('title')).toBe('analysis/qor_metrics.json: missing')
   })
+
+  it('uses only verified Findings and labels a same-revision cached result', () => {
+    const details = stepSnapshotFixture({ blockingIssues: [], metrics: [] })
+    const wrapper = mountPanel({
+      findings: {
+        status: 'stale',
+        data: {
+          details,
+          engineeringWorkspaceId: 'engineering-ws-a',
+          projectWorkspaceId: 'ws_a',
+          step: 'Route',
+          workspaceRevision: 4,
+        },
+        issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+      },
+    })
+
+    expect(wrapper.get('.findings-read-status').text()).toContain('Last committed')
+    expect(wrapper.get('.issue-pane').text()).toContain('No findings reported')
+  })
+
+  it('does not fall back to unverified eager detail after a Findings error', () => {
+    const wrapper = mountPanel({
+      findings: {
+        status: 'error',
+        data: null,
+        issue: { code: 'FINDINGS_REFERENCE_MISSING' },
+        projectWorkspaceId: 'ws_a',
+        step: 'Route',
+      },
+    })
+
+    expect(wrapper.get('.findings-read-status').text()).toContain('Findings unavailable')
+    expect(wrapper.get('.issue-pane').text()).toContain('No findings reported')
+  })
 })

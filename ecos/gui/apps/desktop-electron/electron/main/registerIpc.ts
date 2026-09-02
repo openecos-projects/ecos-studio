@@ -199,6 +199,14 @@ export interface DesktopBridgeServices {
       windowId: number,
       contextId: string,
     ): Promise<import('@ecos-studio/shared').BackendProjectExecutionSnapshotResult>
+    getStepFindings(
+      windowId: number,
+      request: {
+        projectComparisonContextId: string
+        projectWorkspaceId: string
+        step: string
+      },
+    ): Promise<import('@ecos-studio/shared').BackendProjectStepFindingsResult>
     refreshComparison(
       windowId: number,
       contextId: string,
@@ -1404,6 +1412,28 @@ export function registerIpc(
       return await services.backendProjectComparisonService.getExecutionSnapshot(
         event.sender.id,
         request.projectComparisonContextId,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.backendProjectComparisonGetStepFindings,
+    async (event, request) => {
+      if (
+        !isRecord(request) ||
+        typeof request.projectComparisonContextId !== 'string' ||
+        typeof request.projectWorkspaceId !== 'string' ||
+        typeof request.step !== 'string'
+      ) {
+        throw new Error('Backend project Findings query is invalid.')
+      }
+      return await services.backendProjectComparisonService.getStepFindings(
+        event.sender.id,
+        {
+          projectComparisonContextId: request.projectComparisonContextId,
+          projectWorkspaceId: request.projectWorkspaceId,
+          step: request.step,
+        },
       )
     },
   )

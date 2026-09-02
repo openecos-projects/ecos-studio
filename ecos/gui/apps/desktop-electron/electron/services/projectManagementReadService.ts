@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   parseEngineeringSnapshotJson,
@@ -18,6 +19,7 @@ const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
 const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
 const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceReadablePaths.length
+export const PROJECT_FINDINGS_ARTIFACT_MAX_BYTES = 1024 * 1024
 
 const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(
   projectManagementWorkspaceReadablePaths,
@@ -28,6 +30,21 @@ class ProjectManagementWorkspacePathError extends Error {}
 export type ProjectEngineeringSnapshotReadResult = EngineeringSnapshotValidationResult & {
   readBytes: number
 }
+
+export type VerifiedProjectArtifactsReadResult =
+  | { ok: true; texts: Record<string, string> }
+  | {
+      ok: false
+      code:
+        | 'FINDINGS_ARTIFACT_HASH_MISMATCH'
+        | 'FINDINGS_ARTIFACT_INVALID_JSON'
+        | 'FINDINGS_ARTIFACT_SIZE_MISMATCH'
+        | 'FINDINGS_ARTIFACT_TOO_LARGE'
+        | 'FINDINGS_REFERENCE_MISSING'
+        | 'FINDINGS_REFERENCE_UNSAFE'
+        | 'FINDINGS_READ_FAILED'
+      reference: string
+    }
 
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
@@ -221,6 +238,41 @@ export class ProjectManagementReadService {
     }
   }
 
+  async readVerifiedArtifacts(request: {
+    projectRoot: string
+    workspacePath: string
+    artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
+  }): Promise<VerifiedProjectArtifactsReadResult> {
+    if (
+      request.artifacts.length < 1 ||
+      request.artifacts.length > 4 ||
+      new Set(request.artifacts.map((artifact) => artifact.reference)).size !==
+        request.artifacts.length
+    ) {
+      return { ok: false, code: 'FINDINGS_REFERENCE_UNSAFE', reference: '' }
+    }
+    try {
+      const project = await this.loadProject(request.projectRoot)
+      if (!project.manifest) {
+        return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
+      }
+      const workspaceRoot = await this.resolveDeclaredWorkspace(
+        project.root,
+        project.manifest.workspaces.map((workspace) => workspace.workspace_path),
+        request.workspacePath,
+      )
+      const texts: Record<string, string> = {}
+      for (const artifact of request.artifacts) {
+        const result = await readVerifiedArtifact(workspaceRoot, artifact)
+        if (!result.ok) return result
+        texts[artifact.reference] = result.text
+      }
+      return { ok: true, texts }
+    } catch {
+      return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
+    }
+  }
+
   private async loadProject(projectRoot: string) {
     const root = await canonicalizeExistingDirectory(projectRoot)
     const content = await readOptionalBoundedTextFile(
@@ -285,6 +337,118 @@ export class ProjectManagementReadService {
       )
     }
     return await readOptionalBoundedTextFile(canonicalPath, maxBytes)
+  }
+}
+
+async function readVerifiedArtifact(
+  workspaceRoot: string,
+  artifact: { reference: string; sha256: string; sizeBytes: number },
+): Promise<
+  { ok: true; text: string } | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
+> {
+  const unsafe = (): Exclude<VerifiedProjectArtifactsReadResult, { ok: true }> => ({
+    ok: false,
+    code: 'FINDINGS_REFERENCE_UNSAFE',
+    reference: artifact.reference,
+  })
+  if (
+    !artifact.reference ||
+    isAbsolute(artifact.reference) ||
+    !Number.isSafeInteger(artifact.sizeBytes) ||
+    artifact.sizeBytes < 0 ||
+    !/^[a-f0-9]{64}$/.test(artifact.sha256)
+  ) {
+    return unsafe()
+  }
+  const candidate = resolve(workspaceRoot, artifact.reference)
+  if (candidate === workspaceRoot || !isPathWithinRoot(candidate, workspaceRoot)) {
+    return unsafe()
+  }
+  let canonicalPath: string
+  try {
+    canonicalPath = await realpath(candidate)
+  } catch (error) {
+    return isNodeErrorWithCode(error, 'ENOENT')
+      ? { ok: false, code: 'FINDINGS_REFERENCE_MISSING', reference: artifact.reference }
+      : { ok: false, code: 'FINDINGS_READ_FAILED', reference: artifact.reference }
+  }
+  if (!isPathWithinRoot(canonicalPath, workspaceRoot)) return unsafe()
+
+  const handle = await open(canonicalPath, 'r')
+  try {
+    const fileStats = await handle.stat()
+    if (!fileStats.isFile()) {
+      return {
+        ok: false,
+        code: 'FINDINGS_REFERENCE_MISSING',
+        reference: artifact.reference,
+      }
+    }
+    if (
+      fileStats.size > PROJECT_FINDINGS_ARTIFACT_MAX_BYTES ||
+      artifact.sizeBytes > PROJECT_FINDINGS_ARTIFACT_MAX_BYTES
+    ) {
+      return {
+        ok: false,
+        code: 'FINDINGS_ARTIFACT_TOO_LARGE',
+        reference: artifact.reference,
+      }
+    }
+    if (fileStats.size !== artifact.sizeBytes) {
+      return {
+        ok: false,
+        code: 'FINDINGS_ARTIFACT_SIZE_MISMATCH',
+        reference: artifact.reference,
+      }
+    }
+    const buffer = Buffer.alloc(artifact.sizeBytes + 1)
+    let offset = 0
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        offset,
+      )
+      if (bytesRead === 0) break
+      offset += bytesRead
+    }
+    if (offset > PROJECT_FINDINGS_ARTIFACT_MAX_BYTES) {
+      return {
+        ok: false,
+        code: 'FINDINGS_ARTIFACT_TOO_LARGE',
+        reference: artifact.reference,
+      }
+    }
+    if (offset !== artifact.sizeBytes) {
+      return {
+        ok: false,
+        code: 'FINDINGS_ARTIFACT_SIZE_MISMATCH',
+        reference: artifact.reference,
+      }
+    }
+    const bytes = buffer.subarray(0, offset)
+    if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) {
+      return {
+        ok: false,
+        code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+        reference: artifact.reference,
+      }
+    }
+    let text: string
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      JSON.parse(text)
+    } catch {
+      return {
+        ok: false,
+        code: 'FINDINGS_ARTIFACT_INVALID_JSON',
+        reference: artifact.reference,
+      }
+    }
+    return { ok: true, text }
+  } finally {
+    await handle.close()
   }
 }
 

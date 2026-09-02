@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   closeProject: vi.fn(),
   getComparison: vi.fn(),
   getExecutionSnapshot: vi.fn(),
+  getStepFindings: vi.fn(),
   onExecutionInvalidated: vi.fn(
     (_listener: (event: BackendProjectExecutionInvalidatedEvent) => void) => () =>
       undefined,
@@ -79,6 +80,10 @@ describe('backendProjectComparisonSession', () => {
       projectComparisonContextId: 'a',
       generation: 0,
       data: { operations: [] },
+    })
+    api.getStepFindings.mockResolvedValue({
+      ok: false,
+      code: 'FINDINGS_REFERENCE_MISSING',
     })
   })
 
@@ -214,4 +219,90 @@ describe('backendProjectComparisonSession', () => {
       projectComparisonContextId: 'a',
     })
   })
+
+  it('discards a late Findings response after a rapid Workspace selection change', async () => {
+    let finishFirst!: (value: unknown) => void
+    api.selectProject.mockResolvedValue({
+      ok: true,
+      projectComparisonContextId: 'a',
+      generation: 0,
+    })
+    api.getComparison.mockResolvedValue(comparison('Project A', 'a'))
+    api.getStepFindings
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(findings('ws_2', 'STA'))
+    const session = useBackendProjectComparisonSession()
+    await session.selectProject('/projects/a')
+
+    const first = session.loadStepFindings('ws_1', 'Route')
+    await session.loadStepFindings('ws_2', 'STA')
+    finishFirst(findings('ws_1', 'Route'))
+    await first
+
+    expect(session.findings).toMatchObject({
+      status: 'ready',
+      data: { projectWorkspaceId: 'ws_2', step: 'STA' },
+    })
+  })
+
+  it('marks a same-revision verified Findings cache as Last committed', async () => {
+    api.selectProject.mockResolvedValue({
+      ok: true,
+      projectComparisonContextId: 'a',
+      generation: 0,
+    })
+    api.getComparison.mockResolvedValue(comparison('Project A', 'a'))
+    api.getStepFindings.mockResolvedValue({
+      ...findings('ws_1', 'Route'),
+      freshness: 'last-committed',
+      issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+    })
+    const session = useBackendProjectComparisonSession()
+    await session.selectProject('/projects/a')
+
+    await session.loadStepFindings('ws_1', 'Route')
+
+    expect(session.findings).toMatchObject({
+      status: 'stale',
+      data: { projectWorkspaceId: 'ws_1', step: 'Route' },
+      issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+    })
+  })
 })
+
+function findings(projectWorkspaceId: string, step: 'Route' | 'STA') {
+  return {
+    ok: true as const,
+    projectComparisonContextId: 'a',
+    generation: 0,
+    freshness: 'current' as const,
+    data: {
+      engineeringWorkspaceId: `engineering-${projectWorkspaceId}`,
+      projectWorkspaceId,
+      step,
+      workspaceRevision: 1,
+      details: {
+        step,
+        flowStatus: 'success' as const,
+        artifactStatus: 'available' as const,
+        summaryArtifactStatus: 'available' as const,
+        hotspotArtifactStatus: 'available' as const,
+        metrics: [],
+        summaryStatus: 'pass' as const,
+        blockingIssues: [],
+        missingMetrics: [],
+        hardGateFailures: [],
+        hotspots: [],
+        details: [],
+        integrityIssues: [],
+        timingIssues: [],
+        timingCoverage: null,
+      },
+    },
+  }
+}

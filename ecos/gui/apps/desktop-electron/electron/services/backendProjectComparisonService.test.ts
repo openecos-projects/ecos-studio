@@ -874,4 +874,197 @@ describe('BackendProjectComparisonService', () => {
     first.service.invalidateWorkspace('/projects/demo/ws_2')
     expect(events).toEqual([{ windowId: 11, generation: 1 }])
   })
+
+  it('lazy-loads only declared Step Findings and keeps same-revision verified cache', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    const readVerifiedArtifacts = vi.fn().mockResolvedValue({ ok: true, texts: {} })
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => JSON.stringify(fixture.manifest),
+        readVerifiedArtifacts,
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+
+    const current = await service.getStepFindings(11, {
+      projectComparisonContextId: selected.projectComparisonContextId,
+      projectWorkspaceId: 'ws_0002',
+      step: 'Route',
+    })
+
+    expect(current).toMatchObject({
+      ok: true,
+      freshness: 'current',
+      data: {
+        engineeringWorkspaceId: fixture.engineeringSnapshots.ws_0002!.workspaceId,
+        projectWorkspaceId: 'ws_0002',
+        step: 'Route',
+        workspaceRevision: 14,
+        details: {
+          metrics: expect.arrayContaining([
+            expect.objectContaining({
+              baselineComparison: expect.objectContaining({ verdict: 'improvement' }),
+            }),
+          ]),
+        },
+      },
+    })
+    expect(
+      readVerifiedArtifacts.mock.calls[0]?.[0].artifacts.map(
+        (artifact: { reference: string }) => artifact.reference,
+      ),
+    ).toEqual([
+      'route_ecc/analysis/qor_metrics.json',
+      'route_ecc/analysis/qor_summary.json',
+      'route_ecc/analysis/qor_hotspots.json',
+    ])
+
+    readVerifiedArtifacts.mockResolvedValueOnce({
+      ok: false,
+      code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+      reference: 'route_ecc/analysis/qor_metrics.json',
+    })
+    await expect(
+      service.getStepFindings(11, {
+        projectComparisonContextId: selected.projectComparisonContextId,
+        projectWorkspaceId: 'ws_0002',
+        step: 'Route',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      freshness: 'last-committed',
+      issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+    })
+
+    fixture.engineeringSnapshots.ws_0002!.workspaceRevision = 15
+    await service.refreshComparison(11, selected.projectComparisonContextId)
+    readVerifiedArtifacts.mockResolvedValueOnce({
+      ok: false,
+      code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+      reference: 'route_ecc/analysis/qor_metrics.json',
+    })
+    await expect(
+      service.getStepFindings(11, {
+        projectComparisonContextId: selected.projectComparisonContextId,
+        projectWorkspaceId: 'ws_0002',
+        step: 'Route',
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+      detail: 'route_ecc/analysis/qor_metrics.json',
+    })
+  })
+
+  it('rejects undeclared Findings and a Snapshot revision changed during the read', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    let finishRead!: (value: { ok: true; texts: {} }) => void
+    const readVerifiedArtifacts = vi.fn(
+      (_request: { artifacts: unknown[] }) =>
+        new Promise<{ ok: true; texts: {} }>((resolveRead) => {
+          finishRead = resolveRead
+        }),
+    )
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => JSON.stringify(fixture.manifest),
+        readVerifiedArtifacts,
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+
+    await expect(
+      service.getStepFindings(11, {
+        projectComparisonContextId: selected.projectComparisonContextId,
+        projectWorkspaceId: 'other',
+        step: 'Route',
+      }),
+    ).resolves.toEqual({ ok: false, code: 'FINDINGS_WORKSPACE_UNAVAILABLE' })
+    await expect(
+      service.getStepFindings(11, {
+        projectComparisonContextId: selected.projectComparisonContextId,
+        projectWorkspaceId: 'ws_0001',
+        step: 'Future',
+      }),
+    ).resolves.toEqual({ ok: false, code: 'FINDINGS_STEP_UNAVAILABLE' })
+
+    const pending = service.getStepFindings(11, {
+      projectComparisonContextId: selected.projectComparisonContextId,
+      projectWorkspaceId: 'ws_0001',
+      step: 'STA',
+    })
+    service.invalidateWorkspace('/projects/gcd/ws_0001')
+    finishRead({ ok: true, texts: {} })
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      code: 'FINDINGS_SNAPSHOT_REVISION_CHANGED',
+    })
+    expect(readVerifiedArtifacts.mock.calls.at(-1)?.[0].artifacts).toHaveLength(4)
+  })
+
+  it('rejects each missing Step Findings declaration without reading another detail', async () => {
+    for (const [stepId, field] of [
+      ['Route', 'metrics'],
+      ['Route', 'summary'],
+      ['Route', 'hotspots'],
+      ['STA', 'timingIssues'],
+    ] as const) {
+      const fixture = representativeProjectComparisonFixture()
+      const analysisStep = fixture.engineeringSnapshots.ws_0001!.analysis.steps.find(
+        (step) => step.stepId === stepId,
+      )!
+      const declared = analysisStep[field]
+      if (!declared) throw new Error(`missing ${stepId} ${field}`)
+      analysisStep[field] = {
+        artifactId: declared.artifactId,
+        data: null,
+        reasonCode: 'ANALYSIS_FILE_MISSING',
+        status: 'missing',
+      }
+      const readVerifiedArtifacts = vi.fn()
+      const service = new BackendProjectComparisonService(
+        {
+          readEngineeringSnapshot: async ({ workspacePath }) =>
+            snapshotResult(
+              fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!,
+            ),
+          readManifest: async () => JSON.stringify(fixture.manifest),
+          readVerifiedArtifacts,
+          resolveProjectRoot: async (path) => path,
+        },
+        watcherHarness().create,
+      )
+      const selected = await service.selectProject(11, {
+        projectRootLocator: '/projects/gcd',
+      })
+      if (!selected.ok) throw new Error('selection failed')
+      await service.getComparison(11, selected.projectComparisonContextId)
+
+      await expect(
+        service.getStepFindings(11, {
+          projectComparisonContextId: selected.projectComparisonContextId,
+          projectWorkspaceId: 'ws_0001',
+          step: stepId,
+        }),
+      ).resolves.toEqual({ ok: false, code: 'FINDINGS_REFERENCE_MISSING' })
+      expect(readVerifiedArtifacts).not.toHaveBeenCalled()
+    }
+  })
 })

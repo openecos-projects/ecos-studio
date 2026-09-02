@@ -29,6 +29,7 @@ export const desktopApiIpcChannels = {
   backendProjectComparisonGetComparison: 'backend-project-comparison:get-comparison',
   backendProjectComparisonGetExecutionSnapshot:
     'backend-project-comparison:get-execution-snapshot',
+  backendProjectComparisonGetStepFindings: 'backend-project-comparison:get-step-findings',
   backendProjectComparisonRefreshComparison:
     'backend-project-comparison:refresh-comparison',
   dialogPickDirectory: 'dialog:pick-directory',

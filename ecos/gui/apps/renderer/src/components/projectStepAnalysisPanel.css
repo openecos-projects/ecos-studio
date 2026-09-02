@@ -12,6 +12,10 @@
   overflow: hidden;
 }
 
+.step-analysis.has-findings-status {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+}
+
 /* Region 1 — flow step rail, badged with the selected workspace issue counts. */
 .step-rail {
   display: flex;
@@ -507,6 +511,26 @@
   display: grid;
   min-height: 0;
   grid-template-columns: minmax(260px, 0.4fr) minmax(0, 1fr);
+}
+
+.findings-read-status {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  font-size: 12px;
+}
+
+.findings-read-status.stale {
+  color: var(--warning-color);
+}
+
+.findings-read-status.error {
+  color: var(--danger-color);
 }
 
 .issue-pane {

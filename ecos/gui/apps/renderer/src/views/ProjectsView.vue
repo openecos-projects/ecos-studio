@@ -470,6 +470,7 @@
               @refresh="projectComparisonSession.refresh()"
             />
             <ProjectAnalysisPanel
+              :findings="projectComparisonSession.findings"
               :project="selectedProject"
               :selected-analysis-tab="selectedAnalysisTab"
               :selected-step="selectedStep"
@@ -906,6 +907,20 @@ watch(
   () => [route.query.projectRoot, route.query.workspaceId] as const,
   () => {
     void applyRouteProjectFocus()
+  },
+)
+
+watch(
+  [
+    selectedAnalysisTab,
+    selectedWorkspaceId,
+    selectedStep,
+    () => projectComparisonSession.generation,
+  ],
+  ([tab, workspaceId, step]) => {
+    if (tab === 'step' && workspaceId) {
+      void projectComparisonSession.loadStepFindings(workspaceId, step)
+    }
   },
 )
 

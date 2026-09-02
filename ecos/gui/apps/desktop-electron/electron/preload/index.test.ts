@@ -43,6 +43,7 @@ async function loadDesktopBridge() {
       selectProject(request: unknown): Promise<unknown>
       getComparison(request: unknown): Promise<unknown>
       getExecutionSnapshot(request: unknown): Promise<unknown>
+      getStepFindings(request: unknown): Promise<unknown>
       refreshComparison(request: unknown): Promise<unknown>
       onInvalidated(listener: (event: unknown) => void): () => void
       onExecutionInvalidated(listener: (event: unknown) => void): () => void
@@ -114,6 +115,7 @@ describe('preload desktop bridge contract', () => {
           selectProject: expect.any(Function),
           getComparison: expect.any(Function),
           getExecutionSnapshot: expect.any(Function),
+          getStepFindings: expect.any(Function),
           refreshComparison: expect.any(Function),
         }),
         workspace: expect.objectContaining({
@@ -164,6 +166,23 @@ describe('preload desktop bridge contract', () => {
       generation: 1,
       projectComparisonContextId: 'context-1',
     })
+  })
+
+  it('routes the path-free Step Findings query through its typed channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      projectComparisonContextId: 'context-1',
+      projectWorkspaceId: 'ws_1',
+      step: 'Route',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'FINDINGS_READ_FAILED' })
+
+    await bridge.backendProjectComparison.getStepFindings(request)
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.backendProjectComparisonGetStepFindings,
+      request,
+    )
   })
 
   it('routes bridge calls through shared IPC channel constants', async () => {

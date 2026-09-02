@@ -1,5 +1,9 @@
 <template>
-  <section class="step-analysis" aria-label="Step analysis">
+  <section
+    class="step-analysis"
+    :class="{ 'has-findings-status': mode === 'findings' && findingsReadStatus }"
+    aria-label="Step analysis"
+  >
     <nav class="step-rail" aria-label="Flow steps">
       <button
         v-for="tab in stepTabs"
@@ -171,6 +175,16 @@
         <em v-if="option.count !== null" :class="option.tone">{{ option.count }}</em>
       </button>
       <small class="mode-hint">{{ modeHint }}</small>
+    </div>
+
+    <div
+      v-if="mode === 'findings' && findingsReadStatus"
+      class="findings-read-status"
+      :class="findingsReadStatus.tone"
+      role="status"
+    >
+      <i :class="findingsReadStatus.icon" aria-hidden="true"></i>
+      <span>{{ findingsReadStatus.label }}</span>
     </div>
 
     <div v-if="mode === 'findings'" class="step-body">
@@ -590,9 +604,14 @@ import type {
   ProjectStepCompareSummary,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
+import type { ProjectStepFindingsProjectionState } from '@/stores/backendProjectComparisonSession'
+import {
+  parseProjectManifestFlowStep,
+  type ProjectQorTrendSummary,
+} from '@ecos-studio/shared'
 
 const props = defineProps<{
+  findings?: ProjectStepFindingsProjectionState
   steps: ProjectStepCompareSummary[]
   workspaceSummaries: ProjectWorkspaceSummary[]
   qorTrendSummary: ProjectQorTrendSummary
@@ -625,15 +644,64 @@ const compareSort = ref<StepCompareSort | null>(null)
 const barFullScalePercent = COMPARE_BAR_FULL_SCALE_PERCENT
 const WORKSPACE_PICKER_PREVIEW_COUNT = 16
 
-const activeWorkspace = computed(
-  () =>
+const activeWorkspace = computed(() => {
+  const workspace =
     props.workspaceSummaries.find(
       (summary) => summary.workspaceId === props.selectedWorkspaceId,
     ) ??
     props.workspaceSummaries[0] ??
-    null,
-)
+    null
+  if (!workspace || !props.findings) return workspace
+  const step = parseProjectManifestFlowStep(props.selectedStep)
+  if (!step) return workspace
+  const steps = { ...workspace.analysis.steps }
+  const findings = props.findings
+  if (
+    (findings.status === 'ready' || findings.status === 'stale') &&
+    findings.data.projectWorkspaceId === workspace.workspaceId &&
+    findings.data.step === step
+  ) {
+    steps[step] = findings.data.details
+  } else {
+    delete steps[step]
+  }
+  return { ...workspace, analysis: { ...workspace.analysis, steps } }
+})
 const activeWorkspaceId = computed(() => activeWorkspace.value?.workspaceId ?? '')
+const findingsReadStatus = computed(() => {
+  const findings = props.findings
+  if (!findings || findings.status === 'ready') return null
+  if (findings.status === 'stale') {
+    return {
+      icon: 'ri-history-line',
+      label: `Last committed · ${findingsIssueLabel(findings.issue.code)}`,
+      tone: 'stale',
+    }
+  }
+  if (findings.status === 'error') {
+    return {
+      icon: 'ri-error-warning-line',
+      label: `Findings unavailable · ${findingsIssueLabel(findings.issue.code)}`,
+      tone: 'error',
+    }
+  }
+  return {
+    icon: 'ri-loader-4-line',
+    label: 'Loading findings',
+    tone: 'loading',
+  }
+})
+
+function findingsIssueLabel(code: string): string {
+  if (code === 'FINDINGS_REFERENCE_MISSING') return 'artifact missing'
+  if (code === 'FINDINGS_REFERENCE_UNSAFE') return 'unsafe artifact reference'
+  if (code === 'FINDINGS_ARTIFACT_TOO_LARGE') return 'artifact too large'
+  if (code === 'FINDINGS_ARTIFACT_INVALID_JSON') return 'invalid artifact JSON'
+  if (code === 'FINDINGS_SNAPSHOT_REVISION_CHANGED') return 'snapshot changed'
+  if (code === 'FINDINGS_ARTIFACT_HASH_MISMATCH') return 'artifact content changed'
+  if (code === 'FINDINGS_ARTIFACT_SIZE_MISMATCH') return 'artifact size changed'
+  return 'read failed'
+}
 const baselineWorkspace = computed(
   () =>
     props.workspaceSummaries.find(

@@ -499,6 +499,41 @@ export interface BackendProjectExecutionInvalidatedEvent {
   generation: number
 }
 
+export type BackendProjectFindingsIssueCode =
+  | 'FINDINGS_ARTIFACT_HASH_MISMATCH'
+  | 'FINDINGS_ARTIFACT_INVALID_JSON'
+  | 'FINDINGS_ARTIFACT_SIZE_MISMATCH'
+  | 'FINDINGS_ARTIFACT_TOO_LARGE'
+  | 'FINDINGS_READ_FAILED'
+  | 'FINDINGS_REFERENCE_MISSING'
+  | 'FINDINGS_REFERENCE_UNSAFE'
+  | 'FINDINGS_SNAPSHOT_REVISION_CHANGED'
+  | 'FINDINGS_STEP_UNAVAILABLE'
+  | 'FINDINGS_WORKSPACE_UNAVAILABLE'
+
+export interface BackendProjectStepFindings {
+  engineeringWorkspaceId: string
+  projectWorkspaceId: string
+  step: FlowStep
+  workspaceRevision: number
+  details: ProjectAnalysisStepSnapshot
+}
+
+export type BackendProjectStepFindingsResult =
+  | {
+      ok: true
+      projectComparisonContextId: string
+      generation: number
+      freshness: 'current' | 'last-committed'
+      data: BackendProjectStepFindings
+      issue?: ReadIssue
+    }
+  | {
+      ok: false
+      code: 'unknown-context' | BackendProjectFindingsIssueCode
+      detail?: string
+    }
+
 export interface BackendProjectComparisonApi {
   closeProject(request: { projectComparisonContextId: string }): Promise<void>
   selectProject(request: {
@@ -510,6 +545,11 @@ export interface BackendProjectComparisonApi {
   getExecutionSnapshot(request: {
     projectComparisonContextId: string
   }): Promise<BackendProjectExecutionSnapshotResult>
+  getStepFindings(request: {
+    projectComparisonContextId: string
+    projectWorkspaceId: string
+    step: string
+  }): Promise<BackendProjectStepFindingsResult>
   refreshComparison(request: {
     projectComparisonContextId: string
   }): Promise<BackendProjectComparisonQueryResult>

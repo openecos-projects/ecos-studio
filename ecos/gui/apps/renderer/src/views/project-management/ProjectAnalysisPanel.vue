@@ -449,6 +449,7 @@
       v-show="selectedAnalysisTab === 'step'"
     >
       <ProjectStepAnalysisPanel
+        :findings="findings"
         :steps="project.stepCompareSummaries"
         :workspace-summaries="project.workspaceSummaries"
         :qor-trend-summary="project.qorTrendSummary"
@@ -488,6 +489,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import type { ProjectStepFindingsProjectionState } from '@/stores/backendProjectComparisonSession'
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
 import {
@@ -543,6 +545,7 @@ const SIGNOFF_DISPLAY: Record<QorGateStatus, { label: string; tone: string }> = 
 }
 
 const props = defineProps<{
+  findings?: ProjectStepFindingsProjectionState
   project: ProjectManagementProject
   selectedAnalysisTab: AnalysisTab
   selectedStep: string

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import {
   mkdir,
   mkdtemp,
@@ -17,7 +18,10 @@ import {
   registerWorkspaceInManifest,
   type EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
-import { ProjectManagementReadService } from './projectManagementReadService'
+import {
+  PROJECT_FINDINGS_ARTIFACT_MAX_BYTES,
+  ProjectManagementReadService,
+} from './projectManagementReadService'
 
 const temporaryDirectories: string[] = []
 
@@ -365,5 +369,68 @@ describe('ProjectManagementReadService', () => {
       status: 'unavailable',
       issues: [{ code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' }],
     })
+  })
+
+  it('reads only bounded artifacts whose size, hash, and JSON match the Snapshot', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const reference = 'route_ecc/analysis/qor_metrics.json'
+    const path = join(workspaceRoot, reference)
+    const valid = '{"schema_version":3,"metrics":[]}'
+    await mkdir(join(workspaceRoot, 'route_ecc', 'analysis'), { recursive: true })
+    await writeFile(path, valid)
+    const request = (sizeBytes: number, sha256: string) => ({
+      artifacts: [{ reference, sha256, sizeBytes }],
+      projectRoot,
+      workspacePath: workspaceRoot,
+    })
+    const service = new ProjectManagementReadService()
+
+    await expect(
+      service.readVerifiedArtifacts(
+        request(
+          Buffer.byteLength(valid),
+          createHash('sha256').update(valid).digest('hex'),
+        ),
+      ),
+    ).resolves.toEqual({ ok: true, texts: { [reference]: valid } })
+
+    await expect(
+      service.readVerifiedArtifacts(
+        request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_SIZE_MISMATCH' })
+    await expect(
+      service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
+    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' })
+
+    const invalidJson = 'x'.repeat(Buffer.byteLength(valid))
+    await writeFile(path, invalidJson)
+    await expect(
+      service.readVerifiedArtifacts(
+        request(
+          Buffer.byteLength(invalidJson),
+          createHash('sha256').update(invalidJson).digest('hex'),
+        ),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_INVALID_JSON' })
+
+    await writeFile(path, 'x'.repeat(PROJECT_FINDINGS_ARTIFACT_MAX_BYTES + 1))
+    await expect(
+      service.readVerifiedArtifacts(
+        request(PROJECT_FINDINGS_ARTIFACT_MAX_BYTES + 1, 'a'.repeat(64)),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_TOO_LARGE' })
+
+    await unlink(path)
+    await expect(
+      service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
+    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_REFERENCE_MISSING' })
+
+    const outside = join(projectRoot, 'outside-findings.json')
+    await writeFile(outside, valid)
+    await symlink(outside, path)
+    await expect(
+      service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
+    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_REFERENCE_UNSAFE' })
   })
 })

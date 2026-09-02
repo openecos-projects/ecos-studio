@@ -160,6 +160,11 @@ const desktopApi: DesktopApi = {
         desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot,
         request,
       ),
+    getStepFindings: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.backendProjectComparisonGetStepFindings,
+        request,
+      ),
     refreshComparison: (request) =>
       invokeDesktop(
         desktopApiIpcChannels.backendProjectComparisonRefreshComparison,

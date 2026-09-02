@@ -3,6 +3,8 @@ import type {
   BackendProjectComparisonQueryResult,
   BackendProjectExecutionSnapshot,
   BackendProjectExecutionSnapshotResult,
+  BackendProjectStepFindings,
+  BackendProjectStepFindingsResult,
   ReadIssue,
 } from '@ecos-studio/shared'
 import { defineStore } from 'pinia'
@@ -16,6 +18,19 @@ type QueryProjectionState<T> =
   | { status: 'refreshing'; data: T }
   | { status: 'stale'; data: T; issue: ReadIssue }
   | { status: 'error'; data: null; issue: ReadIssue }
+
+export type ProjectStepFindingsProjectionState =
+  | { status: 'idle'; data: null }
+  | { status: 'loading'; data: null; projectWorkspaceId: string; step: string }
+  | { status: 'ready'; data: BackendProjectStepFindings }
+  | { status: 'stale'; data: BackendProjectStepFindings; issue: ReadIssue }
+  | {
+      status: 'error'
+      data: null
+      issue: ReadIssue
+      projectWorkspaceId: string
+      step: string
+    }
 
 function issue(code: string, detail?: string): ReadIssue {
   return { code, ...(detail ? { detail } : {}) }
@@ -32,8 +47,13 @@ export const useBackendProjectComparisonSession = defineStore(
     const generation = ref(-1)
     const execution = ref<BackendProjectExecutionSnapshot>({ operations: [] })
     const executionGeneration = ref(-1)
+    const findings = ref<ProjectStepFindingsProjectionState>({
+      data: null,
+      status: 'idle',
+    })
     let requestSequence = 0
     let executionRequestSequence = 0
+    let findingsRequestSequence = 0
     let unsubscribe: (() => void) | null = null
     let unsubscribeExecution: (() => void) | null = null
 
@@ -61,6 +81,7 @@ export const useBackendProjectComparisonSession = defineStore(
       generation.value = -1
       execution.value = { operations: [] }
       executionGeneration.value = -1
+      findings.value = { data: null, status: 'idle' }
       projection.value = { data: null, status: 'loading' }
       subscribe()
       try {
@@ -129,6 +150,78 @@ export const useBackendProjectComparisonSession = defineStore(
       return reload(true)
     }
 
+    async function loadStepFindings(
+      projectWorkspaceId: string,
+      step: string,
+    ): Promise<void> {
+      const contextId = projectComparisonContextId.value
+      if (!contextId) return
+      const sequence = ++findingsRequestSequence
+      findings.value = { data: null, projectWorkspaceId, status: 'loading', step }
+      try {
+        const result = await getDesktopApi().backendProjectComparison.getStepFindings({
+          projectComparisonContextId: contextId,
+          projectWorkspaceId,
+          step,
+        })
+        commitFindings(result, sequence, contextId, projectWorkspaceId, step)
+      } catch (error) {
+        if (sequence !== findingsRequestSequence) return
+        findings.value = {
+          data: null,
+          issue: issue(
+            'FINDINGS_READ_FAILED',
+            error instanceof Error ? error.message : String(error),
+          ),
+          projectWorkspaceId,
+          status: 'error',
+          step,
+        }
+      }
+    }
+
+    function commitFindings(
+      result: BackendProjectStepFindingsResult,
+      sequence: number,
+      contextId: string,
+      projectWorkspaceId: string,
+      step: string,
+    ): void {
+      if (
+        sequence !== findingsRequestSequence ||
+        contextId !== projectComparisonContextId.value
+      ) {
+        return
+      }
+      if (
+        !result.ok ||
+        result.generation !== generation.value ||
+        result.projectComparisonContextId !== contextId ||
+        result.data.projectWorkspaceId !== projectWorkspaceId ||
+        result.data.step !== step
+      ) {
+        findings.value = {
+          data: null,
+          issue: issue(
+            result.ok ? 'FINDINGS_SNAPSHOT_REVISION_CHANGED' : result.code,
+            result.ok ? undefined : result.detail,
+          ),
+          projectWorkspaceId,
+          status: 'error',
+          step,
+        }
+        return
+      }
+      findings.value =
+        result.freshness === 'last-committed'
+          ? {
+              data: result.data,
+              issue: result.issue ?? issue('FINDINGS_READ_FAILED'),
+              status: 'stale',
+            }
+          : { data: result.data, status: 'ready' }
+    }
+
     function commitExecution(
       result: BackendProjectExecutionSnapshotResult,
       sequence: number,
@@ -184,10 +277,12 @@ export const useBackendProjectComparisonSession = defineStore(
     function clear(): void {
       requestSequence += 1
       executionRequestSequence += 1
+      findingsRequestSequence += 1
       projectComparisonContextId.value = null
       generation.value = -1
       execution.value = { operations: [] }
       executionGeneration.value = -1
+      findings.value = { data: null, status: 'idle' }
       projection.value = { data: null, status: 'idle' }
     }
 
@@ -212,8 +307,10 @@ export const useBackendProjectComparisonSession = defineStore(
       dispose,
       execution,
       executionGeneration,
+      findings,
       generation,
       projectComparisonContextId,
+      loadStepFindings,
       projection,
       refresh,
       selectProject,
