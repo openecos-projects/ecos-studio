@@ -197,11 +197,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     pdkInventory: {} as DesktopApi['pdkInventory'],
     runtime: {} as DesktopApi['runtime'],
-    ecc: {
-      workspace: {
-        inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
-      },
-    },
+    ecc: {},
     shell: {
       createSession: async () => ({
         pid: 0,

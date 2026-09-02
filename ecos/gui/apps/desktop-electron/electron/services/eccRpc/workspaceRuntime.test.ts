@@ -1,7 +1,4 @@
-import type {
-  EccRuntimeEvent,
-  EccWorkspaceInspectSignoffResult,
-} from '@ecos-studio/shared'
+import type { EccRuntimeEvent } from '@ecos-studio/shared'
 import {
   existsSync,
   mkdirSync,
@@ -810,53 +807,6 @@ describe('EccWorkspaceRuntime', () => {
         outputPath: '/exports/custom package.tar.gz',
         workspaceId: 'workspace-1',
       },
-    })
-  })
-
-  it('inspects signoff through the stored ECC workspace id', async () => {
-    const { client, service } = createService()
-    const review: EccWorkspaceInspectSignoffResult = {
-      groups: [],
-      risks: [
-        {
-          details: [
-            {
-              kind: 'artifact',
-              label: 'Harden GDS',
-              location: 'Harden_ecc/output/gcd_Harden.gds',
-              reason: 'Required file is missing or empty',
-              owner: 'checklist',
-              policy: 'block',
-              state: 'failed',
-              evidence: [
-                {
-                  kind: 'file',
-                  path: 'Harden_ecc/output/gcd_Harden.gds',
-                },
-              ],
-            },
-          ],
-          severity: 'blocked',
-          summary: '1 required resource missing',
-          title: 'Harden resources missing',
-        },
-      ],
-      status: 'blocked',
-    }
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-      review,
-    )
-
-    const workspace = await service.openWorkspace({ directory: '/work/demo' })
-    await expect(
-      service.inspectSignoff({ workspaceHandle: workspace.workspaceHandle }),
-    ).resolves.toEqual(review)
-
-    expect(client.calls.at(-1)).toEqual({
-      method: 'workspace.inspect_signoff',
-      params: { workspaceId: 'workspace-1' },
     })
   })
 

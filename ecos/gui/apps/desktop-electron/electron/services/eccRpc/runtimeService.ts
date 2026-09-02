@@ -30,7 +30,6 @@ import type {
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceInspectSignoffResult,
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
@@ -46,7 +45,6 @@ import type {
   EccWorkspaceUpdateRequest,
   EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
-import { validateEngineeringSnapshot } from '@ecos-studio/shared'
 import { open, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -278,12 +276,6 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).exportSignoff(request)
   }
 
-  async inspectSignoff(
-    request: EccWorkspaceHandleRequest,
-  ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.runtimeForHandle(request.workspaceHandle).inspectSignoff(request)
-  }
-
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
     return this.runtimeForHandle(request.workspaceHandle).layoutEditBegin(request)
   }
@@ -342,6 +334,12 @@ export class EccRpcRuntimeService {
     request: EccWorkspaceHandleRequest,
   ): Promise<EccEngineeringSnapshot> {
     const snapshot = await this.rawEngineeringSnapshot(request.workspaceHandle)
+    if (
+      request.expectedWorkspaceRevision !== undefined &&
+      snapshot.workspaceRevision !== request.expectedWorkspaceRevision
+    ) {
+      throw new Error('ENGINEERING_WORKSPACE_REVISION_MISMATCH')
+    }
     return {
       ...snapshot,
       artifacts: snapshot.artifacts.map(
@@ -410,14 +408,9 @@ export class EccRpcRuntimeService {
   private async rawEngineeringSnapshot(
     workspaceHandle: string,
   ): Promise<EccPersistedEngineeringSnapshot> {
-    const snapshot = await this.runtimeForHandle(workspaceHandle).engineeringSnapshot({
+    return await this.runtimeForHandle(workspaceHandle).engineeringSnapshot({
       workspaceHandle,
     })
-    const validated = validateEngineeringSnapshot(snapshot)
-    if (!validated.ok) {
-      throw new Error(validated.issue.code)
-    }
-    return validated.snapshot
   }
 
   private async resolveArtifact(

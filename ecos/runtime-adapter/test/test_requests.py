@@ -21,7 +21,6 @@ from ecos_runtime_adapter.requests import (
     WorkspaceExportSignoffRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
-    WorkspaceInspectSignoffRequest,
     WorkspaceMutationRequest,
     WorkspaceOpenV1Request,
     WorkspaceSyncConfigRequest,
@@ -72,11 +71,6 @@ def test_workspace_create_maps_workspace_spec_v1_camel_case_fields():
             "workspace.export_signoff",
             {"workspaceId": "ws-1", "outputPath": "/exports/custom.tar.gz"},
             WorkspaceExportSignoffRequest,
-        ),
-        (
-            "workspace.inspect_signoff",
-            {"workspaceId": "ws-1"},
-            WorkspaceInspectSignoffRequest,
         ),
         (
             "workspace.sync_config",

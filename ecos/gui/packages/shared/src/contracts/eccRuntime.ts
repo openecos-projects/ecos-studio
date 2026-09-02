@@ -567,14 +567,12 @@ export type EccRuntimeEvent =
 
 export interface EccRuntimeApi {
   runtime?: {
+    engineeringSnapshot(
+      request: EccWorkspaceHandleRequest,
+    ): Promise<EccEngineeringSnapshot>
     openArtifact(request: EccArtifactOpenRequest): Promise<{ opened: boolean }>
     readArtifactChunk(request: EccArtifactReadRequest): Promise<EccArtifactChunk>
     snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
-  }
-  workspace: {
-    inspectSignoff(
-      request: EccWorkspaceHandleRequest,
-    ): Promise<EccWorkspaceInspectSignoffResult>
   }
 }

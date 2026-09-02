@@ -28,7 +28,6 @@ def test_runtime_method_registry_contains_current_methods_once():
         "workspace.sync_config",
         "workspace.reset_flow",
         "workspace.export_signoff",
-        "workspace.inspect_signoff",
         "flow.run",
         "flow.run_step",
         "operation.start_flow",
@@ -93,10 +92,7 @@ def test_runtime_method_lookup_returns_spec():
     assert export_spec is not None
     assert export_spec.request_model is requests.WorkspaceExportSignoffRequest
     assert export_spec.handler_name == "export_signoff"
-    inspect_spec = runtime_method_by_name("workspace.inspect_signoff")
-    assert inspect_spec is not None
-    assert inspect_spec.request_model is requests.WorkspaceInspectSignoffRequest
-    assert inspect_spec.handler_name == "inspect_signoff"
+    assert runtime_method_by_name("workspace.inspect_signoff") is None
     assert runtime_method_by_name("db.ensure") is None
 
 

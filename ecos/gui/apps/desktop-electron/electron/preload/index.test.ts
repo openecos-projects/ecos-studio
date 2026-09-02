@@ -53,10 +53,8 @@ async function loadDesktopBridge() {
         onEvent(listener: (event: unknown) => void): () => void
       }
       runtime: {
+        engineeringSnapshot(request: unknown): Promise<unknown>
         waitForOperation(request: unknown): Promise<unknown>
-      }
-      workspace: {
-        inspectSignoff(request: unknown): Promise<unknown>
       }
     }
     agent: {
@@ -446,15 +444,15 @@ describe('preload desktop bridge contract', () => {
     })
   })
 
-  it('routes ECC signoff inspection through the shared IPC channel constant', async () => {
+  it('routes Engineering Snapshot reads through the shared IPC channel constant', async () => {
     const bridge = await loadDesktopBridge()
     const request = { workspaceHandle: 'workspace-handle-1' }
-    const result = { groups: [], risks: [], status: 'ready' }
+    const result = { workspaceId: 'workspace-1', workspaceRevision: 7 }
     ipcRenderer.invoke.mockResolvedValueOnce(result)
 
-    await expect(bridge.ecc.workspace.inspectSignoff(request)).resolves.toEqual(result)
+    await expect(bridge.ecc.runtime.engineeringSnapshot(request)).resolves.toEqual(result)
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.eccWorkspaceInspectSignoff,
+      desktopApiIpcChannels.eccRuntimeEngineeringSnapshot,
       request,
     )
   })

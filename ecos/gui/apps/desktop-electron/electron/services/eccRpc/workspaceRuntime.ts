@@ -12,6 +12,7 @@ import type {
   EccLayoutEditDiscardResult,
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
+  EccPersistedEngineeringSnapshot,
   EccRpcHelloResult,
   EccRpcPingResult,
   EccRpcShutdownResult,
@@ -26,7 +27,6 @@ import type {
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceInspectSignoffResult,
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
@@ -42,6 +42,7 @@ import type {
   EccWorkspaceUpdateRequest,
   EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
+import { validateEngineeringSnapshot } from '@ecos-studio/shared'
 
 import { normalizeRuntimeError } from './errors'
 import { electronLogger } from '../logger'
@@ -369,12 +370,6 @@ export class EccWorkspaceRuntime {
     return this.commands.exportSignoff(request)
   }
 
-  inspectSignoff(
-    request: EccWorkspaceHandleRequest,
-  ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.commands.inspectSignoff(request)
-  }
-
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
     return this.commands.layoutEditBegin(request)
   }
@@ -512,12 +507,18 @@ export class EccWorkspaceRuntime {
 
   async engineeringSnapshot(
     request: EccWorkspaceHandleRequest,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<EccPersistedEngineeringSnapshot> {
     const client = await this.ensureStarted()
     const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-    return await client.call<Record<string, unknown>>('workspace.engineering_snapshot', {
-      workspaceId,
-    })
+    const snapshot = await client.call<Record<string, unknown>>(
+      'workspace.engineering_snapshot',
+      {
+        workspaceId,
+      },
+    )
+    const validated = validateEngineeringSnapshot(snapshot, workspaceId)
+    if (!validated.ok) throw new Error(validated.issue.code)
+    return validated.snapshot
   }
 
   async recoverInterrupted(

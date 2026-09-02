@@ -455,6 +455,8 @@ const desktopApi: DesktopApi = {
   },
   ecc: {
     runtime: {
+      engineeringSnapshot: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
       openArtifact: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOpenArtifact, request),
       readArtifactChunk: (request) =>
@@ -463,10 +465,6 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
       waitForOperation: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeWaitForOperation, request),
-    },
-    workspace: {
-      inspectSignoff: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceInspectSignoff, request),
     },
   },
   agent: {

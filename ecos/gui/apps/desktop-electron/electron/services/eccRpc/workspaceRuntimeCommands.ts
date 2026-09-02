@@ -20,7 +20,6 @@ import type {
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
-  EccWorkspaceInspectSignoffResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
@@ -283,14 +282,6 @@ export class WorkspaceRuntimeCommands {
       }),
       { timeoutMs: 0 },
     )
-  }
-
-  inspectSignoff(
-    request: EccWorkspaceHandleRequest,
-  ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.workspaceCall('workspace.inspect_signoff', request, (workspaceId) => ({
-      workspaceId,
-    }))
   }
 
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {

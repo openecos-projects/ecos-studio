@@ -115,7 +115,7 @@ export const desktopApiIpcChannels = {
   designRuntimeFlowRunStep: 'design-runtime:flow-run-step',
   chipViewerOpen: 'chip-viewer:open',
   chipViewerIsOpen: 'chip-viewer:is-open',
-  eccWorkspaceInspectSignoff: 'ecc:workspace-inspect-signoff',
+  eccRuntimeEngineeringSnapshot: 'ecc:runtime-engineering-snapshot',
   eccRuntimeWaitForOperation: 'ecc:runtime-wait-operation',
   eccRuntimeSnapshot: 'ecc:runtime-snapshot',
   eccRuntimeReadArtifactChunk: 'ecc:runtime-read-artifact-chunk',

@@ -49,7 +49,6 @@ from ecos_runtime_adapter.requests import (
     WorkspaceExportSignoffRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
-    WorkspaceInspectSignoffRequest,
     WorkspaceMutationRequest,
     WorkspaceRecoverInterruptedRequest,
     WorkspaceSyncConfigRequest,
@@ -213,18 +212,6 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
         return self._with_session_mutation_lock(
             request.workspace_id,
             export,
-            reject_active_operation=True,
-        )
-
-    def inspect_signoff(self, request: WorkspaceInspectSignoffRequest) -> dict:
-        def inspect(session: WorkspaceSession) -> dict:
-            from chipcompiler.engine.signoff_export import inspect_signoff_package
-
-            return inspect_signoff_package(session.workspace)
-
-        return self._with_session_mutation_lock(
-            request.workspace_id,
-            inspect,
             reject_active_operation=True,
         )
 
@@ -559,7 +546,11 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
         }
 
     def engineering_snapshot(self, request: WorkspaceIdRequest) -> dict:
-        return self._read_engineering_snapshot(self._get_session(request.workspace_id))
+        return self._with_session_mutation_lock(
+            request.workspace_id,
+            lambda session: self._read_engineering_snapshot(session),
+            reject_active_operation=True,
+        )
 
     def db_ensure(self, request: DbEnsureRequest) -> dict:
         self._require_persistent_db()

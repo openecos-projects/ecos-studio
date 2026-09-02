@@ -9,7 +9,7 @@ from chipcompiler.engine import signoff_export
 from chipcompiler.engine.signoff_export import SignoffExportError
 from ecos_runtime_adapter.requests import (
     WorkspaceExportSignoffRequest,
-    WorkspaceInspectSignoffRequest,
+    WorkspaceIdRequest,
 )
 from ecos_runtime_adapter.sessions import WorkspaceSessionRegistry
 from ecos_runtime_adapter.workspace_api import RuntimeApiError, WorkspaceRuntimeApi
@@ -274,8 +274,8 @@ def test_inspect_signoff_package_blocks_when_current_checklist_is_unavailable(
     assert review["risks"][0]["title"] == "Signoff checklist unavailable"
 
 
-def test_workspace_inspect_signoff_rejects_active_operation_without_waiting_for_session_mutation_lock(
-    monkeypatch, tmp_path
+def test_engineering_snapshot_rejects_active_operation_without_waiting_for_session_mutation_lock(
+    tmp_path,
 ):
     workspace = SimpleNamespace(directory=tmp_path / "workspace")
     sessions = WorkspaceSessionRegistry()
@@ -285,18 +285,10 @@ def test_workspace_inspect_signoff_rejects_active_operation_without_waiting_for_
     release_operation = _start_blocking_operation(api, session.workspace_id)
     assert api.operations.has_active_workspace(session.workspace_id)
 
-    def fake_inspect(active_workspace):
-        assert active_workspace is workspace
-        pytest.fail("active operation must prevent signoff inspection")
-
-    monkeypatch.setattr(signoff_export, "inspect_signoff_package", fake_inspect)
-
     def run_inspection():
         try:
             results.put(
-                api.inspect_signoff(
-                    WorkspaceInspectSignoffRequest(workspace_id=session.workspace_id)
-                )
+                api.engineering_snapshot(WorkspaceIdRequest(workspace_id=session.workspace_id))
             )
         except BaseException as error:  # pragma: no cover - re-raised below
             results.put(error)

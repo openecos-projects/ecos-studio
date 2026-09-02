@@ -6,7 +6,6 @@ from ecos_runtime_adapter.requests import (
     DbEnsureRequest,
     DbReleaseRequest,
     WorkspaceExportSignoffRequest,
-    WorkspaceInspectSignoffRequest,
     WorkspaceOpenV1Request,
 )
 from ecos_runtime_adapter.server import RuntimeServer, _project_runtime_event
@@ -53,9 +52,6 @@ class CompleteFakeApi:
 
     def export_signoff(self, _request):
         raise AssertionError("unexpected export_signoff call")
-
-    def inspect_signoff(self, _request):
-        raise AssertionError("unexpected inspect_signoff call")
 
     def flow_run(self, _request):
         raise AssertionError("unexpected flow_run call")
@@ -294,29 +290,6 @@ def test_workspace_export_signoff_dispatches_exact_output_path():
         "jsonrpc": "2.0",
         "result": {"outputPath": "/exports/custom.tar.gz "},
         "id": 5,
-    }
-
-
-def test_workspace_inspect_signoff_dispatches_typed_request():
-    class FakeApi(CompleteFakeApi):
-        def inspect_signoff(self, request):
-            assert isinstance(request, WorkspaceInspectSignoffRequest)
-            return {"status": "ready", "groups": [], "risks": []}
-
-    server = RuntimeServer(api=FakeApi())
-
-    response = _dispatch(
-        server,
-        (
-            '{"jsonrpc":"2.0","method":"workspace.inspect_signoff",'
-            '"params":{"workspaceId":"workspace-1"},"id":6}'
-        ),
-    )
-
-    assert response == {
-        "jsonrpc": "2.0",
-        "result": {"status": "ready", "groups": [], "risks": []},
-        "id": 6,
     }
 
 

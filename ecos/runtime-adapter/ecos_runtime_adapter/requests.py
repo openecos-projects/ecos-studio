@@ -87,11 +87,6 @@ class WorkspaceExportSignoffRequest:
 
 
 @dataclass(frozen=True)
-class WorkspaceInspectSignoffRequest:
-    workspace_id: str
-
-
-@dataclass(frozen=True)
 class WorkspaceInfoRequest:
     workspace_id: str
     step: str

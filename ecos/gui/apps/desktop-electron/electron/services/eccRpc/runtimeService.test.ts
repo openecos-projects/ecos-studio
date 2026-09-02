@@ -385,6 +385,51 @@ describe('EccRpcRuntimeService pool', () => {
     expect(workspace.workspaceHandle).toEqual(expect.any(String))
   })
 
+  it('rejects an Engineering Snapshot whose revision no longer matches the request', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.clientFor('/work/demo').responses.push({
+      schemaVersion: 1,
+      artifacts: [],
+      checklist: {},
+      flow: { steps: [] },
+      metrics: [],
+      parameters: {},
+      qorAssessment: {},
+      signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      workspaceId: 'id-/work/demo',
+      workspaceRevision: 2,
+    })
+
+    await expect(
+      pool.service.engineeringSnapshot({
+        expectedWorkspaceRevision: 1,
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).rejects.toThrow('ENGINEERING_WORKSPACE_REVISION_MISMATCH')
+  })
+
+  it('rejects an Engineering Snapshot for a different ECC Workspace identity', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.clientFor('/work/demo').responses.push({
+      schemaVersion: 1,
+      artifacts: [],
+      checklist: {},
+      flow: { steps: [] },
+      metrics: [],
+      parameters: {},
+      qorAssessment: {},
+      signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      workspaceId: 'different-workspace',
+      workspaceRevision: 1,
+    })
+
+    await expect(
+      pool.service.engineeringSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).rejects.toThrow('ENGINEERING_WORKSPACE_ID_MISMATCH')
+  })
+
   it('queries and closes an Engineering Snapshot session for an idle directory', async () => {
     const pool = createPool()
     const query = pool.service.engineeringSnapshotForDirectory('/work/idle')

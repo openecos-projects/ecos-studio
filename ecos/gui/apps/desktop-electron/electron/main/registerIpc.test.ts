@@ -222,7 +222,6 @@ function registerHandlers(
       describeWorkspaceSpec: vi.fn(),
       engineeringSnapshot: vi.fn(),
       exportSignoff: vi.fn(),
-      inspectSignoff: vi.fn(),
       openArtifact: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
       operationStatus: vi.fn(),
@@ -2188,18 +2187,21 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.startFlowOperation).not.toHaveBeenCalled()
   })
 
-  it('inspects ECC signoff through the runtime service', async () => {
+  it('reads the Engineering Snapshot through the runtime service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
-    const request = { workspaceHandle: 'workspace-handle-1' }
-    const result = { groups: [], risks: [], status: 'ready' }
-    services.eccRuntimeService.inspectSignoff.mockResolvedValue(result)
+    const request = {
+      expectedWorkspaceRevision: 7,
+      workspaceHandle: 'workspace-handle-1',
+    }
+    const result = { workspaceId: 'workspace-1', workspaceRevision: 7 }
+    services.eccRuntimeService.engineeringSnapshot.mockResolvedValue(result)
 
     await expect(
-      handlers.get(desktopApiIpcChannels.eccWorkspaceInspectSignoff)?.(event, request),
+      handlers.get(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot)?.(event, request),
     ).resolves.toEqual(result)
 
-    expect(services.eccRuntimeService.inspectSignoff).toHaveBeenCalledWith(request)
+    expect(services.eccRuntimeService.engineeringSnapshot).toHaveBeenCalledWith(request)
   })
 
   it('routes directory-scoped runtime.ready only to the matching workspace window', async () => {

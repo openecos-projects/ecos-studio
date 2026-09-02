@@ -387,7 +387,6 @@ export interface DesktopBridgeServices {
     describeWorkspaceSpec(): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
-    inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
     openArtifact(request: EccArtifactOpenRequest): Promise<unknown>
     readArtifactChunk(request: EccArtifactReadRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
@@ -2270,8 +2269,8 @@ export function registerIpc(
     )
   })
 
-  handle(desktopApiIpcChannels.eccWorkspaceInspectSignoff, async (_event, request) => {
-    return await services.eccRuntimeService.inspectSignoff(
+  handle(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, async (_event, request) => {
+    return await services.eccRuntimeService.engineeringSnapshot(
       request as EccWorkspaceHandleRequest,
     )
   })

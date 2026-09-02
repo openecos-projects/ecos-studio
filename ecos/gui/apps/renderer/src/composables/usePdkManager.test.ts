@@ -264,11 +264,7 @@ const desktopBridge = {
     resolveBinding: async () => null,
   },
   runtime: {} as DesktopApi['runtime'],
-  ecc: {
-    workspace: {
-      inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
-    },
-  },
+  ecc: {},
   shell: {
     createSession: async () => ({
       pid: 0,

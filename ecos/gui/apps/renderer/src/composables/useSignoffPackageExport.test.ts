@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope, type Ref } from 'vue'
-import type { DesktopApi } from '@ecos-studio/shared'
+import type {
+  DesktopApi,
+  EccEngineeringSnapshot,
+  EccWorkspaceInspectSignoffResult,
+} from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   api: null as DesktopApi | null,
@@ -24,7 +28,11 @@ vi.mock('@/platform/desktop', () => ({
 import { useSignoffPackageExport } from './useSignoffPackageExport'
 
 type ProjectRef = Ref<{ path: string } | null>
-type WorkspaceSessionRef = Ref<{ state: string; workspaceId: string }>
+type WorkspaceSessionRef = Ref<{
+  state: string
+  workspaceId: string
+  workspaceRevision?: number
+}>
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -93,6 +101,26 @@ function blockedReview() {
   }
 }
 
+function engineeringSnapshot(
+  signoffAssessment: EccWorkspaceInspectSignoffResult = readyReview(),
+  overrides: Partial<EccEngineeringSnapshot> = {},
+): EccEngineeringSnapshot {
+  return {
+    analysis: { steps: [] },
+    artifacts: [],
+    checklist: {},
+    flow: { steps: [] },
+    metrics: [],
+    parameters: {},
+    qorAssessment: {},
+    schemaVersion: 1,
+    signoffAssessment,
+    workspaceId: 'workspace-1',
+    workspaceRevision: 7,
+    ...overrides,
+  }
+}
+
 async function openReviewAndConfirm(
   mounted: ReturnType<typeof mountComposable>,
 ): Promise<void> {
@@ -106,7 +134,7 @@ function createApi() {
   const readHome = vi.fn().mockResolvedValue({})
   const getVersions = vi.fn().mockResolvedValue({})
   const writeProjectTextFile = vi.fn().mockResolvedValue(undefined)
-  const inspectSignoff = vi.fn().mockResolvedValue(readyReview())
+  const readEngineeringSnapshot = vi.fn().mockResolvedValue(engineeringSnapshot())
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
     outputPath: request.outputPath,
@@ -116,7 +144,7 @@ function createApi() {
     workspace: { writeProjectTextFile },
     workspaceResources: { readFlow, readParameters, readHome },
     dialog: { saveFile },
-    ecc: { workspace: { inspectSignoff } },
+    ecc: { runtime: { engineeringSnapshot: readEngineeringSnapshot } },
     productCommands: {
       execute: (request: { payload: { outputPath: string } }) =>
         exportSignoff(request.payload),
@@ -126,7 +154,7 @@ function createApi() {
   return {
     exportSignoff,
     getVersions,
-    inspectSignoff,
+    readEngineeringSnapshot,
     readFlow,
     readHome,
     readParameters,
@@ -140,6 +168,7 @@ function mountComposable(
   workspaceSession: WorkspaceSessionRef = ref({
     state: 'active',
     workspaceId: 'workspace-handle-1',
+    workspaceRevision: 7,
   }),
 ) {
   const scope = effectScope()
@@ -197,7 +226,8 @@ describe('useSignoffPackageExport export action', () => {
 
     await mounted.result.exportSignoffPackage()
 
-    expect(api.inspectSignoff).toHaveBeenCalledWith({
+    expect(api.readEngineeringSnapshot).toHaveBeenCalledWith({
+      expectedWorkspaceRevision: 7,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(mounted.result.signoffPackageReview.value).toMatchObject({
@@ -214,7 +244,9 @@ describe('useSignoffPackageExport export action', () => {
 
   it('keeps Save As closed when the review is blocked', async () => {
     const api = createApi()
-    api.inspectSignoff.mockResolvedValueOnce(blockedReview())
+    api.readEngineeringSnapshot.mockResolvedValueOnce(
+      engineeringSnapshot(blockedReview()),
+    )
     const mounted = mountComposable()
     scope = mounted.scope
 
@@ -227,9 +259,9 @@ describe('useSignoffPackageExport export action', () => {
 
   it('keeps the review open after an inspection error and allows a refresh', async () => {
     const api = createApi()
-    api.inspectSignoff
+    api.readEngineeringSnapshot
       .mockRejectedValueOnce(new Error('inspection service unavailable'))
-      .mockResolvedValueOnce(readyReview())
+      .mockResolvedValueOnce(engineeringSnapshot())
     const mounted = mountComposable()
     scope = mounted.scope
 
@@ -253,21 +285,43 @@ describe('useSignoffPackageExport export action', () => {
       visible: true,
     })
     expect(mounted.result.canConfirmSignoffPackageExport.value).toBe(true)
-    expect(api.inspectSignoff).toHaveBeenCalledTimes(2)
+    expect(api.readEngineeringSnapshot).toHaveBeenCalledTimes(2)
   })
 
   it('closes the review and ignores a stale inspection after switching workspaces', async () => {
     const api = createApi()
-    const inspection = deferred<ReturnType<typeof readyReview>>()
-    api.inspectSignoff.mockImplementationOnce(() => inspection.promise)
+    const inspection = deferred<EccEngineeringSnapshot>()
+    api.readEngineeringSnapshot.mockImplementationOnce(() => inspection.promise)
     const mounted = mountComposable(ref({ path: '/workspaces/a' }))
     scope = mounted.scope
 
     const exportPromise = mounted.result.exportSignoffPackage()
-    await vi.waitFor(() => expect(api.inspectSignoff).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(api.readEngineeringSnapshot).toHaveBeenCalledTimes(1))
     mounted.currentProject.value = { path: '/workspaces/b' }
     await nextTick()
-    inspection.resolve(readyReview())
+    inspection.resolve(engineeringSnapshot())
+    await exportPromise
+
+    expect(mounted.result.signoffPackageReview.value.visible).toBe(false)
+    expect(api.saveFile).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
+  })
+
+  it('closes the review and ignores a stale snapshot after the revision changes', async () => {
+    const api = createApi()
+    const inspection = deferred<EccEngineeringSnapshot>()
+    api.readEngineeringSnapshot.mockImplementationOnce(() => inspection.promise)
+    const mounted = mountComposable()
+    scope = mounted.scope
+
+    const exportPromise = mounted.result.exportSignoffPackage()
+    await vi.waitFor(() => expect(api.readEngineeringSnapshot).toHaveBeenCalledTimes(1))
+    mounted.workspaceSession.value = {
+      ...mounted.workspaceSession.value,
+      workspaceRevision: 8,
+    }
+    await nextTick()
+    inspection.resolve(engineeringSnapshot())
     await exportPromise
 
     expect(mounted.result.signoffPackageReview.value.visible).toBe(false)
@@ -283,7 +337,7 @@ describe('useSignoffPackageExport export action', () => {
 
     await mounted.result.exportSignoffPackage()
 
-    expect(api.inspectSignoff).toHaveBeenCalledTimes(1)
+    expect(api.readEngineeringSnapshot).toHaveBeenCalledTimes(1)
     expect(api.readFlow).not.toHaveBeenCalled()
     expect(api.saveFile).not.toHaveBeenCalled()
   })
