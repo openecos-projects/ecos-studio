@@ -376,12 +376,9 @@ fn main() -> Result<()> {
             }
         }
         RenderMode::Software | RenderMode::EguiOnly => eframe::NativeOptions {
-            renderer: eframe::Renderer::Glow,
             viewport: eframe::egui::ViewportBuilder::default()
-                .with_inner_size([1280.0, 860.0])
-                .with_min_inner_size([960.0, 640.0])
-                .with_active(true),
-            centered: true,
+                .with_inner_size(eframe::egui::vec2(800.0, 600.0))
+                .with_resizable(true),
             ..Default::default()
         },
     };
