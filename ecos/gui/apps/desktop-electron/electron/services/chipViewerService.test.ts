@@ -662,7 +662,9 @@ describe('ChipViewerService', () => {
       message = error instanceof Error ? error.message : String(error)
     }
 
-    expect(message).toContain('Diagnostic: Missing required system library "libxkbcommon-x11.so.0".')
+    expect(message).toContain(
+      'Diagnostic: Missing required system library "libxkbcommon-x11.so.0".',
+    )
     expect(message).toContain('sudo apt update && sudo apt install -y libxkbcommon-x11-0')
     expect(message).toContain('cage -- ./ECOS-Studio... --no-sandbox')
   })
