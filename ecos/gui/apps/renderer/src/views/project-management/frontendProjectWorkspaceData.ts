@@ -67,6 +67,24 @@ export async function readFrontendProjectWorkspaceData(
                   result.texts[spec.detailPath] ?? null,
                 ]),
               ),
+              frontendQorMetricTexts: Object.fromEntries(
+                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
+                  spec.step,
+                  result.texts[spec.metricsPath] ?? null,
+                ]),
+              ),
+              frontendQorSummaryTexts: Object.fromEntries(
+                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
+                  spec.step,
+                  result.texts[spec.summaryPath] ?? null,
+                ]),
+              ),
+              frontendQorHotspotTexts: Object.fromEntries(
+                projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => [
+                  spec.step,
+                  result.texts[spec.hotspotsPath] ?? null,
+                ]),
+              ),
               flowText: flowText ?? null,
             },
             flow: flowText ? parseFrontendWorkspaceFlowStateMap(flowText) : {},

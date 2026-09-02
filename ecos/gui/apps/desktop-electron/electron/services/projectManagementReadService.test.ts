@@ -133,20 +133,24 @@ describe('ProjectManagementReadService', () => {
   it('uses a project-type-specific summary allowlist', async () => {
     const { projectRoot, workspaceRoot } = await createProject('frontend')
     const detailPath = 'lint_verilator/report/frontend_detail.json'
+    const qorPath = 'lint_verilator/analysis/qor_summary.json'
     await mkdir(join(workspaceRoot, 'lint_verilator', 'report'), { recursive: true })
+    await mkdir(join(workspaceRoot, 'lint_verilator', 'analysis'), { recursive: true })
     await writeFile(join(workspaceRoot, detailPath), '{"step":"lint"}')
+    await writeFile(join(workspaceRoot, qorPath), '{"quality_status":"pass"}')
     const service = new ProjectManagementReadService()
 
     await expect(
       service.readWorkspaceTexts({
         projectRoot,
         workspacePath: workspaceRoot,
-        paths: ['home/flow.json', detailPath],
+        paths: ['home/flow.json', detailPath, qorPath],
       }),
     ).resolves.toMatchObject({
       texts: {
         'home/flow.json': '{"steps":[]}',
         [detailPath]: '{"step":"lint"}',
+        [qorPath]: '{"quality_status":"pass"}',
       },
     })
     await expect(

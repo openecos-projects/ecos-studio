@@ -75,6 +75,13 @@ export interface ProjectWorkspaceAnalysisInput {
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
   frontendDetailTexts?: Partial<Record<ProjectManifestFrontendFlowStep, string | null>>
+  frontendQorMetricTexts?: Partial<Record<ProjectManifestFrontendFlowStep, string | null>>
+  frontendQorSummaryTexts?: Partial<
+    Record<ProjectManifestFrontendFlowStep, string | null>
+  >
+  frontendQorHotspotTexts?: Partial<
+    Record<ProjectManifestFrontendFlowStep, string | null>
+  >
   flowText?: string | null
 }
 

@@ -1,7 +1,19 @@
 import type { ProjectManifestFrontendFlowStep } from '@ecos-studio/shared'
+import {
+  frontendQorForStepState,
+  parseFrontendStepQorTexts,
+  type FrontendQorStatus,
+  type FrontendStepQorAnalysis,
+} from '@/utils/frontendQor'
 
 export type FrontendAnalysisStage = ProjectManifestFrontendFlowStep
 export type FrontendAnalysisTone = 'neutral' | 'good' | 'warn' | 'bad'
+export type {
+  FrontendQorGate,
+  FrontendQorHotspot,
+  FrontendQorStatus,
+  FrontendStepQorAnalysis,
+} from '@/utils/frontendQor'
 export type FrontendAnalysisStepStatus =
   | 'success'
   | 'reused'
@@ -37,6 +49,7 @@ export interface FrontendStepAnalysis {
   runtimeSeconds: number | null
   metrics: FrontendAnalysisMetric[]
   findings: FrontendAnalysisFinding[]
+  qor: FrontendStepQorAnalysis
   available: boolean
 }
 
@@ -58,6 +71,10 @@ export interface FrontendWorkspaceAnalysis {
   passRate: number | null
   cycles: number | null
   difftestPassed: number
+  qorStatus: FrontendQorStatus
+  qorPassedSteps: number
+  qorAnalyzedSteps: number
+  blockingGates: number
   findings: FrontendAnalysisFinding[]
 }
 
@@ -75,6 +92,9 @@ export interface FrontendProjectAnalysis {
   passedCases: number
   failedCases: number
   passRate: number | null
+  qorPassWorkspaceCount: number
+  qorBlockedWorkspaceCount: number
+  qorIncompleteWorkspaceCount: number
 }
 
 export interface FrontendWorkspaceAnalysisSource {
@@ -89,6 +109,9 @@ export interface FrontendWorkspaceAnalysisSource {
     status: FrontendAnalysisStepStatus
   }>
   detailTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
+  qorMetricTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
+  qorSummaryTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
+  qorHotspotTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
 }
 
 const FRONTEND_STAGE_LABELS: Record<FrontendAnalysisStage, string> = {
@@ -133,6 +156,16 @@ export function buildFrontendProjectAnalysis(
     passedCases,
     failedCases,
     passRate: totalCases > 0 ? passedCases / totalCases : null,
+    qorPassWorkspaceCount: workspaces.filter(
+      (workspace) => workspace.qorStatus === 'pass',
+    ).length,
+    qorBlockedWorkspaceCount: workspaces.filter(
+      (workspace) => workspace.qorStatus === 'blocked',
+    ).length,
+    qorIncompleteWorkspaceCount: workspaces.filter(
+      (workspace) =>
+        workspace.qorStatus === 'incomplete' || workspace.qorStatus === 'unavailable',
+    ).length,
   }
 }
 
@@ -149,6 +182,9 @@ function buildFrontendWorkspaceAnalysis(
         stage,
         status,
         source.detailTexts?.[stage] ?? null,
+        source.qorMetricTexts?.[stage] ?? null,
+        source.qorSummaryTexts?.[stage] ?? null,
+        source.qorHotspotTexts?.[stage] ?? null,
       ),
     )
   const completedSteps = steps.filter((step) =>
@@ -182,6 +218,26 @@ function buildFrontendWorkspaceAnalysis(
         recordValue(recordValue(recordValue(item)?.metrics)?.difftest)?.status,
       ).toLowerCase() === 'passed',
   ).length
+  const qorPassedSteps = steps.filter((step) => step.qor.status === 'pass').length
+  const qorAnalyzedSteps = steps.filter((step) => step.qor.available).length
+  const qorObservedSteps = steps.filter(
+    (step) => step.qor.status !== 'unavailable',
+  ).length
+  const blockingGates = sum(
+    steps.map((step) => step.qor.gates.filter((gate) => gate.state === 'failed').length),
+  )
+  const qorStatus: FrontendQorStatus = steps.some((step) => step.qor.status === 'blocked')
+    ? 'blocked'
+    : qorObservedSteps === 0
+      ? 'unavailable'
+      : steps.every(
+            (step) =>
+              COMPLETED_STATUSES.has(step.status) &&
+              step.qor.available &&
+              step.qor.status === 'pass',
+          )
+        ? 'pass'
+        : 'incomplete'
 
   return {
     workspaceId: source.workspaceId,
@@ -201,6 +257,10 @@ function buildFrontendWorkspaceAnalysis(
     passRate: totalCases > 0 ? passedCases / totalCases : null,
     cycles,
     difftestPassed,
+    qorStatus,
+    qorPassedSteps,
+    qorAnalyzedSteps,
+    blockingGates,
     findings: steps.flatMap((step) => step.findings),
   }
 }
@@ -210,10 +270,18 @@ function buildFrontendStepAnalysis(
   stage: FrontendAnalysisStage,
   status: FrontendAnalysisStepStatus,
   text: string | null,
+  qorMetricsText: string | null,
+  qorSummaryText: string | null,
+  qorHotspotsText: string | null,
 ): FrontendStepAnalysis {
   const detail = parseRecord(text)
   const runtime =
     stringAt(detail, ['runtime']) || stringAt(detail, ['summary', 'runtime'])
+  const parsedQor = parseFrontendStepQorTexts(
+    qorMetricsText,
+    qorSummaryText,
+    qorHotspotsText,
+  )
   return {
     stage,
     label: FRONTEND_STAGE_LABELS[stage],
@@ -222,6 +290,7 @@ function buildFrontendStepAnalysis(
     runtimeSeconds: parseRuntimeSeconds(runtime),
     metrics: stageMetrics(stage, detail),
     findings: stageFindings(workspaceId, stage, detail),
+    qor: frontendQorForStepState(parsedQor, status),
     available: detail !== null,
   }
 }

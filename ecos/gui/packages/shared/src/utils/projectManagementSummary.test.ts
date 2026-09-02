@@ -43,11 +43,21 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
 })
 
 describe('frontend project management summary paths', () => {
-  it('uses the five ECC-FE detail artifacts plus flow state', () => {
+  it('uses the five ECC-FE detail and QoR artifact triplets plus flow state', () => {
     expect(
       projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => spec.step),
     ).toEqual(['prepare', 'review', 'elab', 'lint', 'sim'])
-    expect(projectManagementFrontendWorkspaceSummaryPaths).toHaveLength(6)
+    expect(projectManagementFrontendWorkspaceSummaryPaths).toHaveLength(21)
+    for (const spec of projectManagementFrontendWorkspaceStepAnalysisSpecs) {
+      expect(projectManagementFrontendWorkspaceSummaryPaths).toEqual(
+        expect.arrayContaining([
+          spec.detailPath,
+          spec.metricsPath,
+          spec.summaryPath,
+          spec.hotspotsPath,
+        ]),
+      )
+    }
     expect(projectManagementWorkspaceSummaryPathsFor('frontend')).toBe(
       projectManagementFrontendWorkspaceSummaryPaths,
     )

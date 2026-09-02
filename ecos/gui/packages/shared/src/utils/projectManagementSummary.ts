@@ -93,16 +93,51 @@ export const projectManagementWorkspaceSummaryPaths = [
 ]
 
 export const projectManagementFrontendWorkspaceStepAnalysisSpecs = [
-  { step: 'prepare', detailPath: 'prepare_fe/report/frontend_detail.json' },
-  { step: 'review', detailPath: 'review_fe/report/frontend_detail.json' },
-  { step: 'elab', detailPath: 'elab_slang/report/frontend_detail.json' },
-  { step: 'lint', detailPath: 'lint_verilator/report/frontend_detail.json' },
-  { step: 'sim', detailPath: 'sim_verilator/report/frontend_detail.json' },
+  {
+    step: 'prepare',
+    detailPath: 'prepare_fe/report/frontend_detail.json',
+    metricsPath: 'prepare_fe/analysis/qor_metrics.json',
+    summaryPath: 'prepare_fe/analysis/qor_summary.json',
+    hotspotsPath: 'prepare_fe/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'review',
+    detailPath: 'review_fe/report/frontend_detail.json',
+    metricsPath: 'review_fe/analysis/qor_metrics.json',
+    summaryPath: 'review_fe/analysis/qor_summary.json',
+    hotspotsPath: 'review_fe/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'elab',
+    detailPath: 'elab_slang/report/frontend_detail.json',
+    metricsPath: 'elab_slang/analysis/qor_metrics.json',
+    summaryPath: 'elab_slang/analysis/qor_summary.json',
+    hotspotsPath: 'elab_slang/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'lint',
+    detailPath: 'lint_verilator/report/frontend_detail.json',
+    metricsPath: 'lint_verilator/analysis/qor_metrics.json',
+    summaryPath: 'lint_verilator/analysis/qor_summary.json',
+    hotspotsPath: 'lint_verilator/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'sim',
+    detailPath: 'sim_verilator/report/frontend_detail.json',
+    metricsPath: 'sim_verilator/analysis/qor_metrics.json',
+    summaryPath: 'sim_verilator/analysis/qor_summary.json',
+    hotspotsPath: 'sim_verilator/analysis/qor_hotspots.json',
+  },
 ] as const
 
 export const projectManagementFrontendWorkspaceSummaryPaths = [
   'home/flow.json',
-  ...projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => spec.detailPath),
+  ...projectManagementFrontendWorkspaceStepAnalysisSpecs.flatMap((spec) => [
+    spec.detailPath,
+    spec.metricsPath,
+    spec.summaryPath,
+    spec.hotspotsPath,
+  ]),
 ]
 
 export function projectManagementWorkspaceSummaryPathsFor(

@@ -56,6 +56,9 @@ describe('frontend project workspace data', () => {
           ],
         }),
         'prepare_fe/report/frontend_detail.json': '{"step":"prepare"}',
+        'prepare_fe/analysis/qor_metrics.json': '{"schema_version":3}',
+        'prepare_fe/analysis/qor_summary.json': '{"schema_version":4}',
+        'prepare_fe/analysis/qor_hotspots.json': '{"schema_version":3}',
         'review_fe/report/frontend_detail.json': null,
       },
       unavailablePaths: [],
@@ -82,6 +85,15 @@ describe('frontend project workspace data', () => {
             prepare: '{"step":"prepare"}',
             review: null,
           },
+          frontendQorMetricTexts: {
+            prepare: '{"schema_version":3}',
+          },
+          frontendQorSummaryTexts: {
+            prepare: '{"schema_version":4}',
+          },
+          frontendQorHotspotTexts: {
+            prepare: '{"schema_version":3}',
+          },
         },
       },
       flowStates: {
@@ -95,6 +107,8 @@ describe('frontend project workspace data', () => {
         'home/flow.json',
         'prepare_fe/report/frontend_detail.json',
         'sim_verilator/report/frontend_detail.json',
+        'prepare_fe/analysis/qor_metrics.json',
+        'sim_verilator/analysis/qor_summary.json',
       ]),
     )
   })

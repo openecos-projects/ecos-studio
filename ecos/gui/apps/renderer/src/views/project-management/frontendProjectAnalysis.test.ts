@@ -211,4 +211,189 @@ describe('buildFrontendProjectAnalysis', () => {
       'lint',
     ])
   })
+
+  it('parses standard frontend QoR artifacts without borrowing the backend layout', () => {
+    const generation = 'lint-qor-generation'
+    const metrics = JSON.stringify({
+      schema_version: 3,
+      generation,
+      metrics: [
+        {
+          id: 'cpu_lint_error_count',
+          display_name: 'CPU Lint Errors',
+          value: 1,
+          unit: 'count',
+          category: 'lint',
+          direction: 'lower_is_better',
+          rating: { gate: true, score: false, trend: false },
+        },
+      ],
+    })
+    const summary = JSON.stringify({
+      schema_version: 4,
+      generation,
+      analysis_status: 'valid',
+      quality_status: 'blocked',
+      context: { comparison: { fingerprint: 'same-workload' } },
+      gates: [
+        {
+          id: 'no_cpu_lint_errors',
+          title: 'No CPU-owned lint errors',
+          state: 'failed',
+          metrics: [
+            {
+              actual: 1,
+              operator: '==',
+              expected: 0,
+            },
+          ],
+        },
+      ],
+    })
+    const hotspots = JSON.stringify({
+      schema_version: 3,
+      generation,
+      hotspots: [
+        {
+          metric_id: 'cpu_lint_diagnostic',
+          display_name: 'UNUSEDSIGNAL',
+          severity: 'warning',
+          description: 'CPU signal is unused.',
+          source: { path: 'report/lint_summary.json' },
+        },
+      ],
+    })
+
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_qor',
+        workspaceName: 'QoR run',
+        workspacePath: '/projects/cpu/ws_qor',
+        status: 'success',
+        steps: [{ stage: 'lint', status: 'success' }],
+        detailTexts: { lint: '{}' },
+        qorMetricTexts: { lint: metrics },
+        qorSummaryTexts: { lint: summary },
+        qorHotspotTexts: { lint: hotspots },
+      },
+    ])
+
+    expect(analysis).toMatchObject({
+      qorPassWorkspaceCount: 0,
+      qorBlockedWorkspaceCount: 1,
+      qorIncompleteWorkspaceCount: 0,
+    })
+    expect(analysis.workspaces[0]).toMatchObject({
+      qorStatus: 'blocked',
+      qorAnalyzedSteps: 1,
+      qorPassedSteps: 0,
+      blockingGates: 1,
+    })
+    expect(analysis.workspaces[0]?.steps[0]?.qor).toMatchObject({
+      status: 'blocked',
+      comparisonFingerprint: 'same-workload',
+      available: true,
+      metrics: [expect.objectContaining({ id: 'cpu_lint_error_count', display: '1' })],
+      gates: [expect.objectContaining({ id: 'no_cpu_lint_errors', state: 'failed' })],
+      hotspots: [expect.objectContaining({ label: 'UNUSEDSIGNAL' })],
+    })
+  })
+
+  it.each(['unstart', 'running', 'skipped'] as const)(
+    'ignores stale blocked QoR when the live step is %s',
+    (status) => {
+      const generation = 'stale-lint-qor'
+      const analysis = buildFrontendProjectAnalysis([
+        {
+          workspaceId: 'ws_stale',
+          workspaceName: 'Stale run',
+          workspacePath: '/projects/cpu/ws_stale',
+          status: status === 'running' ? 'running' : 'not_started',
+          steps: [{ stage: 'lint', status }],
+          qorMetricTexts: {
+            lint: JSON.stringify({ schema_version: 3, generation, metrics: [] }),
+          },
+          qorSummaryTexts: {
+            lint: JSON.stringify({
+              schema_version: 4,
+              generation,
+              analysis_status: 'valid',
+              quality_status: 'blocked',
+              gates: [
+                {
+                  id: 'no_cpu_lint_errors',
+                  title: 'No CPU-owned lint errors',
+                  state: 'failed',
+                  metrics: [{ actual: 1, operator: '==', expected: 0 }],
+                },
+              ],
+            }),
+          },
+          qorHotspotTexts: {
+            lint: JSON.stringify({
+              schema_version: 3,
+              generation,
+              hotspots: [
+                {
+                  metric_id: 'cpu_lint_diagnostic',
+                  display_name: 'Old lint failure',
+                  severity: 'critical',
+                },
+              ],
+            }),
+          },
+        },
+      ])
+
+      expect(analysis).toMatchObject({
+        qorBlockedWorkspaceCount: 0,
+        qorIncompleteWorkspaceCount: 1,
+      })
+      expect(analysis.workspaces[0]).toMatchObject({
+        qorStatus: 'incomplete',
+        qorAnalyzedSteps: 0,
+        blockingGates: 0,
+      })
+      expect(analysis.workspaces[0]?.steps[0]?.qor).toEqual({
+        status: 'incomplete',
+        analysisStatus: 'incomplete',
+        available: false,
+        comparisonFingerprint: '',
+        metrics: [],
+        gates: [],
+        hotspots: [],
+      })
+    },
+  )
+
+  it('does not report QoR pass for partial artifacts or an unfinished flow', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_partial',
+        workspaceName: 'Partial run',
+        workspacePath: '/projects/cpu/ws_partial',
+        status: 'running',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'running' },
+        ],
+        qorMetricTexts: {
+          prepare: JSON.stringify({ schema_version: 3, metrics: [] }),
+        },
+        qorSummaryTexts: {
+          prepare: JSON.stringify({
+            schema_version: 4,
+            quality_status: 'pass',
+            gates: [],
+          }),
+        },
+      },
+    ])
+
+    expect(analysis.workspaces[0]?.qorStatus).toBe('incomplete')
+    expect(analysis.workspaces[0]?.steps[0]?.qor).toMatchObject({
+      status: 'incomplete',
+      available: false,
+    })
+  })
 })

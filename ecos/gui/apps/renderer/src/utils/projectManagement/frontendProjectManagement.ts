@@ -55,6 +55,12 @@ export function buildFrontendProjectManagementProject(
       })),
       detailTexts:
         workspaceAnalysisInputs[workspace.id]?.frontendDetailTexts ?? undefined,
+      qorMetricTexts:
+        workspaceAnalysisInputs[workspace.id]?.frontendQorMetricTexts ?? undefined,
+      qorSummaryTexts:
+        workspaceAnalysisInputs[workspace.id]?.frontendQorSummaryTexts ?? undefined,
+      qorHotspotTexts:
+        workspaceAnalysisInputs[workspace.id]?.frontendQorHotspotTexts ?? undefined,
     })),
   )
   const bestWorkspaceId =

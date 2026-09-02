@@ -36,6 +36,16 @@
             >
           </div>
           <div>
+            <dt>Quality of Results</dt>
+            <dd :class="projectQorTone">
+              {{ analysis.qorPassWorkspaceCount }}/{{ analysis.workspaceCount }}
+            </dd>
+            <small>
+              {{ analysis.qorBlockedWorkspaceCount }} blocked ·
+              {{ analysis.qorIncompleteWorkspaceCount }} incomplete
+            </small>
+          </div>
+          <div>
             <dt>Failures</dt>
             <dd :class="analysis.failedWorkspaceCount > 0 ? 'tone-bad' : ''">
               {{ analysis.failedWorkspaceCount }}
@@ -61,6 +71,7 @@
           <div class="fe-compare-row is-head" role="row">
             <span role="columnheader">Workspace</span>
             <span role="columnheader">Progress</span>
+            <span role="columnheader">QoR</span>
             <span role="columnheader">Errors</span>
             <span role="columnheader">Warnings</span>
             <span role="columnheader">Simulation</span>
@@ -84,6 +95,12 @@
             <span role="cell" class="fe-progress-cell">
               <strong>{{ workspace.completedSteps }}/{{ workspace.totalSteps }}</strong>
               <i><b :style="{ width: `${workspace.progressPercent}%` }"></b></i>
+            </span>
+            <span role="cell">
+              <span class="fe-qor-status" :class="`is-${workspace.qorStatus}`">
+                <i :class="qorStatusIcon(workspace.qorStatus)" aria-hidden="true"></i>
+                {{ qorStatusLabel(workspace.qorStatus) }}
+              </span>
             </span>
             <span role="cell" :class="workspace.errors > 0 ? 'tone-bad' : 'tone-good'">
               {{ workspace.errors }}
@@ -181,7 +198,7 @@
           </label>
         </header>
 
-        <template v-if="activeStep?.available">
+        <template v-if="activeStep?.available || activeStep?.qor.available">
           <dl class="fe-step-metrics">
             <div v-for="metric in activeStep.metrics" :key="metric.id">
               <dt>{{ metric.label }}</dt>
@@ -198,6 +215,61 @@
               </dd>
             </div>
           </dl>
+
+          <section class="fe-step-qor" aria-label="Quality of Results">
+            <header class="fe-section-heading fe-qor-heading">
+              <div>
+                <span>Quality of Results</span>
+                <small>Contract, structural, lint, and verification quality</small>
+              </div>
+              <span class="fe-qor-status" :class="`is-${activeStep.qor.status}`">
+                <i :class="qorStatusIcon(activeStep.qor.status)" aria-hidden="true"></i>
+                {{ qorStatusLabel(activeStep.qor.status) }}
+              </span>
+            </header>
+
+            <div v-if="activeStep.qor.available" class="fe-qor-body">
+              <div class="fe-qor-gates">
+                <span class="fe-eyebrow">Quality gates</span>
+                <div class="fe-qor-gate-list">
+                  <div v-for="gate in activeStep.qor.gates" :key="gate.id">
+                    <i :class="qorGateIcon(gate.state)" aria-hidden="true"></i>
+                    <span>{{ gate.label }}</span>
+                    <small>{{ qorGateEvidence(gate) }}</small>
+                  </div>
+                </div>
+              </div>
+
+              <div class="fe-qor-metrics">
+                <span class="fe-eyebrow">Measured results</span>
+                <dl>
+                  <div v-for="metric in activeStep.qor.metrics" :key="metric.id">
+                    <dt>{{ metric.label }}</dt>
+                    <dd>{{ metric.display }}</dd>
+                    <small>{{ metric.category }}</small>
+                  </div>
+                </dl>
+              </div>
+
+              <div v-if="activeStep.qor.hotspots.length > 0" class="fe-qor-hotspots">
+                <span class="fe-eyebrow">QoR hotspots</span>
+                <ul>
+                  <li v-for="hotspot in activeStep.qor.hotspots" :key="hotspot.id">
+                    <i :class="qorHotspotIcon(hotspot.severity)" aria-hidden="true"></i>
+                    <div>
+                      <strong>{{ hotspot.label }}</strong>
+                      <p>{{ hotspot.description }}</p>
+                      <small v-if="hotspot.source">{{ hotspot.source }}</small>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <div v-else class="fe-qor-unavailable">
+              QoR artifacts are not available for this step. Run or rerun the step with a
+              current ECC-FE runtime.
+            </div>
+          </section>
 
           <section class="fe-step-findings" aria-label="Step findings">
             <header class="fe-section-heading">
@@ -244,6 +316,9 @@ import type {
   FrontendAnalysisFinding,
   FrontendAnalysisStage,
   FrontendAnalysisStepStatus,
+  FrontendQorGate,
+  FrontendQorHotspot,
+  FrontendQorStatus,
 } from './frontendProjectAnalysis'
 
 type AnalysisTab = 'dashboard' | 'step'
@@ -282,6 +357,13 @@ const visibleFindings = computed(() =>
   findingsExpanded.value
     ? analysis.value.findings
     : analysis.value.findings.slice(0, FINDING_PREVIEW_LIMIT),
+)
+const projectQorTone = computed(() =>
+  analysis.value.qorBlockedWorkspaceCount > 0
+    ? 'tone-bad'
+    : analysis.value.qorIncompleteWorkspaceCount > 0
+      ? 'tone-warn'
+      : 'tone-good',
 )
 watch(
   () => props.project.id,
@@ -334,6 +416,37 @@ function statusIcon(status: string): string {
   if (status === 'running' || status === 'in_progress')
     return 'ri-loader-4-line tone-warn'
   return 'ri-checkbox-blank-circle-line'
+}
+
+function qorStatusLabel(status: FrontendQorStatus): string {
+  if (status === 'pass') return 'Pass'
+  if (status === 'blocked') return 'Blocked'
+  if (status === 'incomplete') return 'Incomplete'
+  return 'Unavailable'
+}
+
+function qorStatusIcon(status: FrontendQorStatus): string {
+  if (status === 'pass') return 'ri-shield-check-fill'
+  if (status === 'blocked') return 'ri-shield-cross-fill'
+  if (status === 'incomplete') return 'ri-shield-flash-line'
+  return 'ri-shield-line'
+}
+
+function qorGateIcon(state: FrontendQorGate['state']): string {
+  if (state === 'pass') return 'ri-checkbox-circle-fill tone-good'
+  if (state === 'failed') return 'ri-close-circle-fill tone-bad'
+  return 'ri-question-line tone-warn'
+}
+
+function qorGateEvidence(gate: FrontendQorGate): string {
+  if (!gate.operator || gate.actual === null || gate.expected === null) return gate.state
+  return `${gate.actual} ${gate.operator} ${gate.expected}`
+}
+
+function qorHotspotIcon(severity: FrontendQorHotspot['severity']): string {
+  if (severity === 'critical') return 'ri-close-circle-fill tone-bad'
+  if (severity === 'warning') return 'ri-error-warning-fill tone-warn'
+  return 'ri-information-fill'
 }
 
 function findingIcon(severity: FrontendAnalysisFinding['severity']): string {
