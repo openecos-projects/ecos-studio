@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DesktopApi } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent, DesktopApi } from '@ecos-studio/shared'
 import type { Project } from '@/types'
 
 const {
@@ -48,6 +48,20 @@ const {
   resolveProjectRouteContextForWorkspaceMock: vi.fn(),
 }))
 
+const runtimeEventBridge = vi.hoisted(() => {
+  const listeners: Array<(event: DesignRuntimeEvent) => void> = []
+  return {
+    listeners,
+    onEvent: vi.fn((listener: (event: DesignRuntimeEvent) => void) => {
+      listeners.push(listener)
+      return () => {
+        const index = listeners.indexOf(listener)
+        if (index >= 0) listeners.splice(index, 1)
+      }
+    }),
+  }
+})
+
 vi.mock('vue-router', () => ({
   useRouter: () => ({
     isReady: vi.fn(async () => undefined),
@@ -76,7 +90,7 @@ vi.mock('@/api', async (importOriginal) => ({
 }))
 
 vi.mock('@/api/runtimeEvents', () => ({
-  createRuntimeEventClient: createRuntimeEventClientMock,
+  createFrontendRuntimeEventClient: createRuntimeEventClientMock,
 }))
 
 vi.mock('@/api/workspaceResources', () => ({
@@ -201,6 +215,9 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       removeDesignFile: vi.fn(),
       watchProjectFile: vi.fn(),
     },
+    runtime: {
+      events: { onEvent: runtimeEventBridge.onEvent },
+    },
     ecc: {
       runtime: {
         snapshot: vi.fn(async () => ({ operations: [] })),
@@ -216,10 +233,48 @@ function readRecentProjectsSetting(): SerializedRecentProject[] {
   return value as SerializedRecentProject[]
 }
 
+function backendProtocolEvent(
+  sourceType: string,
+  payload: Record<string, unknown> = {},
+  options: {
+    eventId?: string
+    operationId?: string
+    rerun?: boolean
+    runtimeInstanceId?: string
+    workspaceDirectory?: string | null
+    workspaceHandle?: string
+    workspaceRevision?: number
+  } = {},
+): DesignRuntimeEvent {
+  return {
+    designTool: 'backend',
+    event: {
+      eventId: options.eventId ?? `event-${sourceType}`,
+      kind: 'flow',
+      operationId: options.operationId ?? 'operation-1',
+      origin: 'gui',
+      payload: { sourceType, ...payload },
+      ...(options.rerun === undefined ? {} : { rerun: options.rerun }),
+      runtimeInstanceId: options.runtimeInstanceId,
+      sequence: 1,
+      timestamp: 1,
+      type: 'execution.progress',
+      workspaceId: 'engineering-workspace',
+      workspaceRevision: options.workspaceRevision,
+    },
+    type: 'runtime.protocol',
+    workspaceDirectory:
+      options.workspaceDirectory === null
+        ? undefined
+        : (options.workspaceDirectory ?? '/work/demo'),
+    workspaceHandle: options.workspaceHandle ?? 'workspace-demo',
+  }
+}
+
 describe('useWorkspace openProject', () => {
   let activeProjectRoot: string | null
   let desktopApi: DesktopApi
-  let onRuntimeEvent: ((response: unknown) => void) | undefined
+  let onRuntimeEvent: ((event: DesignRuntimeEvent) => void) | undefined
 
   beforeEach(() => {
     const workspace = useWorkspace()
@@ -230,9 +285,12 @@ describe('useWorkspace openProject', () => {
     workspace.runtimeEventClient.value?.close()
     workspace.runtimeEventClient.value = null
     workspace.runtimeEvents.value = []
+    workspace.backendRuntimeEvents.value = []
     workspace.runtimeBackendConnecting.value = false
 
     createRuntimeEventClientMock.mockReset()
+    runtimeEventBridge.listeners.splice(0)
+    runtimeEventBridge.onEvent.mockClear()
     closeWorkspaceApiMock.mockReset()
     closeWorkspaceApiMock.mockResolvedValue({ ok: true })
     createWorkspaceApiMock.mockReset()
@@ -276,9 +334,7 @@ describe('useWorkspace openProject', () => {
     waitForRuntimeReadyMock.mockResolvedValue(undefined)
     onRuntimeEvent = undefined
     createRuntimeEventClientMock.mockReturnValue({
-      onAll: vi.fn((handler: (response: unknown) => void) => {
-        onRuntimeEvent = handler
-      }),
+      onAll: vi.fn(),
       offAll: vi.fn(),
       connect: vi.fn(),
       close: vi.fn(),
@@ -304,7 +360,8 @@ describe('useWorkspace openProject', () => {
 
     await workspace.openProject(project)
 
-    expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-demo')
+    expect(runtimeEventBridge.onEvent).toHaveBeenCalledOnce()
+    onRuntimeEvent = runtimeEventBridge.listeners[runtimeEventBridge.listeners.length - 1]
     expect(onRuntimeEvent).toBeDefined()
     return workspace
   }
@@ -2162,24 +2219,8 @@ describe('useWorkspace openProject', () => {
       path: '/work/new',
       lastOpened: new Date('2026-01-02T00:00:00.000Z'),
     }
-    let oldRuntimeEvent: ((response: unknown) => void) | undefined
-    let newRuntimeEvent: ((response: unknown) => void) | undefined
-
-    createRuntimeEventClientMock
-      .mockReturnValueOnce({
-        onAll: vi.fn((handler: (response: unknown) => void) => {
-          oldRuntimeEvent = handler
-        }),
-        connect: vi.fn(),
-        close: vi.fn(),
-      })
-      .mockReturnValueOnce({
-        onAll: vi.fn((handler: (response: unknown) => void) => {
-          newRuntimeEvent = handler
-        }),
-        connect: vi.fn(),
-        close: vi.fn(),
-      })
+    let oldRuntimeEvent: ((event: DesignRuntimeEvent) => void) | undefined
+    let newRuntimeEvent: ((event: DesignRuntimeEvent) => void) | undefined
 
     loadWorkspaceApiMock
       .mockResolvedValueOnce({
@@ -2198,146 +2239,52 @@ describe('useWorkspace openProject', () => {
       })
 
     expect(await workspace.openProject(oldProject)).toBe(true)
+    oldRuntimeEvent =
+      runtimeEventBridge.listeners[runtimeEventBridge.listeners.length - 1]
     expect(await workspace.openProject(newProject)).toBe(true)
+    newRuntimeEvent =
+      runtimeEventBridge.listeners[runtimeEventBridge.listeners.length - 1]
 
-    oldRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-old',
-        cmd: 'run_step',
-        step: 'floorplan',
-      },
-    })
-    expect(workspace.runtimeEvents.value).toHaveLength(0)
+    oldRuntimeEvent?.(
+      backendProtocolEvent(
+        'step.completed',
+        { step: 'floorplan' },
+        {
+          operationId: 'job-old',
+          workspaceDirectory: '/work/old',
+          workspaceHandle: 'workspace-old',
+        },
+      ),
+    )
+    expect(workspace.backendRuntimeEvents.value).toHaveLength(0)
 
-    newRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-new',
-        cmd: 'run_step',
-        step: 'placement',
-      },
-    })
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
-  })
-
-  it('invalidates all Home resources when run_step completes', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-      },
-    })
-
-    expect(workspace.resourceVersions.value).toEqual({
-      home: before.home + 1,
-      flow: before.flow + 1,
-      parameters: before.parameters + 1,
-      step: before.step + 1,
-      'step-config': before['step-config'] + 1,
-      maps: before.maps + 1,
-      logs: before.logs + 1,
-      all: before.all + 1,
-    })
-  })
-
-  it('refreshes a completed rtl2gds step before the full flow completes', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-rtl2gds',
-        cmd: 'rtl2gds',
-        home_page: '/work/demo/home/home.json',
-        log_file: '/work/demo/prepare/log.txt',
-        state: 'Success',
-        step: 'prepare',
-        subflow_path: '/work/demo/prepare/subflow.json',
-      },
-    })
-
-    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
-    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
-  })
-
-  it('does not reload stale resources for a frontend full-flow step completion', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        cmd: 'rtl2gds',
-        designTool: 'frontend',
-        home_page: '/work/frontend/home/home.json',
-        jobId: 'frontend-flow-operation',
-        state: 'Success',
-        step: 'prepare',
-      },
-    })
-
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
-    expect(workspace.resourceVersions.value).toEqual(before)
-  })
-
-  it('refreshes id-less frontend step completions again on the next rerun', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-    const completedStep = {
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        cmd: 'rtl2gds',
-        state: 'Success',
-        step: 'prepare',
-      },
-    }
-
-    onRuntimeEvent?.(completedStep)
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_start',
-        cmd: 'rtl2gds',
-        step: 'prepare',
-      },
-    })
-    onRuntimeEvent?.(completedStep)
-
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 2)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 2)
-    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    newRuntimeEvent?.(
+      backendProtocolEvent(
+        'step.completed',
+        { step: 'placement' },
+        {
+          operationId: 'job-new',
+          workspaceDirectory: '/work/new',
+          workspaceHandle: 'workspace-new',
+        },
+      ),
+    )
+    expect(workspace.backendRuntimeEvents.value).toHaveLength(1)
   })
 
   it('invalidates all workspace resources when rtl2gds completes', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }
 
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'task_complete',
-        jobId: 'job-rtl2gds',
-        cmd: 'rtl2gds',
-      },
-    })
+    onRuntimeEvent?.(
+      backendProtocolEvent(
+        'operation.completed',
+        {},
+        {
+          operationId: 'job-rtl2gds',
+        },
+      ),
+    )
 
     expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
@@ -2348,21 +2295,15 @@ describe('useWorkspace openProject', () => {
   it('requests Home artifact reset after ECC prepares a full-flow rerun', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'message',
-        cmd: 'rtl2gds',
-        directory: '/work/demo',
-        rerun: true,
-        rerunScope: 'flow',
-        runtimeProtocolType: 'operation.rerun_prepared',
-      },
-      message: ['Started rtl2gds'],
-      response: 'success',
-    })
+    onRuntimeEvent?.(
+      backendProtocolEvent(
+        'operation.rerun_prepared',
+        { scope: 'flow' },
+        { rerun: true },
+      ),
+    )
 
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.backendRuntimeEvents.value).toHaveLength(1)
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
     expect(notifyWorkspaceRerunPreparedMock).toHaveBeenCalledWith({
       affectedSteps: [],
@@ -2375,21 +2316,17 @@ describe('useWorkspace openProject', () => {
   it('broadcasts a single-step rerun without resetting the whole Home workspace', async () => {
     await openWorkspaceAndConnectRuntimeEvents()
 
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        affectedSteps: ['Floorplan', 'route'],
-        cmd: 'run_step',
-        directory: '/work/demo',
-        rerun: true,
-        rerunScope: 'step',
-        runtimeProtocolType: 'operation.rerun_prepared',
-        targetStep: 'Floorplan',
-        type: 'message',
-      },
-      message: [],
-      response: 'success',
-    })
+    onRuntimeEvent?.(
+      backendProtocolEvent(
+        'operation.rerun_prepared',
+        {
+          affectedSteps: ['Floorplan', 'route'],
+          scope: 'step',
+          targetStep: 'Floorplan',
+        },
+        { rerun: true },
+      ),
+    )
 
     expect(notifyWorkspaceRerunPreparedMock).toHaveBeenCalledWith({
       affectedSteps: ['Floorplan', 'route'],
@@ -2403,17 +2340,7 @@ describe('useWorkspace openProject', () => {
   it('releases the workspace run lock when a single-step operation completes', async () => {
     await openWorkspaceAndConnectRuntimeEvents()
 
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        cmd: 'run_step',
-        directory: '/work/demo',
-        runtimeProtocolType: 'operation.completed',
-        type: 'step_complete',
-      },
-      message: [],
-      response: 'success',
-    })
+    onRuntimeEvent?.(backendProtocolEvent('operation.completed'))
 
     expect(clearFlowExecutionActiveForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
   })
@@ -2423,27 +2350,27 @@ describe('useWorkspace openProject', () => {
     const notifications = useNotificationStore()
 
     onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        jobId: 'operation-place',
-        method: 'runtime.exited',
-        type: 'error',
-      },
-      message: ['ECC RPC sidecar exited unexpectedly.'],
-      response: 'error',
+      code: 1,
+      designTool: 'backend',
+      interruptedOperationId: 'operation-place',
+      message: 'ECC RPC sidecar exited unexpectedly.',
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-demo',
     })
     onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        errorCode: 'interrupted',
-        jobId: 'operation-place',
-        logFile: '/work/demo/place_dreamplace/log/place.log',
-        method: 'flow.run_step',
-        step: 'place',
-        type: 'error',
-      },
-      message: ['place was interrupted when the ECC sidecar stopped.'],
-      response: 'error',
+      code: 'interrupted',
+      designTool: 'backend',
+      logFile: '/work/demo/place_dreamplace/log/place.log',
+      message: 'place was interrupted when the ECC sidecar stopped.',
+      method: 'flow.run_step',
+      operationId: 'operation-place',
+      step: 'place',
+      type: 'operation.failed',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-demo',
     })
 
     expect(notifications.notifications.value).toEqual([
@@ -2460,17 +2387,16 @@ describe('useWorkspace openProject', () => {
     const notifications = useNotificationStore()
 
     onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        errorCode: 'interrupted',
-        errorDetails: { previousRun: true },
-        jobId: 'operation-place',
-        method: 'flow.run_step',
-        step: 'place',
-        type: 'error',
-      },
-      message: ['Previous place run was interrupted.'],
-      response: 'error',
+      code: 'interrupted',
+      designTool: 'backend',
+      details: { previousRun: true },
+      message: 'Previous place run was interrupted.',
+      method: 'flow.run_step',
+      operationId: 'operation-place',
+      step: 'place',
+      type: 'operation.failed',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-demo',
     })
 
     expect(notifications.notifications.value[0]?.title).toBe(
@@ -2505,65 +2431,49 @@ describe('useWorkspace openProject', () => {
   it('uses the current project path for prepared rerun events with only a workspace handle', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
 
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'message',
-        cmd: 'rtl2gds',
-        workspaceId: 'workspace-demo',
-        rerun: true,
-        rerunScope: 'flow',
-        runtimeProtocolType: 'operation.rerun_prepared',
-      },
-      message: ['Started rtl2gds'],
-      response: 'success',
-    })
+    onRuntimeEvent?.(
+      backendProtocolEvent(
+        'operation.rerun_prepared',
+        { scope: 'flow' },
+        { rerun: true, workspaceDirectory: null },
+      ),
+    )
 
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.backendRuntimeEvents.value).toHaveLength(1)
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
     expect(requestHomeRunArtifactResetMock).not.toHaveBeenCalledWith('workspace-demo')
   })
 
-  it('accepts a new rerun event when a fresh sidecar reuses the legacy event id', async () => {
+  it('accepts a new rerun event when a fresh sidecar reuses an event id', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const sharedEventId = 'workspace-demo:1'
 
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'message',
-        cmd: 'rtl2gds',
-        directory: '/work/demo',
-        jobId: 'operation-old',
-        runtimeEventId: sharedEventId,
-        runtimeInstanceId: 'runtime-old',
-        runtimeProtocolType: 'operation.rerun_prepared',
-        workspaceId: 'workspace-demo',
-        rerun: true,
-        rerunScope: 'flow',
-      },
-      message: [],
-      response: 'success',
-    })
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'message',
-        cmd: 'rtl2gds',
-        directory: '/work/demo',
-        jobId: 'operation-new',
-        runtimeEventId: sharedEventId,
-        runtimeInstanceId: 'runtime-new',
-        runtimeProtocolType: 'operation.rerun_prepared',
-        workspaceId: 'workspace-demo',
-        rerun: true,
-        rerunScope: 'flow',
-      },
-      message: [],
-      response: 'success',
-    })
+    onRuntimeEvent?.(
+      backendProtocolEvent(
+        'operation.rerun_prepared',
+        { scope: 'flow' },
+        {
+          eventId: sharedEventId,
+          operationId: 'operation-old',
+          rerun: true,
+          runtimeInstanceId: 'runtime-old',
+        },
+      ),
+    )
+    onRuntimeEvent?.(
+      backendProtocolEvent(
+        'operation.rerun_prepared',
+        { scope: 'flow' },
+        {
+          eventId: sharedEventId,
+          operationId: 'operation-new',
+          rerun: true,
+          runtimeInstanceId: 'runtime-new',
+        },
+      ),
+    )
 
-    expect(workspace.runtimeEvents.value).toHaveLength(2)
+    expect(workspace.backendRuntimeEvents.value).toHaveLength(2)
     expect(requestHomeRunArtifactResetMock).toHaveBeenCalledTimes(2)
   })
 
@@ -2662,7 +2572,6 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.designTool).toBe('frontend')
     expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-frontend')
     expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-frontend', {
-      designTool: 'frontend',
       workspaceDirectory: '/work/frontend-project',
     })
 
@@ -3343,247 +3252,5 @@ describe('useWorkspace openProject', () => {
     ).resolves.toBe(false)
 
     expect(desktopApi.workspace.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
-  })
-
-  it('does not invalidate resources for read-only runtime events', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      data: {
-        type: 'task_complete',
-        jobId: 'job-get-info',
-        cmd: 'get_info',
-        message: 'completed',
-      },
-    })
-    onRuntimeEvent?.({
-      data: {
-        type: 'task_complete',
-        jobId: 'job-home-page',
-        cmd: 'home_page',
-        message: 'completed',
-      },
-    })
-    onRuntimeEvent?.({
-      data: {
-        type: 'data_ready',
-        jobId: 'job-data-ready',
-        cmd: 'run_step',
-        message: 'completed',
-      },
-    })
-    onRuntimeEvent?.({
-      data: {
-        type: 'task_complete',
-        jobId: 'job-load',
-        cmd: 'load_workspace',
-        message: 'completed',
-      },
-    })
-    onRuntimeEvent?.({
-      data: {
-        type: 'task_complete',
-        jobId: 'job-create',
-        cmd: 'create_workspace',
-        message: 'completed',
-      },
-    })
-    expect(workspace.resourceVersions.value).toEqual(before)
-    expect(workspace).not.toHaveProperty('stepRefreshCounter')
-  })
-
-  it('invalidates all Home resources once when run_step completes', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      data: {
-        type: 'task_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-        message: 'completed',
-      },
-    })
-
-    expect(workspace.resourceVersions.value).toEqual({
-      home: before.home + 1,
-      flow: before.flow + 1,
-      parameters: before.parameters + 1,
-      step: before.step + 1,
-      'step-config': before['step-config'] + 1,
-      maps: before.maps + 1,
-      logs: before.logs + 1,
-      all: before.all + 1,
-    })
-  })
-
-  it('does not invalidate resources for stdout and stderr runtime events', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      data: {
-        type: 'stdout',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        message: 'running',
-      },
-    })
-    onRuntimeEvent?.({
-      data: {
-        type: 'stderr',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        message: 'warning',
-      },
-    })
-
-    expect(workspace.resourceVersions.value).toEqual(before)
-  })
-
-  it('does not count the same completed runtime event twice', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-    const completedEvent = {
-      data: {
-        type: 'task_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-        message: 'completed',
-      },
-    }
-
-    onRuntimeEvent?.(completedEvent)
-    onRuntimeEvent?.(completedEvent)
-
-    expect(workspace.resourceVersions.value).toEqual({
-      home: before.home + 1,
-      flow: before.flow + 1,
-      parameters: before.parameters + 1,
-      step: before.step + 1,
-      'step-config': before['step-config'] + 1,
-      maps: before.maps + 1,
-      logs: before.logs + 1,
-      all: before.all + 1,
-    })
-  })
-
-  it('invalidates structured resources for runtime events with explicit data paths', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-        info: {
-          subflow_path: '/work/demo/floorplan/subflow.json',
-        },
-      },
-    })
-
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
-    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
-  })
-
-  it('invalidates structured resources for runtime events with top-level explicit data paths', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        id: 'subflow',
-        step: 'floorplan',
-        subflow_path: '/work/demo/floorplan/subflow.json',
-      },
-    })
-
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
-    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
-  })
-
-  it('invalidates home and parameters when runtime events carry a home page path', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-        info: {
-          home_page: '/work/demo/home/home.json',
-        },
-      },
-    })
-
-    expect(workspace.runtimeEvents.value).toHaveLength(1)
-    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
-    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
-  })
-
-  it('counts a final result only once after an explicit path lifecycle event for the same job', async () => {
-    const workspace = await openWorkspaceAndConnectRuntimeEvents()
-    const before = { ...workspace.resourceVersions.value }
-
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-        info: {
-          subflow_path: '/work/demo/floorplan/subflow.json',
-        },
-      },
-    })
-    onRuntimeEvent?.({
-      cmd: 'notify',
-      data: {
-        type: 'step_complete',
-        jobId: 'job-run-step',
-        cmd: 'run_step',
-        step: 'floorplan',
-        state: 'Success',
-      },
-      message: ['done'],
-    })
-
-    expect(workspace.runtimeEvents.value).toHaveLength(2)
-    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
-    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
-    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
-    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
-    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
   })
 })

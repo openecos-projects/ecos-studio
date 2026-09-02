@@ -1,4 +1,7 @@
 const testState = vi.hoisted(() => ({
+  backendRuntimeEvents: null as
+    | import('vue').Ref<import('@ecos-studio/shared').DesignRuntimeEvent[]>
+    | null,
   currentProject: null as import('vue').Ref<{ path: string } | null> | null,
   readProjectTextFile: vi.fn(),
   resolveProjectPathAccess: vi.fn(async (path: string) => path),
@@ -31,6 +34,7 @@ vi.mock('vue-router', () => ({
 
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
+    backendRuntimeEvents: testState.backendRuntimeEvents,
     currentProject: testState.currentProject,
     runtimeEvents: testState.runtimeEvents,
     resourceVersions: testState.resourceVersions,
@@ -62,6 +66,29 @@ vi.mock('@/utils/projectFs', () => ({
 import { useSubflow } from './useSubflow'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
+function backendRuntimeEvent(
+  sourceType: string,
+  payload: Record<string, unknown>,
+): import('@ecos-studio/shared').DesignRuntimeEvent {
+  return {
+    designTool: 'backend',
+    event: {
+      eventId: `event-${sourceType}`,
+      kind: 'flow',
+      operationId: 'operation-1',
+      origin: 'gui',
+      payload: { sourceType, ...payload },
+      sequence: 1,
+      timestamp: 1,
+      type: 'execution.progress',
+      workspaceId: 'engineering-workspace',
+    },
+    type: 'runtime.protocol',
+    workspaceDirectory: '/workspace/demo',
+    workspaceHandle: 'workspace-demo',
+  }
+}
+
 describe('useSubflow runtime refresh', () => {
   beforeEach(() => {
     const lifecycle = useWorkspaceLifecycle()
@@ -74,6 +101,7 @@ describe('useSubflow runtime refresh', () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.route.path = '/workspace/floorplan'
     testState.runtimeEvents = ref([])
+    testState.backendRuntimeEvents = ref([])
     testState.resourceVersions = ref({
       home: 0,
       flow: 0,
@@ -179,28 +207,24 @@ describe('useSubflow runtime refresh', () => {
       expect(subflow.subflowSteps.value).toHaveLength(1)
     })
 
-    testState.runtimeEvents!.value.push({
-      data: {
-        runtimeProtocolType: 'step.started',
-        step: 'Floorplan',
-      },
-    })
+    testState.backendRuntimeEvents!.value.push(
+      backendRuntimeEvent('step.started', { step: 'Floorplan' }),
+    )
     await nextTick()
     expect(subflow.subflowSteps.value[0]).toMatchObject({
       name: 'floorplan',
       status: 'running',
     })
 
-    testState.runtimeEvents!.value.push({
-      data: {
-        runtimeProtocolType: 'subflow.stage',
+    testState.backendRuntimeEvents!.value.push(
+      backendRuntimeEvent('subflow.stage', {
         state: 'Success',
         step: 'Floorplan',
         subflowPeakMemory: 24,
         subflowRuntime: '0:0:3',
         subflowStep: 'floorplan',
-      },
-    })
+      }),
+    )
     await nextTick()
     expect(subflow.subflowSteps.value[0]).toMatchObject({
       duration: '0:0:3',

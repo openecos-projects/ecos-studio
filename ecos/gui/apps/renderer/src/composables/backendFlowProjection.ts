@@ -1,10 +1,8 @@
-import type { FlowStepState, FlowStepSummary } from '@ecos-studio/shared'
-
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
+import type {
+  DesignRuntimeEvent,
+  FlowStepState,
+  FlowStepSummary,
+} from '@ecos-studio/shared'
 
 function normalizeState(value: unknown, fallback: FlowStepState): FlowStepState {
   if (typeof value !== 'string') return fallback
@@ -47,24 +45,35 @@ function stepKey(value: string): string {
 
 export function projectBackendFlowSteps(
   committed: readonly FlowStepSummary[],
-  runtimeEvents: readonly unknown[],
+  runtimeEvents: readonly DesignRuntimeEvent[],
 ): FlowStepSummary[] {
   const steps = committed.map((step) => ({ ...step }))
 
   for (const event of runtimeEvents) {
-    const eventRecord = record(event)
-    const data = record(eventRecord?.data)
-    if (!data) continue
+    if (event.designTool !== 'backend') continue
+    const data =
+      event.type === 'runtime.protocol'
+        ? event.event.payload
+        : event.type === 'operation.progress'
+          ? (event.data ?? {})
+          : {}
     const protocolType =
-      typeof data.runtimeProtocolType === 'string' ? data.runtimeProtocolType : ''
-    const legacyType = typeof data.type === 'string' ? data.type : ''
+      event.type === 'runtime.protocol' && typeof data.sourceType === 'string'
+        ? data.sourceType
+        : event.type
+    const operationState = typeof data.state === 'string' ? data.state : ''
     const cancelled =
       protocolType === 'operation.cancelled' ||
-      (!protocolType && legacyType === 'cancelled')
+      (event.type === 'runtime.protocol' &&
+        event.event.type === 'operation.changed' &&
+        operationState === 'cancelled')
     const terminalFailure =
       protocolType === 'operation.failed' ||
       cancelled ||
-      (!protocolType && legacyType === 'error')
+      (event.type === 'runtime.protocol' &&
+        event.event.type === 'operation.changed' &&
+        (operationState === 'failed' || operationState === 'interrupted')) ||
+      (event.type === 'runtime.exited' && event.reason === 'unexpected')
     if (terminalFailure) {
       for (const step of steps) {
         if (step.state === 'running') step.state = cancelled ? 'cancelled' : 'failed'
@@ -73,13 +82,23 @@ export function projectBackendFlowSteps(
     }
 
     const started =
-      protocolType === 'step.started' || (!protocolType && legacyType === 'step_start')
+      protocolType === 'step.started' ||
+      (event.type === 'operation.progress' &&
+        event.phase === 'started' &&
+        Boolean(event.step))
     const completed =
       protocolType === 'step.completed' ||
-      (!protocolType && legacyType === 'step_complete')
+      (event.type === 'operation.progress' &&
+        (event.phase === 'completed' || event.phase === 'failed') &&
+        Boolean(event.step))
     if (!started && !completed) continue
 
-    const stepName = typeof data.step === 'string' ? data.step : ''
+    const stepName =
+      typeof data.step === 'string'
+        ? data.step
+        : 'step' in event && typeof event.step === 'string'
+          ? event.step
+          : ''
     if (!stepName) continue
     if (started) {
       for (const step of steps) {
@@ -99,15 +118,17 @@ export function projectBackendFlowSteps(
       }
       steps.push(step)
     }
-    const phase = typeof data.phase === 'string' ? data.phase : ''
-    const response = eventRecord?.response
+    const phase =
+      event.type === 'operation.progress'
+        ? event.phase
+        : typeof data.phase === 'string'
+          ? data.phase
+          : ''
     const fallback: FlowStepState = started
       ? 'running'
-      : response === 'failed' || phase === 'failed'
+      : phase === 'failed'
         ? 'failed'
-        : response === 'error'
-          ? 'failed'
-          : 'succeeded'
+        : 'succeeded'
     step.state = normalizeState(data.state, fallback)
     if (typeof data.tool === 'string' && data.tool) step.toolId = data.tool
   }

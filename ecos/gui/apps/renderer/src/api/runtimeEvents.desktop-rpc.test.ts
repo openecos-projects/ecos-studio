@@ -40,21 +40,21 @@ function installRuntimeEventBridge() {
 
 function asDesignEvent(
   event: EccRuntimeEvent,
-  designTool: 'backend' | 'frontend' = 'backend',
+  designTool: 'backend' | 'frontend' = 'frontend',
 ) {
   return { ...event, designTool } as DesignRuntimeEvent
 }
 
-describe('createRuntimeEventClient desktop design runtime events', () => {
+describe('createFrontendRuntimeEventClient desktop design runtime events', () => {
   afterEach(() => {
     restoreWindow()
     vi.resetModules()
   })
 
-  it('maps backend run_step completion and preserves step metadata', async () => {
+  it('maps frontend run_step completion and preserves step metadata', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     const stepCompleteHandler = vi.fn()
     client.onAll(allHandler)
@@ -77,7 +77,7 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           cmd: 'run_step',
-          designTool: 'backend',
+          designTool: 'frontend',
           jobId: 'operation-1',
           step: 'placement',
           type: 'step_complete',
@@ -93,8 +93,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('filters events by design tool and workspace handle', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('frontend-handle', { designTool: 'frontend' })
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('frontend-handle')
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -145,9 +145,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('accepts a frontend event with a stale handle when its directory matches', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('frontend-handle', {
-      designTool: 'frontend',
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('frontend-handle', {
       workspaceDirectory: '/work/frontend/',
     })
     const allHandler = vi.fn()
@@ -178,8 +177,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('maps full-flow rerun start metadata onto a lifecycle message', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -208,97 +207,10 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     )
   })
 
-  it('maps a single-step agent rerun completion onto run_step', async () => {
-    const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
-    const allHandler = vi.fn()
-    const stepCompleteHandler = vi.fn()
-    client.onAll(allHandler)
-    client.on('step_complete', stepCompleteHandler)
-    client.connect()
-
-    bridge.emit(
-      asDesignEvent({
-        executionScope: 'single_step',
-        method: 'candidate.rerun',
-        operationId: 'operation-single-rerun',
-        rerun: true,
-        type: 'operation.completed',
-        workspaceHandle: 'workspace-handle-1',
-      }),
-    )
-
-    expect(allHandler).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          cmd: 'run_step',
-          executionScope: 'single_step',
-          method: 'candidate.rerun',
-          type: 'step_complete',
-        }),
-      }),
-    )
-    expect(stepCompleteHandler).toHaveBeenCalledTimes(1)
-  })
-
-  it('maps a full-flow agent rerun onto flow lifecycle notifications', async () => {
-    const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
-    const allHandler = vi.fn()
-    client.onAll(allHandler)
-    client.connect()
-
-    bridge.emit(
-      asDesignEvent({
-        executionScope: 'full_flow',
-        method: 'candidate.rerun',
-        operationId: 'operation-rerun',
-        rerun: true,
-        type: 'operation.started',
-        workspaceHandle: 'workspace-handle-1',
-      }),
-    )
-    bridge.emit(
-      asDesignEvent({
-        executionScope: 'full_flow',
-        method: 'candidate.rerun',
-        operationId: 'operation-rerun',
-        rerun: true,
-        type: 'operation.completed',
-        workspaceHandle: 'workspace-handle-1',
-      }),
-    )
-
-    expect(allHandler).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          cmd: 'rtl2gds',
-          executionScope: 'full_flow',
-          rerun: true,
-          type: 'message',
-        }),
-      }),
-    )
-    expect(allHandler).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          cmd: 'rtl2gds',
-          executionScope: 'full_flow',
-          rerun: true,
-          type: 'task_complete',
-        }),
-      }),
-    )
-  })
-
   it('maps bounded step log chunks from the runtime protocol', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const logHandler = vi.fn()
     client.on('log', logHandler)
     client.connect()
@@ -342,8 +254,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('maps rerun preparation metadata from the runtime protocol', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -391,10 +303,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('maps frontend progress into an incremental step completion', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1', {
-      designTool: 'frontend',
-    })
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -435,10 +345,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('keeps standard frontend step start and completion events incremental', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1', {
-      designTool: 'frontend',
-    })
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const startHandler = vi.fn()
     const completeHandler = vi.fn()
     client.on('step_start', startHandler)
@@ -501,10 +409,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('maps standard frontend subflow stages without completing the outer step', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1', {
-      designTool: 'frontend',
-    })
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     const stepCompleteHandler = vi.fn()
     client.onAll(allHandler)
@@ -556,8 +462,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('maps failures and cancellation to terminal notifications', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     const errorHandler = vi.fn()
     client.onAll(allHandler)
@@ -602,8 +508,8 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
 
   it('publishes only unexpected sidecar exits as errors', async () => {
     const bridge = installRuntimeEventBridge()
-    const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('workspace-handle-1')
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('workspace-handle-1')
     const allHandler = vi.fn()
     const errorHandler = vi.fn()
     client.onAll(allHandler)

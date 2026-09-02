@@ -23,17 +23,6 @@ export {
 } from './frontendCatalog'
 
 export {
-  createRuntimeEventClient,
-  type RuntimeEventClient,
-  type RuntimeEventResponse,
-  type RuntimeNotifyType,
-  type RuntimeEventHandler,
-  type RuntimeEventClientConfig,
-  type RuntimeEventClientState,
-  type RuntimeResponseType,
-} from './runtimeEvents'
-
-export {
   checkResourceUpdatesApi,
   getToolStatusApi,
   importLocalResourcePathApi,

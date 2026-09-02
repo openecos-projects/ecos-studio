@@ -1,5 +1,15 @@
 import { getCurrentInstance, onBeforeUnmount, watch } from 'vue'
-import type { WorkspaceResourceIndex, WorkspaceStepResource } from '@ecos-studio/shared'
+import type {
+  DesignRuntimeEvent,
+  WorkspaceResourceIndex,
+  WorkspaceStepResource,
+} from '@ecos-studio/shared'
+import {
+  backendRuntimeEventKind,
+  backendRuntimeEventState,
+  backendRuntimeEventStep,
+  backendRuntimeEventTerminalState,
+} from '@/api/backendRuntimeEvents'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
@@ -44,7 +54,7 @@ function filename(path: string): string {
  */
 export function useFlowRunArtifacts() {
   const messageStore = useMessageStore()
-  const { currentProject, runtimeEvents } = useWorkspace()
+  const { backendRuntimeEvents, currentProject } = useWorkspace()
   const { registerBlobUrl } = useWorkspaceLifecycle()
   const activeCaptures = new Set<FlowRunArtifactCapture>()
 
@@ -59,9 +69,7 @@ export function useFlowRunArtifacts() {
     const forcedSteps = new Set<string>()
     const existingRuntimeEvents = new WeakSet<object>()
     const handledRuntimeEvents = new WeakSet<object>()
-    for (const event of runtimeEvents.value) {
-      if (event && typeof event === 'object') existingRuntimeEvents.add(event)
-    }
+    for (const event of backendRuntimeEvents.value) existingRuntimeEvents.add(event)
     let stopped = false
     let inspectionQueue = Promise.resolve()
 
@@ -206,40 +214,30 @@ export function useFlowRunArtifacts() {
       }
     })
 
-    function consumeRuntimeEvent(event: unknown): void {
+    function consumeRuntimeEvent(event: DesignRuntimeEvent): void {
       if (
         stopped ||
-        !event ||
-        typeof event !== 'object' ||
         existingRuntimeEvents.has(event) ||
         handledRuntimeEvents.has(event)
       ) {
         return
       }
       handledRuntimeEvents.add(event)
-      const data = (event as { data?: unknown }).data
-      if (!data || typeof data !== 'object') return
-      const eventData = data as Record<string, unknown>
-      const protocolType = eventData.runtimeProtocolType
-      const step = typeof eventData.step === 'string' ? eventData.step : ''
+      const protocolType = backendRuntimeEventKind(event)
+      const step = backendRuntimeEventStep(event) ?? ''
       if (protocolType === 'step.completed' && step) {
-        const state =
-          typeof eventData.state === 'string' ? eventData.state.toLowerCase() : ''
+        const state = backendRuntimeEventState(event)?.toLowerCase() ?? ''
         if (state === 'success') completedSteps.add(flowStepKey(step))
         return
       }
-      if (
-        ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
-          String(protocolType),
-        )
-      ) {
+      if (backendRuntimeEventTerminalState(event)) {
         enqueueFinalInspection()
         void inspectionQueue.finally(() => capture.stop())
       }
     }
 
     stopWatchingRuntimeEvents = watch(
-      runtimeEvents,
+      backendRuntimeEvents,
       (events) => {
         for (const event of events) consumeRuntimeEvent(event)
       },

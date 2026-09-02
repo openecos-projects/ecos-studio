@@ -7,6 +7,11 @@ import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { FrontendStepEnum, InfoEnum, StepEnum, getStepMetadata } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
+import {
+  backendRuntimeEventKind,
+  backendRuntimeEventPayload,
+  backendRuntimeEventStep,
+} from '@/api/backendRuntimeEvents'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
   normalizeWorkspaceProjectPath,
@@ -124,7 +129,8 @@ function parseTimeString(timeStr: string): number {
  */
 export function useSubflow() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions, runtimeEvents } = useWorkspace()
+  const { backendRuntimeEvents, currentProject, resourceVersions, runtimeEvents } =
+    useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
   const route = useRoute()
 
@@ -467,6 +473,70 @@ export function useSubflow() {
     if (event && typeof event === 'object') existingRuntimeEvents.add(event)
   }
 
+  const existingBackendRuntimeEvents = new WeakSet<object>(backendRuntimeEvents.value)
+  const handledBackendRuntimeEvents = new WeakSet<object>()
+  const stopWatchingBackendRuntimeEvents = watch(
+    backendRuntimeEvents,
+    (events) => {
+      const currentStep = getCurrentRouteStep()
+      if (!currentStep) return
+      for (const event of events) {
+        if (
+          existingBackendRuntimeEvents.has(event) ||
+          handledBackendRuntimeEvents.has(event) ||
+          !sameStepName(backendRuntimeEventStep(event) ?? '', currentStep)
+        ) {
+          continue
+        }
+        handledBackendRuntimeEvents.add(event)
+        const kind = backendRuntimeEventKind(event)
+        if (kind === 'step.started') {
+          stepExecutionActive = true
+          runtimeUpdateRevision += 1
+          resetSubflowForRerun(true)
+          continue
+        }
+        if (kind === 'step.completed') {
+          stepExecutionActive = false
+          continue
+        }
+        if (kind !== 'subflow.stage') continue
+
+        const payload = backendRuntimeEventPayload(event)
+        const subflowStep =
+          typeof payload.subflowStep === 'string'
+            ? payload.subflowStep
+            : typeof payload.subflow_step === 'string'
+              ? payload.subflow_step
+              : ''
+        if (!subflowStep) continue
+        runtimeUpdateRevision += 1
+        updateSubflowStage(
+          subflowStep,
+          typeof payload.state === 'string' ? payload.state : 'Unstart',
+          typeof payload.subflowRuntime === 'string'
+            ? payload.subflowRuntime
+            : typeof payload.runtime === 'string'
+              ? payload.runtime
+              : '',
+          typeof payload.subflowPeakMemory === 'number'
+            ? payload.subflowPeakMemory
+            : typeof payload.peakMemory === 'number'
+              ? payload.peakMemory
+              : undefined,
+        )
+        const subflowState =
+          typeof payload.state === 'string' ? payload.state.trim().toLowerCase() : ''
+        if (['incomplete', 'invalid', 'failed'].includes(subflowState)) {
+          stepExecutionActive = false
+        } else {
+          advanceRunningSubflowStage()
+        }
+      }
+    },
+    { deep: true, flush: 'sync' },
+  )
+
   const stopWatchingRuntimeEvents = watch(
     runtimeEvents,
     (events) => {
@@ -545,6 +615,7 @@ export function useSubflow() {
   onScopeDispose(() => {
     unregisterWorkspaceRerunPrepared()
     unregisterStepRenderTask()
+    stopWatchingBackendRuntimeEvents()
     stopWatchingRuntimeEvents()
   })
 

@@ -1,7 +1,7 @@
-import type { DesignRuntimeEvent, DesignTool } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 
-export type RuntimeNotifyType =
+export type FrontendRuntimeNotifyType =
   | 'data_ready'
   | 'step_start'
   | 'step_complete'
@@ -12,13 +12,18 @@ export type RuntimeNotifyType =
   | 'log'
   | 'message'
 
-export type RuntimeResponseType = 'success' | 'failed' | 'error' | 'warning' | 'cancelled'
+export type FrontendRuntimeResponseType =
+  | 'success'
+  | 'failed'
+  | 'error'
+  | 'warning'
+  | 'cancelled'
 
-export interface RuntimeEventResponse {
+export interface FrontendRuntimeEventResponse {
   cmd: string
-  response: RuntimeResponseType
+  response: FrontendRuntimeResponseType
   data: {
-    type: RuntimeNotifyType
+    type: FrontendRuntimeNotifyType
     step?: string
     id?: string
     timestamp?: number
@@ -27,52 +32,30 @@ export interface RuntimeEventResponse {
   message: string[]
 }
 
-export type RuntimeEventHandler = (response: RuntimeEventResponse) => void
+export type FrontendRuntimeEventHandler = (response: FrontendRuntimeEventResponse) => void
 
-export interface RuntimeEventClientConfig {
-  autoReconnect?: boolean
-  reconnectDelay?: number
-  maxReconnectDelay?: number
-  connectionTimeout?: number
-  designTool?: DesignTool
+export interface FrontendRuntimeEventClientConfig {
   workspaceDirectory?: string
 }
 
-export type RuntimeEventClientState =
+export type FrontendRuntimeEventClientState =
   | 'disconnected'
   | 'connecting'
   | 'connected'
   | 'error'
 
-function methodToCommand(
-  method: string | undefined,
-  executionScope: string | undefined,
-): string | undefined {
+function methodToCommand(method: string | undefined): string | undefined {
   if (method === 'flow.run') return 'rtl2gds'
   if (method === 'flow.run_step') return 'run_step'
-  if (method === 'candidate.rerun' && executionScope === 'full_flow') return 'rtl2gds'
-  // Agent isolated reruns use candidate.rerun; single_step must refresh step UI like run_step.
-  if (method === 'candidate.rerun' && executionScope === 'single_step') return 'run_step'
   return method
 }
 
-function isFlowMethod(
-  method: string | undefined,
-  _executionScope: string | undefined,
-): boolean {
-  return (
-    method === 'flow.run' || method === 'flow.run_step' || method === 'candidate.rerun'
-  )
+function isFlowMethod(method: string | undefined): boolean {
+  return method === 'flow.run' || method === 'flow.run_step'
 }
 
-function isFullFlowMethod(
-  method: string | undefined,
-  executionScope: string | undefined,
-): boolean {
-  return (
-    method === 'flow.run' ||
-    (method === 'candidate.rerun' && executionScope === 'full_flow')
-  )
+function isFullFlowMethod(method: string | undefined): boolean {
+  return method === 'flow.run'
 }
 
 function normalizeWorkspacePath(path: string): string {
@@ -98,17 +81,15 @@ function eventMatchesWorkspace(
   )
 }
 
-function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | null {
+function notifyTypeFromEvent(
+  event: DesignRuntimeEvent,
+): FrontendRuntimeNotifyType | null {
   if (event.type === 'runtime.exited') {
     return event.reason === 'unexpected' ? 'error' : null
   }
   if (event.type === 'operation.progress') {
     if (event.data?.runtimeProtocolType === 'subflow.stage') return 'message'
-    const executionScope =
-      'executionScope' in event && typeof event.executionScope === 'string'
-        ? event.executionScope
-        : undefined
-    if (!isFlowMethod(event.method, executionScope)) return null
+    if (!isFlowMethod(event.method)) return null
     if (event.phase === 'started') return event.step ? 'step_start' : 'message'
     if (event.phase === 'completed' || event.phase === 'failed') {
       return event.step ? 'step_complete' : 'message'
@@ -120,35 +101,26 @@ function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | nul
     return event.step ? 'step_start' : 'message'
   }
   if (event.type === 'operation.failed') {
-    return isFlowMethod(event.method, event.executionScope) ? 'error' : null
+    return isFlowMethod(event.method) ? 'error' : null
   }
   if (event.type === 'operation.cancelled') {
-    const executionScope =
-      'executionScope' in event && typeof event.executionScope === 'string'
-        ? event.executionScope
-        : undefined
-    return isFlowMethod(event.method, executionScope) ? 'cancelled' : null
+    return isFlowMethod(event.method) ? 'cancelled' : null
   }
   if (event.type !== 'operation.completed' && event.type !== 'operation.started') {
     return null
   }
-  if (!isFlowMethod(event.method, event.executionScope)) return null
+  if (!isFlowMethod(event.method)) return null
 
   if (event.type === 'operation.started') {
-    if (
-      event.method === 'flow.run_step' ||
-      (event.method === 'candidate.rerun' && event.executionScope === 'single_step')
-    ) {
+    if (event.method === 'flow.run_step') {
       return 'step_start'
     }
     return 'message'
   }
-  return isFullFlowMethod(event.method, event.executionScope)
-    ? 'task_complete'
-    : 'step_complete'
+  return isFullFlowMethod(event.method) ? 'task_complete' : 'step_complete'
 }
 
-function responseFromEvent(event: DesignRuntimeEvent): RuntimeResponseType {
+function responseFromEvent(event: DesignRuntimeEvent): FrontendRuntimeResponseType {
   if (event.type === 'operation.failed' || event.type === 'runtime.exited') {
     return 'error'
   }
@@ -168,7 +140,7 @@ function responseFromEvent(event: DesignRuntimeEvent): RuntimeResponseType {
 
 function responseFromRuntimeEvent(
   event: DesignRuntimeEvent,
-): RuntimeEventResponse | null {
+): FrontendRuntimeEventResponse | null {
   if (event.type === 'runtime.protocol') {
     return responseFromProtocolEvent(event)
   }
@@ -177,11 +149,11 @@ function responseFromRuntimeEvent(
 
   const method = 'method' in event ? event.method : 'runtime.exited'
   const executionScope = 'executionScope' in event ? event.executionScope : undefined
-  const command = methodToCommand(method, executionScope)
+  const command = methodToCommand(method)
   const message =
     'message' in event && typeof event.message === 'string' ? [event.message] : []
   const progressData = event.type === 'operation.progress' ? event.data : undefined
-  const data: RuntimeEventResponse['data'] = {
+  const data: FrontendRuntimeEventResponse['data'] = {
     ...progressData,
     cmd: command,
     designTool: event.designTool,
@@ -215,7 +187,7 @@ function responseFromRuntimeEvent(
 
 function responseFromProtocolEvent(
   event: Extract<DesignRuntimeEvent, { type: 'runtime.protocol' }>,
-): RuntimeEventResponse | null {
+): FrontendRuntimeEventResponse | null {
   const protocol = event.event
   const payload = protocol.payload
   const command = protocol.kind === 'flow' ? 'rtl2gds' : 'run_step'
@@ -234,7 +206,7 @@ function responseFromProtocolEvent(
       : []
   const sourceType =
     typeof payload.sourceType === 'string' ? payload.sourceType : protocol.type
-  const typeBySource: Record<string, RuntimeNotifyType> = {
+  const typeBySource: Record<string, FrontendRuntimeNotifyType> = {
     'operation.rerun_prepared': 'message',
     'step.log': 'log',
     'step.completed': 'step_complete',
@@ -308,23 +280,24 @@ function responseFromProtocolEvent(
   }
 }
 
-export function createRuntimeEventClient(
+export function createFrontendRuntimeEventClient(
   workspaceId: string,
-  config: RuntimeEventClientConfig = {},
+  config: FrontendRuntimeEventClientConfig = {},
 ) {
   let unsubscribeEvents: (() => void) | null = null
-  let state: RuntimeEventClientState = 'disconnected'
-  const handlers = new Map<RuntimeNotifyType, RuntimeEventHandler[]>()
-  const allHandlers: RuntimeEventHandler[] = []
-  let stateChangeCallback: ((state: RuntimeEventClientState) => void) | null = null
+  let state: FrontendRuntimeEventClientState = 'disconnected'
+  const handlers = new Map<FrontendRuntimeNotifyType, FrontendRuntimeEventHandler[]>()
+  const allHandlers: FrontendRuntimeEventHandler[] = []
+  let stateChangeCallback: ((state: FrontendRuntimeEventClientState) => void) | null =
+    null
 
-  function setState(newState: RuntimeEventClientState) {
+  function setState(newState: FrontendRuntimeEventClientState) {
     state = newState
     stateChangeCallback?.(state)
   }
 
-  function handleNotification(response: RuntimeEventResponse) {
-    const notifyType = response.data?.type as RuntimeNotifyType
+  function handleNotification(response: FrontendRuntimeEventResponse) {
+    const notifyType = response.data?.type as FrontendRuntimeNotifyType
 
     allHandlers.forEach((handler) => {
       try {
@@ -359,9 +332,8 @@ export function createRuntimeEventClient(
       return
     }
 
-    const designTool = config.designTool ?? 'backend'
     unsubscribeEvents = desktopApi.runtime.events.onEvent((event) => {
-      if (event.designTool !== designTool) return
+      if (event.designTool !== 'frontend') return
       if (!eventMatchesWorkspace(event, workspaceId, config.workspaceDirectory)) return
       const response = responseFromRuntimeEvent(event)
       if (response) {
@@ -369,9 +341,7 @@ export function createRuntimeEventClient(
       }
     })
     setState('connected')
-    console.log(
-      `${designTool} runtime event stream connected for workspace: ${workspaceId}`,
-    )
+    console.log(`frontend runtime event stream connected for workspace: ${workspaceId}`)
   }
 
   function close() {
@@ -384,14 +354,14 @@ export function createRuntimeEventClient(
     console.log(`Runtime event stream disconnected from workspace: ${workspaceId}`)
   }
 
-  function on(type: RuntimeNotifyType, handler: RuntimeEventHandler) {
+  function on(type: FrontendRuntimeNotifyType, handler: FrontendRuntimeEventHandler) {
     if (!handlers.has(type)) {
       handlers.set(type, [])
     }
     handlers.get(type)!.push(handler)
   }
 
-  function off(type: RuntimeNotifyType, handler: RuntimeEventHandler) {
+  function off(type: FrontendRuntimeNotifyType, handler: FrontendRuntimeEventHandler) {
     const typeHandlers = handlers.get(type)
     if (typeHandlers) {
       const index = typeHandlers.indexOf(handler)
@@ -401,11 +371,11 @@ export function createRuntimeEventClient(
     }
   }
 
-  function onAll(handler: RuntimeEventHandler) {
+  function onAll(handler: FrontendRuntimeEventHandler) {
     allHandlers.push(handler)
   }
 
-  function offAll(handler: RuntimeEventHandler) {
+  function offAll(handler: FrontendRuntimeEventHandler) {
     const index = allHandlers.indexOf(handler)
     if (index !== -1) {
       allHandlers.splice(index, 1)
@@ -420,7 +390,7 @@ export function createRuntimeEventClient(
     onAll,
     offAll,
     getState: () => state,
-    onStateChange(callback: (state: RuntimeEventClientState) => void) {
+    onStateChange(callback: (state: FrontendRuntimeEventClientState) => void) {
       stateChangeCallback = callback
     },
     onDataReady(callback: (step: string, id: string) => void) {
@@ -467,4 +437,6 @@ export function createRuntimeEventClient(
   }
 }
 
-export type RuntimeEventClient = ReturnType<typeof createRuntimeEventClient>
+export type FrontendRuntimeEventClient = ReturnType<
+  typeof createFrontendRuntimeEventClient
+>

@@ -1,5 +1,12 @@
 import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
+import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
+import {
+  backendRuntimeEventKind,
+  backendRuntimeEventPayload,
+  backendRuntimeEventState,
+  backendRuntimeEventStep,
+} from '@/api/backendRuntimeEvents'
 import { readOptionalProjectTextFileChunk } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
@@ -161,23 +168,21 @@ function isFailedState(state: string): boolean {
 }
 
 function rerunPreparedForWorkspace(
-  event: unknown,
+  event: DesignRuntimeEvent,
   workspacePath: string,
 ): string[] | null {
-  const data = (event as { data?: unknown })?.data
-  if (!data || typeof data !== 'object') return null
-  const record = data as Record<string, unknown>
-  if (record.runtimeProtocolType !== 'operation.rerun_prepared') return null
-  const eventWorkspace = normalizedPath(record.directory || record.workspaceId)
+  if (backendRuntimeEventKind(event) !== 'operation.rerun_prepared') return null
+  const payload = backendRuntimeEventPayload(event)
+  const eventWorkspace = normalizedPath(event.workspaceDirectory)
   if (eventWorkspace && eventWorkspace !== normalizedPath(workspacePath)) return null
-  return Array.isArray(record.affectedSteps)
-    ? record.affectedSteps.filter((step): step is string => typeof step === 'string')
+  return Array.isArray(payload.affectedSteps)
+    ? payload.affectedSteps.filter((step): step is string => typeof step === 'string')
     : []
 }
 
 export function useBackendFlowLogs() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, runtimeEvents } = useWorkspace()
+  const { backendRuntimeEvents, currentProject } = useWorkspace()
   const handledEventIds = new Set<string>()
   const handledEventObjects = new WeakSet<object>()
 
@@ -185,13 +190,8 @@ export function useBackendFlowLogs() {
     isFlowExecutionActiveForWorkspace(currentProject.value?.path),
   )
 
-  function shouldProcess(event: unknown): boolean {
-    if (!event || typeof event !== 'object') return false
-    const data = (event as { data?: unknown }).data
-    const eventId =
-      data && typeof data === 'object'
-        ? (data as Record<string, unknown>).runtimeEventId
-        : undefined
+  function shouldProcess(event: DesignRuntimeEvent): boolean {
+    const eventId = event.type === 'runtime.protocol' ? event.event.eventId : undefined
     if (typeof eventId === 'string' && eventId) {
       if (handledEventIds.has(eventId)) return false
       handledEventIds.add(eventId)
@@ -205,7 +205,7 @@ export function useBackendFlowLogs() {
     return true
   }
 
-  function processRuntimeEvent(event: unknown): void {
+  function processRuntimeEvent(event: DesignRuntimeEvent): void {
     const workspacePath = currentProject.value?.path
     if (!workspacePath || !shouldProcess(event)) return
     const affected = rerunPreparedForWorkspace(event, workspacePath)
@@ -214,18 +214,16 @@ export function useBackendFlowLogs() {
       prepareFlowLogSegmentsForRerun(affected)
       return
     }
-    const data = (event as { data?: unknown }).data
-    if (!data || typeof data !== 'object') return
-    const record = data as Record<string, unknown>
-    const protocolType = record.runtimeProtocolType
-    const stepName = typeof record.step === 'string' ? record.step : ''
+    const record = backendRuntimeEventPayload(event)
+    const protocolType = backendRuntimeEventKind(event)
+    const stepName = backendRuntimeEventStep(event) ?? ''
     const tool = typeof record.tool === 'string' ? record.tool : ''
     if (!stepName) return
 
     if (protocolType === 'step.started') {
       const segment = upsertRuntimeSegment({
         live: true,
-        state: typeof record.state === 'string' ? record.state : 'Ongoing',
+        state: backendRuntimeEventState(event) ?? 'Ongoing',
         stepName,
         tool,
       })
@@ -241,7 +239,7 @@ export function useBackendFlowLogs() {
     if (protocolType === 'step.log' && typeof record.logChunk === 'string') {
       const segment = upsertRuntimeSegment({
         live: true,
-        state: typeof record.state === 'string' ? record.state : 'Ongoing',
+        state: backendRuntimeEventState(event) ?? 'Ongoing',
         stepName,
         tool,
       })
@@ -260,7 +258,7 @@ export function useBackendFlowLogs() {
     }
 
     if (protocolType === 'step.completed') {
-      const state = typeof record.state === 'string' ? record.state : 'Success'
+      const state = backendRuntimeEventState(event) ?? 'Success'
       const segment = upsertRuntimeSegment({
         failed: isFailedState(state),
         live: false,
@@ -287,7 +285,7 @@ export function useBackendFlowLogs() {
     }
   }
 
-  function consumeRuntimeEvents(events: readonly unknown[]): void {
+  function consumeRuntimeEvents(events: readonly DesignRuntimeEvent[]): void {
     for (const event of events) processRuntimeEvent(event)
   }
 
@@ -433,7 +431,7 @@ export function useBackendFlowLogs() {
     },
     { immediate: true },
   )
-  watch(runtimeEvents, (events) => consumeRuntimeEvents(events), {
+  watch(backendRuntimeEvents, (events) => consumeRuntimeEvents(events), {
     deep: true,
     flush: 'sync',
     immediate: true,

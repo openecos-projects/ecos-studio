@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type Ref } from 'vue'
+import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
@@ -13,7 +14,7 @@ const testState = vi.hoisted(() => ({
     checklist: '',
     metrics: {},
   })),
-  runtimeEvents: null as Ref<unknown[]> | null,
+  runtimeEvents: null as Ref<DesignRuntimeEvent[]> | null,
   readOptionalProjectTextFileChunk: vi.fn(),
   subscribeProjectLogTail: vi.fn(),
   watchProjectFile: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: testState.currentProject,
     resourceVersions: ref({ all: 0, flow: 0, home: 0, logs: 0 }),
-    runtimeEvents: testState.runtimeEvents,
+    backendRuntimeEvents: testState.runtimeEvents,
   }),
 }))
 
@@ -70,10 +71,48 @@ async function waitForLiveLogFrame(): Promise<void> {
   await nextTick()
 }
 
+let eventSequence = 0
+
+function runtimeEvent(data: Record<string, unknown>): DesignRuntimeEvent {
+  const {
+    directory,
+    rerun,
+    rerunScope,
+    runtimeEventId,
+    runtimeProtocolType,
+    ...payload
+  } = data
+  eventSequence += 1
+  return {
+    designTool: 'backend',
+    event: {
+      eventId:
+        typeof runtimeEventId === 'string' ? runtimeEventId : `event-${eventSequence}`,
+      kind: 'flow',
+      operationId: 'operation-1',
+      origin: 'gui',
+      payload: {
+        ...payload,
+        ...(typeof rerunScope === 'string' ? { scope: rerunScope } : {}),
+        sourceType: runtimeProtocolType,
+      },
+      ...(typeof rerun === 'boolean' ? { rerun } : {}),
+      sequence: eventSequence,
+      timestamp: eventSequence,
+      type: 'execution.progress',
+      workspaceId: 'engineering-workspace',
+    },
+    type: 'runtime.protocol',
+    workspaceDirectory: typeof directory === 'string' ? directory : '/workspace/demo',
+    workspaceHandle: 'workspace-handle',
+  }
+}
+
 describe('useBackendFlowLogs runtime updates', () => {
   beforeEach(async () => {
     const { resetSharedHomeDataProjectState } = await import('./useBackendFlowLogs')
     resetSharedHomeDataProjectState()
+    eventSequence = 0
     testState.getWorkspaceResourceIndexApi.mockReset()
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [] } })
   })
@@ -98,61 +137,61 @@ describe('useBackendFlowLogs runtime updates', () => {
     const scope = effectScope()
     const home = scope.run(() => useBackendFlowLogs())!
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         runtimeProtocolType: 'step.started',
         state: 'Ongoing',
         step: 'Synthesis',
         tool: 'yosys',
-      },
-    })
+      }),
+    )
     await nextTick()
     expect(home.flowLogSegments.value).toMatchObject([
       { live: true, stepName: 'Synthesis', tool: 'yosys' },
     ])
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         logChunk: 'live synthesis log\n',
         logCursor: 19,
         runtimeProtocolType: 'step.log',
         step: 'Synthesis',
         tool: 'yosys',
-      },
-    })
+      }),
+    )
     await nextTick()
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         logChunk: 'live synthesis log\n',
         logCursor: 19,
         runtimeProtocolType: 'step.log',
         step: 'Synthesis',
         tool: 'yosys',
-      },
-    })
+      }),
+    )
     await waitForLiveLogFrame()
     expect(Object.values(home.flowLogContentByKey.value)).toContain(
       'live synthesis log\n',
     )
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         finalLog: 'final synthesis log',
         runtimeProtocolType: 'step.completed',
         state: 'Success',
         step: 'Synthesis',
         tool: 'yosys',
-      },
-    })
+      }),
+    )
     await nextTick()
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         runtimeProtocolType: 'step.started',
         state: 'Ongoing',
         step: 'Floorplan',
         tool: 'iEDA',
-      },
-    })
+      }),
+    )
     await nextTick()
     expect(home.flowLogSegments.value).toEqual(
       expect.arrayContaining([
@@ -171,35 +210,35 @@ describe('useBackendFlowLogs runtime updates', () => {
     const scope = effectScope()
     const home = scope.run(() => useBackendFlowLogs())!
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         runtimeEventId: 'runtime-1:1',
         runtimeProtocolType: 'step.started',
         state: 'Ongoing',
         step: 'route',
         tool: 'ecc',
-      },
-    })
-    testState.runtimeEvents.value.push({
-      data: {
+      }),
+    )
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         logChunk: 'route line one\n',
         logCursor: 15,
         runtimeEventId: 'runtime-1:2',
         runtimeProtocolType: 'step.log',
         step: 'route',
         tool: 'ecc',
-      },
-    })
-    testState.runtimeEvents.value.push({
-      data: {
+      }),
+    )
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         logChunk: 'route line two\n',
         logCursor: 30,
         runtimeEventId: 'runtime-1:3',
         runtimeProtocolType: 'step.log',
         step: 'route',
         tool: 'ecc',
-      },
-    })
+      }),
+    )
 
     await waitForLiveLogFrame()
 
@@ -221,35 +260,35 @@ describe('useBackendFlowLogs runtime updates', () => {
     const scope = effectScope()
     const home = scope.run(() => useBackendFlowLogs())!
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         runtimeEventId: 'runtime-2:1',
         runtimeProtocolType: 'step.started',
         state: 'Ongoing',
         step: 'cts',
         tool: 'ecc',
-      },
-    })
-    testState.runtimeEvents.value.push({
-      data: {
+      }),
+    )
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         logChunk: 'cts completed output\n',
         logCursor: 21,
         runtimeEventId: 'runtime-2:2',
         runtimeProtocolType: 'step.log',
         step: 'cts',
         tool: 'ecc',
-      },
-    })
-    testState.runtimeEvents.value.push({
-      data: {
+      }),
+    )
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         finalLog: '',
         runtimeEventId: 'runtime-2:3',
         runtimeProtocolType: 'step.completed',
         state: 'Success',
         step: 'cts',
         tool: 'ecc',
-      },
-    })
+      }),
+    )
 
     await nextTick()
 
@@ -309,15 +348,15 @@ describe('useBackendFlowLogs runtime updates', () => {
     const scope = effectScope()
     const home = scope.run(() => useBackendFlowLogs())!
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         finalLog: '',
         runtimeProtocolType: 'step.completed',
         state: 'Success',
         step: 'fixFanout',
         tool: 'ecc',
-      },
-    })
+      }),
+    )
     await nextTick()
     const segment = home.flowLogSegments.value.find(
       (item) => item.stepName === 'fixFanout',
@@ -358,27 +397,27 @@ describe('useBackendFlowLogs runtime updates', () => {
       ['Floorplan', 'ecc'],
       ['route', 'ecc'],
     ]) {
-      testState.runtimeEvents.value.push({
-        data: {
+      testState.runtimeEvents.value.push(
+        runtimeEvent({
           finalLog: `${step} final log`,
           runtimeProtocolType: 'step.completed',
           state: 'Success',
           step,
           tool,
-        },
-      })
+        }),
+      )
       await nextTick()
     }
 
-    testState.runtimeEvents.value.push({
-      data: {
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
         affectedSteps: ['Floorplan', 'route'],
         directory: '/workspace/demo',
         rerun: true,
         rerunScope: 'step',
         runtimeProtocolType: 'operation.rerun_prepared',
-      },
-    })
+      }),
+    )
     await nextTick()
 
     expect(home.flowLogSegments.value).toEqual([

@@ -1,5 +1,6 @@
 import { ref, getCurrentInstance } from 'vue'
 import type {
+  DesignRuntimeEvent,
   DesignTool,
   DesktopSettingsValue,
   WorkspaceDirectoryReplacement,
@@ -17,7 +18,17 @@ import {
   waitForRuntimeReady,
 } from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
-import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
+import type {
+  FrontendRuntimeEventClient,
+  FrontendRuntimeEventResponse,
+} from '../api/runtimeEvents'
+import {
+  backendRuntimeEventMessage,
+  backendRuntimeEventOperationId,
+  backendRuntimeEventTerminalState,
+  connectBackendRuntimeEventSession,
+  type BackendRuntimeEventClient,
+} from '../api/backendRuntimeEvents'
 import {
   clearFlowExecutionActiveForWorkspace,
   isFlowExecutionActiveForWorkspace,
@@ -139,8 +150,10 @@ function scheduleStepRefresh(options: {
 }
 
 // Runtime event connection（workspace 级别，跟随 workspace 生命周期）
-const runtimeEventClient = ref<RuntimeEventClient | null>(null)
-const runtimeEvents = ref<RuntimeEventResponse[]>([])
+const runtimeEventClient = ref<FrontendRuntimeEventClient | null>(null)
+const runtimeEvents = ref<FrontendRuntimeEventResponse[]>([])
+const backendRuntimeEventClient = ref<BackendRuntimeEventClient | null>(null)
+const backendRuntimeEvents = ref<DesignRuntimeEvent[]>([])
 const notificationStore = useNotificationStore()
 const handledRefreshRuntimeEvents = new Set<string>()
 const handledRuntimeProtocolEvents = new Set<string>()
@@ -1524,6 +1537,81 @@ export function useWorkspace() {
   /**
    * 建立 runtime event 连接，订阅 workspace 的运行生命周期通知
    */
+  function connectBackendRuntimeEvents(workspaceId: string, sessionId: string): void {
+    const projectPath = currentProject.value?.path
+    const client = connectBackendRuntimeEventSession(workspaceId, projectPath, {
+      isCurrent: () => workspaceLifecycle.isCurrentSession(sessionId),
+      onEvent: (event) => {
+        backendRuntimeEvents.value.push(event)
+        if (backendRuntimeEvents.value.length > 200) {
+          backendRuntimeEvents.value.splice(0, backendRuntimeEvents.value.length - 200)
+        }
+      },
+      onFailure: (failure) => {
+        const rawMessage = failure.message
+        const [message, ...detailLines] = rawMessage.split('\n')
+        const previousRun =
+          isRecord(failure.details) && failure.details.previousRun === true
+        const stepTitle = failure.step
+          ? `${failure.step.charAt(0).toUpperCase()}${failure.step.slice(1)}`
+          : 'Flow'
+        notificationStore.addNotification({
+          key: failure.operationId,
+          severity: 'error',
+          title: failure.sidecarStopped
+            ? 'ECC sidecar stopped'
+            : previousRun
+              ? `Previous ${stepTitle} run was interrupted`
+              : failure.code === 'interrupted' || failure.terminalState === 'interrupted'
+                ? `${stepTitle} interrupted`
+                : `${stepTitle} failed`,
+          message: message?.trim() || 'ECC runtime operation failed.',
+          detail:
+            detailLines.join('\n').trim() ||
+            (failure.code === 'interrupted' || failure.terminalState === 'interrupted'
+              ? 'The step was marked Incomplete and was not rerun automatically.'
+              : 'Review the step log before rerunning.'),
+          logFile: failure.logFile,
+        })
+      },
+      onInvalidate: (step) => {
+        workspaceLifecycle.invalidate(['all'], {
+          sessionId,
+          reason: 'runtime-event',
+          step,
+        })
+      },
+      onRevision: (revision) => {
+        workspaceLifecycle.updateWorkspaceRevision(revision, sessionId)
+      },
+      onRerunPrepared: (event) => {
+        notifyWorkspaceRerunPrepared(event)
+        if (
+          event.scope === 'flow' &&
+          !isAgentWorkspaceRerunHomePrepared(event.projectPath)
+        ) {
+          clearHomeRunArtifactResetAwaitingBackendStart(event.projectPath)
+          requestHomeRunArtifactReset(event.projectPath)
+        }
+      },
+      onStepCommit: scheduleStepRefresh,
+      onTerminal: (directory) => {
+        const resolvedDirectory = directory ?? currentProject.value?.path
+        if (resolvedDirectory) clearFlowExecutionActiveForWorkspace(resolvedDirectory)
+      },
+    })
+    backendRuntimeEventClient.value = client
+    unregisterRuntimeEventCleanup = workspaceLifecycle.registerCleanup(
+      () => {
+        if (backendRuntimeEventClient.value === client) {
+          backendRuntimeEventClient.value = null
+        }
+        client.close()
+      },
+      { sessionId, label: 'backend runtime event client' },
+    )
+  }
+
   function connectRuntimeEvents(
     workspaceId: string,
     designTool: DesignTool = 'backend',
@@ -1533,13 +1621,14 @@ export function useWorkspace() {
     disconnectRuntimeEvents()
     handledRuntimeProtocolEvents.clear()
 
-    const client =
-      designTool === 'frontend'
-        ? runtimeEventApi.createRuntimeEventClient(workspaceId, {
-            designTool,
-            workspaceDirectory: currentProject.value?.path,
-          })
-        : runtimeEventApi.createRuntimeEventClient(workspaceId)
+    if (designTool === 'backend') {
+      connectBackendRuntimeEvents(workspaceId, sessionId)
+      return
+    }
+
+    const client = runtimeEventApi.createFrontendRuntimeEventClient(workspaceId, {
+      workspaceDirectory: currentProject.value?.path,
+    })
 
     // 注册通用处理器，收集所有通知到 runtimeEvents
     client.onAll((response) => {
@@ -1616,7 +1705,7 @@ export function useWorkspace() {
         if (runtimeEvents.value.length > 200) {
           runtimeEvents.value.splice(0, runtimeEvents.value.length - 200)
         }
-        const rerunPrepared = workspaceRerunPreparedEvent(response)
+        const rerunPrepared = frontendWorkspaceRerunPreparedEvent(response)
         if (rerunPrepared) {
           notifyWorkspaceRerunPrepared(rerunPrepared)
         }
@@ -1627,7 +1716,7 @@ export function useWorkspace() {
             requestHomeRunArtifactReset(resetProjectPath)
           }
         }
-        invalidateResourcesForRuntimeEvent(response, sessionId)
+        invalidateResourcesForFrontendRuntimeEvent(response, sessionId)
         if (
           eventType === 'step.completed' &&
           runtimeEventId &&
@@ -1643,7 +1732,7 @@ export function useWorkspace() {
             workspaceHandle,
           })
         }
-        if (isTerminalRuntimeOperationEvent(response)) {
+        if (isTerminalFrontendRuntimeOperationEvent(response)) {
           const directory =
             asString(response.data?.directory) ?? currentProject.value?.path
           if (directory) clearFlowExecutionActiveForWorkspace(directory)
@@ -1678,13 +1767,18 @@ export function useWorkspace() {
       runtimeEventClient.value.close()
       runtimeEventClient.value = null
     }
+    if (backendRuntimeEventClient.value) {
+      backendRuntimeEventClient.value.close()
+      backendRuntimeEventClient.value = null
+    }
     runtimeEvents.value = []
+    backendRuntimeEvents.value = []
     handledRefreshRuntimeEvents.clear()
     handledRuntimeProtocolEvents.clear()
   }
 
-  function runtimeEventInvalidationScopes(
-    response: RuntimeEventResponse,
+  function frontendRuntimeEventInvalidationScopes(
+    response: FrontendRuntimeEventResponse,
   ): WorkspaceInvalidationScope[] | null {
     const event = response.data
     const eventType = event?.type as string | undefined
@@ -1778,8 +1872,8 @@ export function useWorkspace() {
     return [...scopes]
   }
 
-  function workspaceRerunPreparedEvent(
-    response: RuntimeEventResponse,
+  function frontendWorkspaceRerunPreparedEvent(
+    response: FrontendRuntimeEventResponse,
   ): import('./homeRunArtifacts').WorkspaceRerunPrepared | null {
     const event = response.data
     if (
@@ -1805,7 +1899,9 @@ export function useWorkspace() {
     }
   }
 
-  function isTerminalRuntimeOperationEvent(response: RuntimeEventResponse): boolean {
+  function isTerminalFrontendRuntimeOperationEvent(
+    response: FrontendRuntimeEventResponse,
+  ): boolean {
     const protocolType = asString(response.data?.runtimeProtocolType)
     if (
       protocolType === 'operation.completed' ||
@@ -1817,11 +1913,11 @@ export function useWorkspace() {
     return ['task_complete', 'error', 'cancelled'].includes(String(response.data?.type))
   }
 
-  function invalidateResourcesForRuntimeEvent(
-    response: RuntimeEventResponse,
+  function invalidateResourcesForFrontendRuntimeEvent(
+    response: FrontendRuntimeEventResponse,
     sessionId: string,
   ): void {
-    const scopes = runtimeEventInvalidationScopes(response)
+    const scopes = frontendRuntimeEventInvalidationScopes(response)
     if (!scopes) return
     workspaceLifecycle.invalidate(scopes, {
       sessionId,
@@ -1841,33 +1937,36 @@ export function useWorkspace() {
   }
 
   function waitForRuntimeOperation(operationId: string): Promise<void> {
-    const isTerminalEvent = (response: RuntimeEventResponse): boolean => {
-      if (asString(response.data?.jobId) !== operationId) return false
-      return ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
-        asString(response.data?.runtimeProtocolType) ?? '',
+    const isTerminalEvent = (event: DesignRuntimeEvent): boolean => {
+      return (
+        backendRuntimeEventOperationId(event) === operationId &&
+        backendRuntimeEventTerminalState(event) !== null
       )
     }
     const finishFromEvent = (
-      response: RuntimeEventResponse,
+      event: DesignRuntimeEvent,
       resolve: () => void,
       reject: (reason: Error) => void,
     ): void => {
-      const terminalType = asString(response.data?.runtimeProtocolType)
-      if (terminalType === 'operation.completed') {
+      const terminalState = backendRuntimeEventTerminalState(event)
+      if (terminalState === 'succeeded') {
         resolve()
         return
       }
       reject(
-        new Error(response.message[0] || `ECC operation ${terminalType ?? 'failed'}.`),
+        new Error(
+          backendRuntimeEventMessage(event) ||
+            `ECC operation ${terminalState ?? 'failed'}.`,
+        ),
       )
     }
 
-    const completed = [...runtimeEvents.value].reverse().find(isTerminalEvent)
+    const completed = [...backendRuntimeEvents.value].reverse().find(isTerminalEvent)
     if (completed) {
       return new Promise((resolve, reject) => finishFromEvent(completed, resolve, reject))
     }
 
-    const client = runtimeEventClient.value
+    const client = backendRuntimeEventClient.value
     const workspaceHandle = workspaceLifecycle.session.value.workspaceId
     const waitForOperation = getOptionalDesktopApi()?.ecc.runtime?.waitForOperation
     if (!client && (!waitForOperation || !workspaceHandle)) {
@@ -1883,10 +1982,10 @@ export function useWorkspace() {
         cleanup()
         complete()
       }
-      const handler = (response: RuntimeEventResponse) => {
-        if (!isTerminalEvent(response)) return
+      const handler = (event: DesignRuntimeEvent) => {
+        if (!isTerminalEvent(event)) return
         finishFromEvent(
-          response,
+          event,
           () => settle(resolve),
           (reason) => settle(() => reject(reason)),
         )
@@ -1906,7 +2005,7 @@ export function useWorkspace() {
         { label: `runtime operation ${operationId}` },
       )
 
-      const terminal = [...runtimeEvents.value].reverse().find(isTerminalEvent)
+      const terminal = [...backendRuntimeEvents.value].reverse().find(isTerminalEvent)
       if (terminal) {
         finishFromEvent(
           terminal,
@@ -1956,6 +2055,7 @@ export function useWorkspace() {
     updateWindowTitle,
     runtimeEventClient,
     runtimeEvents,
+    backendRuntimeEvents,
     resourceVersions: workspaceLifecycle.resourceVersions,
     workspaceSession: workspaceLifecycle.session,
     invalidateWorkspaceResources,

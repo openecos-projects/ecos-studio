@@ -62,7 +62,7 @@ function displayFlowState(state: FlowStepState): string {
 
 export function useBackendFlowStages() {
   const session = useBackendWorkspaceSession()
-  const { currentProject, runtimeEvents } = useWorkspace()
+  const { backendRuntimeEvents, currentProject } = useWorkspace()
 
   const committedSteps = computed(() => {
     const section = session.projection.data?.flow
@@ -71,7 +71,10 @@ export function useBackendFlowStages() {
       : []
   })
   const projectedSteps = computed(() => {
-    const steps = projectBackendFlowSteps(committedSteps.value, runtimeEvents.value)
+    const steps = projectBackendFlowSteps(
+      committedSteps.value,
+      backendRuntimeEvents.value,
+    )
     const request = optimisticRun.value
     if (
       !request ||
@@ -79,7 +82,8 @@ export function useBackendFlowStages() {
     ) {
       return steps
     }
-    const latestRuntimeEvent = runtimeEvents.value[runtimeEvents.value.length - 1]
+    const latestRuntimeEvent =
+      backendRuntimeEvents.value[backendRuntimeEvents.value.length - 1]
     if (latestRuntimeEvent && latestRuntimeEvent !== request.runtimeEventCursor) {
       return steps
     }
@@ -134,7 +138,8 @@ export function useBackendFlowStages() {
     optimisticRun.value = {
       projectPath: normalizedPath(currentProject.value?.path ?? ''),
       resetAll: Boolean(options.resetAll),
-      runtimeEventCursor: runtimeEvents.value[runtimeEvents.value.length - 1] ?? null,
+      runtimeEventCursor:
+        backendRuntimeEvents.value[backendRuntimeEvents.value.length - 1] ?? null,
       stepPath: '',
     }
   }
@@ -143,7 +148,8 @@ export function useBackendFlowStages() {
     optimisticRun.value = {
       projectPath: normalizedPath(currentProject.value?.path ?? ''),
       resetAll: false,
-      runtimeEventCursor: runtimeEvents.value[runtimeEvents.value.length - 1] ?? null,
+      runtimeEventCursor:
+        backendRuntimeEvents.value[backendRuntimeEvents.value.length - 1] ?? null,
       stepPath,
     }
   }

@@ -255,7 +255,7 @@ const {
   openProject,
   invalidateWorkspaceResources,
   currentProject,
-  runtimeEvents,
+  backendRuntimeEvents,
   waitForRuntimeOperation,
 } = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
@@ -273,7 +273,7 @@ const agentFlowProgress = useAgentFlowProgress(
     // ECC terminal events are the only source of runtime-driven refreshes.
     invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
   },
-  runtimeEvents,
+  backendRuntimeEvents,
 )
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)

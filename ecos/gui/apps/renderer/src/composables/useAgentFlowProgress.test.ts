@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { nextTick, ref } from 'vue'
-import type { RuntimeEventResponse } from '@/api/runtimeEvents'
+import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 import { useAgentFlowProgress } from './useAgentFlowProgress'
 
 function runtimeEvent(
@@ -15,22 +15,24 @@ function runtimeEvent(
   } = {
     eventId: 'event-1',
   },
-): RuntimeEventResponse {
+): DesignRuntimeEvent {
   return {
-    cmd: 'notify',
-    data: {
-      directory: '/runs/gcd',
-      jobId: options.operationId,
-      runtimeEventId: options.eventId,
+    designTool: 'backend',
+    event: {
+      eventId: options.eventId,
+      kind: 'flow',
+      operationId: options.operationId ?? 'operation-1',
+      origin: 'gui',
+      payload: { sourceType: type, state: options.state, step: options.step },
       runtimeInstanceId: options.runtimeInstanceId,
-      runtimeProtocolType: type,
-      state: options.state,
-      step: options.step,
-      type: type === 'step.started' ? 'step_start' : 'step_complete',
-      workspaceId: options.workspaceId,
+      sequence: 1,
+      timestamp: 1,
+      type: 'execution.progress',
+      workspaceId: options.workspaceId ?? 'workspace-gcd',
     },
-    message: [],
-    response: 'success',
+    type: 'runtime.protocol',
+    workspaceDirectory: '/runs/gcd',
+    workspaceHandle: 'workspace-handle',
   }
 }
 
@@ -38,7 +40,7 @@ describe('useAgentFlowProgress', () => {
   it('reports ordered ECC step events without reading or watching NFS files', async () => {
     const messages: string[] = []
     const changes: number[] = []
-    const events = ref<RuntimeEventResponse[]>([])
+    const events = ref<DesignRuntimeEvent[]>([])
     const progress = useAgentFlowProgress(
       (message) => messages.push(message),
       () => changes.push(changes.length + 1),
@@ -63,7 +65,7 @@ describe('useAgentFlowProgress', () => {
 
   it('ignores duplicate and unrelated workspace protocol events', async () => {
     const messages: string[] = []
-    const events = ref<RuntimeEventResponse[]>([])
+    const events = ref<DesignRuntimeEvent[]>([])
     const progress = useAgentFlowProgress(
       (message) => messages.push(message),
       undefined,
@@ -77,19 +79,16 @@ describe('useAgentFlowProgress', () => {
     await nextTick()
     events.value.push({
       ...runtimeEvent('step.started', { eventId: 'event-2', step: 'route' }),
-      data: {
-        ...runtimeEvent('step.started', { eventId: 'event-2', step: 'route' }).data,
-        directory: '/runs/other',
-      },
+      workspaceDirectory: '/runs/other',
     })
     await nextTick()
 
     expect(messages).toEqual(['Running place.'])
   })
 
-  it('accepts a legacy event id from a new ECC sidecar instance', async () => {
+  it('accepts a reused event id from a new ECC sidecar instance', async () => {
     const messages: string[] = []
-    const events = ref<RuntimeEventResponse[]>([])
+    const events = ref<DesignRuntimeEvent[]>([])
     const progress = useAgentFlowProgress(
       (message) => messages.push(message),
       undefined,
