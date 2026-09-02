@@ -961,10 +961,16 @@
 }
 
 .project-analysis-shell {
-  display: grid;
+  display: flex;
   min-height: 0;
+  flex-direction: column;
   flex: 1 1 auto;
   overflow: hidden;
+}
+
+.project-analysis-shell > :last-child {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .legend-list {

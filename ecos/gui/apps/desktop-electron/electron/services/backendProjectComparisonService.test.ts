@@ -9,6 +9,32 @@ import type { ProjectEngineeringSnapshotReadResult } from './projectManagementRe
 import { electronLogger } from './logger'
 import { representativeProjectComparisonFixture } from './backendProjectComparison.fixture'
 import { BackendProjectComparisonService } from './backendProjectComparisonService'
+import type { ProjectComparisonFileWatcherCallbacks } from './projectComparisonFileWatcher'
+
+class FakeProjectComparisonWatcher {
+  close = vi.fn(async () => undefined)
+  reconcile = vi.fn(
+    async (_projectRoot: string, _workspaceRoots: readonly string[]) => undefined,
+  )
+  startProject = vi.fn(async (_projectRoot: string) => undefined)
+
+  constructor(readonly callbacks: ProjectComparisonFileWatcherCallbacks) {}
+}
+
+function watcherHarness(startError?: Error) {
+  let watcher: FakeProjectComparisonWatcher | null = null
+  return {
+    create: (callbacks: ProjectComparisonFileWatcherCallbacks) => {
+      watcher = new FakeProjectComparisonWatcher(callbacks)
+      if (startError) watcher.startProject.mockRejectedValueOnce(startError)
+      return watcher as never
+    },
+    get current(): FakeProjectComparisonWatcher {
+      if (!watcher) throw new Error('watcher not created')
+      return watcher
+    },
+  }
+}
 
 function manifest(root = '/projects/demo'): ProjectManifest {
   return {
@@ -118,6 +144,7 @@ function snapshotResult(
 }
 
 function serviceFixture() {
+  const watchers = watcherHarness()
   const project = manifest()
   const readManifest = vi.fn().mockResolvedValue(JSON.stringify(project))
   const readEngineeringSnapshot = vi
@@ -129,11 +156,15 @@ function serviceFixture() {
     project,
     readEngineeringSnapshot,
     readManifest,
-    service: new BackendProjectComparisonService({
-      readEngineeringSnapshot,
-      readManifest,
-      resolveProjectRoot: async (path) => path,
-    }),
+    service: new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot,
+        readManifest,
+        resolveProjectRoot: async (path) => path,
+      },
+      watchers.create,
+    ),
+    watchers,
   }
 }
 
@@ -150,11 +181,15 @@ describe('BackendProjectComparisonService', () => {
         return snapshotResult(fixture.engineeringSnapshots[workspaceId]!)
       })
     const debug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
-    const service = new BackendProjectComparisonService({
-      readEngineeringSnapshot,
-      readManifest,
-      resolveProjectRoot: async (path) => path,
-    })
+    const watchers = watcherHarness()
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot,
+        readManifest,
+        resolveProjectRoot: async (path) => path,
+      },
+      watchers.create,
+    )
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/gcd',
     })
@@ -254,7 +289,7 @@ describe('BackendProjectComparisonService', () => {
   })
 
   it('selects an opaque context and coalesces comparison reads in one generation', async () => {
-    const { readEngineeringSnapshot, service } = serviceFixture()
+    const { readEngineeringSnapshot, readManifest, service, watchers } = serviceFixture()
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',
     })
@@ -279,11 +314,155 @@ describe('BackendProjectComparisonService', () => {
     ).toEqual(expect.arrayContaining([expect.objectContaining({ stepId: 'Route' })]))
     expect(JSON.stringify(left)).not.toContain('/projects/demo/ws_')
     expect(readEngineeringSnapshot).toHaveBeenCalledTimes(2)
+    expect(watchers.current.startProject.mock.invocationCallOrder[0]).toBeLessThan(
+      readManifest.mock.invocationCallOrder[0]!,
+    )
+    expect(watchers.current.reconcile.mock.invocationCallOrder[0]).toBeLessThan(
+      readEngineeringSnapshot.mock.invocationCallOrder[0]!,
+    )
 
     await expect(
       service.getComparison(11, selected.projectComparisonContextId),
     ).resolves.toEqual(left)
     expect(readEngineeringSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('rereads only the changed Snapshot and ignores an unchanged revision', async () => {
+    const { readEngineeringSnapshot, service, watchers } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+    const invalidated = vi.fn()
+    service.onInvalidated(invalidated)
+    readEngineeringSnapshot.mockImplementation(async ({ workspacePath }) => {
+      const snapshot = engineeringSnapshot(workspacePath)
+      if (workspacePath.endsWith('ws_1')) snapshot.workspaceRevision = 2
+      return snapshotResult(snapshot)
+    })
+
+    watchers.current.callbacks.onSnapshotChanged('/projects/demo/ws_1')
+    await vi.waitFor(() => expect(invalidated).toHaveBeenCalledOnce())
+    await service.getComparison(11, selected.projectComparisonContextId)
+    expect(readEngineeringSnapshot).toHaveBeenCalledTimes(3)
+
+    invalidated.mockClear()
+    watchers.current.callbacks.onSnapshotChanged('/projects/demo/ws_1')
+    await vi.waitFor(() => expect(readEngineeringSnapshot).toHaveBeenCalledTimes(4))
+    expect(invalidated).not.toHaveBeenCalled()
+
+    service.invalidateWorkspace('/projects/demo/ws_2')
+    expect(invalidated).toHaveBeenCalledOnce()
+    await service.getComparison(11, selected.projectComparisonContextId)
+    expect(readEngineeringSnapshot).toHaveBeenCalledTimes(5)
+  })
+
+  it('preserves verified data and reports watcher failure without retry polling', async () => {
+    const { service, watchers } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+    const invalidated = vi.fn()
+    service.onInvalidated(invalidated)
+
+    watchers.current.callbacks.onError(new Error('watch failed'))
+    expect(invalidated).toHaveBeenCalledOnce()
+    const result = await service.getComparison(11, selected.projectComparisonContextId)
+
+    expect(result.ok && result.data.refresh).toEqual({
+      automatic: 'unavailable',
+      issue: { code: 'PROJECT_COMPARISON_AUTO_REFRESH_UNAVAILABLE' },
+    })
+    expect(watchers.current.startProject).toHaveBeenCalledOnce()
+  })
+
+  it('checks revisions on focus without invalidating unchanged data', async () => {
+    const { readEngineeringSnapshot, service } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+    const invalidated = vi.fn()
+    service.onInvalidated(invalidated)
+
+    await service.checkForUpdates(11)
+
+    expect(readEngineeringSnapshot).toHaveBeenCalledTimes(4)
+    expect(invalidated).not.toHaveBeenCalled()
+  })
+
+  it('reconciles Workspace watchers after a Manifest change and closes them on dispose', async () => {
+    const { project, readManifest, service, watchers } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+    readManifest.mockResolvedValue(
+      JSON.stringify({
+        ...project,
+        updated_at: '2026-01-03T00:00:00Z',
+        workspaces: project.workspaces.slice(0, 1),
+      }),
+    )
+    const invalidated = vi.fn()
+    service.onInvalidated(invalidated)
+
+    watchers.current.callbacks.onManifestChanged()
+    await vi.waitFor(() => expect(invalidated).toHaveBeenCalledOnce())
+    await service.getComparison(11, selected.projectComparisonContextId)
+    expect(watchers.current.reconcile).toHaveBeenLastCalledWith('/projects/demo', [
+      '/projects/demo/ws_1',
+    ])
+
+    service.disposeWindow(11)
+    expect(watchers.current.close).toHaveBeenCalledOnce()
+  })
+
+  it('continues initial loading when watcher startup fails and uses a fresh watcher on reopen', async () => {
+    const readers = serviceFixture()
+    const failingWatchers = watcherHarness(new Error('watch unavailable'))
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: readers.readEngineeringSnapshot,
+        readManifest: readers.readManifest,
+        resolveProjectRoot: async (path) => path,
+      },
+      failingWatchers.create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const result = await service.getComparison(11, selected.projectComparisonContextId)
+    expect(result.ok && result.data.refresh.automatic).toBe('unavailable')
+    const failedWatcher = failingWatchers.current
+
+    await service.selectProject(11, { projectRootLocator: '/projects/demo' })
+    expect(failedWatcher.close).toHaveBeenCalledOnce()
+    expect(failingWatchers.current).not.toBe(failedWatcher)
+  })
+
+  it('releases a Project context only when the window and context identity match', async () => {
+    const { service, watchers } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    await service.closeProject(22, selected.projectComparisonContextId)
+    expect(watchers.current.close).not.toHaveBeenCalled()
+    await service.closeProject(11, selected.projectComparisonContextId)
+
+    expect(watchers.current.close).toHaveBeenCalledOnce()
+    await expect(
+      service.getComparison(11, selected.projectComparisonContextId),
+    ).resolves.toEqual({ ok: false, code: 'unknown-context' })
   })
 
   it('keeps readable workspaces when one Engineering Snapshot is invalid', async () => {

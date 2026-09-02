@@ -3,7 +3,7 @@ import type {
   ProjectManifestWorkspaceStatus as ProjectWorkspaceStatus,
 } from '../utils/projectManifest.ts'
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
-import type { ReadSection } from './backendWorkspace.ts'
+import type { ReadIssue, ReadSection } from './backendWorkspace.ts'
 
 export type ProjectStepStatus =
   | 'success'
@@ -423,6 +423,10 @@ export interface ProjectStepComparison {
 
 export interface BackendProjectComparison {
   identity: ProjectComparisonIdentity
+  refresh: {
+    automatic: 'available' | 'unavailable'
+    issue?: ReadIssue
+  }
   trend: ReadSection<ProjectQorTrendSummary>
   workspaceSnapshots: ReadSection<{
     items: ProjectAnalysisSnapshot[]
@@ -465,6 +469,7 @@ export interface BackendProjectComparisonInvalidatedEvent {
 }
 
 export interface BackendProjectComparisonApi {
+  closeProject(request: { projectComparisonContextId: string }): Promise<void>
   selectProject(request: {
     projectRootLocator: string
   }): Promise<BackendProjectComparisonSelectResult>

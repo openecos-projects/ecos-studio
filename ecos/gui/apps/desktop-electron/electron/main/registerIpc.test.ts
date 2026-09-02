@@ -121,6 +121,7 @@ function registerHandlers(
       refreshOverview: vi.fn(),
     },
     backendProjectComparisonService: {
+      closeProject: vi.fn(),
       disposeWindow: vi.fn(),
       getComparison: vi.fn(),
       refreshComparison: vi.fn(),
@@ -373,6 +374,20 @@ describe('registerIpc', () => {
 
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
+    )
+  })
+
+  it('closes only the sending window Project Comparison context', async () => {
+    const { handlers, services } = registerHandlers()
+
+    await handlers.get(desktopApiIpcChannels.backendProjectComparisonCloseProject)?.(
+      { sender: { id: 7 } },
+      { projectComparisonContextId: 'context-1' },
+    )
+
+    expect(services.backendProjectComparisonService.closeProject).toHaveBeenCalledWith(
+      7,
+      'context-1',
     )
   })
 

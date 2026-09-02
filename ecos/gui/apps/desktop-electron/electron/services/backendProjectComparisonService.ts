@@ -27,6 +27,10 @@ import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { isPathWithinRoot } from './pathScope'
 import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
+import {
+  ProjectComparisonFileWatcher,
+  type ProjectComparisonFileWatcherCallbacks,
+} from './projectComparisonFileWatcher'
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
@@ -47,7 +51,15 @@ interface ProjectComparisonContext {
   inFlight: Promise<BackendProjectComparisonQueryResult> | null
   coalescedRequests: number
   engineeringWorkspaceIds: Map<string, string>
+  manifestFingerprint: string
+  snapshotCache: Map<string, ProjectEngineeringSnapshotReadResult>
+  watcher: ProjectComparisonFileWatcher
+  watcherIssue: ReadIssue | null
 }
+
+type ProjectComparisonFileWatcherFactory = (
+  callbacks: ProjectComparisonFileWatcherCallbacks,
+) => ProjectComparisonFileWatcher
 
 type InvalidationListener = (
   windowId: number,
@@ -61,18 +73,53 @@ export class BackendProjectComparisonService {
   private readonly contextsByWindow = new Map<number, ProjectComparisonContext>()
   private readonly listeners = new Set<InvalidationListener>()
 
-  constructor(private readonly reader: ProjectComparisonReader) {}
+  constructor(
+    private readonly reader: ProjectComparisonReader,
+    private readonly createWatcher: ProjectComparisonFileWatcherFactory = (callbacks) =>
+      new ProjectComparisonFileWatcher(callbacks),
+  ) {}
 
   async selectProject(
     windowId: number,
     request: { projectRootLocator: string },
   ): Promise<BackendProjectComparisonSelectResult> {
+    const previous = this.contextsByWindow.get(windowId)
+    if (previous) {
+      this.contextsByWindow.delete(windowId)
+      await previous.watcher.close()
+    }
+    let watcher: ProjectComparisonFileWatcher | null = null
     try {
       const projectRoot = await (this.reader.resolveProjectRoot ?? realpath)(
         request.projectRootLocator,
       )
-      const manifest = await this.readManifest(projectRoot)
-      const context: ProjectComparisonContext = {
+      let context: ProjectComparisonContext | null = null
+      let manifestChangedBeforeRead = false
+      let watcherIssue: ReadIssue | null = null
+      watcher = this.createWatcher({
+        onError: () => {
+          watcherIssue = autoRefreshIssue()
+          if (context) this.markWatcherUnavailable(context)
+        },
+        onManifestChanged: () => {
+          if (context) void this.handleManifestChanged(context)
+          else manifestChangedBeforeRead = true
+        },
+        onSnapshotChanged: (workspaceRoot) => {
+          if (context) void this.handleSnapshotChanged(context, workspaceRoot)
+        },
+      })
+      try {
+        await watcher.startProject(projectRoot)
+      } catch {
+        watcherIssue = autoRefreshIssue()
+      }
+      let manifest: ProjectManifest
+      do {
+        manifestChangedBeforeRead = false
+        manifest = await this.readManifest(projectRoot)
+      } while (manifestChangedBeforeRead)
+      context = {
         id: randomUUID(),
         windowId,
         projectRoot,
@@ -84,6 +131,18 @@ export class BackendProjectComparisonService {
         inFlight: null,
         coalescedRequests: 0,
         engineeringWorkspaceIds: new Map(),
+        manifestFingerprint: manifestFingerprint(manifest),
+        snapshotCache: new Map(),
+        watcher,
+        watcherIssue,
+      }
+      try {
+        await watcher.reconcile(
+          projectRoot,
+          manifest.workspaces.map((workspace) => workspace.workspace_path),
+        )
+      } catch {
+        context.watcherIssue = autoRefreshIssue()
       }
       this.contextsByWindow.set(windowId, context)
       return {
@@ -92,6 +151,7 @@ export class BackendProjectComparisonService {
         generation: context.generation,
       }
     } catch (error) {
+      await watcher?.close()
       return failure('invalid-project', error)
     }
   }
@@ -126,6 +186,7 @@ export class BackendProjectComparisonService {
   ): Promise<BackendProjectComparisonQueryResult> {
     const context = this.context(windowId, projectComparisonContextId)
     if (!context) return Promise.resolve({ ok: false, code: 'unknown-context' })
+    context.snapshotCache.clear()
     context.generation += 1
     context.cache = null
     context.inFlight = null
@@ -141,6 +202,11 @@ export class BackendProjectComparisonService {
         )
       )
         continue
+      for (const root of context.dependencies) {
+        if (dependency === root || dependency.startsWith(`${root}/`)) {
+          context.snapshotCache.delete(root)
+        }
+      }
       this.invalidateContext(context)
     }
   }
@@ -169,8 +235,30 @@ export class BackendProjectComparisonService {
     return () => this.listeners.delete(listener)
   }
 
-  disposeWindow(windowId: number): void {
+  async closeProject(
+    windowId: number,
+    projectComparisonContextId: string,
+  ): Promise<void> {
+    const context = this.context(windowId, projectComparisonContextId)
+    if (!context) return
     this.contextsByWindow.delete(windowId)
+    await context.watcher.close()
+  }
+
+  disposeWindow(windowId: number): void {
+    const context = this.contextsByWindow.get(windowId)
+    this.contextsByWindow.delete(windowId)
+    if (context) void context.watcher.close()
+  }
+
+  async checkForUpdates(windowId: number): Promise<void> {
+    const context = this.contextsByWindow.get(windowId)
+    if (!context || (await this.handleManifestChanged(context))) return
+    await Promise.all(
+      [...context.dependencies].map((workspaceRoot) =>
+        this.handleSnapshotChanged(context, workspaceRoot),
+      ),
+    )
   }
 
   private context(windowId: number, id: string): ProjectComparisonContext | null {
@@ -183,6 +271,49 @@ export class BackendProjectComparisonService {
       this.contextsByWindow.get(context.windowId) === context &&
       context.generation === generation
     )
+  }
+
+  private markWatcherUnavailable(context: ProjectComparisonContext): void {
+    if (context.watcherIssue) return
+    context.watcherIssue = autoRefreshIssue()
+    if (context.cache) this.invalidateContext(context)
+  }
+
+  private async handleManifestChanged(
+    context: ProjectComparisonContext,
+  ): Promise<boolean> {
+    if (this.contextsByWindow.get(context.windowId) !== context) return false
+    try {
+      const manifest = await this.readManifest(context.projectRoot)
+      if (this.contextsByWindow.get(context.windowId) !== context) return false
+      const fingerprint = manifestFingerprint(manifest)
+      if (fingerprint === context.manifestFingerprint) return false
+      context.manifestFingerprint = fingerprint
+      this.invalidateContext(context)
+      return true
+    } catch {
+      if (this.contextsByWindow.get(context.windowId) === context) {
+        this.invalidateContext(context)
+      }
+      return true
+    }
+  }
+
+  private async handleSnapshotChanged(
+    context: ProjectComparisonContext,
+    workspaceRoot: string,
+  ): Promise<void> {
+    if (this.contextsByWindow.get(context.windowId) !== context) return
+    const key = resolve(workspaceRoot)
+    const previous = context.snapshotCache.get(key)
+    const next = await this.reader.readEngineeringSnapshot({
+      projectRoot: context.projectRoot,
+      workspacePath: key,
+    })
+    if (this.contextsByWindow.get(context.windowId) !== context) return
+    context.snapshotCache.set(key, next)
+    if (!previous || snapshotRevision(previous) === snapshotRevision(next)) return
+    this.invalidateContext(context)
   }
 
   private async readManifest(projectRoot: string): Promise<ProjectManifest> {
@@ -215,7 +346,17 @@ export class BackendProjectComparisonService {
     const eventLoopDelay = eventLoopDelayMs()
     try {
       const manifest = await this.readManifest(context.projectRoot)
+      context.manifestFingerprint = manifestFingerprint(manifest)
+      try {
+        await context.watcher.reconcile(
+          context.projectRoot,
+          manifest.workspaces.map((workspace) => workspace.workspace_path),
+        )
+      } catch {
+        this.markWatcherUnavailable(context)
+      }
       let readBytes = 0
+      let readFileCount = 0
       let unavailableFileCount = 0
       const readStartedAt = performance.now()
       const entries = await mapWithConcurrency(
@@ -223,11 +364,17 @@ export class BackendProjectComparisonService {
         2,
         async (workspace) => {
           try {
-            const snapshotResult = await this.reader.readEngineeringSnapshot({
-              projectRoot: context.projectRoot,
-              workspacePath: workspace.workspace_path,
-            })
-            readBytes += snapshotResult.readBytes
+            const snapshotKey = resolve(workspace.workspace_path)
+            let snapshotResult = context.snapshotCache.get(snapshotKey)
+            if (!snapshotResult) {
+              snapshotResult = await this.reader.readEngineeringSnapshot({
+                projectRoot: context.projectRoot,
+                workspacePath: workspace.workspace_path,
+              })
+              context.snapshotCache.set(snapshotKey, snapshotResult)
+              readFileCount += 1
+              readBytes += snapshotResult.readBytes
+            }
             if (!snapshotResult.ok) {
               unavailableFileCount += 1
               return {
@@ -298,6 +445,9 @@ export class BackendProjectComparisonService {
       context.dependencies = new Set(
         manifest.workspaces.map((workspace) => resolve(workspace.workspace_path)),
       )
+      for (const key of context.snapshotCache.keys()) {
+        if (!context.dependencies.has(key)) context.snapshotCache.delete(key)
+      }
       const currentIdentityKeys = new Set(
         manifest.workspaces.map((workspace) =>
           engineeringIdentityKey(workspace.workspace_id, workspace.workspace_path),
@@ -350,6 +500,9 @@ export class BackendProjectComparisonService {
             ? { baselineWorkspaceId: manifest.qor_baseline.workspace_id }
             : {}),
         },
+        refresh: context.watcherIssue
+          ? { automatic: 'unavailable', issue: context.watcherIssue }
+          : { automatic: 'available' },
         trend: section(trend, issues),
         workspaceSnapshots: section({ items: snapshots, flowStates }, issues),
         stepComparisons: section({ steps: stepComparisons }, issues),
@@ -372,7 +525,7 @@ export class BackendProjectComparisonService {
         analysisMs: roundMs(performance.now() - analysisStartedAt),
         coalescedRequests: context.coalescedRequests,
         eventLoopDelayMs: roundMs(await eventLoopDelay),
-        fileCount: manifest.workspaces.length,
+        fileCount: readFileCount,
         ipcPayloadBytes: Buffer.byteLength(JSON.stringify(result)),
         readBytes,
         readMs: roundMs(readMs),
@@ -386,6 +539,20 @@ export class BackendProjectComparisonService {
       return queryFailure('read-failed', error)
     }
   }
+}
+
+function snapshotRevision(result: ProjectEngineeringSnapshotReadResult): string {
+  return result.ok
+    ? `${result.snapshot.workspaceId}:${result.snapshot.workspaceRevision}`
+    : `${result.issue.code}:${result.issue.actualSizeBytes ?? ''}:${result.issue.allowedSizeBytes ?? ''}`
+}
+
+function manifestFingerprint(manifest: ProjectManifest): string {
+  return JSON.stringify(manifest)
+}
+
+function autoRefreshIssue(): ReadIssue {
+  return { code: 'PROJECT_COMPARISON_AUTO_REFRESH_UNAVAILABLE' }
 }
 
 function analysisTextsFromSnapshot(

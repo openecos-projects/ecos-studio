@@ -1,9 +1,14 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BackendProjectComparisonInvalidatedEvent } from '@ecos-studio/shared'
 
 const api = vi.hoisted(() => ({
+  closeProject: vi.fn(),
   getComparison: vi.fn(),
-  onInvalidated: vi.fn(() => () => undefined),
+  onInvalidated: vi.fn(
+    (_listener: (event: BackendProjectComparisonInvalidatedEvent) => void) => () =>
+      undefined,
+  ),
   refreshComparison: vi.fn(),
   selectProject: vi.fn(),
 }))
@@ -22,6 +27,7 @@ function comparison(projectName: string, contextId = 'context-1', generation = 0
     generation,
     data: {
       identity: { projectId: projectName, projectName, designName: 'gcd' },
+      refresh: { automatic: 'available' as const },
       trend: ready({
         workspaces: [],
         trendPoints: [],
@@ -58,6 +64,7 @@ describe('backendProjectComparisonSession', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     api.onInvalidated.mockReturnValue(() => undefined)
+    api.closeProject.mockResolvedValue(undefined)
   })
 
   it('clears the previous project before selecting and loading a new context', async () => {
@@ -93,6 +100,51 @@ describe('backendProjectComparisonSession', () => {
     expect(session.projection).toMatchObject({
       status: 'stale',
       data: { identity: { projectName: 'Project A' } },
+    })
+  })
+
+  it('reloads an invalidated generation without requesting an explicit full refresh', async () => {
+    let invalidate: (event: BackendProjectComparisonInvalidatedEvent) => void = () => {
+      throw new Error('invalidation listener was not registered')
+    }
+    api.onInvalidated.mockImplementation((listener) => {
+      invalidate = listener
+      return () => undefined
+    })
+    api.selectProject.mockResolvedValue({
+      ok: true,
+      projectComparisonContextId: 'a',
+      generation: 0,
+    })
+    api.getComparison
+      .mockResolvedValueOnce(comparison('Project A', 'a', 0))
+      .mockResolvedValueOnce(comparison('Project A updated', 'a', 1))
+    const session = useBackendProjectComparisonSession()
+    await session.selectProject('/projects/a')
+
+    invalidate({ projectComparisonContextId: 'a', generation: 1 })
+    await vi.waitFor(() =>
+      expect(session.projection.data?.identity.projectName).toBe('Project A updated'),
+    )
+
+    expect(api.getComparison).toHaveBeenCalledTimes(2)
+    expect(api.refreshComparison).not.toHaveBeenCalled()
+  })
+
+  it('closes the selected Electron context when the session is disposed', async () => {
+    api.selectProject.mockResolvedValue({
+      ok: true,
+      projectComparisonContextId: 'a',
+      generation: 0,
+    })
+    api.getComparison.mockResolvedValue(comparison('Project A', 'a'))
+    const session = useBackendProjectComparisonSession()
+    await session.selectProject('/projects/a')
+
+    session.dispose()
+
+    expect(api.closeProject).toHaveBeenCalledWith({
+      projectComparisonContextId: 'a',
     })
   })
 })

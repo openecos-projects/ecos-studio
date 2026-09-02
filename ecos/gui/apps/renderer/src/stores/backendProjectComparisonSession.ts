@@ -89,7 +89,7 @@ export const useBackendProjectComparisonSession = defineStore(
       }
     }
 
-    async function refresh(): Promise<void> {
+    async function reload(explicit: boolean): Promise<void> {
       const contextId = projectComparisonContextId.value
       if (!contextId) return
       const sequence = ++requestSequence
@@ -98,10 +98,11 @@ export const useBackendProjectComparisonSession = defineStore(
         ? { data: committed, status: 'refreshing' }
         : { data: null, status: 'loading' }
       try {
+        const request = { projectComparisonContextId: contextId }
         commit(
-          await getDesktopApi().backendProjectComparison.refreshComparison({
-            projectComparisonContextId: contextId,
-          }),
+          await (explicit
+            ? getDesktopApi().backendProjectComparison.refreshComparison(request)
+            : getDesktopApi().backendProjectComparison.getComparison(request)),
           sequence,
           committed,
         )
@@ -117,13 +118,17 @@ export const useBackendProjectComparisonSession = defineStore(
       }
     }
 
+    function refresh(): Promise<void> {
+      return reload(true)
+    }
+
     function subscribe(): void {
       unsubscribe ??= getDesktopApi().backendProjectComparison.onInvalidated((event) => {
         if (
           event.projectComparisonContextId === projectComparisonContextId.value &&
           event.generation > generation.value
         ) {
-          void refresh()
+          void reload(false)
         }
       })
     }
@@ -136,6 +141,14 @@ export const useBackendProjectComparisonSession = defineStore(
     }
 
     function dispose(): void {
+      const contextId = projectComparisonContextId.value
+      if (contextId) {
+        void getDesktopApi()
+          .backendProjectComparison.closeProject({
+            projectComparisonContextId: contextId,
+          })
+          .catch(() => undefined)
+      }
       unsubscribe?.()
       unsubscribe = null
       clear()

@@ -452,6 +452,13 @@
 
         <main class="manager-table-panel">
           <div class="project-analysis-shell">
+            <ProjectComparisonRefreshStatus
+              :automatic="
+                projectComparisonSession.projection.data?.refresh.automatic ?? 'available'
+              "
+              :refreshing="projectComparisonSession.projection.status === 'refreshing'"
+              @refresh="projectComparisonSession.refresh()"
+            />
             <ProjectAnalysisPanel
               :project="selectedProject"
               :selected-analysis-tab="selectedAnalysisTab"
@@ -760,6 +767,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
+import ProjectComparisonRefreshStatus from './project-management/ProjectComparisonRefreshStatus.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'

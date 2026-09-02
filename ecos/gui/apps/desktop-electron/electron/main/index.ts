@@ -362,6 +362,11 @@ async function launchWindow(
   })
   mainWindow.on('focus', () => {
     applyWindowMenuState(windowId)
+    void services?.backendProjectComparisonService
+      .checkForUpdates(windowId)
+      .catch((error) =>
+        electronLogger.warn('[project-comparison] focus check failed', error),
+      )
   })
   return mainWindow
 }

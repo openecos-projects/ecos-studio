@@ -149,6 +149,8 @@ const desktopApi: DesktopApi = {
       ),
   },
   backendProjectComparison: {
+    closeProject: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendProjectComparisonCloseProject, request),
     selectProject: (request) =>
       invokeDesktop(desktopApiIpcChannels.backendProjectComparisonSelectProject, request),
     getComparison: (request) =>

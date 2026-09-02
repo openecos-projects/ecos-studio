@@ -25,6 +25,7 @@ export const desktopApiIpcChannels = {
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
   backendWorkspaceRefreshOverview: 'backend-workspace:refresh-overview',
   backendProjectComparisonSelectProject: 'backend-project-comparison:select-project',
+  backendProjectComparisonCloseProject: 'backend-project-comparison:close-project',
   backendProjectComparisonGetComparison: 'backend-project-comparison:get-comparison',
   backendProjectComparisonRefreshComparison:
     'backend-project-comparison:refresh-comparison',

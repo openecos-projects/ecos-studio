@@ -39,6 +39,7 @@ async function loadDesktopBridge() {
       onInvalidated(listener: (event: unknown) => void): () => void
     }
     backendProjectComparison: {
+      closeProject(request: unknown): Promise<void>
       selectProject(request: unknown): Promise<unknown>
       getComparison(request: unknown): Promise<unknown>
       refreshComparison(request: unknown): Promise<unknown>
@@ -107,6 +108,7 @@ describe('preload desktop bridge contract', () => {
           getVersions: expect.any(Function),
         }),
         backendProjectComparison: expect.objectContaining({
+          closeProject: expect.any(Function),
           selectProject: expect.any(Function),
           getComparison: expect.any(Function),
           refreshComparison: expect.any(Function),
@@ -115,6 +117,20 @@ describe('preload desktop bridge contract', () => {
           readProjectTextFile: expect.any(Function),
         }),
       }),
+    )
+  })
+
+  it('routes Project Comparison close through its typed IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { projectComparisonContextId: 'context-1' }
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(
+      bridge.backendProjectComparison.closeProject(request),
+    ).resolves.toBeUndefined()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.backendProjectComparisonCloseProject,
+      request,
     )
   })
 

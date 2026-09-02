@@ -189,6 +189,7 @@ export interface DesktopBridgeServices {
     >
   }
   backendProjectComparisonService: {
+    closeProject(windowId: number, contextId: string): Promise<void>
     disposeWindow(windowId: number): void
     getComparison(
       windowId: number,
@@ -1334,6 +1335,19 @@ export function registerIpc(
         {
           projectRootLocator: request.projectRootLocator,
         },
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.backendProjectComparisonCloseProject,
+    async (event, request) => {
+      if (!isRecord(request) || typeof request.projectComparisonContextId !== 'string') {
+        throw new Error('Backend project comparison close request is invalid.')
+      }
+      await services.backendProjectComparisonService.closeProject(
+        event.sender.id,
+        request.projectComparisonContextId,
       )
     },
   )
