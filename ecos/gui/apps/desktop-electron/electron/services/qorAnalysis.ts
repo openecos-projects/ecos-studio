@@ -43,6 +43,7 @@ export interface ProjectQorWorkspaceInput {
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
   stepStatuses: Record<string, ProjectStepStatus>
+  normalizedMetrics?: ProjectQorMetricRecord[]
   /** Present on production inputs, including null when ECC has no valid Snapshot. */
   authoritativeAssessment?: {
     gateStatus: QorGateStatus
@@ -1008,7 +1009,14 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
   const record = parseJsonObject(input.text)
   if (record?.schema_version !== 3 || !Array.isArray(record.metrics)) return []
 
-  return record.metrics.flatMap((rawMetric) => {
+  return normalizeQorMetricRecords(input, record.metrics)
+}
+
+export function normalizeQorMetricRecords(
+  input: Omit<QorStepMetricInput, 'text'>,
+  metrics: unknown[],
+): ProjectQorMetricRecord[] {
+  return metrics.flatMap((rawMetric) => {
     if (!rawMetric || typeof rawMetric !== 'object' || Array.isArray(rawMetric)) {
       return []
     }
@@ -1220,14 +1228,16 @@ function resolveExplicitBaselineWorkspace(
 function buildWorkspaceSummary(
   workspace: ProjectQorWorkspaceInput,
 ): ProjectQorTrendWorkspaceSummary {
-  const records = QOR_FLOW_STEPS.flatMap((step) =>
-    normalizeQorMetrics({
-      workspaceId: workspace.workspaceId,
-      workspaceKey: workspace.workspaceKey,
-      step,
-      text: workspace.stepMetricTexts[step],
-    }),
-  )
+  const records =
+    workspace.normalizedMetrics ??
+    QOR_FLOW_STEPS.flatMap((step) =>
+      normalizeQorMetrics({
+        workspaceId: workspace.workspaceId,
+        workspaceKey: workspace.workspaceKey,
+        step,
+        text: workspace.stepMetricTexts[step],
+      }),
+    )
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
   const areaScoringStep = resolveLastSuccessfulAreaStep(records, workspace.stepStatuses)
   const projectRecords = selectProjectRecords(records, areaScoringStep)

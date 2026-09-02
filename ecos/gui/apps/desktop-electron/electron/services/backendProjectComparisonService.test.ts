@@ -3,6 +3,8 @@ import {
   projectManifestFlowSteps,
   validateEngineeringSnapshot,
   type EccEngineeringSnapshot,
+  type EccEngineeringMetric,
+  type EccPersistedEngineeringSnapshot,
   type EccRuntimeOperation,
   type ProjectManifest,
 } from '@ecos-studio/shared'
@@ -142,6 +144,19 @@ function snapshotResult(
   const validated = validateEngineeringSnapshot(snapshot)
   if (!validated.ok) throw new Error(validated.issue.code)
   return { ...validated, readBytes: Buffer.byteLength(JSON.stringify(snapshot)) }
+}
+
+function appendSnapshotStepMetric(
+  snapshot: EccPersistedEngineeringSnapshot,
+  stepId: string,
+  metric: EccEngineeringMetric,
+): void {
+  const metricsFile = snapshot.analysis.steps.find(
+    (step) => step.stepId === stepId,
+  )?.metrics
+  const metrics = metricsFile?.data?.metrics
+  if (!Array.isArray(metrics)) throw new Error(`missing ${stepId} Snapshot metrics`)
+  metrics.push(metric)
 }
 
 function serviceFixture() {
@@ -377,6 +392,178 @@ describe('BackendProjectComparisonService', () => {
       }),
     )
     expect(fixture.engineeringSnapshots.ws_0001.workspaceId).not.toBe('ws_0001')
+  })
+
+  it('preserves the complete Snapshot metric contract in Step Compare', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    for (const [index, workspaceId] of ['ws_0001', 'ws_0002'].entries()) {
+      const metric = {
+        analysis_group: 'route_latency',
+        category: 'runtime' as const,
+        confidence: 'medium' as const,
+        corner: 'slow',
+        corner_context: {
+          configured_role: 'route',
+          label: 'SS 1.62V 125C',
+          process_corner: 'ss',
+          rc_corner: 'rcmax',
+          temperature_c: 125,
+          voltage_v: 1.62,
+        },
+        direction: 'lower_is_better' as const,
+        display_name: 'Route Snapshot Latency',
+        id: 'snapshot_only_latency',
+        project_role: 'trend' as const,
+        rating: { gate: false, score: false, trend: true },
+        scope: 'design',
+        source: {
+          kind: 'feature',
+          path: 'feature/Route.step.json',
+          selector: '/metrics/snapshot_only_latency',
+        },
+        step_role: 'primary' as const,
+        unit: 'ms',
+        value: index === 0 ? 100 : 80,
+      }
+      appendSnapshotStepMetric(
+        fixture.engineeringSnapshots[workspaceId]!,
+        'Route',
+        metric,
+      )
+      appendSnapshotStepMetric(fixture.engineeringSnapshots[workspaceId]!, 'Route', {
+        ...metric,
+        display_name: 'Internal Route Counter',
+        id: 'snapshot_hidden_counter',
+        step_role: 'hidden',
+      })
+    }
+    const candidateRoute = fixture.engineeringSnapshots.ws_0002!.analysis.steps.find(
+      (step) => step.stepId === 'Route',
+    )
+    if (!candidateRoute) throw new Error('missing Route analysis')
+    candidateRoute.hotspots = {
+      artifactId: candidateRoute.hotspots.artifactId,
+      data: null,
+      reasonCode: 'ANALYSIS_FILE_INVALID',
+      status: 'invalid',
+    }
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: async ({ workspacePath }) =>
+          snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
+        readManifest: async () => JSON.stringify(fixture.manifest),
+        resolveProjectRoot: async (path) => path,
+      },
+      watcherHarness().create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const result = await service.getComparison(11, selected.projectComparisonContextId)
+    if (!result.ok || !('data' in result.data.stepComparisons)) {
+      throw new Error('Step Compare unavailable')
+    }
+    const route = result.data.stepComparisons.data.steps.find(
+      (step) => step.stepId === 'Route',
+    )
+    const records = route?.workspaces.map((workspace) =>
+      workspace.metrics.filter((metric) => metric.metricName.startsWith('snapshot_')),
+    )
+
+    expect(records).toEqual([
+      [
+        {
+          analysisGroup: 'route_latency',
+          baselineComparison: {
+            absoluteDelta: 0,
+            baselineValue: 100,
+            relativeDeltaPct: 0,
+            verdict: 'baseline',
+          },
+          confidence: 'medium',
+          corner: 'slow',
+          cornerContext: {
+            configuredRole: 'route',
+            label: 'SS 1.62V 125C',
+            processCorner: 'ss',
+            rcCorner: 'rcmax',
+            temperatureC: 125,
+            voltageV: 1.62,
+          },
+          dimension: 'runtime',
+          displayName: 'Route Snapshot Latency',
+          leads: false,
+          metricName: 'snapshot_only_latency',
+          polarity: 'lower_is_better',
+          projectRole: 'trend',
+          rating: { gate: false, score: false, trend: true },
+          scope: 'design',
+          sourceFile: 'feature/Route.step.json',
+          step: 'Route',
+          stepRole: 'primary',
+          unit: 'ms',
+          value: 100,
+          verdict: 'pass',
+          workspaceId: 'ws_0001',
+        },
+      ],
+      [
+        expect.objectContaining({
+          baselineComparison: {
+            absoluteDelta: -20,
+            baselineValue: 100,
+            relativeDeltaPct: -20,
+            verdict: 'improvement',
+          },
+          leads: true,
+          metricName: 'snapshot_only_latency',
+          value: 80,
+          workspaceId: 'ws_0002',
+        }),
+      ],
+    ])
+  })
+
+  it('keeps an invalid-QoR Workspace column but excludes it from metrics and ranking', async () => {
+    const { readEngineeringSnapshot, service } = serviceFixture()
+    readEngineeringSnapshot.mockImplementation(async ({ workspacePath }) => {
+      const snapshot = engineeringSnapshot(workspacePath)
+      if (workspacePath.endsWith('ws_2')) {
+        snapshot.metrics = [
+          {
+            ...snapshot.metrics[0]!,
+            step_role: 'unknown',
+          } as unknown as EccEngineeringMetric,
+        ]
+      }
+      return snapshotResult(snapshot)
+    })
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const result = await service.getComparison(11, selected.projectComparisonContextId)
+    if (
+      !result.ok ||
+      !('data' in result.data.stepComparisons) ||
+      !('data' in result.data.trend)
+    ) {
+      throw new Error('comparison unavailable')
+    }
+    const route = result.data.stepComparisons.data.steps.find(
+      (step) => step.stepId === 'Route',
+    )
+
+    expect(route?.workspaces).toEqual([
+      expect.objectContaining({ workspaceId: 'ws_1' }),
+      { workspaceId: 'ws_2', status: 'missing', metrics: [] },
+    ])
+    expect(
+      result.data.trend.data.workspaces.map((workspace) => workspace.workspaceId),
+    ).toEqual(['ws_1'])
   })
 
   it('captures the no-HMR initial-load failure when a lifecycle event invalidates the query', async () => {

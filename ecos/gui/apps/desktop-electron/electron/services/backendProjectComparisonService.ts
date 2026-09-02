@@ -535,7 +535,7 @@ export class BackendProjectComparisonService {
       const flowStates = Object.fromEntries(
         inputs.map((input) => [input.workspaceId, input.stepStatuses]),
       )
-      const stepComparisons = buildStepComparisons(manifest, inputs, snapshots)
+      const stepComparisons = buildStepComparisons(manifest, inputs, trend)
       const recommendation = selectRecommendation(trend.workspaces)
       const data: BackendProjectComparison = {
         identity: {
@@ -627,7 +627,7 @@ function engineeringIdentityKey(workspaceId: string, workspacePath: string): str
 function buildStepComparisons(
   manifest: ProjectManifest,
   inputs: ReturnType<typeof projectQorInputForWorkspace>[],
-  snapshots: ProjectAnalysisSnapshot[],
+  trend: ProjectQorTrendSummary,
 ): ProjectStepComparison[] {
   const availableInputs = inputs.filter((input): input is NonNullable<typeof input> =>
     Boolean(input),
@@ -642,6 +642,15 @@ function buildStepComparisons(
     if (workspace.branch_from?.source_step) stepIds.add(workspace.branch_from.source_step)
   }
   const knownOrder = new Map(FLOW_STEPS.map((step, order) => [step, order]))
+  const inputsByWorkspace = new Map(
+    availableInputs.map((input) => [input.workspaceId, input]),
+  )
+  const metricsByWorkspace = new Map(
+    trend.workspaces.map((workspace) => [
+      workspace.workspaceId,
+      workspace.comparisonRecords ?? workspace.records,
+    ]),
+  )
   const unknownSteps = [...stepIds]
     .filter((step) => !knownOrder.has(step as (typeof FLOW_STEPS)[number]))
     .sort((left, right) => left.localeCompare(right))
@@ -653,18 +662,14 @@ function buildStepComparisons(
         FLOW_STEPS.length + unknownSteps.indexOf(stepId),
       name: stepId,
       workspaces: manifest.workspaces.map((workspace) => {
-        const input = availableInputs.find(
-          (candidate) => candidate.workspaceId === workspace.workspace_id,
-        )
-        const snapshot = snapshots.find(
-          (candidate) => candidate.workspaceId === workspace.workspace_id,
-        )
-        const stepSnapshot = snapshot?.steps[stepId as keyof typeof snapshot.steps]
+        const input = inputsByWorkspace.get(workspace.workspace_id)
         return {
           workspaceId: workspace.workspace_id,
           status: (input?.stepStatuses[stepId] ??
             'missing') as ProjectStepComparison['workspaces'][number]['status'],
-          metrics: stepSnapshot?.metrics ?? [],
+          metrics: (metricsByWorkspace.get(workspace.workspace_id) ?? []).filter(
+            (metric) => metric.step === stepId && metric.stepRole !== 'hidden',
+          ),
         }
       }),
     }))

@@ -1,6 +1,7 @@
 import {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
+  parseProjectManifestFlowStep,
   type EccEngineeringSnapshot,
   type MetricComparison,
   type MetricValue,
@@ -10,7 +11,11 @@ import {
   type WorkspaceBaselineComparison,
   type WorkspaceQorSummary,
 } from '@ecos-studio/shared'
-import type { ProjectQorWorkspaceInput } from './qorAnalysis'
+import {
+  normalizeQorMetricRecords,
+  type ProjectQorMetricRecord,
+  type ProjectQorWorkspaceInput,
+} from './qorAnalysis'
 
 export type WorkspaceAnalysisTexts = Record<string, string | null>
 
@@ -238,6 +243,24 @@ function workspaceStatus(
   return 'not_started'
 }
 
+function snapshotComparisonMetrics(
+  snapshot: EccEngineeringSnapshot | null | undefined,
+  workspaceId: string,
+): ProjectQorMetricRecord[] {
+  if (!snapshot) return []
+  return snapshot.analysis.steps.flatMap((analysisStep) => {
+    const step = parseProjectManifestFlowStep(analysisStep.stepId)
+    const metrics = analysisStep.metrics.data?.metrics
+    if (analysisStep.metrics.status !== 'available' || !step || !Array.isArray(metrics)) {
+      return []
+    }
+    return normalizeQorMetricRecords(
+      { step, workspaceId, workspaceKey: workspaceId },
+      metrics,
+    )
+  })
+}
+
 export function projectQorInputForWorkspace(
   manifest: ProjectManifest,
   workspaceId: string,
@@ -256,6 +279,7 @@ export function projectQorInputForWorkspace(
     staTimingIssuesText: texts[projectManagementStaTimingIssuesPath] ?? null,
     status: workspaceStatus(workspace.status, statuses),
     authoritativeAssessment: snapshot.assessment,
+    normalizedMetrics: snapshotComparisonMetrics(engineeringSnapshot, workspaceId),
     snapshotQor: snapshot.qor,
     stepHotspotTexts: Object.fromEntries(
       projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
