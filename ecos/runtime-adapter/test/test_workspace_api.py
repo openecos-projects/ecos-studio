@@ -1086,6 +1086,124 @@ def test_flow_run_uses_run_steps_and_prepare_on_rerun(monkeypatch, tmp_path):
     assert result == {"rerun": True}
     assert prepared == [(ws.resolve(), flow, {"preserve_user_inputs": False})]
     assert flow.run_steps_calls == [True]
+    snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+    assert snapshot["workspaceRevision"] == 2
+    assert snapshot["cause"] == "flow.rerun_prepared"
+
+
+def test_failed_rerun_keeps_the_reset_revision_as_committed_truth(monkeypatch, tmp_path):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+
+    def prepare(workspace, _flow, **_kwargs):
+        workspace.flow.data = {
+            "steps": [{"name": "Synthesis", "tool": "yosys", "state": "Unstart"}]
+        }
+
+    monkeypatch.setattr("chipcompiler.data.prepare_workspace_for_rerun", prepare)
+    DummyFlow.next_run_states = [StateEnum.Imcomplete]
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+
+    with pytest.raises(RuntimeApiError):
+        api.flow_run(FlowRunRequest(workspace_id=workspace_id, rerun=True))
+
+    snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+    assert snapshot["workspaceRevision"] == 2
+    assert snapshot["cause"] == "flow.rerun_prepared"
+    assert snapshot["flow"]["steps"][0]["state"] == "Unstart"
+
+
+def test_cancelled_rerun_keeps_the_reset_revision_before_the_first_step(
+    monkeypatch,
+    tmp_path,
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    entered_execution = threading.Event()
+    continue_execution = threading.Event()
+    events = []
+
+    def execute(_flow, _plan, *, event_sink):
+        entered_execution.set()
+        assert continue_execution.wait(timeout=2)
+        event_sink.raise_if_cancelled()
+        raise AssertionError("cancelled execution continued")
+
+    monkeypatch.setattr("chipcompiler.engine.execute", execute)
+    api = WorkspaceRuntimeApi(event_publisher=events.append)
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    started = api.start_flow_operation(
+        OperationStartFlowRequest(
+            workspace_id=workspace_id,
+            rerun=True,
+            idempotency_key="cancelled-rerun",
+        )
+    )
+    assert entered_execution.wait(timeout=1)
+
+    api.cancel_operation(OperationIdRequest(operation_id=started["operationId"]))
+    continue_execution.set()
+    for _ in range(100):
+        status = api.operation_status(OperationIdRequest(operation_id=started["operationId"]))
+        if status["state"] == "cancelled":
+            break
+        threading.Event().wait(0.01)
+
+    snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+    assert status["state"] == "cancelled"
+    assert snapshot["workspaceRevision"] == 2
+    assert snapshot["cause"] == "flow.rerun_prepared"
+    assert next(event for event in events if event["type"] == "operation.rerun_prepared")[
+        "payload"
+    ]["workspaceRevision"] == 2
+
+
+def test_rerun_snapshot_commit_failure_fails_the_operation(monkeypatch, tmp_path):
+    from chipcompiler.engine.snapshot import EngineeringSnapshotError
+
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    events = []
+    api = WorkspaceRuntimeApi(event_publisher=events.append)
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+
+    def fail_commit(*_args, **_kwargs):
+        raise EngineeringSnapshotError("snapshot disk full")
+
+    monkeypatch.setattr(
+        "chipcompiler.engine.snapshot.commit_engineering_snapshot",
+        fail_commit,
+    )
+    started = api.start_flow_operation(
+        OperationStartFlowRequest(
+            workspace_id=workspace_id,
+            rerun=True,
+            idempotency_key="failed-rerun-commit",
+        )
+    )
+
+    for _ in range(100):
+        status = api.operation_status(OperationIdRequest(operation_id=started["operationId"]))
+        if status["state"] == "failed":
+            break
+        threading.Event().wait(0.01)
+
+    assert status["state"] == "failed"
+    assert status["error"]["code"] == "engineering_snapshot_commit_failed"
+    assert "snapshot disk full" in status["error"]["message"]
+    assert not any(event["type"] == "operation.rerun_prepared" for event in events)
+
+
+def test_non_rerun_failure_preserves_the_previous_snapshot(monkeypatch, tmp_path):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    DummyFlow.next_run_states = [StateEnum.Imcomplete]
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    before = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+
+    with pytest.raises(RuntimeApiError):
+        api.flow_run(FlowRunRequest(workspace_id=workspace_id, rerun=False))
+
+    snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+    assert snapshot == before
 
 
 def test_gui_flow_operation_rerun_preserves_current_user_inputs(monkeypatch, tmp_path):
@@ -1554,6 +1672,18 @@ def test_flow_run_step_rerun_clears_step_artifacts_and_resets_step_state(monkeyp
         "unavailable": 0,
     }
     assert checklist["checklist"] == []
+    snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+    assert snapshot["workspaceRevision"] == 2
+    assert snapshot["cause"] == "flow.rerun_prepared"
+    assert snapshot["flow"]["steps"][0]["state"] == "Unstart"
+    assert all(
+        fact["data"] is None
+        for step in snapshot["analysis"]["steps"]
+        for fact in (step["metrics"], step["summary"], step["hotspots"])
+    )
+    assert snapshot["metrics"] == []
+    assert snapshot["qorAssessment"]["metrics"] == []
+    assert all(artifact["availability"] == "missing" for artifact in snapshot["artifacts"])
 
 
 def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(monkeypatch, tmp_path):

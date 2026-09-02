@@ -33,6 +33,7 @@ class RuntimeFlowObserver:
         *,
         affected_steps: list[str],
         scope: str,
+        workspace_revision: int,
         target_step: str = "",
     ) -> None:
         self._manager.rerun_prepared(
@@ -40,6 +41,7 @@ class RuntimeFlowObserver:
             affected_steps=affected_steps,
             scope=scope,
             target_step=target_step,
+            workspace_revision=workspace_revision,
         )
 
     def on_step_completed(

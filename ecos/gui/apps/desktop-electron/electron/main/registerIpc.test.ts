@@ -2316,13 +2316,16 @@ describe('registerIpc', () => {
 
     listener?.({
       event: {
-        eventId: 'event-2',
+        eventId: 'event-prepared',
         operationId: 'operation-1',
         origin: 'gui',
-        payload: { state: 'succeeded', workspaceRevision: 2 },
+        payload: {
+          sourceType: 'operation.rerun_prepared',
+          workspaceRevision: 2,
+        },
         sequence: 2,
         timestamp: 2,
-        type: 'operation.changed',
+        type: 'execution.progress',
         workspaceId: 'engineering-1',
       },
       type: 'runtime.protocol',
@@ -2332,6 +2335,28 @@ describe('registerIpc', () => {
     expect(
       services.backendProjectComparisonService.invalidateExecution,
     ).toHaveBeenCalledTimes(2)
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
+
+    listener?.({
+      event: {
+        eventId: 'event-2',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'succeeded', workspaceRevision: 2 },
+        sequence: 3,
+        timestamp: 3,
+        type: 'operation.changed',
+        workspaceId: 'engineering-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+    })
+
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledTimes(3)
     expect(
       services.backendProjectComparisonService.invalidateWorkspace,
     ).toHaveBeenCalledWith('/work/demo')

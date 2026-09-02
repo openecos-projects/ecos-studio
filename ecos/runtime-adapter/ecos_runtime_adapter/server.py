@@ -168,7 +168,7 @@ def _project_runtime_event(event: dict) -> dict:
         "payload": payload,
         **(
             {"workspaceRevision": payload["workspaceRevision"]}
-            if event_type == "workspace.committed" and "workspaceRevision" in payload
+            if "workspaceRevision" in payload
             else {}
         ),
     }

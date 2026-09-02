@@ -53,4 +53,41 @@ describe('RuntimeOperationTracker active operations', () => {
     tracker.track(operationEvent('succeeded', { sequence: 3 }))
     expect(tracker.activeOperations()).toEqual([])
   })
+
+  it('advances an active rerun to its committed preparation revision', () => {
+    const tracker = new RuntimeOperationTracker()
+    tracker.track(operationEvent('running', { sequence: 2 }))
+
+    tracker.track({
+      ...operationEvent('running'),
+      payload: {
+        sourceType: 'operation.rerun_prepared',
+        workspaceRevision: 8,
+      },
+      sequence: 3,
+      type: 'execution.progress',
+      workspaceRevision: 8,
+    })
+
+    expect(tracker.activeOperations()).toEqual([
+      expect.objectContaining({
+        operationId: 'operation-1',
+        state: 'running',
+        workspaceRevision: 8,
+      }),
+    ])
+
+    const reordered = new RuntimeOperationTracker()
+    reordered.track({
+      ...operationEvent('running'),
+      payload: {
+        sourceType: 'operation.rerun_prepared',
+        workspaceRevision: 8,
+      },
+      sequence: 3,
+      type: 'execution.progress',
+    })
+    reordered.track(operationEvent('queued'))
+    expect(reordered.activeOperations()).toHaveLength(1)
+  })
 })

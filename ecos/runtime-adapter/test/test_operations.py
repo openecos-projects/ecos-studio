@@ -253,13 +253,16 @@ def test_event_identity_is_unique_across_sidecar_operation_managers():
 def test_rerun_prepared_event_carries_the_affected_steps_once():
     events = []
     manager = RuntimeOperationManager(events.append)
+    step = SimpleNamespace(name="Floorplan", tool="ecc", log=SimpleNamespace(file=""))
 
     def runner(observer):
         observer.on_rerun_prepared(
             scope="step",
             target_step="Floorplan",
             affected_steps=["Floorplan", "route"],
+            workspace_revision=4,
         )
+        observer.on_step_completed(step, StateEnum.Success)
         return {"rerun": True}
 
     first = manager.start(
@@ -270,6 +273,7 @@ def test_rerun_prepared_event_carries_the_affected_steps_once():
         step="Floorplan",
         idempotency_key="rerun-prepared",
         runner=runner,
+        workspace_revision=3,
     )
     duplicate = manager.start(
         workspace_id="workspace-1",
@@ -279,6 +283,7 @@ def test_rerun_prepared_event_carries_the_affected_steps_once():
         step="Floorplan",
         idempotency_key="rerun-prepared",
         runner=runner,
+        workspace_revision=3,
     )
 
     assert duplicate["operationId"] == first["operationId"]
@@ -287,7 +292,13 @@ def test_rerun_prepared_event_carries_the_affected_steps_once():
         "affectedSteps": ["Floorplan", "route"],
         "scope": "step",
         "targetStep": "Floorplan",
+        "workspaceRevision": 4,
     }
+    assert prepared["workspaceRevision"] == 4
+    completed = _wait_for_event(events, "step.completed")
+    assert events.index(prepared) < events.index(completed)
+    assert completed["payload"]["workspaceRevision"] == 5
+    assert manager.operation_status(first["operationId"])["workspaceRevision"] == 5
     assert len([event for event in events if event["type"] == "operation.rerun_prepared"]) == 1
 
 

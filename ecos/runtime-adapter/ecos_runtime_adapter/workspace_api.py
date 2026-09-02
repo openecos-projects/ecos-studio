@@ -269,10 +269,15 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                     engine_flow,
                     preserve_user_inputs=preserve_user_inputs,
                 )
+                reset_revision = self._commit_workspace_snapshot(
+                    session,
+                    "flow.rerun_prepared",
+                )
                 self._notify_rerun_prepared(
                     observer,
                     affected_steps,
                     scope="flow",
+                    workspace_revision=reset_revision,
                 )
             try:
                 from chipcompiler.engine import ExecutionPlan, execute
@@ -349,11 +354,16 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                     engine_flow,
                     affected_steps,
                 )
+                reset_revision = self._commit_workspace_snapshot(
+                    session,
+                    "flow.rerun_prepared",
+                )
                 self._notify_rerun_prepared(
                     observer,
                     affected_steps,
                     scope="step",
                     target_step=workspace_step.name,
+                    workspace_revision=reset_revision,
                 )
 
             try:
@@ -989,6 +999,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
         workspace_steps,
         *,
         scope: str,
+        workspace_revision: int,
         target_step: str = "",
     ) -> None:
         callback = getattr(observer, "on_rerun_prepared", None)
@@ -998,6 +1009,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
             affected_steps=[str(getattr(step, "name", "")) for step in workspace_steps],
             scope=scope,
             target_step=target_step,
+            workspace_revision=workspace_revision,
         )
 
     @staticmethod
@@ -1058,8 +1070,11 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 }
             )
             updated_record = True
-        if updated_record:
-            engine_flow.save()
+        if updated_record and not engine_flow.save():
+            raise RuntimeApiError(
+                "command_failed",
+                "failed to persist rerun Step reset",
+            )
 
         for workspace_step in unique_steps:
             WorkspaceRuntimeApi._reset_step_subflow(workspace_step)

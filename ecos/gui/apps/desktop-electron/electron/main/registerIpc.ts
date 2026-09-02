@@ -905,7 +905,9 @@ export function registerIpc(
     if (
       designTool === 'backend' &&
       payload.type === 'runtime.protocol' &&
-      payload.event.type === 'operation.changed'
+      (payload.event.type === 'operation.changed' ||
+        (payload.event.type === 'execution.progress' &&
+          payload.event.payload.sourceType === 'operation.rerun_prepared'))
     ) {
       services.backendProjectComparisonService.invalidateExecution()
     }

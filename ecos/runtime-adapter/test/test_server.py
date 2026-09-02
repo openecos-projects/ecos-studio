@@ -9,7 +9,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceInspectSignoffRequest,
     WorkspaceOpenV1Request,
 )
-from ecos_runtime_adapter.server import RuntimeServer
+from ecos_runtime_adapter.server import RuntimeServer, _project_runtime_event
 from ecos_runtime_adapter.workspace_api import RuntimeApiError
 
 
@@ -161,6 +161,25 @@ def test_runtime_events_are_projected_to_the_four_v1_event_types():
         "workspace.committed",
     ]
     assert events[-1]["workspaceRevision"] == 2
+
+
+def test_rerun_preparation_projection_carries_its_committed_revision():
+    event = _project_runtime_event(
+        {
+            "eventId": "event-1",
+            "operationId": "operation-1",
+            "origin": "gui",
+            "payload": {"workspaceRevision": 3},
+            "sequence": 1,
+            "timestamp": 1,
+            "type": "operation.rerun_prepared",
+            "workspaceId": "workspace-1",
+        }
+    )
+
+    assert event["type"] == "execution.progress"
+    assert event["payload"]["workspaceRevision"] == 3
+    assert event["workspaceRevision"] == 3
 
 
 def test_rpc_hello_reports_persistent_db_capabilities_when_enabled():

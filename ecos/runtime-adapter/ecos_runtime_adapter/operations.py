@@ -300,8 +300,8 @@ class RuntimeOperationManager:
                     else:
                         operation.state = "failed"
                         operation.error = operation.error or {
-                            "message": str(exc),
-                            "code": "command_failed",
+                            "message": str(getattr(exc, "message", exc)),
+                            "code": str(getattr(exc, "code", "command_failed")),
                         }
                         event_type = "operation.failed"
                     operation.updated_at = time.time()
@@ -369,11 +369,13 @@ class RuntimeOperationManager:
         *,
         affected_steps: list[str],
         scope: str,
+        workspace_revision: int,
         target_step: str = "",
     ) -> None:
         """Publish the idempotent GUI reset boundary before a rerun starts."""
         with self._lock:
             operation = self._operations[operation_id]
+            operation.workspace_revision = workspace_revision
             operation.updated_at = time.time()
             event = self._new_event_locked(
                 operation,
@@ -382,8 +384,10 @@ class RuntimeOperationManager:
                     "affectedSteps": affected_steps,
                     "scope": scope,
                     "targetStep": target_step,
+                    "workspaceRevision": workspace_revision,
                 },
             )
+            self._persist_workspace_ledger_locked(operation.workspace_id)
         self._publish(event)
 
     def step_completed(
@@ -547,6 +551,7 @@ class RuntimeOperationManager:
             "sequence": sequence,
             "type": event_type,
             "workspaceId": operation.workspace_id,
+            "workspaceRevision": operation.workspace_revision,
             "operationId": operation.operation_id,
             "origin": operation.origin,
             "kind": operation.kind,
