@@ -624,6 +624,28 @@ describe('project management V3 model', () => {
       }),
     )
     expect(workspaceStatusFromFlow('in_progress', lecFailed)).toBe('failed')
+
+    const lecRunning = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'filler', state: 'Success' },
+          { name: 'postRouteLec', state: 'Ongoing' },
+        ],
+      }),
+    )
+    expect(lecRunning).toEqual({ Filler: 'running' })
+    expect(workspaceStatusFromFlow('success', lecRunning)).toBe('running')
+
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'filler', state: 'Invalid' },
+            { name: 'postRouteLec', state: 'Ongoing' },
+          ],
+        }),
+      ),
+    ).toEqual({ Filler: 'failed' })
   })
 
   it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {

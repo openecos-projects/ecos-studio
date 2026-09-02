@@ -1143,10 +1143,13 @@ export function parseWorkspaceFlowStateMap(
     if (!flowStep || !status) return stateMap
 
     // Timing Opt and postRouteLec alias onto the preceding coarse step; keep
-    // the earlier entry unless the aliased check failed, so a failed LEC gate
-    // still marks the workspace failed without hiding an unstarted one.
+    // the earlier entry unless the aliased check is more urgent (failed, or
+    // running over a finished stage), so the gate stays visible without
+    // hiding an unstarted one behind a completed predecessor.
     const existing = stateMap[flowStep]
-    if (existing === undefined || status === 'failed') stateMap[flowStep] = status
+    const overrides =
+      status === 'failed' || (status === 'running' && existing !== 'failed')
+    if (existing === undefined || overrides) stateMap[flowStep] = status
     return stateMap
   }, {})
 }
