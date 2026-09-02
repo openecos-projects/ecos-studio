@@ -82,7 +82,7 @@ describe('backendProjectComparisonSession', () => {
     })
     api.getStepFindings.mockResolvedValue({
       ok: false,
-      code: 'FINDINGS_REFERENCE_MISSING',
+      code: 'ARTIFACT_REFERENCE_MISSING',
     })
   })
 
@@ -259,7 +259,7 @@ describe('backendProjectComparisonSession', () => {
     api.getStepFindings.mockResolvedValue({
       ...findings('ws_1', 'Route'),
       freshness: 'last-committed',
-      issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+      issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
     })
     const session = useBackendProjectComparisonSession()
     await session.selectProject('/projects/a')
@@ -269,7 +269,7 @@ describe('backendProjectComparisonSession', () => {
     expect(session.findings).toMatchObject({
       status: 'stale',
       data: { projectWorkspaceId: 'ws_1', step: 'Route' },
-      issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+      issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
     })
   })
 })

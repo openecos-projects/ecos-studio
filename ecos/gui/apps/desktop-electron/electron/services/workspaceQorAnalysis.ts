@@ -54,6 +54,12 @@ interface SnapshotQorProjection {
   qor: WorkspaceQorSummary | null
 }
 
+export type WorkspaceEngineeringFacts = Pick<
+  EccEngineeringSnapshot,
+  'analysis' | 'flow' | 'metrics' | 'qorAssessment'
+> &
+  Partial<Pick<EccEngineeringSnapshot, 'signoffAssessment'>>
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -99,7 +105,7 @@ function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
 }
 
 function snapshotQorProjection(
-  snapshot: EccEngineeringSnapshot | null | undefined,
+  snapshot: WorkspaceEngineeringFacts | null | undefined,
 ): SnapshotQorProjection {
   const empty: SnapshotQorProjection = { assessment: null, qor: null }
   if (!snapshot) return empty
@@ -108,24 +114,25 @@ function snapshotQorProjection(
   const gate = score?.gate
   const value = score?.value
   const threshold = score?.threshold
-  const signoffStatus = snapshot.signoffAssessment.status
   if (
     !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(gate)) ||
     !(value === null || (typeof value === 'number' && Number.isFinite(value))) ||
     typeof threshold !== 'number' ||
-    !Number.isFinite(threshold) ||
-    !['ready', 'attention', 'blocked'].includes(signoffStatus)
+    !Number.isFinite(threshold)
   ) {
     return empty
   }
-  const assessment = {
-    gateStatus: gate as NonNullable<
-      ProjectQorWorkspaceInput['authoritativeAssessment']
-    >['gateStatus'],
-    score: value as number | null,
-    scoreThreshold: threshold,
-    signoffStatus,
-  }
+  const signoffStatus = snapshot.signoffAssessment?.status
+  const assessment = ['ready', 'attention', 'blocked'].includes(String(signoffStatus))
+    ? {
+        gateStatus: gate as NonNullable<
+          ProjectQorWorkspaceInput['authoritativeAssessment']
+        >['gateStatus'],
+        score: value as number | null,
+        scoreThreshold: threshold,
+        signoffStatus: signoffStatus!,
+      }
+    : null
   const rawMetrics = Array.isArray(qor?.metrics) ? qor.metrics : snapshot.metrics
   if (!Array.isArray(rawMetrics) || !Array.isArray(qor?.steps)) {
     return { assessment, qor: null }
@@ -178,9 +185,9 @@ function snapshotQorProjection(
     assessment,
     qor: {
       score: {
-        value: assessment.score,
-        gate: assessment.gateStatus,
-        threshold: assessment.scoreThreshold,
+        value: value as number | null,
+        gate: gate as WorkspaceQorSummary['score']['gate'],
+        threshold,
       },
       metrics,
       steps,
@@ -244,7 +251,7 @@ function workspaceStatus(
 }
 
 function snapshotComparisonMetrics(
-  snapshot: EccEngineeringSnapshot | null | undefined,
+  snapshot: WorkspaceEngineeringFacts | null | undefined,
   workspaceId: string,
 ): ProjectQorMetricRecord[] {
   if (!snapshot) return []
@@ -265,7 +272,7 @@ export function projectQorInputForWorkspace(
   manifest: ProjectManifest,
   workspaceId: string,
   texts: WorkspaceAnalysisTexts,
-  engineeringSnapshot?: EccEngineeringSnapshot | null,
+  engineeringSnapshot?: WorkspaceEngineeringFacts | null,
 ): WorkspaceQorInput | null {
   const workspace = manifest.workspaces.find(
     (candidate) => candidate.workspace_id === workspaceId,

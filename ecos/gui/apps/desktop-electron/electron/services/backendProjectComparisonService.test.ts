@@ -929,7 +929,7 @@ describe('BackendProjectComparisonService', () => {
 
     readVerifiedArtifacts.mockResolvedValueOnce({
       ok: false,
-      code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+      code: 'ARTIFACT_REVISION_MISMATCH',
       reference: 'route_ecc/analysis/qor_metrics.json',
     })
     await expect(
@@ -941,14 +941,14 @@ describe('BackendProjectComparisonService', () => {
     ).resolves.toMatchObject({
       ok: true,
       freshness: 'last-committed',
-      issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+      issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
     })
 
     fixture.engineeringSnapshots.ws_0002!.workspaceRevision = 15
     await service.refreshComparison(11, selected.projectComparisonContextId)
     readVerifiedArtifacts.mockResolvedValueOnce({
       ok: false,
-      code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+      code: 'ARTIFACT_REVISION_MISMATCH',
       reference: 'route_ecc/analysis/qor_metrics.json',
     })
     await expect(
@@ -959,7 +959,7 @@ describe('BackendProjectComparisonService', () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+      code: 'ARTIFACT_REVISION_MISMATCH',
       detail: 'route_ecc/analysis/qor_metrics.json',
     })
   })
@@ -1063,7 +1063,7 @@ describe('BackendProjectComparisonService', () => {
           projectWorkspaceId: 'ws_0001',
           step: stepId,
         }),
-      ).resolves.toEqual({ ok: false, code: 'FINDINGS_REFERENCE_MISSING' })
+      ).resolves.toEqual({ ok: false, code: 'ARTIFACT_REFERENCE_MISSING' })
       expect(readVerifiedArtifacts).not.toHaveBeenCalled()
     }
   })

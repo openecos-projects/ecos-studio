@@ -22,7 +22,10 @@ interface FindingsArtifactReader {
 export interface CommittedFindingsWorkspace {
   analysis: ProjectAnalysisSnapshot
   comparisonMetrics: Partial<Record<ProjectManifestFlowStep, ProjectQorMetricRecord[]>>
-  engineeringSnapshot: EccPersistedEngineeringSnapshot
+  engineeringSnapshot: Pick<
+    EccPersistedEngineeringSnapshot,
+    'analysis' | 'artifacts' | 'workspaceId' | 'workspaceRevision'
+  >
   projectWorkspaceId: string
   workspacePath: string
 }
@@ -179,7 +182,7 @@ export class ProjectStepFindingsService {
 }
 
 function declaredArtifacts(
-  snapshot: EccPersistedEngineeringSnapshot,
+  snapshot: Pick<EccPersistedEngineeringSnapshot, 'artifacts'>,
   analysisStep: {
     hotspots: EccEngineeringAnalysisFile
     metrics: EccEngineeringAnalysisFile
@@ -195,7 +198,7 @@ function declaredArtifacts(
   const artifacts = []
   for (const file of files) {
     if (file.status !== 'available') {
-      return { ok: false, code: 'FINDINGS_REFERENCE_MISSING' }
+      return { ok: false, code: 'ARTIFACT_REFERENCE_MISSING' }
     }
     const artifact = snapshot.artifacts.find(
       (candidate) =>
@@ -209,7 +212,7 @@ function declaredArtifacts(
       artifact.sizeBytes === undefined ||
       artifact.sha256 === undefined
     ) {
-      return { ok: false, code: 'FINDINGS_REFERENCE_MISSING' }
+      return { ok: false, code: 'ARTIFACT_REFERENCE_MISSING' }
     }
     artifacts.push({
       reference: artifact.reference,

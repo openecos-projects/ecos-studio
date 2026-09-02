@@ -195,6 +195,7 @@ export {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   parseEngineeringSnapshotJson,
   validateEngineeringSnapshot,
+  type EngineeringSnapshotEnvelope,
   type EngineeringSnapshotIssue,
   type EngineeringSnapshotSections,
   type EngineeringSnapshotValidationResult,

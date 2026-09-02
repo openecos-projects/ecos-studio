@@ -36,12 +36,11 @@ export type VerifiedProjectArtifactsReadResult =
   | {
       ok: false
       code:
-        | 'FINDINGS_ARTIFACT_HASH_MISMATCH'
+        | 'ARTIFACT_REVISION_MISMATCH'
         | 'FINDINGS_ARTIFACT_INVALID_JSON'
-        | 'FINDINGS_ARTIFACT_SIZE_MISMATCH'
         | 'FINDINGS_ARTIFACT_TOO_LARGE'
-        | 'FINDINGS_REFERENCE_MISSING'
-        | 'FINDINGS_REFERENCE_UNSAFE'
+        | 'ARTIFACT_REFERENCE_MISSING'
+        | 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE'
         | 'FINDINGS_READ_FAILED'
       reference: string
     }
@@ -222,7 +221,7 @@ export class ProjectManagementReadService {
       }
       const artifactIssue = await validateArtifactRealPaths(
         workspaceRoot,
-        validated.snapshot.artifacts,
+        validated.sections.artifacts.data,
       )
       if (!artifactIssue) return { ...validated, readBytes }
       return {
@@ -249,7 +248,7 @@ export class ProjectManagementReadService {
       new Set(request.artifacts.map((artifact) => artifact.reference)).size !==
         request.artifacts.length
     ) {
-      return { ok: false, code: 'FINDINGS_REFERENCE_UNSAFE', reference: '' }
+      return { ok: false, code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE', reference: '' }
     }
     try {
       const project = await this.loadProject(request.projectRoot)
@@ -348,7 +347,7 @@ async function readVerifiedArtifact(
 > {
   const unsafe = (): Exclude<VerifiedProjectArtifactsReadResult, { ok: true }> => ({
     ok: false,
-    code: 'FINDINGS_REFERENCE_UNSAFE',
+    code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE',
     reference: artifact.reference,
   })
   if (
@@ -369,7 +368,7 @@ async function readVerifiedArtifact(
     canonicalPath = await realpath(candidate)
   } catch (error) {
     return isNodeErrorWithCode(error, 'ENOENT')
-      ? { ok: false, code: 'FINDINGS_REFERENCE_MISSING', reference: artifact.reference }
+      ? { ok: false, code: 'ARTIFACT_REFERENCE_MISSING', reference: artifact.reference }
       : { ok: false, code: 'FINDINGS_READ_FAILED', reference: artifact.reference }
   }
   if (!isPathWithinRoot(canonicalPath, workspaceRoot)) return unsafe()
@@ -380,7 +379,7 @@ async function readVerifiedArtifact(
     if (!fileStats.isFile()) {
       return {
         ok: false,
-        code: 'FINDINGS_REFERENCE_MISSING',
+        code: 'ARTIFACT_REFERENCE_MISSING',
         reference: artifact.reference,
       }
     }
@@ -397,7 +396,7 @@ async function readVerifiedArtifact(
     if (fileStats.size !== artifact.sizeBytes) {
       return {
         ok: false,
-        code: 'FINDINGS_ARTIFACT_SIZE_MISMATCH',
+        code: 'ARTIFACT_REVISION_MISMATCH',
         reference: artifact.reference,
       }
     }
@@ -423,7 +422,7 @@ async function readVerifiedArtifact(
     if (offset !== artifact.sizeBytes) {
       return {
         ok: false,
-        code: 'FINDINGS_ARTIFACT_SIZE_MISMATCH',
+        code: 'ARTIFACT_REVISION_MISMATCH',
         reference: artifact.reference,
       }
     }
@@ -431,7 +430,7 @@ async function readVerifiedArtifact(
     if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) {
       return {
         ok: false,
-        code: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+        code: 'ARTIFACT_REVISION_MISMATCH',
         reference: artifact.reference,
       }
     }

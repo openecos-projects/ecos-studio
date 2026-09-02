@@ -398,10 +398,10 @@ describe('ProjectManagementReadService', () => {
       service.readVerifiedArtifacts(
         request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)),
       ),
-    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_SIZE_MISMATCH' })
+    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REVISION_MISMATCH' })
     await expect(
       service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
-    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' })
+    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REVISION_MISMATCH' })
 
     const invalidJson = 'x'.repeat(Buffer.byteLength(valid))
     await writeFile(path, invalidJson)
@@ -424,13 +424,13 @@ describe('ProjectManagementReadService', () => {
     await unlink(path)
     await expect(
       service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
-    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_REFERENCE_MISSING' })
+    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REFERENCE_MISSING' })
 
     const outside = join(projectRoot, 'outside-findings.json')
     await writeFile(outside, valid)
     await symlink(outside, path)
     await expect(
       service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
-    ).resolves.toMatchObject({ ok: false, code: 'FINDINGS_REFERENCE_UNSAFE' })
+    ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' })
   })
 })

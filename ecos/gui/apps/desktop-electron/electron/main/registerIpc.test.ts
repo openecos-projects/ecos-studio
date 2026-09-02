@@ -414,7 +414,7 @@ describe('registerIpc', () => {
       projectWorkspaceId: 'ws_1',
       step: 'Route',
     }
-    const result = { ok: false, code: 'FINDINGS_REFERENCE_MISSING' }
+    const result = { ok: false, code: 'ARTIFACT_REFERENCE_MISSING' }
     services.backendProjectComparisonService.getStepFindings.mockResolvedValue(result)
 
     await expect(

@@ -503,7 +503,20 @@ export class EccWorkspaceRuntime {
     )
     const validated = validateEngineeringSnapshot(snapshot, workspaceId)
     if (!validated.ok) throw new Error(validated.issue.code)
-    return validated.snapshot
+    const { artifacts, flow, qor, signoff } = validated.sections
+    if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)
+    if (flow.status !== 'ready') throw new Error(flow.issues[0]?.code)
+    if (qor.status !== 'ready') throw new Error(qor.issues[0]?.code)
+    if (signoff.status !== 'ready') throw new Error(signoff.issues[0]?.code)
+    return {
+      ...validated.snapshot,
+      analysis: qor.data.analysis,
+      artifacts: artifacts.data,
+      flow: flow.data,
+      metrics: qor.data.metrics,
+      qorAssessment: qor.data.qorAssessment,
+      signoffAssessment: signoff.data,
+    }
   }
 
   async recoverInterrupted(

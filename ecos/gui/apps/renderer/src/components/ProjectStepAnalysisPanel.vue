@@ -693,13 +693,12 @@ const findingsReadStatus = computed(() => {
 })
 
 function findingsIssueLabel(code: string): string {
-  if (code === 'FINDINGS_REFERENCE_MISSING') return 'artifact missing'
-  if (code === 'FINDINGS_REFERENCE_UNSAFE') return 'unsafe artifact reference'
+  if (code === 'ARTIFACT_REFERENCE_MISSING') return 'artifact missing'
+  if (code === 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE') return 'unsafe artifact reference'
   if (code === 'FINDINGS_ARTIFACT_TOO_LARGE') return 'artifact too large'
   if (code === 'FINDINGS_ARTIFACT_INVALID_JSON') return 'invalid artifact JSON'
   if (code === 'FINDINGS_SNAPSHOT_REVISION_CHANGED') return 'snapshot changed'
-  if (code === 'FINDINGS_ARTIFACT_HASH_MISMATCH') return 'artifact content changed'
-  if (code === 'FINDINGS_ARTIFACT_SIZE_MISMATCH') return 'artifact size changed'
+  if (code === 'ARTIFACT_REVISION_MISMATCH') return 'artifact revision changed'
   return 'read failed'
 }
 const baselineWorkspace = computed(

@@ -141,7 +141,9 @@ describe('Engineering Snapshot validation', () => {
     expect(valid.ok).toBe(true)
     if (!valid.ok) return
     expect(valid.sections.qor.status).toBe('ready')
-    expect(valid.snapshot.metrics[0]).toEqual(metric)
+    expect(
+      valid.sections.qor.status === 'ready' && valid.sections.qor.data.metrics[0],
+    ).toEqual(metric)
 
     const invalidFlow = snapshot()
     invalidFlow.flow = { steps: [{ name: 'sta', tool: 'ecc' }] } as never
@@ -179,6 +181,34 @@ describe('Engineering Snapshot validation', () => {
         actualSizeBytes: ENGINEERING_SNAPSHOT_MAX_BYTES + 1,
         allowedSizeBytes: ENGINEERING_SNAPSHOT_MAX_BYTES,
       },
+    })
+  })
+
+  it('rejects an incomplete envelope before exposing typed sections', () => {
+    const { parameters: _parameters, ...incomplete } = snapshot()
+
+    expect(validateEngineeringSnapshot(incomplete)).toEqual({
+      ok: false,
+      issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' },
+    })
+  })
+
+  it('accepts Runtime input while isolating its path-free Artifact section', () => {
+    const runtime = snapshot()
+    runtime.artifacts = runtime.artifacts.map(
+      ({ reference: _reference, ...artifact }) => artifact,
+    ) as never
+
+    const validated = validateEngineeringSnapshot(runtime)
+
+    expect(validated.ok && validated.sections).toMatchObject({
+      artifacts: {
+        status: 'unavailable',
+        issues: [{ code: 'ENGINEERING_ARTIFACT_INVALID' }],
+      },
+      flow: { status: 'ready' },
+      qor: { status: 'ready' },
+      signoff: { status: 'ready' },
     })
   })
 })

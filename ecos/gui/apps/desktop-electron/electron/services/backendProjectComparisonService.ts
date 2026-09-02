@@ -12,7 +12,8 @@ import {
   type BackendProjectComparisonSelectResult,
   type BackendProjectExecutionSnapshotResult,
   type BackendProjectStepFindingsResult,
-  type EccPersistedEngineeringSnapshot,
+  type EccEngineeringAnalysis,
+  type EccEngineeringAnalysisArtifactRef,
   type EccRuntimeOperation,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
@@ -483,23 +484,37 @@ export class BackendProjectComparisonService {
                 ),
               }
             }
-            const engineeringSnapshot = snapshotResult.snapshot
-            const texts = analysisTextsFromSnapshot(engineeringSnapshot)
+            const envelope = snapshotResult.snapshot
+            const qor = snapshotResult.sections.qor.data
+            const artifacts =
+              snapshotResult.sections.artifacts.status === 'ready'
+                ? snapshotResult.sections.artifacts.data
+                : []
+            const engineeringFacts = {
+              analysis: qor.analysis,
+              flow: snapshotResult.sections.flow.data,
+              metrics: qor.metrics,
+              qorAssessment: qor.qorAssessment,
+              ...(snapshotResult.sections.signoff.status === 'ready'
+                ? { signoffAssessment: snapshotResult.sections.signoff.data }
+                : {}),
+            }
+            const texts = analysisTextsFromSnapshot(qor.analysis, artifacts)
             const input = projectQorInputForWorkspace(
               manifest,
               workspace.workspace_id,
               texts,
-              engineeringSnapshot,
+              engineeringFacts,
             )
             return input
               ? {
                   executionWorkspace: {
-                    engineeringWorkspaceId: engineeringSnapshot.workspaceId,
+                    engineeringWorkspaceId: envelope.workspaceId,
                     projectWorkspaceId: workspace.workspace_id,
                     stepStatuses: input.stepStatuses,
-                    workspaceRevision: engineeringSnapshot.workspaceRevision,
+                    workspaceRevision: envelope.workspaceRevision,
                   } satisfies CommittedProjectWorkspace,
-                  engineeringWorkspaceId: engineeringSnapshot.workspaceId,
+                  engineeringWorkspaceId: envelope.workspaceId,
                   identityKey,
                   input,
                   issues: sectionIssues.map((issue) =>
@@ -581,7 +596,14 @@ export class BackendProjectComparisonService {
         manifest.workspaces.flatMap((workspace) => {
           const snapshot = context.snapshotCache.get(resolve(workspace.workspace_path))
           const analysis = analysisByWorkspace.get(workspace.workspace_id)
-          if (!snapshot?.ok || !analysis) return []
+          if (
+            !snapshot?.ok ||
+            !analysis ||
+            snapshot.sections.qor.status !== 'ready' ||
+            snapshot.sections.artifacts.status !== 'ready'
+          ) {
+            return []
+          }
           return [
             {
               analysis,
@@ -593,7 +615,12 @@ export class BackendProjectComparisonService {
                   )?.metrics ?? [],
                 ]),
               ),
-              engineeringSnapshot: snapshot.snapshot,
+              engineeringSnapshot: {
+                analysis: snapshot.sections.qor.data.analysis,
+                artifacts: snapshot.sections.artifacts.data,
+                workspaceId: snapshot.snapshot.workspaceId,
+                workspaceRevision: snapshot.snapshot.workspaceRevision,
+              },
               projectWorkspaceId: workspace.workspace_id,
               workspacePath: workspace.workspace_path,
             } satisfies CommittedFindingsWorkspace,
@@ -666,13 +693,14 @@ function autoRefreshIssue(): ReadIssue {
 }
 
 function analysisTextsFromSnapshot(
-  snapshot: EccPersistedEngineeringSnapshot,
+  analysis: EccEngineeringAnalysis,
+  artifacts: EccEngineeringAnalysisArtifactRef[],
 ): Record<string, string | null> {
   const references = new Map(
-    snapshot.artifacts.map((artifact) => [artifact.artifactId, artifact.reference]),
+    artifacts.map((artifact) => [artifact.artifactId, artifact.reference]),
   )
   const texts: Record<string, string | null> = {}
-  for (const step of snapshot.analysis.steps) {
+  for (const step of analysis.steps) {
     for (const file of [step.metrics, step.summary, step.hotspots, step.timingIssues]) {
       if (!file || file.status !== 'available' || !file.data) continue
       const reference = references.get(file.artifactId)

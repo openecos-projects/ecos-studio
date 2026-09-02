@@ -31,6 +31,27 @@ function waitForQueuedOperation(): Promise<void> {
   })
 }
 
+function engineeringSnapshot(workspaceId: string, workspaceRevision = 1) {
+  return {
+    analysis: { steps: [] },
+    artifacts: [],
+    checklist: {},
+    flow: { steps: [] },
+    metrics: [],
+    parameters: {},
+    qorAssessment: {
+      metrics: [],
+      score: { gate: 'unavailable', threshold: 60, value: null },
+      status: 'unavailable',
+      steps: [],
+    },
+    schemaVersion: 1,
+    signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    workspaceId,
+    workspaceRevision,
+  }
+}
+
 class FakeRpcClient implements EccRpcRuntimeClient {
   readonly calls: RpcCall[] = []
   responses: Array<unknown | Promise<unknown>> = []
@@ -354,18 +375,7 @@ describe('EccRpcRuntimeService pool', () => {
   it('resolves the Engineering Snapshot for an active Workspace directory', async () => {
     const pool = createPool()
     const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
-    pool.clientFor('/work/demo').responses.push({
-      schemaVersion: 1,
-      artifacts: [],
-      checklist: {},
-      flow: { steps: [] },
-      metrics: [],
-      parameters: {},
-      qorAssessment: {},
-      signoffAssessment: { groups: [], risks: [], status: 'ready' },
-      workspaceId: 'id-/work/demo',
-      workspaceRevision: 1,
-    })
+    pool.clientFor('/work/demo').responses.push(engineeringSnapshot('id-/work/demo'))
 
     await expect(
       pool.service.engineeringSnapshotForDirectory('/work/demo/'),
@@ -384,18 +394,7 @@ describe('EccRpcRuntimeService pool', () => {
   it('rejects an Engineering Snapshot whose revision no longer matches the request', async () => {
     const pool = createPool()
     const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
-    pool.clientFor('/work/demo').responses.push({
-      schemaVersion: 1,
-      artifacts: [],
-      checklist: {},
-      flow: { steps: [] },
-      metrics: [],
-      parameters: {},
-      qorAssessment: {},
-      signoffAssessment: { groups: [], risks: [], status: 'ready' },
-      workspaceId: 'id-/work/demo',
-      workspaceRevision: 2,
-    })
+    pool.clientFor('/work/demo').responses.push(engineeringSnapshot('id-/work/demo', 2))
 
     await expect(
       pool.service.engineeringSnapshot({
@@ -408,18 +407,9 @@ describe('EccRpcRuntimeService pool', () => {
   it('rejects an Engineering Snapshot for a different ECC Workspace identity', async () => {
     const pool = createPool()
     const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
-    pool.clientFor('/work/demo').responses.push({
-      schemaVersion: 1,
-      artifacts: [],
-      checklist: {},
-      flow: { steps: [] },
-      metrics: [],
-      parameters: {},
-      qorAssessment: {},
-      signoffAssessment: { groups: [], risks: [], status: 'ready' },
-      workspaceId: 'different-workspace',
-      workspaceRevision: 1,
-    })
+    pool
+      .clientFor('/work/demo')
+      .responses.push(engineeringSnapshot('different-workspace'))
 
     await expect(
       pool.service.engineeringSnapshot({ workspaceHandle: workspace.workspaceHandle }),
@@ -433,18 +423,7 @@ describe('EccRpcRuntimeService pool', () => {
     client.responses.push(
       { directory: '/work/idle', workspaceId: 'id-/work/idle' },
       { recovered: [] },
-      {
-        schemaVersion: 1,
-        artifacts: [],
-        checklist: {},
-        flow: { steps: [] },
-        metrics: [],
-        parameters: {},
-        qorAssessment: {},
-        signoffAssessment: { groups: [], risks: [], status: 'ready' },
-        workspaceId: 'id-/work/idle',
-        workspaceRevision: 1,
-      },
+      engineeringSnapshot('id-/work/idle'),
       { closed: true },
     )
 

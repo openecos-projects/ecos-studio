@@ -786,7 +786,7 @@ describe('ProjectStepAnalysisPanel', () => {
           step: 'Route',
           workspaceRevision: 4,
         },
-        issue: { code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' },
+        issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
       },
     })
 
@@ -799,7 +799,7 @@ describe('ProjectStepAnalysisPanel', () => {
       findings: {
         status: 'error',
         data: null,
-        issue: { code: 'FINDINGS_REFERENCE_MISSING' },
+        issue: { code: 'ARTIFACT_REFERENCE_MISSING' },
         projectWorkspaceId: 'ws_a',
         step: 'Route',
       },

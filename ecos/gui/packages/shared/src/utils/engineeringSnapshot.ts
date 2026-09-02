@@ -4,7 +4,7 @@ import type {
   EccEngineeringAnalysisFile,
   EccEngineeringMetric,
   EccEngineeringSnapshot,
-  EccPersistedEngineeringSnapshot,
+  EccWorkspaceInspectSignoffResult,
 } from '../contracts/eccRuntime.ts'
 import type { ReadIssue, ReadSection } from '../contracts/backendWorkspace.ts'
 
@@ -22,11 +22,21 @@ export interface EngineeringSnapshotSections {
   signoff: ReadSection<EccEngineeringSnapshot['signoffAssessment']>
 }
 
+export type EngineeringSnapshotEnvelope = Pick<
+  EccEngineeringSnapshot,
+  'checklist' | 'parameters' | 'schemaVersion' | 'workspaceId' | 'workspaceRevision'
+>
+
+type EngineeringSnapshotQor = Pick<
+  EccEngineeringSnapshot,
+  'analysis' | 'metrics' | 'qorAssessment'
+>
+
 export type EngineeringSnapshotValidationResult =
   | {
       ok: true
       sections: EngineeringSnapshotSections
-      snapshot: EccPersistedEngineeringSnapshot
+      snapshot: EngineeringSnapshotEnvelope
     }
   | { ok: false; issue: EngineeringSnapshotIssue }
 
@@ -74,8 +84,9 @@ export function validateEngineeringSnapshot(
   }
   if (
     !nonEmptyString(value.workspaceId) ||
-    !Number.isSafeInteger(value.workspaceRevision) ||
-    (value.workspaceRevision as number) < 1
+    !positiveInteger(value.workspaceRevision) ||
+    !record(value.parameters) ||
+    !record(value.checklist)
   ) {
     return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
   }
@@ -83,49 +94,54 @@ export function validateEngineeringSnapshot(
     return { ok: false, issue: { code: 'ENGINEERING_WORKSPACE_ID_MISMATCH' } }
   }
 
-  const snapshot = value as unknown as EccPersistedEngineeringSnapshot
   return {
     ok: true,
-    snapshot,
+    snapshot: {
+      checklist: value.checklist,
+      parameters: value.parameters,
+      schemaVersion: 1,
+      workspaceId: value.workspaceId,
+      workspaceRevision: value.workspaceRevision,
+    },
     sections: {
-      flow: section(validFlow(value.flow), snapshot.flow, 'ENGINEERING_FLOW_INVALID'),
-      qor: section(
-        validQor(value),
-        {
-          analysis: snapshot.analysis,
-          metrics: snapshot.metrics,
-          qorAssessment: snapshot.qorAssessment,
-        },
-        'ENGINEERING_QOR_INVALID',
-      ),
-      signoff: section(
-        validSignoff(value.signoffAssessment),
-        snapshot.signoffAssessment,
-        'ENGINEERING_SIGNOFF_INVALID',
-      ),
-      artifacts: section(
-        validArtifacts(value.artifacts),
-        snapshot.artifacts,
-        'ENGINEERING_ARTIFACT_INVALID',
-      ),
+      flow: validFlow(value.flow)
+        ? ready(value.flow)
+        : unavailable('ENGINEERING_FLOW_INVALID'),
+      qor: validQor(value)
+        ? ready({
+            analysis: value.analysis,
+            metrics: value.metrics,
+            qorAssessment: value.qorAssessment,
+          })
+        : unavailable('ENGINEERING_QOR_INVALID'),
+      signoff: validSignoff(value.signoffAssessment)
+        ? ready(value.signoffAssessment)
+        : unavailable('ENGINEERING_SIGNOFF_INVALID'),
+      artifacts: validArtifacts(value.artifacts)
+        ? ready(value.artifacts)
+        : unavailable('ENGINEERING_ARTIFACT_INVALID'),
     },
   }
 }
 
-function section<T>(valid: boolean, data: T, code: string): ReadSection<T> {
-  return valid
-    ? { status: 'ready', data, issues: [] }
-    : { status: 'unavailable', issues: [{ code }] }
+function ready<T>(data: T): ReadSection<T> {
+  return { status: 'ready', data, issues: [] }
 }
 
-function validFlow(value: unknown): boolean {
+function unavailable<T>(code: string): ReadSection<T> {
+  return { status: 'unavailable', issues: [{ code }] }
+}
+
+function validFlow(value: unknown): value is EccEngineeringSnapshot['flow'] {
   if (!record(value) || !Array.isArray(value.steps)) return false
   return value.steps.every(
     (step) => record(step) && nonEmptyString(step.name) && nonEmptyString(step.state),
   )
 }
 
-function validQor(snapshot: Record<string, unknown>): boolean {
+function validQor(
+  snapshot: Record<string, unknown>,
+): snapshot is Record<string, unknown> & EngineeringSnapshotQor {
   if (
     !Array.isArray(snapshot.metrics) ||
     !snapshot.metrics.every(validMetric) ||
@@ -175,6 +191,7 @@ function validMetric(value: unknown): value is EccEngineeringMetric {
       String(value.direction),
     ) &&
     nonEmptyString(value.scope) &&
+    (value.unit === undefined || value.unit === null || typeof value.unit === 'string') &&
     (value.corner === null || nonEmptyString(value.corner)) &&
     (value.corner_context === undefined ||
       value.corner_context === null ||
@@ -268,14 +285,70 @@ function validAnalysisFile(
   )
 }
 
-function validSignoff(value: unknown): boolean {
+function validSignoff(value: unknown): value is EccWorkspaceInspectSignoffResult {
   return (
     record(value) &&
     ['ready', 'attention', 'blocked'].includes(String(value.status)) &&
     Array.isArray(value.groups) &&
-    value.groups.every(record) &&
+    value.groups.every(validSignoffGroup) &&
     Array.isArray(value.risks) &&
-    value.risks.every(record)
+    value.risks.every(validSignoffRisk)
+  )
+}
+
+function validSignoffGroup(value: unknown): boolean {
+  return (
+    record(value) &&
+    ['initial', 'config', 'harden', 'final_design', 'sta', 'spef', 'reports'].includes(
+      String(value.id),
+    ) &&
+    nonEmptyString(value.label) &&
+    ['ready', 'attention', 'blocked'].includes(String(value.status)) &&
+    nonNegativeInteger(value.available) &&
+    nonNegativeInteger(value.expected) &&
+    typeof value.summary === 'string'
+  )
+}
+
+function validSignoffRisk(value: unknown): boolean {
+  return (
+    record(value) &&
+    Array.isArray(value.details) &&
+    value.details.every(validSignoffDetail) &&
+    ['blocked', 'warning'].includes(String(value.severity)) &&
+    nonEmptyString(value.title) &&
+    typeof value.summary === 'string'
+  )
+}
+
+function validSignoffDetail(value: unknown): boolean {
+  return (
+    record(value) &&
+    [
+      'flow',
+      'artifact',
+      'configuration',
+      'provenance',
+      'quality_gate',
+      'report',
+      'freshness',
+    ].includes(String(value.kind)) &&
+    nonEmptyString(value.label) &&
+    typeof value.location === 'string' &&
+    nonEmptyString(value.reason) &&
+    ['qor', 'checklist'].includes(String(value.owner)) &&
+    ['block', 'warn'].includes(String(value.policy)) &&
+    ['pass', 'failed', 'warning', 'unavailable'].includes(String(value.state)) &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(
+      (evidence) =>
+        record(evidence) &&
+        nonEmptyString(evidence.kind) &&
+        typeof evidence.path === 'string' &&
+        (evidence.destination === undefined ||
+          typeof evidence.destination === 'string') &&
+        (evidence.selector === undefined || typeof evidence.selector === 'string'),
+    )
   )
 }
 
@@ -325,5 +398,9 @@ function finiteNumber(value: unknown): value is number {
 }
 
 function nonNegativeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
 }
