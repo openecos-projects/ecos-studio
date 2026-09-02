@@ -11,6 +11,17 @@ describe('FrontendWorkspaceView QoR layout', () => {
     expect(frontendWorkspaceViewSource).toContain('QoR · {{ frontendQorStatusLabel')
     expect(frontendWorkspaceViewSource).toContain('frontendQorForStepState(')
     expect(frontendWorkspaceViewSource).toContain('currentStep.value?.state')
+    expect(frontendWorkspaceViewSource).toContain('running: currentStepQorRunning.value')
+    expect(frontendWorkspaceViewSource).not.toContain('running: runBusy.value')
     expect(frontendWorkspaceViewSource).toContain('stale: Boolean(stepStaleReason.value)')
+  })
+
+  it('refreshes the selected step QoR as soon as that step completes', () => {
+    expect(frontendWorkspaceViewSource).toContain(
+      'detailRequestStepName.value.trim().toLowerCase() === stepKey',
+    )
+    expect(frontendWorkspaceViewSource).toMatch(
+      /if \(\s*isCompleted &&[\s\S]*?detailRequestStepName\.value\.trim\(\)\.toLowerCase\(\) === stepKey[\s\S]*?void loadDetail\(\)/,
+    )
   })
 })

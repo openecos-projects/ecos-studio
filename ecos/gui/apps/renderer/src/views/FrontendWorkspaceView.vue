@@ -2972,12 +2972,20 @@ const shouldShowStepConsole = computed(
   () => consoleProblemCount.value > 0 || (!consoleCollapsed.value && hasStepLogs.value),
 )
 const humanStepTitle = computed(() => labelForStep(currentStepName.value || 'Step'))
+const currentStepQorRunning = computed(() => {
+  if (!runBusy.value) return false
+  if (runPhase.value === 'queued') return true
+  const state = String(currentStep.value?.state || '')
+    .trim()
+    .toLowerCase()
+  return state === 'ongoing' || state === 'pending' || state === 'running'
+})
 const currentStepQor = computed(() =>
   frontendQorForStepState(
     parseFrontendStepQorArtifacts(detail.value?.qor),
     currentStep.value?.state,
     {
-      running: runBusy.value,
+      running: currentStepQorRunning.value,
       stale: Boolean(stepStaleReason.value),
     },
   ),
@@ -4174,6 +4182,13 @@ function processRuntimeStepEvent(event: unknown): void {
   steps.value[stepIndex] = {
     ...steps.value[stepIndex]!,
     ...override,
+  }
+  if (
+    isCompleted &&
+    !isHomeView.value &&
+    detailRequestStepName.value.trim().toLowerCase() === stepKey
+  ) {
+    void loadDetail()
   }
 }
 
