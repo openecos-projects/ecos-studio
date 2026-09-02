@@ -87,6 +87,23 @@ const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = 
   Harden: 'ecc',
 }
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
+
+/** Sizer publishes underscored lowercase directory and file stems. */
+function sizerStepStem(stepName: string): string {
+  return stepName.trim().split(/\s+/).join('_').toLowerCase()
+}
+
+/** Mirrors the workspace resource index's step directory naming. */
+function rerunStageDirectoryName(stepName: string, tool: string): string {
+  return tool.toLowerCase() === 'sizer'
+    ? `${sizerStepStem(stepName)}_sizer`
+    : `${stepName}_${tool}`
+}
+
+/** Step slug for rerun target directories and ids; spaces are not path-safe. */
+function rerunStepSlug(stepName: string): string {
+  return stepName.trim().split(/\s+/).join('_').toLowerCase()
+}
 const AUTHORIZED_KNOBS = {
   place: new Set([
     'place.target_density',
@@ -301,7 +318,7 @@ async function verifyWorkspaceRerunContract(
   const targetWorkspace = resolve(contract.target_workspace)
   const expectedTarget = join(
     dirname(sourceWorkspace),
-    `${basename(sourceWorkspace)}_rerun_${contract.target_step.toLowerCase()}`,
+    `${basename(sourceWorkspace)}_rerun_${rerunStepSlug(contract.target_step)}`,
   )
   const targetSuffix = targetWorkspace.slice(expectedTarget.length)
   if (
@@ -344,7 +361,9 @@ async function verifyWorkspaceRerunContract(
   if (!targetTool) {
     throw new Error('Workspace rerun target step is not completed in the source flow.')
   }
-  const stageOutputPrefix = `${contract.target_step}_${targetTool}/output/${contract.design_id}_${contract.target_step}`
+  const stageFileStem =
+    targetTool === 'sizer' ? sizerStepStem(contract.target_step) : contract.target_step
+  const stageOutputPrefix = `${rerunStageDirectoryName(contract.target_step, targetTool)}/output/${contract.design_id}_${stageFileStem}`
   const isStageArtifact = STAGE_OUTPUT_SUFFIXES.some(
     (suffix) => contract.source_stage_artifact === `${stageOutputPrefix}${suffix}`,
   )
@@ -767,7 +786,7 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
     const tool =
       toolByStep.get(stageName) ??
       DEFAULT_STEP_TOOLS[stageName as (typeof FLOW_STEP_SEQUENCE)[number]]
-    wipedDirectories.add(`${stageName}_${tool}`)
+    wipedDirectories.add(rerunStageDirectoryName(stageName, tool))
   }
 
   await pruneWorkspaceRerunHomeJson(join(home, 'home.json'), {
@@ -1223,7 +1242,7 @@ async function emptyWorkspaceStepDirectory(
   workspace: string,
   step: WorkspaceFlowStep,
 ): Promise<void> {
-  const stageDirectory = join(workspace, `${step.name}_${step.tool}`)
+  const stageDirectory = join(workspace, rerunStageDirectoryName(step.name, step.tool))
   try {
     const stats = await lstat(stageDirectory)
     if (stats.isSymbolicLink() || !stats.isDirectory()) {

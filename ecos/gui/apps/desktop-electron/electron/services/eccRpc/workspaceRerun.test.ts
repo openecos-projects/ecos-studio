@@ -281,6 +281,68 @@ describe('prepareWorkspaceRerun', () => {
     expect(checklist.checklist).toEqual([])
   })
 
+  it('targets the sizer stage with sanitized directory and rerun id', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-sizer-'))
+    temporaryRoots.push(root)
+    const source = join(root, 'gcd')
+    const flow = JSON.stringify({
+      steps: [
+        { name: 'CTS', state: 'Success', tool: 'ecc' },
+        { name: 'Timing optimization', state: 'Success', tool: 'sizer' },
+      ],
+    })
+    const artifact = Buffer.from('sizer-def')
+    await mkdir(join(source, 'home'), { recursive: true })
+    await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
+    await mkdir(join(source, 'timing_optimization_sizer', 'output'), {
+      recursive: true,
+    })
+    await writeFile(join(source, 'home', 'flow.json'), flow)
+    await writeFile(join(source, 'home', 'parameters.json'), '{}\n')
+    await writeFile(join(source, 'CTS_ecc', 'output', 'gcd_CTS.def.gz'), 'checkpoint')
+    await writeFile(
+      join(
+        source,
+        'timing_optimization_sizer',
+        'output',
+        'gcd_timing_optimization.def.gz',
+      ),
+      artifact,
+    )
+
+    const contract: DesktopAgentWorkspaceRerunContract = {
+      design_id: 'gcd',
+      end_step: 'Timing optimization',
+      execution_scope: 'single_step',
+      parameter_patch: [],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_timing_optimization',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact:
+        'timing_optimization_sizer/output/gcd_timing_optimization.def.gz',
+      source_flow_json_sha256: sha256(flow),
+      source_stage_artifact_sha256: sha256(artifact),
+      source_workspace: source,
+      target_step: 'Timing optimization',
+      target_workspace: `${source}_rerun_timing_optimization`,
+      writes: [],
+    }
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    // The real sizer directory is wiped; no unsanitized junk directory appears.
+    await expect(
+      readdir(join(contract.target_workspace, 'timing_optimization_sizer')),
+    ).resolves.toEqual([])
+    await expect(
+      readdir(join(contract.target_workspace, 'CTS_ecc', 'output')),
+    ).resolves.toContain('gcd_CTS.def.gz')
+    const targetEntries = await readdir(contract.target_workspace)
+    expect(targetEntries).not.toContain('Timing optimization_sizer')
+  })
+
   it('rewrites home.json paths and prunes post-target home aggregates', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await mkdir(join(source, 'drc_ecc', 'analysis'), { recursive: true })
