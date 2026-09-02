@@ -820,6 +820,41 @@ def test_rerun_discovers_post_route_lec_stage_from_result_json(tmp_path: Path) -
     )
 
 
+def test_rerun_discovers_timing_opt_stage_with_sanitized_target(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    flow = workspace / "home" / "flow.json"
+    flow.parent.mkdir(parents=True)
+    flow.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "name": "Timing optimization",
+                        "tool": "sizer",
+                        "state": "Success",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    sizer_output = workspace / "timing_optimization_sizer" / "output"
+    sizer_output.mkdir(parents=True)
+    (sizer_output / "gcd_timing_optimization.def.gz").write_bytes(b"def")
+
+    resolver = GuiWorkspaceRerunResolver(tmp_path)
+    discovery = resolver.discover_workspace(workspace, "gcd")
+
+    assert discovery.allowed_stages == ("Timing optimization",)
+    assert discovery.source.stage_artifact_ref["Timing optimization"] == (
+        "timing_optimization_sizer/output/gcd_timing_optimization.def.gz"
+    )
+
+    contract = resolver.freeze(discovery.source, "Timing optimization", [], "single_step")
+    assert contract.rerun_id == "gcd_rerun_timing_optimization"
+    assert contract.target_workspace == str(tmp_path / "gcd_rerun_timing_optimization")
+
+
 def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     workspace = tmp_path / "gcd"
     flow = workspace / "home" / "flow.json"

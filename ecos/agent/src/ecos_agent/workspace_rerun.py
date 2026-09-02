@@ -206,9 +206,10 @@ class GuiWorkspaceRerunResolver:
 
     @staticmethod
     def _next_rerun_target(source_workspace: Path, target_step: str) -> Path:
-        base = source_workspace.with_name(
-            f"{source_workspace.name}_rerun_{target_step.lower()}"
-        )
+        # Step names may contain spaces, but rerun ids must stay path-safe for
+        # the Electron-side contract validation.
+        step_slug = "_".join(target_step.lower().split())
+        base = source_workspace.with_name(f"{source_workspace.name}_rerun_{step_slug}")
         for index in range(10_000):
             target = base if index == 0 else base.with_name(f"{base.name}_{index:04d}")
             if not target.exists():
@@ -289,19 +290,22 @@ class GuiWorkspaceRerunResolver:
     def _stage_output(source: Path, design_id: str, step: str, tool: str) -> Path:
         if not _TOOL_NAME.fullmatch(tool):
             raise ValueError(f"completed stage {step} has an invalid tool")
-        output_dir = source / f"{step}_{tool}" / "output"
+        # Sizer publishes underscored lowercase directory and file stems.
+        stem = "_".join(step.split()).lower() if tool == "sizer" else step
+        stage_dir = f"{stem}_sizer" if tool == "sizer" else f"{step}_{tool}"
+        output_dir = source / stage_dir / "output"
         try:
             output_dir.resolve().relative_to(source)
         except ValueError as exc:
             raise ValueError(f"completed stage {step} output escapes workspace") from exc
         if tool == "yosys_lec":
             # LEC stages publish an equivalence result JSON instead of layout outputs.
-            result = output_dir / f"{design_id}_{step}_result.json"
+            result = output_dir / f"{design_id}_{stem}_result.json"
             if result.is_file() and not result.is_symlink():
                 return result
             raise ValueError(f"completed stage {step} has no matching output artifact")
         for suffix in _STAGE_OUTPUT_SUFFIXES:
-            output = output_dir / f"{design_id}_{step}{suffix}"
+            output = output_dir / f"{design_id}_{stem}{suffix}"
             if output.is_file() and not output.is_symlink():
                 return output
         raise ValueError(f"completed stage {step} has no matching output artifact")
