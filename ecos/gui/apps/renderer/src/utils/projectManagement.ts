@@ -421,11 +421,19 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   cts: 'CTS',
   legalization: 'Legal',
   legal: 'Legal',
+  // Timing Opt runs between Legal and Route; report it under the preceding
+  // coarse step. parseWorkspaceFlowStateMap merges duplicate coarse entries
+  // failure-first so a failed Timing Opt still fails the workspace.
+  timingopt: 'Legal',
+  timingoptimization: 'Legal',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  // postRouteLec runs between Filler and RCX; same failure-first rationale.
+  postlec: 'Filler',
+  postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
   gds: 'Harden',
@@ -1134,7 +1142,11 @@ export function parseWorkspaceFlowStateMap(
     const flowStep = knownFlowStep(name)
     if (!flowStep || !status) return stateMap
 
-    stateMap[flowStep] = status
+    // Timing Opt and postRouteLec alias onto the preceding coarse step; keep
+    // the earlier entry unless the aliased check failed, so a failed LEC gate
+    // still marks the workspace failed without hiding an unstarted one.
+    const existing = stateMap[flowStep]
+    if (existing === undefined || status === 'failed') stateMap[flowStep] = status
     return stateMap
   }, {})
 }
@@ -2091,7 +2103,13 @@ function normalizeFlowStep(step: FlowStep | string): FlowStep {
 
 function knownFlowStep(step: FlowStep | string): FlowStep | null {
   if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
+  return (
+    FLOW_STEP_ALIASES[
+      String(step)
+        .toLowerCase()
+        .replace(/[_\-\s]+/g, '')
+    ] ?? null
+  )
 }
 
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {

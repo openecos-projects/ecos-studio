@@ -580,6 +580,52 @@ describe('project management V3 model', () => {
     ).toEqual({ Route: 'running', LVS: 'success', STA: 'success', Floor: 'reused' })
   })
 
+  it('maps Timing Opt and post-route LEC states onto the preceding coarse step', () => {
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'filler', state: 'Success' },
+            { name: 'postRouteLec', state: 'Unstart' },
+          ],
+        }),
+      ),
+    ).toEqual({ Filler: 'success' })
+
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'filler', state: 'Success' },
+            { name: 'postRouteLec', state: 'Incomplete' },
+          ],
+        }),
+      ),
+    ).toEqual({ Filler: 'failed' })
+
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'legalization', state: 'Success' },
+            { name: 'Timing optimization', state: 'Success' },
+            { name: 'route', state: 'running' },
+          ],
+        }),
+      ),
+    ).toEqual({ Legal: 'success', Route: 'running' })
+
+    const lecFailed = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'filler', state: 'Success' },
+          { name: 'postRouteLec', state: 'Incomplete' },
+        ],
+      }),
+    )
+    expect(workspaceStatusFromFlow('in_progress', lecFailed)).toBe('failed')
+  })
+
   it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {
     expect(workspaceStatusFromFlow('not_started', successStates)).toBe('success')
     expect(workspaceStatusFromFlow('not_started', { Route: 'running' })).toBe('running')
