@@ -150,6 +150,12 @@ export interface StepDashboardLvsInsights {
   violations: StepDashboardLvsViolation[]
 }
 
+export interface StepDashboardLecInsights {
+  status: 'proven' | 'incomplete' | 'unavailable'
+  tone: StepDashboardTone
+  metrics: StepDashboardSynthesisValue[]
+}
+
 export interface StepDashboardStaCorner {
   id: string
   staCorner: string
@@ -843,6 +849,64 @@ export function lvsInsights(value: unknown): StepDashboardLvsInsights | null {
   })
   if (!entities.length && !connections.length && !violations.length) return null
   return { entities, connections, violations }
+}
+
+function formatByteSize(value: number): string {
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${value} B`
+}
+
+/** Parses the yosys_lec result JSON (`output/<design>_<step>_result.json`). */
+export function lecInsights(value: unknown): StepDashboardLecInsights | null {
+  const source = record(value)
+  if (!source) return null
+  const rawStatus = textValue(source.status, '').trim().toLowerCase()
+  const status =
+    rawStatus === 'proven'
+      ? ('proven' as const)
+      : rawStatus === 'incomplete'
+        ? ('incomplete' as const)
+        : ('unavailable' as const)
+  const tone: StepDashboardTone =
+    status === 'proven' ? 'good' : status === 'incomplete' ? 'bad' : 'neutral'
+
+  const metrics: StepDashboardSynthesisValue[] = []
+  const goldenVerilog = textValue(source.golden_verilog, '')
+  const gateVerilog = textValue(source.gate_verilog, '')
+  const goldenSha256 = textValue(source.golden_sha256, '')
+  const gateSha256 = textValue(source.gate_sha256, '')
+  const goldenSizeBytes = finiteNumber(source.golden_size_bytes)
+  const gateSizeBytes = finiteNumber(source.gate_size_bytes)
+  if (goldenVerilog)
+    metrics.push({
+      id: 'lec-golden-netlist',
+      label: 'Golden netlist',
+      value: goldenVerilog,
+    })
+  if (gateVerilog)
+    metrics.push({ id: 'lec-gate-netlist', label: 'Gate netlist', value: gateVerilog })
+  if (goldenSha256)
+    metrics.push({
+      id: 'lec-golden-sha256',
+      label: 'Golden SHA-256',
+      value: goldenSha256,
+    })
+  if (gateSha256)
+    metrics.push({ id: 'lec-gate-sha256', label: 'Gate SHA-256', value: gateSha256 })
+  if (goldenSizeBytes !== null)
+    metrics.push({
+      id: 'lec-golden-size',
+      label: 'Golden size',
+      value: formatByteSize(goldenSizeBytes),
+    })
+  if (gateSizeBytes !== null)
+    metrics.push({
+      id: 'lec-gate-size',
+      label: 'Gate size',
+      value: formatByteSize(gateSizeBytes),
+    })
+  return { status, tone, metrics }
 }
 
 export function rcxInsights(value: unknown): StepDashboardRcxInsights | null {

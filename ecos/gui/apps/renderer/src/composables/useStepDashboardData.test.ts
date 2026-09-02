@@ -350,4 +350,12 @@ describe('useStepDashboardData', () => {
     expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'harden'")
     expect(source).toContain('hardenOutputInsights(resourceStep.resources.output)')
   })
+
+  it('loads the indexed LEC result JSON for the equivalence insight surface', () => {
+    expect(source).toContain("const isLec = ['lec', 'postroutelec'].includes(")
+    expect(source).toContain('resourceStep.resources.output.result')
+    expect(source).toContain('readJson(lecResultPath)')
+    expect(source).toContain('lecInsights(lecResultJson)')
+    expect(source).toContain('lecInsights: StepDashboardLecInsights | null')
+  })
 })

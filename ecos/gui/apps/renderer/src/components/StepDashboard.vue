@@ -745,6 +745,46 @@
               </div>
             </section>
           </div>
+          <div v-else-if="isLecStep" class="data-body lec-data-body">
+            <section class="lec-insight-column">
+              <header class="floorplan-insight-header">
+                <div>
+                  <i class="ri-equal-line" aria-hidden="true" />
+                  <h3>Equivalence Result</h3>
+                </div>
+                <span
+                  v-if="data.lecInsights"
+                  class="lec-status"
+                  :class="`is-${data.lecInsights.tone}`"
+                >
+                  {{ lecStatusLabel }}
+                </span>
+              </header>
+              <dl
+                v-if="data.lecInsights?.metrics.length"
+                class="synthesis-value-grid lec-metrics-grid"
+              >
+                <div v-for="metric in data.lecInsights.metrics" :key="metric.id">
+                  <dt>{{ metric.label }}</dt>
+                  <dd :title="metric.value">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div v-else class="synthesis-empty-state">
+                <i class="ri-equal-line" aria-hidden="true" />
+                <span>No LEC result</span>
+              </div>
+              <p
+                v-if="data.lecInsights?.status === 'incomplete'"
+                class="lec-failure-hint"
+              >
+                <i class="ri-error-warning-line" aria-hidden="true" />
+                <span>
+                  Equivalence unproven. Inspect equiv_status.rpt and the equiv_failed
+                  artifacts in Reports.
+                </span>
+              </p>
+            </section>
+          </div>
           <div v-else-if="insightData" class="data-body floorplan-data-body">
             <section class="floorplan-insight-column">
               <header class="floorplan-insight-header">
@@ -1228,6 +1268,21 @@ const staCorners = computed(() => {
 const isSynthesisStep = computed(
   () => (data.value?.step ?? currentStep.value).trim().toLowerCase() === 'synthesis',
 )
+const isLecStep = computed(() =>
+  ['lec', 'postroutelec'].includes(
+    (data.value?.step ?? currentStep.value).trim().toLowerCase(),
+  ),
+)
+const lecStatusLabel = computed(() => {
+  switch (data.value?.lecInsights?.status) {
+    case 'proven':
+      return 'Equivalence proven'
+    case 'incomplete':
+      return 'Unproven'
+    default:
+      return 'Unavailable'
+  }
+})
 const timingCornerCount = computed(
   () => data.value?.timingAnalysis?.overview.corners.length ?? 0,
 )
@@ -1671,6 +1726,18 @@ function fileName(path: string): string {
 }
 .is-neutral {
   color: var(--text-secondary);
+}
+
+.lec-status {
+  font-weight: 700;
+}
+
+.lec-failure-hint {
+  align-items: flex-start;
+  color: var(--warn-color);
+  display: flex;
+  gap: 6px;
+  margin: 0;
 }
 
 .step-summary-body,
@@ -2165,6 +2232,9 @@ function fileName(path: string): string {
 .data-body.harden-data-body {
   grid-template-columns: minmax(0, 1fr);
 }
+.data-body.lec-data-body {
+  grid-template-columns: minmax(0, 1fr);
+}
 .sta-data-body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2172,6 +2242,7 @@ function fileName(path: string): string {
 .floorplan-insight-column,
 .rcx-insight-column,
 .harden-output-column,
+.lec-insight-column,
 .sta-insight-column {
   display: flex;
   flex-direction: column;
