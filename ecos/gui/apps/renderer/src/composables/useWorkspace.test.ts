@@ -66,7 +66,8 @@ vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: waitForDesktopApiMock,
 }))
 
-vi.mock('@/api', () => ({
+vi.mock('@/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api')>()),
   closeWorkspaceApi: closeWorkspaceApiMock,
   loadWorkspaceApi: loadWorkspaceApiMock,
   createWorkspaceApi: createWorkspaceApiMock,
@@ -2604,10 +2605,17 @@ describe('useWorkspace openProject', () => {
 
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        mpc: expect.objectContaining({
-          resource_id: 'mpc:mpc-frame',
-          design: { index: 0, design_name: 'frame' },
-          core_template: { minimum_area: 100, maximum_area: 500 },
+        workspaceSpec: expect.objectContaining({
+          mpc: {
+            designId: 'frame',
+            resourceId: 'mpc:mpc-frame',
+            version: '0.1.0',
+          },
+        }),
+        workspaceBindings: expect.objectContaining({
+          mpc: expect.objectContaining({
+            template: { minimum_area: 100, maximum_area: 500 },
+          }),
         }),
       }),
     )
@@ -2811,13 +2819,18 @@ describe('useWorkspace openProject', () => {
 
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        pdk_config_mode: 'manual',
-        pdk_config: {
-          mode: 'manual',
-          tech_lef: ['/pdks/local-pdk/tech.lef'],
-          cell_lef: ['/pdks/local-pdk/stdcells.lef'],
-          liberty: ['/pdks/local-pdk/stdcells.lib'],
-        },
+        workspaceBindings: expect.objectContaining({
+          pdk: expect.objectContaining({
+            files: {
+              tech: '/pdks/local-pdk/tech.lef',
+              'lef-1': '/pdks/local-pdk/stdcells.lef',
+              'liberty-1': '/pdks/local-pdk/stdcells.lib',
+            },
+          }),
+        }),
+        workspaceSpec: expect.objectContaining({
+          pdk: expect.objectContaining({ mode: 'manual' }),
+        }),
       }),
     )
   })
@@ -2853,7 +2866,7 @@ describe('useWorkspace openProject', () => {
     ).resolves.toBe(true)
 
     expect(updateWorkspaceApiMock).toHaveBeenCalledWith(
-      expect.objectContaining({ directory: '/work/existing' }),
+      expect.objectContaining({ targetDirectory: '/work/existing' }),
       'workspace-handle-1',
       1,
     )
@@ -2936,12 +2949,14 @@ describe('useWorkspace openProject', () => {
     )
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        directory: '/work/demo',
-        origin_def: '/work/.demo.replace-backup-1/origin/demo.def',
-        origin_verilog: '/work/.demo.replace-backup-1/origin/demo.v',
-        rtl_list: ['/work/.demo.replace-backup-1/origin/demo.v'],
-        sdc: '/work/.demo.replace-backup-1/origin/demo.sdc',
-        pdk_json: '/work/.demo.replace-backup-1/home/pdk.json',
+        targetDirectory: '/work/demo',
+        workspaceBindings: expect.objectContaining({
+          inputs: {
+            def: '/work/.demo.replace-backup-1/origin/demo.def',
+            'rtl-1': '/work/.demo.replace-backup-1/origin/demo.v',
+            sdc: '/work/.demo.replace-backup-1/origin/demo.sdc',
+          },
+        }),
       }),
     )
     expect(desktopApi.workspace.finalizeProjectDirectoryReplacement).toHaveBeenCalledWith(

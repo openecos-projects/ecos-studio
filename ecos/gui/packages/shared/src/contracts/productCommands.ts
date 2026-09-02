@@ -16,14 +16,14 @@ import type {
 export type ProductCommandRequest =
   | {
       command: 'workspace.create'
-      payload: EccWorkspaceCreateRequest & { commandId: string }
+      payload: EccWorkspaceCreateRequest
     }
   | { command: 'workspace.run'; payload: EccRuntimeStartFlowRequest }
   | { command: 'workspace.runStep'; payload: EccRuntimeStartStepRequest }
   | {
       command: 'workspace.update'
       payload: {
-        draft: EccWorkspaceCreateRequest
+        draft: Omit<EccWorkspaceCreateRequest, 'commandId'>
         commandId: string
         expectedWorkspaceRevision: number
         workspaceHandle: string

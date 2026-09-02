@@ -91,9 +91,6 @@ export interface EccRpcRuntimeServiceOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
-  snapshotLoader?: (
-    directory: string,
-  ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
   openPath?: (path: string) => Promise<string>
 }
 
@@ -205,8 +202,8 @@ export class EccRpcRuntimeService {
   }
 
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
-    const requestKey = normalizeWorkspacePath(request.directory)
-    const runtime = this.getOrCreateRuntime(request.directory)
+    const requestKey = normalizeWorkspacePath(request.targetDirectory)
+    const runtime = this.getOrCreateRuntime(request.targetDirectory)
     return runtime.createWorkspace(request).then(async (result) => {
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
       await runtime.releaseIdleSidecar()
@@ -375,8 +372,14 @@ export class EccRpcRuntimeService {
     const workspaceHandle = [...this.handleToDirectory].find(
       ([, candidateDirectory]) => candidateDirectory === key,
     )?.[0]
-    if (!workspaceHandle) throw new WorkspaceSessionNotFoundError(directory)
-    return await this.engineeringSnapshot({ workspaceHandle })
+    if (workspaceHandle) return await this.engineeringSnapshot({ workspaceHandle })
+
+    const opened = await this.openWorkspace({ directory: key })
+    try {
+      return await this.engineeringSnapshot({ workspaceHandle: opened.workspaceHandle })
+    } finally {
+      await this.closeWorkspace({ workspaceHandle: opened.workspaceHandle })
+    }
   }
 
   async readArtifactChunk(request: EccArtifactReadRequest): Promise<EccArtifactChunk> {
@@ -456,7 +459,6 @@ export class EccRpcRuntimeService {
         directory: key,
         lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
         onEvent: (event) => this.emit(event),
-        snapshotLoader: this.options.snapshotLoader,
       })
       this.runtimes.set(key, runtime)
     }

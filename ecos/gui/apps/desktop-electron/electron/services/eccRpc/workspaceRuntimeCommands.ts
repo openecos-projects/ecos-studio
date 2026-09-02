@@ -36,7 +36,6 @@ import type {
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
-import { workspaceSpecCreatePayload } from './workspaceSpecAdapter'
 
 export interface EccWorkspaceSessionResult {
   directory: string
@@ -73,18 +72,14 @@ export class WorkspaceRuntimeCommands {
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
     return this.context.enqueue('workspace.create', undefined, async () => {
       const client = await this.context.ensureStarted()
-      const payload = workspaceSpecCreatePayload(request) as {
-        workspaceBindings: Record<string, unknown>
-      }
-      const response = await client.call<EccWorkspaceSessionResult>(
-        'workspace.create',
-        payload,
-      )
+      const response = await client.call<EccWorkspaceSessionResult>('workspace.create', {
+        ...request,
+      })
       const session = this.context.sessions.activate(
         response.directory,
         response.workspaceId,
         response.workspaceRevision ?? 1,
-        payload.workspaceBindings,
+        request.workspaceBindings,
       )
       return {
         directory: session.directory,

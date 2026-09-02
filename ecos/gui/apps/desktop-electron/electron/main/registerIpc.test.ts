@@ -4,6 +4,7 @@ import {
   desktopApiIpcChannels,
   desktopMenuEventIds,
   type EccRuntimeEvent,
+  type EccWorkspaceCreateRequest,
 } from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -282,6 +283,40 @@ function registerHandlers(
   return {
     handlers,
     services,
+  }
+}
+
+function openBackendWorkspace(
+  handlers: Map<string, RegisteredHandler>,
+  event: { sender: unknown },
+  request: { directory: string },
+) {
+  return handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(event, {
+    ...request,
+    designTool: 'backend',
+  })
+}
+
+function closeBackendWorkspace(
+  handlers: Map<string, RegisteredHandler>,
+  event: { sender: unknown },
+  request: { workspaceHandle: string },
+) {
+  return handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceClose)?.(event, {
+    ...request,
+    designTool: 'backend',
+  })
+}
+
+function workspaceCreateRequest(
+  request: Partial<EccWorkspaceCreateRequest>,
+): EccWorkspaceCreateRequest {
+  return {
+    commandId: 'workspace-create',
+    targetDirectory: '/tmp/workspace',
+    workspaceBindings: { inputs: {}, pdk: {} },
+    workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+    ...request,
   }
 }
 
@@ -661,7 +696,8 @@ describe('registerIpc', () => {
     services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
       workspaceRevision: 1,
     })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: owner },
       { directory: contract.target_workspace },
     )
@@ -747,7 +783,8 @@ describe('registerIpc', () => {
     services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
       workspaceRevision: 1,
     })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: owner },
       { directory: contract.target_workspace },
     )
@@ -992,17 +1029,6 @@ describe('registerIpc', () => {
     )
   })
 
-  it('delegates ECC ping to the runtime service', async () => {
-    const { handlers, services } = registerHandlers()
-    const event = { sender: { id: 'web-contents' } }
-    services.eccRuntimeService.rpcPing.mockResolvedValue({ ok: true })
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.eccRpcPing)?.(event),
-    ).resolves.toEqual({ ok: true })
-    expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
-  })
-
   it('preserves and rejects an invalid existing Binding before workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -1017,10 +1043,8 @@ describe('registerIpc', () => {
     await expect(
       handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
         command: 'workspace.create',
-        payload: {
+        payload: workspaceCreateRequest({
           commandId: 'workspace-create-invalid-binding',
-          directory: '/tmp/workspace',
-          pdk: 'ics55',
           pdkInstallationId: 'pdk-installation:ics55',
           projectId: 'proj_demo',
           projectRoot: '/tmp/project',
@@ -1029,7 +1053,7 @@ describe('registerIpc', () => {
             version: null,
             manualConfig: null,
           },
-        },
+        }),
       }),
     ).resolves.toEqual({
       error: { message: error.message, name: 'Error' },
@@ -1055,12 +1079,9 @@ describe('registerIpc', () => {
     await expect(
       handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
         command: 'workspace.create',
-        payload: {
+        payload: workspaceCreateRequest({
           commandId: 'workspace-create-missing-requirement',
-          directory: '/tmp/workspace',
-          pdk: 'vendor-pdk',
-          pdkRoot: '/tmp/vendor-pdk',
-        },
+        }),
       }),
     ).resolves.toEqual({
       error: {
@@ -1078,10 +1099,8 @@ describe('registerIpc', () => {
   it('uses the persisted Project Requirement for workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
-    const payload = {
+    const payload = workspaceCreateRequest({
       commandId: 'workspace-create-persisted-requirement',
-      directory: '/tmp/workspace',
-      pdk: 'ics55',
       pdkInstallationId: 'pdk-installation:ics55',
       projectId: 'proj_demo',
       projectRoot: '/tmp/project',
@@ -1090,7 +1109,18 @@ describe('registerIpc', () => {
         version: null,
         manualConfig: null,
       },
-    }
+      workspaceSpec: {
+        pdk: {
+          familyId: 'ics55',
+          mode: 'manual',
+          files: [
+            { fileId: 'tech', role: 'tech' },
+            { fileId: 'lef-1', role: 'lef' },
+            { fileId: 'liberty-1', role: 'liberty' },
+          ],
+        },
+      },
+    })
     const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
     const persistedRequirement = {
       familyId: 'ics55',
@@ -1156,19 +1186,24 @@ describe('registerIpc', () => {
       projectRoot: payload.projectRoot,
       requirement: persistedRequirement,
     })
-    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith({
-      commandId: payload.commandId,
-      directory: payload.directory,
-      pdk: payload.pdk,
-      pdkConfig: {
-        tech_lef: ['tech.lef'],
-        cell_lef: ['cells.lef'],
-        liberty: ['typ.lib'],
-      },
-      pdkConfigMode: 'manual',
-      pdkRoot: '/canonical/pdk',
-      pdkVersion: null,
-    })
+    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: payload.commandId,
+        targetDirectory: payload.targetDirectory,
+        workspaceBindings: {
+          inputs: {},
+          pdk: {
+            files: {
+              tech: 'tech.lef',
+              'lef-1': 'cells.lef',
+              'liberty-1': 'typ.lib',
+            },
+            root: '/canonical/pdk',
+          },
+        },
+        workspaceSpec: payload.workspaceSpec,
+      }),
+    )
   })
 
   it('waits for a runtime operation through the main-process tracker', async () => {
@@ -2033,7 +2068,7 @@ describe('registerIpc', () => {
       workspaceHandle: request.workspaceHandle,
     })
     services.eccRuntimeService.exportSignoff.mockResolvedValue(result)
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+    await openBackendWorkspace(handlers, event, {
       directory: '/work/demo',
     })
 
@@ -2054,7 +2089,7 @@ describe('registerIpc', () => {
       directory: '/work/demo',
       workspaceHandle: 'workspace-handle-1',
     })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(owner, {
+    await openBackendWorkspace(handlers, owner, {
       directory: '/work/demo',
     })
 
@@ -2117,11 +2152,13 @@ describe('registerIpc', () => {
         directory: '/work/other',
         workspaceHandle: 'workspace-handle-2',
       })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: ownerSender },
       { directory: '/work/demo' },
     )
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: otherSender },
       { directory: '/work/other' },
     )
@@ -2133,7 +2170,8 @@ describe('registerIpc', () => {
       workspaceDirectory: '/work/demo',
     })
 
-    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, {
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      designTool: 'backend',
       type: 'runtime.ready',
       workspaceDirectory: '/work/demo',
     })
@@ -2164,11 +2202,13 @@ describe('registerIpc', () => {
         directory: '/work/other',
         workspaceHandle: 'workspace-handle-2',
       })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: ownerSender },
       { directory: '/work/demo' },
     )
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: otherSender },
       { directory: '/work/other' },
     )
@@ -2183,7 +2223,10 @@ describe('registerIpc', () => {
     }
     listener?.(exited)
 
-    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, exited)
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      ...exited,
+      designTool: 'backend',
+    })
     expect(otherSend).not.toHaveBeenCalled()
   })
 
@@ -2217,7 +2260,8 @@ describe('registerIpc', () => {
       directory: '/work/demo/',
       workspaceHandle: 'workspace-handle-1',
     })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: ownerSender },
       { directory: '/work/demo/' },
     )
@@ -2228,7 +2272,8 @@ describe('registerIpc', () => {
       workspaceDirectory: '/work/demo',
     })
 
-    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, {
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      designTool: 'backend',
       type: 'runtime.ready',
       workspaceDirectory: '/work/demo',
     })
@@ -2257,11 +2302,13 @@ describe('registerIpc', () => {
         directory: '/work/other',
         workspaceHandle: 'workspace-handle-2',
       })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: ownerSender },
       { directory: '/work/demo' },
     )
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: otherSender },
       { directory: '/work/other' },
     )
@@ -2273,7 +2320,8 @@ describe('registerIpc', () => {
       workspaceDirectory: '/work/demo',
     })
 
-    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, {
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      designTool: 'backend',
       text: 'yosys: warning',
       type: 'runtime.stderr',
       workspaceDirectory: '/work/demo',
@@ -2299,12 +2347,14 @@ describe('registerIpc', () => {
       directory: '/work/demo',
       workspaceHandle: 'workspace-handle-1',
     })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: ownerSender },
       { directory: '/work/demo' },
     )
 
-    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, {
+    expect(ownerSend).toHaveBeenCalledWith(desktopApiEventChannels.designRuntimeEvent, {
+      designTool: 'backend',
       type: 'runtime.ready',
       workspaceDirectory: '/work/demo',
     })
@@ -2333,11 +2383,13 @@ describe('registerIpc', () => {
         directory: '/work/other',
         workspaceHandle: 'workspace-handle-2',
       })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: ownerSender },
       { directory: '/work/demo' },
     )
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+    await openBackendWorkspace(
+      handlers,
       { sender: otherSender },
       { directory: '/work/other' },
     )
@@ -2352,7 +2404,7 @@ describe('registerIpc', () => {
     })
 
     expect(ownerSend).toHaveBeenCalledWith(
-      desktopApiEventChannels.eccEvent,
+      desktopApiEventChannels.designRuntimeEvent,
       expect.objectContaining({
         type: 'operation.started',
         workspaceHandle: 'workspace-handle-1',
@@ -2374,10 +2426,7 @@ describe('registerIpc', () => {
       directory: '/work/demo',
       workspaceHandle: 'workspace-handle-1',
     })
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
-      { sender },
-      { directory: '/work/demo' },
-    )
+    await openBackendWorkspace(handlers, { sender }, { directory: '/work/demo' })
 
     const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
     listener?.({
@@ -2701,7 +2750,7 @@ describe('registerIpc', () => {
     })
 
     await expect(
-      handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      openBackendWorkspace(handlers, event, {
         directory: '/work/demo',
       }),
     ).resolves.toEqual({
@@ -2711,7 +2760,7 @@ describe('registerIpc', () => {
 
     expect(sender.listenerCount('destroyed')).toBe(1)
     sender.emit('destroyed')
-    const explicitClose = handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+    const explicitClose = closeBackendWorkspace(handlers, event, {
       workspaceHandle: 'workspace-handle-1',
     })
 
@@ -2732,17 +2781,17 @@ describe('registerIpc', () => {
       workspaceHandle: 'workspace-handle-1',
     })
 
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+    await openBackendWorkspace(handlers, event, {
       directory: '/work/demo',
     })
     expect(sender.listenerCount('destroyed')).toBe(1)
 
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+    await closeBackendWorkspace(handlers, event, {
       workspaceHandle: 'workspace-handle-1',
     })
     expect(sender.listenerCount('destroyed')).toBe(0)
 
-    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+    await openBackendWorkspace(handlers, event, {
       directory: '/work/demo',
     })
 

@@ -15,7 +15,6 @@ import { BackendProjectComparisonService } from '../services/backendProjectCompa
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
-import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import {
@@ -180,7 +179,6 @@ function getDesktopServices() {
       }),
     lazyWorkspaceOpen: false,
     openPath: (path) => shell.openPath(path),
-    snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
   })
   installRuntimeQuitGuard({
     app,
@@ -230,6 +228,10 @@ function getDesktopServices() {
   const projectManagementReadService = new ProjectManagementReadService()
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
+    {
+      getByDirectory: (directory) =>
+        eccRuntimeService.engineeringSnapshotForDirectory(directory),
+    },
   )
   const backendWorkspaceService = new BackendWorkspaceService({
     engineeringSnapshotProvider: {

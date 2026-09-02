@@ -68,21 +68,29 @@ export async function prepareWorkspaceCreateBinding(
     projectRoot: _projectRoot,
     ...runtimeRequest
   } = request
+  const specPdk = isRecord(request.workspaceSpec.pdk) ? request.workspaceSpec.pdk : {}
+  const bindingPdk = isRecord(request.workspaceBindings.pdk)
+    ? request.workspaceBindings.pdk
+    : {}
   return {
     ...runtimeRequest,
-    pdk: requirement.familyId,
-    pdkRoot: installation.root,
-    pdkVersion: requirement.version,
-    ...(requirement.manualConfig
-      ? {
-          pdkConfigMode: 'manual' as const,
-          pdkConfig: {
-            tech_lef: [requirement.manualConfig.techLef],
-            cell_lef: requirement.manualConfig.cellLefs,
-            liberty: requirement.manualConfig.liberty,
-          },
-        }
-      : {}),
+    workspaceBindings: {
+      ...request.workspaceBindings,
+      pdk: {
+        ...bindingPdk,
+        root: installation.root,
+        ...(requirement.version ? { version: requirement.version } : {}),
+        ...manualPdkFiles(specPdk, requirement),
+      },
+    },
+    workspaceSpec: {
+      ...request.workspaceSpec,
+      pdk: {
+        ...specPdk,
+        familyId: requirement.familyId,
+        ...(requirement.version ? { version: requirement.version } : {}),
+      },
+    },
   }
 }
 

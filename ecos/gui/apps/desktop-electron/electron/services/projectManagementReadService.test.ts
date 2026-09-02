@@ -75,19 +75,18 @@ describe('ProjectManagementReadService', () => {
       },
       unavailablePaths: [],
     })
-    await expect(
-      service.readWorkspaceTexts({
-        projectRoot,
-        workspacePath: workspaceRoot,
-        paths: [...projectManagementWorkspaceSummaryPaths],
-      }),
-    ).resolves.toMatchObject({
+    const summaries = await service.readWorkspaceTexts({
+      projectRoot,
+      workspacePath: workspaceRoot,
+      paths: [...projectManagementWorkspaceSummaryPaths],
+    })
+    expect(summaries).toMatchObject({
       texts: expect.objectContaining({
-        'home/flow.json': '{"steps":[]}',
         'lvs_ecc/analysis/qor_metrics.json': null,
       }),
       unavailablePaths: [],
     })
+    expect(summaries.texts).not.toHaveProperty('home/flow.json')
   })
 
   it('returns project.json text even when root_path does not match the selected directory', async () => {

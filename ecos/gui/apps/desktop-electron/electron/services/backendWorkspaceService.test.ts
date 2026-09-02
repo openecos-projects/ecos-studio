@@ -53,7 +53,11 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
     },
     metrics: [],
     parameters: index.parameters ?? {},
-    qorAssessment: { score: { gate: 'pass', threshold: 60, value: 73.5 } },
+    qorAssessment: {
+      metrics: [],
+      score: { gate: 'pass', threshold: 60, value: 73.5 },
+      steps: [],
+    },
     schemaVersion: 1,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: 'ecc-workspace-a',
@@ -102,16 +106,9 @@ describe('BackendWorkspaceService', () => {
         ],
       }),
     )
-    const projectManagementReadService = {
-      readManifest,
-      async readWorkspaceTexts() {
-        expect(this).toBe(projectManagementReadService)
-        return { texts: {}, unavailablePaths: [] }
-      },
-    }
     const service = new BackendWorkspaceService({
       engineeringSnapshotProvider: snapshotProvider(),
-      projectManagementReadService,
+      projectManagementReadService: { readManifest },
       workspaceResourceService: { getIndex },
     })
 

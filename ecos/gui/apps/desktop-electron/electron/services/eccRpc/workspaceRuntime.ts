@@ -59,7 +59,6 @@ import {
   type RuntimeOperationMetadata,
 } from './workspaceRuntimeCommands'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
-import { WorkspaceSnapshotCache } from './workspaceSnapshotCache'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 
@@ -77,9 +76,6 @@ export interface EccWorkspaceRuntimeOptions {
   diagnosticIdleTimeoutMs?: number
   lazyWorkspaceOpen?: boolean
   sessions?: WorkspaceSessionRegistry
-  snapshotLoader?: (
-    directory: string,
-  ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
 }
 
 interface InFlightOperation {
@@ -114,7 +110,8 @@ export class EccWorkspaceRuntime {
   private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
   private readonly pendingRecoveryEvents: EccRuntimeEvent[] = []
   private readonly sidecarLifecycle: RuntimeSidecarLifecycle
-  private readonly snapshotCache = new WorkspaceSnapshotCache()
+  private cachedSnapshot: Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'> | null =
+    null
   private readonly commands: WorkspaceRuntimeCommands
   private queue = Promise.resolve()
   private ready = false
@@ -134,7 +131,7 @@ export class EccWorkspaceRuntime {
         const snapshot = await client.call<
           Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
         >('workspace.snapshot', { workspaceId })
-        this.snapshotCache.set(snapshot)
+        this.cachedSnapshot = snapshot
       },
       closeSidecar: async () => {
         await this.shutdown()
@@ -342,7 +339,7 @@ export class EccWorkspaceRuntime {
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const result = await this.commands.refreshConfig(request)
-    this.snapshotCache.clear()
+    this.cachedSnapshot = null
     return result
   }
 
@@ -350,7 +347,7 @@ export class EccWorkspaceRuntime {
     request: EccWorkspaceSyncConfigRequest,
   ): Promise<EccWorkspaceSyncConfigResult> {
     const result = await this.commands.syncConfig(request)
-    this.snapshotCache.clear()
+    this.cachedSnapshot = null
     return result
   }
 
@@ -358,7 +355,7 @@ export class EccWorkspaceRuntime {
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceResetFlowResult> {
     const result = await this.commands.resetFlow(request)
-    this.snapshotCache.clear()
+    this.cachedSnapshot = null
     return result
   }
 
@@ -493,26 +490,18 @@ export class EccWorkspaceRuntime {
     const finalSnapshotTask = this.sidecarLifecycle.waitForFinalSnapshot()
     if (finalSnapshotTask) await finalSnapshotTask
 
-    const cachedSnapshot = this.snapshotCache.get()
+    const cachedSnapshot = this.cachedSnapshot
     if (!this.isActive() && cachedSnapshot) {
       this.flushPendingRecoveryEvents()
       return { ...cachedSnapshot, workspaceHandle: request.workspaceHandle }
     }
-    const session = this.sessions.require(request.workspaceHandle)
-    if (!this.isActive() && this.options.snapshotLoader) {
-      const snapshot = await this.snapshotCache.loadIdle(
-        session.directory,
-        this.options.snapshotLoader,
-      )
-      this.flushPendingRecoveryEvents()
-      return { ...snapshot, workspaceHandle: request.workspaceHandle }
-    }
+    this.sessions.require(request.workspaceHandle)
     const client = await this.ensureStarted()
     const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
     const snapshot = await client.call<
       Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
     >('workspace.snapshot', { workspaceId })
-    this.snapshotCache.set(snapshot)
+    this.cachedSnapshot = snapshot
     this.flushPendingRecoveryEvents()
     return { ...snapshot, workspaceHandle: request.workspaceHandle }
   }
@@ -540,7 +529,7 @@ export class EccWorkspaceRuntime {
         ...(operationId ? { operationId } : {}),
       },
     )
-    if (result.recovered.length > 0) this.snapshotCache.clear()
+    if (result.recovered.length > 0) this.cachedSnapshot = null
     for (const recovered of result.recovered) {
       const step = recovered.step || 'Flow step'
       const event: EccRuntimeEvent = {
@@ -865,9 +854,8 @@ export class EccWorkspaceRuntime {
       !terminalAlreadyRecorded
     ) {
       // The prior cache may describe the final step as Ongoing. A fresh page
-      // must wait for the terminal snapshot or fall back to the bounded disk
-      // loader if capture fails.
-      this.snapshotCache.clear()
+      // must wait for the terminal ECC snapshot.
+      this.cachedSnapshot = null
       this.sidecarLifecycle.releaseAfterSuccessfulOperation(protocolEvent.workspaceId)
     } else if (
       isTerminal &&

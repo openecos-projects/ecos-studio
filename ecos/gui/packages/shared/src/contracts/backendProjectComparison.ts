@@ -244,42 +244,6 @@ export interface ProjectQorTrendSummary {
   unsupportedModules: ProjectQorUnsupportedModule[]
 }
 
-export interface ProjectQorScoreMetricDetail {
-  step: FlowStep
-  metricName: string
-  displayName: string
-  value: number
-  unit?: string
-  score: number
-}
-
-export interface ProjectQorScoreDimensionDetail {
-  dimension: QorDimension
-  label: string
-  score: number
-  configuredWeight: number
-  effectiveWeight: number
-  contribution: number
-  metrics: ProjectQorScoreMetricDetail[]
-}
-
-export interface ProjectQorScoreDetail {
-  overallScore: number | null
-  gateStatus: QorGateStatus
-  dimensions: ProjectQorScoreDimensionDetail[]
-}
-
-export interface ProjectQorTrendOptions {
-  baselineWorkspaceId?: string | null
-}
-
-export interface ProjectQorTrendReportMetadata {
-  projectId?: string
-  projectName?: string
-  projectPath?: string
-  generatedAt?: string
-}
-
 export interface ProjectQorTrendPoint {
   workspaceId: string
   label: string
@@ -299,40 +263,6 @@ export interface ProjectQorDelta {
   absoluteDelta: number
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
-}
-
-/**
- * A current-workspace view of the project's explicit-baseline comparison. The project
- * trend keeps only changes in its top-level lists; Home also needs unchanged metrics to
- * present a meaningful per-step comparison denominator.
- */
-export interface ProjectQorWorkspaceComparisonDelta extends ProjectQorDelta {
-  step: FlowStep
-  unit?: string
-}
-
-/**
- * A paired metric is retained for the detail view even when its QoR rule is
- * informational only. The dashboard verdict continues to use `deltas`, which
- * contains only directional (higher/lower is better) metrics.
- */
-export interface ProjectQorWorkspaceComparisonMetric extends ProjectQorWorkspaceComparisonDelta {
-  polarity: ProjectQorMetricRecord['polarity']
-  baselinePolarity: ProjectQorMetricRecord['polarity']
-  isDirectional: boolean
-}
-
-export interface ProjectQorWorkspaceComparison {
-  workspaceId: string
-  workspaceName: string
-  score: number | null
-  baselineWorkspaceId: string | null
-  baselineWorkspaceName: string | null
-  baselineScore: number | null
-  isBaselineWorkspace: boolean
-  available: boolean
-  metrics: ProjectQorWorkspaceComparisonMetric[]
-  deltas: ProjectQorWorkspaceComparisonDelta[]
 }
 
 export interface ProjectQorRegression extends ProjectQorDelta {

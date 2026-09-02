@@ -1,5 +1,3 @@
-import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
-
 export interface EccRpcHelloResult {
   adapterVersion?: number
   capabilities: string[]
@@ -28,31 +26,14 @@ export interface EccRpcShutdownResult {
 import type { PdkRequirement } from './pdkInventory.ts'
 
 export interface EccWorkspaceCreateRequest {
-  commandId?: string
-  directory: string
-  designInputMode?: 'rtl' | 'post_synthesis'
-  filelist?: string
-  mpc?: Record<string, unknown> | null
-  flowConfig?: Record<string, unknown>
-  originDef?: string
-  originVerilog?: string
-  parameters?: Record<string, unknown>
-  pdk?: string
-  pdkConfig?: {
-    cell_lef?: string[]
-    liberty?: string[]
-    tech_lef?: string[]
-  }
-  pdkConfigMode?: 'default' | 'manual'
-  pdkJson?: unknown
-  pdkRoot?: string
-  pdkVersion?: string | null
+  commandId: string
+  targetDirectory: string
+  workspaceBindings: Record<string, unknown>
+  workspaceSpec: Record<string, unknown>
   pdkInstallationId?: string
   pdkRequirement?: PdkRequirement
   projectId?: string
   projectRoot?: string
-  rtlList?: string[]
-  sdc?: string
 }
 
 export interface EccWorkspaceOpenRequest {
@@ -520,38 +501,15 @@ export type EccRuntimeEvent =
     }
 
 export interface EccRuntimeApi {
-  events: {
-    onEvent(listener: (event: EccRuntimeEvent) => void): DesktopEventUnsubscribe
-  }
-  rpc: {
-    hello(): Promise<EccRpcHelloResult>
-    ping(): Promise<EccRpcPingResult>
-    shutdown(): Promise<EccRpcShutdownResult>
-  }
   runtime?: {
-    engineeringSnapshot(
-      request: EccWorkspaceHandleRequest,
-    ): Promise<EccEngineeringSnapshot>
     openArtifact(request: EccArtifactOpenRequest): Promise<{ opened: boolean }>
     readArtifactChunk(request: EccArtifactReadRequest): Promise<EccArtifactChunk>
     snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
-    status(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
   }
   workspace: {
-    close(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>
-    describeSpec(): Promise<Record<string, unknown>>
     inspectSignoff(
       request: EccWorkspaceHandleRequest,
     ): Promise<EccWorkspaceInspectSignoffResult>
-    home(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult>
-    info(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult>
-    open(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult>
-    refreshConfig(
-      request: EccWorkspaceHandleRequest,
-    ): Promise<EccWorkspaceRefreshConfigResult>
-    validateSpec(
-      request: EccWorkspaceSpecValidationRequest,
-    ): Promise<EccWorkspaceSpecValidationResult>
   }
 }

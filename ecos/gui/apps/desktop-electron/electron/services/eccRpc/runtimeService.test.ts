@@ -231,7 +231,9 @@ describe('EccRpcRuntimeService pool', () => {
 
     const workspace = await pool.service.createWorkspace({
       commandId: 'workspace-create-new',
-      directory: '/work/new',
+      targetDirectory: '/work/new',
+      workspaceBindings: {},
+      workspaceSpec: {},
     })
 
     expect(workspace.directory).toBe('/work/new')
@@ -380,6 +382,38 @@ describe('EccRpcRuntimeService pool', () => {
       params: { workspaceId: 'id-/work/demo' },
     })
     expect(workspace.workspaceHandle).toEqual(expect.any(String))
+  })
+
+  it('queries and closes an Engineering Snapshot session for an idle directory', async () => {
+    const pool = createPool()
+    const query = pool.service.engineeringSnapshotForDirectory('/work/idle')
+    const client = pool.clientFor('/work/idle')
+    client.responses.push(
+      { directory: '/work/idle', workspaceId: 'id-/work/idle' },
+      { recovered: [] },
+      {
+        artifacts: [],
+        checklist: {},
+        flow: { steps: [] },
+        metrics: [],
+        parameters: {},
+        qorAssessment: {},
+        signoffAssessment: { groups: [], risks: [], status: 'ready' },
+        workspaceId: 'id-/work/idle',
+        workspaceRevision: 1,
+      },
+      { closed: true },
+    )
+
+    await expect(query).resolves.toMatchObject({ workspaceId: 'id-/work/idle' })
+    expect(client.calls.map((call) => call.method)).toEqual([
+      'rpc.hello',
+      'workspace.open',
+      'workspace.recover_interrupted',
+      'workspace.engineering_snapshot',
+      'workspace.close',
+    ])
+    expect(pool.sidecarFor('/work/idle').shutdownCount).toBe(1)
   })
 
   it('reads a bounded artifact chunk by opaque id without accepting a path', async () => {

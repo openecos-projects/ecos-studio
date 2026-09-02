@@ -1,27 +1,18 @@
 import {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
+  type EccEngineeringSnapshot,
   type MetricComparison,
   type MetricValue,
   type ProjectManifest,
   type ProjectManifestFlowStep,
-  type QorScore,
   type ReadSection,
   type WorkspaceBaselineComparison,
   type WorkspaceQorSummary,
 } from '@ecos-studio/shared'
-import {
-  buildProjectQorTrendSummary,
-  buildProjectQorWorkspaceComparison,
-  QOR_SCORE_THRESHOLD,
-  qorSummaryStatus,
-  type ProjectQorMetricRecord,
-  type ProjectQorWorkspaceInput,
-} from './qorAnalysis'
+import type { ProjectQorWorkspaceInput } from './qorAnalysis'
 
 export type WorkspaceAnalysisTexts = Record<string, string | null>
-
-const FLOW_STEPS = projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)
 
 const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   synthesis: 'Synth',
@@ -56,20 +47,32 @@ interface WorkspaceQorInput extends ProjectQorWorkspaceInput {
 interface SnapshotQorProjection {
   assessment: ProjectQorWorkspaceInput['authoritativeAssessment']
   qor: WorkspaceQorSummary | null
-  stepMetricTexts: Partial<Record<ProjectManifestFlowStep, string>>
-  stepSummaryTexts: Partial<Record<ProjectManifestFlowStep, string>>
 }
 
-function snapshotMetric(
-  value: unknown,
-  stepId: ProjectManifestFlowStep,
-): MetricValue | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const metric = value as Record<string, unknown>
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function flowStep(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return (FLOW_STEP_ALIASES[trimmed.toLowerCase()] ?? trimmed) || null
+}
+
+function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
+  const metric = record(value)
+  if (!metric) return null
   const id = typeof metric.id === 'string' ? metric.id : ''
-  const name = typeof metric.display_name === 'string' ? metric.display_name : id
+  const name =
+    typeof metric.display_name === 'string'
+      ? metric.display_name
+      : typeof metric.name === 'string'
+        ? metric.name
+        : id
   const number = metric.value
-  const polarity = metric.direction
+  const polarity = metric.direction ?? metric.polarity
   if (
     !id ||
     typeof number !== 'number' ||
@@ -90,130 +93,94 @@ function snapshotMetric(
   }
 }
 
-function snapshotQorProjection(text: string | null | undefined): SnapshotQorProjection {
-  const empty: SnapshotQorProjection = {
-    assessment: null,
-    qor: null,
-    stepMetricTexts: {},
-    stepSummaryTexts: {},
-  }
-  if (!text) return empty
-  try {
-    const snapshot = JSON.parse(text) as Record<string, unknown>
-    const qor = snapshot.qorAssessment as Record<string, unknown> | undefined
-    const score = qor?.score as Record<string, unknown> | undefined
-    const signoff = snapshot.signoffAssessment as Record<string, unknown> | undefined
-    const gate = score?.gate
-    const value = score?.value
-    const threshold = score?.threshold
-    const signoffStatus = signoff?.status
-    if (
-      !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(gate)) ||
-      !(value === null || (typeof value === 'number' && Number.isFinite(value))) ||
-      typeof threshold !== 'number' ||
-      !Number.isFinite(threshold) ||
-      !['ready', 'attention', 'blocked'].includes(String(signoffStatus))
-    ) {
-      return empty
-    }
-    const assessment = {
-      gateStatus: gate as NonNullable<
-        ProjectQorWorkspaceInput['authoritativeAssessment']
-      >['gateStatus'],
-      score: value as number | null,
-      scoreThreshold: threshold,
-      signoffStatus: signoffStatus as NonNullable<
-        ProjectQorWorkspaceInput['authoritativeAssessment']
-      >['signoffStatus'],
-    }
-    if (!Array.isArray(qor?.metrics) || !Array.isArray(qor.steps)) {
-      return { ...empty, assessment }
-    }
-
-    const metrics: MetricValue[] = []
-    const steps: WorkspaceQorSummary['steps'] = []
-    const stepMetricTexts: Partial<Record<ProjectManifestFlowStep, string>> = {}
-    const stepSummaryTexts: Partial<Record<ProjectManifestFlowStep, string>> = {}
-    let offset = 0
-    for (const rawStep of qor.steps) {
-      if (!rawStep || typeof rawStep !== 'object' || Array.isArray(rawStep)) {
-        return { ...empty, assessment }
-      }
-      const stepRecord = rawStep as Record<string, unknown>
-      const count = stepRecord.summaryMetricCount
-      const order = stepRecord.order
-      if (
-        !Number.isInteger(count) ||
-        (count as number) < 0 ||
-        !Number.isInteger(order) ||
-        (order as number) < 0
-      ) {
-        return { ...empty, assessment }
-      }
-      const nextOffset = offset + (count as number)
-      if (nextOffset > qor.metrics.length) return { ...empty, assessment }
-      const step = flowStep(stepRecord.stepId ?? stepRecord.name)
-      if ((!step || !FLOW_STEPS.includes(step as ProjectManifestFlowStep)) && count) {
-        return { ...empty, assessment }
-      }
-      if (step && FLOW_STEPS.includes(step as ProjectManifestFlowStep)) {
-        const canonicalStep = step as ProjectManifestFlowStep
-        if (stepMetricTexts[canonicalStep]) return { ...empty, assessment }
-        const stepMetrics = qor.metrics
-          .slice(offset, nextOffset)
-          .map((metric) => snapshotMetric(metric, canonicalStep))
-        if (stepMetrics.some((metric) => metric === null)) {
-          return { ...empty, assessment }
-        }
-        const status = stepRecord.status
-        if (!['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(status))) {
-          return { ...empty, assessment }
-        }
-        metrics.push(...(stepMetrics as MetricValue[]))
-        steps.push({
-          stepId: canonicalStep,
-          order: order as number,
-          name: canonicalStep,
-          status: status as WorkspaceQorSummary['steps'][number]['status'],
-          summaryMetricCount: count as number,
-          metrics: stepMetrics as MetricValue[],
-        })
-        stepMetricTexts[canonicalStep] = JSON.stringify({
-          schema_version: 3,
-          metrics: qor.metrics.slice(offset, nextOffset),
-        })
-        stepSummaryTexts[canonicalStep] = JSON.stringify({
-          schema_version: 4,
-          quality_status: stepRecord.status,
-        })
-      }
-      offset = nextOffset
-    }
-    return offset === qor.metrics.length
-      ? {
-          assessment,
-          qor: {
-            score: {
-              value: assessment.score,
-              gate: assessment.gateStatus,
-              threshold: assessment.scoreThreshold,
-            },
-            metrics,
-            steps,
-          },
-          stepMetricTexts,
-          stepSummaryTexts,
-        }
-      : { ...empty, assessment }
-  } catch {
+function snapshotQorProjection(
+  snapshot: EccEngineeringSnapshot | null | undefined,
+): SnapshotQorProjection {
+  const empty: SnapshotQorProjection = { assessment: null, qor: null }
+  if (!snapshot) return empty
+  const qor = record(snapshot.qorAssessment)
+  const score = record(qor?.score)
+  const gate = score?.gate
+  const value = score?.value
+  const threshold = score?.threshold
+  const signoffStatus = snapshot.signoffAssessment.status
+  if (
+    !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(gate)) ||
+    !(value === null || (typeof value === 'number' && Number.isFinite(value))) ||
+    typeof threshold !== 'number' ||
+    !Number.isFinite(threshold) ||
+    !['ready', 'attention', 'blocked'].includes(signoffStatus)
+  ) {
     return empty
   }
-}
+  const assessment = {
+    gateStatus: gate as NonNullable<
+      ProjectQorWorkspaceInput['authoritativeAssessment']
+    >['gateStatus'],
+    score: value as number | null,
+    scoreThreshold: threshold,
+    signoffStatus,
+  }
+  const rawMetrics = Array.isArray(qor?.metrics) ? qor.metrics : snapshot.metrics
+  if (!Array.isArray(rawMetrics) || !Array.isArray(qor?.steps)) {
+    return { assessment, qor: null }
+  }
 
-function flowStep(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return (FLOW_STEP_ALIASES[trimmed.toLowerCase()] ?? trimmed) || null
+  const metrics: MetricValue[] = []
+  const steps: WorkspaceQorSummary['steps'] = []
+  const seenSteps = new Set<string>()
+  let offset = 0
+  for (const rawStep of qor.steps) {
+    const stepRecord = record(rawStep)
+    const count = stepRecord?.summaryMetricCount
+    const order = stepRecord?.order
+    const stepId = flowStep(stepRecord?.stepId ?? stepRecord?.name)
+    const status = stepRecord?.status
+    if (
+      !stepRecord ||
+      !stepId ||
+      seenSteps.has(stepId) ||
+      !Number.isInteger(count) ||
+      (count as number) < 0 ||
+      !Number.isInteger(order) ||
+      (order as number) < 0 ||
+      !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(status))
+    ) {
+      return { assessment, qor: null }
+    }
+    const nextOffset = offset + (count as number)
+    if (nextOffset > rawMetrics.length) return { assessment, qor: null }
+    const stepMetrics = rawMetrics
+      .slice(offset, nextOffset)
+      .map((metric) => snapshotMetric(metric, stepId))
+    if (stepMetrics.some((metric) => metric === null)) {
+      return { assessment, qor: null }
+    }
+    seenSteps.add(stepId)
+    metrics.push(...(stepMetrics as MetricValue[]))
+    steps.push({
+      stepId,
+      order: order as number,
+      name: typeof stepRecord.name === 'string' ? stepRecord.name : stepId,
+      metrics: stepMetrics as MetricValue[],
+      status: status as WorkspaceQorSummary['steps'][number]['status'],
+      summaryMetricCount: count as number,
+    })
+    offset = nextOffset
+  }
+  if (offset !== rawMetrics.length) return { assessment, qor: null }
+  return {
+    assessment,
+    qor: {
+      score: {
+        value: assessment.score,
+        gate: assessment.gateStatus,
+        threshold: assessment.scoreThreshold,
+      },
+      metrics,
+      steps,
+    },
+  }
 }
 
 function flowState(value: unknown): ProjectStepStatus | undefined {
@@ -243,23 +210,17 @@ function flowState(value: unknown): ProjectStepStatus | undefined {
   }
 }
 
-function flowStates(text: string | null | undefined): Record<string, ProjectStepStatus> {
-  if (!text) return {}
-  try {
-    const parsed = JSON.parse(text) as { steps?: unknown[] }
-    if (!Array.isArray(parsed.steps)) return {}
-    return Object.fromEntries(
-      parsed.steps.flatMap((raw) => {
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
-        const stepRecord = raw as Record<string, unknown>
-        const step = flowStep(stepRecord.name)
-        const state = flowState(stepRecord.state)
-        return step && state ? [[step, state]] : []
-      }),
-    )
-  } catch {
-    return {}
-  }
+function flowStates(flow: unknown): Record<string, ProjectStepStatus> {
+  const steps = record(flow)?.steps
+  if (!Array.isArray(steps)) return {}
+  return Object.fromEntries(
+    steps.flatMap((rawStep) => {
+      const stepRecord = record(rawStep)
+      const step = flowStep(stepRecord?.name ?? stepRecord?.stepId)
+      const state = flowState(stepRecord?.state ?? stepRecord?.status)
+      return step && state ? [[step, state]] : []
+    }),
+  )
 }
 
 function workspaceStatus(
@@ -281,13 +242,14 @@ export function projectQorInputForWorkspace(
   manifest: ProjectManifest,
   workspaceId: string,
   texts: WorkspaceAnalysisTexts,
+  engineeringSnapshot?: EccEngineeringSnapshot | null,
 ): WorkspaceQorInput | null {
   const workspace = manifest.workspaces.find(
     (candidate) => candidate.workspace_id === workspaceId,
   )
   if (!workspace) return null
-  const statuses = flowStates(texts['home/flow.json'])
-  const snapshot = snapshotQorProjection(texts['home/engineering-snapshot.json'])
+  const statuses = flowStates(engineeringSnapshot?.flow)
+  const snapshot = snapshotQorProjection(engineeringSnapshot)
   return {
     branchFrom: workspace.branch_from,
     createdAt: workspace.created_at,
@@ -301,149 +263,77 @@ export function projectQorInputForWorkspace(
         texts[spec.hotspotsPath] ?? null,
       ]),
     ),
-    stepMetricTexts: {
-      ...Object.fromEntries(
-        projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
-          spec.step,
-          texts[spec.metricsPath] ?? null,
-        ]),
-      ),
-      ...snapshot.stepMetricTexts,
-    },
+    stepMetricTexts: Object.fromEntries(
+      projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
+        spec.step,
+        texts[spec.metricsPath] ?? null,
+      ]),
+    ),
     stepStatuses: statuses,
-    stepSummaryTexts: {
-      ...Object.fromEntries(
-        projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
-          spec.step,
-          texts[spec.summaryPath] ?? null,
-        ]),
-      ),
-      ...snapshot.stepSummaryTexts,
-    },
+    stepSummaryTexts: Object.fromEntries(
+      projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
+        spec.step,
+        texts[spec.summaryPath] ?? null,
+      ]),
+    ),
     workspaceId,
     workspaceName: workspace.name || workspaceId,
     workspaceKey: workspaceId,
   }
 }
 
-function qorScore(
-  record: {
-    overallScore: number | null
-    gateStatus: QorScore['gate']
-  },
-  threshold = QOR_SCORE_THRESHOLD,
-): QorScore {
-  return {
-    value: record.overallScore,
-    gate: record.gateStatus,
-    threshold,
-  }
+function metricKey(metric: MetricValue): string {
+  return `${metric.stepId}:\0${metric.id}`
 }
 
-function metricValue(record: ProjectQorMetricRecord): MetricValue {
+function metricDelta(
+  current: MetricValue,
+  baseline: MetricValue,
+): MetricComparison | null {
+  if (current.value === null || baseline.value === null) return null
+  const absoluteDelta = current.value - baseline.value
+  const directional =
+    current.polarity === baseline.polarity &&
+    (current.polarity === 'higher_is_better' || current.polarity === 'lower_is_better')
+  const verdict = !directional
+    ? 'not-comparable'
+    : absoluteDelta === 0
+      ? 'unchanged'
+      : (current.polarity === 'higher_is_better' && absoluteDelta > 0) ||
+          (current.polarity === 'lower_is_better' && absoluteDelta < 0)
+        ? 'improvement'
+        : 'regression'
   return {
-    id: record.metricName,
-    name: record.displayName,
-    stepId: record.step,
-    value: record.value,
-    ...(record.unit ? { unit: record.unit } : {}),
-    polarity: record.polarity,
-  }
-}
-
-function workspaceQor(
-  record: ReturnType<typeof buildProjectQorTrendSummary>['workspaces'][number],
-  input: ProjectQorWorkspaceInput,
-): WorkspaceQorSummary {
-  const metrics = (record.comparisonRecords ?? record.records).map(metricValue)
-  return {
-    score: qorScore(
-      record,
-      input.authoritativeAssessment?.scoreThreshold ?? QOR_SCORE_THRESHOLD,
-    ),
-    metrics,
-    steps: FLOW_STEPS.map((step, order) => {
-      const stepMetrics = metrics.filter((metric) => metric.stepId === step)
-      return {
-        stepId: step,
-        order,
-        name: step,
-        metrics: stepMetrics,
-        status: qorSummaryStatus(input.stepSummaryTexts?.[step]) ?? 'unavailable',
-        summaryMetricCount: stepMetrics.length,
-      }
-    }),
-  }
-}
-
-function comparisonDelta(
-  metric: ReturnType<typeof buildProjectQorWorkspaceComparison>['metrics'][number],
-): MetricComparison {
-  return {
-    metricId: metric.metricName,
-    name: metric.displayName,
-    stepId: metric.step,
-    currentValue: metric.currentValue,
-    baselineValue: metric.baselineValue,
-    absoluteDelta: metric.absoluteDelta,
-    relativeDeltaPct: metric.relativeDeltaPct,
-    ...(metric.unit ? { unit: metric.unit } : {}),
-    polarity: metric.polarity,
-    verdict: !metric.isDirectional
-      ? 'not-comparable'
-      : metric.state === 'neutral'
-        ? 'unchanged'
-        : metric.state,
+    metricId: current.id,
+    name: current.name,
+    stepId: current.stepId,
+    currentValue: current.value,
+    baselineValue: baseline.value,
+    absoluteDelta,
+    relativeDeltaPct:
+      baseline.value === 0 ? null : (absoluteDelta / Math.abs(baseline.value)) * 100,
+    ...(current.unit ? { unit: current.unit } : {}),
+    polarity: current.polarity,
+    verdict,
   }
 }
 
 export function analyzeWorkspaceQor(
   manifest: ProjectManifest,
   currentWorkspaceId: string,
-  textsByWorkspaceId: Record<string, WorkspaceAnalysisTexts>,
+  snapshotsByWorkspaceId: Record<string, EccEngineeringSnapshot | null>,
 ): {
   qor: ReadSection<WorkspaceQorSummary>
   baselineComparison: ReadSection<WorkspaceBaselineComparison>
 } {
-  const currentInput = projectQorInputForWorkspace(
-    manifest,
-    currentWorkspaceId,
-    textsByWorkspaceId[currentWorkspaceId] ?? {},
+  const currentWorkspace = manifest.workspaces.find(
+    (workspace) => workspace.workspace_id === currentWorkspaceId,
   )
-  if (!currentInput) {
-    const unavailable = {
-      status: 'unavailable' as const,
-      issues: [{ code: 'WORKSPACE_QOR_UNAVAILABLE' }],
-    }
-    return { qor: unavailable, baselineComparison: unavailable }
-  }
-  const baselineWorkspaceId = manifest.qor_baseline?.workspace_id
-  const baselineInput = baselineWorkspaceId
-    ? projectQorInputForWorkspace(
-        manifest,
-        baselineWorkspaceId,
-        textsByWorkspaceId[baselineWorkspaceId] ?? {},
-      )
-    : null
-  const trend = buildProjectQorTrendSummary(
-    baselineInput && baselineInput.workspaceId !== currentInput.workspaceId
-      ? [baselineInput, currentInput]
-      : [currentInput],
-    { baselineWorkspaceId: baselineWorkspaceId ?? null },
-  )
-  const current = trend.workspaces.find(
-    (workspace) => workspace.workspaceId === currentWorkspaceId,
-  )
-  const qor: ReadSection<WorkspaceQorSummary> = currentInput.snapshotQor
-    ? { status: 'ready', data: currentInput.snapshotQor, issues: [] }
-    : current
-      ? { status: 'ready', data: workspaceQor(current, currentInput), issues: [] }
-      : {
-          status: 'unavailable',
-          issues: [{ code: 'WORKSPACE_QOR_UNAVAILABLE' }],
-        }
-
-  if (!baselineWorkspaceId || !baselineInput) {
+  const current = snapshotQorProjection(snapshotsByWorkspaceId[currentWorkspaceId])
+  const qor: ReadSection<WorkspaceQorSummary> = current.qor
+    ? { status: 'ready', data: current.qor, issues: [] }
+    : { status: 'unavailable', issues: [{ code: 'WORKSPACE_QOR_UNAVAILABLE' }] }
+  if (!currentWorkspace) {
     return {
       qor,
       baselineComparison: {
@@ -452,29 +342,49 @@ export function analyzeWorkspaceQor(
       },
     }
   }
-  const comparison = buildProjectQorWorkspaceComparison(trend, currentWorkspaceId)
+
+  const baselineWorkspaceId = manifest.qor_baseline?.workspace_id
+  const baselineWorkspace = manifest.workspaces.find(
+    (workspace) => workspace.workspace_id === baselineWorkspaceId,
+  )
+  const baseline = baselineWorkspaceId
+    ? snapshotQorProjection(snapshotsByWorkspaceId[baselineWorkspaceId])
+    : null
+  if (!baselineWorkspaceId || !baselineWorkspace || !baseline?.qor) {
+    return {
+      qor,
+      baselineComparison: {
+        status: 'unavailable',
+        issues: [{ code: 'WORKSPACE_BASELINE_UNAVAILABLE' }],
+      },
+    }
+  }
+
+  const baselineMetrics = new Map(
+    baseline.qor.metrics.map((metric) => [metricKey(metric), metric]),
+  )
+  const deltas =
+    current.qor?.metrics.flatMap((metric) => {
+      const baselineMetric = baselineMetrics.get(metricKey(metric))
+      if (!baselineMetric) return []
+      const delta = metricDelta(metric, baselineMetric)
+      return delta ? [delta] : []
+    }) ?? []
   return {
     qor,
     baselineComparison: {
       status: 'ready',
       data: {
         baselineWorkspaceId,
-        baselineWorkspaceName:
-          comparison.baselineWorkspaceName ?? baselineInput.workspaceName,
-        baselineScore: {
-          value: comparison.baselineScore,
-          gate:
-            trend.workspaces.find(
-              (workspace) => workspace.workspaceId === baselineWorkspaceId,
-            )?.gateStatus ?? 'unavailable',
-          threshold: QOR_SCORE_THRESHOLD,
-        },
-        deltas: comparison.metrics.map(comparisonDelta),
-        status: comparison.isBaselineWorkspace
-          ? 'baseline'
-          : comparison.available
-            ? 'comparable'
-            : 'not-comparable',
+        baselineWorkspaceName: baselineWorkspace.name || baselineWorkspaceId,
+        baselineScore: baseline.qor.score,
+        deltas,
+        status:
+          currentWorkspaceId === baselineWorkspaceId
+            ? 'baseline'
+            : deltas.some((delta) => delta.verdict !== 'not-comparable')
+              ? 'comparable'
+              : 'not-comparable',
       },
       issues: [],
     },

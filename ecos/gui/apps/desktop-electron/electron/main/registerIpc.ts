@@ -750,16 +750,6 @@ export function registerIpc(
   const readyKey = (designTool: DesignTool, directory: string): string =>
     `${designTool}:${directory}`
 
-  const sendEccEventToSender = (
-    sender: IpcMainInvokeEvent['sender'],
-    payload: EccRuntimeEvent,
-  ): void => {
-    if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) {
-      return
-    }
-    sender.send(desktopApiEventChannels.eccEvent, payload)
-  }
-
   const sendDesignRuntimeEventToSender = (
     sender: IpcMainInvokeEvent['sender'],
     designTool: DesignTool,
@@ -881,8 +871,6 @@ export function registerIpc(
       if (designTool === 'backend' && runtimeEventCommitsWorkspaceFacts(payload)) {
         invalidateBackendWorkspaceForSender(subscription.sender)
       }
-      if (designTool === 'backend')
-        sendEccEventToSender(subscription.sender, scopedPayload)
       sendDesignRuntimeEventToSender(subscription.sender, designTool, scopedPayload)
     }
     return deliveredSenders.size
@@ -904,7 +892,6 @@ export function registerIpc(
           if (directory)
             services.backendProjectComparisonService.invalidateWorkspace(directory)
         }
-        if (designTool === 'backend') sendEccEventToSender(subscription.sender, payload)
         sendDesignRuntimeEventToSender(subscription.sender, designTool, payload)
         return
       }
@@ -1067,7 +1054,6 @@ export function registerIpc(
       readyKey(designTool, normalizedDirectory),
     )
     if (pendingReady) {
-      if (designTool === 'backend') sendEccEventToSender(sender, pendingReady)
       sendDesignRuntimeEventToSender(sender, designTool, pendingReady)
     }
   }
@@ -2197,80 +2183,9 @@ export function registerIpc(
     )
   })
 
-  handle(desktopApiIpcChannels.eccRpcHello, async () => {
-    return await services.eccRuntimeService.rpcHello()
-  })
-
-  handle(desktopApiIpcChannels.eccRpcPing, async () => {
-    return await services.eccRuntimeService.rpcPing()
-  })
-
-  handle(desktopApiIpcChannels.eccRpcShutdown, async () => {
-    return await services.eccRuntimeService.rpcShutdown()
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceOpen, async (event, request) => {
-    const openRequest = request as EccWorkspaceOpenRequest
-    const result = await services.eccRuntimeService.openWorkspace(
-      openRequest.workspaceBindings
-        ? openRequest
-        : await prepareWorkspaceOpenBinding(services, openRequest.directory),
-    )
-    const workspaceHandle = workspaceHandleFromResult(result)
-    const directory = workspaceDirectoryFromResult(result)
-    if (workspaceHandle) {
-      if (typeof openRequest.directory === 'string') {
-        trackWorkspaceHandle(event.sender, workspaceHandle, openRequest.directory)
-      }
-      if (directory) {
-        trackWorkspaceHandle(event.sender, workspaceHandle, directory)
-      }
-    }
-    return result
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceDescribeSpec, async () => {
-    return await services.eccRuntimeService.describeWorkspaceSpec()
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceValidateSpec, async (_event, request) => {
-    return await services.eccRuntimeService.validateWorkspaceSpec(
-      request as EccWorkspaceSpecValidationRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceClose, async (_event, request) => {
-    const closeRequest = request as EccWorkspaceHandleRequest
-    return await detachTrackedWorkspaceHandle(closeRequest.workspaceHandle)
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceHome, async (_event, request) => {
-    return await services.eccRuntimeService.workspaceHome(
-      request as EccWorkspaceHandleRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceInfo, async (_event, request) => {
-    return await services.eccRuntimeService.workspaceInfo(
-      request as EccWorkspaceInfoRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccWorkspaceRefreshConfig, async (_event, request) => {
-    return await services.eccRuntimeService.refreshConfig(
-      request as EccWorkspaceHandleRequest,
-    )
-  })
-
   handle(desktopApiIpcChannels.eccWorkspaceInspectSignoff, async (_event, request) => {
     return await services.eccRuntimeService.inspectSignoff(
       request as EccWorkspaceHandleRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeOperationStatus, async (_event, request) => {
-    return await services.eccRuntimeService.operationStatus(
-      request as EccRuntimeOperationRequest,
     )
   })
 
@@ -2282,12 +2197,6 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.eccRuntimeSnapshot, async (_event, request) => {
     return await services.eccRuntimeService.workspaceSnapshot(
-      request as EccWorkspaceHandleRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, async (_event, request) => {
-    return await services.eccRuntimeService.engineeringSnapshot(
       request as EccWorkspaceHandleRequest,
     )
   })

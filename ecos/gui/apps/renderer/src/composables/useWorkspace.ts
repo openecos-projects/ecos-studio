@@ -10,6 +10,7 @@ import { useToast } from 'primevue/usetoast'
 import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
   closeWorkspaceApi,
+  backendWorkspaceOptions,
   loadWorkspaceApi,
   createWorkspaceApi,
   updateWorkspaceApi,
@@ -101,75 +102,6 @@ function asString(value: unknown): string | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function backendWorkspaceOptions(config: WorkspaceConfig, selectedPath: string) {
-  const frontendParams = config.parameters || {}
-  const pdkName = config.pdk || 'ics55'
-  const toNumber = (value: unknown, fallback: number) => {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : fallback
-  }
-  const dieAreaMode =
-    frontendParams.die_area_mode === 'width_height'
-      ? 'width_height'
-      : 'utilitization_margin'
-  const dieArea =
-    dieAreaMode === 'width_height'
-      ? {
-          mode: dieAreaMode,
-          width: toNumber(frontendParams.die_width, 100),
-          height: toNumber(frontendParams.die_height, 100),
-        }
-      : {
-          mode: dieAreaMode,
-          utilitization: toNumber(
-            frontendParams.utilitization ?? frontendParams.core_utilization,
-            0.6,
-          ),
-          margin: toNumber(frontendParams.margin, 0),
-        }
-  const parameters = {
-    ...Object.fromEntries(
-      Object.entries(frontendParams).filter(([key]) => key.includes('.')),
-    ),
-    Design: frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
-    'Top module': frontendParams.top_module || 'top',
-    Clock: frontendParams.clock || 'clk',
-    'Die Area': dieArea,
-    'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
-    'Max fanout': toNumber(frontendParams.max_fanout, 20),
-    'Target density': toNumber(frontendParams.target_density, 0.2),
-    'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
-    PDK: pdkName,
-    Core: {
-      Utilitization:
-        dieAreaMode === 'utilitization_margin'
-          ? toNumber(frontendParams.utilitization ?? frontendParams.core_utilization, 0.6)
-          : toNumber(frontendParams.core_utilization, 0.5),
-    },
-  }
-  return {
-    directory: selectedPath,
-    designTool: 'backend' as const,
-    pdk: pdkName,
-    pdk_root: config.pdk_root || '',
-    pdk_installation_id: config.pdk_installation_id,
-    pdk_requirement: config.pdk_requirement,
-    parameters,
-    origin_def: config.origin_def,
-    origin_verilog: config.origin_verilog,
-    rtl_list: config.rtl_list || [],
-    filelist: config.filelist,
-    mpc: config.mpc as unknown as Record<string, unknown> | null,
-    design_input_mode: config.design_input_mode,
-    sdc: config.sdc,
-    flow_config: config.flow_config,
-    pdk_config_mode: config.pdk_config_mode,
-    pdk_config: config.pdk_config,
-    pdk_json: config.pdk_json,
-    project_context: config.project_context,
-  }
 }
 
 function workspaceHandleFromResponseData(

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ProjectManifest } from '@ecos-studio/shared'
+import type { EccEngineeringSnapshot, ProjectManifest } from '@ecos-studio/shared'
 import { BackendProjectComparisonService } from './backendProjectComparisonService'
 
 function manifest(root = '/projects/demo'): ProjectManifest {
@@ -52,37 +52,72 @@ function manifest(root = '/projects/demo'): ProjectManifest {
   }
 }
 
+function engineeringSnapshot(
+  workspacePath: string,
+  step = 'Route',
+): EccEngineeringSnapshot {
+  const value = workspacePath.endsWith('ws_1') ? 120 : 100
+  const metric = {
+    direction: 'lower_is_better',
+    display_name: 'Wire length',
+    id: 'wire_length',
+    value,
+  }
+  return {
+    artifacts: [],
+    checklist: {},
+    flow: { steps: [{ name: step, state: 'Success' }] },
+    metrics: [metric],
+    parameters: {},
+    qorAssessment: {
+      metrics: [metric],
+      score: { gate: 'pass', threshold: 60, value: 80 - value / 10 },
+      steps: [
+        {
+          name: 'Route',
+          order: 6,
+          status: 'pass',
+          stepId: 'Route',
+          summaryMetricCount: 1,
+        },
+      ],
+    },
+    schemaVersion: 1,
+    signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    workspaceId: workspacePath,
+    workspaceRevision: 1,
+  }
+}
+
 function serviceFixture() {
   const project = manifest()
   const readManifest = vi.fn().mockResolvedValue(JSON.stringify(project))
-  const readWorkspaceTexts = vi.fn().mockImplementation(async ({ workspacePath }) => ({
-    texts: {
-      'home/flow.json': JSON.stringify({
-        steps: [{ name: 'Route', state: 'Success' }],
-      }),
-      'analysis/Route/qor_metrics.json': JSON.stringify({
-        metrics: [
-          { name: 'wire length', value: workspacePath.endsWith('ws_1') ? 120 : 100 },
-        ],
-      }),
-    },
+  const readWorkspaceTexts = vi.fn().mockResolvedValue({
+    texts: {},
     unavailablePaths: [],
-  }))
+  })
+  const getByDirectory = vi
+    .fn()
+    .mockImplementation(async (workspacePath) => engineeringSnapshot(workspacePath))
   return {
+    getByDirectory,
     project,
     readManifest,
     readWorkspaceTexts,
-    service: new BackendProjectComparisonService({
-      readManifest,
-      readWorkspaceTexts,
-      resolveProjectRoot: async (path) => path,
-    }),
+    service: new BackendProjectComparisonService(
+      {
+        readManifest,
+        readWorkspaceTexts,
+        resolveProjectRoot: async (path) => path,
+      },
+      { getByDirectory },
+    ),
   }
 }
 
 describe('BackendProjectComparisonService', () => {
   it('selects an opaque context and coalesces comparison reads in one generation', async () => {
-    const { service, readWorkspaceTexts } = serviceFixture()
+    const { getByDirectory, service, readWorkspaceTexts } = serviceFixture()
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',
     })
@@ -107,6 +142,7 @@ describe('BackendProjectComparisonService', () => {
     ).toEqual(expect.arrayContaining([expect.objectContaining({ stepId: 'Route' })]))
     expect(JSON.stringify(left)).not.toContain('/projects/demo/ws_')
     expect(readWorkspaceTexts).toHaveBeenCalledTimes(2)
+    expect(getByDirectory).toHaveBeenCalledTimes(2)
   })
 
   it('keeps readable workspaces when one workspace analysis fails', async () => {
@@ -136,15 +172,10 @@ describe('BackendProjectComparisonService', () => {
   })
 
   it('preserves an unknown Flow Step as an opaque comparison identity', async () => {
-    const { service, readWorkspaceTexts } = serviceFixture()
-    readWorkspaceTexts.mockResolvedValue({
-      texts: {
-        'home/flow.json': JSON.stringify({
-          steps: [{ name: 'CustomSignoff', state: 'Success' }],
-        }),
-      },
-      unavailablePaths: [],
-    })
+    const { getByDirectory, service } = serviceFixture()
+    getByDirectory.mockImplementation(async (workspacePath) =>
+      engineeringSnapshot(workspacePath, 'CustomSignoff'),
+    )
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',
     })

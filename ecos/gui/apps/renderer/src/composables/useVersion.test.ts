@@ -198,26 +198,8 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     pdkInventory: {} as DesktopApi['pdkInventory'],
     runtime: {} as DesktopApi['runtime'],
     ecc: {
-      events: {
-        onEvent: () => () => undefined,
-      },
-      rpc: {
-        hello: async () => ({ capabilities: [], eccVersion: 'unknown', version: 1 }),
-        ping: async () => ({ ok: true }),
-        shutdown: async () => ({ ok: true }),
-      },
       workspace: {
-        describeSpec: async () => ({}),
-        validateSpec: async () => ({ issues: [] }),
-        close: async () => ({ ok: true }),
         inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
-        home: async () => ({ path: '' }),
-        info: async (request) => ({ id: request.id, info: {}, step: request.step }),
-        open: async (request) => ({
-          directory: request.directory,
-          workspaceHandle: 'workspace-handle-1',
-        }),
-        refreshConfig: async () => ({ directory: '', refreshed: true }),
       },
     },
     shell: {

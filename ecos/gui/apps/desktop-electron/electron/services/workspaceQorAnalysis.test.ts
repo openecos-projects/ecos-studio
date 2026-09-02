@@ -1,4 +1,4 @@
-import type { ProjectManifest } from '@ecos-studio/shared'
+import type { EccEngineeringSnapshot, ProjectManifest } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import { buildProjectQorTrendSummary } from './qorAnalysis'
 import { analyzeWorkspaceQor, projectQorInputForWorkspace } from './workspaceQorAnalysis'
@@ -39,12 +39,33 @@ function metricText(value: number): string {
   })
 }
 
-const engineeringSnapshot = JSON.stringify({
-  qorAssessment: {
-    score: { gate: 'pass', threshold: 60, value: 73.5 },
-  },
-  signoffAssessment: { status: 'ready' },
-})
+function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
+  const metric = JSON.parse(metricText(metricValue)).metrics[0]
+  return {
+    artifacts: [],
+    checklist: {},
+    flow: { steps: [{ name: 'Route', state: 'Success' }] },
+    metrics: [metric],
+    parameters: {},
+    qorAssessment: {
+      metrics: [metric],
+      score: { gate: 'pass', threshold: 60, value: 73.5 },
+      steps: [
+        {
+          name: 'Route',
+          order: 6,
+          status: 'pass',
+          stepId: 'Route',
+          summaryMetricCount: 1,
+        },
+      ],
+    },
+    schemaVersion: 1,
+    signoffAssessment: { groups: [], risks: [], status: 'ready' },
+    workspaceId: 'ecc-workspace',
+    workspaceRevision: 1,
+  }
+}
 
 function workspace(id: string, name: string) {
   return {
@@ -75,14 +96,8 @@ describe('analyzeWorkspaceQor', () => {
     } as ProjectManifest
 
     const result = analyzeWorkspaceQor(manifest, 'current', {
-      baseline: {
-        'home/engineering-snapshot.json': engineeringSnapshot,
-        'route_ecc/analysis/qor_metrics.json': metricText(5200),
-      },
-      current: {
-        'home/engineering-snapshot.json': engineeringSnapshot,
-        'route_ecc/analysis/qor_metrics.json': metricText(5000),
-      },
+      baseline: engineeringSnapshot(5200),
+      current: engineeringSnapshot(5000),
     })
 
     expect(result.qor).toMatchObject({
@@ -108,10 +123,14 @@ describe('analyzeWorkspaceQor', () => {
       status: 'ready',
     })
 
-    const projectInput = projectQorInputForWorkspace(manifest, 'current', {
-      'home/engineering-snapshot.json': engineeringSnapshot,
-      'route_ecc/analysis/qor_metrics.json': metricText(5000),
-    })
+    const projectInput = projectQorInputForWorkspace(
+      manifest,
+      'current',
+      {
+        'route_ecc/analysis/qor_metrics.json': metricText(5000),
+      },
+      engineeringSnapshot(5000),
+    )
     expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]?.overallScore).toBe(
       result.qor.status === 'ready' ? result.qor.data.score.value : null,
     )
@@ -119,23 +138,30 @@ describe('analyzeWorkspaceQor', () => {
 
   it('restores step metrics directly from an authoritative snapshot', () => {
     const metric = JSON.parse(metricText(5000)).metrics[0]
-    const snapshot = JSON.stringify({
+    const snapshot: EccEngineeringSnapshot = {
+      artifacts: [],
+      checklist: {},
+      flow: { steps: [{ name: 'CustomSignoff', state: 'Success' }] },
       metrics: [metric],
+      parameters: {},
       qorAssessment: {
         metrics: [metric],
         score: { gate: 'pass', threshold: 60, value: 73.5 },
         steps: [
           {
-            name: 'route',
+            name: 'CustomSignoff',
             order: 6,
             status: 'pass',
-            stepId: 'route',
+            stepId: 'CustomSignoff',
             summaryMetricCount: 1,
           },
         ],
       },
-      signoffAssessment: { status: 'ready' },
-    })
+      schemaVersion: 1,
+      signoffAssessment: { groups: [], risks: [], status: 'ready' },
+      workspaceId: 'ecc-current',
+      workspaceRevision: 1,
+    }
     const manifest = {
       project_id: 'project-1',
       name: 'demo',
@@ -144,21 +170,23 @@ describe('analyzeWorkspaceQor', () => {
       qor_baseline: null,
     } as ProjectManifest
 
-    const result = analyzeWorkspaceQor(manifest, 'current', {
-      current: { 'home/engineering-snapshot.json': snapshot },
-    })
+    const result = analyzeWorkspaceQor(manifest, 'current', { current: snapshot })
 
     expect(result.qor).toMatchObject({
       data: {
-        metrics: [{ id: 'route_wirelength', stepId: 'Route', value: 5000 }],
+        metrics: [{ id: 'route_wirelength', stepId: 'CustomSignoff', value: 5000 }],
         score: { value: 73.5 },
       },
       status: 'ready',
     })
     expect(
       result.qor.status === 'ready'
-        ? result.qor.data.steps.find((step) => step.stepId === 'Route')
+        ? result.qor.data.steps.find((step) => step.stepId === 'CustomSignoff')
         : null,
-    ).toMatchObject({ status: 'pass', stepId: 'Route', summaryMetricCount: 1 })
+    ).toMatchObject({
+      status: 'pass',
+      stepId: 'CustomSignoff',
+      summaryMetricCount: 1,
+    })
   })
 })

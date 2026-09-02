@@ -10,8 +10,6 @@ import type {
   ProductCommandRequest,
 } from '@ecos-studio/shared'
 
-import { workspaceSpecCreatePayload } from './eccRpc/workspaceSpecAdapter'
-
 interface ProductCommandRuntime {
   cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
@@ -54,18 +52,16 @@ export async function executeProductCommand(
     case 'workspace.runStep':
       return await context.runtime.startStepOperation(request.payload)
     case 'workspace.update': {
-      const draft = await context.prepareCreate(request.payload.draft)
-      const canonical = workspaceSpecCreatePayload(draft) as {
-        commandId: string
-        workspaceBindings: Record<string, unknown>
-        workspaceSpec: Record<string, unknown>
-      }
+      const draft = await context.prepareCreate({
+        ...request.payload.draft,
+        commandId: request.payload.commandId,
+      })
       return await context.runtime.updateWorkspace({
         commandId: request.payload.commandId,
         expectedWorkspaceRevision: request.payload.expectedWorkspaceRevision,
-        workspaceBindings: canonical.workspaceBindings,
+        workspaceBindings: draft.workspaceBindings,
         workspaceHandle,
-        workspaceSpec: canonical.workspaceSpec,
+        workspaceSpec: draft.workspaceSpec,
       })
     }
     case 'workspace.cancel':
@@ -87,7 +83,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
   switch (value.command) {
     case 'workspace.create':
       requireString(payload, 'commandId')
-      requireString(payload, 'directory')
+      requireString(payload, 'targetDirectory')
+      requireRecord(payload, 'workspaceBindings')
+      requireRecord(payload, 'workspaceSpec')
       break
     case 'workspace.run':
       requireString(payload, 'workspaceHandle')
@@ -104,6 +102,8 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireString(payload, 'commandId')
       requireString(payload, 'workspaceHandle')
       if (!isRecord(payload.draft)) throw new Error('Workspace update requires a draft')
+      requireRecord(payload.draft, 'workspaceBindings')
+      requireRecord(payload.draft, 'workspaceSpec')
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.cancel':
@@ -133,6 +133,10 @@ function requireString(payload: Record<string, unknown>, key: string): void {
   if (typeof payload[key] !== 'string' || !payload[key].trim()) {
     throw new Error(`Product Command requires ${key}`)
   }
+}
+
+function requireRecord(payload: Record<string, unknown>, key: string): void {
+  if (!isRecord(payload[key])) throw new Error(`Product Command requires ${key}`)
 }
 
 function validateRevision(value: unknown): void {

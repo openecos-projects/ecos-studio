@@ -19,15 +19,15 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
       metricsPath: 'lvs_ecc/analysis/qor_metrics.json',
       summaryPath: 'lvs_ecc/analysis/qor_summary.json',
     })
-    expect(projectManagementWorkspaceSummaryPaths).toContain('home/flow.json')
-    expect(projectManagementWorkspaceSummaryPaths).toContain(
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain('home/flow.json')
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain(
       'home/engineering-snapshot.json',
     )
     expect(projectManagementWorkspaceSummaryPaths).toContain(
       projectManagementStaTimingIssuesPath,
     )
     expect(projectManagementWorkspaceSummaryPaths).toHaveLength(
-      3 + projectManagementWorkspaceStepAnalysisSpecs.length * 3,
+      1 + projectManagementWorkspaceStepAnalysisSpecs.length * 3,
     )
     expect(new Set(projectManagementWorkspaceSummaryPaths).size).toBe(
       projectManagementWorkspaceSummaryPaths.length,
@@ -74,10 +74,12 @@ describe('projectManagementWorkspaceStepConfigPaths', () => {
     expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
     expect(projectManagementWorkspaceReadablePaths).toHaveLength(
       projectManagementWorkspaceSummaryPaths.length +
-        projectManagementWorkspaceStepConfigPaths.length,
+        projectManagementWorkspaceStepConfigPaths.length +
+        1,
     )
     expect(projectManagementWorkspaceReadablePaths).toEqual(
       expect.arrayContaining([
+        'home/flow.json',
         ...projectManagementWorkspaceSummaryPaths,
         ...projectManagementWorkspaceStepConfigPaths,
       ]),

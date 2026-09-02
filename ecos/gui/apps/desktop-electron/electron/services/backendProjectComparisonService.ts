@@ -10,6 +10,7 @@ import {
   type BackendProjectComparisonQueryResult,
   type BackendProjectComparisonSelectResult,
   type DesktopProjectManagementWorkspaceTextsResult,
+  type EccEngineeringSnapshot,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
   type ProjectQorMetricRecord,
@@ -34,6 +35,10 @@ interface ProjectComparisonReader {
     workspacePath: string
     paths: string[]
   }): Promise<DesktopProjectManagementWorkspaceTextsResult>
+}
+
+interface EngineeringSnapshotProvider {
+  getByDirectory(directory: string): Promise<EccEngineeringSnapshot>
 }
 
 interface ProjectComparisonContext {
@@ -74,7 +79,10 @@ export class BackendProjectComparisonService {
   private readonly contextsByWindow = new Map<number, ProjectComparisonContext>()
   private readonly listeners = new Set<InvalidationListener>()
 
-  constructor(private readonly reader: ProjectComparisonReader) {}
+  constructor(
+    private readonly reader: ProjectComparisonReader,
+    private readonly snapshotProvider: EngineeringSnapshotProvider,
+  ) {}
 
   async selectProject(
     windowId: number,
@@ -235,11 +243,14 @@ export class BackendProjectComparisonService {
         2,
         async (workspace) => {
           try {
-            const { texts, unavailablePaths } = await this.reader.readWorkspaceTexts({
-              projectRoot: context.projectRoot,
-              workspacePath: workspace.workspace_path,
-              paths: [...projectManagementWorkspaceSummaryPaths],
-            })
+            const [{ texts, unavailablePaths }, engineeringSnapshot] = await Promise.all([
+              this.reader.readWorkspaceTexts({
+                projectRoot: context.projectRoot,
+                workspacePath: workspace.workspace_path,
+                paths: [...projectManagementWorkspaceSummaryPaths],
+              }),
+              this.snapshotProvider.getByDirectory(workspace.workspace_path),
+            ])
             readBytes += Object.values(texts).reduce(
               (total, text) => total + (text ? Buffer.byteLength(text) : 0),
               0,
@@ -249,6 +260,7 @@ export class BackendProjectComparisonService {
               manifest,
               workspace.workspace_id,
               texts,
+              engineeringSnapshot,
             )
             return input ? { input } : { issue: workspaceIssue(workspace.workspace_id) }
           } catch (error) {

@@ -5,14 +5,9 @@ import {
   projectIdFromName,
   type DesignTool,
   type EccWorkspaceCreateRequest,
+  type ProjectManifestMpc,
+  type WorkspaceConfig,
 } from '@ecos-studio/shared'
-
-// Types for API requests and responses
-export interface ProjectInfo {
-  name: string
-  path: string
-  flow?: Record<string, unknown>
-}
 
 export interface WorkspaceResponse {
   cmd: CMDEnum
@@ -27,36 +22,200 @@ export interface WorkspaceResponse {
   message: string[]
 }
 
-export interface LoadWorkspaceRequest {
-  cmd: CMDEnum.load_workspace
-  data: {
-    cpu_filelist?: string
-    cpu_rtl_files?: string[]
-    designTool?: DesignTool
-    directory: string
-  }
+type BackendWorkspaceCreateOptions = Omit<EccWorkspaceCreateRequest, 'commandId'> & {
+  designTool: 'backend'
 }
 
-export interface CreateWorkspaceRequest {
-  cmd: CMDEnum.create_workspace
-  data: {
-    pdk: string
-    pdk_root: string
-    directory: string
-    parameters: Record<string, unknown>
-    origin_def: string
-    origin_verilog: string
-    filelist: string
-    rtl_list: string[]
-    design_input_mode?: string
-    sdc?: string
-    flow_config?: Record<string, unknown>
-    pdk_config_mode?: string
-    pdk_config?: Record<string, unknown>
-    pdk_json?: unknown
-    project_context?: Record<string, unknown>
-    soc_filelist?: string
-    testbench?: string
+interface FrontendWorkspaceCreateOptions {
+  directory?: string
+  designTool: 'frontend'
+  pdk?: string
+  parameters?: Record<string, unknown>
+  origin_def?: string
+  origin_verilog?: string
+  rtl_list?: string[]
+  pdk_root?: string
+  filelist?: string
+  cpu_filelist?: string
+  cpu_rtl_files?: string[]
+  cpu_top_module?: string
+  soc_filelist?: string
+  testbench?: string
+  sim_cpp_sources?: string[]
+  sim_cflags?: string[]
+  sim_ldflags?: string[]
+  sim_run_args?: string[]
+  sim_images?: string[]
+  sim_program_names?: string[]
+  sim_program_sources?: string[]
+  sim_program_link_base?: string
+  sim_programs_dir?: string
+  sim_compile_preset?: string
+  sim_compile_opt_level?: string
+  sim_compile_march?: string
+  sim_compile_mabi?: string
+  sim_compile_extra_cflags?: string[]
+  sim_coremark_iterations?: string
+  sim_coremark_total_data_size?: string
+  sim_coremark_has_float?: boolean
+  sim_tests_dir?: string
+  sim_tests_out_dir?: string
+  sim_build_all_programs?: boolean
+  sim_soc_root?: string
+  sim_build_test_script?: string
+  soc_harness_id?: string
+  soc_variant?: string
+  toolchain_id?: string
+  test_suite_id?: string
+  core_id?: string
+}
+
+export function backendWorkspaceOptions(
+  config: WorkspaceConfig,
+  targetDirectory: string,
+): BackendWorkspaceCreateOptions {
+  const parameters = config.parameters ?? {}
+  const inputs: Array<{ inputId: string; role: string }> = []
+  const inputBindings: Record<string, string> = {}
+  const addInput = (inputId: string, role: string, path: string) => {
+    if (!path) return
+    inputs.push({ inputId, role })
+    inputBindings[inputId] = path
+  }
+  if (config.filelist) addInput('filelist', 'filelist', config.filelist)
+  config.rtl_list.forEach((path, index) => addInput(`rtl-${index + 1}`, 'rtl', path))
+  if (!config.filelist && !config.rtl_list.length) {
+    addInput(
+      config.design_input_mode === 'post_synthesis' ? 'netlist' : 'rtl-main',
+      config.design_input_mode === 'post_synthesis' ? 'netlist' : 'rtl',
+      config.origin_verilog,
+    )
+  }
+  addInput('def', 'def', config.origin_def)
+  addInput('sdc', 'sdc', config.sdc ?? '')
+
+  const pdkMode = config.pdk_config_mode === 'manual' ? 'manual' : 'default'
+  const pdkFiles: Array<{ fileId: string; role: string }> = []
+  const pdkFileBindings: Record<string, string> = {}
+  const addPdkFiles = (role: string, paths: string[]) => {
+    paths.forEach((path, index) => {
+      const fileId = role === 'tech' && index === 0 ? 'tech' : `${role}-${index + 1}`
+      pdkFiles.push({ fileId, role })
+      pdkFileBindings[fileId] = path
+    })
+  }
+  if (pdkMode === 'manual') {
+    addPdkFiles('tech', config.pdk_config?.tech_lef ?? [])
+    addPdkFiles('lef', config.pdk_config?.cell_lef ?? [])
+    addPdkFiles('liberty', config.pdk_config?.liberty ?? [])
+  }
+
+  const numberValue = (value: unknown, fallback: number) => {
+    const number = Number(value)
+    return Number.isFinite(number) ? number : fallback
+  }
+  const fixedDie = parameters.die_area_mode === 'width_height'
+  const flowSteps = config.flow_config?.steps ?? []
+  const startStep = config.flow_config?.start_step || flowSteps[0]
+  const endStep = config.flow_config?.end_step || flowSteps[flowSteps.length - 1]
+  const selectedSteps = new Set([...flowSteps, startStep, endStep].filter(Boolean))
+  const flowId = selectedSteps.has('Harden')
+    ? 'harden'
+    : selectedSteps.has('RCX') || selectedSteps.has('sta')
+      ? 'rcx'
+      : selectedSteps.size === 1 && selectedSteps.has('Synthesis')
+        ? 'syn_sta'
+        : 'rtl2gds'
+  const mpc = config.mpc as ProjectManifestMpc | null | undefined
+  const projectContext = config.project_context
+
+  return {
+    designTool: 'backend',
+    targetDirectory,
+    pdkInstallationId: config.pdk_installation_id,
+    pdkRequirement: config.pdk_requirement,
+    projectId:
+      projectContext?.project_id ??
+      projectIdFromName(
+        projectContext?.project_name || targetDirectory.split('/').pop() || '',
+      ),
+    projectRoot: projectContext?.project_root || targetDirectory,
+    workspaceSpec: {
+      schemaVersion: 1,
+      design: {
+        name: String(parameters.design || targetDirectory.split('/').pop() || ''),
+        topModule: String(parameters.top_module || 'top'),
+        clockPort: String(parameters.clock || 'clk'),
+      },
+      inputMode: config.design_input_mode === 'post_synthesis' ? 'postSynthesis' : 'rtl',
+      inputs,
+      pdk: {
+        familyId: config.pdk || 'ics55',
+        mode: pdkMode,
+        ...(config.pdk_requirement?.version
+          ? { version: config.pdk_requirement.version }
+          : {}),
+        ...(pdkMode === 'manual' ? { files: pdkFiles } : {}),
+      },
+      flow: {
+        flowId,
+        ...(startStep && endStep
+          ? {
+              fromStepId: startStep,
+              throughStepId: endStep,
+            }
+          : {}),
+      },
+      ...(mpc
+        ? {
+            mpc: {
+              resourceId: mpc.resource_id,
+              version: mpc.installed_version,
+              designId: mpc.design.design_name || String(mpc.design.index),
+            },
+          }
+        : {}),
+      parameters: {
+        ...Object.fromEntries(
+          Object.entries(parameters).filter(([key]) => key.includes('.')),
+        ),
+        'design.frequency_mhz': numberValue(parameters.frequency_max, 100),
+        'floorplan.mode': fixedDie ? 'width_height' : 'utilization',
+        'floorplan.core_util': numberValue(
+          parameters.utilitization ?? parameters.core_utilization,
+          fixedDie ? 0.5 : 0.6,
+        ),
+        ...(fixedDie
+          ? {
+              'floorplan.die_width': numberValue(parameters.die_width, 100),
+              'floorplan.die_height': numberValue(parameters.die_height, 100),
+            }
+          : {
+              'floorplan.core_margin': [
+                numberValue(parameters.margin, 0),
+                numberValue(parameters.margin, 0),
+              ],
+            }),
+        'synth.max_fanout': numberValue(parameters.max_fanout, 20),
+        'place.target_density': numberValue(parameters.target_density, 0.2),
+        'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
+      },
+    },
+    workspaceBindings: {
+      inputs: inputBindings,
+      pdk: {
+        root: config.pdk_root,
+        ...(pdkMode === 'manual' ? { files: pdkFileBindings } : {}),
+      },
+      ...(mpc
+        ? {
+            mpc: {
+              template: mpc.core_template,
+              sourcePath: mpc.spec_path || mpc.path,
+            },
+          }
+        : {}),
+    },
   }
 }
 
@@ -94,59 +253,9 @@ export function closeWorkspaceApi(
  * @param name - Name of the new project (optional, defaults to "New_Chip_Design")
  * @param options - Additional project configuration options from wizard
  */
-export function createWorkspaceApi(options: {
-  directory?: string
-  designTool?: DesignTool
-  pdk?: string
-  parameters?: Record<string, unknown>
-  origin_def?: string
-  origin_verilog?: string
-  rtl_list?: string[]
-  pdk_root?: string
-  pdk_installation_id?: string
-  pdk_requirement?: import('@ecos-studio/shared').PdkRequirement
-  filelist?: string
-  mpc?: Record<string, unknown> | null
-  design_input_mode?: string
-  sdc?: string
-  flow_config?: Record<string, unknown>
-  pdk_config_mode?: string
-  pdk_config?: Record<string, unknown>
-  pdk_json?: unknown
-  project_context?: Record<string, unknown>
-  cpu_filelist?: string
-  cpu_rtl_files?: string[]
-  cpu_top_module?: string
-  soc_filelist?: string
-  testbench?: string
-  sim_cpp_sources?: string[]
-  sim_cflags?: string[]
-  sim_ldflags?: string[]
-  sim_run_args?: string[]
-  sim_images?: string[]
-  sim_program_names?: string[]
-  sim_program_sources?: string[]
-  sim_program_link_base?: string
-  sim_programs_dir?: string
-  sim_compile_preset?: string
-  sim_compile_opt_level?: string
-  sim_compile_march?: string
-  sim_compile_mabi?: string
-  sim_compile_extra_cflags?: string[]
-  sim_coremark_iterations?: string
-  sim_coremark_total_data_size?: string
-  sim_coremark_has_float?: boolean
-  sim_tests_dir?: string
-  sim_tests_out_dir?: string
-  sim_build_all_programs?: boolean
-  sim_soc_root?: string
-  sim_build_test_script?: string
-  soc_harness_id?: string
-  soc_variant?: string
-  toolchain_id?: string
-  test_suite_id?: string
-  core_id?: string
-}) {
+export function createWorkspaceApi(
+  options: BackendWorkspaceCreateOptions | FrontendWorkspaceCreateOptions,
+) {
   if (options.designTool === 'frontend') {
     const payload = toDesktopBridgeData({
       cpu_filelist: options.cpu_filelist || '',
@@ -209,31 +318,15 @@ export function createWorkspaceApi(options: {
       })) as Promise<WorkspaceResponse>
   }
 
-  const data = toDesktopBridgeData({
-    directory: options?.directory || '',
-    pdk: options?.pdk || '',
-    parameters: options.parameters || {},
-    origin_def: options.origin_def || '',
-    origin_verilog: options.origin_verilog || '',
-    rtl_list: options.rtl_list || [],
-    pdk_root: options.pdk_root || '',
-    pdk_installation_id: options.pdk_installation_id || '',
-    pdk_requirement: options.pdk_requirement,
-    filelist: options.filelist || '',
-    mpc: options.mpc ?? null,
-    design_input_mode: options.design_input_mode || '',
-    sdc: options.sdc || '',
-    flow_config: options.flow_config || {},
-    pdk_config_mode: options.pdk_config_mode || '',
-    pdk_config: options.pdk_config || {},
-    pdk_json: options.pdk_json || '',
-    project_context: options.project_context || {},
-  })
-  const draft = backendWorkspaceDraft(data)
+  const { designTool: _designTool, ...draft } = options
+  const payload = toDesktopBridgeData({
+    ...draft,
+    commandId: crypto.randomUUID(),
+  }) as unknown as EccWorkspaceCreateRequest
   return getDesktopApi()
     .productCommands.execute({
       command: 'workspace.create',
-      payload: { ...draft, commandId: crypto.randomUUID() },
+      payload,
     })
     .then((result) => ({
       cmd: CMDEnum.create_workspace,
@@ -250,87 +343,18 @@ export function createWorkspaceApi(options: {
 }
 
 export function updateWorkspaceApi(
-  options: Parameters<typeof createWorkspaceApi>[0],
+  options: BackendWorkspaceCreateOptions,
   workspaceHandle: string,
   expectedWorkspaceRevision: number,
 ) {
-  const data = toDesktopBridgeData({
-    ...options,
-    flow_config: options.flow_config ?? {},
-    pdk_config: options.pdk_config ?? {},
-    project_context: options.project_context ?? {},
-  })
+  const { designTool: _designTool, ...request } = options
   return getDesktopApi().productCommands.execute({
     command: 'workspace.update',
     payload: {
-      draft: backendWorkspaceDraft(data),
+      draft: toDesktopBridgeData(request) as Omit<EccWorkspaceCreateRequest, 'commandId'>,
       commandId: crypto.randomUUID(),
       expectedWorkspaceRevision,
       workspaceHandle,
     },
   })
-}
-
-function backendWorkspaceDraft(data: Record<string, unknown>): EccWorkspaceCreateRequest {
-  const directory = String(data.directory ?? '')
-  return {
-    ...(data.design_input_mode
-      ? {
-          designInputMode: String(data.design_input_mode) as 'rtl' | 'post_synthesis',
-        }
-      : {}),
-    directory,
-    filelist: String(data.filelist ?? ''),
-    mpc: (data.mpc as Record<string, unknown> | null) ?? null,
-    flowConfig: (data.flow_config as Record<string, unknown>) ?? {},
-    originDef: String(data.origin_def ?? ''),
-    originVerilog: String(data.origin_verilog ?? ''),
-    parameters: (data.parameters as Record<string, unknown>) ?? {},
-    pdk: String(data.pdk ?? ''),
-    pdkConfig:
-      (data.pdk_config as {
-        cell_lef?: string[]
-        liberty?: string[]
-        tech_lef?: string[]
-      }) ?? undefined,
-    ...(data.pdk_config_mode
-      ? {
-          pdkConfigMode: String(data.pdk_config_mode) as 'default' | 'manual',
-        }
-      : {}),
-    pdkJson: data.pdk_json ?? null,
-    pdkRoot: String(data.pdk_root ?? ''),
-    pdkInstallationId: String(data.pdk_installation_id ?? ''),
-    pdkRequirement: data.pdk_requirement as
-      | import('@ecos-studio/shared').PdkRequirement
-      | undefined,
-    projectId: projectIdFromContext(
-      data.project_context as Record<string, unknown>,
-      directory,
-    ),
-    projectRoot: projectRootFromContext(
-      data.project_context as Record<string, unknown>,
-      directory,
-    ),
-    rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
-    sdc: String(data.sdc ?? ''),
-  }
-}
-
-function projectRootFromContext(
-  context: Record<string, unknown>,
-  workspaceDirectory: string,
-): string {
-  return String(context.project_root || workspaceDirectory)
-}
-
-function projectIdFromContext(
-  context: Record<string, unknown>,
-  workspaceDirectory: string,
-): string {
-  if (context.project_id) return String(context.project_id)
-  const name = String(
-    context.project_name || workspaceDirectory.split(/[/\\]/).pop() || 'project',
-  )
-  return projectIdFromName(name)
 }

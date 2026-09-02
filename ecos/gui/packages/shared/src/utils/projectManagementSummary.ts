@@ -83,8 +83,6 @@ export const projectManagementStaTimingIssuesPath =
   'sta_ecc/analysis/sta_timing_issues.json'
 
 export const projectManagementWorkspaceSummaryPaths = [
-  'home/engineering-snapshot.json',
-  'home/flow.json',
   ...projectManagementWorkspaceStepAnalysisSpecs.flatMap((spec) => [
     spec.metricsPath,
     spec.summaryPath,
@@ -123,6 +121,7 @@ export const projectManagementWorkspaceStepConfigPaths = [
 
 /** Every workspace-relative path projectManagement.readWorkspaceTexts may serve. */
 export const projectManagementWorkspaceReadablePaths = [
+  'home/flow.json',
   ...projectManagementWorkspaceSummaryPaths,
   ...projectManagementWorkspaceStepConfigPaths,
 ] as const

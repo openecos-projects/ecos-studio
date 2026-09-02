@@ -5,7 +5,6 @@ import { performance } from 'node:perf_hooks'
 import {
   parseProjectManifest,
   parseRuntimeSeconds,
-  projectManagementWorkspaceSummaryPaths,
   type BackendWorkspaceOverviewResult,
   type ChecklistFinding,
   type FlowStepState,
@@ -24,7 +23,7 @@ import {
   type WorkspaceResourceIndex,
 } from '@ecos-studio/shared'
 import { requireWindowScopeId } from './windowScopeContext'
-import { analyzeWorkspaceQor, type WorkspaceAnalysisTexts } from './workspaceQorAnalysis'
+import { analyzeWorkspaceQor } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { workspaceDashboardMetrics } from './workspaceDashboardAnalysis'
 
@@ -37,14 +36,6 @@ interface BackendWorkspaceServiceOptions {
   }
   projectManagementReadService?: {
     readManifest(projectRoot: string): Promise<string | null>
-    readWorkspaceTexts?(request: {
-      projectRoot: string
-      workspacePath: string
-      paths: string[]
-    }): Promise<{
-      texts: Record<string, string | null>
-      unavailablePaths: string[]
-    }>
   }
   readWorkspaceTextFile?: (path: string) => Promise<string | null>
 }
@@ -536,14 +527,13 @@ export class BackendWorkspaceService {
     qor: ReadSection<WorkspaceQorSummary>
     baselineComparison: ReadSection<WorkspaceBaselineComparison>
   }> {
-    const reader = this.options.projectManagementReadService
     const currentWorkspace = manifest?.workspaces.find((workspace) =>
       pathsEqual(workspace.workspace_path, index.root),
     )
-    if (!manifest || !currentWorkspace || !reader?.readWorkspaceTexts) {
+    const snapshotProvider = this.options.engineeringSnapshotProvider
+    if (!manifest || !currentWorkspace || !snapshotProvider) {
       return { qor: unavailable(), baselineComparison: unavailable() }
     }
-    const readWorkspaceTexts = reader.readWorkspaceTexts.bind(reader)
 
     const baselineWorkspaceId = manifest.qor_baseline?.workspace_id
     const requestedIds = [
@@ -552,7 +542,7 @@ export class BackendWorkspaceService {
         ? [baselineWorkspaceId]
         : []),
     ]
-    const textsByWorkspaceId: Record<string, WorkspaceAnalysisTexts> = {}
+    const snapshotsByWorkspaceId: Record<string, EccEngineeringSnapshot | null> = {}
     const failedIds = new Set<string>()
     await Promise.all(
       requestedIds.map(async (workspaceId) => {
@@ -564,19 +554,15 @@ export class BackendWorkspaceService {
           return
         }
         if (workspaceId === currentWorkspace.workspace_id && snapshot) {
-          textsByWorkspaceId[workspaceId] = {
-            'home/engineering-snapshot.json': JSON.stringify(snapshot),
-          }
+          snapshotsByWorkspaceId[workspaceId] = snapshot
           return
         }
         try {
-          const result = await readWorkspaceTexts({
-            projectRoot: dirname(index.root),
-            workspacePath: workspace.workspace_path,
-            paths: [...projectManagementWorkspaceSummaryPaths],
-          })
-          textsByWorkspaceId[workspaceId] = result.texts
+          snapshotsByWorkspaceId[workspaceId] = await snapshotProvider.getByDirectory(
+            workspace.workspace_path,
+          )
         } catch {
+          snapshotsByWorkspaceId[workspaceId] = null
           failedIds.add(workspaceId)
         }
       }),
@@ -597,7 +583,7 @@ export class BackendWorkspaceService {
     const result = analyzeWorkspaceQor(
       manifest,
       currentWorkspace.workspace_id,
-      textsByWorkspaceId,
+      snapshotsByWorkspaceId,
     )
     if (baselineWorkspaceId && failedIds.has(baselineWorkspaceId)) {
       result.baselineComparison = {

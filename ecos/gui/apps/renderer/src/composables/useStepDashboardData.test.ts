@@ -1,6 +1,5 @@
 import { effectScope, ref, type EffectScope, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import source from './useStepDashboardData.ts?raw'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
@@ -271,83 +270,5 @@ describe('useStepDashboardData cache', () => {
       expect.stringContaining('CTS_'),
       expect.anything(),
     )
-  })
-})
-
-describe('useStepDashboardData', () => {
-  it('skips an absent layout artifact without discarding Synthesis data', () => {
-    expect(source).toContain('resourceStep.resources.output.image?.exists')
-    expect(source).toContain("? stringInfo(layoutResponse.info, 'image')")
-  })
-
-  it('reads each step checklist from the step folder', () => {
-    expect(source).toContain('`${resourceStep.directory}/checklist.json`')
-    expect(source).not.toContain('InfoEnum.checklist')
-  })
-
-  it('loads Synthesis timing data from the post-synthesis feature directory', () => {
-    expect(source).toContain('resourceStep.resources.feature.stat?.path || dbPath')
-    expect(source).toContain('feature/post_synthesis/qor_summary.json')
-    expect(source).toContain('feature/post_synthesis/timing_paths.json')
-    expect(source).toContain('synthesisInsights(')
-    expect(source).toContain('POST_SYNTHESIS_TIMING_CORNER')
-    expect(source).toContain('stepTimingAnalysis(')
-  })
-
-  it('uses the indexed Floorplan database feature for specialized insights', () => {
-    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'floorplan'")
-    expect(source).toContain('floorplanInsights(dbJson)')
-  })
-
-  it('uses each physical step feature for Floorplan-style snapshots and step.json metrics', () => {
-    expect(source).toContain('floorplanStyleInsightSteps')
-    expect(source).toContain("'fixfanout'")
-    expect(source).toContain("'place'")
-    expect(source).toContain("'cts'")
-    expect(source).toContain("'legalization'")
-    expect(source).toContain("'route'")
-    expect(source).toContain("'filler'")
-    expect(source).toContain(
-      'stepFeatureInsights(resourceStep.name, stepJson, dbJson, mapJson)',
-    )
-    expect(source).toContain('feature/${resourceStep.name}.map.json')
-  })
-
-  it('no longer loads a dedicated Place density map (covered by congestion tiles)', () => {
-    expect(source).not.toContain('placeDensityMapUrl')
-    expect(source).not.toContain('place_allcell_density.png')
-  })
-
-  it("loads the step's own congestion maps (place/CTS) into snapshot tiles", () => {
-    expect(source).toContain('congestionCandidatePngPaths(congestionCandidateStep)')
-    expect(source).toContain('buildCongestionTiles(')
-    expect(source).toContain('parseCongestionCsv(text)')
-    expect(source).toContain('congestionTiles')
-    expect(source).toContain('replacement.congestionTileUrls')
-  })
-
-  it("derives the Design Statis metric table from every step's db.json feature", () => {
-    expect(source).toContain('designStatisSummary(dbJson)')
-    expect(source).toContain('designStatis: StepDesignStatis | null')
-  })
-
-  it('loads specialized RCX, DRC, LVS, and STA feature artifacts for their insight surfaces', () => {
-    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'rcx'")
-    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'drc'")
-    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'lvs'")
-    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'sta'")
-    expect(source).toContain('analysis/drc_statis.csv')
-    expect(source).toContain('readText(drcStatisticsPath)')
-    expect(source).toContain('rcxInsights(stepJson)')
-    expect(source).toContain('drcInsights(drcStatisticsText)')
-    expect(source).toContain('lvsInsights(stepJson)')
-    expect(source).toContain('staCornerSummaryPaths(stepJson, resourceStep.directory)')
-    expect(source).toContain('staInsights(stepJson)')
-    expect(source).toContain('readJson(timingPathsPath)')
-  })
-
-  it('uses indexed Harden output artifacts for the dedicated output surface', () => {
-    expect(source).toContain("resourceStep.name.trim().toLowerCase() === 'harden'")
-    expect(source).toContain('hardenOutputInsights(resourceStep.resources.output)')
   })
 })

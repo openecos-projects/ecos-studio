@@ -6,13 +6,11 @@ export { waitForRuntimeReady, type WaitForRuntimeReadyOptions } from './client'
 
 export {
   closeWorkspaceApi,
+  backendWorkspaceOptions,
   loadWorkspaceApi,
   createWorkspaceApi,
   updateWorkspaceApi,
-  type ProjectInfo,
   type WorkspaceResponse,
-  type LoadWorkspaceRequest,
-  type CreateWorkspaceRequest,
 } from './workspace'
 
 export {

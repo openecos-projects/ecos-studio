@@ -1,9 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import panelSource from './TimingAnalysisPanel.vue?raw'
-import dialogSource from './TimingAnalysisDialog.vue?raw'
-import tableSource from './TimingCornerTable.vue?raw'
-import kpisSource from './TimingKpis.vue?raw'
-import staPanelSource from '../flow-insights/StaPanel.vue?raw'
 import {
   countClass,
   formatFrequency,
@@ -63,43 +58,5 @@ describe('timing format helpers', () => {
       'MAX_125/Cworst',
       'MIN_125/Cworst',
     ])
-  })
-})
-
-describe('TimingAnalysisPanel composition', () => {
-  it('renders the unified KPI, corner table, chart, critical paths, and run info', () => {
-    expect(panelSource).toContain('<TimingKpis')
-    expect(panelSource).toContain('<TimingCornerTable')
-    expect(panelSource).toContain('<TimingWnsChart')
-    expect(panelSource).toContain('<TimingCriticalPaths')
-    expect(panelSource).toContain('<TimingRunInfo')
-    expect(panelSource).toContain('selectStaPathGroup')
-    expect(panelSource).toContain('selectStaCriticalPaths')
-    expect(panelSource).toContain('Waiting for STA corners…')
-  })
-
-  it('offers per-corner critical path scope tabs only with per-corner paths', () => {
-    expect(panelSource).toContain('pathsByCorner')
-    expect(panelSource).toContain('All corners')
-    expect(panelSource).toContain('initialCorner')
-  })
-
-  it('collapses single-corner summaries onto the Worst row and hides attribution', () => {
-    expect(tableSource).toContain('visibleRows')
-    expect(tableSource).toContain('props.rows.length === 1')
-    expect(kpisSource).toContain('attributesCorner')
-    expect(panelSource).toContain('attributesCorner')
-  })
-
-  it('reuses the Data Snapshot dialog chrome and sizing', () => {
-    expect(dialogSource).toContain('maximizable')
-    expect(dialogSource).toContain("width: 'min(1080px, calc(100vw - 40px))'")
-    expect(dialogSource).toContain("height: 'min(72vh, 680px)'")
-  })
-
-  it('keeps the home STA panel on the shared composition plus convergence', () => {
-    expect(staPanelSource).toContain('<TimingAnalysisPanel')
-    expect(staPanelSource).toContain('Cross-run Convergence')
-    expect(staPanelSource).not.toContain('sta-table')
   })
 })

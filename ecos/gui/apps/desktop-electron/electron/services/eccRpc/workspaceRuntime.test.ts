@@ -89,7 +89,7 @@ function createService(
   directory = '/work/demo',
   options: Pick<
     ConstructorParameters<typeof EccWorkspaceRuntime>[0],
-    'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen' | 'snapshotLoader'
+    'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen'
   > = {},
 ) {
   const client = new FakeRpcClient()
@@ -177,77 +177,6 @@ describe('EccWorkspaceRuntime', () => {
     } finally {
       rmSync(directory, { force: true, recursive: true })
     }
-  })
-
-  it('opens an idle workspace from a bounded snapshot without spawning ECC', async () => {
-    let loaderCalls = 0
-    const { service, sidecar } = createService('/work/demo', {
-      lazyWorkspaceOpen: true,
-      snapshotLoader: async (directory) => {
-        loaderCalls += 1
-        return {
-          directory,
-          flow: { steps: [] },
-          home: { flow: '/work/demo/home/flow.json' },
-          lastEventId: 'disk:1',
-          operations: [],
-          parameters: {},
-        }
-      },
-    })
-
-    const workspace = await service.openWorkspace({ directory: '/work/demo' })
-    await expect(
-      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
-    ).resolves.toMatchObject({
-      directory: '/work/demo',
-      lastEventId: 'disk:1',
-      workspaceHandle: workspace.workspaceHandle,
-    })
-
-    expect(loaderCalls).toBe(1)
-    expect(sidecar.startCount).toBe(0)
-  })
-
-  it('shares one idle snapshot read across concurrent renderer requests', async () => {
-    const pending = deferred<{
-      directory: string
-      flow: { steps: [] }
-      home: Record<string, never>
-      lastEventId: string
-      operations: []
-      parameters: Record<string, never>
-    }>()
-    let loaderCalls = 0
-    const { service } = createService('/nfs/demo', {
-      lazyWorkspaceOpen: true,
-      snapshotLoader: async () => {
-        loaderCalls += 1
-        return await pending.promise
-      },
-    })
-    const workspace = await service.openWorkspace({ directory: '/nfs/demo' })
-
-    const first = service.workspaceSnapshot({
-      workspaceHandle: workspace.workspaceHandle,
-    })
-    const second = service.workspaceSnapshot({
-      workspaceHandle: workspace.workspaceHandle,
-    })
-    expect(loaderCalls).toBe(1)
-
-    pending.resolve({
-      directory: '/nfs/demo',
-      flow: { steps: [] },
-      home: {},
-      lastEventId: 'disk:1',
-      operations: [],
-      parameters: {},
-    })
-    await expect(Promise.all([first, second])).resolves.toEqual([
-      expect.objectContaining({ lastEventId: 'disk:1' }),
-      expect.objectContaining({ lastEventId: 'disk:1' }),
-    ])
   })
 
   it('invalidates the cached flow snapshot after refreshing workspace config', async () => {
@@ -772,17 +701,17 @@ describe('EccWorkspaceRuntime', () => {
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
     )
-    const flowConfig = {
-      start_step: 'Synthesis',
-      end_step: 'Harden',
-      steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
-    }
-
     await service.createWorkspace({
       commandId: 'workspace-create-flow-range',
-      directory: '/work/demo',
-      flowConfig,
-      sdc: '/constraints/top.sdc',
+      targetDirectory: '/work/demo',
+      workspaceBindings: { inputs: { sdc: '/constraints/top.sdc' } },
+      workspaceSpec: {
+        flow: {
+          flowId: 'harden',
+          fromStepId: 'Synthesis',
+          throughStepId: 'Harden',
+        },
+      },
     })
 
     expect(client.calls.at(-1)).toEqual({
@@ -797,27 +726,6 @@ describe('EccWorkspaceRuntime', () => {
             throughStepId: 'Harden',
           },
         }),
-      }),
-    })
-  })
-
-  it('omits empty flowConfig when creating a workspace', async () => {
-    const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
-
-    await service.createWorkspace({
-      commandId: 'workspace-create-empty-flow',
-      directory: '/work/demo',
-      flowConfig: {},
-    })
-
-    expect(client.calls.at(-1)).toEqual({
-      method: 'workspace.create',
-      params: expect.not.objectContaining({
-        flowConfig: expect.anything(),
       }),
     })
   })

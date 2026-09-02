@@ -106,11 +106,6 @@ describe('preload desktop bridge contract', () => {
         app: expect.objectContaining({
           getVersions: expect.any(Function),
         }),
-        ecc: expect.objectContaining({
-          events: expect.objectContaining({
-            onEvent: expect.any(Function),
-          }),
-        }),
         backendProjectComparison: expect.objectContaining({
           selectProject: expect.any(Function),
           getComparison: expect.any(Function),
@@ -422,26 +417,6 @@ describe('preload desktop bridge contract', () => {
       desktopApiIpcChannels.menuSetActionEnabled,
       desktopMenuEventIds.exportSignoffPackage,
       true,
-    )
-  })
-
-  it('subscribes and unsubscribes with shared event channel constants', async () => {
-    const bridge = await loadDesktopBridge()
-    const listener = vi.fn()
-
-    const unsubscribe = bridge.ecc.events.onEvent(listener)
-    const eventListener = ipcRenderer.on.mock.calls[0]?.[1]
-    eventListener?.({}, { type: 'runtime.ready' })
-    unsubscribe()
-
-    expect(ipcRenderer.on).toHaveBeenCalledWith(
-      desktopApiEventChannels.eccEvent,
-      expect.any(Function),
-    )
-    expect(listener).toHaveBeenCalledWith({ type: 'runtime.ready' })
-    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
-      desktopApiEventChannels.eccEvent,
-      eventListener,
     )
   })
 

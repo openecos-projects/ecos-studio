@@ -43,8 +43,8 @@ describe('workspace desktop bridge', () => {
       },
     })
 
-    const { createWorkspaceApi } = await import('./workspace')
-    const options = reactive({
+    const { backendWorkspaceOptions, createWorkspaceApi } = await import('./workspace')
+    const config = reactive({
       directory: '/workspace/demo',
       filelist: '',
       origin_def: '',
@@ -59,14 +59,12 @@ describe('workspace desktop bridge', () => {
         top_module: 'top',
       },
       pdk: 'ics55',
-      pdk_json: {
-        name: 'ics55',
-        root: '/pdks/ics55',
-        tech: '/pdks/ics55/tech.lef',
-        lefs: ['/pdks/ics55/stdcells.lef'],
-        libs: ['/pdks/ics55/stdcells.lib'],
-      },
       pdk_root: '/pdks/ics55',
+      pdk_requirement: {
+        familyId: 'ics55',
+        manualConfig: null,
+        version: null,
+      },
       rtl_list: ['/rtl/top.v'],
       sdc: '/constraints/top.sdc',
       flow_config: {
@@ -76,7 +74,9 @@ describe('workspace desktop bridge', () => {
       },
     })
 
-    await expect(createWorkspaceApi(options)).resolves.toMatchObject({
+    await expect(
+      createWorkspaceApi(backendWorkspaceOptions(config, config.directory)),
+    ).resolves.toMatchObject({
       response: 'success',
       data: {
         workspace_handle: 'workspace-handle-1',
@@ -86,26 +86,53 @@ describe('workspace desktop bridge', () => {
       expect.objectContaining({
         command: 'workspace.create',
         payload: expect.objectContaining({
-          parameters: expect.objectContaining({
-            design: 'demo',
+          targetDirectory: '/workspace/demo',
+          workspaceBindings: expect.objectContaining({
+            inputs: {
+              'rtl-1': '/rtl/top.v',
+              sdc: '/constraints/top.sdc',
+            },
           }),
-          rtlList: ['/rtl/top.v'],
-          flowConfig: {
-            start_step: 'Synthesis',
-            end_step: 'Harden',
-            steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
-          },
-          pdkJson: {
-            name: 'ics55',
-            root: '/pdks/ics55',
-            tech: '/pdks/ics55/tech.lef',
-            lefs: ['/pdks/ics55/stdcells.lef'],
-            libs: ['/pdks/ics55/stdcells.lib'],
-          },
-          sdc: '/constraints/top.sdc',
+          workspaceSpec: expect.objectContaining({
+            design: expect.objectContaining({ name: 'demo', topModule: 'top' }),
+            flow: {
+              flowId: 'harden',
+              fromStepId: 'Synthesis',
+              throughStepId: 'Harden',
+            },
+            parameters: expect.objectContaining({
+              'design.frequency_mhz': 100,
+            }),
+          }),
         }),
       }),
     )
+  })
+
+  it('keeps a synthesis-only Flow range when endpoints are inferred', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/synth',
+        flow_config: { start_step: '', end_step: '', steps: ['Synthesis'] },
+        origin_def: '',
+        origin_verilog: '/rtl/top.v',
+        parameters: { design: 'demo', top_module: 'top' },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: [],
+      },
+      '/workspace/synth',
+    )
+
+    expect(options.workspaceSpec).toMatchObject({
+      design: { clockPort: 'clk' },
+      flow: {
+        flowId: 'syn_sta',
+        fromStepId: 'Synthesis',
+        throughStepId: 'Synthesis',
+      },
+    })
   })
 
   it('forwards the CPU module independently from the frontend SoC top', async () => {

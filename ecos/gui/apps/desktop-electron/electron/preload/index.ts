@@ -7,7 +7,6 @@ import type {
   DesktopApi,
   DesignRuntimeEvent,
   DesktopDirectoryDialogOptions,
-  EccRuntimeEvent,
   DesktopFileDialogOptions,
   DesktopRtlSourceDialogOptions,
   ChipViewerOpenRequest,
@@ -436,46 +435,19 @@ const desktopApi: DesktopApi = {
     },
   },
   ecc: {
-    events: {
-      onEvent: (listener) =>
-        subscribeToDesktopEvent(
-          desktopApiEventChannels.eccEvent,
-          (_event, payload: unknown) => {
-            listener(payload as EccRuntimeEvent)
-          },
-        ),
-    },
-    rpc: {
-      hello: () => invokeDesktop(desktopApiIpcChannels.eccRpcHello),
-      ping: () => invokeDesktop(desktopApiIpcChannels.eccRpcPing),
-      shutdown: () => invokeDesktop(desktopApiIpcChannels.eccRpcShutdown),
-    },
     runtime: {
-      engineeringSnapshot: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
       openArtifact: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeOpenArtifact, request),
       readArtifactChunk: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeReadArtifactChunk, request),
       snapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
-      status: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationStatus, request),
       waitForOperation: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeWaitForOperation, request),
     },
     workspace: {
-      close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),
-      describeSpec: () => invokeDesktop(desktopApiIpcChannels.eccWorkspaceDescribeSpec),
       inspectSignoff: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccWorkspaceInspectSignoff, request),
-      home: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceHome, request),
-      info: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceInfo, request),
-      open: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceOpen, request),
-      refreshConfig: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceRefreshConfig, request),
-      validateSpec: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceValidateSpec, request),
     },
   },
   agent: {
