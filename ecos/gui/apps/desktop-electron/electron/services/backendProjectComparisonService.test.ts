@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
-import type { EccEngineeringSnapshot, ProjectManifest } from '@ecos-studio/shared'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  projectManifestFlowSteps,
+  type EccEngineeringSnapshot,
+  type ProjectManifest,
+} from '@ecos-studio/shared'
+import { electronLogger } from './logger'
+import { representativeProjectComparisonFixture } from './backendProjectComparison.fixture'
 import { BackendProjectComparisonService } from './backendProjectComparisonService'
 
 function manifest(root = '/projects/demo'): ProjectManifest {
@@ -116,6 +122,127 @@ function serviceFixture() {
 }
 
 describe('BackendProjectComparisonService', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('freezes representative Project Comparison behavior and deterministic read costs', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    const readManifest = vi.fn().mockResolvedValue(JSON.stringify(fixture.manifest))
+    const readWorkspaceTexts = vi.fn().mockImplementation(async ({ workspacePath }) => {
+      const workspaceId = workspacePath.split('/').at(-1)!
+      return fixture.workspaceTexts[workspaceId]
+    })
+    const getByDirectory = vi.fn().mockImplementation(async (workspacePath) => {
+      const workspaceId = workspacePath.split('/').at(-1)!
+      return fixture.engineeringSnapshots[workspaceId]
+    })
+    const debug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const service = new BackendProjectComparisonService(
+      {
+        readManifest,
+        readWorkspaceTexts,
+        resolveProjectRoot: async (path) => path,
+      },
+      { getByDirectory },
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const [first, coalesced] = await Promise.all([
+      service.getComparison(11, selected.projectComparisonContextId),
+      service.getComparison(11, selected.projectComparisonContextId),
+    ])
+
+    expect(coalesced).toEqual(first)
+    if (
+      !first.ok ||
+      !('data' in first.data.workspaceSnapshots) ||
+      !('data' in first.data.trend) ||
+      !('data' in first.data.stepComparisons)
+    ) {
+      throw new Error('representative comparison was unavailable')
+    }
+    expect(first.data.identity).toEqual({
+      projectId: 'proj_gcd',
+      projectName: 'gcd',
+      designName: 'gcd',
+      baselineWorkspaceId: 'ws_0001',
+    })
+    const successfulFlow = Object.fromEntries(
+      projectManifestFlowSteps.map((step) => [step, 'success']),
+    )
+    expect(first.data.workspaceSnapshots.data.flowStates).toEqual({
+      ws_0001: successfulFlow,
+      ws_0002: successfulFlow,
+    })
+    expect(
+      first.data.trend.data.workspaces.map((workspace) => ({
+        id: workspace.workspaceId,
+        score: workspace.overallScore,
+        status: workspace.status,
+        metrics: workspace.comparisonRecords?.length,
+        signoff: workspace.signoffReadiness.status,
+      })),
+    ).toEqual([
+      { id: 'ws_0001', score: 72, status: 'Green', metrics: 181, signoff: 'pass' },
+      { id: 'ws_0002', score: 84, status: 'Green', metrics: 181, signoff: 'pass' },
+    ])
+    expect(first.ok && first.data.recommendation).toMatchObject({
+      status: 'ready',
+      data: { workspaceId: 'ws_0002', score: 84 },
+    })
+    expect(first.ok && first.data.risks).toMatchObject({
+      data: {
+        items: [expect.objectContaining({ workspaceId: 'ws_0002', step: 'Route' })],
+      },
+    })
+    expect(first.ok && first.data.timingTriage).toMatchObject({
+      data: {
+        items: [
+          expect.objectContaining({
+            workspaceId: 'ws_0002',
+            baselineWorkspaceId: 'ws_0001',
+            issueId: 'setup-main',
+            state: 'improved',
+          }),
+        ],
+      },
+    })
+    expect(first.data.stepComparisons.data.steps).toHaveLength(13)
+    expect(first.data.workspaceSnapshots.data.items[1]?.steps.Route).toMatchObject({
+      flowStatus: 'success',
+      metrics: expect.any(Array),
+      hotspots: [expect.objectContaining({ metric: 'route_congestion' })],
+    })
+    expect(readWorkspaceTexts).toHaveBeenCalledTimes(2)
+    expect(getByDirectory).toHaveBeenCalledTimes(2)
+    expect(debug).toHaveBeenCalledWith(
+      '[backend-project-comparison] query metrics',
+      expect.objectContaining({
+        coalescedRequests: 1,
+        fileCount: 80,
+        ipcPayloadBytes: expect.any(Number),
+        readBytes: expect.any(Number),
+        workspaceCount: 2,
+      }),
+    )
+    expect(fixture.engineeringSnapshots.ws_0001.workspaceId).not.toBe('ws_0001')
+  })
+
+  it('captures the no-HMR initial-load failure when a lifecycle event invalidates the query', async () => {
+    const { service } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const query = service.getComparison(11, selected.projectComparisonContextId)
+    service.invalidateWorkspace('/projects/demo/ws_1')
+
+    await expect(query).resolves.toEqual({ ok: false, code: 'unknown-context' })
+  })
+
   it('selects an opaque context and coalesces comparison reads in one generation', async () => {
     const { getByDirectory, service, readWorkspaceTexts } = serviceFixture()
     const selected = await service.selectProject(11, {
