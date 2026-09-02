@@ -24,7 +24,7 @@ HARD_PAIRS = ("cts:synthesis", "place:legalization", "rcx:sta")
 SEMANTIC_TARGETS = {
     "synthesis": ("algorithm.synthesis.frontend_lowering", "algorithm.synthesis.mapped_netlist_gate"),
     "floorplan": ("algorithm.floorplan.database_wrapping", "algorithm.floorplan.die_core_rows_tracks"),
-    "fixfanout": ("algorithm.fixfanout.model_initialization", "algorithm.fixfanout.violating_net_scan"),
+    "sizer": ("algorithm.sizer.runtime_and_script_preconditions", "algorithm.sizer.command_and_staging_gate"),
     "place": ("algorithm.place.execution", "algorithm.dreamplace.global_placement"),
     "cts": ("algorithm.cts.flow_pipeline", "algorithm.cts.clock_domain_synthesis"),
     "legalization": ("algorithm.legalization.legalize_only_setup", "algorithm.legalization.legalization_pipeline"),
@@ -38,7 +38,7 @@ SEMANTIC_TARGETS = {
 SEMANTIC_WORK = {
     "synthesis": ("read Verilog or Slang sources into RTLIL modules and purge dead logic before mapping", "require `check -mapped` and the declared final Verilog output before accepting the run"),
     "floorplan": ("convert the live iDB design, routing layers, instances, nets, and IO pins into an internal physical model before geometry", "derive die dimensions from utilization, align the core to the placement site, and emit routing-layer track grids"),
-    "fixfanout": ("configure `insert_buffer` and `max_fanout`, rejecting a non-positive limit before repair", "scan non-clock nets by load-pin count and stop when the repair candidate set is empty"),
+    "sizer": ("check the ECC, Sizer, and DreamPlace runtimes plus generated script paths before execution", "require a zero Sizer exit and both staging DEF and Verilog before legalization"),
     "place": ("run global placement, an acceptance gate, legalization, and detailed refinement in that order", "minimize smoothed wirelength and density over continuous cell coordinates, with overflow controlling convergence"),
     "cts": ("run Synthesis, Optimization, Instantiation, and Evaluation on shared clock-layout state", "separate hard-macro and regular clock sinks before `Topology::formClock()` commits a clock topology"),
     "legalization": ("disable global placement, fillers, and random-center initialization while enabling `legalize_flag`", "apply `MacroLegalize`, `GreedyLegalize`, then `AbacusLegalize` to the continuous position tensor"),
@@ -52,7 +52,7 @@ SEMANTIC_WORK = {
 SEMANTIC_WORK_ZH = {
     "synthesis": ("将 Verilog 或 Slang 源读入 RTLIL 模块，并在 mapping 前清除死逻辑", "只有 `check -mapped` 通过且声明的 final Verilog 已生成时才接受本次运行"),
     "floorplan": ("在生成 geometry 前，将 live iDB design 的 routing layers、instances、nets 和 IO pins 转为内部物理模型", "按 utilization 推导 die 尺寸，将 core 对齐 placement site，并生成 routing-layer track grids"),
-    "fixfanout": ("先配置 `insert_buffer` 与 `max_fanout`，非正 fanout limit 必须在 repair 前拒绝", "按 load-pin count 扫描非时钟网络，直到 repair candidate set 为空才停止"),
+    "sizer": ("执行前检查 ECC、Sizer、DreamPlace runtime 和已生成的脚本路径", "只有 Sizer 返回零且 staging DEF 与 Verilog 同时存在后才进入 legalization"),
     "place": ("按 global placement、acceptance gate、legalization、detailed refinement 的顺序执行", "在连续 cell coordinates 上最小化 smoothed wirelength 与 density，并用 overflow 控制收敛"),
     "cts": ("在共享 clock-layout state 上依次执行 Synthesis、Optimization、Instantiation 和 Evaluation", "先区分 hard-macro 与 regular clock sinks，再由 `Topology::formClock()` 提交时钟拓扑"),
     "legalization": ("关闭 global placement、fillers 和 random-center initialization，同时启用 `legalize_flag`", "对连续 position tensor 依次应用 `MacroLegalize`、`GreedyLegalize`、`AbacusLegalize`"),

@@ -479,7 +479,7 @@ def test_raw_rag_mode_exposes_retrieval_without_state_conditioned_support(
     codex = _FakeCodex(
         lambda context: _proposal(
             context,
-            knob_id="synth.max_fanout",
+            knob_id="cts.max_fanout",
             direction=StrategyDirection.DECREASE,
         )
     )

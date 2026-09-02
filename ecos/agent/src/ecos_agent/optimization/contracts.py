@@ -41,7 +41,7 @@ class OptimizationKnob(StrEnum):
     DENSITY_WEIGHT = "place.density_weight"
     FLOORPLAN_CORE_UTIL = "floorplan.core_util"
     FLOORPLAN_ASPECT_RATIO = "floorplan.aspect_ratio"
-    SYNTH_MAX_FANOUT = "synth.max_fanout"
+    CTS_MAX_FANOUT = "cts.max_fanout"
 
 
 class ObjectiveMetric(StrEnum):
@@ -495,7 +495,7 @@ class RequestedKnobValue(_ContractModel):
                 raise ValueError("routability optimization must be a boolean")
         elif self.knob_id in {
             OptimizationKnob.CELL_PADDING_X,
-            OptimizationKnob.SYNTH_MAX_FANOUT,
+            OptimizationKnob.CTS_MAX_FANOUT,
         }:
             lattice = (
                 (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
@@ -549,7 +549,7 @@ class AppliedKnobValue(_ContractModel):
             return self
         if self.knob_id in {
             OptimizationKnob.CELL_PADDING_X,
-            OptimizationKnob.SYNTH_MAX_FANOUT,
+            OptimizationKnob.CTS_MAX_FANOUT,
         }:
             minimum = 0 if self.knob_id == OptimizationKnob.CELL_PADDING_X else 1
             if type(self.value) is not int or self.value < 0:

@@ -33,7 +33,7 @@ def _expanded_current(**overrides: object) -> dict[str, object]:
         "place.density_weight": 0.00085,
         "floorplan.core_util": 0.6,
         "floorplan.aspect_ratio": 1.0,
-        "synth.max_fanout": 32,
+        "cts.max_fanout": 32,
         **overrides,
     }
 
@@ -47,7 +47,7 @@ def _all_requested_values() -> tuple[RequestedKnobValue, ...]:
         "place.density_weight": (0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.00065, 0.00075, 0.00085, 0.001, 0.00125, 0.0015, 0.002, 0.0025, 0.0035, 0.005, 0.0075, 0.01),
         "floorplan.core_util": tuple(round(0.2 + 0.05 * index, 2) for index in range(16)),
         "floorplan.aspect_ratio": (0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0, 3.0, 4.0, 5.0),
-        "synth.max_fanout": (8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64),
+        "cts.max_fanout": (8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64),
     }
     return tuple(
         RequestedKnobValue(knob_id=knob_id, value=value)
@@ -206,8 +206,8 @@ def test_legal_actions_exclude_only_noop_directions() -> None:
         ("floorplan.core_util", "increase"),
         ("floorplan.aspect_ratio", "decrease"),
         ("floorplan.aspect_ratio", "increase"),
-        ("synth.max_fanout", "decrease"),
-        ("synth.max_fanout", "increase"),
+        ("cts.max_fanout", "decrease"),
+        ("cts.max_fanout", "increase"),
         ("place.target_density", "decrease"),
         ("place.target_density", "increase"),
         ("place.target_overflow", "decrease"),

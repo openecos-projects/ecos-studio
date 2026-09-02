@@ -31,13 +31,10 @@ KnobSurface = Literal["parameters", "step_config"]
 
 PARAMETERS_FILE = "home/parameters.json"
 DREAMPLACE_FILE = "config/dreamplace_ecc.json"
-FIXFANOUT_FILE = "config/fixfanout_ecc.json"
 CTS_FILE = "config/cts_ecc.json"
 ROUTE_FILE = "config/route_ecc.json"
 
-WRITABLE_FILES = frozenset(
-    {PARAMETERS_FILE, DREAMPLACE_FILE, FIXFANOUT_FILE, CTS_FILE, ROUTE_FILE}
-)
+WRITABLE_FILES = frozenset({PARAMETERS_FILE, DREAMPLACE_FILE, CTS_FILE, ROUTE_FILE})
 
 
 @dataclass(frozen=True)
@@ -83,10 +80,6 @@ def _parameters(*json_path: str | int) -> KnobTarget:
 
 def _dreamplace(key: str) -> KnobTarget:
     return KnobTarget(surface="step_config", file=DREAMPLACE_FILE, json_path=(key,))
-
-
-def _fixfanout(key: str) -> KnobTarget:
-    return KnobTarget(surface="step_config", file=FIXFANOUT_FILE, json_path=(key,))
 
 
 def _cts(key: str) -> KnobTarget:
@@ -194,13 +187,6 @@ _SPECS: tuple[KnobSpec, ...] = (
     ),
     KnobSpec(
         "place.num_threads", ECCStepName.PLACEMENT, "integer", config=_dreamplace("num_threads")
-    ),
-    KnobSpec(
-        "synth.max_fanout",
-        ECCStepName.NETLIST_OPT,
-        "integer",
-        config=_fixfanout("max_fanout"),
-        parameters=_parameters("Max fanout"),
     ),
     # -- Clock tree synthesis ------------------------------------------------
     KnobSpec(

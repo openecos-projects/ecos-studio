@@ -1,6 +1,6 @@
 {
-  "benchmark_sha256": "e4a946d15f868ebcfc31a1e3e9f93a9e342f9e6a9c26b334879c8321bb7961f5",
-  "corpus_sha256": "48dde93a3c38c0d82b8846b1a5c6664545856d2fb7b737be7849bb039a67dde4",
+  "benchmark_sha256": "5fa6a0955e65d33d0a54006b759fa130a53352311313946569c2703821b11648",
+  "corpus_sha256": "49487799fbf8813a5c59b5bf8afe55e64fdc63a79c523f9501af7a7ae8f97b73",
   "counts": {
     "by_category": {
       "cross_stage": 48,
@@ -33,7 +33,6 @@
       "cts": 32,
       "drc": 16,
       "filler": 16,
-      "fixfanout": 16,
       "floorplan": 16,
       "harden": 16,
       "legalization": 16,
@@ -41,6 +40,7 @@
       "place": 32,
       "rcx": 32,
       "route": 16,
+      "sizer": 16,
       "sta": 16,
       "synthesis": 16
     }

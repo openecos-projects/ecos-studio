@@ -292,13 +292,14 @@ class GuiWorkspaceRerunResolver:
     def _stage_output(source: Path, design_id: str, step: str, tool: str) -> Path:
         if not _TOOL_NAME.fullmatch(tool):
             raise ValueError(f"completed stage {step} has an invalid tool")
-        output_dir = source / f"{step}_{tool}" / "output"
+        artifact_step = "_".join(step.split()).lower() if tool == "sizer" else step
+        output_dir = source / f"{artifact_step}_{tool}" / "output"
         try:
             output_dir.resolve().relative_to(source)
         except ValueError as exc:
             raise ValueError(f"completed stage {step} output escapes workspace") from exc
         for suffix in _STAGE_OUTPUT_SUFFIXES:
-            output = output_dir / f"{design_id}_{step}{suffix}"
+            output = output_dir / f"{design_id}_{artifact_step}{suffix}"
             if output.is_file() and not output.is_symlink():
                 return output
         raise ValueError(f"completed stage {step} has no matching output artifact")

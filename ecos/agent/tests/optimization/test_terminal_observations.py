@@ -63,9 +63,9 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert (
         by_id[("routing_diagnostic", "route_dr_total_patch_count", None)].value == 126
     )
-    assert by_id[("cost", "flow_tool_runtime", None)].value == 55
+    assert by_id[("cost", "flow_tool_runtime", None)].value == 58.5
     assert by_id[("cost", "flow_peak_memory", None)].value == 500
-    assert by_id[("cost", "flow_stage_count", None)].value == 10
+    assert by_id[("cost", "flow_stage_count", None)].value == 11
     assert by_id[("cost", "flow_nonzero_peak_memory_stage_count", None)].value == 8
     assert by_id[("corner_robustness", "sta_setup_wns", "TYP_25/TYPICAL")].value == 8.5
     assert (
@@ -153,8 +153,8 @@ def test_terminal_observation_marks_missing_cost_as_ineligible(
     by_id = {
         metric.metric_id: metric.value for metric in observation.evaluation_metrics
     }
-    assert by_id["flow_stage_count"] == 10
-    assert by_id["flow_cost_covered_stage_count"] == 9
+    assert by_id["flow_stage_count"] == 11
+    assert by_id["flow_cost_covered_stage_count"] == 10
     assert "flow_tool_runtime" not in by_id
 
 

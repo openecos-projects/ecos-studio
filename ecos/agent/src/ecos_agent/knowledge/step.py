@@ -30,10 +30,10 @@ class StepKnowledgeSpec:
 STEP_KNOWLEDGE_SPECS = (
     StepKnowledgeSpec("synthesis", "Synthesis"),
     StepKnowledgeSpec("floorplan", "Floorplan"),
-    StepKnowledgeSpec("fixfanout", "fixFanout"),
     StepKnowledgeSpec("place", "place", "ecos-place-manifest.v1", "ecos-place-catalog.v3"),
     StepKnowledgeSpec("cts", "CTS"),
     StepKnowledgeSpec("legalization", "legalization"),
+    StepKnowledgeSpec("sizer", "Timing optimization"),
     StepKnowledgeSpec("route", "route"),
     StepKnowledgeSpec("drc", "drc"),
     StepKnowledgeSpec("filler", "filler"),

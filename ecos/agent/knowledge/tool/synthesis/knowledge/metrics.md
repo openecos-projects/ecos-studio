@@ -16,7 +16,7 @@
 
 **Calculation:** Yosys reads `/design/num_cells` from the stat JSON and publishes that structural count.
 
-**Boundary:** It counts the current mapped netlist only; it does not include later CTS, fanout-repair, filler, or routing edits.
+**Boundary:** It counts the current mapped netlist only; it does not include later CTS, Sizer, filler, or routing edits.
 
 **Source evidence:** **yosys.runner**, **yosys.metrics**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
 

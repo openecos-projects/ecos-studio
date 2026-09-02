@@ -9,7 +9,7 @@ from .provider_support import (
     last_event as _last_event,
     proposal as _proposal,
     send_session_input as _send,
-    workspace_with_fixfanout_and_place as _workspace_with_fixfanout_and_place,
+    workspace_with_timing_opt_and_place as _workspace_with_timing_opt_and_place,
     write_workspace_inputs as _write_workspace_inputs,
 )
 
@@ -53,17 +53,17 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     assert [option["label"] for option in stage_choice["options"]] == ["place"]
 
 
-def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None:
+def test_rerun_skips_empty_parameter_table_for_timing_opt(tmp_path: Path) -> None:
     workspace = tmp_path / "source-workspace"
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(
-        '{"steps": [{"name": "fixFanout", "tool": "ecc", "state": "Success"}]}',
+        '{"steps": [{"name": "Timing optimization", "tool": "sizer", "state": "Success"}]}',
         encoding="utf-8",
     )
-    output = workspace / "fixFanout_ecc" / "output"
+    output = workspace / "timing_optimization_sizer" / "output"
     output.mkdir(parents=True)
-    (output / "gcd_fixFanout.def.gz").write_bytes(b"def")
+    (output / "gcd_timing_optimization.def.gz").write_bytes(b"def")
     (workspace / "home" / "parameters.json").write_text(
         '{"Design": "gcd"}', encoding="utf-8"
     )
@@ -78,7 +78,7 @@ def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None
 
     session = provider.sessions[session_id]
     assert session.phase == "rerun_scope"
-    assert session.rerun_stage == "fixFanout"
+    assert session.rerun_stage == "Timing optimization"
     assert session.rerun_parameter_patch == []
     assert any(
         event["type"] == "message"
@@ -428,7 +428,7 @@ def test_workspace_creation_harden_result_starts_signoff_inspection(tmp_path: Pa
 
 
 def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []
     parser_contexts: list[dict[str, object]] = []
 
@@ -461,7 +461,7 @@ def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -
 
 
 def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []
 
     def empty_patch(_context: dict[str, object]) -> dict[str, object]:

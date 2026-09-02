@@ -511,7 +511,7 @@ class EccCandidateRerunAdapter:
         if request.requested.knob_id == OptimizationKnob.CELL_PADDING_X:
             if type(value) is not int:
                 raise OptimizationEccAdapterError("cell padding value is invalid")
-        elif request.requested.knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
+        elif request.requested.knob_id == OptimizationKnob.CTS_MAX_FANOUT:
             if type(value) is not int:
                 raise OptimizationEccAdapterError("max fanout value is invalid")
         elif request.requested.knob_id != OptimizationKnob.ROUTABILITY_OPT:

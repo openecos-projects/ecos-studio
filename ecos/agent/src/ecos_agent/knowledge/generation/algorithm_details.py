@@ -15,8 +15,6 @@ SOURCE_PATHS = {
     "ifp.macro_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/macro_placer/MacroPlacer.cpp",
     "ifp.pdn": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/pdn_generator/PDNGenerator.cpp",
     "ifp.phy_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/phy_placer/PhyPlacer.cpp",
-    "izh.config": "ecc/chipcompiler/thirdparty/ecc-tools/src/interface/python/py_izh/py_izh_utils.cpp",
-    "izh.fanout": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iZH/source/module/fanout_fixer/FanoutFixer.cpp",
     "izh.filler": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iZH/source/module/filler_inserter/FillerInserter.cpp",
     "icts.api": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/interface/CTSAPI.cc",
     "icts.synthesis": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/source/module/synthesis/Synthesis.cc",
@@ -115,32 +113,6 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
             ("ifp.pdn", "ifp.phy_placer", "ifp.interface"),
         ),
     ),
-    "fixfanout": (
-        (
-            "model_initialization",
-            ("fixfanout model initialization", "fanout fixer config"),
-            "**Input and state:** The JSON adapter maps `insert_buffer` and `max_fanout` into iZH configuration, then `FanoutFixer::initFFModel()` creates an `FFModel` with buffer master, fanout limit, and insertion counters.\n\n**Constraint:** A non-positive maximum fanout is rejected before repair. The model is a structural netlist-editing state, not a placement legalization model.",
-            ("izh.config", "izh.fanout"),
-        ),
-        (
-            "violating_net_scan",
-            ("fixfanout violating net scan", "fanout fixer candidate nets"),
-            "**Input and state:** The live iDB design net list and the `FFModel.max_fanout` limit are scanned each repair round.\n\n**Algorithm:** `FanoutFixer::fix()` skips clock nets and collects every non-clock net whose load-pin count exceeds the limit. This is a full net-list scan per round rather than a timing-driven priority queue.\n\n**Stop:** The repair loop terminates when the candidate set is empty.",
-            ("izh.fanout",),
-        ),
-        (
-            "buffer_tree_construction",
-            ("fixfanout buffer tree construction", "fanout buffer grouping"),
-            "**Input and state:** For each violating net, its load pins are detached and partitioned into chunks of at most `max_fanout`.\n\n**Algorithm:** Each chunk receives a `zh_fanout_net_*` and `zh_fanout_buf_*`: the buffer input reconnects to the original net, its output drives the new net, and the chunk's load pins move to that new net. Power and ground pins are skipped.\n\n**Boundary:** New buffers begin unplaced at `(0, 0)`, so this repair changes connectivity and requires a later physical implementation stage for legal placement.",
-            ("izh.fanout",),
-        ),
-        (
-            "hierarchical_convergence",
-            ("fixfanout hierarchical convergence", "fanout buffer tree convergence"),
-            "**Algorithm:** If the original net still drives too many inserted buffer inputs after one grouping round, it is selected again. Repeated partitioning therefore constructs a multi-level buffer tree.\n\n**Stop and output:** Convergence means every non-clock net has at most the configured number of load pins. The model records fixed-net, inserted-net, and inserted-buffer counts; ECOS persistence then exports the modified logical and physical database state.",
-            ("izh.fanout", "ecc.runner"),
-        ),
-    ),
     "cts": (
         (
             "flow_pipeline",
@@ -191,6 +163,32 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
             ("dreamplace greedy abacus legalization", "standard cell row legalization"),
             "**Input and state:** Standard cells, fixed blockages, row-height bins, blank intervals, and initial positions form the cell-legalization model.\n\n**Algorithm:** Greedy legalization runs left and right passes, assigns cells to bins, subtracts fixed cells into blank intervals, and merges bins while cells remain unplaced. Abacus then sorts cells by row/bin, creates and merges clusters, solves cluster positions from `q/e`, clamps to the bin, aligns to sites, and advances coordinates to prevent overlap.\n\n**Stop and output:** Greedy stops when all cells are placed or no more bin rounds remain; Abacus returns refined movable coordinates after its finite row/bin traversal.",
             ("dreamplace.greedy_legalize", "dreamplace.abacus_legalize"),
+        ),
+    ),
+    "sizer": (
+        (
+            "runtime_and_script_preconditions",
+            ("sizer runtime checks", "timing optimization script preconditions"),
+            "**Input and state:** The wrapper starts from a reset three-step subflow and removes prior published outputs.\n\n**Gate:** It requires ECC, Sizer, and DreamPlace availability plus existing generated env and command files. A failed check marks the corresponding subflow step invalid before Sizer runs.\n\n**Boundary:** These checks establish executable prerequisites only; they do not describe or validate a native Sizer optimization algorithm.",
+            ("sizer.runner", "sizer.subflow"),
+        ),
+        (
+            "command_and_staging_gate",
+            ("sizer command staging gate", "timing optimization staging def verilog"),
+            "**Input and state:** The wrapper constructs the fixed Sizer invocation from the configured executable, env file, and command file, then runs it in the step work directory.\n\n**Gate:** `run sizer` succeeds only when the process returns zero and both sizer staging DEF and Verilog exist. Otherwise the step is incomplete and legalization is not entered.\n\n**Boundary:** ECOS observes only the subprocess result and declared staging files; it does not inspect or claim the native Sizer algorithm.",
+            ("sizer.runner", "sizer.builder"),
+        ),
+        (
+            "legalization_handoff",
+            ("sizer legalization handoff", "timing optimization dreamplace legalization"),
+            "**Input and state:** After the staging gate, the wrapper passes the staging DEF and Verilog to `legalize_layout`.\n\n**Gate:** `run legalization` succeeds only when DreamPlace returns a live ECC object representing the legalized state. A missing object stops the stage before publication.\n\n**Boundary:** This handoff verifies wrapper sequencing and legalization acceptance, not timing improvement or the internals of Sizer.",
+            ("sizer.runner", "dreamplace.runner"),
+        ),
+        (
+            "publication_and_cleanup",
+            ("sizer save data cleanup", "timing optimization publication"),
+            "**Input and state:** The legalized ECC object is passed to shared `save_data` with stage-feature emission disabled.\n\n**Gate and output:** `save data` is successful only when persistence returns true. On failure, the wrapper removes partial published outputs; it always closes the ECC object.\n\n**Boundary:** Published artifacts establish completion of the wrapper pipeline, not QoR improvement or native-algorithm activation.",
+            ("sizer.runner", "ecc.runner"),
         ),
     ),
     "route": (

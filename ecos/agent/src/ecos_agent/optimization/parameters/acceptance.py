@@ -188,7 +188,7 @@ def _state_sha256(root: Path) -> str:
         "home/flow.json",
         "home/parameters.json",
         "config/floorplan_ecc.json",
-        "config/fixfanout_ecc.json",
+        "config/cts_ecc.json",
         "config/dreamplace_ecc.json",
     )
     missing = [relative for relative in files if not (root / relative).is_file()]

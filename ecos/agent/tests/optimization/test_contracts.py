@@ -197,7 +197,7 @@ def test_requested_lattice_uses_logical_padding_sites() -> None:
     assert RequestedKnobValue(knob_id="place.density_weight", value=0.00085).value == 0.00085
     assert RequestedKnobValue(knob_id="floorplan.core_util", value=0.6).value == 0.6
     assert RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.33).value == 1.33
-    assert RequestedKnobValue(knob_id="synth.max_fanout", value=32).value == 32
+    assert RequestedKnobValue(knob_id="cts.max_fanout", value=32).value == 32
 
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.target_density", value=0.12)
@@ -214,4 +214,4 @@ def test_requested_lattice_uses_logical_padding_sites() -> None:
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.25)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="synth.max_fanout", value=34)
+        RequestedKnobValue(knob_id="cts.max_fanout", value=34)

@@ -302,7 +302,7 @@ def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
         ),
         encoding="utf-8",
     )
-    (workspace / "config/fixfanout_ecc.json").write_text(
+    (workspace / "config/cts_ecc.json").write_text(
         json.dumps({"max_fanout": 32}), encoding="utf-8"
     )
     (workspace / "config/floorplan_ecc.json").write_text(

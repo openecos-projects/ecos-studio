@@ -105,7 +105,7 @@ def write_workspace_inputs(root: Path) -> tuple[Path, Path, Path, Path]:
     return rtl, filelist, sdc, pdk
 
 
-def workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
+def workspace_with_timing_opt_and_place(tmp_path: Path) -> Path:
     workspace = tmp_path / "gcd"
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
@@ -113,20 +113,20 @@ def workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "steps": [
-                    {"name": "fixFanout", "tool": "ecc", "state": "Success"},
                     {"name": "place", "tool": "dreamplace", "state": "Success"},
+                    {"name": "Timing optimization", "tool": "sizer", "state": "Success"},
                 ]
             }
         ),
         encoding="utf-8",
     )
-    for step, tool, suffix in (
-        ("fixFanout", "ecc", ".def.gz"),
-        ("place", "dreamplace", ".def.gz"),
+    for step, tool, artifact_step, suffix in (
+        ("place", "dreamplace", "place", ".def.gz"),
+        ("Timing optimization", "sizer", "timing_optimization", ".def.gz"),
     ):
-        output = workspace / f"{step}_{tool}" / "output"
+        output = workspace / f"{artifact_step}_{tool}" / "output"
         output.mkdir(parents=True)
-        (output / f"gcd_{step}{suffix}").write_bytes(b"def")
+        (output / f"gcd_{artifact_step}{suffix}").write_bytes(b"def")
     config = workspace / "config"
     config.mkdir()
     (config / "dreamplace_ecc.json").write_text(

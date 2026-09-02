@@ -31,7 +31,7 @@ FROZEN_KNOBS = tuple(OptimizationKnob)
 EXPECTED_LATTICE_COUNTS = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: 16,
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: 13,
-    OptimizationKnob.SYNTH_MAX_FANOUT: 16,
+    OptimizationKnob.CTS_MAX_FANOUT: 16,
     OptimizationKnob.TARGET_DENSITY: 21,
     OptimizationKnob.TARGET_OVERFLOW: 23,
     OptimizationKnob.CELL_PADDING_X: 12,
@@ -44,7 +44,7 @@ _REGISTERED_PROBES = frozenset(
         "ifp.die_builder.die_utilization",
         "ifp.die_builder.die_aspect_ratio",
         "floorplan.dimension_solver",
-        "fixfanout.threshold_compare",
+        "icts.synthesis.topology.max_fanout",
         "dreamplace.density_objective",
         "dreamplace.overflow_predicate",
         "dreamplace.cell_size_expansion",
@@ -55,7 +55,7 @@ _REGISTERED_PROBES = frozenset(
 _EXPECTED_SURFACES = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: ("float", "ratio"),
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: ("float", "ratio"),
-    OptimizationKnob.SYNTH_MAX_FANOUT: ("int", "fanout"),
+    OptimizationKnob.CTS_MAX_FANOUT: ("int", "fanout"),
     OptimizationKnob.TARGET_DENSITY: ("float", "ratio"),
     OptimizationKnob.TARGET_OVERFLOW: ("float", "ratio"),
     OptimizationKnob.CELL_PADDING_X: ("int", "site"),

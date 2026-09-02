@@ -69,10 +69,10 @@ class OptimizationRuntimeError(ValueError):
 
 _OPTIMIZATION_RERUN_STAGES = (
     "Floorplan",
-    "fixFanout",
     "place",
     "CTS",
     "legalization",
+    "Timing optimization",
     "route",
     "drc",
     "lvs",
@@ -643,8 +643,8 @@ def _current_values(
         dreamplace = json.loads(
             (workspace / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
         )
-        fixfanout = json.loads(
-            (workspace / "config" / "fixfanout_ecc.json").read_text(encoding="utf-8")
+        cts = json.loads(
+            (workspace / "config" / "cts_ecc.json").read_text(encoding="utf-8")
         )
         values = {
             "place.target_density": dreamplace["target_density"],
@@ -654,7 +654,7 @@ def _current_values(
             "place.density_weight": dreamplace["density_weight"],
             "floorplan.core_util": parameters["Core"]["Utilitization"],
             "floorplan.aspect_ratio": parameters["Core"]["Aspect ratio"],
-            "synth.max_fanout": fixfanout["max_fanout"],
+            "cts.max_fanout": cts["max_fanout"],
         }
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise OptimizationRuntimeError("optimization parameters are invalid") from exc

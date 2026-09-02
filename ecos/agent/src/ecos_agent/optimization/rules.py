@@ -39,7 +39,7 @@ _LATTICE_VALUES = {
     OptimizationKnob.DENSITY_WEIGHT: (0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.00065, 0.00075, 0.00085, 0.001, 0.00125, 0.0015, 0.002, 0.0025, 0.0035, 0.005, 0.0075, 0.01),
     OptimizationKnob.FLOORPLAN_CORE_UTIL: tuple(round(0.2 + 0.05 * i, 2) for i in range(16)),
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0, 3.0, 4.0, 5.0),
-    OptimizationKnob.SYNTH_MAX_FANOUT: (8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64),
+    OptimizationKnob.CTS_MAX_FANOUT: (8, 12, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 48, 56, 64),
 }
 _DRC_GOAL_MARKERS = (
     "drc",
@@ -97,8 +97,8 @@ CONTROLLED_COORDINATE_ORDER = (
     CoordinateAction(OptimizationKnob.FLOORPLAN_CORE_UTIL, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.FLOORPLAN_ASPECT_RATIO, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.FLOORPLAN_ASPECT_RATIO, CoordinateDirection.INCREASE),
-    CoordinateAction(OptimizationKnob.SYNTH_MAX_FANOUT, CoordinateDirection.DECREASE),
-    CoordinateAction(OptimizationKnob.SYNTH_MAX_FANOUT, CoordinateDirection.INCREASE),
+    CoordinateAction(OptimizationKnob.CTS_MAX_FANOUT, CoordinateDirection.DECREASE),
+    CoordinateAction(OptimizationKnob.CTS_MAX_FANOUT, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.TARGET_DENSITY, CoordinateDirection.DECREASE),
     CoordinateAction(OptimizationKnob.TARGET_DENSITY, CoordinateDirection.INCREASE),
     CoordinateAction(OptimizationKnob.TARGET_OVERFLOW, CoordinateDirection.DECREASE),
@@ -474,7 +474,7 @@ def _current_value(
                 or not 0 <= float(value) <= max(_PADDING_VALUES)
         ):
             raise ValueError("current cell padding site count is invalid")
-    elif knob_id == OptimizationKnob.SYNTH_MAX_FANOUT:
+    elif knob_id == OptimizationKnob.CTS_MAX_FANOUT:
         if type(value) is not int or value < 1:
             raise ValueError("current max fanout is invalid")
     elif type(value) not in {int, float} or isinstance(value, bool) or not math.isfinite(float(value)):

@@ -283,7 +283,7 @@ def _verify_workspace_parameters(
 ) -> None:
     parameters = _workspace_json(workspace, "home/parameters.json")
     dreamplace = _workspace_json(workspace, "config/dreamplace_ecc.json")
-    fixfanout = _workspace_json(workspace, "config/fixfanout_ecc.json")
+    cts = _workspace_json(workspace, "config/cts_ecc.json")
     floorplan = _workspace_json(workspace, "config/floorplan_ecc.json")
     baseline = manifest.baseline
     site_width = _site_width_dbu_from_pdk(manifest.pdk_root)
@@ -305,7 +305,7 @@ def _verify_workspace_parameters(
         any(parameters.get(key) != value for key, value in expected_parameters.items())
         or Path(str(parameters.get("PDK Root"))).resolve() != manifest.pdk_root
         or any(dreamplace.get(key) != value for key, value in expected_dreamplace.items())
-        or fixfanout.get("max_fanout") != baseline["max_fanout"]
+        or cts.get("max_fanout") != baseline["max_fanout"]
         or die_util.get("utilization") != baseline["core_utilization"]
         or die_util.get("aspect_ratio") != baseline["core_aspect_ratio"]
     ):

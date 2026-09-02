@@ -77,6 +77,7 @@ def frozen_workspace(tmp_path: Path) -> Path:
                 {"name": "place", "state": "Success"},
                 {"name": "CTS", "state": "Success"},
                 {"name": "legalization", "state": "Success"},
+                {"name": "Timing optimization", "state": "Success"},
                 {"name": "route", "state": "Success"},
                 {"name": "drc", "state": "Success"},
                 {"name": "lvs", "state": "Success"},
@@ -112,6 +113,10 @@ def frozen_workspace(tmp_path: Path) -> Path:
     _write_json(
         root / "legalization_dreamplace/analysis/qor_metrics.json",
         _metrics(("runtime_seconds", 3.0), ("peak_memory_mb", 0.0)),
+    )
+    _write_json(
+        root / "timing_optimization_sizer/analysis/qor_metrics.json",
+        _metrics(("runtime_seconds", 3.5), ("peak_memory_mb", 0.0)),
     )
     _write_json(
         root / "route_ecc/analysis/qor_metrics.json",

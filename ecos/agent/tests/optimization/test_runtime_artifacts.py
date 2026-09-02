@@ -36,10 +36,10 @@ from ecos_agent.optimization.runtime import (
 
 _STAGES = (
     "Floorplan",
-    "fixFanout",
     "place",
     "CTS",
     "legalization",
+    "Timing optimization",
     "route",
     "drc",
     "lvs",
@@ -149,7 +149,7 @@ def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
-    (tmp_path / "config" / "fixfanout_ecc.json").write_text(
+    (tmp_path / "config" / "cts_ecc.json").write_text(
         json.dumps({"max_fanout": 24}), encoding="utf-8"
     )
     place_log = tmp_path / "place_dreamplace/log/place.log"
@@ -170,7 +170,7 @@ def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> 
         "place.density_weight": 0.001,
         "floorplan.core_util": 0.6,
         "floorplan.aspect_ratio": 1.33,
-        "synth.max_fanout": 24,
+        "cts.max_fanout": 24,
     }
 
 

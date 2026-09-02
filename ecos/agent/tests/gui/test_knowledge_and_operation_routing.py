@@ -12,7 +12,7 @@ from .provider_support import (
     chat_response as _chat_response,
     last_event as _last_event,
     send_session_input as _send,
-    workspace_with_fixfanout_and_place as _workspace_with_fixfanout_and_place,
+    workspace_with_timing_opt_and_place as _workspace_with_timing_opt_and_place,
 )
 
 
@@ -80,7 +80,7 @@ def test_knowledge_question_reports_local_observable_work_in_one_turn(
 
 
 def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []
     parser_contexts: list[dict[str, object]] = []
     operation_contexts: list[dict[str, object]] = []
@@ -116,7 +116,7 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
 
 
 def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []
     chat_contexts: list[dict[str, object]] = []
 
@@ -267,7 +267,7 @@ def test_chat_rejects_unavailable_source_evidence_id(tmp_path: Path) -> None:
 
 
 def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_timing_opt_and_place(tmp_path)
     repository = tmp_path / "ecos-studio"
     source = repository / "ecc" / "route.py"
     source.parent.mkdir(parents=True)
@@ -324,7 +324,7 @@ def test_operation_question_codex_fallback_disallows_operations(tmp_path: Path) 
 
 
 def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []
     operation_contexts: list[dict[str, object]] = []
 

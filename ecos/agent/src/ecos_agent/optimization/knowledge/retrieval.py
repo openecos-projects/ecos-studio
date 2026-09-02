@@ -58,8 +58,8 @@ class OptimizationRetrievalRequest(BaseModel):
     current_stage: ECCStepName
     action_stages: tuple[ECCStepName, ...] = (
         ECCStepName.FLOORPLAN,
-        ECCStepName.NETLIST_OPT,
         ECCStepName.PLACEMENT,
+        ECCStepName.CTS,
     )
     observed_metric_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
     observation_status: Literal["success"] = "success"
@@ -88,8 +88,8 @@ class OptimizationRetrievalRequest(BaseModel):
     def validate_knobs(self) -> "OptimizationRetrievalRequest":
         if self.action_stages != (
             ECCStepName.FLOORPLAN,
-            ECCStepName.NETLIST_OPT,
             ECCStepName.PLACEMENT,
+            ECCStepName.CTS,
         ):
             raise ValueError("retrieval action stages are not frozen")
         if self.allowed_knobs != tuple(OptimizationKnob):
@@ -216,7 +216,7 @@ class OptimizationKnowledgeRetriever:
             stages = tuple(
                 stage.value.casefold()
                 for stage in request.action_stages
-                if channel == KnowledgeChannel.TOOL or stage != ECCStepName.NETLIST_OPT
+                if channel == KnowledgeChannel.TOOL or stage != ECCStepName.CTS
             )
             answer = retriever.reply_for_stages(query, stages)
             channel_results.append(_channel_result(channel, query, answer, seen_entity_ids))

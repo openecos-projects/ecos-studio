@@ -42,7 +42,7 @@ def _values() -> dict[str, bool | int | float]:
         "place.density_weight": 0.00085,
         "floorplan.core_util": 0.6,
         "floorplan.aspect_ratio": 1.0,
-        "synth.max_fanout": 32,
+        "cts.max_fanout": 32,
     }
 
 
@@ -74,7 +74,7 @@ def test_controlled_coordinate_reuses_fixed_direction_order_without_duplicates()
         "floorplan.core_util",
         "floorplan.aspect_ratio",
         "floorplan.aspect_ratio",
-        "synth.max_fanout",
+        "cts.max_fanout",
     ]
     assert len({(item.requested.knob_id, item.requested.value) for item in selections}) == 20
 

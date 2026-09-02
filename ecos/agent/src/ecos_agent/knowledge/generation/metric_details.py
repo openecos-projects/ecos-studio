@@ -28,7 +28,7 @@ METRIC_DETAILS: dict[str, MetricDetail] = {
     "synthesis_cell_count": (
         "The number of mapped cells in the synthesized netlist.",
         "Yosys reads `/design/num_cells` from the stat JSON and publishes that structural count.",
-        "It counts the current mapped netlist only; it does not include later CTS, fanout-repair, filler, or routing edits.",
+        "It counts the current mapped netlist only; it does not include later CTS, Sizer, filler, or routing edits.",
         ("yosys.metrics", "ecc.metrics"),
     ),
     "synthesis_port_count": (
@@ -72,12 +72,6 @@ METRIC_DETAILS: dict[str, MetricDetail] = {
         "The parser writes `Design Statis.num_nets`; the metric builder publishes that finite count after persistence.",
         "It is a database connectivity count, not a count of routed nets, timing paths, or DRC violations.",
         ("ecc.metrics", "ecc.feature.summary"),
-    ),
-    "fanout_max": (
-        "The fanout threshold field exposed by the post-fixFanout feature database.",
-        "The metric builder first reads `Pins.max_fanout`; only when it is absent does it fall back to the workspace `Max fanout` parameter. The native feature builder initializes this field to 32 and bins pin fanout as `0..32` and `>32`.",
-        "Despite its name, this path does not rescan every final net to prove an observed maximum fanout; interpret it as the published threshold or fallback reference.",
-        ("ecc.metrics", "ecc.feature.summary", "ecc.feature.builder", "izh.fanout"),
     ),
     "io_pin_count": (
         "The number of IO pins in the saved physical database.",

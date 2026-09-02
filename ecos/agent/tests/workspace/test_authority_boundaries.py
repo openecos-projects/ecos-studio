@@ -14,10 +14,10 @@ def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
     assert GUI_WORKSPACE_FLOW_STEPS == (
         "Synthesis",
         "Floorplan",
-        "fixFanout",
         "place",
         "CTS",
         "legalization",
+        "Timing optimization",
         "route",
         "drc",
         "lvs",

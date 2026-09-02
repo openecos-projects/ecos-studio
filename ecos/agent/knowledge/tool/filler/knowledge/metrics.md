@@ -5,7 +5,7 @@
 
 **Calculation:** After stage persistence, the shared metric builder may read `Design Layout` and `Design Statis` facts from the feature database to publish generic structural records.
 
-**Boundary:** Legalization and filler currently publish no stage-specific numeric comparison metric; shared database facts are context, not a movement, legality, or filler-coverage result.
+**Boundary:** filler currently publishes no stage-specific numeric comparison metric; shared database facts are context, not proof of stage success or timing improvement.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
 

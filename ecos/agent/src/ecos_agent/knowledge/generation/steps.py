@@ -23,9 +23,9 @@ ECOS_ROOT = AGENT_ROOT.parents[1]
 METRICS = {
     "synthesis": ("synthesis_cell_area", "synthesis_cell_count", "synthesis_port_count", "synthesis_wire_count"),
     "floorplan": ("die_area", "core_area", "core_utilization", "instance_count", "net_count"),
-    "fixfanout": ("fanout_max", "instance_count", "net_count"),
     "cts": ("clock_path_max_buffer", "clock_path_min_buffer", "clock_wirelength", "cts_buffer_area", "cts_buffer_count", "cts_clock_tree_max_level", "cts_clock_wirelength_max", "cts_worst_optimized_skew_ns", "cts_worst_max_insertion_latency_ns", "cts_skew_target_unmet_count", "instance_count", "io_pin_count", "net_count"),
     "legalization": (),
+    "sizer": (),
     "route": ("route_dr_total_patch_count", "route_dr_total_via_count", "route_dr_total_violation_count", "route_dr_total_wirelength", "route_la_total_demand", "route_la_total_overflow", "route_via_count", "route_wirelength"),
     "drc": ("drc_count",),
     "filler": (),
@@ -67,15 +67,6 @@ STAGES = (
         "ecc/chipcompiler/tools/ecc/configs/floorplan_ecc.json",
     ),
     Stage(
-        "fixfanout",
-        "fixFanout",
-        ("fixfanout", "fix fanout", "fanout optimization", "fanout stage", "扇出优化阶段"),
-        "The ECC runner loads the current database, marks the configured clock net when present, invokes `run_net_opt`, saves the resulting design and geometry snapshot, and then produces metrics and checklist evidence.",
-        "The step cannot execute when ECC input loading fails. The reported maximum fanout is evidence from the saved feature database or workspace parameter, not proof that every timing or electrical constraint is closed.",
-        "ECC publishes maximum fanout together with database instance and net counts after net optimization.",
-        "ecc/chipcompiler/tools/ecc/configs/fixfanout_ecc.json",
-    ),
-    Stage(
         "place",
         "Place",
         ("place", "placement", "place stage", "布局阶段"),
@@ -103,6 +94,15 @@ STAGES = (
         "The standard GUI stage comparison has no legalization-specific numeric metric. Database and QoR artifacts are still produced by the shared analysis path when the run reaches it.",
         "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
         ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
+    ),
+    Stage(
+        "sizer",
+        "Timing optimization",
+        ("sizer", "timing optimization", "timing optimization stage", "时序优化阶段"),
+        "The Sizer runner resets the three-step subflow, checks the ECC, Sizer, and DreamPlace runtimes plus generated script paths, runs Sizer, and requires both staging DEF and Verilog outputs. It then invokes DreamPlace legalization on those staging files and calls shared ECC persistence only after legalization succeeds. The verified wrapper order is `run sizer` -> `run legalization` -> `save data`.",
+        "Missing runtimes or scripts invalidate the stage. A nonzero Sizer exit, missing staging output, failed legalization, or failed persistence leaves the stage incomplete; failed publication also removes partial published outputs.",
+        "The Sizer metrics adapter delegates to the legalization metric builder. These records describe the legalized saved state and do not expose or prove a native Sizer optimization algorithm.",
+        tool_source_ids=("sizer.runner", "sizer.builder", "sizer.subflow", "sizer.metrics", "dreamplace.runner", "ecc.runner"),
     ),
     Stage(
         "route",
@@ -171,6 +171,10 @@ SOURCE_PATHS = {
     "yosys.metrics": "ecc/chipcompiler/tools/yosys/metrics.py",
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",
     "dreamplace.module": "ecc/chipcompiler/tools/ecc_dreamplace/module.py",
+    "sizer.runner": "ecc/chipcompiler/tools/ecc_sizer/runner.py",
+    "sizer.builder": "ecc/chipcompiler/tools/ecc_sizer/builder.py",
+    "sizer.subflow": "ecc/chipcompiler/tools/ecc_sizer/subflow.py",
+    "sizer.metrics": "ecc/chipcompiler/tools/ecc_sizer/metrics.py",
     **ALGORITHM_SOURCE_PATHS,
     **METRIC_SOURCE_PATHS,
 }
@@ -184,10 +188,6 @@ FAILURE_DETAILS = {
         ("engine", ("floorplan ECC unavailable", "floorplan load data failed"), "If `get_eda_instance` returns no ECC module, the floorplan runner does not enter `init_fp` or `run_fp` and returns false."),
         ("geometry", ("floorplan geometry missing", "floorplan manifest missing"), "For floorplan, shared persistence requires `geometry_snapshot_save` and an existing geometry manifest. Either failure causes `save_data` to return false."),
     ),
-    "fixfanout": (
-        ("engine", ("fixfanout ECC unavailable", "fixfanout load data failed"), "If ECC input loading fails, the runner never calls `run_net_opt`; no subflow success state is evidence of a fanout fix."),
-        ("metric_fallback", ("fixfanout metric fallback", "fanout evidence missing"), "When `Pins.max_fanout` is absent, the metric builder falls back to the workspace parameter. Treat that fallback as a configured limit reference, not measured post-optimization fanout evidence."),
-    ),
     "cts": (
         ("engine", ("cts ECC unavailable", "cts load data failed"), "Without an ECC module, CTS, its report, map, and timing feature facts are not executed."),
         ("timing_facts", ("cts timing facts missing", "cts skew unavailable"), "If `feature_cts_timing` cannot be persisted after `save_data`, the CTS runner logs an error and returns false. Missing timing facts cannot be repaired by the visual map."),
@@ -195,6 +195,11 @@ FAILURE_DETAILS = {
     "legalization": (
         ("engine", ("legalization ECC unavailable", "legalization load data failed"), "Without an ECC module, DreamPlace legalization is not constructed and no legal placement is produced."),
         ("infinite_hpwl", ("legalization hpwl inf", "dreamplace legalization failed"), "`DreamplaceModule` returns false when `PlacementEngine.run()` reports infinite HPWL. The DreamPlace runner's progress record must not override that terminal tool result."),
+    ),
+    "sizer": (
+        ("runtime", ("sizer runtime unavailable", "timing optimization scripts missing"), "The runner returns `Invalid` before subprocess execution when ECC, Sizer, or DreamPlace is unavailable, or when the generated Sizer env/cmd script paths do not exist."),
+        ("staging", ("sizer staging output missing", "timing optimization subprocess failed"), "A nonzero Sizer exit or absence of either staging DEF or staging Verilog marks `run sizer` incomplete and prevents legalization."),
+        ("publication", ("sizer legalization failed", "timing optimization publication failed"), "Legalization must return a live ECC object before persistence. If legalization or shared `save_data` fails, the wrapper removes partial published outputs and does not report stage success."),
     ),
     "route": (
         ("engine", ("route ECC unavailable", "routing load data failed"), "Without an ECC module, routing and conditional STA initialization do not run."),
@@ -242,13 +247,6 @@ PARAMETER_DETAILS = {
         "pdn_generator.rail": ("The follow-pin PDN rail definitions.", "It creates local power rails on declared routing layers."),
         "pdn_generator.stripe": ("The PDN stripe definitions.", "It creates wider periodic power stripes with declared width, pitch, and offset."),
         "pdn_generator.connect_layers": ("The PDN layer-connection definitions.", "It specifies routing-layer pairs to connect through the power network."),
-    },
-    "fixfanout": {
-        "insert_buffer": ("The buffer cell selection for fanout repair.", "It supplies the buffer implementation used when net optimization inserts drivers."),
-        "max_fanout": ("The maximum allowed fanout constraint.", "It is the threshold that directs fanout optimization and validates the resulting fanout metric."),
-        "file_path.sdc_file": ("The timing-constraint input path.", "It supplies constraints used by the net-optimization tool."),
-        "file_path.lib_files": ("The Liberty input collection.", "It supplies cell timing and drive models to net optimization."),
-        "file_path.lef_files": ("The LEF input collection.", "It supplies physical cell and routing data to net optimization."),
     },
     "cts": {
         "skew_bound": ("The target upper bound for clock skew.", "It directs CTS optimization and is compared against derived clock-quality facts."),
@@ -434,6 +432,10 @@ def _add_virtual_parameters(
             ("workspace_config", "**Meaning:** The Filler workspace-configuration boundary.\n\n**Role:** The runner passes it to `run_filler` before saving the post-insertion database."),
             ("cell_selection", "**Meaning:** The filler-cell selection supplied by the workspace configuration.\n\n**Role:** It constrains which physical filler cells the underlying tool may insert."),
         ),
+        "sizer": (
+            ("script_inputs", "**Meaning:** The generated Sizer environment and command files.\n\n**Role:** The wrapper requires both files before invoking the fixed Sizer command; they materialize workspace paths and tool inputs."),
+            ("staging_outputs", "**Meaning:** The Sizer staging DEF and Verilog paths.\n\n**Role:** Both files must exist before the wrapper can pass the result into DreamPlace legalization."),
+        ),
     }[stage.slug]
     for name, body in records:
         _add(
@@ -481,7 +483,7 @@ def _add_metrics(
                 "database_summary",
                 "The saved ECC database summary available to shared QoR analysis.",
                 "After stage persistence, the shared metric builder may read `Design Layout` and `Design Statis` facts from the feature database to publish generic structural records.",
-                "Legalization and filler currently publish no stage-specific numeric comparison metric; shared database facts are context, not a movement, legality, or filler-coverage result.",
+                f"{stage.step_name} currently publishes no stage-specific numeric comparison metric; shared database facts are context, not proof of stage success or timing improvement.",
             ),
             (
                 "qor_availability",
@@ -560,7 +562,7 @@ def _add_artifacts(
             ("package_metrics", ("harden package metrics", "harden artifact completeness"), "The package-completeness QoR record for the required GDS, LEF, and LIB outputs.", "The harden metric builder checks each declared path and sums absent artifacts."),
         ), evidence)
         return
-    feature_step_disabled = stage.slug in {"floorplan", "legalization", "rcx", "sta"}
+    feature_step_disabled = stage.slug in {"floorplan", "legalization", "sizer", "rcx", "sta"}
     feature_step_calculation = (
         "This runner calls `save_data(..., feature_step=False)`, so the generic stage feature file is intentionally not emitted."
         if feature_step_disabled
