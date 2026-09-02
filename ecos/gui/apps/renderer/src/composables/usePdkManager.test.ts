@@ -188,7 +188,6 @@ const desktopBridge = {
     retainProjectDirectoryReplacement: async () => undefined,
     scanPdkDirectory,
     scanRtlDirectory,
-    watchProjectFile: async () => () => undefined,
     listDesignFiles: async () => [],
     addDesignFiles: async () => ({ added: [], skipped: [] }),
     removeDesignFile: async () => null,

@@ -10,20 +10,15 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { watch, type FSWatcher } from 'chokidar'
 import type {
-  DesktopProjectFileChangedEvent,
-  DesktopProjectFileChangeEventType,
   DesktopProjectDirectoryEntry,
   DesktopProjectTextFileChunk,
   DesktopProjectTextFileTail,
-  DesktopProjectTextFileUpdate,
   ScannedPdkDirectory,
   ScannedRtlDirectory,
   WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
-import { LogTailService } from './logTailService'
-import { isPathWithinRoot, isSameOrAncestorPath } from './pathScope'
+import { isPathWithinRoot } from './pathScope'
 import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
 import {
   addWorkspaceDesignFiles,
@@ -165,10 +160,6 @@ function isSamePath(path: string, otherPath: string): boolean {
   return relative(path, otherPath) === ''
 }
 
-function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
-  return !isSameOrAncestorPath(path, targetPath)
-}
-
 function normalizeRelativePathForMatch(path: string): string {
   return path.replace(/\\/g, '/')
 }
@@ -229,28 +220,6 @@ function isRuntimeProtectedProjectPath(
   )
 }
 
-async function findProjectFileWatchDirectory(
-  path: string,
-  rootPath: string,
-): Promise<string> {
-  let candidate = dirname(path)
-
-  while (candidate && isPathWithinRoot(candidate, rootPath)) {
-    try {
-      const candidateStats = await stat(candidate)
-      if (candidateStats.isDirectory()) return candidate
-    } catch (error) {
-      if (!isNodeErrorWithCode(error, 'ENOENT')) {
-        throw error
-      }
-    }
-
-    candidate = dirname(candidate)
-  }
-
-  return rootPath
-}
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path)
@@ -278,79 +247,16 @@ async function createUniqueReplacementBackupPath(targetPath: string): Promise<st
   throw new Error(`Unable to allocate a replacement backup path for ${targetPath}`)
 }
 
-type ChokidarProjectFileEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir'
-
-function mapChokidarEventType(
-  eventType: ChokidarProjectFileEvent,
-): DesktopProjectFileChangeEventType {
-  switch (eventType) {
-    case 'add':
-    case 'change':
-      return 'change'
-    case 'addDir':
-    case 'unlink':
-    case 'unlinkDir':
-      return 'rename'
-  }
-}
-
-function getRawEventPath(
-  rawPath: string,
-  details: unknown,
-  watchDirectory: string,
-  targetPath: string,
-): string {
-  if (isAbsolute(rawPath)) return rawPath
-
-  const watchedPath =
-    typeof details === 'object' &&
-    details !== null &&
-    'watchedPath' in details &&
-    typeof details.watchedPath === 'string'
-      ? details.watchedPath
-      : watchDirectory
-
-  if (isSamePath(watchedPath, targetPath)) return targetPath
-  return join(watchedPath, rawPath)
-}
-
-async function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      watcher.off('ready', onReady)
-      watcher.off('error', onError)
-    }
-    const onReady = () => {
-      cleanup()
-      resolve()
-    }
-    const onError = (error: unknown) => {
-      cleanup()
-      reject(error)
-    }
-
-    watcher.once('ready', onReady)
-    watcher.once('error', onError)
-  })
-}
-
 export class WorkspaceService {
   private readonly projectScopeProvider: ProjectScopeProvider
   private readonly replacementJournalDirectory: string
   private readonly runtimeMutationGuard?: RuntimeMutationGuard
-  private readonly logTailService: LogTailService
   private readonly directoryReplacements = new Map<string, DirectoryReplacementRecord>()
-  private readonly projectFileWatchers = new Map<string, { close: () => Promise<void> }>()
-  private nextProjectFileWatchId = 1
 
   constructor(options: WorkspaceServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
     this.replacementJournalDirectory = options.replacementJournalDirectory
     this.runtimeMutationGuard = options.runtimeMutationGuard
-    this.logTailService = new LogTailService({
-      projectScopeProvider: this.projectScopeProvider,
-      textReader: this,
-    })
   }
 
   async isProjectDirectory(path: string): Promise<boolean> {
@@ -429,8 +335,6 @@ export class WorkspaceService {
   }
 
   async clearProjectRoot(): Promise<void> {
-    // Per-window scope only. File/log subscriptions are tracked by the IPC layer
-    // and cleaned up for the calling window (or on sender destroy).
     await this.projectScopeProvider.clearProjectRoot()
   }
 
@@ -493,54 +397,6 @@ export class WorkspaceService {
     }
   }
 
-  async readOptionalProjectTextFileUpdate(
-    path: string,
-    fromOffsetBytes: number,
-    maxChars: number,
-  ): Promise<DesktopProjectTextFileUpdate | null> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-    const boundedMaxChars = boundedTextCharCount(maxChars)
-    const readBytes = boundedMaxChars * UTF8_MAX_BYTES_PER_CODE_UNIT
-
-    let handle: Awaited<ReturnType<typeof open>> | null = null
-    try {
-      handle = await open(canonicalPath, 'r')
-      const fileStats = await handle.stat()
-      const normalizedOffset = Math.max(0, Math.floor(fromOffsetBytes))
-      const fileWasTruncated = normalizedOffset > fileStats.size
-      const unreadBytes = Math.max(0, fileStats.size - normalizedOffset)
-      const tooMuchUnread = unreadBytes > readBytes
-      const start =
-        fileWasTruncated || tooMuchUnread
-          ? Math.max(0, fileStats.size - readBytes)
-          : normalizedOffset
-      const length = fileStats.size - start
-      const buffer = Buffer.alloc(length)
-      const result =
-        length > 0 ? await handle.read(buffer, 0, length, start) : { bytesRead: 0 }
-      const raw = buffer.subarray(0, result.bytesRead).toString('utf8')
-      const decodedTooLong = raw.length > boundedMaxChars
-      const truncated = fileWasTruncated || tooMuchUnread || decodedTooLong
-
-      return {
-        content: truncated ? raw.slice(-boundedMaxChars) : raw,
-        fromOffsetBytes: start,
-        nextOffsetBytes: fileStats.size,
-        sizeBytes: fileStats.size,
-        reset: fileWasTruncated || tooMuchUnread || decodedTooLong,
-        truncated,
-      }
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return null
-      }
-
-      throw error
-    } finally {
-      await handle?.close()
-    }
-  }
-
   /**
    * Reads one bounded, UTF-8-safe chunk without materializing a complete NFS
    * log in Electron main or sending an unbounded IPC payload to the renderer.
@@ -590,22 +446,6 @@ export class WorkspaceService {
     } finally {
       await handle?.close()
     }
-  }
-
-  async subscribeProjectLogTail(
-    path: string,
-    options: {
-      maxInitialChars?: number
-      maxChunkChars?: number
-      pollIntervalMs?: number
-    } = {},
-    listener: (event: import('@ecos-studio/shared').DesktopProjectLogTailEvent) => void,
-  ): Promise<string> {
-    return await this.logTailService.subscribeProjectLogTail(path, options, listener)
-  }
-
-  async unsubscribeProjectLogTail(subscriptionId: string): Promise<void> {
-    await this.logTailService.unsubscribeProjectLogTail(subscriptionId)
   }
 
   async readProjectBinaryFile(path: string): Promise<Uint8Array> {
@@ -978,99 +818,6 @@ export class WorkspaceService {
     await rm(journalPath, { force: true })
   }
 
-  async watchProjectFile(
-    path: string,
-    listener: (event: DesktopProjectFileChangedEvent) => void,
-  ): Promise<string> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-    const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    const watchDirectory = await findProjectFileWatchDirectory(canonicalPath, projectRoot)
-    const subscriptionId = `project-file-watch-${this.nextProjectFileWatchId++}`
-    let closed = false
-    let pendingRawEmitTimer: ReturnType<typeof setTimeout> | null = null
-    let pendingRawEventType: DesktopProjectFileChangeEventType = 'change'
-
-    const clearPendingRawEmit = () => {
-      if (!pendingRawEmitTimer) return
-      clearTimeout(pendingRawEmitTimer)
-      pendingRawEmitTimer = null
-    }
-
-    const emit = (eventType: DesktopProjectFileChangeEventType) => {
-      if (closed) return
-      listener({
-        subscriptionId,
-        path: canonicalPath,
-        eventType,
-      })
-    }
-
-    const scheduleRawFallbackEmit = (eventType: DesktopProjectFileChangeEventType) => {
-      pendingRawEventType = eventType
-      if (pendingRawEmitTimer) return
-      pendingRawEmitTimer = setTimeout(() => {
-        pendingRawEmitTimer = null
-        emit(pendingRawEventType)
-      }, 50)
-    }
-
-    const watcher = watch(watchDirectory, {
-      ignored: (path) => shouldIgnoreWatchPath(path, canonicalPath),
-      ignoreInitial: true,
-      persistent: false,
-    })
-
-    watcher.on('all', (eventType, changedPath) => {
-      if (
-        eventType !== 'add' &&
-        eventType !== 'addDir' &&
-        eventType !== 'change' &&
-        eventType !== 'unlink' &&
-        eventType !== 'unlinkDir'
-      ) {
-        return
-      }
-      if (!isSamePath(changedPath, canonicalPath)) return
-
-      clearPendingRawEmit()
-      emit(mapChokidarEventType(eventType))
-    })
-    watcher.on('raw', (rawEventType, rawPath, details) => {
-      if (rawEventType !== 'change' && rawEventType !== 'rename') return
-      if (typeof rawPath !== 'string' || !rawPath) return
-      const changedPath = getRawEventPath(rawPath, details, watchDirectory, canonicalPath)
-      if (!isSamePath(changedPath, canonicalPath)) return
-
-      scheduleRawFallbackEmit(rawEventType === 'rename' ? 'rename' : 'change')
-    })
-    watcher.on('error', () => {
-      emit('error')
-    })
-
-    try {
-      await waitForWatcherReady(watcher)
-    } catch (error) {
-      await watcher.close()
-      throw error
-    }
-
-    this.projectFileWatchers.set(subscriptionId, {
-      close: async () => {
-        closed = true
-        clearPendingRawEmit()
-        await watcher.close()
-      },
-    })
-    return subscriptionId
-  }
-
-  async unwatchProjectFile(subscriptionId: string): Promise<void> {
-    const record = this.projectFileWatchers.get(subscriptionId)
-    if (!record) return
-    await record.close()
-    this.projectFileWatchers.delete(subscriptionId)
-  }
-
   async scanPdkDirectory(path: string): Promise<ScannedPdkDirectory> {
     return await this.projectScopeProvider.scanPdkDirectory(path)
   }
@@ -1104,15 +851,6 @@ export class WorkspaceService {
       )
     await this.assertCanWriteProjectTextFile(canonicalFilelist)
     return await removeWorkspaceDesignFile(projectRoot, filelistEntry)
-  }
-
-  private async closeAllProjectFileWatchers(): Promise<void> {
-    await Promise.all(
-      [...this.projectFileWatchers.values()].map(async (record) => {
-        await record.close()
-      }),
-    )
-    this.projectFileWatchers.clear()
   }
 
   private async assertCanWriteProjectTextFile(canonicalPath: string): Promise<void> {

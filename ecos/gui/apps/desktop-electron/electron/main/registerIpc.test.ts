@@ -144,7 +144,6 @@ function registerHandlers(
       readOptionalProjectTextFile: vi.fn(),
       readOptionalProjectTextFileChunk: vi.fn(),
       readOptionalProjectTextFileTail: vi.fn(),
-      readOptionalProjectTextFileUpdate: vi.fn(),
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       registerProjectReadRoot: vi.fn(),
@@ -168,10 +167,6 @@ function registerHandlers(
         projectRoot: '/work',
       })),
       retainProjectDirectoryReplacement: vi.fn(),
-      subscribeProjectLogTail: vi.fn(),
-      unwatchProjectFile: vi.fn(),
-      unsubscribeProjectLogTail: vi.fn(),
-      watchProjectFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
     },
     workspaceResourceService: {
@@ -222,13 +217,11 @@ function registerHandlers(
       describeWorkspaceSpec: vi.fn(),
       engineeringSnapshot: vi.fn(),
       exportSignoff: vi.fn(),
-      openArtifact: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
-      readArtifactChunk: vi.fn(),
       resetFlow: vi.fn(),
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
@@ -1571,30 +1564,6 @@ describe('registerIpc', () => {
       truncated: true,
       sizeBytes: 4096,
     })
-    services.workspaceService.readOptionalProjectTextFileUpdate.mockResolvedValue({
-      content: 'next log',
-      fromOffsetBytes: 1024,
-      nextOffsetBytes: 1032,
-      sizeBytes: 1032,
-      reset: false,
-      truncated: false,
-    })
-    services.workspaceService.subscribeProjectLogTail.mockImplementation(
-      async (_path, _options, listener) => {
-        listener({
-          subscriptionId: 'project-log-tail-1',
-          path: '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-          eventType: 'snapshot',
-          content: 'live log',
-          fromOffsetBytes: 0,
-          nextOffsetBytes: 8,
-          sizeBytes: 8,
-          reset: false,
-          truncated: false,
-        })
-        return 'project-log-tail-1'
-      },
-    )
     services.workspaceService.readProjectBinaryFile.mockResolvedValue(
       Uint8Array.from([0x45, 0x43, 0x4f, 0x53]),
     )
@@ -1741,17 +1710,6 @@ describe('registerIpc', () => {
       sizeBytes: 4096,
     })
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceReadOptionalProjectTextFileUpdate)?.(
-        event,
-        '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-        1024,
-        2048,
-      ),
-    ).resolves.toMatchObject({
-      content: 'next log',
-      nextOffsetBytes: 1032,
-    })
-    await expect(
       handlers.get(desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk)?.(
         event,
         '/tmp/project/Synthesis_yosys/log/Synthesis.log',
@@ -1762,16 +1720,6 @@ describe('registerIpc', () => {
       content: 'complete log',
       eof: true,
     })
-    await expect(
-      handlers.get(desktopApiIpcChannels.workspaceSubscribeProjectLogTail)?.(
-        event,
-        '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-        {
-          maxInitialChars: 1024,
-          maxChunkChars: 1024,
-        },
-      ),
-    ).resolves.toBe('project-log-tail-1')
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceReadProjectBinaryFile)?.(
         event,
@@ -1851,19 +1799,8 @@ describe('registerIpc', () => {
       services.workspaceService.readOptionalProjectTextFileTail,
     ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024)
     expect(
-      services.workspaceService.readOptionalProjectTextFileUpdate,
-    ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024, 2048)
-    expect(
       services.workspaceService.readOptionalProjectTextFileChunk,
     ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 0, 262144)
-    expect(services.workspaceService.subscribeProjectLogTail).toHaveBeenCalledWith(
-      '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-      {
-        maxInitialChars: 1024,
-        maxChunkChars: 1024,
-      },
-      expect.any(Function),
-    )
     expect(services.workspaceService.readProjectBinaryFile).toHaveBeenCalledWith(
       '/tmp/project/output/preview.bin',
     )
@@ -3081,134 +3018,5 @@ describe('registerIpc', () => {
     })
 
     expect(electronLogger.warn).not.toHaveBeenCalled()
-  })
-
-  it('sends project file change notifications to the requesting renderer', async () => {
-    const { handlers, services } = registerHandlers()
-    const sender = Object.assign(new EventEmitter(), {
-      isDestroyed: vi.fn(() => false),
-      send: vi.fn(),
-    })
-    const event = { sender }
-    services.workspaceService.watchProjectFile.mockImplementation(
-      async (_path, listener) => {
-        listener({
-          subscriptionId: 'project-file-watch-1',
-          path: '/tmp/project/home/flow.json',
-          eventType: 'change',
-        })
-        return 'project-file-watch-1'
-      },
-    )
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.workspaceWatchProjectFile)?.(
-        event,
-        '/tmp/project/home/flow.json',
-      ),
-    ).resolves.toBe('project-file-watch-1')
-
-    expect(sender.listenerCount('destroyed')).toBe(1)
-
-    await handlers.get(desktopApiIpcChannels.workspaceUnwatchProjectFile)?.(
-      event,
-      'project-file-watch-1',
-    )
-
-    expect(services.workspaceService.watchProjectFile).toHaveBeenCalledWith(
-      '/tmp/project/home/flow.json',
-      expect.any(Function),
-    )
-    expect(sender.send).toHaveBeenCalledWith('workspace:file-changed', {
-      subscriptionId: 'project-file-watch-1',
-      path: '/tmp/project/home/flow.json',
-      eventType: 'change',
-    })
-    expect(services.workspaceService.unwatchProjectFile).toHaveBeenCalledWith(
-      'project-file-watch-1',
-    )
-    expect(sender.listenerCount('destroyed')).toBe(0)
-  })
-
-  it('unwatches a project file when the requesting renderer is destroyed', async () => {
-    const { handlers, services } = registerHandlers()
-    const sender = Object.assign(new EventEmitter(), {
-      isDestroyed: vi.fn(() => false),
-      send: vi.fn(),
-    })
-    const event = { sender }
-    services.workspaceService.watchProjectFile.mockResolvedValue('project-file-watch-1')
-
-    await handlers.get(desktopApiIpcChannels.workspaceWatchProjectFile)?.(
-      event,
-      '/tmp/project/home/flow.json',
-    )
-
-    expect(sender.listenerCount('destroyed')).toBe(1)
-
-    sender.emit('destroyed')
-    await vi.waitFor(() => {
-      expect(services.workspaceService.unwatchProjectFile).toHaveBeenCalledWith(
-        'project-file-watch-1',
-      )
-    })
-
-    await handlers.get(desktopApiIpcChannels.workspaceUnwatchProjectFile)?.(
-      event,
-      'project-file-watch-1',
-    )
-
-    expect(services.workspaceService.unwatchProjectFile).toHaveBeenCalledTimes(1)
-    expect(sender.listenerCount('destroyed')).toBe(0)
-  })
-
-  it('unsubscribes live log tails when the renderer is destroyed or unsubscribes explicitly', async () => {
-    const { handlers, services } = registerHandlers()
-    const sender = Object.assign(new EventEmitter(), {
-      isDestroyed: vi.fn(() => false),
-      send: vi.fn(),
-    })
-    const event = { sender }
-    services.workspaceService.subscribeProjectLogTail.mockImplementation(
-      async (_path, _options, listener) => {
-        listener({
-          subscriptionId: 'project-log-tail-1',
-          path: '/tmp/project/home/flow.log',
-          eventType: 'snapshot',
-          content: 'log chunk',
-        })
-        return 'project-log-tail-1'
-      },
-    )
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.workspaceSubscribeProjectLogTail)?.(
-        event,
-        '/tmp/project/home/flow.log',
-        {
-          maxInitialChars: 256,
-          maxChunkChars: 256,
-        },
-      ),
-    ).resolves.toBe('project-log-tail-1')
-
-    expect(sender.listenerCount('destroyed')).toBe(1)
-    expect(sender.send).toHaveBeenCalledWith(
-      'workspace:log-tail',
-      expect.objectContaining({
-        subscriptionId: 'project-log-tail-1',
-        eventType: 'snapshot',
-        content: 'log chunk',
-      }),
-    )
-
-    await handlers.get(desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail)?.(
-      event,
-      'project-log-tail-1',
-    )
-    expect(services.workspaceService.unsubscribeProjectLogTail).toHaveBeenCalledWith(
-      'project-log-tail-1',
-    )
-    expect(sender.listenerCount('destroyed')).toBe(0)
   })
 })

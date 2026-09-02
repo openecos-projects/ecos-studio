@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -11,8 +11,6 @@ import type {
   DesktopRtlSourceDialogOptions,
   ChipViewerOpenRequest,
   DesktopMenuEventId,
-  DesktopProjectFileChangedEvent,
-  DesktopProjectLogTailEvent,
   ProjectManifestMutationRequest,
   ResourceJob,
   ResourceImportLocalRequest,
@@ -243,13 +241,6 @@ const desktopApi: DesktopApi = {
         path,
         maxChars,
       ),
-    readOptionalProjectTextFileUpdate: (path, fromOffsetBytes, maxChars) =>
-      invokeDesktop(
-        desktopApiIpcChannels.workspaceReadOptionalProjectTextFileUpdate,
-        path,
-        fromOffsetBytes,
-        maxChars,
-      ),
     readOptionalProjectTextFileChunk: (path, fromOffsetBytes, maxBytes) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
@@ -257,32 +248,6 @@ const desktopApi: DesktopApi = {
         fromOffsetBytes,
         maxBytes,
       ),
-    subscribeProjectLogTail: async (path, options, listener) => {
-      const subscriptionId = (await ipcRenderer.invoke(
-        desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
-        path,
-        options,
-      )) as string
-      const eventListener = (
-        _event: IpcRendererEvent,
-        payload: DesktopProjectLogTailEvent,
-      ) => {
-        if (payload.subscriptionId !== subscriptionId) return
-        listener(payload)
-      }
-      ipcRenderer.on(desktopApiEventChannels.workspaceLogTail, eventListener)
-
-      return () => {
-        ipcRenderer.removeListener(
-          desktopApiEventChannels.workspaceLogTail,
-          eventListener,
-        )
-        void invokeDesktop(
-          desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
-          subscriptionId,
-        )
-      }
-    },
     readProjectBinaryFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectBinaryFile, path),
     writeProjectTextFile: (path, content) =>
@@ -321,31 +286,6 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceAddDesignFiles, sourcePaths),
     removeDesignFile: (filelistEntry) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRemoveDesignFile, filelistEntry),
-    watchProjectFile: async (path, listener) => {
-      const subscriptionId = (await ipcRenderer.invoke(
-        desktopApiIpcChannels.workspaceWatchProjectFile,
-        path,
-      )) as string
-      const eventListener = (
-        _event: IpcRendererEvent,
-        payload: DesktopProjectFileChangedEvent,
-      ) => {
-        if (payload.subscriptionId !== subscriptionId) return
-        listener(payload)
-      }
-      ipcRenderer.on(desktopApiEventChannels.workspaceFileChanged, eventListener)
-
-      return () => {
-        ipcRenderer.removeListener(
-          desktopApiEventChannels.workspaceFileChanged,
-          eventListener,
-        )
-        void invokeDesktop(
-          desktopApiIpcChannels.workspaceUnwatchProjectFile,
-          subscriptionId,
-        )
-      }
-    },
   },
   chipViewer: {
     open: (request: ChipViewerOpenRequest) =>
@@ -457,10 +397,6 @@ const desktopApi: DesktopApi = {
     runtime: {
       engineeringSnapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
-      openArtifact: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeOpenArtifact, request),
-      readArtifactChunk: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeReadArtifactChunk, request),
       snapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
       waitForOperation: (request) =>

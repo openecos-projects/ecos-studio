@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
@@ -178,7 +178,6 @@ function getDesktopServices() {
         onNotification,
       }),
     lazyWorkspaceOpen: false,
-    openPath: (path) => shell.openPath(path),
   })
   installRuntimeQuitGuard({
     app,

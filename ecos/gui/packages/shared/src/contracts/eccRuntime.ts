@@ -424,24 +424,6 @@ export type EccPersistedEngineeringSnapshot = Omit<
   artifacts: EccEngineeringAnalysisArtifactRef[]
 }
 
-export interface EccArtifactReadRequest extends EccWorkspaceHandleRequest {
-  artifactId: string
-  length: number
-  offset: number
-}
-
-export interface EccArtifactChunk {
-  data: Uint8Array
-  eof: boolean
-  nextOffset: number
-  sizeBytes: number
-}
-
-export interface EccArtifactOpenRequest extends EccWorkspaceHandleRequest {
-  artifactId: string
-  viewer: 'system'
-}
-
 export interface EccRuntimeProtocolPayload {
   eventId: string
   kind?: EccRuntimeOperationKind
@@ -570,8 +552,6 @@ export interface EccRuntimeApi {
     engineeringSnapshot(
       request: EccWorkspaceHandleRequest,
     ): Promise<EccEngineeringSnapshot>
-    openArtifact(request: EccArtifactOpenRequest): Promise<{ opened: boolean }>
-    readArtifactChunk(request: EccArtifactReadRequest): Promise<EccArtifactChunk>
     snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
   }

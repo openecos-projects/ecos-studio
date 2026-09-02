@@ -197,8 +197,6 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       readOptionalProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       readOptionalProjectTextFileTail: vi.fn(),
-      readOptionalProjectTextFileUpdate: vi.fn(),
-      subscribeProjectLogTail: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
       listProjectDirectory: vi.fn(),
@@ -213,7 +211,6 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       listDesignFiles: vi.fn(),
       addDesignFiles: vi.fn(),
       removeDesignFile: vi.fn(),
-      watchProjectFile: vi.fn(),
     },
     runtime: {
       events: { onEvent: runtimeEventBridge.onEvent },

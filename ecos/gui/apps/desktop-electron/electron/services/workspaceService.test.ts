@@ -1,17 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  appendFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { DesktopProjectFileChangedEvent } from '@ecos-studio/shared'
 import { WorkspaceService } from './workspaceService'
 
 const tempDirectories: string[] = []
@@ -64,24 +54,6 @@ function createWorkspaceService(
     projectScopeProvider,
     service,
   }
-}
-
-async function waitForProjectFileEvent(
-  listener: ReturnType<typeof vi.fn>,
-  event: Partial<DesktopProjectFileChangedEvent>,
-): Promise<void> {
-  await vi.waitFor(
-    () => {
-      expect(listener).toHaveBeenCalledWith(expect.objectContaining(event))
-    },
-    { timeout: 3000 },
-  )
-}
-
-async function delay(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, ms)
-  })
 }
 
 describe('WorkspaceService', () => {
@@ -223,53 +195,6 @@ describe('WorkspaceService', () => {
       content: 'third line',
       truncated: true,
       sizeBytes: Buffer.byteLength('first line\nsecond line\nthird line'),
-    })
-  })
-
-  it('reads appended text updates from a byte offset', async () => {
-    const directory = await createTempDir('ecos-workspace-service-update-')
-    const filePath = join(directory, 'Route_openroad', 'log', 'Route.log')
-    await mkdir(join(directory, 'Route_openroad', 'log'), { recursive: true })
-    await writeFile(filePath, 'alpha\nbeta', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const offset = Buffer.byteLength('alpha')
-
-    await expect(
-      service.readOptionalProjectTextFileUpdate(
-        '/workspace/Route_openroad/log/Route.log',
-        offset,
-        32,
-      ),
-    ).resolves.toMatchObject({
-      content: '\nbeta',
-      fromOffsetBytes: offset,
-      nextOffsetBytes: Buffer.byteLength('alpha\nbeta'),
-      sizeBytes: Buffer.byteLength('alpha\nbeta'),
-      reset: false,
-      truncated: false,
-    })
-  })
-
-  it('resets text updates when the unread range exceeds the bounded tail window', async () => {
-    const directory = await createTempDir('ecos-workspace-service-update-reset-')
-    const filePath = join(directory, 'Route_openroad', 'log', 'Route.log')
-    await mkdir(join(directory, 'Route_openroad', 'log'), { recursive: true })
-    await writeFile(filePath, '0123456789abcdefghijklmnopqrstuvwxyz', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-
-    await expect(
-      service.readOptionalProjectTextFileUpdate(
-        '/workspace/Route_openroad/log/Route.log',
-        0,
-        10,
-      ),
-    ).resolves.toMatchObject({
-      content: 'qrstuvwxyz',
-      nextOffsetBytes: Buffer.byteLength('0123456789abcdefghijklmnopqrstuvwxyz'),
-      reset: true,
-      truncated: true,
     })
   })
 
@@ -746,176 +671,5 @@ describe('WorkspaceService', () => {
 
     await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(runtimeMutationGuard.isWorkspaceRuntimeActive).toHaveBeenCalledWith(directory)
-  })
-
-  it('watches a project-scoped file through the validated canonical path', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-')
-    const filePath = join(directory, 'flow.json')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
-
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    expect(subscriptionId).toMatch(/^project-file-watch-/)
-    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-      '/workspace/home/flow.json',
-    )
-
-    await service.unwatchProjectFile(subscriptionId)
-  })
-
-  it('emits change events for an existing watched file', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-change-')
-    const filePath = join(directory, 'flow.json')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    try {
-      await writeFile(join(directory, 'unrelated.log'), 'noise', 'utf8')
-      await delay(100)
-      expect(listener).not.toHaveBeenCalled()
-
-      await writeFile(filePath, '{"steps":[{"state":"ongoing"}]}', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-
-      listener.mockClear()
-      await appendFile(filePath, '\nmore log-like content', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('emits when a missing watched file is created later', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-missing-')
-    const filePath = join(directory, 'CTS_ecc', 'log', 'CTS.log')
-    await mkdir(join(directory, 'CTS_ecc', 'log'), { recursive: true })
-
-    const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
-
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/CTS_ecc/log/CTS.log',
-      listener,
-    )
-
-    try {
-      expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-        '/workspace/CTS_ecc/log/CTS.log',
-      )
-
-      await writeFile(filePath, 'created after watch', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('falls back to the project root when parent directories do not exist yet', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-root-fallback-')
-    const filePath = join(directory, 'legalization_dreamplace', 'log', 'legalization.log')
-    const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
-
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/legalization_dreamplace/log/legalization.log',
-      listener,
-    )
-
-    try {
-      expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-        '/workspace/legalization_dreamplace/log/legalization.log',
-      )
-      expect(projectScopeProvider.getProjectRoot).toHaveBeenCalledTimes(1)
-
-      await mkdir(join(directory, 'legalization_dreamplace', 'log'), { recursive: true })
-      await writeFile(filePath, 'created under missing parents', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('emits when the watched file is replaced by rename', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-replace-')
-    const filePath = join(directory, 'flow.json')
-    const replacementPath = join(directory, 'flow.json.tmp')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    try {
-      await writeFile(replacementPath, '{"steps":[{"state":"complete"}]}', 'utf8')
-      await rename(replacementPath, filePath)
-
-      await vi.waitFor(
-        () => {
-          expect(listener).toHaveBeenCalledWith(
-            expect.objectContaining({
-              subscriptionId,
-              path: filePath,
-            }),
-          )
-          const events = listener.mock.calls.map(([event]) => event.eventType)
-          expect(
-            events.some((eventType) => eventType === 'change' || eventType === 'rename'),
-          ).toBe(true)
-        },
-        { timeout: 3000 },
-      )
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('does not emit after unwatching a project file', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-unwatch-')
-    const filePath = join(directory, 'flow.json')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    await service.unwatchProjectFile(subscriptionId)
-    await writeFile(filePath, '{"steps":[{"state":"ongoing"}]}', 'utf8')
-    await delay(150)
-
-    expect(listener).not.toHaveBeenCalled()
   })
 })

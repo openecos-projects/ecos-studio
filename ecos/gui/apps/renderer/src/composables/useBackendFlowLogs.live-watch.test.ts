@@ -16,8 +16,6 @@ const testState = vi.hoisted(() => ({
   })),
   runtimeEvents: null as Ref<DesignRuntimeEvent[]> | null,
   readOptionalProjectTextFileChunk: vi.fn(),
-  subscribeProjectLogTail: vi.fn(),
-  watchProjectFile: vi.fn(),
 }))
 
 vi.mock('vue', async () => {
@@ -54,11 +52,8 @@ vi.mock('@/utils/projectFiles', () => ({
   readOptionalProjectTextFile: vi.fn(),
   readOptionalProjectTextFileChunk: testState.readOptionalProjectTextFileChunk,
   readOptionalProjectTextFileTail: vi.fn(),
-  readOptionalProjectTextFileUpdate: vi.fn(),
   readProjectBlobUrl: vi.fn(),
   readProjectTextFile: vi.fn(),
-  subscribeProjectLogTail: testState.subscribeProjectLogTail,
-  watchProjectFile: testState.watchProjectFile,
 }))
 
 vi.mock('@/utils/projectFs', () => ({
@@ -115,19 +110,6 @@ describe('useBackendFlowLogs runtime updates', () => {
     eventSequence = 0
     testState.getWorkspaceResourceIndexApi.mockReset()
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [] } })
-  })
-
-  it('does not attach NFS file or log subscriptions while a GUI flow is active', async () => {
-    testState.currentProject = ref(null)
-    testState.runtimeEvents = ref([])
-    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
-    const scope = effectScope()
-    scope.run(() => useBackendFlowLogs())
-
-    await Promise.resolve()
-    expect(testState.watchProjectFile).not.toHaveBeenCalled()
-    expect(testState.subscribeProjectLogTail).not.toHaveBeenCalled()
-    scope.stop()
   })
 
   it('uses ECC log cursors for live output without replacing prior step logs', async () => {

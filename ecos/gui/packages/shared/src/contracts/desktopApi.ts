@@ -35,12 +35,7 @@ import type {
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
 } from '../utils/projectManifest.ts'
-import type {
-  DesktopEventUnsubscribe,
-  DesktopMenuEventId,
-  DesktopProjectFileChangedEvent,
-  DesktopProjectLogTailEvent,
-} from './desktopEvents.ts'
+import type { DesktopEventUnsubscribe, DesktopMenuEventId } from './desktopEvents.ts'
 import type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -141,27 +136,12 @@ export interface DesktopProjectTextFileTail {
   sizeBytes: number
 }
 
-export interface DesktopProjectTextFileUpdate {
-  content: string
-  fromOffsetBytes: number
-  nextOffsetBytes: number
-  sizeBytes: number
-  reset: boolean
-  truncated: boolean
-}
-
 /** A bounded sequential chunk from a project-scoped UTF-8 text file. */
 export interface DesktopProjectTextFileChunk {
   content: string
   eof: boolean
   nextOffsetBytes: number
   sizeBytes: number
-}
-
-export interface DesktopProjectLogTailSubscriptionOptions {
-  maxInitialChars?: number
-  maxChunkChars?: number
-  pollIntervalMs?: number
 }
 
 export interface DesktopProjectDirectoryEntry {
@@ -295,21 +275,11 @@ export interface DesktopApi {
       path: string,
       maxChars: number,
     ): Promise<DesktopProjectTextFileTail | null>
-    readOptionalProjectTextFileUpdate?(
-      path: string,
-      fromOffsetBytes: number,
-      maxChars: number,
-    ): Promise<DesktopProjectTextFileUpdate | null>
     readOptionalProjectTextFileChunk?(
       path: string,
       fromOffsetBytes: number,
       maxBytes: number,
     ): Promise<DesktopProjectTextFileChunk | null>
-    subscribeProjectLogTail?(
-      path: string,
-      options: DesktopProjectLogTailSubscriptionOptions,
-      listener: (event: DesktopProjectLogTailEvent) => void,
-    ): Promise<DesktopEventUnsubscribe>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
@@ -326,10 +296,6 @@ export interface DesktopApi {
     listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>
     addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult>
     removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null>
-    watchProjectFile(
-      path: string,
-      listener: (event: DesktopProjectFileChangedEvent) => void,
-    ): Promise<DesktopEventUnsubscribe>
   }
   chipViewer: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>

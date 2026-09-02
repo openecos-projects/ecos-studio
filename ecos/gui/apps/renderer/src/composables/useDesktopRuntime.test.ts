@@ -149,7 +149,6 @@ const desktopBridge = {
       rootPath: '',
       files: [],
     }),
-    watchProjectFile: async () => () => undefined,
     listDesignFiles: async () => [],
     addDesignFiles: async () => ({ added: [], skipped: [] }),
     removeDesignFile: async () => null,

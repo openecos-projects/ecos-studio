@@ -1,7 +1,4 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
-import { mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -461,57 +458,6 @@ describe('EccRpcRuntimeService pool', () => {
       'workspace.close',
     ])
     expect(pool.sidecarFor('/work/idle').shutdownCount).toBe(1)
-  })
-
-  it('reads a bounded artifact chunk by opaque id without accepting a path', async () => {
-    const pool = createPool()
-    const workspaceDirectory = await mkdtemp(join(tmpdir(), 'ecos-artifact-runtime-'))
-    await writeFile(`${workspaceDirectory}/artifact.bin`, 'abcdef')
-    const workspace = await pool.service.openWorkspace({
-      directory: workspaceDirectory,
-    })
-    pool.clientFor(workspaceDirectory).responses.push({
-      schemaVersion: 1,
-      artifacts: [
-        {
-          artifactId: 'artifact-1',
-          reference: 'artifact.bin',
-          sizeBytes: 6,
-        },
-      ],
-      workspaceId: `id-${workspaceDirectory}`,
-      workspaceRevision: 1,
-    })
-
-    const chunk = await pool.service.readArtifactChunk({
-      artifactId: 'artifact-1',
-      length: 3,
-      offset: 2,
-      workspaceHandle: workspace.workspaceHandle,
-    })
-
-    expect(new TextDecoder().decode(chunk.data)).toBe('cde')
-    expect(chunk).toMatchObject({ eof: false, nextOffset: 5, sizeBytes: 6 })
-    pool.clientFor(workspaceDirectory).responses.push({
-      schemaVersion: 1,
-      artifacts: [
-        {
-          artifactId: 'artifact-1',
-          reference: 'artifact.bin',
-          sizeBytes: 6,
-        },
-      ],
-      workspaceId: `id-${workspaceDirectory}`,
-      workspaceRevision: 1,
-    })
-    await expect(
-      pool.service.readArtifactChunk({
-        artifactId: '../artifact.bin',
-        length: 3,
-        offset: 0,
-        workspaceHandle: workspace.workspaceHandle,
-      }),
-    ).rejects.toThrow('Artifact not found')
   })
 
   it('shuts down and removes a runtime when its last handle closes', async () => {

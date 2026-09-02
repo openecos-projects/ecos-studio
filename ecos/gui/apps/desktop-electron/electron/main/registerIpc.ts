@@ -12,8 +12,6 @@ import { dirname } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
-  type DesktopProjectFileChangedEvent,
-  type DesktopProjectLogTailEvent,
   type DesktopProjectDirectoryEntry,
   type DesktopProjectManagementWorkspaceTextsRequest,
   type DesktopProjectManagementWorkspaceTextsResult,
@@ -30,8 +28,6 @@ import {
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
-  type EccArtifactOpenRequest,
-  type EccArtifactReadRequest,
   type EccRuntimeEvent,
   type EccRuntimeOperation,
   type EccRuntimeOperationRequest,
@@ -55,7 +51,6 @@ import {
   type WorkspaceCreationModelRequest,
   type DesktopProjectTextFileChunk,
   type DesktopProjectTextFileTail,
-  type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
@@ -247,26 +242,12 @@ export interface DesktopBridgeServices {
       path: string,
       maxChars: number,
     ): Promise<DesktopProjectTextFileTail | null>
-    readOptionalProjectTextFileUpdate(
-      path: string,
-      fromOffsetBytes: number,
-      maxChars: number,
-    ): Promise<DesktopProjectTextFileUpdate | null>
     readOptionalProjectTextFileChunk(
       path: string,
       fromOffsetBytes: number,
       maxBytes: number,
     ): Promise<DesktopProjectTextFileChunk | null>
     listPendingExternalReadRoots?(): Promise<string[]>
-    subscribeProjectLogTail(
-      path: string,
-      options: {
-        maxInitialChars?: number
-        maxChunkChars?: number
-        pollIntervalMs?: number
-      },
-      listener: (event: DesktopProjectLogTailEvent) => void,
-    ): Promise<string>
     registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
@@ -288,12 +269,6 @@ export interface DesktopBridgeServices {
     restoreProjectDirectoryReplacement(replacementId: string): Promise<void>
     finalizeProjectDirectoryReplacement(replacementId: string): Promise<void>
     retainProjectDirectoryReplacement(replacementId: string): Promise<void>
-    unwatchProjectFile(subscriptionId: string): Promise<void>
-    unsubscribeProjectLogTail(subscriptionId: string): Promise<void>
-    watchProjectFile(
-      path: string,
-      listener: (event: DesktopProjectFileChangedEvent) => void,
-    ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     pathExists(path: string): Promise<boolean>
@@ -387,8 +362,6 @@ export interface DesktopBridgeServices {
     describeWorkspaceSpec(): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
-    openArtifact(request: EccArtifactOpenRequest): Promise<unknown>
-    readArtifactChunk(request: EccArtifactReadRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
     operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
@@ -721,20 +694,6 @@ export function registerIpc(
     )
   })
 
-  const projectFileWatchSubscriptions = new Map<
-    string,
-    {
-      sender: IpcMainInvokeEvent['sender']
-      onDestroyed: () => void
-    }
-  >()
-  const projectLogTailSubscriptions = new Map<
-    string,
-    {
-      sender: IpcMainInvokeEvent['sender']
-      onDestroyed: () => void
-    }
-  >()
   const shellSessions = new Map<
     string,
     {
@@ -973,34 +932,6 @@ export function registerIpc(
       workspaceRerunToken: token,
     })
   })
-
-  const unwatchProjectFile = async (subscriptionId: string): Promise<void> => {
-    const subscription = projectFileWatchSubscriptions.get(subscriptionId)
-
-    if (!subscription) {
-      return
-    }
-
-    projectFileWatchSubscriptions.delete(subscriptionId)
-    if (typeof subscription.sender.off === 'function') {
-      subscription.sender.off('destroyed', subscription.onDestroyed)
-    }
-    await services.workspaceService.unwatchProjectFile(subscriptionId)
-  }
-
-  const unsubscribeProjectLogTail = async (subscriptionId: string): Promise<void> => {
-    const subscription = projectLogTailSubscriptions.get(subscriptionId)
-
-    if (!subscription) {
-      return
-    }
-
-    projectLogTailSubscriptions.delete(subscriptionId)
-    if (typeof subscription.sender.off === 'function') {
-      subscription.sender.off('destroyed', subscription.onDestroyed)
-    }
-    await services.workspaceService.unsubscribeProjectLogTail(subscriptionId)
-  }
 
   const killShellSession = async (sessionId: string): Promise<void> => {
     const session = shellSessions.get(sessionId)
@@ -1570,19 +1501,6 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.workspaceClearProjectRoot, async (event) => {
     const sender = event.sender
-    for (const [
-      subscriptionId,
-      subscription,
-    ] of projectFileWatchSubscriptions.entries()) {
-      if (subscription.sender === sender) {
-        await unwatchProjectFile(subscriptionId)
-      }
-    }
-    for (const [subscriptionId, subscription] of projectLogTailSubscriptions.entries()) {
-      if (subscription.sender === sender) {
-        await unsubscribeProjectLogTail(subscriptionId)
-      }
-    }
     await services.workspaceService.clearProjectRoot()
     if (typeof sender.id === 'number') {
       services.backendWorkspaceService.clearWindow(sender.id)
@@ -1640,17 +1558,6 @@ export function registerIpc(
   )
 
   handle(
-    desktopApiIpcChannels.workspaceReadOptionalProjectTextFileUpdate,
-    async (_event, path, fromOffsetBytes, maxChars) => {
-      return await services.workspaceService.readOptionalProjectTextFileUpdate(
-        path as string,
-        fromOffsetBytes as number,
-        maxChars as number,
-      )
-    },
-  )
-
-  handle(
     desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
     async (_event, path, fromOffsetBytes, maxBytes) => {
       return await services.workspaceService.readOptionalProjectTextFileChunk(
@@ -1658,48 +1565,6 @@ export function registerIpc(
         fromOffsetBytes as number,
         maxBytes as number,
       )
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
-    async (event, path, options) => {
-      const sender = event.sender
-      const isSenderDestroyed = (): boolean =>
-        typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
-      let subscriptionId: string | null = null
-      const onDestroyed = (): void => {
-        if (!subscriptionId) return
-        void unsubscribeProjectLogTail(subscriptionId)
-      }
-
-      subscriptionId = await services.workspaceService.subscribeProjectLogTail(
-        path as string,
-        options as {
-          maxInitialChars?: number
-          maxChunkChars?: number
-          pollIntervalMs?: number
-        },
-        (payload) => {
-          if (isSenderDestroyed()) return
-          if (typeof sender.send === 'function') {
-            sender.send(desktopApiEventChannels.workspaceLogTail, payload)
-          }
-        },
-      )
-      projectLogTailSubscriptions.set(subscriptionId, {
-        sender,
-        onDestroyed,
-      })
-      if (typeof sender.once === 'function') {
-        sender.once('destroyed', onDestroyed)
-      }
-
-      if (isSenderDestroyed()) {
-        onDestroyed()
-      }
-
-      return subscriptionId
     },
   )
 
@@ -1821,52 +1686,6 @@ export function registerIpc(
       invalidateBackendWorkspaceForSender(event.sender)
       services.backendProjectComparisonService.invalidateWorkspace(workspaceRoot)
       return result
-    },
-  )
-
-  handle(desktopApiIpcChannels.workspaceWatchProjectFile, async (event, path) => {
-    const sender = event.sender
-    let subscriptionId: string | null = null
-    const onDestroyed = (): void => {
-      if (!subscriptionId) return
-      void unwatchProjectFile(subscriptionId)
-    }
-
-    subscriptionId = await services.workspaceService.watchProjectFile(
-      path as string,
-      (payload) => {
-        if (event.sender.isDestroyed()) return
-        if (typeof event.sender.send === 'function') {
-          event.sender.send(desktopApiEventChannels.workspaceFileChanged, payload)
-        }
-      },
-    )
-    projectFileWatchSubscriptions.set(subscriptionId, {
-      sender,
-      onDestroyed,
-    })
-    if (typeof sender.once === 'function') {
-      sender.once('destroyed', onDestroyed)
-    }
-
-    if (sender.isDestroyed()) {
-      onDestroyed()
-    }
-
-    return subscriptionId
-  })
-
-  handle(
-    desktopApiIpcChannels.workspaceUnwatchProjectFile,
-    async (_event, subscriptionId) => {
-      await unwatchProjectFile(subscriptionId as string)
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
-    async (_event, subscriptionId) => {
-      await unsubscribeProjectLogTail(subscriptionId as string)
     },
   )
 
@@ -2284,18 +2103,6 @@ export function registerIpc(
   handle(desktopApiIpcChannels.eccRuntimeSnapshot, async (_event, request) => {
     return await services.eccRuntimeService.workspaceSnapshot(
       request as EccWorkspaceHandleRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeReadArtifactChunk, async (_event, request) => {
-    return await services.eccRuntimeService.readArtifactChunk(
-      request as EccArtifactReadRequest,
-    )
-  })
-
-  handle(desktopApiIpcChannels.eccRuntimeOpenArtifact, async (_event, request) => {
-    return await services.eccRuntimeService.openArtifact(
-      request as EccArtifactOpenRequest,
     )
   })
 

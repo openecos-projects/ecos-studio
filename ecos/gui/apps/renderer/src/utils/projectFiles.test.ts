@@ -4,7 +4,6 @@ import {
   getMimeTypeFromPath,
   readOptionalProjectTextFileChunk,
   readOptionalProjectTextFileTail,
-  readOptionalProjectTextFileUpdate,
   readProjectTextFileTail,
   readProjectBlobUrl,
   readProjectTextFile,
@@ -60,14 +59,6 @@ describe('projectFiles', () => {
       truncated: true,
       sizeBytes: 4096,
     })
-    const readOptionalProjectTextUpdate = vi.fn().mockResolvedValue({
-      content: 'next',
-      fromOffsetBytes: 10,
-      nextOffsetBytes: 14,
-      sizeBytes: 14,
-      reset: false,
-      truncated: false,
-    })
     const readOptionalProjectTextChunk = vi.fn().mockResolvedValue({
       content: 'complete log',
       eof: true,
@@ -85,7 +76,6 @@ describe('projectFiles', () => {
           readProjectTextFile: readProjectText,
           readProjectTextFileTail: readProjectTextTail,
           readOptionalProjectTextFileTail: readOptionalProjectTextTail,
-          readOptionalProjectTextFileUpdate: readOptionalProjectTextUpdate,
           readOptionalProjectTextFileChunk: readOptionalProjectTextChunk,
           readProjectBinaryFile: readProjectBinary,
           writeProjectTextFile: writeProjectText,
@@ -112,14 +102,6 @@ describe('projectFiles', () => {
       sizeBytes: 4096,
     })
     await expect(
-      readOptionalProjectTextFileUpdate('logs/run.log', 10, 64, {
-        projectPath: '/workspace/demo',
-      }),
-    ).resolves.toMatchObject({
-      content: 'next',
-      nextOffsetBytes: 14,
-    })
-    await expect(
       readOptionalProjectTextFileChunk('logs/run.log', 0, 262144, {
         projectPath: '/workspace/demo',
       }),
@@ -137,11 +119,6 @@ describe('projectFiles', () => {
     expect(readProjectTextTail).toHaveBeenCalledWith('/workspace/demo/logs/run.log', 64)
     expect(readOptionalProjectTextTail).toHaveBeenCalledWith(
       '/workspace/demo/logs/run.log',
-      64,
-    )
-    expect(readOptionalProjectTextUpdate).toHaveBeenCalledWith(
-      '/workspace/demo/logs/run.log',
-      10,
       64,
     )
     expect(readOptionalProjectTextChunk).toHaveBeenCalledWith(

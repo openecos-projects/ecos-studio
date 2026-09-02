@@ -117,7 +117,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         rootPath: '',
         files: [],
       }),
-      watchProjectFile: async () => () => undefined,
       listDesignFiles: async () => [],
       addDesignFiles: async () => ({ added: [], skipped: [] }),
       removeDesignFile: async () => null,
