@@ -261,6 +261,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'drc',
       'lvs',
       'filler',
+      'postRouteLec',
       'RCX',
       'sta',
       'Harden',
