@@ -187,8 +187,10 @@ function getDesktopServices() {
     runtime: eccRuntimeService,
   })
   const frontendRpcCore = new EccRpcRuntimeService({
+    adapterManagementRpc: true,
     createSidecar: (directory, onEvent) =>
       new EccRpcSidecarProcess({
+        adapterManagementRpc: true,
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),

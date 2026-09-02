@@ -9,7 +9,6 @@ from ecos_runtime_adapter.requests import (
     FloorplanEditValidateRequest,
     WorkspaceOpenV1Request,
 )
-from ecos_runtime_adapter.server import BASE_CAPABILITIES, RuntimeServer
 
 
 def test_runtime_method_registry_contains_current_methods_once():
@@ -96,7 +95,7 @@ def test_runtime_method_lookup_returns_spec():
     assert runtime_method_by_name("db.ensure") is None
 
 
-def test_persistent_db_method_lookup_requires_enabled_capability():
+def test_persistent_db_method_lookup_requires_persistent_db():
     from ecos_runtime_adapter.methods import runtime_method_by_name
 
     ensure_spec = runtime_method_by_name("db.ensure", persistent_db_enabled=True)
@@ -117,30 +116,6 @@ def test_persistent_db_method_lookup_requires_enabled_capability():
     validate_spec = runtime_method_by_name("floorplan.edit.validate", persistent_db_enabled=True)
     assert validate_spec is not None
     assert validate_spec.request_model is FloorplanEditValidateRequest
-
-
-def test_default_server_capabilities_are_generated_from_runtime_registry():
-    from ecos_runtime_adapter.methods import runtime_method_names
-
-    server = RuntimeServer()
-
-    assert server.capabilities == (*BASE_CAPABILITIES, *runtime_method_names())
-
-
-def test_persistent_db_server_capabilities_include_db_methods():
-    from ecos_runtime_adapter.methods import runtime_method_names
-
-    server = RuntimeServer(persistent_db_enabled=True)
-
-    assert server.capabilities == (
-        *BASE_CAPABILITIES,
-        *runtime_method_names(persistent_db_enabled=True),
-    )
-    assert "db.ensure" in server.capabilities
-    assert "db.release" in server.capabilities
-    assert "layout.edit.begin" in server.capabilities
-    assert "layout.edit.save" in server.capabilities
-    assert "floorplan.edit.inspect" in server.capabilities
 
 
 def test_requests_module_does_not_own_runtime_method_table():

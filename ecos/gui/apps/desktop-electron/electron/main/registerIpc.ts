@@ -370,9 +370,6 @@ export interface DesktopBridgeServices {
     ): Promise<{ directory: string; workspaceHandle: string }>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
     resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
-    rpcHello(): Promise<unknown>
-    rpcPing(): Promise<unknown>
-    rpcShutdown(): Promise<unknown>
     runFlow(request: EccFlowRunRequest): Promise<unknown>
     runStep(request: EccFlowRunStepRequest): Promise<unknown>
     startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
@@ -1852,12 +1849,12 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.designRuntimeRpcHello, async (_event, request) => {
-    const designTool = requireDesignTool(
-      (request as DesignRuntimeTargetRequest).designTool,
-    )
-    return designTool === 'frontend'
-      ? await services.frontendRpcRuntimeService.rpcHello()
-      : await services.eccRuntimeService.rpcHello()
+    if (
+      requireDesignTool((request as DesignRuntimeTargetRequest).designTool) !== 'frontend'
+    ) {
+      throw new Error('Backend runtime negotiation is not supported')
+    }
+    return await services.frontendRpcRuntimeService.rpcHello()
   })
 
   handle(desktopApiIpcChannels.workspaceCreationModelGet, async (_event, request) => {
@@ -1890,21 +1887,21 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.designRuntimeRpcPing, async (_event, request) => {
-    const designTool = requireDesignTool(
-      (request as DesignRuntimeTargetRequest).designTool,
-    )
-    return designTool === 'frontend'
-      ? await services.frontendRpcRuntimeService.rpcPing()
-      : await services.eccRuntimeService.rpcPing()
+    if (
+      requireDesignTool((request as DesignRuntimeTargetRequest).designTool) !== 'frontend'
+    ) {
+      throw new Error('Backend runtime ping is not supported')
+    }
+    return await services.frontendRpcRuntimeService.rpcPing()
   })
 
   handle(desktopApiIpcChannels.designRuntimeRpcShutdown, async (_event, request) => {
-    const designTool = requireDesignTool(
-      (request as DesignRuntimeTargetRequest).designTool,
-    )
-    return designTool === 'frontend'
-      ? await services.frontendRpcRuntimeService.rpcShutdown()
-      : await services.eccRuntimeService.rpcShutdown()
+    if (
+      requireDesignTool((request as DesignRuntimeTargetRequest).designTool) !== 'frontend'
+    ) {
+      throw new Error('Backend runtime shutdown RPC is not supported')
+    }
+    return await services.frontendRpcRuntimeService.rpcShutdown()
   })
 
   handle(

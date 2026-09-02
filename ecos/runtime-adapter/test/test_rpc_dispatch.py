@@ -9,11 +9,11 @@ def _dispatch(dispatcher: RpcDispatcher, payload: str) -> dict:
 
 def test_dispatch_registered_method_returns_standard_success_response():
     dispatcher = RpcDispatcher()
-    dispatcher.add_method("rpc.ping", lambda: {"ok": True})
+    dispatcher.add_method("test.ping", lambda: {"ok": True})
 
     response = _dispatch(
         dispatcher,
-        '{"jsonrpc":"2.0","method":"rpc.ping","id":1}',
+        '{"jsonrpc":"2.0","method":"test.ping","id":1}',
     )
 
     assert response == {"jsonrpc": "2.0", "result": {"ok": True}, "id": 1}
@@ -63,9 +63,9 @@ def test_parse_error_uses_json_rpc_parse_error_shape():
 
 def test_custom_non_json_rpc_envelope_is_rejected():
     dispatcher = RpcDispatcher()
-    dispatcher.add_method("rpc.ping", lambda: {"ok": True})
+    dispatcher.add_method("test.ping", lambda: {"ok": True})
 
-    response = _dispatch(dispatcher, '{"type":"request","method":"rpc.ping","id":1}')
+    response = _dispatch(dispatcher, '{"type":"request","method":"test.ping","id":1}')
 
     assert response["id"] is None
     assert response["error"]["code"] == -32600

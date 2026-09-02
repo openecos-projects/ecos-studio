@@ -81,7 +81,7 @@ def run_stdio_server(
     runtime_server.set_notification_sink(writer.send_notification)
 
     try:
-        while not runtime_server.should_exit:
+        while True:
             chunk = _read_chunk(input_stream)
             if not chunk:
                 break
@@ -93,12 +93,8 @@ def run_stdio_server(
 
             for message in messages:
                 response = runtime_server.dispatch(message)
-                if runtime_server.should_exit and not response:
-                    break
                 if response:
                     writer.send_response(response)
-                if runtime_server.should_exit:
-                    break
         return 0
     finally:
         runtime_server.set_notification_sink(None)

@@ -13,9 +13,6 @@ import type {
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
   EccPersistedEngineeringSnapshot,
-  EccRpcHelloResult,
-  EccRpcPingResult,
-  EccRpcShutdownResult,
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
@@ -51,7 +48,12 @@ import {
   RuntimeOperationTracker,
   isRuntimeProtocolPayload,
 } from './runtimeOperationTracker'
-import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
+import type {
+  EccRpcRuntimeClient,
+  EccRpcRuntimeSidecar,
+  RuntimeShutdownBarrier,
+  RuntimeShutdownResult,
+} from './runtimeClient'
 import { RuntimeSidecarLifecycle } from './runtimeSidecarLifecycle'
 import {
   WorkspaceRuntimeCommands,
@@ -66,7 +68,7 @@ export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 export interface EccWorkspaceRuntimeOptions {
   /**
    * Bound workspace directory for this runtime. `null` is used for the
-   * control runtime (rpc.hello / rpc.ping only).
+   * control runtime.
    */
   directory: string | null
   createSidecar(
@@ -75,6 +77,7 @@ export interface EccWorkspaceRuntimeOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   diagnosticIdleTimeoutMs?: number
+  adapterManagementRpc?: boolean
   lazyWorkspaceOpen?: boolean
   sessions?: WorkspaceSessionRegistry
 }
@@ -100,10 +103,10 @@ export class EccWorkspaceRuntime {
   private readonly sessions: WorkspaceSessionRegistry
   private readonly sidecar: EccRpcRuntimeSidecar
   private client: EccRpcRuntimeClient | null = null
+  private managementHelloResult: unknown = null
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
   /** Compatibility cancellation state for the legacy frontend RPC facade. */
   private readonly cancelledOperationIds = new Set<string>()
-  private helloResult: EccRpcHelloResult | null = null
   private inFlightOperation: InFlightOperation | null = null
   private inFlightCount = 0
   private readonly operationTracker = new RuntimeOperationTracker()
@@ -218,6 +221,9 @@ export class EccWorkspaceRuntime {
   ): Promise<T> {
     return this.enqueue(method, undefined, async () => {
       const client = await this.ensureStarted()
+      if (method === 'rpc.hello' && this.options.adapterManagementRpc) {
+        return this.managementHelloResult as T
+      }
       return await client.call<T>(method, params, options)
     })
   }
@@ -283,27 +289,6 @@ export class EccWorkspaceRuntime {
     return () => {
       this.eventListeners.delete(listener)
     }
-  }
-
-  rpcHello(): Promise<EccRpcHelloResult> {
-    return this.enqueue('rpc.hello', undefined, async () => {
-      await this.ensureStarted()
-      if (!this.helloResult) {
-        throw new Error('ECC RPC hello completed without a result.')
-      }
-      return this.helloResult
-    })
-  }
-
-  rpcPing(): Promise<EccRpcPingResult> {
-    return this.enqueue('rpc.ping', undefined, async () => {
-      const client = await this.ensureStarted()
-      return await client.call<EccRpcPingResult>('rpc.ping')
-    })
-  }
-
-  rpcShutdown(): Promise<EccRpcShutdownResult> {
-    return this.shutdown()
   }
 
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
@@ -561,8 +546,15 @@ export class EccWorkspaceRuntime {
     return result.recovered
   }
 
-  async shutdown(): Promise<EccRpcShutdownResult> {
+  async shutdown(): Promise<RuntimeShutdownResult> {
     this.sidecarLifecycle.cancelDiagnosticRelease()
+    if (!this.options.adapterManagementRpc && this.isActive()) {
+      return {
+        deferred: true,
+        ok: false,
+        shutdownBarrier: this.shutdownBarrier() ?? undefined,
+      }
+    }
     try {
       await this.sidecar.shutdown()
     } catch (error) {
@@ -573,8 +565,8 @@ export class EccWorkspaceRuntime {
       throw error
     }
     this.client = null
+    this.managementHelloResult = null
     this.ready = false
-    this.helloResult = null
     this.sessions.clearEccWorkspaceIds()
     this.operationTracker.rejectAll(
       new Error('ECC sidecar shut down before the operation completed.'),
@@ -588,7 +580,7 @@ export class EccWorkspaceRuntime {
   }
 
   async cancelAtSafeShutdownBoundary(
-    shutdownBarrier: NonNullable<EccRpcShutdownResult['shutdownBarrier']>,
+    shutdownBarrier: RuntimeShutdownBarrier,
   ): Promise<void> {
     if (!shutdownBarrier.safeToStop || !shutdownBarrier.operationId) return
     const client = this.client
@@ -601,29 +593,30 @@ export class EccWorkspaceRuntime {
     const client = await this.sidecar.start()
     if (client !== this.client) {
       this.client = client
+      this.managementHelloResult = null
       this.ready = false
-      this.helloResult = null
       this.sessions.clearEccWorkspaceIds()
       this.operationTracker.reset(new Error('ECC sidecar client was replaced.'))
     }
-    if (this.ready && this.helloResult) {
-      return client
-    }
+    if (this.ready) return client
 
-    this.helloResult = await client.call<EccRpcHelloResult>('rpc.hello', {
-      version: 1,
-    })
-    if (this.helloResult.adapterVersion !== undefined) {
-      const missing = [
-        'runtime.adapter.v1',
-        'workspace-spec.v1',
-        'engineering-snapshot.v1',
-      ].filter((capability) => !this.helloResult!.capabilities.includes(capability))
-      if (missing.length) {
-        this.helloResult = null
-        throw new Error(
-          `ECC Runtime Adapter is missing capabilities: ${missing.join(', ')}`,
-        )
+    if (this.options.adapterManagementRpc) {
+      const helloResult = await client.call<{
+        adapterVersion?: number
+        capabilities: string[]
+      }>('rpc.hello', { version: 1 })
+      this.managementHelloResult = helloResult
+      if (helloResult.adapterVersion !== undefined) {
+        const missing = [
+          'runtime.adapter.v1',
+          'workspace-spec.v1',
+          'engineering-snapshot.v1',
+        ].filter((capability) => !helloResult.capabilities.includes(capability))
+        if (missing.length) {
+          throw new Error(
+            `ECC Runtime Adapter is missing capabilities: ${missing.join(', ')}`,
+          )
+        }
       }
     }
     this.ready = true
@@ -766,8 +759,8 @@ export class EccWorkspaceRuntime {
       const workspaceHandle =
         inFlight?.workspaceHandle ?? this.sessions.active?.workspaceHandle
       this.client = null
+      this.managementHelloResult = null
       this.ready = false
-      this.helloResult = null
       this.sessions.clearEccWorkspaceIds()
       this.operationTracker.rejectAll(
         new Error('ECC sidecar exited before the operation completed.'),
@@ -955,9 +948,7 @@ export class EccWorkspaceRuntime {
   }
 }
 
-function shutdownBarrierFrom(
-  error: unknown,
-): NonNullable<EccRpcShutdownResult['shutdownBarrier']> | null {
+function shutdownBarrierFrom(error: unknown): RuntimeShutdownBarrier | null {
   if (!(error instanceof Error) || !('shutdownBarrier' in error)) return null
   const barrier = (error as Error & { shutdownBarrier?: unknown }).shutdownBarrier
   if (typeof barrier !== 'object' || barrier === null || Array.isArray(barrier))
@@ -967,6 +958,6 @@ function shutdownBarrierFrom(
     typeof value.state === 'string' &&
     typeof value.step === 'string' &&
     typeof value.workspaceId === 'string'
-    ? (value as NonNullable<EccRpcShutdownResult['shutdownBarrier']>)
+    ? (value as unknown as RuntimeShutdownBarrier)
     : null
 }

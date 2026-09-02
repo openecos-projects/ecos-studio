@@ -1,28 +1,3 @@
-export interface EccRpcHelloResult {
-  adapterVersion?: number
-  capabilities: string[]
-  eccVersion: string
-  version: number
-}
-
-export interface EccRpcPingResult {
-  ok: boolean
-}
-
-export interface EccRpcShutdownResult {
-  ok: boolean
-  deferred?: boolean
-  shutdownBarrier?: {
-    cancelRequested?: boolean
-    interruptibility?: EccRuntimeInterruptibility
-    operationId: string
-    safeToStop?: boolean
-    state: string
-    step: string
-    workspaceId: string
-  }
-}
-
 import type { PdkRequirement } from './pdkInventory.ts'
 
 export interface EccWorkspaceCreateRequest {

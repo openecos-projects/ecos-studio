@@ -1,9 +1,9 @@
 import type {
   EccFlowRunResult,
   EccFlowRunStepResult,
-  EccRpcHelloResult,
-  EccRpcPingResult,
-  EccRpcShutdownResult,
+  DesignRuntimeHelloResult,
+  DesignRuntimePingResult,
+  DesignRuntimeShutdownResult,
   EccRuntimeEvent,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateResult,
@@ -14,9 +14,7 @@ import type {
 import { EccRpcRuntimeService } from './eccRpc/runtimeService'
 import { normalizeFrontendRuntimeEvent } from './frontendRpcRuntime'
 
-export interface FrontendRpcHelloResult extends Omit<EccRpcHelloResult, 'eccVersion'> {
-  eccFeVersion: string
-}
+export type FrontendRpcHelloResult = DesignRuntimeHelloResult & { eccFeVersion: string }
 
 export interface FrontendRpcRuntimeServiceOptions {
   runtime: EccRpcRuntimeService
@@ -45,12 +43,12 @@ export class FrontendRpcRuntimeService {
     return this.runtime.callRuntime<FrontendRpcHelloResult>('rpc.hello', { version: 1 })
   }
 
-  rpcPing(): Promise<EccRpcPingResult> {
-    return this.runtime.rpcPing()
+  rpcPing(): Promise<DesignRuntimePingResult> {
+    return this.runtime.callRuntime('rpc.ping')
   }
 
-  rpcShutdown(): Promise<EccRpcShutdownResult> {
-    return this.runtime.rpcShutdown()
+  rpcShutdown(): Promise<DesignRuntimeShutdownResult> {
+    return this.runtime.shutdown()
   }
 
   cancelOperationLegacy(

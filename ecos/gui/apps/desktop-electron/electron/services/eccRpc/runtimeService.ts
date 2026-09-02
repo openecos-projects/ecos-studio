@@ -13,9 +13,6 @@ import type {
   EccLayoutEditDiscardResult,
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
-  EccRpcHelloResult,
-  EccRpcPingResult,
-  EccRpcShutdownResult,
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
@@ -53,6 +50,7 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
+import type { RuntimeShutdownResult } from './runtimeClient'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -64,6 +62,7 @@ export interface EccRpcRuntimeServiceOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
+  adapterManagementRpc?: boolean
 }
 
 /**
@@ -143,15 +142,7 @@ export class EccRpcRuntimeService {
     return this.uniqueRuntimes().some((runtime) => runtime.hasPendingRuntimeWork())
   }
 
-  rpcHello(): Promise<EccRpcHelloResult> {
-    return this.getOrCreateControlRuntime().rpcHello()
-  }
-
-  rpcPing(): Promise<EccRpcPingResult> {
-    return this.getOrCreateControlRuntime().rpcPing()
-  }
-
-  async rpcShutdown(): Promise<EccRpcShutdownResult> {
+  async shutdown(): Promise<RuntimeShutdownResult> {
     const runtimes = this.uniqueRuntimes()
     const blockingRuntime = runtimes.find((runtime) => runtime.hasPendingRuntimeWork())
     if (blockingRuntime) {
@@ -378,6 +369,7 @@ export class EccRpcRuntimeService {
           this.options.createSidecar(key, onEvent, onNotification),
         directory: key,
         lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
+        adapterManagementRpc: this.options.adapterManagementRpc,
         onEvent: (event) => this.emit(event),
       })
       this.runtimes.set(key, runtime)
@@ -400,6 +392,7 @@ export class EccRpcRuntimeService {
         createSidecar: (onEvent, onNotification) =>
           this.options.createSidecar(null, onEvent, onNotification),
         directory: null,
+        adapterManagementRpc: this.options.adapterManagementRpc,
         onEvent: (event) => this.emit(event),
       })
     }

@@ -86,7 +86,7 @@ function createService(
   directory = '/work/demo',
   options: Pick<
     ConstructorParameters<typeof EccWorkspaceRuntime>[0],
-    'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen'
+    'adapterManagementRpc' | 'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen'
   > = {},
 ) {
   const client = new FakeRpcClient()
@@ -119,10 +119,7 @@ function createService(
 describe('EccWorkspaceRuntime', () => {
   it('creates a workspace from a runtime-specific payload', async () => {
     const { client, service } = createService('/work/frontend')
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/frontend', workspaceId: 'frontend-1' },
-    )
+    client.responses.push({ directory: '/work/frontend', workspaceId: 'frontend-1' })
 
     await expect(
       service.createWorkspacePayload({
@@ -179,7 +176,6 @@ describe('EccWorkspaceRuntime', () => {
   it('invalidates the cached flow snapshot after refreshing workspace config', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         directory: '/work/demo',
@@ -230,10 +226,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('maps protocol notifications to the matching GUI workspace handle', async () => {
     const { client, events, service, sidecarNotification } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
 
     sidecarNotification({
@@ -262,7 +255,6 @@ describe('EccWorkspaceRuntime', () => {
   it('starts GUI flow operations without waiting for the long-running result', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         createdAt: 1,
@@ -305,7 +297,6 @@ describe('EccWorkspaceRuntime', () => {
     const { client, events, service, sidecarEvent } = createService()
     const flowResult = deferred<{ rerun: boolean }>()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       flowResult.promise,
     )
@@ -346,10 +337,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('binds a late sidecar progress event to the active workspace session', async () => {
     const { client, events, service, sidecarEvent } = createService('/work/frontend')
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/frontend', workspaceId: 'frontend-1' },
-    )
+    client.responses.push({ directory: '/work/frontend', workspaceId: 'frontend-1' })
 
     const workspace = await service.openWorkspace({ directory: '/work/frontend' })
     sidecarEvent({
@@ -372,12 +360,14 @@ describe('EccWorkspaceRuntime', () => {
   })
 
   it('cancels the matching in-flight operation and emits a cancelled event', async () => {
-    const { client, events, service, sidecar } = createService()
+    const { client, events, service, sidecar } = createService('/work/frontend', {
+      adapterManagementRpc: true,
+    })
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { directory: '/work/frontend', workspaceId: 'workspace-1' },
     )
-    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const workspace = await service.openWorkspace({ directory: '/work/frontend' })
     const blockedFlow = deferred<{ rerun: boolean }>()
     client.responses.push(blockedFlow.promise)
 
@@ -422,7 +412,6 @@ describe('EccWorkspaceRuntime', () => {
   it('forwards GUI single-step rerun reset intent to ECC', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         createdAt: 1,
@@ -469,10 +458,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('resolves an operation waiter from its terminal protocol event', async () => {
     const { client, service, sidecarNotification } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     const completed = service.waitForOperation({
       operationId: 'operation-1',
@@ -510,10 +496,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('persists the terminal snapshot before releasing a successful flow sidecar', async () => {
     const { client, service, sidecar, sidecarNotification } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     client.responses.push({
       directory: '/work/demo',
@@ -571,7 +554,6 @@ describe('EccWorkspaceRuntime', () => {
       parameters: Record<string, never>
     }>()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         directory: '/work/demo',
@@ -694,10 +676,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('forwards the wizard flow range when creating a workspace', async () => {
     const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     await service.createWorkspace({
       commandId: 'workspace-create-flow-range',
       targetDirectory: '/work/demo',
@@ -727,18 +706,14 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
-  it('lazy-starts the sidecar, performs rpc.hello, and opens workspaces', async () => {
+  it('starts the sidecar and sends the first owned business RPC directly', async () => {
     const { client, events, service, sidecar } = createService()
-    client.responses.push(
-      { capabilities: ['workspace.open'], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
 
     const result = await service.openWorkspace({ directory: '/work/demo' })
 
     expect(sidecar.startCount).toBe(1)
     expect(client.calls).toEqual([
-      { method: 'rpc.hello', params: { version: 1 } },
       { method: 'workspace.open', params: { directory: '/work/demo' } },
     ])
     expect(result).toEqual({
@@ -756,7 +731,6 @@ describe('EccWorkspaceRuntime', () => {
   it('moves a legacy sidecar log before rerunning a flow step', async () => {
     const { client, service, sidecar } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       { state: 'Success', step: 'placement' },
     )
@@ -787,7 +761,6 @@ describe('EccWorkspaceRuntime', () => {
   it('exports signoff through the stored ECC workspace id and preserves the output path', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       { outputPath: '/exports/custom package.tar.gz' },
     )
@@ -813,7 +786,6 @@ describe('EccWorkspaceRuntime', () => {
   it('emits rerun metadata when a full flow rerun starts', async () => {
     const { client, events, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       { rerun: true },
     )
@@ -839,7 +811,6 @@ describe('EccWorkspaceRuntime', () => {
   it('moves a legacy sidecar log before sending a rerun request', async () => {
     const { client, service, sidecar } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       { rerun: true },
     )
@@ -865,10 +836,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('cleans runtime activity tracking when an operation-started listener throws', async () => {
     const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
 
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     service.onEvent((event) => {
@@ -888,58 +856,9 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.isActive()).toBe(false)
   })
 
-  it('serializes all RPC operations through a per-runtime queue', async () => {
-    const { client, service } = createService()
-    client.responses.push({ capabilities: [], eccVersion: '0.1.0', version: 1 })
-    await service.rpcHello()
-    await Promise.resolve()
-    client.calls.length = 0
-
-    const firstPing = deferred<{ ok: boolean }>()
-    client.responses.push(firstPing.promise, { ok: true })
-
-    const first = service.rpcPing()
-    const second = service.rpcPing()
-    await waitForQueuedOperation()
-
-    expect(client.calls).toEqual([{ method: 'rpc.ping', params: undefined }])
-    firstPing.resolve({ ok: true })
-    await expect(first).resolves.toEqual({ ok: true })
-    await expect(second).resolves.toEqual({ ok: true })
-    expect(client.calls).toEqual([
-      { method: 'rpc.ping', params: undefined },
-      { method: 'rpc.ping', params: undefined },
-    ])
-  })
-
-  it('bypasses the operation queue when shutting down the sidecar', async () => {
-    const { client, service, sidecar } = createService()
-    client.responses.push({ capabilities: [], eccVersion: '0.1.0', version: 1 })
-    await service.rpcHello()
-    await Promise.resolve()
-    client.calls.length = 0
-
-    const blockedPing = deferred<{ ok: boolean }>()
-    client.responses.push(blockedPing.promise)
-
-    const ping = service.rpcPing()
-    await waitForQueuedOperation()
-
-    await expect(service.rpcShutdown()).resolves.toEqual({ ok: true })
-
-    expect(sidecar.shutdownCount).toBe(1)
-    expect(client.calls).toEqual([{ method: 'rpc.ping', params: undefined }])
-
-    blockedPing.resolve({ ok: true })
-    await expect(ping).resolves.toEqual({ ok: true })
-  })
-
   it('enriches unexpected runtime exits with the in-flight operation', async () => {
     const { client, events, service, sidecarEvent } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
 
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     const blockedFlow = deferred<{ rerun: boolean }>()
@@ -979,9 +898,7 @@ describe('EccWorkspaceRuntime', () => {
   it('restarts and reopens the active workspace on the next call after exit', async () => {
     const { client, service, sidecar, sidecarEvent } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       { recovered: [] },
       { rerun: false },
@@ -1011,8 +928,7 @@ describe('EccWorkspaceRuntime', () => {
     ).resolves.toEqual({ rerun: false })
 
     expect(sidecar.startCount).toBe(3)
-    expect(client.calls.slice(2)).toEqual([
-      { method: 'rpc.hello', params: { version: 1 } },
+    expect(client.calls.slice(1)).toEqual([
       { method: 'workspace.open', params: { directory: '/work/demo' } },
       { method: 'workspace.recover_interrupted', params: { workspaceId: 'workspace-2' } },
       {
@@ -1030,9 +946,7 @@ describe('EccWorkspaceRuntime', () => {
   it('recovers a persisted interruption when the start notification was lost', async () => {
     const { client, service, sidecarEvent } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       { recovered: [] },
     )
@@ -1057,9 +971,7 @@ describe('EccWorkspaceRuntime', () => {
   it('retries crash recovery on the next workspace snapshot after a transient failure', async () => {
     const { client, service, sidecarEvent } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       new Error('temporary recovery failure'),
       {
@@ -1109,13 +1021,11 @@ describe('EccWorkspaceRuntime', () => {
     const { client, events, service, sidecar, sidecarEvent, sidecarNotification } =
       createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         operationId: 'operation-place',
         state: 'running',
       },
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       {
         recovered: [
@@ -1198,7 +1108,6 @@ describe('EccWorkspaceRuntime', () => {
   it('replays previous-run recovery after the workspace snapshot is requested', async () => {
     const { client, events, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         recovered: [
@@ -1239,7 +1148,6 @@ describe('EccWorkspaceRuntime', () => {
   it('invalidates a cached snapshot after recovering an interrupted step', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
       {
         directory: '/work/demo',
@@ -1281,23 +1189,19 @@ describe('EccWorkspaceRuntime', () => {
     ])
   })
 
-  it('handshakes and reopens retained sessions when the sidecar returns a new client', async () => {
+  it('reopens retained sessions when the sidecar returns a new client', async () => {
     const { client, service, sidecar } = createService()
     const workspaceBindings = {
       inputs: {},
       pdk: { root: '/pdks/ics55', version: '1.10.102' },
     }
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     const workspace = await service.openWorkspace({
       directory: '/work/demo',
       workspaceBindings,
     })
     const replacementClient = new FakeRpcClient()
     replacementClient.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-2' },
       { rerun: false },
     )
@@ -1312,7 +1216,6 @@ describe('EccWorkspaceRuntime', () => {
     ).resolves.toEqual({ rerun: false })
 
     expect(replacementClient.calls).toEqual([
-      { method: 'rpc.hello', params: { version: 1 } },
       {
         method: 'workspace.open',
         params: { directory: '/work/demo', workspaceBindings },
@@ -1332,7 +1235,6 @@ describe('EccWorkspaceRuntime', () => {
   it('closes a shared ECC workspace only after its final GUI handle is released', async () => {
     const { client, service } = createService()
     client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-shared' },
       { directory: '/work/demo', workspaceId: 'workspace-shared' },
       { ok: true },
@@ -1361,26 +1263,16 @@ describe('EccWorkspaceRuntime', () => {
 
   it('does not send a stale workspace id when close replaces the sidecar client', async () => {
     const { client, service, sidecar } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     const replacementClient = new FakeRpcClient()
-    replacementClient.responses.push({
-      capabilities: [],
-      eccVersion: '0.1.0',
-      version: 1,
-    })
     sidecar.client = replacementClient
 
     await expect(
       service.closeWorkspace({ workspaceHandle: workspace.workspaceHandle }),
     ).resolves.toEqual({ ok: true })
 
-    expect(replacementClient.calls).toEqual([
-      { method: 'rpc.hello', params: { version: 1 } },
-    ])
+    expect(replacementClient.calls).toEqual([])
     await expect(
       service.runFlow({
         rerun: false,
@@ -1391,10 +1283,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('releases the GUI handle when server-side workspace close fails', async () => {
     const { client, service } = createService()
-    client.responses.push(
-      { capabilities: [], eccVersion: '0.1.0', version: 1 },
-      { directory: '/work/demo', workspaceId: 'workspace-1' },
-    )
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     client.responses.push(new Error('server close failed'))
 

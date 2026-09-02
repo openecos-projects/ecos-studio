@@ -1,4 +1,5 @@
-import type { EccRpcShutdownResult, EccRuntimeEvent } from '@ecos-studio/shared'
+import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import type { RuntimeShutdownResult } from '../services/eccRpc/runtimeClient'
 import { describe, expect, it, vi } from 'vitest'
 
 import { installRuntimeQuitGuard } from './runtimeQuitGuard'
@@ -27,7 +28,7 @@ class FakeApp {
 
 class FakeRuntime {
   hasPending = true
-  readonly shutdown = vi.fn<() => Promise<EccRpcShutdownResult>>()
+  readonly shutdown = vi.fn<() => Promise<RuntimeShutdownResult>>()
   private listener: ((event: EccRuntimeEvent) => void) | null = null
 
   hasPendingRuntimeWork(): boolean {
@@ -39,10 +40,6 @@ class FakeRuntime {
     return () => {
       this.listener = null
     }
-  }
-
-  rpcShutdown(): Promise<EccRpcShutdownResult> {
-    return this.shutdown()
   }
 
   emit(event: EccRuntimeEvent): void {

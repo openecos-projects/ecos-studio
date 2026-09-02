@@ -1,9 +1,8 @@
 import type {
   EccFlowRunResult,
   EccFlowRunStepResult,
-  EccRpcPingResult,
-  EccRpcShutdownResult,
   EccRuntimeEvent,
+  EccRuntimeInterruptibility,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateResult,
   EccWorkspaceHomeResult,
@@ -23,6 +22,24 @@ export interface DesignRuntimeHelloResult {
   eccFeVersion?: string
   eccVersion?: string
   version: number
+}
+
+export interface DesignRuntimePingResult {
+  ok: boolean
+}
+
+export interface DesignRuntimeShutdownResult {
+  ok: boolean
+  deferred?: boolean
+  shutdownBarrier?: {
+    cancelRequested?: boolean
+    interruptibility?: EccRuntimeInterruptibility
+    operationId: string
+    safeToStop?: boolean
+    state: string
+    step: string
+    workspaceId: string
+  }
 }
 
 export interface DesignRuntimeTargetRequest {
@@ -84,8 +101,8 @@ export interface DesignRuntimeApi {
   }
   rpc: {
     hello(request: DesignRuntimeTargetRequest): Promise<DesignRuntimeHelloResult>
-    ping(request: DesignRuntimeTargetRequest): Promise<EccRpcPingResult>
-    shutdown(request: DesignRuntimeTargetRequest): Promise<EccRpcShutdownResult>
+    ping(request: DesignRuntimeTargetRequest): Promise<DesignRuntimePingResult>
+    shutdown(request: DesignRuntimeTargetRequest): Promise<DesignRuntimeShutdownResult>
   }
   workspace: {
     close(request: DesignRuntimeWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>

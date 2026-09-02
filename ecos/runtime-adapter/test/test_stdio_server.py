@@ -84,41 +84,35 @@ def _create_real_workspace(tmp_path: Path, minimal_ics55_pdk_factory) -> Path:
 
 
 def test_stdio_server_writes_only_content_length_framed_responses():
+    server = RuntimeServer()
+    server.dispatcher.add_method("test.echo", lambda value: {"value": value})
     stdin = io.BytesIO(
-        _request("rpc.hello", 1, {"version": 1})
-        + _request("rpc.ping", 2)
-        + _request("rpc.shutdown", 3)
+        _request("test.echo", 1, {"value": "one"})
+        + _request("test.echo", 2, {"value": "two"})
     )
     stdout = io.BytesIO()
 
-    rc = run_stdio_server(stdin, stdout, server=RuntimeServer())
+    rc = run_stdio_server(stdin, stdout, server=server)
 
     raw = stdout.getvalue()
     assert rc == 0
     assert raw.startswith(b"Content-Length: ")
-    assert raw.count(b"Content-Length: ") == 3
+    assert raw.count(b"Content-Length: ") == 2
     responses = _decode_output(raw)
-    assert [response["id"] for response in responses] == [1, 2, 3]
-    assert responses[0]["result"]["version"] == 1
-    assert responses[1]["result"] == {"ok": True}
-    assert responses[2]["result"] == {"ok": True}
+    assert [response["id"] for response in responses] == [1, 2]
+    assert [response["result"] for response in responses] == [
+        {"value": "one"},
+        {"value": "two"},
+    ]
 
 
 def test_stdio_server_does_not_write_response_for_notification():
-    stdin = io.BytesIO(_notification("rpc.ping"))
+    server = RuntimeServer()
+    server.dispatcher.add_method("test.notify", lambda: {"ok": True})
+    stdin = io.BytesIO(_notification("test.notify"))
     stdout = io.BytesIO()
 
-    rc = run_stdio_server(stdin, stdout, server=RuntimeServer())
-
-    assert rc == 0
-    assert stdout.getvalue() == b""
-
-
-def test_stdio_server_stops_after_shutdown_notification_in_buffer():
-    stdin = io.BytesIO(_notification("rpc.shutdown") + _request("rpc.ping", 1))
-    stdout = io.BytesIO()
-
-    rc = run_stdio_server(stdin, stdout, server=RuntimeServer())
+    rc = run_stdio_server(stdin, stdout, server=server)
 
     assert rc == 0
     assert stdout.getvalue() == b""
@@ -160,18 +154,9 @@ def test_stdio_server_redirects_fd_stdout_noise_away_from_protocol_stdout(capfd)
 
 
 def test_rpc_stdio_subprocess_smoke():
-    stdin = (
-        _request("rpc.hello", 1, {"version": 1})
-        + _request("rpc.ping", 2)
-        + _request(
-            "rpc.shutdown",
-            3,
-        )
-    )
-
     completed = subprocess.run(
         _stdio_command(),
-        input=stdin,
+        input=_request("missing", 1),
         cwd=os.getcwd(),
         capture_output=True,
         check=False,
@@ -179,16 +164,14 @@ def test_rpc_stdio_subprocess_smoke():
 
     assert completed.returncode == 0
     responses = _decode_output(completed.stdout)
-    assert [response["id"] for response in responses] == [1, 2, 3]
-    assert responses[1]["result"] == {"ok": True}
+    assert responses[0]["id"] == 1
+    assert responses[0]["error"]["code"] == -32601
 
 
 def test_rpc_stdio_subprocess_persistent_db_smoke():
-    stdin = _request("rpc.hello", 1, {"version": 1}) + _request("rpc.shutdown", 2)
-
     completed = subprocess.run(
         _stdio_command(persistent_db=True),
-        input=stdin,
+        input=_request("db.release", 1, {"workspaceId": "missing"}),
         cwd=os.getcwd(),
         capture_output=True,
         check=False,
@@ -196,9 +179,8 @@ def test_rpc_stdio_subprocess_persistent_db_smoke():
 
     assert completed.returncode == 0
     responses = _decode_output(completed.stdout)
-    assert [response["id"] for response in responses] == [1, 2]
-    assert "db.ensure" in responses[0]["result"]["capabilities"]
-    assert "db.release" in responses[0]["result"]["capabilities"]
+    assert responses[0]["id"] == 1
+    assert responses[0]["error"]["code"] == -32010
 
 
 def test_rpc_stdio_subprocess_workspace_open_home_smoke(tmp_path, minimal_ics55_pdk_factory):
@@ -224,8 +206,8 @@ def test_rpc_stdio_subprocess_workspace_open_home_smoke(tmp_path, minimal_ics55_
         )
         home_response = _read_subprocess_response(process)
 
-        _write_subprocess_request(process, "rpc.shutdown", 3)
-        shutdown_response = _read_subprocess_response(process)
+        process.stdin.close()
+        process.stdin = None
         stderr = process.communicate(timeout=5)[1]
     finally:
         if process.poll() is None:
@@ -244,4 +226,3 @@ def test_rpc_stdio_subprocess_workspace_open_home_smoke(tmp_path, minimal_ics55_
         "result": {"path": str(ws.resolve() / "home" / "home.json")},
         "id": 2,
     }
-    assert shutdown_response == {"jsonrpc": "2.0", "result": {"ok": True}, "id": 3}

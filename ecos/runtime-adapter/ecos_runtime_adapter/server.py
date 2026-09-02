@@ -1,6 +1,5 @@
 from collections.abc import Callable
 
-import chipcompiler
 from jsonrpcserver import Error
 
 from ecos_runtime_adapter import methods
@@ -8,19 +7,6 @@ from ecos_runtime_adapter.errors import RuntimeApiError
 from ecos_runtime_adapter.requests import RequestValidationError, parse_request_model
 from ecos_runtime_adapter.rpc_dispatch import RpcDispatcher
 from ecos_runtime_adapter.workspace_api import WorkspaceRuntimeApi
-
-PROTOCOL_VERSION = 1
-ADAPTER_VERSION = 1
-BASE_CAPABILITIES = (
-    "rpc.hello",
-    "rpc.ping",
-    "rpc.shutdown",
-    "runtime.v2",
-    "operation.events",
-    "runtime.adapter.v1",
-    "workspace-spec.v1",
-    "engineering-snapshot.v1",
-)
 
 ERROR_CODES = {
     "workspace_session_not_found": -32010,
@@ -39,22 +25,11 @@ class RuntimeServer:
         self.persistent_db_enabled = persistent_db_enabled
         self.dispatcher = RpcDispatcher()
         self.api = api or WorkspaceRuntimeApi(persistent_db_enabled=persistent_db_enabled)
-        self.should_exit = False
         self._notification_sink: Callable[[str, dict], None] | None = None
         set_event_publisher = getattr(self.api, "set_event_publisher", None)
         if callable(set_event_publisher):
             set_event_publisher(self._publish_runtime_event)
-        self._register_base_methods()
         self._register_runtime_methods()
-
-    @property
-    def capabilities(self) -> tuple[str, ...]:
-        return (
-            *BASE_CAPABILITIES,
-            *methods.runtime_method_names(
-                persistent_db_enabled=self.persistent_db_enabled,
-            ),
-        )
 
     def dispatch(self, payload: bytes | str) -> str:
         return self.dispatcher.dispatch(payload)
@@ -66,40 +41,6 @@ class RuntimeServer:
         sink = self._notification_sink
         if sink is not None:
             sink("runtime.event", _project_runtime_event(event))
-
-    def _register_base_methods(self) -> None:
-        self.dispatcher.add_method("rpc.hello", self._hello)
-        self.dispatcher.add_method("rpc.ping", self._ping)
-        self.dispatcher.add_method("rpc.shutdown", self._shutdown)
-
-    def _hello(self, version: int):
-        if version != PROTOCOL_VERSION:
-            return Error(
-                -32001,
-                "unsupported_version",
-                {"supportedVersion": PROTOCOL_VERSION, "requestedVersion": version},
-            )
-        return {
-            "version": PROTOCOL_VERSION,
-            "adapterVersion": ADAPTER_VERSION,
-            "eccVersion": getattr(chipcompiler, "__version__", "unknown"),
-            "capabilities": list(self.capabilities),
-        }
-
-    def _ping(self) -> dict:
-        return {"ok": True}
-
-    def _shutdown(self) -> dict:
-        operations = getattr(self.api, "operations", None)
-        shutdown_barrier = getattr(operations, "shutdown_barrier", None)
-        barrier = shutdown_barrier() if callable(shutdown_barrier) else None
-        if barrier is not None:
-            return {"ok": False, "deferred": True, "shutdownBarrier": barrier}
-        self.should_exit = True
-        sessions = getattr(self.api, "sessions", None)
-        if sessions is not None and hasattr(sessions, "close_all"):
-            sessions.close_all()
-        return {"ok": True}
 
     def _register_runtime_methods(self) -> None:
         for spec in methods.runtime_methods(

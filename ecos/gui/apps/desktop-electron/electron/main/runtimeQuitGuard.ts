@@ -1,4 +1,5 @@
-import type { EccRpcShutdownResult, EccRuntimeEvent } from '@ecos-studio/shared'
+import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import type { RuntimeShutdownResult } from '../services/eccRpc/runtimeClient'
 
 export interface RuntimeQuitGuardApp {
   on(event: 'before-quit', listener: (event: { preventDefault(): void }) => void): unknown
@@ -8,7 +9,7 @@ export interface RuntimeQuitGuardApp {
 export interface RuntimeQuitGuardRuntime {
   hasPendingRuntimeWork(): boolean
   onEvent(listener: (event: EccRuntimeEvent) => void): () => void
-  rpcShutdown(): Promise<EccRpcShutdownResult>
+  shutdown(): Promise<RuntimeShutdownResult>
 }
 
 export interface RuntimeQuitGuardOptions {
@@ -38,7 +39,7 @@ export function installRuntimeQuitGuard(options: RuntimeQuitGuardOptions): void 
     if (!quitPending || shutdownInFlight) return
     shutdownInFlight = true
     void options.runtime
-      .rpcShutdown()
+      .shutdown()
       .then((result) => {
         shutdownInFlight = false
         if (result.deferred) return

@@ -108,28 +108,6 @@ class CompleteFakeApi:
         raise AssertionError("unexpected floorplan_edit_validate call")
 
 
-def test_rpc_hello_returns_version_and_capabilities():
-    server = RuntimeServer()
-
-    response = _dispatch(
-        server,
-        '{"jsonrpc":"2.0","method":"rpc.hello","params":{"version":1},"id":"hello"}',
-    )
-
-    assert response["id"] == "hello"
-    assert response["result"]["adapterVersion"] == 1
-    assert "runtime.adapter.v1" in response["result"]["capabilities"]
-    assert response["result"]["version"] == 1
-    assert response["result"]["eccVersion"]
-    assert "rpc.ping" in response["result"]["capabilities"]
-    assert "rpc.shutdown" in response["result"]["capabilities"]
-    assert "runtime.v2" in response["result"]["capabilities"]
-    assert "operation.events" in response["result"]["capabilities"]
-    assert "workspace.snapshot" in response["result"]["capabilities"]
-    assert "db.ensure" not in response["result"]["capabilities"]
-    assert "db.release" not in response["result"]["capabilities"]
-
-
 def test_runtime_events_are_projected_to_the_four_v1_event_types():
     server = RuntimeServer()
     events = []
@@ -176,68 +154,6 @@ def test_rerun_preparation_projection_carries_its_committed_revision():
     assert event["type"] == "execution.progress"
     assert event["payload"]["workspaceRevision"] == 3
     assert event["workspaceRevision"] == 3
-
-
-def test_rpc_hello_reports_persistent_db_capabilities_when_enabled():
-    server = RuntimeServer(persistent_db_enabled=True)
-
-    response = _dispatch(
-        server,
-        '{"jsonrpc":"2.0","method":"rpc.hello","params":{"version":1},"id":"hello"}',
-    )
-
-    assert "db.ensure" in response["result"]["capabilities"]
-    assert "db.release" in response["result"]["capabilities"]
-
-
-def test_rpc_hello_rejects_incompatible_version():
-    server = RuntimeServer()
-
-    response = _dispatch(
-        server,
-        '{"jsonrpc":"2.0","method":"rpc.hello","params":{"version":2},"id":1}',
-    )
-
-    assert response["id"] == 1
-    assert response["error"]["code"] == -32001
-    assert response["error"]["message"] == "unsupported_version"
-
-
-def test_rpc_ping_returns_correlated_result():
-    server = RuntimeServer()
-
-    response = _dispatch(server, '{"jsonrpc":"2.0","method":"rpc.ping","id":"p"}')
-
-    assert response == {"jsonrpc": "2.0", "result": {"ok": True}, "id": "p"}
-
-
-def test_rpc_shutdown_marks_server_for_graceful_exit():
-    server = RuntimeServer()
-
-    response = _dispatch(server, '{"jsonrpc":"2.0","method":"rpc.shutdown","id":3}')
-
-    assert response == {"jsonrpc": "2.0", "result": {"ok": True}, "id": 3}
-    assert server.should_exit
-
-
-def test_rpc_shutdown_releases_runtime_sessions():
-    class FakeSessions:
-        def __init__(self):
-            self.closed = False
-
-        def close_all(self):
-            self.closed = True
-
-    class FakeApi(CompleteFakeApi):
-        sessions = FakeSessions()
-
-    api = FakeApi()
-    server = RuntimeServer(api=api)
-
-    response = _dispatch(server, '{"jsonrpc":"2.0","method":"rpc.shutdown","id":3}')
-
-    assert response == {"jsonrpc": "2.0", "result": {"ok": True}, "id": 3}
-    assert api.sessions.closed
 
 
 def test_unknown_method_keeps_request_id():
