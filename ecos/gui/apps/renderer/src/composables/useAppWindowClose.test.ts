@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { consoleError, waitForDesktopApi, mountedCallbacks, unmountedCallbacks } =
-  vi.hoisted(() => ({
+const { consoleError, getDesktopApi, mountedCallbacks, unmountedCallbacks } = vi.hoisted(
+  () => ({
     consoleError: vi.fn(),
-    waitForDesktopApi: vi.fn(),
+    getDesktopApi: vi.fn(),
     mountedCallbacks: [] as Array<() => void | Promise<void>>,
     unmountedCallbacks: [] as Array<() => void>,
-  }))
+  }),
+)
 
 vi.mock('vue', () => ({
   onMounted: (callback: () => void | Promise<void>) => {
@@ -18,7 +19,7 @@ vi.mock('vue', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi,
+  getDesktopApi,
 }))
 
 import { useAppWindowClose } from './useAppWindowClose'
@@ -28,7 +29,7 @@ describe('useAppWindowClose', () => {
     mountedCallbacks.length = 0
     unmountedCallbacks.length = 0
     consoleError.mockReset()
-    waitForDesktopApi.mockReset()
+    getDesktopApi.mockReset()
     vi.spyOn(console, 'error').mockImplementation(consoleError)
   })
 
@@ -42,7 +43,7 @@ describe('useAppWindowClose', () => {
     const confirmClose = vi.fn().mockResolvedValue(undefined)
     let onCloseRequested: (() => void) | undefined
 
-    waitForDesktopApi.mockResolvedValue({
+    getDesktopApi.mockReturnValue({
       window: {
         confirmClose,
         onCloseRequested: vi.fn((listener: () => void) => {
@@ -72,7 +73,7 @@ describe('useAppWindowClose', () => {
     const confirmClose = vi.fn().mockResolvedValue(undefined)
     let onCloseRequested: (() => void) | undefined
 
-    waitForDesktopApi.mockResolvedValue({
+    getDesktopApi.mockReturnValue({
       window: {
         confirmClose,
         onCloseRequested: vi.fn((listener: () => void) => {

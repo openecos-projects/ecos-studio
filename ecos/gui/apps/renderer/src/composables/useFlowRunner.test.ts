@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StateEnum, StepEnum } from '@/api/type'
 
 const {
-  ensureDesktopRuntime,
   ensureApiReady,
   showToast,
   invalidateWorkspaceResources,
@@ -17,7 +16,6 @@ const {
   markHomeRunArtifactResetAwaitingBackendStart,
   clearHomeRunArtifactResetAwaitingBackendStart,
 } = vi.hoisted(() => ({
-  ensureDesktopRuntime: vi.fn(() => false),
   ensureApiReady: vi.fn(() => Promise.resolve(true)),
   showToast: vi.fn(),
   invalidateWorkspaceResources: vi.fn(),
@@ -57,10 +55,6 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { step: StepEnum.FLOORPLAN } }),
 }))
 
-vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({ ensureDesktopRuntime }),
-}))
-
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject,
@@ -95,8 +89,6 @@ import {
 
 describe('useFlowRunner desktop and design-tool routing', () => {
   beforeEach(() => {
-    ensureDesktopRuntime.mockReset()
-    ensureDesktopRuntime.mockReturnValue(false)
     ensureApiReady.mockReset()
     ensureApiReady.mockResolvedValue(true)
     showToast.mockReset()
@@ -129,20 +121,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     currentProject.value = null
   })
 
-  it('guards both run modes outside the desktop runtime', async () => {
-    const runner = useFlowRunner()
-    await expect(runner.runFlow()).resolves.toEqual({
-      step: StepEnum.FLOORPLAN,
-      state: StateEnum.Invalid,
-    })
-    await expect(runner.runAllFlow()).resolves.toBeNull()
-    expect(ensureApiReady).not.toHaveBeenCalled()
-    expect(startStepOperationApi).not.toHaveBeenCalled()
-    expect(startFlowOperationApi).not.toHaveBeenCalled()
-  })
-
   it('starts backend flows through the main runtime operation tracker', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     startFlowOperationApi.mockResolvedValue({
       operationId: 'operation-flow',
@@ -181,7 +160,6 @@ describe('useFlowRunner desktop and design-tool routing', () => {
   })
 
   it('keeps frontend flow and step calls on the design-tool runtime bridge', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
     rtl2gdsApi.mockResolvedValue({
       response: 'success',
@@ -223,7 +201,6 @@ describe('useFlowRunner desktop and design-tool routing', () => {
   })
 
   it('does not use the backend rerun snapshot guard for synchronous frontend reruns', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
     rtl2gdsApi.mockResolvedValue({
       response: 'success',
@@ -241,7 +218,6 @@ describe('useFlowRunner desktop and design-tool routing', () => {
   })
 
   it('waits for a frontend workspace session to become active before running', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
     workspaceSession.value = {
       sessionId: 'session-1',
@@ -261,7 +237,6 @@ describe('useFlowRunner desktop and design-tool routing', () => {
   })
 
   it('keeps the backend run lock until the operation waiter reaches a terminal state', async () => {
-    ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     startFlowOperationApi.mockResolvedValue({
       operationId: 'operation-flow',

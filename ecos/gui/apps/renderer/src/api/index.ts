@@ -2,8 +2,6 @@
  * API module exports
  */
 
-export { waitForRuntimeReady, type WaitForRuntimeReadyOptions } from './client'
-
 export {
   closeWorkspaceApi,
   backendWorkspaceOptions,

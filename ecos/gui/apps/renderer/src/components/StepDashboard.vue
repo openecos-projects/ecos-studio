@@ -1095,7 +1095,6 @@ import CongestionPanel from './flow-insights/CongestionPanel.vue'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { getDesktopApi } from '@/platform/desktop'
-import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
 import StatusPieChart from './home/StatusPieChart.vue'
 import { homeQorFlowStepForLabel } from './home/qorComparisonData'
@@ -1157,7 +1156,7 @@ const chipViewerAvailable = computed(() =>
   canOpenChipViewer({
     chipViewerBusy: chipViewerBusy.value,
     chipViewerEditBusy: false,
-    isDesktopRuntime: isDesktopRuntime(),
+    isDesktopRuntime: true,
     projectPath: currentProject.value?.path,
     step: chipViewerStep.value,
   }),

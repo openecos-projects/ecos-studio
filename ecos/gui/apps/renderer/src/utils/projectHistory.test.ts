@@ -31,7 +31,7 @@ const readManifest = vi.fn(async (projectRoot: string) => {
 })
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi: vi.fn(async () => ({
+  getDesktopApi: vi.fn(() => ({
     settings: {
       get: settingsGet,
       set: settingsSet,

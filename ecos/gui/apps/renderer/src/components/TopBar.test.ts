@@ -25,8 +25,7 @@ vi.mock('@/stores/agentShellStore', () => ({
   useAgentShellStore: () => ({ homeAgentOpen: false, toggleHomeAgent: vi.fn() }),
 }))
 vi.mock('@/platform/desktop', () => ({
-  getOptionalDesktopApi: () => testState.desktopApi,
-  waitForDesktopApi: async () => testState.desktopApi,
+  getDesktopApi: () => testState.desktopApi,
 }))
 vi.mock('@/components/NotificationCenter.vue', () => ({
   default: { template: '<div />' },

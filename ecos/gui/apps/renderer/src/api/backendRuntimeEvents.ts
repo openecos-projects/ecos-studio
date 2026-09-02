@@ -1,5 +1,5 @@
 import type { DesignRuntimeEvent } from '@ecos-studio/shared'
-import { getOptionalDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 
 export interface BackendRuntimeEventClient {
   close(): void
@@ -262,8 +262,7 @@ export function createBackendRuntimeEventClient(
     close,
     connect() {
       close()
-      const runtime = getOptionalDesktopApi()?.runtime
-      if (!runtime) throw new Error('Design runtime event stream is unavailable.')
+      const runtime = getDesktopApi().runtime
       unsubscribe = runtime.events.onEvent((event) => {
         if (
           event.designTool !== 'backend' ||

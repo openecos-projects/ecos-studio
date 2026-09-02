@@ -14,9 +14,7 @@ const {
   settingsData,
   setDesktopWindowTitleMock,
   toastAddMock,
-  waitForRuntimeReadyMock,
-  waitForDesktopApiMock,
-  getOptionalDesktopApiMock,
+  getDesktopApiMock,
   requestHomeRunArtifactResetMock,
   clearHomeRunArtifactResetAwaitingBackendStartMock,
   notifyWorkspaceRerunPreparedMock,
@@ -36,9 +34,7 @@ const {
   settingsData: new Map<string, unknown>(),
   setDesktopWindowTitleMock: vi.fn(),
   toastAddMock: vi.fn(),
-  waitForRuntimeReadyMock: vi.fn(),
-  waitForDesktopApiMock: vi.fn(),
-  getOptionalDesktopApiMock: vi.fn(),
+  getDesktopApiMock: vi.fn(),
   requestHomeRunArtifactResetMock: vi.fn(),
   clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
   notifyWorkspaceRerunPreparedMock: vi.fn(),
@@ -76,8 +72,7 @@ vi.mock('primevue/usetoast', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
-  getOptionalDesktopApi: getOptionalDesktopApiMock,
-  waitForDesktopApi: waitForDesktopApiMock,
+  getDesktopApi: getDesktopApiMock,
 }))
 
 vi.mock('@/api', async (importOriginal) => ({
@@ -86,7 +81,6 @@ vi.mock('@/api', async (importOriginal) => ({
   loadWorkspaceApi: loadWorkspaceApiMock,
   createWorkspaceApi: createWorkspaceApiMock,
   updateWorkspaceApi: updateWorkspaceApiMock,
-  waitForRuntimeReady: waitForRuntimeReadyMock,
 }))
 
 vi.mock('@/api/runtimeEvents', () => ({
@@ -303,9 +297,7 @@ describe('useWorkspace openProject', () => {
     readWorkspaceParametersResourceApiMock.mockReset()
     setDesktopWindowTitleMock.mockReset()
     toastAddMock.mockReset()
-    waitForRuntimeReadyMock.mockReset()
-    waitForDesktopApiMock.mockReset()
-    getOptionalDesktopApiMock.mockReset()
+    getDesktopApiMock.mockReset()
     requestHomeRunArtifactResetMock.mockReset()
     notifyWorkspaceRerunPreparedMock.mockReset()
     clearFlowExecutionActiveForWorkspaceMock.mockReset()
@@ -326,9 +318,7 @@ describe('useWorkspace openProject', () => {
     vi.mocked(desktopApi.workspace.clearProjectRoot).mockImplementation(async () => {
       activeProjectRoot = null
     })
-    waitForDesktopApiMock.mockResolvedValue(desktopApi)
-    getOptionalDesktopApiMock.mockReturnValue(desktopApi)
-    waitForRuntimeReadyMock.mockResolvedValue(undefined)
+    getDesktopApiMock.mockReturnValue(desktopApi)
     onRuntimeEvent = undefined
     createRuntimeEventClientMock.mockReturnValue({
       onAll: vi.fn(),
@@ -384,7 +374,6 @@ describe('useWorkspace openProject', () => {
     ).resolves.toBe(true)
 
     expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
-    expect(waitForRuntimeReadyMock).not.toHaveBeenCalled()
     expect(workspace.currentProject.value?.path).toBe('/work/demo')
     expect(settingsData.get('current_project_path')).toBe('/work/demo')
   })
@@ -611,7 +600,6 @@ describe('useWorkspace openProject', () => {
 
     expect(await workspace.openProject()).toBe(false)
     expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
-    expect(waitForRuntimeReadyMock).not.toHaveBeenCalled()
     expect(desktopApi.workspace.isProjectDirectory).toHaveBeenCalledWith('/work/not-ecos')
     expect(workspace.currentProject.value).toBeNull()
   })
@@ -633,7 +621,6 @@ describe('useWorkspace openProject', () => {
       ),
     ).toBe(false)
     expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
-    expect(waitForRuntimeReadyMock).not.toHaveBeenCalled()
     expect(workspace.currentProject.value).toBeNull()
   })
 
@@ -2081,16 +2068,19 @@ describe('useWorkspace openProject', () => {
 
   it('checks only desktop bridge availability before workspace operations', async () => {
     const workspace = useWorkspace()
+    getDesktopApiMock.mockClear()
 
     await expect(workspace.ensureApiReady()).resolves.toBe(true)
 
-    expect(waitForRuntimeReadyMock).toHaveBeenCalled()
+    expect(getDesktopApiMock).toHaveBeenCalledOnce()
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
   })
 
   it('reports desktop runtime availability failures through ensureApiReady', async () => {
     const workspace = useWorkspace()
-    waitForRuntimeReadyMock.mockRejectedValueOnce(new Error('bridge unavailable'))
+    getDesktopApiMock.mockImplementationOnce(() => {
+      throw new Error('bridge unavailable')
+    })
 
     await expect(workspace.ensureApiReady()).resolves.toBe(false)
 
@@ -2410,7 +2400,7 @@ describe('useWorkspace openProject', () => {
           resolveTracker = resolve
         }),
     )
-    getOptionalDesktopApiMock.mockReturnValue({
+    getDesktopApiMock.mockReturnValue({
       ecc: { runtime: { waitForOperation } },
     } as unknown as DesktopApi)
 

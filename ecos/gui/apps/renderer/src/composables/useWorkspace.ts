@@ -8,14 +8,13 @@ import type {
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
-import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import {
   closeWorkspaceApi,
   backendWorkspaceOptions,
   loadWorkspaceApi,
   createWorkspaceApi,
   updateWorkspaceApi,
-  waitForRuntimeReady,
 } from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type {
@@ -176,22 +175,22 @@ let _toast: ReturnType<typeof useToast> | null = null
 const APP_NAME = 'ECOS Studio'
 
 async function getSetting<T>(key: string): Promise<T | null> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   return (await desktopApi.settings.get(key)) as T | null
 }
 
 async function setSetting(key: string, value: unknown): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   await desktopApi.settings.set(key, value as DesktopSettingsValue)
 }
 
 async function deleteSetting(key: string): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   await desktopApi.settings.delete(key)
 }
 
 async function pickDirectory(title: string): Promise<string | null> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   return await desktopApi.dialog.pickDirectory({ title })
 }
 
@@ -268,7 +267,7 @@ export function useWorkspace() {
     runtimeBackendSubtitle.value =
       'First load or restoring your project may take a moment'
     try {
-      await waitForRuntimeReady({ timeoutMs: 180_000 })
+      getDesktopApi()
       return true
     } catch {
       if (!options.quiet) {
@@ -312,7 +311,7 @@ export function useWorkspace() {
     path: string,
   ): Promise<WorkspaceAffinityResult> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       if (typeof desktopApi.workspace.openOrFocus !== 'function') {
         return { action: 'proceed', previousPath: null }
       }
@@ -335,7 +334,7 @@ export function useWorkspace() {
 
   const bindWorkspaceWindow = async (path: string): Promise<void> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       if (typeof desktopApi.workspace.bindWindow !== 'function') return
       await desktopApi.workspace.bindWindow(path)
     } catch (error) {
@@ -345,7 +344,7 @@ export function useWorkspace() {
 
   const unbindWorkspaceWindow = async (path?: string): Promise<void> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       if (typeof desktopApi.workspace.unbindWindow !== 'function') return
       await desktopApi.workspace.unbindWindow(path)
     } catch (error) {
@@ -379,7 +378,7 @@ export function useWorkspace() {
    */
   const isProjectValid = async (path: string): Promise<boolean> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       return await desktopApi.workspace.isProjectDirectory(path)
     } catch (error) {
       console.error(`Failed to check path existence: ${path}`, error)
@@ -393,7 +392,7 @@ export function useWorkspace() {
   ): Promise<string | null> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         const canonicalPath = await desktopApi.workspace.registerProjectRoot(path)
         activeProjectRootOwner = owner
         return normalizePath(canonicalPath)
@@ -409,7 +408,7 @@ export function useWorkspace() {
         const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
         if (!projectContext) return
 
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
       } catch (error) {
         console.warn('Failed to register managed project read scope:', error)
@@ -419,7 +418,7 @@ export function useWorkspace() {
   const clearProjectRoot = (): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.clearProjectRoot()
         activeProjectRootOwner = null
       } catch (error) {
@@ -456,7 +455,7 @@ export function useWorkspace() {
     enqueueProjectRootMutation(async () => {
       if (activeProjectRootOwner !== owner) return
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         const committedPath = currentProject.value?.path
         if (committedPath) {
           await desktopApi.workspace.registerProjectRoot(committedPath)
@@ -525,7 +524,7 @@ export function useWorkspace() {
         return
       }
 
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       const boundPath =
         typeof desktopApi.workspace.getBoundPath === 'function'
           ? await desktopApi.workspace.getBoundPath()
@@ -863,7 +862,7 @@ export function useWorkspace() {
         // 恢复运行状态：检查ECC runtime中是否有正在运行的operations
         if (!isFlowExecutionActiveForWorkspace(canonicalProjectRoot)) {
           try {
-            const desktopApi = await waitForDesktopApi()
+            const desktopApi = getDesktopApi()
             if (desktopApi.ecc.runtime?.snapshot) {
               const snapshot = await desktopApi.ecc.runtime.snapshot({
                 workspaceHandle: workspaceId,
@@ -968,13 +967,13 @@ export function useWorkspace() {
     let usedDirectoryReplacement = false
     const restoreReplacement = async () => {
       if (!replacement || committedReplacement) return
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       await desktopApi.workspace.restoreProjectDirectoryReplacement(replacement.id)
       replacement = null
     }
     const finalizeReplacement = async () => {
       if (!replacement) return
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       await desktopApi.workspace.finalizeProjectDirectoryReplacement(replacement.id)
       committedReplacement = true
       replacement = null
@@ -990,7 +989,7 @@ export function useWorkspace() {
         return
       }
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.discardFailedWorkspaceCreate(selectedPath)
       } catch (cleanupError) {
         console.error('Failed to discard incomplete workspace create:', cleanupError)
@@ -1085,7 +1084,7 @@ export function useWorkspace() {
 
       let creationConfig = config
       if (config?.replaceExistingWorkspace) {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         const registeredParent = await desktopApi.workspace.registerProjectRoot(
           workspaceParentPath(selectedPath),
         )
@@ -1143,7 +1142,7 @@ export function useWorkspace() {
         'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      const desktopApiForCreate = await waitForDesktopApi()
+      const desktopApiForCreate = getDesktopApi()
       existedBeforeCreate = await desktopApiForCreate.workspace.pathExists(selectedPath)
 
       // 3. Create the workspace through the selected persistent RPC runtime.
@@ -1968,7 +1967,7 @@ export function useWorkspace() {
 
     const client = backendRuntimeEventClient.value
     const workspaceHandle = workspaceLifecycle.session.value.workspaceId
-    const waitForOperation = getOptionalDesktopApi()?.ecc.runtime?.waitForOperation
+    const waitForOperation = getDesktopApi().ecc.runtime?.waitForOperation
     if (!client && (!waitForOperation || !workspaceHandle)) {
       return Promise.reject(new Error('ECC runtime operation stream is unavailable.'))
     }

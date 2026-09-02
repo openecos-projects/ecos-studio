@@ -1,5 +1,5 @@
 import type { WorkspaceConfig } from '@/types'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { parseProjectManifest } from '@ecos-studio/shared'
@@ -182,7 +182,7 @@ export async function registerProjectManagedWorkspace(
     const registeredWorkspaceRoot = await registerLocalProjectRoot(workspacePath)
     if (registeredProjectRoot && registeredWorkspaceRoot) {
       try {
-        const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.registerProjectReadRoot(registeredProjectRoot)
       } catch (error) {
         console.warn('Failed to register managed project read scope:', error)
@@ -193,7 +193,7 @@ export async function registerProjectManagedWorkspace(
 
 async function registerLocalProjectRoot(rootPath: string): Promise<string | null> {
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const registeredRoot = await desktopApi.workspace.registerProjectRoot(rootPath)
     return normalizePath(registeredRoot || rootPath)
   } catch (error) {

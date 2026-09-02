@@ -1,28 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { hasDesktopApi, waitForDesktopApi } = vi.hoisted(() => ({
-  hasDesktopApi: vi.fn(),
-  waitForDesktopApi: vi.fn(),
+const { getDesktopApi } = vi.hoisted(() => ({
+  getDesktopApi: vi.fn(),
 }))
 
 vi.mock('@/platform/desktop', () => ({
-  hasDesktopApi,
-  waitForDesktopApi,
+  getDesktopApi,
 }))
 
 import { setDesktopWindowTitle } from './windowTitle'
 
 describe('setDesktopWindowTitle', () => {
   beforeEach(() => {
-    hasDesktopApi.mockReset()
-    waitForDesktopApi.mockReset()
+    getDesktopApi.mockReset()
   })
 
   it('updates the title through the desktop bridge when available', async () => {
     const setTitle = vi.fn().mockResolvedValue(undefined)
 
-    hasDesktopApi.mockReturnValue(true)
-    waitForDesktopApi.mockResolvedValue({
+    getDesktopApi.mockReturnValue({
       window: {
         setTitle,
       },
@@ -33,10 +29,13 @@ describe('setDesktopWindowTitle', () => {
     expect(setTitle).toHaveBeenCalledWith('Project A')
   })
 
-  it('does nothing when the desktop bridge is unavailable', async () => {
-    hasDesktopApi.mockReturnValue(false)
+  it('fails immediately when the desktop bridge is unavailable', async () => {
+    getDesktopApi.mockImplementation(() => {
+      throw new Error('ECOS desktop bridge is not available.')
+    })
 
-    await expect(setDesktopWindowTitle('Project B')).resolves.toBeUndefined()
-    expect(waitForDesktopApi).not.toHaveBeenCalled()
+    await expect(setDesktopWindowTitle('Project B')).rejects.toThrow(
+      'ECOS desktop bridge is not available.',
+    )
   })
 })

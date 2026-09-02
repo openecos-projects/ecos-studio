@@ -10,7 +10,6 @@ import {
 import { readOptionalProjectTextFileChunk } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 
 export interface FlowLogSegment {
@@ -181,7 +180,6 @@ function rerunPreparedForWorkspace(
 }
 
 export function useBackendFlowLogs() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { backendRuntimeEvents, currentProject } = useWorkspace()
   const handledEventIds = new Set<string>()
   const handledEventObjects = new WeakSet<object>()
@@ -292,7 +290,7 @@ export function useBackendFlowLogs() {
   async function refreshFlowLogs(): Promise<void> {
     const generation = ++loadGeneration
     const startingEmpty = flowLogSegmentsState.value.length === 0
-    if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
+    if (!currentProject.value?.path) {
       if (startingEmpty) flowLogSegmentsState.value = []
       return
     }

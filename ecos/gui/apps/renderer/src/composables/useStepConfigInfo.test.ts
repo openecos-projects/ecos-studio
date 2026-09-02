@@ -24,12 +24,6 @@ vi.mock('./useWorkspace', () => ({
   }),
 }))
 
-vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({
-    isDesktopRuntimeAvailable: true,
-  }),
-}))
-
 vi.mock('./useBackendFlowLogs', () => ({
   convertRemoteToLocalPath: (path: string) => path,
 }))

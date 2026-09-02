@@ -6,7 +6,6 @@ import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
@@ -85,7 +84,6 @@ function firstResponseMessage(
 
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
   const { resourceVersions } = workspaceLifecycle
@@ -284,12 +282,6 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     if (!canApply() || !localPath) return
     stepConfigPathResolved.value = localPath
 
-    if (!isDesktopRuntimeAvailable) {
-      stepConfigReadError.value =
-        'Reading local config requires the ECOS Studio desktop runtime. Browser mode cannot access project files.'
-      return
-    }
-
     try {
       const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
         resolveProjectPathAccess(localPath),
@@ -418,10 +410,6 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     }
     if (!path) {
       stepConfigSaveError.value = 'No configuration file path resolved'
-      return false
-    }
-    if (!isDesktopRuntimeAvailable) {
-      stepConfigSaveError.value = 'Saving requires the ECOS Studio desktop runtime'
       return false
     }
     if (blockStepConfigSaveWhileFlowRunning()) {

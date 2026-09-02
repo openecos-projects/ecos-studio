@@ -26,7 +26,6 @@ import {
   type StaOverviewModel,
   type StepResourcesModel,
 } from '@/components/flow-insights/flowInsightsData'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
@@ -326,7 +325,6 @@ function clearFlowInsightsCacheForWorkspace(projectPath: string): void {
 }
 
 export function useFlowInsights() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject, resourceVersions } = useWorkspace()
   const data = ref<FlowInsightsData | null>(null)
   const loading = ref(false)
@@ -364,7 +362,7 @@ export function useFlowInsights() {
   async function refresh(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
     const projectPath = currentProject.value?.path
     const version = ++requestVersion
-    if (!projectPath || !isDesktopRuntimeAvailable) {
+    if (!projectPath) {
       data.value = null
       error.value = null
       loading.value = false

@@ -1,6 +1,5 @@
 import { ref, computed, onScopeDispose, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { readProjectTextFile } from '@/utils/projectFiles'
@@ -128,7 +127,6 @@ function parseTimeString(timeStr: string): number {
  * 负责获取和管理当前步骤的子流程信息
  */
 export function useSubflow() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { backendRuntimeEvents, currentProject, resourceVersions, runtimeEvents } =
     useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
@@ -286,12 +284,6 @@ export function useSubflow() {
         return
       }
 
-      // 2. 使用桌面桥接读取 JSON 文件
-      if (!isDesktopRuntimeAvailable) {
-        console.warn('Desktop bridge unavailable, cannot read local file')
-        return
-      }
-
       const projectPath = currentProject.value?.path
       const localPath = projectPath
         ? convertRemoteToLocalPath(subflowPath, projectPath)
@@ -333,8 +325,8 @@ export function useSubflow() {
    * 用于 runtime event 推送的 subflow_path
    */
   async function loadSubflowFromPath(subflowPath: string): Promise<void> {
-    if (!isDesktopRuntimeAvailable || !subflowPath) {
-      console.warn('Cannot load subflow: desktop bridge unavailable or path is empty')
+    if (!subflowPath) {
+      console.warn('Cannot load subflow: path is empty')
       return
     }
 

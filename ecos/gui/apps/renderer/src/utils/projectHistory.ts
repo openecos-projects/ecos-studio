@@ -1,5 +1,5 @@
 import { parseProjectManifest, type DesktopSettingsValue } from '@ecos-studio/shared'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import type { Project, ProjectStatus } from '@/types'
 import { readProjectManagementManifest } from './projectManagementRead'
 
@@ -68,12 +68,12 @@ async function saveProjectHistory(projects: Project[]): Promise<void> {
 }
 
 async function getSetting<T>(key: string): Promise<T | null> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   return (await desktopApi.settings.get(key)) as T | null
 }
 
 async function setSetting(key: string, value: unknown): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   await desktopApi.settings.set(key, value as DesktopSettingsValue)
 }
 

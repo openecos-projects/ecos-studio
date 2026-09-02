@@ -209,7 +209,7 @@ import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   projectContextFromWorkspaceConfig,
@@ -381,7 +381,7 @@ async function registerProjectRootForProjectManagement(
   if (!projectRoot) return
 
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     await desktopApi.workspace.registerProjectRoot(projectRoot)
   } catch (error) {
     console.warn('Failed to register project root for workspace defaults.', error)

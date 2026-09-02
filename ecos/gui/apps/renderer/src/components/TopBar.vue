@@ -200,8 +200,7 @@ import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useRoute, useRouter } from 'vue-router'
-import type { DesktopApi } from '@ecos-studio/shared'
-import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
@@ -249,7 +248,7 @@ const agentShell = useAgentShellStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
-const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+const desktopApi = getDesktopApi()
 const canOpenStepConfig = computed(
   () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
 )
@@ -501,12 +500,8 @@ const isMaximized = ref(false)
 let unlistenMaximizedChanged: (() => void) | undefined
 
 async function syncMaximizedState() {
-  if (!desktopApi.value) {
-    return
-  }
-
   try {
-    isMaximized.value = await desktopApi.value.window.isMaximized()
+    isMaximized.value = await desktopApi.window.isMaximized()
   } catch {
     /* ignore */
   }
@@ -518,21 +513,10 @@ onMounted(async () => {
   window.addEventListener('resize', handleQuickMenuViewportChange)
   window.addEventListener('scroll', handleQuickMenuViewportChange, true)
 
-  if (!desktopApi.value) {
-    try {
-      desktopApi.value = await waitForDesktopApi({ timeoutMs: 5000 })
-    } catch (error) {
-      console.warn('[TopBar] Desktop bridge did not become available in time:', error)
-      return
-    }
-  }
-
   void syncMaximizedState()
-  unlistenMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
-    (nextIsMaximized) => {
-      isMaximized.value = nextIsMaximized
-    },
-  )
+  unlistenMaximizedChanged = desktopApi.window.onMaximizedChanged((nextIsMaximized) => {
+    isMaximized.value = nextIsMaximized
+  })
 })
 
 onUnmounted(() => {
@@ -545,18 +529,15 @@ onUnmounted(() => {
 
 // ---- 窗口控制 ----
 const handleMinimize = async () => {
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  await api.window.minimize()
+  await desktopApi.window.minimize()
 }
 
 const handleMaximize = async () => {
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  await api.window.toggleMaximize()
+  await desktopApi.window.toggleMaximize()
 }
 
 const handleClose = async () => {
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  await api.window.close()
+  await desktopApi.window.close()
 }
 </script>
 

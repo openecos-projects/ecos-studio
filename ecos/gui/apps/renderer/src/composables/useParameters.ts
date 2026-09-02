@@ -1,6 +1,5 @@
 import { ref, reactive, watch, computed, getCurrentScope, onScopeDispose } from 'vue'
 import { useWorkspace } from './useWorkspace'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
@@ -415,7 +414,6 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
  * 负责从 parameters.json 加载配置参数并管理状态
  */
 export function useParameters() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const {
     currentProject,
     resourceVersions,
@@ -614,10 +612,8 @@ export function useParameters() {
   }
 
   async function loadParameters(): Promise<void> {
-    if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn(
-        'Cannot load parameters: desktop bridge unavailable or no project is open',
-      )
+    if (!currentProject.value?.path) {
+      console.warn('Cannot load parameters: no project is open')
       resetParametersState()
       return
     }
@@ -702,10 +698,8 @@ export function useParameters() {
   }
 
   async function saveParameters(): Promise<boolean> {
-    if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn(
-        'Cannot save parameters: desktop bridge unavailable or no project is open',
-      )
+    if (!currentProject.value?.path) {
+      console.warn('Cannot save parameters: no project is open')
       return false
     }
 

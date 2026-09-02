@@ -9,7 +9,6 @@ import {
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
-  desktopAvailable: true,
   route: { query: {} as Record<string, unknown> },
   readManifest: vi.fn(),
   readWorkspaceTexts: vi.fn(),
@@ -27,7 +26,6 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
-  hasDesktopApi: () => testState.desktopAvailable,
   getDesktopApi: () => ({
     projectManagement: {
       readManifest: testState.readManifest,
@@ -142,7 +140,6 @@ describe('useBaselineStepConfig', () => {
     scope = effectScope()
     step = ref<StepEnum | undefined>(StepEnum.CTS)
     testState.currentProject = ref({ path: '/projects/gcd/ws_0004' })
-    testState.desktopAvailable = true
     testState.route.query = { projectRoot: '/projects/gcd' }
     testState.readManifest.mockReset()
     testState.readWorkspaceTexts.mockReset()
@@ -180,14 +177,6 @@ describe('useBaselineStepConfig', () => {
     const baseline = create()
     await vi.waitFor(() => {
       expect(baseline.status.value).toBe('no-project')
-    })
-  })
-
-  it('reports browser when the desktop runtime is unavailable', async () => {
-    testState.desktopAvailable = false
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('browser')
     })
   })
 

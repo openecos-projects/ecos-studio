@@ -580,7 +580,6 @@ import {
 } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
 import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
-import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { getDesktopApi } from '@/platform/desktop'
@@ -985,7 +984,7 @@ function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
   return canOpenChipViewer({
     chipViewerBusy: openingLayoutStep.value !== null,
     chipViewerEditBusy: false,
-    isDesktopRuntime: isDesktopRuntime(),
+    isDesktopRuntime: true,
     projectPath: currentProject.value?.path,
     step: thumbnail.step,
   })

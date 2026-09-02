@@ -3,13 +3,13 @@ import {
   type ProjectManifest,
   type ProjectManifestMutation,
 } from '@ecos-studio/shared'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 
 export async function mutateProjectManifest(
   projectRoot: string,
   mutation: ProjectManifestMutation,
 ): Promise<ProjectManifest> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.projectManifest.mutate({
     mutation: cloneForDesktopIpc(mutation),
     projectRoot,

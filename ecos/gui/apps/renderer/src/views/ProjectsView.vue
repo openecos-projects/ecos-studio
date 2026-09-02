@@ -784,7 +784,7 @@ import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import {
@@ -1601,7 +1601,7 @@ async function loadSelectedProjectWorkspaceData() {
 
 async function importProject() {
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const directory = await desktopApi.dialog.pickDirectory({
       title: 'Select Project Folder',
     })
@@ -1635,7 +1635,7 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
   closeRowActionMenus()
   if (!project.path) return
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const directory = await desktopApi.dialog.pickDirectory({
       title: 'Select Workspace Folder',
     })
@@ -1883,7 +1883,7 @@ async function loadProjectMpcSpec(resourceId: string): Promise<void> {
 async function selectProjectStorageLocation() {
   projectRootError.value = ''
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const directory = await desktopApi.dialog.pickDirectory({
       title: 'Select Project Storage Location',
     })

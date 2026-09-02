@@ -8,7 +8,6 @@ import {
   type StepDashboardFloorplanSnapshot,
 } from '@/components/step-dashboard/stepDashboardData'
 import { isSuccessfulFlowStep } from './flowRunArtifacts'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
@@ -317,7 +316,6 @@ function clearHomeSnapshotCacheForWorkspace(projectPath: string): void {
 }
 
 export function useHomeSnapshots() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject, resourceVersions } = useWorkspace()
   const insightSnapshots = ref<HomeInsightSnapshot[]>([])
   const layoutThumbnails = ref<HomeLayoutThumbnail[]>([])
@@ -345,7 +343,7 @@ export function useHomeSnapshots() {
   async function refresh(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
     const projectPath = currentProject.value?.path
     const version = ++requestVersion
-    if (!projectPath || !isDesktopRuntimeAvailable) {
+    if (!projectPath) {
       insightSnapshots.value = []
       layoutThumbnails.value = []
       error.value = null

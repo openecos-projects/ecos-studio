@@ -4,7 +4,7 @@ import type { ProjectManifestMutation } from '@ecos-studio/shared'
 const mutate = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi: vi.fn(async () => ({
+  getDesktopApi: vi.fn(() => ({
     projectManifest: {
       mutate,
     },

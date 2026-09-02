@@ -1,6 +1,5 @@
 import { ref, computed, getCurrentInstance, onUnmounted, watch } from 'vue'
 import { useWorkspace } from './useWorkspace'
-import { useDesktopRuntime, isDesktopRuntime } from './useDesktopRuntime'
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
 import { readProjectTextFile } from '@/utils/projectFiles'
@@ -126,7 +125,7 @@ function normalizeFlowStageState(value: string | null | undefined): string {
 export async function loadFlowRunStepKeysFromProject(
   projectPath: string,
 ): Promise<string[]> {
-  if (!isDesktopRuntime() || !projectPath) {
+  if (!projectPath) {
     return fallbackRunStepKeys()
   }
   try {
@@ -185,7 +184,6 @@ async function readFrontendFlowWithRetry(
  * 负责从 flow.json 加载流程步骤并管理状态
  */
 export function useFlowStages() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject, resourceVersions, runtimeEvents, workspaceSession } =
     useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
@@ -348,8 +346,8 @@ export function useFlowStages() {
    */
   async function loadFlowStagesFromPath(flowJsonPath: string): Promise<void> {
     const loadGeneration = ++flowLoadGeneration
-    if (!isDesktopRuntimeAvailable || !flowJsonPath) {
-      console.warn('Cannot load flow.json: desktop bridge unavailable or path is empty')
+    if (!flowJsonPath) {
+      console.warn('Cannot load flow.json: path is empty')
       return
     }
 
@@ -398,10 +396,8 @@ export function useFlowStages() {
    */
   async function loadFlowStages(): Promise<void> {
     const loadGeneration = ++flowLoadGeneration
-    if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn(
-        'Cannot load flow.json: desktop bridge unavailable or no project is open',
-      )
+    if (!currentProject.value?.path) {
+      console.warn('Cannot load flow.json: no project is open')
       dynamicFlowStages.value = []
       return
     }

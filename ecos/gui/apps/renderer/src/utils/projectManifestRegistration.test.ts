@@ -17,7 +17,7 @@ const mutateProjectManifest = vi.fn()
 const readOptionalProjectTextFile = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi: vi.fn(async () => ({
+  getDesktopApi: vi.fn(() => ({
     workspace: {
       registerProjectRoot,
       registerProjectReadRoot,

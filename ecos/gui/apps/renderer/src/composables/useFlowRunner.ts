@@ -1,6 +1,5 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
 import {
@@ -69,7 +68,6 @@ function clearTransientInteractionLocks() {
  * 同一套 renderer runtime protocol，状态更新由事件消费者直接完成。
  */
 export function useFlowRunner() {
-  const { ensureDesktopRuntime } = useDesktopRuntime()
   const {
     currentProject,
     ensureApiReady,
@@ -106,15 +104,6 @@ export function useFlowRunner() {
     if (stepParam) {
       return stepParam
     }
-  }
-
-  function showDesktopRequiredToast() {
-    showToast({
-      severity: 'warn',
-      summary: 'Desktop App Required',
-      detail: 'Flow execution is only available in the desktop app.',
-      life: 5000,
-    })
   }
 
   function getCurrentWorkspacePath(): string | null {
@@ -188,15 +177,6 @@ export function useFlowRunner() {
     if (!step) {
       console.warn('Unable to get current step')
       return null
-    }
-
-    // 检查是否在 desktop runtime 环境中
-    if (!ensureDesktopRuntime()) {
-      console.warn(
-        'Not running in desktop runtime environment, cannot execute ECC RPC flow command',
-      )
-      showDesktopRequiredToast()
-      return { step: step as StepEnum, state: StateEnum.Invalid }
     }
 
     if (!(await ensureApiReady())) {
@@ -308,15 +288,6 @@ export function useFlowRunner() {
    * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
    */
   async function runAllFlow(options: FlowRunOptions = {}): Promise<any | null> {
-    // 检查是否在 desktop runtime 环境中
-    if (!ensureDesktopRuntime()) {
-      console.warn(
-        'Not running in desktop runtime environment, cannot execute ECC RPC flow command',
-      )
-      showDesktopRequiredToast()
-      return null
-    }
-
     if (!(await ensureApiReady())) {
       return null
     }

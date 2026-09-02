@@ -5,7 +5,6 @@ const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
   resourceVersions: null as Ref<{ step: number; all: number }> | null,
   route: { params: { step: 'synthesis' }, path: '/workspace/synthesis' },
-  isDesktopRuntimeAvailable: null as Ref<boolean> | null,
   getWorkspaceResourceIndexApi: vi.fn(),
   resolveWorkspaceStepInfoApi: vi.fn(),
   readOptionalProjectTextFile: vi.fn(),
@@ -15,12 +14,6 @@ const testState = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   useRoute: () => testState.route,
-}))
-
-vi.mock('@/composables/useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({
-    isDesktopRuntimeAvailable: testState.isDesktopRuntimeAvailable,
-  }),
 }))
 
 vi.mock('@/composables/useWorkspace', () => ({
@@ -97,7 +90,6 @@ describe('useStepDashboardData cache', () => {
     scope = effectScope()
     testState.currentProject = ref({ path: '/projects/gcd/ws_0004' })
     testState.resourceVersions = ref({ step: 0, all: 0 })
-    testState.isDesktopRuntimeAvailable = ref(true)
     testState.route.params.step = 'synthesis'
     testState.route.path = '/workspace/synthesis'
     testState.getWorkspaceResourceIndexApi.mockReset()

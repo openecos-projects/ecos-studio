@@ -31,10 +31,6 @@ vi.mock('./useWorkspace', () => ({
   }),
 }))
 
-vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({ isDesktopRuntimeAvailable: true }),
-}))
-
 vi.mock('./useFlowRunner', () => ({
   clearFlowExecutionActiveForWorkspace: vi.fn(),
   flowExecutionActive: ref(true),

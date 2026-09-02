@@ -22,10 +22,6 @@ vi.mock('./useWorkspace', () => ({
   }),
 }))
 
-vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({ isDesktopRuntimeAvailable: true }),
-}))
-
 vi.mock('@/api/workspaceResources', () => ({
   getWorkspaceResourceIndexApi: testState.getWorkspaceResourceIndexApi,
 }))

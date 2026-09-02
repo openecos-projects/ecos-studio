@@ -16,7 +16,7 @@ const bridge = vi.hoisted(() => {
 })
 
 vi.mock('@/platform/desktop', () => ({
-  getOptionalDesktopApi: () => ({ runtime: { events: { onEvent: bridge.onEvent } } }),
+  getDesktopApi: () => ({ runtime: { events: { onEvent: bridge.onEvent } } }),
 }))
 
 import { createBackendRuntimeEventClient } from './backendRuntimeEvents'

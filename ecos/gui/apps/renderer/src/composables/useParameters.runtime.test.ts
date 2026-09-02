@@ -60,12 +60,6 @@ vi.mock('./useWorkspace', () => ({
   }),
 }))
 
-vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({
-    isDesktopRuntimeAvailable: true,
-  }),
-}))
-
 vi.mock('./useBackendFlowLogs', () => ({
   fetchSharedHomeData,
   convertRemoteToLocalPath: (path: string) => path,

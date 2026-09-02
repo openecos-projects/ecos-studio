@@ -214,7 +214,6 @@ import {
   appMenuActionIds,
   type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
-  type DesktopApi,
 } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
@@ -227,11 +226,7 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/flowExecutionState'
-import {
-  getOptionalDesktopApi,
-  hasDesktopApi,
-  waitForDesktopApi,
-} from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
@@ -328,7 +323,7 @@ const {
   currentProject,
   showToast,
 })
-const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+const desktopApi = getDesktopApi()
 
 function updatePdkNameDialogVisibility(visible: boolean): void {
   if (!visible) cancelPdkName()
@@ -339,17 +334,27 @@ watch(
   ([hasWorkspace, workspaceRoute]) => {
     void (async () => {
       try {
-        const api = desktopApi.value ?? (await waitForDesktopApi({ timeoutMs: 5000 }))
-        desktopApi.value = api
         await Promise.all([
-          api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
-          api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
-          api.menu.setActionEnabled(appMenuActionIds.exportDesignMetrics, hasWorkspace),
-          api.menu.setActionEnabled(
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.reconfigureWorkspace,
+            hasWorkspace,
+          ),
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.manageDesignFiles,
+            hasWorkspace,
+          ),
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.exportDesignMetrics,
+            hasWorkspace,
+          ),
+          desktopApi.menu.setActionEnabled(
             appMenuActionIds.exportSignoffPackage,
             workspaceRoute,
           ),
-          api.menu.setActionEnabled(appMenuActionIds.exportDesignSummary, workspaceRoute),
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.exportDesignSummary,
+            workspaceRoute,
+          ),
         ])
       } catch (error) {
         console.warn('[App] Failed to sync workspace menu availability:', error)
@@ -422,9 +427,7 @@ async function createWorkspaceFromAgent(
   }
   const workspacePath = currentProject.value?.path
   if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  desktopApi.value = api
-  await api.workspace.writeProjectTextFile(
+  await desktopApi.workspace.writeProjectTextFile(
     `${normalizeLocalPath(workspacePath)}/home/workspace_setup_contract.v2.json`,
     `${JSON.stringify(contract, null, 2)}\n`,
   )
@@ -576,14 +579,12 @@ async function openWorkspaceReconfigureWizard() {
 
   try {
     const normalizedWorkspacePath = normalizeLocalPath(workspacePath)
-    const api = desktopApi.value ?? (await waitForDesktopApi())
-    desktopApi.value = api
-    await api.workspace.registerProjectRoot(normalizedWorkspacePath)
+    await desktopApi.workspace.registerProjectRoot(normalizedWorkspacePath)
     const projectContext = await resolveProjectRouteContextForWorkspace(
       normalizedWorkspacePath,
     )
     if (projectContext) {
-      await api.workspace.registerProjectReadRoot(projectContext.projectRoot)
+      await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
     }
 
     workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
@@ -856,9 +857,9 @@ async function scanWorkspaceOriginDesignInputs(
 ): Promise<WorkspaceOriginDesignInputs> {
   const inputs = emptyWorkspaceOriginDesignInputs()
   try {
-    const api = desktopApi.value ?? (await waitForDesktopApi())
-    desktopApi.value = api
-    const entries = await api.workspace.listProjectDirectory(`${workspacePath}/origin`)
+    const entries = await desktopApi.workspace.listProjectDirectory(
+      `${workspacePath}/origin`,
+    )
     for (const entry of entries) {
       if (entry.type !== 'file') continue
       const filePath = normalizeLocalPath(entry.path)
@@ -997,13 +998,7 @@ function isAbsoluteLocalPath(path: string): boolean {
 
 const openDocumentation = async () => {
   try {
-    if (desktopApi.value ?? hasDesktopApi()) {
-      const api = desktopApi.value ?? (await waitForDesktopApi())
-      desktopApi.value = api
-      await api.system.openExternal(documentationUrl)
-    } else {
-      window.open(documentationUrl, '_blank', 'noopener,noreferrer')
-    }
+    await desktopApi.system.openExternal(documentationUrl)
   } catch (error) {
     console.error('Failed to open documentation:', error)
     showToast({
@@ -1019,12 +1014,10 @@ async function setZoomFactor(nextFactor: number): Promise<void> {
   const factor = zoomFactors.includes(nextFactor as (typeof zoomFactors)[number])
     ? (nextFactor as (typeof zoomFactors)[number])
     : 1
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  desktopApi.value = api
-  await api.window.setZoomFactor(factor)
+  await desktopApi.window.setZoomFactor(factor)
   zoomFactor.value = factor
   try {
-    await api.settings.set(zoomSettingKey, factor)
+    await desktopApi.settings.set(zoomSettingKey, factor)
   } catch (error) {
     console.warn('[App] Failed to persist UI zoom setting:', error)
   }
@@ -1044,8 +1037,7 @@ async function adjustZoom(action: AppMenuAction): Promise<void> {
 
 const { handleMenuAction } = useAppMenuActions({
   createWindow: async () => {
-    const api = await waitForDesktopApi()
-    await api.window.create({ initialRoute: '/' })
+    await desktopApi.window.create({ initialRoute: '/' })
   },
   navigateToWorkspace: () => {
     router.push('/workspace')
@@ -1149,15 +1141,11 @@ const markResizing = () => {
  * 见 styles/index.css 与本文件 scoped 样式中的 `.window-maximized` 规则。
  */
 async function syncMaximizedClass() {
-  if (!desktopApi.value) {
-    return
-  }
-
   try {
-    const maxed = await desktopApi.value.window.isMaximized()
+    const maxed = await desktopApi.window.isMaximized()
     document.body.classList.toggle('window-maximized', maxed)
   } catch {
-    /* ignore: window API unavailable (e.g. SSR / test) */
+    /* ignore window state query failures */
   }
 }
 
@@ -1170,27 +1158,16 @@ const handleSelectStart = (e: Event) => {
 }
 
 onMounted(async () => {
-  if (!desktopApi.value) {
-    try {
-      desktopApi.value = await waitForDesktopApi({ timeoutMs: 5000 })
-    } catch (error) {
-      console.warn('[App] Desktop bridge not available on initial mount:', error)
+  try {
+    const savedZoom = await desktopApi.settings.get<number>(zoomSettingKey)
+    if (
+      typeof savedZoom === 'number' &&
+      zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
+    ) {
+      await setZoomFactor(savedZoom)
     }
-  }
-  console.info('[App] Desktop bridge available:', Boolean(desktopApi.value))
-
-  if (desktopApi.value) {
-    try {
-      const savedZoom = await desktopApi.value.settings.get<number>(zoomSettingKey)
-      if (
-        typeof savedZoom === 'number' &&
-        zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
-      ) {
-        await setZoomFactor(savedZoom)
-      }
-    } catch (error) {
-      console.warn('[App] Failed to restore UI zoom setting:', error)
-    }
+  } catch (error) {
+    console.warn('[App] Failed to restore UI zoom setting:', error)
   }
 
   themeStore.initTheme()
@@ -1215,19 +1192,13 @@ onMounted(async () => {
   // 启动时先同步一次最大化状态（从持久化会话恢复的场景）
   void syncMaximizedClass()
 
-  if (!desktopApi.value) {
-    return
-  }
-
   // 由桌面桥接的 resize 事件统一驱动降级状态，覆盖所有缩放来源。
-  unlistenWindowResized = desktopApi.value.window.onResized(() => {
+  unlistenWindowResized = desktopApi.window.onResized(() => {
     markResizing()
   })
-  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
-    (isMaximized) => {
-      document.body.classList.toggle('window-maximized', isMaximized)
-    },
-  )
+  unlistenWindowMaximizedChanged = desktopApi.window.onMaximizedChanged((isMaximized) => {
+    document.body.classList.toggle('window-maximized', isMaximized)
+  })
 })
 
 onUnmounted(() => {

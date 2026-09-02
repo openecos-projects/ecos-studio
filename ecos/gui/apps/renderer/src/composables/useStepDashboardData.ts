@@ -19,7 +19,6 @@ import {
   parseCongestionCsv,
   type CongestionMapTileModel,
 } from '@/components/flow-insights/flowInsightsData'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { onWorkspaceRerunPrepared } from '@/composables/homeRunArtifacts'
 import { registerRuntimeStepRenderTask } from '@/composables/runtimeStepRenderSync'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -254,7 +253,6 @@ export function clearStepDashboardDataForRerun(
 
 export function useStepDashboardData() {
   const route = useRoute()
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject, resourceVersions } = useWorkspace()
   const data = ref<StepDashboardData | null>(null)
   const loading = ref(false)
@@ -333,7 +331,7 @@ export function useStepDashboardData() {
     else data.value = null
     error.value = null
 
-    if (!step || !projectPath || !isDesktopRuntimeAvailable) return
+    if (!step || !projectPath) return
     loading.value = true
     try {
       const [index, layoutResponse, analysisResponse, mapResponse] = await Promise.all([
