@@ -83,6 +83,22 @@ function packagedEccLibraryEnv(
   }
 }
 
+function packagedSizerEnv(
+  binariesPath: string,
+  platform: RuntimePlatform,
+): NodeJS.ProcessEnv {
+  if (platform !== 'linux') return {}
+
+  const root = join(binariesPath, 'sizer')
+  if (
+    !existsSync(join(root, 'bin', 'Sizer')) ||
+    !existsSync(join(root, 'src', 'sizer_os.tcl'))
+  ) {
+    return {}
+  }
+  return { CHIPCOMPILER_ECC_SIZER_ROOT: root }
+}
+
 function ensureRepoEccDevShim(
   userDataPath: string,
   wrapperScript: string,
@@ -140,11 +156,13 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
     const resourcesPath = resolvePackagedResourcesPath(options)
     const binariesPath = resolvePackagedBinariesPath(options)
     const {
+      CHIPCOMPILER_ECC_SIZER_ROOT: _inheritedSizerRoot,
       CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
       ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
       ...baseEnv
     } = options.env
     const libraryEnv = packagedEccLibraryEnv(baseEnv, binariesPath, options.platform)
+    const sizerEnv = packagedSizerEnv(binariesPath, options.platform)
 
     if (packagedRuntimeBin) {
       const nextPath = prependPath(baseEnv, packagedRuntimeBin, options.platform)
@@ -152,6 +170,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       return {
         ...baseEnv,
         ...libraryEnv,
+        ...sizerEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         [nextPath.key]: nextPath.value,
       }
@@ -161,11 +180,12 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       return {
         ...baseEnv,
         ...libraryEnv,
+        ...sizerEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
       }
     }
 
-    return { ...baseEnv }
+    return { ...baseEnv, ...sizerEnv }
   }
 
   const developmentBinDir = resolveDevelopmentEccBinDir(options)

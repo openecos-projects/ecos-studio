@@ -85,6 +85,56 @@ build_agent_provider() {
     src/ecos_agent/gui/__main__.py
 }
 
+prepare_sizer_runtime() {
+  local source_root="${CHIPCOMPILER_ECC_SIZER_ROOT:-}"
+  local download_dir="$REPO_ROOT/ecc/dist/ecc-sizer-download"
+  local stage_dir="$REPO_ROOT/ecc/dist/ecos-sizer-runtime"
+
+  if [[ -z "$source_root" || ! -x "$source_root/bin/Sizer" || ! -f "$source_root/src/sizer_os.tcl" ]]; then
+    if ! command -v gh >/dev/null 2>&1; then
+      printf 'Sizer runtime not found; set CHIPCOMPILER_ECC_SIZER_ROOT or install gh for artifact download.\n' >&2
+      return 1
+    fi
+
+    local run_id
+    run_id="$(
+      gh api 'repos/openecos-projects/ecc-sizer/actions/workflows/ci.yml/runs?branch=main&status=success&per_page=20' \
+        --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
+    )"
+    if [[ -z "$run_id" ]]; then
+      printf 'No successful ecc-sizer CI artifact found on main.\n' >&2
+      return 1
+    fi
+
+    rm -rf "$download_dir"
+    mkdir -p "$download_dir"
+    printf 'Downloading ecc-sizer-linux-x64 from CI run %s\n' "$run_id"
+    gh run download "$run_id" \
+      --repo openecos-projects/ecc-sizer \
+      --name ecc-sizer-linux-x64 \
+      --dir "$download_dir"
+
+    local archive
+    archive="$(find "$download_dir" -name 'ecc-sizer-linux-x64.tar.gz' -print -quit)"
+    if [[ -z "$archive" ]]; then
+      printf 'Downloaded ecc-sizer artifact does not contain ecc-sizer-linux-x64.tar.gz.\n' >&2
+      return 1
+    fi
+    tar -xzf "$archive" -C "$download_dir"
+    source_root="$(find "$download_dir" -type f -path '*/src/sizer_os.tcl' -printf '%h\n' | sed 's#/src$##' | head -n 1)"
+  fi
+
+  if [[ -z "$source_root" || ! -x "$source_root/bin/Sizer" || ! -f "$source_root/src/sizer_os.tcl" ]]; then
+    printf 'Invalid Sizer runtime at %s.\n' "${source_root:-<empty>}" >&2
+    return 1
+  fi
+
+  rm -rf "$stage_dir"
+  mkdir -p "$stage_dir"
+  cp -a "$source_root/." "$stage_dir/"
+  SIZER_RUNTIME_ROOT="$stage_dir"
+}
+
 validate_packaged_binaries() {
   local binary_dir="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/binaries"
   local agent_dir="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/agent"
@@ -93,6 +143,7 @@ validate_packaged_binaries() {
   local required_files=(
     "$binary_dir/ecc"
     "$binary_dir/chip-viewer-native"
+    "$binary_dir/sizer/bin/Sizer"
   )
 
   for required_file in "${required_files[@]}"; do
@@ -104,6 +155,11 @@ validate_packaged_binaries() {
 
   if ! find "$binary_dir" -path '*/ecc_tools_bin/ecc_py*.so' -type f -print -quit | grep -q .; then
     printf 'required ecc_tools_bin/ecc_py extension was not packaged under %s\n' "$binary_dir" >&2
+    missing=1
+  fi
+
+  if [[ ! -f "$binary_dir/sizer/src/sizer_os.tcl" ]]; then
+    printf 'required Sizer runtime script is missing: %s\n' "$binary_dir/sizer/src/sizer_os.tcl" >&2
     missing=1
   fi
 
@@ -125,12 +181,14 @@ validate_packaged_binaries() {
 build_ecc
 build_chip_viewer
 build_agent_provider
+prepare_sizer_runtime
 
 cd "$REPO_ROOT"
 rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/{agent,binaries}
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
+cp -a "$SIZER_RUNTIME_ROOT" ecos/gui/apps/desktop-electron/resources/binaries/sizer
 cp ecos/agent/dist/ecos-agent ecos/gui/apps/desktop-electron/resources/agent
 cp ecos/agent/agent-provider.packaged.json ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 validate_packaged_binaries
