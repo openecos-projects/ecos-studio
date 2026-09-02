@@ -1611,6 +1611,7 @@ type FlowStepName =
   | 'place'
   | 'CTS'
   | 'legalization'
+  | 'Timing optimization'
   | 'route'
   | 'drc'
   | 'lvs'
@@ -1752,6 +1753,7 @@ const hardenFlowSteps: Array<{ name: FlowStepName; description: string }> = [
   { name: 'place', description: 'Standard cell placement.' },
   { name: 'CTS', description: 'Clock tree synthesis.' },
   { name: 'legalization', description: 'Placement legalization.' },
+  { name: 'Timing optimization', description: 'Cell sizing after legalization.' },
   { name: 'route', description: 'Detailed routing.' },
   { name: 'drc', description: 'Design rule checking.' },
   { name: 'lvs', description: 'Layout versus netlist connectivity.' },
@@ -2048,6 +2050,8 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     cts: 'CTS',
     legal: 'legalization',
     legalization: 'legalization',
+    timingopt: 'Timing optimization',
+    timingoptimization: 'Timing optimization',
     route: 'route',
     drc: 'drc',
     lvs: 'lvs',
@@ -2064,6 +2068,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     'place',
     'CTS',
     'legalization',
+    'Timing optimization',
     'route',
     'drc',
     'lvs',

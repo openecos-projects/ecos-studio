@@ -59,6 +59,7 @@ const physicalSnapshotSteps = new Set([
   'place',
   'cts',
   'legalization',
+  'timing optimization',
   'route',
   'filler',
 ])

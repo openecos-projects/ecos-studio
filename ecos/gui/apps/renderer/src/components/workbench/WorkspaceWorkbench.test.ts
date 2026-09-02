@@ -44,9 +44,7 @@ describe('WorkspaceWorkbench shared right panel', () => {
 
   it('unpins a selected log when GUI rerun preparation invalidates that step', () => {
     expect(source).toContain('logRerunAffectedSteps?: readonly string[]')
-    expect(source).toContain(
-      'affectedLabels.has(selectedLogNode.value.label.trim().toLowerCase())',
-    )
+    expect(source).toContain('sameFlowStepName(step, selectedLogNode.value!.label)')
     expect(source).toContain('logSelectionPinned.value = false')
   })
 })

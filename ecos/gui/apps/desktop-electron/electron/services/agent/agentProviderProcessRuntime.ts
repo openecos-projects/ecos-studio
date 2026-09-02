@@ -494,6 +494,7 @@ const workspaceSetupFlowSteps = [
   'place',
   'CTS',
   'legalization',
+  'Timing optimization',
   'route',
   'drc',
   'lvs',

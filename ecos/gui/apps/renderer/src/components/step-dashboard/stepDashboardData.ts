@@ -1406,7 +1406,9 @@ export function stepFeatureInsights(
   const metrics =
     normalizedStep === 'place'
       ? placeMetrics(mapValue)
-      : normalizedStep === 'legalization' || normalizedStep === 'filler'
+      : normalizedStep === 'legalization' ||
+          normalizedStep === 'filler' ||
+          normalizedStep === 'timing optimization'
         ? floorplanMetrics(databaseValue)
         : stepFeatureMetrics(stepValue)
   const snapshots = floorplanSnapshots(databaseValue)

@@ -1018,7 +1018,7 @@ describe('step dashboard data', () => {
     ])
   })
 
-  it('reuses Floorplan metrics for legalization and filler', () => {
+  it('reuses Floorplan metrics for legalization, filler, and Timing Opt', () => {
     const database = {
       'Design Layout': { die_area: 1200, die_usage: 0.4 },
       'Design Statis': { num_iopins: 12, num_instances: 100 },
@@ -1027,7 +1027,7 @@ describe('step dashboard data', () => {
     }
     const expectedMetrics = floorplanInsights(database)?.metrics
 
-    for (const step of ['legalization', 'filler']) {
+    for (const step of ['legalization', 'filler', 'timing optimization']) {
       expect(
         stepFeatureInsights(step, { run: {}, constraints: {} }, database, null)?.metrics,
       ).toEqual(expectedMetrics)

@@ -41,6 +41,7 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain('const currentStepLogNode')
     expect(source).toContain('const stepKey = typeof route.params.step')
     expect(source).toContain('getStepMetadata(stepKey)')
+    expect(source).toContain('sameFlowStepName(item.stepName, stepKey)')
     expect(source).toContain('<template #right-log>')
     expect(source).toContain(':selected-node="currentStepLogNode"')
     expect(source).toContain(':selected-node-pinned="true"')

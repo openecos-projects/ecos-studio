@@ -115,6 +115,7 @@ import { copyFlowLogText } from '@/components/flowLogCopy'
 import { formatFlowLogTitle } from './flowLogTitle'
 import type { FlowStatusNode } from './flowStatus'
 import type { FlowLogSegment } from '@/composables/useHomeData'
+import { sameFlowStepName } from '@/api/type'
 
 const props = defineProps<{
   activeStepName: string
@@ -136,8 +137,8 @@ const copied = ref(false)
 const currentRuntimeSegment = computed(() => {
   const activeStepName = props.activeStepName.trim().toLowerCase()
   if (activeStepName) {
-    const matching = props.segments.filter(
-      (segment) => segment.stepName.trim().toLowerCase() === activeStepName,
+    const matching = props.segments.filter((segment) =>
+      sameFlowStepName(segment.stepName, activeStepName),
     )
     const active =
       matching.find((segment) => segment.live) ?? matching[matching.length - 1]
@@ -193,9 +194,8 @@ function selectSegmentForNode(): void {
   }
 
   selectionPinned.value = true
-  const matchingSegments = props.segments.filter(
-    (segment) =>
-      segment.stepName.trim().toLowerCase() === node.label.trim().toLowerCase(),
+  const matchingSegments = props.segments.filter((segment) =>
+    sameFlowStepName(segment.stepName, node.label),
   )
   const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
   if (!segment) {

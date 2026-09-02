@@ -401,6 +401,7 @@ describe('AgentProviderProcessRuntime', () => {
                 'place',
                 'CTS',
                 'legalization',
+                'Timing optimization',
                 'route',
                 'drc',
                 'lvs',

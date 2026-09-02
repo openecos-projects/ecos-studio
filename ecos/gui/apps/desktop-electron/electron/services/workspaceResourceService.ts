@@ -217,8 +217,19 @@ export class WorkspaceResourceService {
 
     if (toolKey === 'yosys') {
       addYosysResources(resources, directory, design, step.name)
-    } else if (toolKey === 'ecc') {
+    } else if (toolKey === 'ecc' || toolKey === 'sizer') {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
+      if (toolKey === 'sizer') {
+        const safeStepName = step.name.trim().split(/\s+/).join('_').toLowerCase()
+        resources.output.def = createFile(
+          join(directory, 'output', `${design}_${safeStepName}.def.gz`),
+          'output',
+        )
+        resources.output.verilog = createFile(
+          join(directory, 'output', `${design}_${safeStepName}.v.gz`),
+          'output',
+        )
+      }
     } else if (toolKey === 'dreamplace') {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
       resources.config.dreamplace = createFile(
