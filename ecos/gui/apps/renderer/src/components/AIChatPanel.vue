@@ -1587,6 +1587,14 @@ async function handleInteraction(
     (message) => message.interaction?.requestId === requestId,
   )?.interaction
   const textMessage = displayAsMessage && 'text' in answer ? answer.text.trim() : ''
+  const startsQuickStart =
+    props.shell === 'home' &&
+    Boolean(quickStartRunner) &&
+    kind === 'choice' &&
+    'optionId' in answer &&
+    interaction?.interaction.kind === 'choice' &&
+    (interaction.interaction.options[2]?.id === answer.optionId ||
+      answer.optionId === QUICK_START_OPTION_ID)
   if (
     !interaction ||
     !messageStore.answerInteraction(
@@ -1595,20 +1603,9 @@ async function handleInteraction(
     )
   )
     return
-  if (
-    props.shell === 'home' &&
-    quickStartRunner &&
-    kind === 'choice' &&
-    'optionId' in answer &&
-    interaction.interaction.kind === 'choice' &&
-    (interaction.interaction.options[2]?.id === answer.optionId ||
-      answer.optionId === QUICK_START_OPTION_ID)
-  ) {
-    await startQuickStart()
-    return
-  }
   if (textMessage) messageStore.addMessage(textMessage)
   isAgentRequestPending.value = true
+  let accepted = false
   try {
     const request =
       kind === 'form'
@@ -1629,8 +1626,10 @@ async function handleInteraction(
             sessionId,
           }
     const result = await agent.answerInteraction(request)
-    activeUi.value.undoInteraction = result.canUndo ? { kind, requestId } : undefined
+    activeUi.value.undoInteraction =
+      result.canUndo && !startsQuickStart ? { kind, requestId } : undefined
     markContractInteractionAnswered(sessionId, requestId)
+    accepted = true
   } catch (error) {
     messageStore.restoreInteraction(requestId)
     messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
@@ -1638,6 +1637,7 @@ async function handleInteraction(
     isAgentRequestPending.value = false
     messageStore.finishStreamingMessages()
   }
+  if (startsQuickStart && accepted) await startQuickStart()
 }
 
 async function browseInteractionRtl(fieldId: string): Promise<void> {

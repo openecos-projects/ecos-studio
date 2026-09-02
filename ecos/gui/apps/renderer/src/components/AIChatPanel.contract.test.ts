@@ -29,6 +29,12 @@ describe('AIChatPanel flow contracts', () => {
       'messageStore.finishStreamingMessages(sessionId ?? undefined)',
     )
     expect(source).toContain("interaction.title !== 'Get started'")
+    expect(source).toContain('if (startsQuickStart && accepted) await startQuickStart()')
+    expect(
+      source.indexOf('const result = await agent.answerInteraction(request)'),
+    ).toBeLessThan(
+      source.indexOf('if (startsQuickStart && accepted) await startQuickStart()'),
+    )
   })
 
   it('renders centered turns with visually distinct user messages', () => {
