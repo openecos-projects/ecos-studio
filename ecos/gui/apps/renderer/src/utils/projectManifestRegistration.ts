@@ -2,7 +2,7 @@ import type { WorkspaceConfig } from '@/types'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
-import { parseProjectManifest } from '@/utils/projectManagement'
+import { parseProjectManifest } from '@ecos-studio/shared'
 
 export interface ProjectRouteContext {
   projectRoot: string

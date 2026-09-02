@@ -1577,18 +1577,16 @@ import { useWorkspaceCreationModel } from '../composables/useWorkspaceCreationMo
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
-import {
-  parseProjectManifest,
-  type ProjectManifest,
-  type ProjectManifestMpc,
-} from '@/utils/projectManagement'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import {
   isHdlFilePath,
+  parseProjectManifest,
   projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
   type PickedRtlSources,
+  type ProjectManifest,
+  type ProjectManifestMpc,
 } from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'

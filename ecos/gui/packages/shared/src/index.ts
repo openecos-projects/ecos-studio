@@ -331,6 +331,7 @@ export {
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
   ensureProjectQorBaseline,
+  normalizeProjectManifestFlowStep,
   parseProjectManifest,
   projectIdFromName,
   projectManifestFlowSteps,

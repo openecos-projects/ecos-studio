@@ -4,8 +4,8 @@ import { StepEnum } from '@/api/type'
 import {
   createProjectManifestDraft,
   registerWorkspaceInManifest,
-  setQorBaselineInManifest,
-} from '@/utils/projectManagement'
+  synchronizeProjectBaseline,
+} from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
@@ -67,7 +67,10 @@ function projectManifest() {
     workspacePath: '/projects/gcd/ws_0004',
     now: '2026-08-04T01:00:00.000Z',
   })
-  return setQorBaselineInManifest(withCurrent, 'ws_0001')
+  return synchronizeProjectBaseline(withCurrent, {
+    workspaceId: 'ws_0001',
+    baseDesign: withCurrent.base_design,
+  })
 }
 
 function singleWorkspaceManifest() {

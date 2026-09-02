@@ -11,10 +11,6 @@ vi.mock('@/platform/desktop', () => ({
   })),
 }))
 
-vi.mock('@/utils/projectManagement', () => ({
-  parseProjectManifest: vi.fn((content: string) => JSON.parse(content)),
-}))
-
 describe('mutateProjectManifest', () => {
   beforeEach(() => {
     mutate.mockReset()
@@ -23,6 +19,7 @@ describe('mutateProjectManifest', () => {
         schema_version: 1,
         project_id: 'proj_demo',
         name: 'demo',
+        design_name: 'demo',
         root_path: '/projects/demo',
         created_at: '2026-07-17T00:00:00.000Z',
         updated_at: '2026-07-17T00:00:00.000Z',
