@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { createReadStream } from 'node:fs'
+import { lstat, readdir, realpath, stat } from 'node:fs/promises'
+import { dirname, join, relative, resolve } from 'node:path'
 import type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
@@ -211,7 +212,7 @@ export class WorkspaceResourceService {
         }
       }
 
-      const stepInfoResult = await this.buildStepInfoResponse(request.id, step)
+      const stepInfoResult = await this.buildStepInfoResponse(request.id, step, index)
       const info = stepInfoResult.info
       const requiredFiles = this.requiredFilesForStepInfo(request.id, step)
       const missing = requiredFiles
@@ -614,6 +615,8 @@ export class WorkspaceResourceService {
 
   private async buildAnalysisStepInfo(
     step: WorkspaceStepResource,
+    steps: WorkspaceStepResource[],
+    design: string,
   ): Promise<StepInfoBuildResult> {
     if (step.tool.toLowerCase() !== 'yosys_lec') {
       return stepInfo(buildAnalysisInfo(step))
@@ -621,24 +624,36 @@ export class WorkspaceResourceService {
     return stepInfo({
       ...buildAnalysisInfo(step),
       'lec result': step.resources.output.result?.path,
-      'lec status': await this.lecResultStatus(step),
+      'lec status': await this.lecResultStatus(step, steps, design),
     })
   }
 
   /** Mirrors ECC lec_result_status: rehash the recorded netlists so a stale proof degrades. */
-  private async lecResultStatus(step: WorkspaceStepResource): Promise<string> {
+  private async lecResultStatus(
+    step: WorkspaceStepResource,
+    steps: WorkspaceStepResource[],
+    design: string,
+  ): Promise<string> {
     const resultFile = step.resources.output.result
     if (!resultFile?.exists) return 'missing'
     const result = await this.readJsonOrNull(resultFile.path)
     if (result?.status !== 'proven') return 'incomplete'
-    const goldenCurrent = await this.lecNetlistIsCurrent(result, 'golden')
-    const gateCurrent = await this.lecNetlistIsCurrent(result, 'gate')
+    const workspaceRoot = dirname(step.directory)
+    const goldenCurrent = await this.lecNetlistIsCurrent(result, 'golden', {
+      expectedPath: lecExpectedGoldenPath(step, steps, design),
+      workspaceRoot,
+    })
+    const gateCurrent = await this.lecNetlistIsCurrent(result, 'gate', {
+      expectedPath: lecExpectedGatePath(step, steps, design),
+      workspaceRoot,
+    })
     return goldenCurrent && gateCurrent ? 'proven' : 'stale'
   }
 
   private async lecNetlistIsCurrent(
     result: Record<string, unknown>,
     role: 'golden' | 'gate',
+    expected: { expectedPath: string | null; workspaceRoot: string },
   ): Promise<boolean> {
     const recordedPath = result[`${role}_verilog`]
     const recordedSha = result[`${role}_sha256`]
@@ -653,14 +668,25 @@ export class WorkspaceResourceService {
     ) {
       return false
     }
+    // The recorded file must still be the currently selected flow input.
+    if (
+      expected.expectedPath &&
+      resolve(expected.workspaceRoot, recordedPath) !==
+        resolve(expected.workspaceRoot, expected.expectedPath)
+    ) {
+      return false
+    }
     try {
       const canonicalPath =
         await this.projectScopeProvider.requestProjectPathAccess(recordedPath)
-      const content = await readFile(canonicalPath)
-      return (
-        content.length === recordedSize &&
-        createHash('sha256').update(content).digest('hex') === recordedSha
-      )
+      const hash = createHash('sha256')
+      let size = 0
+      // Stream like ECC file_digest instead of loading whole netlists.
+      for await (const chunk of createReadStream(canonicalPath)) {
+        hash.update(chunk as Buffer)
+        size += (chunk as Buffer).length
+      }
+      return size === recordedSize && hash.digest('hex') === recordedSha
     } catch {
       return false
     }
@@ -669,6 +695,7 @@ export class WorkspaceResourceService {
   private async buildStepInfoResponse(
     id: WorkspaceStepInfoRequest['id'],
     step: WorkspaceStepResource,
+    index: WorkspaceResourceIndex,
   ): Promise<StepInfoBuildResult> {
     switch (id) {
       case 'layout':
@@ -693,7 +720,7 @@ export class WorkspaceResourceService {
       case 'subflow':
         return stepInfo({ path: step.resources.subflow.path?.path })
       case 'analysis':
-        return await this.buildAnalysisStepInfo(step)
+        return await this.buildAnalysisStepInfo(step, index.flow.steps, index.design)
       case 'checklist':
         return stepInfo({ path: step.resources.checklist.path?.path })
       case 'config':
@@ -1163,6 +1190,50 @@ function addLecResources(
     join(directory, 'output', `${design}_${stepName}_result.json`),
     'output',
   )
+}
+
+/** ECC publishes step netlists as output/<design>_<step>.v.gz (sizer stem underscored). */
+function stepOutputVerilogPath(step: WorkspaceStepResource, design: string): string {
+  const stem =
+    step.tool.toLowerCase() === 'sizer'
+      ? step.name.trim().split(/\s+/).join('_').toLowerCase()
+      : step.name
+  return join(step.directory, 'output', `${design}_${stem}.v.gz`)
+}
+
+/** Current gate input of a LEC step: the nearest preceding physical step's verilog. */
+function lecExpectedGatePath(
+  step: WorkspaceStepResource,
+  steps: WorkspaceStepResource[],
+  design: string,
+): string | null {
+  const stepIndex = steps.findIndex(
+    (candidate) => candidate.name.toLowerCase() === step.name.toLowerCase(),
+  )
+  for (let index = stepIndex - 1; index >= 0; index -= 1) {
+    const candidate = steps[index]!
+    if (candidate.tool.toLowerCase() === 'yosys_lec') continue
+    return stepOutputVerilogPath(candidate, design)
+  }
+  return null
+}
+
+/** Current golden input of a LEC step, mirroring the ECC flow chaining. */
+function lecExpectedGoldenPath(
+  step: WorkspaceStepResource,
+  steps: WorkspaceStepResource[],
+  design: string,
+): string | null {
+  const explicit = step.info?.golden_verilog
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
+  const synthesis = steps.find(
+    (candidate) => candidate.name.trim().toLowerCase() === 'synthesis',
+  )
+  if (!synthesis) return null
+  if (step.name.trim().toLowerCase() === 'lec') {
+    return join(synthesis.directory, 'output', `${design}_Synthesis_golden.v`)
+  }
+  return stepOutputVerilogPath(synthesis, design)
 }
 
 function collectFiles(resources: StepFileBuckets): WorkspaceResourceFile[] {

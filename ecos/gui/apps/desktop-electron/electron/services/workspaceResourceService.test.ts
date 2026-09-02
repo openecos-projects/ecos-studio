@@ -390,10 +390,13 @@ describe('WorkspaceResourceService', () => {
   it('revalidates a proven LEC result against the current netlists', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [
+      { name: 'Synthesis', tool: 'yosys', state: 'Success' },
+      { name: 'filler', tool: 'ecc', state: 'Success' },
       { name: 'postRouteLec', tool: 'yosys_lec', state: 'Success' },
     ])
     const stepDirectory = join(root, 'postRouteLec_yosys_lec')
-    const goldenPath = join(root, 'Synthesis_yosys', 'output', 'gcd_Synthesis_golden.v')
+    // ECC chains the postRouteLec golden to the Synthesis output verilog.
+    const goldenPath = join(root, 'Synthesis_yosys', 'output', 'gcd_Synthesis.v.gz')
     const gatePath = join(root, 'filler_ecc', 'output', 'gcd_filler.v.gz')
     await mkdir(join(root, 'Synthesis_yosys', 'output'), { recursive: true })
     await mkdir(join(root, 'filler_ecc', 'output'), { recursive: true })
@@ -404,24 +407,41 @@ describe('WorkspaceResourceService', () => {
     await writeFile(gatePath, gateText, 'utf8')
     const digest = (content: string) => createHash('sha256').update(content).digest('hex')
     const resultPath = join(stepDirectory, 'output', 'gcd_postRouteLec_result.json')
-    await writeJson(resultPath, {
-      status: 'proven',
-      golden_verilog: goldenPath,
-      gate_verilog: gatePath,
-      golden_sha256: digest(goldenText),
-      gate_sha256: digest(gateText),
-      golden_size_bytes: Buffer.byteLength(goldenText),
-      gate_size_bytes: Buffer.byteLength(gateText),
-    })
+    const writeResult = (gate: string, gateContent: string) =>
+      writeJson(resultPath, {
+        status: 'proven',
+        golden_verilog: goldenPath,
+        gate_verilog: gate,
+        golden_sha256: digest(goldenText),
+        gate_sha256: digest(gateContent),
+        golden_size_bytes: Buffer.byteLength(goldenText),
+        gate_size_bytes: Buffer.byteLength(gateContent),
+      })
+    await writeResult(gatePath, gateText)
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const proven = await service.resolveStepInfo({ step: 'postRouteLec', id: 'analysis' })
     expect(proven.info['lec status']).toBe('proven')
     expect(proven.info['lec result']).toBe(resultPath)
 
+    // Same path, changed contents.
     await writeFile(gatePath, `${gateText}-changed`, 'utf8')
-    const stale = await service.resolveStepInfo({ step: 'postRouteLec', id: 'analysis' })
-    expect(stale.info['lec status']).toBe('stale')
+    const staleContent = await service.resolveStepInfo({
+      step: 'postRouteLec',
+      id: 'analysis',
+    })
+    expect(staleContent.info['lec status']).toBe('stale')
+
+    // Restored contents, but the recorded gate is no longer the current input.
+    await writeFile(gatePath, gateText, 'utf8')
+    const otherPath = join(root, 'filler_ecc', 'output', 'gcd_other.v.gz')
+    await writeFile(otherPath, gateText, 'utf8')
+    await writeResult(otherPath, gateText)
+    const stalePath = await service.resolveStepInfo({
+      step: 'postRouteLec',
+      id: 'analysis',
+    })
+    expect(stalePath.info['lec status']).toBe('stale')
 
     await writeJson(resultPath, { status: 'incomplete' })
     const incomplete = await service.resolveStepInfo({
