@@ -288,9 +288,6 @@ const desktopBridge = {
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => desktopBridge,
-  getOptionalDesktopApi: () => desktopBridge,
-  hasDesktopApi: () => true,
-  waitForDesktopApi: async () => desktopBridge,
 }))
 
 vi.mock('./useWorkspace', () => ({

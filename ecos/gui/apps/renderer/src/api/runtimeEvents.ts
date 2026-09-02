@@ -1,5 +1,5 @@
 import type { DesignRuntimeEvent } from '@ecos-studio/shared'
-import { getOptionalDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 
 export type FrontendRuntimeNotifyType =
   | 'data_ready'
@@ -323,14 +323,7 @@ export function createFrontendRuntimeEventClient(
     close()
 
     setState('connecting')
-    const desktopApi = getOptionalDesktopApi()
-    if (!desktopApi?.runtime) {
-      setState('error')
-      console.warn(
-        `Design runtime event stream unavailable for workspace: ${workspaceId}`,
-      )
-      return
-    }
+    const desktopApi = getDesktopApi()
 
     unsubscribeEvents = desktopApi.runtime.events.onEvent((event) => {
       if (event.designTool !== 'frontend') return

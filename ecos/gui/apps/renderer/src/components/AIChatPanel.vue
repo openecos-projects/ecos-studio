@@ -214,7 +214,7 @@ import { groupMessagesIntoTurns } from './chatTurns'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
-import { getOptionalDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
@@ -613,8 +613,8 @@ function baseName(path: string | undefined): string | undefined {
 }
 
 async function connectAgent(): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
+  const desktopApi = getDesktopApi()
+  const agent = desktopApi.agent
   if (!agent) return
 
   unsubscribeAgentEvents?.()
@@ -645,7 +645,7 @@ function selectChatTab(id: string): void {
 }
 
 async function closeChatTab(id: string): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (agent) {
     try {
       await agent.interrupt({ providerId: AGENT_PROVIDER_ID, sessionId: id })
@@ -669,8 +669,8 @@ async function closeChatTab(id: string): Promise<void> {
 }
 
 async function startProviderSession(sessionId: string): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
+  const desktopApi = getDesktopApi()
+  const agent = desktopApi.agent
   const tab = agentShell.tabs.find((candidate) => candidate.id === sessionId)
   if (!agent || !tab) return
 
@@ -722,7 +722,7 @@ async function ensureCodexReady(): Promise<boolean> {
 }
 
 async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) {
     codexSetupStatus.value = null
     return null
@@ -745,7 +745,7 @@ async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null
 function bindCodexProgress(): void {
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex?.onProgress) return
   unsubscribeCodexProgress = codex.onProgress(
     (event: DesktopCodexInstallProgressEvent) => {
@@ -767,7 +767,7 @@ function bindCodexProgress(): void {
 }
 
 async function installCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   bindCodexProgress()
@@ -791,7 +791,7 @@ async function installCodexCli(): Promise<void> {
 }
 
 async function loginCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   try {
@@ -813,7 +813,7 @@ async function loginCodexCli(): Promise<void> {
 }
 
 async function recheckCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   try {
@@ -836,9 +836,9 @@ async function recheckCodexCli(): Promise<void> {
 }
 
 async function pickCodexBin(): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const codex = desktopApi?.agent?.codex
-  if (!desktopApi || !codex) return
+  const desktopApi = getDesktopApi()
+  const codex = desktopApi.agent?.codex
+  if (!codex) return
   const files = await desktopApi.dialog.pickFiles({
     title: '选择 Codex CLI 可执行文件',
   })
@@ -1239,8 +1239,8 @@ const handleSubmit = async (): Promise<void> => {
 }
 
 async function sendAgentMessage(message: string, addToHistory = true): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
+  const desktopApi = getDesktopApi()
+  const agent = desktopApi.agent
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
@@ -1349,7 +1349,7 @@ async function flushQueuedMessage(): Promise<void> {
 }
 
 async function interruptAgent(): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isInterruptPending.value) return
   isInterruptPending.value = true
@@ -1427,7 +1427,7 @@ async function reportWorkspaceCreationResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
@@ -1443,10 +1443,10 @@ async function executeWorkspaceRerun(
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const ui = sessionUi(ownerSessionId)
-  const desktopApi = getOptionalDesktopApi()
-  const prepareRerun = desktopApi?.workspace.prepareFlowAgentRerun
-  const executeRerun = desktopApi?.workspace.executeFlowAgentRerun
-  if (!desktopApi || !prepareRerun || !executeRerun) {
+  const desktopApi = getDesktopApi()
+  const prepareRerun = desktopApi.workspace.prepareFlowAgentRerun
+  const executeRerun = desktopApi.workspace.executeFlowAgentRerun
+  if (!prepareRerun || !executeRerun) {
     messageStore.addAssistantMessage(
       'Rerun is unavailable in this desktop session.',
       'error',
@@ -1615,7 +1615,7 @@ async function reportWorkspaceRerunResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
@@ -1680,7 +1680,7 @@ async function reportWorkspaceContinueResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_continue_result:${JSON.stringify({ continue_id: continueId, status, error })}`,
@@ -1745,7 +1745,7 @@ async function reportWorkspaceParameterUpdateResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_parameter_update_result:${JSON.stringify({ update_id: updateId, status, error })}`,
@@ -1768,8 +1768,7 @@ async function applyWorkspaceParameterWrites(
   workspaceRoot: string,
   writes: DesktopAgentWorkspaceParameterWrite[],
 ): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  if (!desktopApi) throw new Error('Desktop API is unavailable.')
+  const desktopApi = getDesktopApi()
   const byFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
   for (const write of writes) {
     const group = byFile.get(write.file)

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import type { PdkInstallationSnapshot } from '@ecos-studio/shared'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
 
@@ -53,7 +53,7 @@ function installationToPdk(installation: PdkInstallationSnapshot): ImportedPdk {
 }
 
 async function importPath(path: string): Promise<ImportedPdk> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const scanned = await desktopApi.workspace.scanPdkDirectory(path)
   let familyId = scanned.pdkId
   let displayName = scanned.name || familyId
@@ -81,7 +81,7 @@ export function usePdkManager() {
   const loadPdks = async (force = false): Promise<void> => {
     if (isLoaded.value && !force) return
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       importedPdks.value = (await desktopApi.pdkInventory.list())
         .map(installationToPdk)
         .sort((left, right) => left.name.localeCompare(right.name))
@@ -93,7 +93,7 @@ export function usePdkManager() {
 
   const importPdk = async (): Promise<ImportedPdk | null> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       const path = await desktopApi.dialog.pickDirectory({
         title: 'Select PDK Root Directory',
       })
@@ -141,13 +141,13 @@ export function usePdkManager() {
   }
 
   const removePdk = async (installationId: string): Promise<void> => {
-    const desktopApi = await waitForDesktopApi()
+    const desktopApi = getDesktopApi()
     await desktopApi.pdkInventory.remove(installationId)
     await loadPdks(true)
   }
 
   const locatePdk = async (installationId: string): Promise<void> => {
-    const desktopApi = await waitForDesktopApi()
+    const desktopApi = getDesktopApi()
     const path = await desktopApi.dialog.pickDirectory({ title: 'Locate PDK Root' })
     if (!path) return
     await desktopApi.pdkInventory.locate({ installationId, root: path })

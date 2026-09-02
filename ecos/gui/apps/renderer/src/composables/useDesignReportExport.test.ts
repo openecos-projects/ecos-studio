@@ -32,25 +32,6 @@ vi.mock('@/platform/desktop', () => ({
       saveFile: mockSaveFile,
     },
   }),
-  getOptionalDesktopApi: () => ({
-    app: {
-      getVersions: mockGetVersions,
-    },
-    workspaceResources: {
-      getIndex: mockGetIndex,
-      readFlow: mockReadFlow,
-      readParameters: mockReadParameters,
-      readHome: mockReadHome,
-    },
-    workspace: {
-      readOptionalProjectTextFile: mockReadOptionalProjectTextFile,
-      writeProjectTextFile: mockWriteProjectTextFile,
-      requestProjectPathAccess: mockRequestProjectPathAccess,
-    },
-    dialog: {
-      saveFile: mockSaveFile,
-    },
-  }),
 }))
 
 describe('useDesignReportExport', () => {

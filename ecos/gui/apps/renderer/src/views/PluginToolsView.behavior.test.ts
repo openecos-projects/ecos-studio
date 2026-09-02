@@ -7,7 +7,10 @@ import PluginToolsView from './PluginToolsView.vue'
 const viewMocks = vi.hoisted(() => ({
   push: vi.fn(),
   importPdk: vi.fn(async () => ({ id: 'pdk-installation:ics55' })),
-  waitForDesktopApi: vi.fn(),
+  getDesktopApi: vi.fn(() => ({
+    dialog: { pickDirectory: vi.fn() },
+    system: { openExternal: vi.fn() },
+  })),
   store: {
     resources: [] as ResourceItem[],
     loading: false,
@@ -31,9 +34,7 @@ vi.mock('@/composables/usePdkManager', () => ({
   usePdkManager: () => ({ importPdk: viewMocks.importPdk }),
 }))
 vi.mock('@/platform/desktop', () => ({
-  getOptionalDesktopApi: () => null,
-  hasDesktopApi: () => false,
-  waitForDesktopApi: viewMocks.waitForDesktopApi,
+  getDesktopApi: viewMocks.getDesktopApi,
 }))
 
 function pdkResource(overrides: Partial<ResourceItem>): ResourceItem {
@@ -93,13 +94,13 @@ describe('PluginToolsView PDK behavior', () => {
     viewMocks.store.resources = [pdkResource({})]
     const wrapper = mount(PluginToolsView)
     viewMocks.importPdk.mockClear()
-    viewMocks.waitForDesktopApi.mockClear()
+    viewMocks.getDesktopApi.mockClear()
     viewMocks.store.fetchTools.mockClear()
 
     await wrapper.find('[data-title="Import Local"]').trigger('click')
 
     expect(viewMocks.importPdk).toHaveBeenCalledOnce()
-    expect(viewMocks.waitForDesktopApi).not.toHaveBeenCalled()
+    expect(viewMocks.getDesktopApi).not.toHaveBeenCalled()
     expect(viewMocks.store.fetchTools).toHaveBeenCalledWith({ silent: true })
     wrapper.unmount()
   })
