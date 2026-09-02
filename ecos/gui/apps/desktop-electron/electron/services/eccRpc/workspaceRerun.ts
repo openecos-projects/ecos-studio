@@ -718,13 +718,11 @@ async function prepareWorkspaceRerunFlow(
   }
 
   if (executionScope === 'full_flow') {
-    const presentIndexes = flow.steps.map((step) =>
-      FLOW_STEP_SEQUENCE.indexOf(step.name as (typeof FLOW_STEP_SEQUENCE)[number]),
-    )
-    const maxPresentIndex = Math.max(-1, ...presentIndexes)
     const present = new Set(flow.steps.map((step) => step.name))
-    // Extend past the source flow's last step up to the catalog terminus.
-    for (let index = maxPresentIndex + 1; index <= endIndex; index += 1) {
+    // Fill missing catalog steps throughout the rerun range: flows created
+    // before a step was inserted (e.g. Timing Opt, postRouteLec) still gain
+    // it on a full-flow rerun instead of silently skipping the gate.
+    for (let index = targetIndex; index <= endIndex; index += 1) {
       const name = FLOW_STEP_SEQUENCE[index]!
       if (present.has(name)) continue
       flow.steps.push({

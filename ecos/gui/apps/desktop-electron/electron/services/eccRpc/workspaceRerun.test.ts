@@ -635,6 +635,87 @@ describe('prepareWorkspaceRerun', () => {
     expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
   })
 
+  it('backfills steps inserted mid-flow for legacy full_flow reruns', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-legacy-'))
+    temporaryRoots.push(root)
+    const source = join(root, 'gcd')
+    // A flow completed before Timing Opt and postRouteLec existed.
+    const legacyNames = [
+      'Synthesis',
+      'Floorplan',
+      'place',
+      'CTS',
+      'legalization',
+      'route',
+      'drc',
+      'lvs',
+      'filler',
+      'RCX',
+      'sta',
+      'Harden',
+    ]
+    const legacyTools: Record<string, string> = {
+      Synthesis: 'yosys',
+      place: 'dreamplace',
+      legalization: 'dreamplace',
+    }
+    const flow = JSON.stringify({
+      steps: legacyNames.map((name) => ({
+        name,
+        state: 'Success',
+        tool: legacyTools[name] ?? 'ecc',
+      })),
+    })
+    const artifact = Buffer.from('synthesis-def')
+    await mkdir(join(source, 'home'), { recursive: true })
+    await mkdir(join(source, 'Synthesis_yosys', 'output'), { recursive: true })
+    await writeFile(join(source, 'home', 'flow.json'), flow)
+    await writeFile(join(source, 'home', 'parameters.json'), '{}\n')
+    await writeFile(
+      join(source, 'Synthesis_yosys', 'output', 'gcd_Synthesis.def.gz'),
+      artifact,
+    )
+
+    const contract: DesktopAgentWorkspaceRerunContract = {
+      design_id: 'gcd',
+      end_step: 'Harden',
+      execution_scope: 'full_flow',
+      parameter_patch: [],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_synthesis',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact: 'Synthesis_yosys/output/gcd_Synthesis.def.gz',
+      source_flow_json_sha256: sha256(flow),
+      source_stage_artifact_sha256: sha256(artifact),
+      source_workspace: source,
+      target_step: 'Synthesis',
+      target_workspace: `${source}_rerun_synthesis`,
+      writes: [],
+    }
+
+    await prepareWorkspaceRerun(contract)
+
+    const targetFlow = JSON.parse(
+      await readFile(join(contract.target_workspace, 'home', 'flow.json'), 'utf8'),
+    ) as { steps: Array<{ name: string; state: string; tool: string }> }
+    expect(targetFlow.steps.map((step) => [step.name, step.tool, step.state])).toEqual([
+      ['Synthesis', 'yosys', 'Unstart'],
+      ['Floorplan', 'ecc', 'Unstart'],
+      ['place', 'dreamplace', 'Unstart'],
+      ['CTS', 'ecc', 'Unstart'],
+      ['legalization', 'dreamplace', 'Unstart'],
+      ['Timing optimization', 'sizer', 'Unstart'],
+      ['route', 'ecc', 'Unstart'],
+      ['drc', 'ecc', 'Unstart'],
+      ['lvs', 'ecc', 'Unstart'],
+      ['filler', 'ecc', 'Unstart'],
+      ['postRouteLec', 'yosys_lec', 'Unstart'],
+      ['RCX', 'ecc', 'Unstart'],
+      ['sta', 'ecc', 'Unstart'],
+      ['Harden', 'ecc', 'Unstart'],
+    ])
+  })
+
   it.each([
     [
       'targets a non-isolated directory',
