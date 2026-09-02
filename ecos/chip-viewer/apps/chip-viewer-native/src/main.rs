@@ -61,6 +61,9 @@ struct Args {
 
     #[arg(long, alias = "safe-mode")]
     egui_only: bool,
+
+    #[arg(long)]
+    x11: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -98,23 +101,27 @@ impl GraphicsEnvironment {
     }
 }
 
-fn configure_linux_window_backend() {
+fn configure_linux_window_backend(args: &Args) {
     if !cfg!(target_os = "linux") {
         return;
     }
+
+    let force_x11 = args.x11
+        || std::env::var("ECOS_WINDOW_BACKEND")
+            .map(|v| v.eq_ignore_ascii_case("x11"))
+            .unwrap_or(false);
+
+    if force_x11 {
+        std::env::remove_var("WAYLAND_DISPLAY");
+        std::env::remove_var("WAYLAND_SOCKET");
+        eprintln!("ECOS: forcing X11 window backend (removed WAYLAND_DISPLAY and WAYLAND_SOCKET)");
+    }
+
     eprintln!(
-        "ECOS window environment: WAYLAND_DISPLAY={:?}, DISPLAY={:?}, WINIT_UNIX_BACKEND={:?}",
+        "ECOS window environment: WAYLAND_DISPLAY={:?}, DISPLAY={:?}",
         std::env::var_os("WAYLAND_DISPLAY"),
         std::env::var_os("DISPLAY"),
-        std::env::var_os("WINIT_UNIX_BACKEND"),
     );
-    if std::env::var_os("WINIT_UNIX_BACKEND").is_some() {
-        return;
-    }
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        std::env::set_var("WINIT_UNIX_BACKEND", "wayland");
-        eprintln!("ECOS: using Wayland window backend");
-    }
 }
 
 fn is_software_adapter(info: &wgpu::AdapterInfo) -> bool {
@@ -257,7 +264,7 @@ fn print_startup_diagnostics(
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    configure_linux_window_backend();
+    configure_linux_window_backend(&args);
     let env = GraphicsEnvironment::detect();
 
     let force_cpu_env = std::env::var("ECOS_FORCE_CPU")
@@ -441,10 +448,7 @@ fn main() -> Result<()> {
         Err(err) => {
             eprintln!("Chip Viewer windowing failure: {err}");
 
-            let is_wayland_active = std::env::var_os("WINIT_UNIX_BACKEND").as_deref()
-                == Some(std::ffi::OsStr::new("wayland"))
-                || (std::env::var_os("WINIT_UNIX_BACKEND").is_none()
-                    && std::env::var_os("WAYLAND_DISPLAY").is_some());
+            let is_wayland_active = std::env::var_os("WAYLAND_DISPLAY").is_some();
             let has_x11_display = std::env::var_os("DISPLAY").is_some();
             let already_retried = std::env::var_os("ECOS_RESTARTED_WITH_X11").is_some();
 
@@ -456,7 +460,10 @@ fn main() -> Result<()> {
                 let current_exe = std::env::current_exe()?;
                 let mut cmd = std::process::Command::new(current_exe);
                 cmd.args(std::env::args_os().skip(1));
-                cmd.env("WINIT_UNIX_BACKEND", "x11");
+                cmd.arg("--x11");
+                cmd.env_remove("WAYLAND_DISPLAY");
+                cmd.env_remove("WAYLAND_SOCKET");
+                cmd.env("ECOS_WINDOW_BACKEND", "x11");
                 cmd.env("ECOS_RESTARTED_WITH_X11", "1");
                 let status = cmd.status()?;
                 std::process::exit(status.code().unwrap_or(1));
