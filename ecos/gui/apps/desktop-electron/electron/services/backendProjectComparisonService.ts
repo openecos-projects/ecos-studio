@@ -4,32 +4,20 @@ import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
   parseProjectManifest,
-  projectManagementWorkspaceSummaryPaths,
-  projectManifestFlowSteps,
   type BackendProjectComparison,
   type BackendProjectComparisonInvalidatedEvent,
   type BackendProjectComparisonQueryResult,
   type BackendProjectComparisonSelectResult,
   type BackendProjectExecutionSnapshotResult,
   type BackendProjectStepFindingsResult,
-  type EccEngineeringAnalysis,
-  type EccEngineeringAnalysisArtifactRef,
   type EccRuntimeOperation,
-  type ProjectAnalysisSnapshot,
   type ProjectManifest,
-  type ProjectQorMetricRecord,
-  type ProjectQorTrendSummary,
-  type ProjectQorTrendWorkspaceSummary,
-  type ProjectRecommendation,
-  type ProjectStepComparison,
   type ReadIssue,
-  type ReadSection,
 } from '@ecos-studio/shared'
-import { buildProjectAnalysisSnapshot } from './projectAnalysisSnapshot'
-import { buildProjectQorTrendSummary } from './qorAnalysis'
 import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { isPathWithinRoot } from './pathScope'
+import { mapWithConcurrency } from './boundedConcurrency'
 import type {
   ProjectEngineeringSnapshotReadResult,
   VerifiedProjectArtifactsReadResult,
@@ -46,6 +34,15 @@ import {
   ProjectStepFindingsService,
   type CommittedFindingsWorkspace,
 } from './projectStepFindingsService'
+import {
+  analysisTextsFromSnapshot,
+  buildProjectComparisonSnapshots,
+  buildProjectComparisonSteps,
+  buildProjectComparisonTrend,
+  comparisonSection,
+  selectRecommendation,
+  workspaceIssue,
+} from './projectComparisonProjection'
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
@@ -85,9 +82,6 @@ type InvalidationListener = (
   windowId: number,
   event: BackendProjectComparisonInvalidatedEvent,
 ) => void
-
-const FLOW_STEPS = projectManifestFlowSteps
-const ANALYSIS_PATHS = new Set<string>(projectManagementWorkspaceSummaryPaths)
 
 export class BackendProjectComparisonService {
   private readonly contextsByWindow = new Map<number, ProjectComparisonContext>()
@@ -575,18 +569,15 @@ export class BackendProjectComparisonService {
       }
       const readMs = performance.now() - readStartedAt
       const analysisStartedAt = performance.now()
-      const trend = publicTrend(
-        buildProjectQorTrendSummary(inputs, {
-          baselineWorkspaceId: manifest.qor_baseline?.workspace_id ?? null,
-        }),
+      const trend = buildProjectComparisonTrend(
+        inputs,
+        manifest.qor_baseline?.workspace_id ?? null,
       )
-      const snapshots = inputs.map((input) =>
-        publicSnapshot(buildProjectAnalysisSnapshot(input, FLOW_STEPS)),
-      )
+      const snapshots = buildProjectComparisonSnapshots(inputs)
       const flowStates = Object.fromEntries(
         inputs.map((input) => [input.workspaceId, input.stepStatuses]),
       )
-      const stepComparisons = buildStepComparisons(manifest, inputs, trend)
+      const stepComparisons = buildProjectComparisonSteps(manifest, inputs, trend)
       const analysisByWorkspace = new Map(
         snapshots.map((snapshot) => [snapshot.workspaceId, snapshot]),
       )
@@ -640,17 +631,17 @@ export class BackendProjectComparisonService {
         refresh: context.watcherIssue
           ? { automatic: 'unavailable', issue: context.watcherIssue }
           : { automatic: 'available' },
-        trend: section(trend, issues),
-        workspaceSnapshots: section({ items: snapshots, flowStates }, issues),
-        stepComparisons: section({ steps: stepComparisons }, issues),
+        trend: comparisonSection(trend, issues),
+        workspaceSnapshots: comparisonSection({ items: snapshots, flowStates }, issues),
+        stepComparisons: comparisonSection({ steps: stepComparisons }, issues),
         recommendation: recommendation
-          ? section(recommendation, issues)
+          ? comparisonSection(recommendation, issues)
           : {
               status: 'unavailable',
               issues: [...issues, { code: 'NO_ELIGIBLE_WORKSPACE' }],
             },
-        risks: section({ items: trend.risks }, issues),
-        timingTriage: section({ items: trend.timingClosure.triage }, issues),
+        risks: comparisonSection({ items: trend.risks }, issues),
+        timingTriage: comparisonSection({ items: trend.timingClosure.triage }, issues),
       }
       const result: BackendProjectComparisonQueryResult = {
         ok: true,
@@ -692,130 +683,8 @@ function autoRefreshIssue(): ReadIssue {
   return { code: 'PROJECT_COMPARISON_AUTO_REFRESH_UNAVAILABLE' }
 }
 
-function analysisTextsFromSnapshot(
-  analysis: EccEngineeringAnalysis,
-  artifacts: EccEngineeringAnalysisArtifactRef[],
-): Record<string, string | null> {
-  const references = new Map(
-    artifacts.map((artifact) => [artifact.artifactId, artifact.reference]),
-  )
-  const texts: Record<string, string | null> = {}
-  for (const step of analysis.steps) {
-    for (const file of [step.metrics, step.summary, step.hotspots, step.timingIssues]) {
-      if (!file || file.status !== 'available' || !file.data) continue
-      const reference = references.get(file.artifactId)
-      if (reference && ANALYSIS_PATHS.has(reference)) {
-        texts[reference] = JSON.stringify(file.data)
-      }
-    }
-  }
-  return texts
-}
-
 function engineeringIdentityKey(workspaceId: string, workspacePath: string): string {
   return `${workspaceId}\0${resolve(workspacePath)}`
-}
-
-function buildStepComparisons(
-  manifest: ProjectManifest,
-  inputs: ReturnType<typeof projectQorInputForWorkspace>[],
-  trend: ProjectQorTrendSummary,
-): ProjectStepComparison[] {
-  const availableInputs = inputs.filter((input): input is NonNullable<typeof input> =>
-    Boolean(input),
-  )
-  const stepIds = new Set<string>(FLOW_STEPS)
-  for (const input of availableInputs) {
-    for (const stepId of Object.keys(input.stepStatuses)) stepIds.add(stepId)
-  }
-  for (const workspace of manifest.workspaces) {
-    stepIds.add(workspace.start_step)
-    stepIds.add(workspace.end_step)
-    if (workspace.branch_from?.source_step) stepIds.add(workspace.branch_from.source_step)
-  }
-  const knownOrder = new Map(FLOW_STEPS.map((step, order) => [step, order]))
-  const inputsByWorkspace = new Map(
-    availableInputs.map((input) => [input.workspaceId, input]),
-  )
-  const metricsByWorkspace = new Map(
-    trend.workspaces.map((workspace) => [
-      workspace.workspaceId,
-      workspace.comparisonRecords ?? workspace.records,
-    ]),
-  )
-  const unknownSteps = [...stepIds]
-    .filter((step) => !knownOrder.has(step as (typeof FLOW_STEPS)[number]))
-    .sort((left, right) => left.localeCompare(right))
-  return [...stepIds]
-    .map((stepId) => ({
-      stepId,
-      order:
-        knownOrder.get(stepId as (typeof FLOW_STEPS)[number]) ??
-        FLOW_STEPS.length + unknownSteps.indexOf(stepId),
-      name: stepId,
-      workspaces: manifest.workspaces.map((workspace) => {
-        const input = inputsByWorkspace.get(workspace.workspace_id)
-        return {
-          workspaceId: workspace.workspace_id,
-          status: (input?.stepStatuses[stepId] ??
-            'missing') as ProjectStepComparison['workspaces'][number]['status'],
-          metrics: (metricsByWorkspace.get(workspace.workspace_id) ?? []).filter(
-            (metric) => metric.step === stepId && metric.stepRole !== 'hidden',
-          ),
-        }
-      }),
-    }))
-    .sort((left, right) => left.order - right.order)
-}
-
-function publicMetric(
-  metric: ProjectQorMetricRecord & { workspaceKey?: string },
-): ProjectQorMetricRecord {
-  const { workspaceKey: _workspaceKey, ...result } = metric
-  return result
-}
-
-function publicSnapshot(
-  snapshot: ReturnType<typeof buildProjectAnalysisSnapshot>,
-): ProjectAnalysisSnapshot {
-  return {
-    ...snapshot,
-    steps: Object.fromEntries(
-      Object.entries(snapshot.steps).map(([step, value]) => [
-        step,
-        value ? { ...value, metrics: value.metrics.map(publicMetric) } : value,
-      ]),
-    ),
-  }
-}
-
-function publicTrend(
-  trend: ReturnType<typeof buildProjectQorTrendSummary>,
-): ProjectQorTrendSummary {
-  return {
-    ...trend,
-    workspaces: trend.workspaces.map((workspace) => {
-      const { workspaceKey: _workspaceKey, ...result } = workspace
-      return {
-        ...result,
-        records: workspace.records.map(publicMetric),
-        ...(workspace.comparisonRecords
-          ? { comparisonRecords: workspace.comparisonRecords.map(publicMetric) }
-          : {}),
-      }
-    }),
-    timingClosure: {
-      issues: trend.timingClosure.issues,
-      coverage: trend.timingClosure.coverage,
-      triage: trend.timingClosure.triage,
-      criticalCount: trend.timingClosure.criticalCount,
-      warningCount: trend.timingClosure.warningCount,
-      cleanWorkspaceCount: trend.timingClosure.cleanWorkspaceCount,
-      atRiskWorkspaceCount: trend.timingClosure.atRiskWorkspaceCount,
-      incompleteWorkspaceCount: trend.timingClosure.incompleteWorkspaceCount,
-      unavailableWorkspaceCount: trend.timingClosure.unavailableWorkspaceCount,
-    },
-  }
 }
 
 function eventLoopDelayMs(): Promise<number> {
@@ -827,53 +696,6 @@ function eventLoopDelayMs(): Promise<number> {
 
 function roundMs(value: number): number {
   return Number(value.toFixed(2))
-}
-
-function section<T>(data: T, issues: ReadIssue[]): ReadSection<T> {
-  return issues.length
-    ? { status: 'partial', data, issues }
-    : { status: 'ready', data, issues: [] }
-}
-
-function workspaceIssue(workspaceId: string, error?: unknown): ReadIssue {
-  if (error && typeof error === 'object' && 'code' in error) {
-    const issue = error as ReadIssue & {
-      actualSizeBytes?: number
-      allowedSizeBytes?: number
-    }
-    const sizeDetail =
-      issue.actualSizeBytes !== undefined && issue.allowedSizeBytes !== undefined
-        ? ` (${issue.actualSizeBytes}/${issue.allowedSizeBytes} bytes)`
-        : ''
-    return {
-      code: issue.code,
-      detail: `${workspaceId}${issue.detail ? `: ${issue.detail}` : ''}${sizeDetail}`,
-    }
-  }
-  return {
-    code: 'WORKSPACE_ANALYSIS_FAILED',
-    detail: error instanceof Error ? `${workspaceId}: ${error.message}` : workspaceId,
-  }
-}
-
-function selectRecommendation(
-  workspaces: ProjectQorTrendWorkspaceSummary[],
-): ProjectRecommendation | null {
-  const best = workspaces
-    .filter(
-      (workspace) =>
-        workspace.overallScore !== null &&
-        (workspace.dataQuality.status === 'complete' ||
-          workspace.dataQuality.status === 'limited'),
-    )
-    .sort((left, right) => (right.overallScore ?? -1) - (left.overallScore ?? -1))[0]
-  return best?.overallScore === null || !best
-    ? null
-    : {
-        workspaceId: best.workspaceId,
-        score: best.overallScore,
-        reasons: [`Highest eligible QoR score: ${best.overallScore}`],
-      }
 }
 
 function failure(
@@ -896,22 +718,4 @@ function queryFailure(
     code,
     detail: error instanceof Error ? error.message : String(error),
   }
-}
-
-async function mapWithConcurrency<T, R>(
-  values: readonly T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = []
-  let next = 0
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-      while (next < values.length) {
-        const index = next++
-        results[index] = await mapper(values[index]!)
-      }
-    }),
-  )
-  return results
 }
