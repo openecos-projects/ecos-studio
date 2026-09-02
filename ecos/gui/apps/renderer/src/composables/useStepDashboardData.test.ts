@@ -236,7 +236,9 @@ describe('useStepDashboardData cache', () => {
     testState.route.params.step = 'postRouteLec'
     testState.route.path = '/workspace/postRouteLec'
     testState.getWorkspaceResourceIndexApi.mockResolvedValue(lecIndex)
-    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({ info: {} })
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      info: { 'lec status': 'proven' },
+    })
     testState.readOptionalProjectTextFile.mockImplementation(async (path: string) =>
       path.endsWith('_result.json')
         ? JSON.stringify({
@@ -259,6 +261,16 @@ describe('useStepDashboardData cache', () => {
     expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith(
       expect.stringContaining('gcd_postRouteLec_result.json'),
     )
+
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      info: { 'lec status': 'stale' },
+    })
+    clearStepDashboardDataCache()
+    const staleDashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => {
+      expect(staleDashboard.data.value?.lecInsights?.status).toBe('stale')
+    })
+    expect(staleDashboard.data.value?.lecInsights?.tone).toBe('warn')
   })
 
   it("loads this step's own congestion maps for the Place dashboard", async () => {
@@ -405,7 +417,8 @@ describe('useStepDashboardData', () => {
     expect(source).toContain("const isLec = ['lec', 'postroutelec'].includes(")
     expect(source).toContain('resourceStep.resources.output.result')
     expect(source).toContain('readJson(lecResultPath)')
-    expect(source).toContain('lecInsights(lecResultJson)')
+    expect(source).toContain("stringInfo(analysisResponse.info, 'lec status')")
+    expect(source).toContain('lecInsights(lecResultJson, lecBackendStatus)')
     expect(source).toContain('lecInsights: StepDashboardLecInsights | null')
   })
 })

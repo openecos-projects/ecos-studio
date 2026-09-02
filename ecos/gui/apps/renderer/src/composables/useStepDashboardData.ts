@@ -367,6 +367,9 @@ export function useStepDashboardData() {
       const isLec = ['lec', 'postroutelec'].includes(
         resourceStep.name.trim().toLowerCase(),
       )
+      const lecBackendStatus = isLec
+        ? stringInfo(analysisResponse.info, 'lec status')
+        : ''
       const isFloorplanStyleStep = usesFloorplanStyleInsights(resourceStep.name)
       const stepPath =
         stringInfo(analysisResponse.info, 'step feature') ||
@@ -511,7 +514,7 @@ export function useStepDashboardData() {
         hardenInsights: isHarden
           ? hardenOutputInsights(resourceStep.resources.output)
           : null,
-        lecInsights: isLec ? lecInsights(lecResultJson) : null,
+        lecInsights: isLec ? lecInsights(lecResultJson, lecBackendStatus) : null,
         lvsInsights: isLvs ? lvsInsights(stepJson) : null,
         rcxInsights: isRcx ? rcxInsights(stepJson) : null,
         staInsights: isSta ? staInsights(stepJson) : null,

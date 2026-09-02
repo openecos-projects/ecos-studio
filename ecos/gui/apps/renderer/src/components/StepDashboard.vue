@@ -783,6 +783,12 @@
                   artifacts in Reports.
                 </span>
               </p>
+              <p v-if="data.lecInsights?.status === 'stale'" class="lec-failure-hint">
+                <i class="ri-error-warning-line" aria-hidden="true" />
+                <span>
+                  The netlists changed after this run. Rerun LEC to re-verify equivalence.
+                </span>
+              </p>
             </section>
           </div>
           <div v-else-if="insightData" class="data-body floorplan-data-body">
@@ -1279,6 +1285,8 @@ const lecStatusLabel = computed(() => {
       return 'Equivalence proven'
     case 'incomplete':
       return 'Unproven'
+    case 'stale':
+      return 'Stale — rerun LEC'
     default:
       return 'Unavailable'
   }

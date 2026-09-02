@@ -150,8 +150,10 @@ export interface StepDashboardLvsInsights {
   violations: StepDashboardLvsViolation[]
 }
 
+export type StepDashboardLecStatus = 'proven' | 'incomplete' | 'stale' | 'unavailable'
+
 export interface StepDashboardLecInsights {
-  status: 'proven' | 'incomplete' | 'unavailable'
+  status: StepDashboardLecStatus
   tone: StepDashboardTone
   metrics: StepDashboardSynthesisValue[]
 }
@@ -863,8 +865,16 @@ function isNetlistSize(value: number | null): value is number {
   return value !== null && Number.isInteger(value) && value >= 0
 }
 
-/** Parses the yosys_lec result JSON (`output/<design>_<step>_result.json`). */
-export function lecInsights(value: unknown): StepDashboardLecInsights | null {
+/**
+ * Parses the yosys_lec result JSON (`output/<design>_<step>_result.json`).
+ * `backendStatus` is the Electron-computed ECC-equivalent status
+ * (missing/incomplete/stale/proven, rehashed against the current netlists) and
+ * wins over the recorded status whenever present.
+ */
+export function lecInsights(
+  value: unknown,
+  backendStatus?: string,
+): StepDashboardLecInsights | null {
   const source = record(value)
   if (!source) return null
   const goldenVerilog = textValue(source.golden_verilog, '')
@@ -883,15 +893,25 @@ export function lecInsights(value: unknown): StepDashboardLecInsights | null {
     SHA256_HEX.test(gateSha256) &&
     isNetlistSize(goldenSizeBytes) &&
     isNetlistSize(gateSizeBytes)
-  const rawStatus = textValue(source.status, '').trim().toLowerCase()
-  const status =
-    rawStatus === 'proven' && complete
-      ? ('proven' as const)
-      : rawStatus === 'incomplete'
-        ? ('incomplete' as const)
-        : ('unavailable' as const)
+  const rawStatus =
+    (backendStatus ?? '').trim().toLowerCase() ||
+    textValue(source.status, '').trim().toLowerCase()
+  const status: StepDashboardLecStatus =
+    rawStatus === 'stale'
+      ? 'stale'
+      : rawStatus === 'proven' && complete
+        ? 'proven'
+        : rawStatus === 'incomplete'
+          ? 'incomplete'
+          : 'unavailable'
   const tone: StepDashboardTone =
-    status === 'proven' ? 'good' : status === 'incomplete' ? 'bad' : 'neutral'
+    status === 'proven'
+      ? 'good'
+      : status === 'incomplete'
+        ? 'bad'
+        : status === 'stale'
+          ? 'warn'
+          : 'neutral'
 
   const metrics: StepDashboardSynthesisValue[] = []
   if (goldenVerilog)

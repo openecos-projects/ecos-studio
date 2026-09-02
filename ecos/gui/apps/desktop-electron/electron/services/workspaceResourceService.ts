@@ -1,4 +1,5 @@
-import { lstat, readdir, realpath, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import type {
   WorkspaceResourceFile,
@@ -611,6 +612,60 @@ export class WorkspaceResourceService {
     }
   }
 
+  private async buildAnalysisStepInfo(
+    step: WorkspaceStepResource,
+  ): Promise<StepInfoBuildResult> {
+    if (step.tool.toLowerCase() !== 'yosys_lec') {
+      return stepInfo(buildAnalysisInfo(step))
+    }
+    return stepInfo({
+      ...buildAnalysisInfo(step),
+      'lec result': step.resources.output.result?.path,
+      'lec status': await this.lecResultStatus(step),
+    })
+  }
+
+  /** Mirrors ECC lec_result_status: rehash the recorded netlists so a stale proof degrades. */
+  private async lecResultStatus(step: WorkspaceStepResource): Promise<string> {
+    const resultFile = step.resources.output.result
+    if (!resultFile?.exists) return 'missing'
+    const result = await this.readJsonOrNull(resultFile.path)
+    if (result?.status !== 'proven') return 'incomplete'
+    const goldenCurrent = await this.lecNetlistIsCurrent(result, 'golden')
+    const gateCurrent = await this.lecNetlistIsCurrent(result, 'gate')
+    return goldenCurrent && gateCurrent ? 'proven' : 'stale'
+  }
+
+  private async lecNetlistIsCurrent(
+    result: Record<string, unknown>,
+    role: 'golden' | 'gate',
+  ): Promise<boolean> {
+    const recordedPath = result[`${role}_verilog`]
+    const recordedSha = result[`${role}_sha256`]
+    const recordedSize = result[`${role}_size_bytes`]
+    if (typeof recordedPath !== 'string' || !recordedPath) return false
+    if (typeof recordedSha !== 'string' || !/^[0-9a-f]{64}$/.test(recordedSha))
+      return false
+    if (
+      typeof recordedSize !== 'number' ||
+      !Number.isInteger(recordedSize) ||
+      recordedSize < 0
+    ) {
+      return false
+    }
+    try {
+      const canonicalPath =
+        await this.projectScopeProvider.requestProjectPathAccess(recordedPath)
+      const content = await readFile(canonicalPath)
+      return (
+        content.length === recordedSize &&
+        createHash('sha256').update(content).digest('hex') === recordedSha
+      )
+    } catch {
+      return false
+    }
+  }
+
   private async buildStepInfoResponse(
     id: WorkspaceStepInfoRequest['id'],
     step: WorkspaceStepResource,
@@ -638,7 +693,7 @@ export class WorkspaceResourceService {
       case 'subflow':
         return stepInfo({ path: step.resources.subflow.path?.path })
       case 'analysis':
-        return stepInfo(buildAnalysisInfo(step))
+        return await this.buildAnalysisStepInfo(step)
       case 'checklist':
         return stepInfo({ path: step.resources.checklist.path?.path })
       case 'config':

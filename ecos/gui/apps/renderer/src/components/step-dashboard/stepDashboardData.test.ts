@@ -213,6 +213,38 @@ describe('step dashboard data', () => {
     expect(lecInsights('nope')).toBeNull()
   })
 
+  it('defers to the backend-revalidated LEC status when provided', () => {
+    const completePayload = {
+      status: 'proven',
+      golden_verilog: '/ws/golden.v',
+      gate_verilog: '/ws/gate.v',
+      golden_sha256: 'a'.repeat(64),
+      gate_sha256: 'b'.repeat(64),
+      golden_size_bytes: 512,
+      gate_size_bytes: 2048,
+    }
+    expect(lecInsights(completePayload, 'proven')).toMatchObject({
+      status: 'proven',
+      tone: 'good',
+    })
+    expect(lecInsights(completePayload, 'stale')).toMatchObject({
+      status: 'stale',
+      tone: 'warn',
+    })
+    expect(lecInsights(completePayload, 'missing')).toMatchObject({
+      status: 'unavailable',
+      tone: 'neutral',
+    })
+    expect(lecInsights(completePayload, 'incomplete')).toMatchObject({
+      status: 'incomplete',
+      tone: 'bad',
+    })
+    // A backend claim of proven still requires the complete payload shape.
+    expect(lecInsights({ status: 'incomplete' }, 'proven')).toMatchObject({
+      status: 'unavailable',
+    })
+  })
+
   it('uses the final routing iteration rather than an intermediate result', () => {
     expect(
       stepKeyMetrics('route', {

@@ -144,6 +144,7 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('data.lecInsights')
     expect(componentSource).toContain('lecStatusLabel')
     expect(componentSource).toContain('is-${data.lecInsights.tone}')
+    expect(componentSource).toContain('Stale — rerun LEC')
     expect(componentSource).toContain('No LEC result')
     expect(componentSource).toContain('lec-failure-hint')
     expect(componentSource).toContain('.data-body.lec-data-body')
