@@ -124,11 +124,14 @@ function registerHandlers(
       closeProject: vi.fn(),
       disposeWindow: vi.fn(),
       getComparison: vi.fn(),
+      getExecutionSnapshot: vi.fn(),
+      invalidateExecution: vi.fn(),
       refreshComparison: vi.fn(),
       selectProject: vi.fn(),
       invalidateProject: vi.fn(),
       invalidateWorkspace: vi.fn(),
       onInvalidated: vi.fn(),
+      onExecutionInvalidated: vi.fn(),
     },
     workspaceService: {
       approvePendingExternalReadRoots: vi.fn(),
@@ -389,6 +392,29 @@ describe('registerIpc', () => {
       7,
       'context-1',
     )
+  })
+
+  it('queries Project execution state for only the sending window context', async () => {
+    const { handlers, services } = registerHandlers()
+    const result = {
+      data: { operations: [] },
+      generation: 0,
+      ok: true,
+      projectComparisonContextId: 'context-1',
+    }
+    services.backendProjectComparisonService.getExecutionSnapshot.mockResolvedValue(
+      result,
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot)?.(
+        { sender: { id: 7 } },
+        { projectComparisonContextId: 'context-1' },
+      ),
+    ).resolves.toEqual(result)
+    expect(
+      services.backendProjectComparisonService.getExecutionSnapshot,
+    ).toHaveBeenCalledWith(7, 'context-1')
   })
 
   it('requires native confirmation before approving external frontend roots', async () => {
@@ -2261,6 +2287,54 @@ describe('registerIpc', () => {
 
     expect(webContents.send).not.toHaveBeenCalled()
     expect(getAllWindows).not.toHaveBeenCalled()
+  })
+
+  it('invalidates every Project execution snapshot for Runtime operation changes', () => {
+    const { services } = registerHandlers()
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+
+    listener?.({
+      event: {
+        eventId: 'event-1',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'queued', workspaceRevision: 1 },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'engineering-1',
+      },
+      type: 'runtime.protocol',
+    })
+
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledOnce()
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).not.toHaveBeenCalled()
+
+    listener?.({
+      event: {
+        eventId: 'event-2',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'succeeded', workspaceRevision: 2 },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.changed',
+        workspaceId: 'engineering-1',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/demo',
+    })
+
+    expect(
+      services.backendProjectComparisonService.invalidateExecution,
+    ).toHaveBeenCalledTimes(2)
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
   })
 
   it('matches directory-scoped events after normalizing trailing slashes', async () => {

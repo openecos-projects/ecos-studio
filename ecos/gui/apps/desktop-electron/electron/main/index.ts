@@ -228,6 +228,8 @@ function getDesktopServices() {
   const projectManagementReadService = new ProjectManagementReadService()
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
+    undefined,
+    () => eccRuntimeService.activeOperations(),
   )
   const backendWorkspaceService = new BackendWorkspaceService({
     engineeringSnapshotProvider: {

@@ -27,6 +27,8 @@ export const desktopApiIpcChannels = {
   backendProjectComparisonSelectProject: 'backend-project-comparison:select-project',
   backendProjectComparisonCloseProject: 'backend-project-comparison:close-project',
   backendProjectComparisonGetComparison: 'backend-project-comparison:get-comparison',
+  backendProjectComparisonGetExecutionSnapshot:
+    'backend-project-comparison:get-execution-snapshot',
   backendProjectComparisonRefreshComparison:
     'backend-project-comparison:refresh-comparison',
   dialogPickDirectory: 'dialog:pick-directory',
@@ -138,6 +140,7 @@ export const desktopApiIpcChannels = {
 export const desktopApiEventChannels = {
   backendWorkspaceInvalidated: 'backend-workspace:invalidated',
   backendProjectComparisonInvalidated: 'backend-project-comparison:invalidated',
+  backendProjectExecutionInvalidated: 'backend-project-execution:invalidated',
   menuAction: 'menu:action',
   windowCloseRequested: 'window:close-requested',
   windowResized: 'window:resized',

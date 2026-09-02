@@ -468,6 +468,37 @@ export interface BackendProjectComparisonInvalidatedEvent {
   generation: number
 }
 
+export interface BackendProjectActiveOperation {
+  cancelRequested: boolean
+  engineeringWorkspaceId: string
+  kind: 'flow' | 'step'
+  operationId: string
+  projectWorkspaceId: string
+  rerun: boolean
+  state: 'queued' | 'running'
+  step: FlowStep | null
+  updatedAt: number
+  workspaceRevision: number
+}
+
+export interface BackendProjectExecutionSnapshot {
+  operations: BackendProjectActiveOperation[]
+}
+
+export type BackendProjectExecutionSnapshotResult =
+  | {
+      ok: true
+      projectComparisonContextId: string
+      generation: number
+      data: BackendProjectExecutionSnapshot
+    }
+  | { ok: false; code: 'unknown-context' }
+
+export interface BackendProjectExecutionInvalidatedEvent {
+  projectComparisonContextId: string
+  generation: number
+}
+
 export interface BackendProjectComparisonApi {
   closeProject(request: { projectComparisonContextId: string }): Promise<void>
   selectProject(request: {
@@ -476,10 +507,16 @@ export interface BackendProjectComparisonApi {
   getComparison(request: {
     projectComparisonContextId: string
   }): Promise<BackendProjectComparisonQueryResult>
+  getExecutionSnapshot(request: {
+    projectComparisonContextId: string
+  }): Promise<BackendProjectExecutionSnapshotResult>
   refreshComparison(request: {
     projectComparisonContextId: string
   }): Promise<BackendProjectComparisonQueryResult>
   onInvalidated(
     listener: (event: BackendProjectComparisonInvalidatedEvent) => void,
+  ): DesktopEventUnsubscribe
+  onExecutionInvalidated(
+    listener: (event: BackendProjectExecutionInvalidatedEvent) => void,
   ): DesktopEventUnsubscribe
 }

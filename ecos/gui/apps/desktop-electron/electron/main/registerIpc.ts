@@ -195,6 +195,10 @@ export interface DesktopBridgeServices {
       windowId: number,
       contextId: string,
     ): Promise<import('@ecos-studio/shared').BackendProjectComparisonQueryResult>
+    getExecutionSnapshot(
+      windowId: number,
+      contextId: string,
+    ): Promise<import('@ecos-studio/shared').BackendProjectExecutionSnapshotResult>
     refreshComparison(
       windowId: number,
       contextId: string,
@@ -204,11 +208,18 @@ export interface DesktopBridgeServices {
       request: { projectRootLocator: string },
     ): Promise<import('@ecos-studio/shared').BackendProjectComparisonSelectResult>
     invalidateProject(projectRoot: string): void
+    invalidateExecution(): void
     invalidateWorkspace(workspaceRoot: string): void
     onInvalidated(
       listener: (
         windowId: number,
         event: import('@ecos-studio/shared').BackendProjectComparisonInvalidatedEvent,
+      ) => void,
+    ): () => void
+    onExecutionInvalidated(
+      listener: (
+        windowId: number,
+        event: import('@ecos-studio/shared').BackendProjectExecutionInvalidatedEvent,
       ) => void,
     ): () => void
   }
@@ -692,6 +703,16 @@ export function registerIpc(
       event,
     )
   })
+  services.backendProjectComparisonService.onExecutionInvalidated((windowId, event) => {
+    const targetWindow = BrowserWindow.getAllWindows().find(
+      (window) => window.webContents.id === windowId,
+    )
+    if (!targetWindow || targetWindow.isDestroyed()) return
+    targetWindow.webContents.send(
+      desktopApiEventChannels.backendProjectExecutionInvalidated,
+      event,
+    )
+  })
 
   const projectFileWatchSubscriptions = new Map<
     string,
@@ -881,6 +902,13 @@ export function registerIpc(
     designTool: DesignTool,
     payload: EccRuntimeEvent,
   ): void => {
+    if (
+      designTool === 'backend' &&
+      payload.type === 'runtime.protocol' &&
+      payload.event.type === 'operation.changed'
+    ) {
+      services.backendProjectComparisonService.invalidateExecution()
+    }
     const workspaceHandle = readWorkspaceHandleFromEvent(payload)
     if (workspaceHandle) {
       const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
@@ -1359,6 +1387,19 @@ export function registerIpc(
         throw new Error('Backend project comparison query is invalid.')
       }
       return await services.backendProjectComparisonService.getComparison(
+        event.sender.id,
+        request.projectComparisonContextId,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot,
+    async (event, request) => {
+      if (!isRecord(request) || typeof request.projectComparisonContextId !== 'string') {
+        throw new Error('Backend project execution query is invalid.')
+      }
+      return await services.backendProjectComparisonService.getExecutionSnapshot(
         event.sender.id,
         request.projectComparisonContextId,
       )

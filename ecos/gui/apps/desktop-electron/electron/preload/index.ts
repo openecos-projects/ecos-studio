@@ -155,6 +155,11 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.backendProjectComparisonSelectProject, request),
     getComparison: (request) =>
       invokeDesktop(desktopApiIpcChannels.backendProjectComparisonGetComparison, request),
+    getExecutionSnapshot: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot,
+        request,
+      ),
     refreshComparison: (request) =>
       invokeDesktop(
         desktopApiIpcChannels.backendProjectComparisonRefreshComparison,
@@ -163,6 +168,13 @@ const desktopApi: DesktopApi = {
     onInvalidated: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.backendProjectComparisonInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as Parameters<typeof listener>[0])
+        },
+      ),
+    onExecutionInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.backendProjectExecutionInvalidated,
         (_event, payload: unknown) => {
           listener(payload as Parameters<typeof listener>[0])
         },

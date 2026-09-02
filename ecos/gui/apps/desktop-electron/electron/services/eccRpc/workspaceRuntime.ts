@@ -185,6 +185,10 @@ export class EccWorkspaceRuntime {
     return this.inFlightCount > 0 || this.operationTracker.hasActiveOperations()
   }
 
+  activeOperations(): EccRuntimeOperation[] {
+    return this.operationTracker.activeOperations()
+  }
+
   hasInFlightOperation(operationId?: string): boolean {
     const operation = this.inFlightOperation
     return Boolean(operation && (!operationId || operation.operationId === operationId))

@@ -42,8 +42,10 @@ async function loadDesktopBridge() {
       closeProject(request: unknown): Promise<void>
       selectProject(request: unknown): Promise<unknown>
       getComparison(request: unknown): Promise<unknown>
+      getExecutionSnapshot(request: unknown): Promise<unknown>
       refreshComparison(request: unknown): Promise<unknown>
       onInvalidated(listener: (event: unknown) => void): () => void
+      onExecutionInvalidated(listener: (event: unknown) => void): () => void
     }
     ecc: {
       events: {
@@ -111,6 +113,7 @@ describe('preload desktop bridge contract', () => {
           closeProject: expect.any(Function),
           selectProject: expect.any(Function),
           getComparison: expect.any(Function),
+          getExecutionSnapshot: expect.any(Function),
           refreshComparison: expect.any(Function),
         }),
         workspace: expect.objectContaining({
@@ -132,6 +135,35 @@ describe('preload desktop bridge contract', () => {
       desktopApiIpcChannels.backendProjectComparisonCloseProject,
       request,
     )
+  })
+
+  it('routes Project execution queries and invalidation through typed channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { projectComparisonContextId: 'context-1' }
+    const result = { data: { operations: [] }, generation: 0, ok: true }
+    ipcRenderer.invoke.mockResolvedValueOnce(result)
+
+    await expect(
+      bridge.backendProjectComparison.getExecutionSnapshot(request),
+    ).resolves.toEqual(result)
+    const listener = vi.fn()
+    const unsubscribe = bridge.backendProjectComparison.onExecutionInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { generation: 1, projectComparisonContextId: 'context-1' })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot,
+      request,
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendProjectExecutionInvalidated,
+      eventListener,
+    )
+    expect(listener).toHaveBeenCalledWith({
+      generation: 1,
+      projectComparisonContextId: 'context-1',
+    })
   })
 
   it('routes bridge calls through shared IPC channel constants', async () => {

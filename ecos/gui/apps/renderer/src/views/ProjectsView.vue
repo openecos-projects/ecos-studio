@@ -230,7 +230,17 @@
                             {{ workspace.branchStep }}</em
                           >
                         </span>
+                        <ProjectExecutionStatus
+                          v-if="
+                            projectExecutionOperations(project.source.path, workspace.id)
+                              .length > 0
+                          "
+                          :operations="
+                            projectExecutionOperations(project.source.path, workspace.id)
+                          "
+                        />
                         <span
+                          v-else
                           class="workspace-flow-hint"
                           :class="flowStatusHintClass(workspace.flowStatusHint.state)"
                         >
@@ -768,6 +778,7 @@ import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import ProjectComparisonRefreshStatus from './project-management/ProjectComparisonRefreshStatus.vue'
+import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
@@ -973,6 +984,13 @@ function comparisonAnalysisForProject(projectRoot: string) {
         ? comparison.stepComparisons.data.steps
         : [],
   }
+}
+
+function projectExecutionOperations(projectRoot: string, workspaceId: string) {
+  if (comparisonProjectRoot.value !== projectRoot) return []
+  return projectComparisonSession.execution.operations.filter(
+    (operation) => operation.projectWorkspaceId === workspaceId,
+  )
 }
 
 const searchShowsAll = computed(() => Boolean(searchQuery.value.trim()))

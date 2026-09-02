@@ -3,6 +3,7 @@ import {
   projectManifestFlowSteps,
   validateEngineeringSnapshot,
   type EccEngineeringSnapshot,
+  type EccRuntimeOperation,
   type ProjectManifest,
 } from '@ecos-studio/shared'
 import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
@@ -168,8 +169,111 @@ function serviceFixture() {
   }
 }
 
+function activeOperation(
+  overrides: Partial<EccRuntimeOperation> = {},
+): EccRuntimeOperation {
+  return {
+    cancelRequested: false,
+    createdAt: 1,
+    currentStep: 'Route',
+    currentTool: 'openroad',
+    error: null,
+    kind: 'step',
+    operationId: 'operation-1',
+    origin: 'gui',
+    rerun: false,
+    result: null,
+    state: 'running',
+    step: 'Route',
+    updatedAt: 2,
+    workspaceId: '/projects/demo/ws_1',
+    workspaceRevision: 1,
+    ...overrides,
+  }
+}
+
 describe('BackendProjectComparisonService', () => {
   afterEach(() => vi.restoreAllMocks())
+
+  it('builds a lightweight revision-matched execution overlay', async () => {
+    const fixture = serviceFixture()
+    const activeOperations = vi.fn(() => [
+      activeOperation(),
+      activeOperation({ operationId: 'stale', workspaceRevision: 0 }),
+      activeOperation({ operationId: 'other', workspaceId: 'engineering-other' }),
+    ])
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: fixture.readEngineeringSnapshot,
+        readManifest: fixture.readManifest,
+        resolveProjectRoot: async (path) => path,
+      },
+      fixture.watchers.create,
+      activeOperations,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+    const readsBeforeExecution = fixture.readEngineeringSnapshot.mock.calls.length
+
+    await expect(
+      service.getExecutionSnapshot(11, selected.projectComparisonContextId),
+    ).resolves.toEqual({
+      ok: true,
+      projectComparisonContextId: selected.projectComparisonContextId,
+      generation: 0,
+      data: {
+        operations: [
+          expect.objectContaining({
+            engineeringWorkspaceId: '/projects/demo/ws_1',
+            operationId: 'operation-1',
+            projectWorkspaceId: 'ws_1',
+            step: null,
+            workspaceRevision: 1,
+          }),
+        ],
+      },
+    })
+    expect(fixture.readEngineeringSnapshot).toHaveBeenCalledTimes(readsBeforeExecution)
+    expect(activeOperations).toHaveBeenCalledOnce()
+  })
+
+  it('invalidates execution snapshots for every selected window independently', async () => {
+    const fixture = serviceFixture()
+    const service = new BackendProjectComparisonService(
+      {
+        readEngineeringSnapshot: fixture.readEngineeringSnapshot,
+        readManifest: fixture.readManifest,
+        resolveProjectRoot: async (path) => path,
+      },
+      fixture.watchers.create,
+      () => [],
+    )
+    const first = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    const second = await service.selectProject(12, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!first.ok || !second.ok) throw new Error('selection failed')
+    const listener = vi.fn()
+    service.onExecutionInvalidated(listener)
+
+    service.invalidateExecution()
+
+    expect(listener.mock.calls).toEqual([
+      [
+        11,
+        { generation: 1, projectComparisonContextId: first.projectComparisonContextId },
+      ],
+      [
+        12,
+        { generation: 1, projectComparisonContextId: second.projectComparisonContextId },
+      ],
+    ])
+  })
 
   it('freezes representative Project Comparison behavior and deterministic read costs', async () => {
     const fixture = representativeProjectComparisonFixture()

@@ -144,6 +144,10 @@ export class EccRpcRuntimeService {
     return this.uniqueRuntimes().some((runtime) => runtime.isActive())
   }
 
+  activeOperations(): EccRuntimeOperation[] {
+    return this.uniqueRuntimes().flatMap((runtime) => runtime.activeOperations())
+  }
+
   hasPendingRuntimeWork(): boolean {
     return this.uniqueRuntimes().some((runtime) => runtime.hasPendingRuntimeWork())
   }

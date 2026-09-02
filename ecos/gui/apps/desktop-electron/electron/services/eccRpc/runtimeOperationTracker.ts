@@ -6,6 +6,7 @@ interface OperationWaiter {
 }
 
 const terminalStates = new Set(['succeeded', 'failed', 'cancelled', 'interrupted'])
+const activeStates = new Set(['queued', 'running'])
 
 /**
  * Keeps the notification-derived operation state separate from RPC session
@@ -13,16 +14,21 @@ const terminalStates = new Set(['succeeded', 'failed', 'cancelled', 'interrupted
  * both idempotent.
  */
 export class RuntimeOperationTracker {
-  private readonly activeOperationIds = new Set<string>()
+  private readonly active = new Map<string, EccRuntimeOperation>()
+  private readonly latestSequences = new Map<string, number>()
   private readonly terminalOperations = new Map<string, EccRuntimeOperation>()
   private readonly waiters = new Map<string, OperationWaiter[]>()
 
   hasActiveOperations(): boolean {
-    return this.activeOperationIds.size > 0
+    return this.active.size > 0
   }
 
   firstActiveOperationId(): string | null {
-    return this.activeOperationIds.values().next().value ?? null
+    return this.active.keys().next().value ?? null
+  }
+
+  activeOperations(): EccRuntimeOperation[] {
+    return [...this.active.values()]
   }
 
   hasTerminalOperation(operationId: string): boolean {
@@ -31,18 +37,26 @@ export class RuntimeOperationTracker {
 
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
     if (protocolEvent.type !== 'operation.changed') return false
-    const state = stringPayloadValue(protocolEvent.payload, 'state')
-    if (!terminalStates.has(state)) {
-      if (this.terminalOperations.has(protocolEvent.operationId)) return false
-      this.activeOperationIds.add(protocolEvent.operationId)
+    const latestSequence = this.latestSequences.get(protocolEvent.operationId)
+    if (latestSequence !== undefined && protocolEvent.sequence <= latestSequence) {
       return false
     }
+    this.latestSequences.set(protocolEvent.operationId, protocolEvent.sequence)
+    const state = stringPayloadValue(protocolEvent.payload, 'state')
+    if (activeStates.has(state)) {
+      if (this.terminalOperations.has(protocolEvent.operationId)) return false
+      this.active.set(protocolEvent.operationId, operationFrom(protocolEvent))
+      return false
+    }
+    if (!terminalStates.has(state)) return false
 
-    this.activeOperationIds.delete(protocolEvent.operationId)
-    const operation = terminalOperationFrom(protocolEvent)
+    this.active.delete(protocolEvent.operationId)
+    const operation = operationFrom(protocolEvent)
     this.terminalOperations.set(operation.operationId, operation)
     if (this.terminalOperations.size > 512) {
-      this.terminalOperations.delete(this.terminalOperations.keys().next().value!)
+      const oldestOperationId = this.terminalOperations.keys().next().value!
+      this.terminalOperations.delete(oldestOperationId)
+      this.latestSequences.delete(oldestOperationId)
     }
     this.resolveWaiters(operation.operationId, operation)
     return true
@@ -68,12 +82,13 @@ export class RuntimeOperationTracker {
       for (const waiter of waiters) waiter.reject(reason)
     }
     this.waiters.clear()
-    this.activeOperationIds.clear()
+    this.active.clear()
   }
 
   reset(reason: Error): void {
     this.rejectAll(reason)
     this.terminalOperations.clear()
+    this.latestSequences.clear()
   }
 
   private resolveWaiters(operationId: string, operation: EccRuntimeOperation): void {
@@ -101,9 +116,7 @@ export function isRuntimeProtocolPayload(
   )
 }
 
-function terminalOperationFrom(
-  protocolEvent: EccRuntimeProtocolPayload,
-): EccRuntimeOperation {
+function operationFrom(protocolEvent: EccRuntimeProtocolPayload): EccRuntimeOperation {
   const payload = protocolEvent.payload
   const error = isRuntimeErrorPayload(payload.error)
     ? payload.error
@@ -120,10 +133,20 @@ function terminalOperationFrom(
     operationId: protocolEvent.operationId,
     origin: protocolEvent.origin,
     rerun: Boolean(protocolEvent.rerun),
+    ...(protocolEvent.runSessionId ? { runSessionId: protocolEvent.runSessionId } : {}),
+    ...(protocolEvent.runtimeInstanceId
+      ? { runtimeInstanceId: protocolEvent.runtimeInstanceId }
+      : {}),
     result: recordPayloadValue(payload, 'result'),
     state: stringPayloadValue(payload, 'state') as EccRuntimeOperation['state'],
     step: stringPayloadValue(payload, 'step'),
     updatedAt: protocolEvent.timestamp,
+    ...(typeof (payload.workspaceRevision ?? protocolEvent.workspaceRevision) === 'number'
+      ? {
+          workspaceRevision: (payload.workspaceRevision ??
+            protocolEvent.workspaceRevision) as number,
+        }
+      : {}),
     workspaceId: protocolEvent.workspaceId,
   }
 }

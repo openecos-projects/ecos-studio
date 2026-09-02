@@ -624,6 +624,33 @@ describe('EccRpcRuntimeService pool', () => {
     expect(seen).toHaveLength(before)
   })
 
+  it('aggregates active operations owned by every workspace runtime', async () => {
+    const pool = createPool()
+    await pool.service.openWorkspace({ directory: '/work/a' })
+    await pool.service.openWorkspace({ directory: '/work/b' })
+    for (const [index, directory] of ['/work/a', '/work/b'].entries()) {
+      pool.sidecarNotification(directory, {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: `event-${index}`,
+          kind: 'step',
+          operationId: `operation-${index}`,
+          origin: 'gui',
+          payload: { state: 'queued', step: 'Route', workspaceRevision: 1 },
+          sequence: 1,
+          timestamp: index,
+          type: 'operation.changed',
+          workspaceId: `id-${directory}`,
+        },
+      })
+    }
+
+    expect(
+      pool.service.activeOperations().map((operation) => operation.operationId),
+    ).toEqual(['operation-0', 'operation-1'])
+  })
+
   it('routes handles when ECC returns a resolved directory different from the request', async () => {
     const sidecars = new Map<string | null, FakeSidecar>()
     const clients = new Map<string | null, FakeRpcClient>()

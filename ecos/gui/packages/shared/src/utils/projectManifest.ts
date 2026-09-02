@@ -601,10 +601,16 @@ export function recordReplacementBackupInManifest(
 export function normalizeProjectManifestFlowStep(
   step: ProjectManifestFlowStep | string,
 ): ProjectManifestFlowStep {
+  return parseProjectManifestFlowStep(step) ?? 'Synth'
+}
+
+export function parseProjectManifestFlowStep(
+  step: ProjectManifestFlowStep | string,
+): ProjectManifestFlowStep | null {
   if ((projectManifestFlowSteps as readonly string[]).includes(step)) {
     return step as ProjectManifestFlowStep
   }
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? 'Synth'
+  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
 }
 
 function normalizeWorkspace(

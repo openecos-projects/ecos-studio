@@ -1,6 +1,8 @@
 import type {
   BackendProjectComparison,
   BackendProjectComparisonQueryResult,
+  BackendProjectExecutionSnapshot,
+  BackendProjectExecutionSnapshotResult,
   ReadIssue,
 } from '@ecos-studio/shared'
 import { defineStore } from 'pinia'
@@ -28,8 +30,12 @@ export const useBackendProjectComparisonSession = defineStore(
     })
     const projectComparisonContextId = ref<string | null>(null)
     const generation = ref(-1)
+    const execution = ref<BackendProjectExecutionSnapshot>({ operations: [] })
+    const executionGeneration = ref(-1)
     let requestSequence = 0
+    let executionRequestSequence = 0
     let unsubscribe: (() => void) | null = null
+    let unsubscribeExecution: (() => void) | null = null
 
     function commit(
       result: BackendProjectComparisonQueryResult,
@@ -53,6 +59,8 @@ export const useBackendProjectComparisonSession = defineStore(
       const sequence = ++requestSequence
       projectComparisonContextId.value = null
       generation.value = -1
+      execution.value = { operations: [] }
+      executionGeneration.value = -1
       projection.value = { data: null, status: 'loading' }
       subscribe()
       try {
@@ -70,12 +78,13 @@ export const useBackendProjectComparisonSession = defineStore(
         }
         projectComparisonContextId.value = selected.projectComparisonContextId
         generation.value = selected.generation
-        commit(
-          await getDesktopApi().backendProjectComparison.getComparison({
-            projectComparisonContextId: selected.projectComparisonContextId,
-          }),
-          sequence,
-        )
+        const comparison = await getDesktopApi().backendProjectComparison.getComparison({
+          projectComparisonContextId: selected.projectComparisonContextId,
+        })
+        commit(comparison, sequence)
+        if (sequence === requestSequence && comparison.ok) {
+          await reloadExecution()
+        }
       } catch (error) {
         if (sequence !== requestSequence) return
         projection.value = {
@@ -99,13 +108,11 @@ export const useBackendProjectComparisonSession = defineStore(
         : { data: null, status: 'loading' }
       try {
         const request = { projectComparisonContextId: contextId }
-        commit(
-          await (explicit
-            ? getDesktopApi().backendProjectComparison.refreshComparison(request)
-            : getDesktopApi().backendProjectComparison.getComparison(request)),
-          sequence,
-          committed,
-        )
+        const comparison = await (explicit
+          ? getDesktopApi().backendProjectComparison.refreshComparison(request)
+          : getDesktopApi().backendProjectComparison.getComparison(request))
+        commit(comparison, sequence, committed)
+        if (sequence === requestSequence && comparison.ok) await reloadExecution()
       } catch (error) {
         if (sequence !== requestSequence) return
         const queryIssue = issue(
@@ -122,6 +129,38 @@ export const useBackendProjectComparisonSession = defineStore(
       return reload(true)
     }
 
+    function commitExecution(
+      result: BackendProjectExecutionSnapshotResult,
+      sequence: number,
+    ): void {
+      if (
+        sequence !== executionRequestSequence ||
+        !result.ok ||
+        result.projectComparisonContextId !== projectComparisonContextId.value ||
+        result.generation < executionGeneration.value
+      ) {
+        return
+      }
+      execution.value = result.data
+      executionGeneration.value = result.generation
+    }
+
+    async function reloadExecution(): Promise<void> {
+      const contextId = projectComparisonContextId.value
+      if (!contextId) return
+      const sequence = ++executionRequestSequence
+      try {
+        commitExecution(
+          await getDesktopApi().backendProjectComparison.getExecutionSnapshot({
+            projectComparisonContextId: contextId,
+          }),
+          sequence,
+        )
+      } catch {
+        if (sequence === executionRequestSequence) execution.value = { operations: [] }
+      }
+    }
+
     function subscribe(): void {
       unsubscribe ??= getDesktopApi().backendProjectComparison.onInvalidated((event) => {
         if (
@@ -131,12 +170,24 @@ export const useBackendProjectComparisonSession = defineStore(
           void reload(false)
         }
       })
+      unsubscribeExecution ??=
+        getDesktopApi().backendProjectComparison.onExecutionInvalidated((event) => {
+          if (
+            event.projectComparisonContextId === projectComparisonContextId.value &&
+            event.generation > executionGeneration.value
+          ) {
+            void reloadExecution()
+          }
+        })
     }
 
     function clear(): void {
       requestSequence += 1
+      executionRequestSequence += 1
       projectComparisonContextId.value = null
       generation.value = -1
+      execution.value = { operations: [] }
+      executionGeneration.value = -1
       projection.value = { data: null, status: 'idle' }
     }
 
@@ -151,12 +202,16 @@ export const useBackendProjectComparisonSession = defineStore(
       }
       unsubscribe?.()
       unsubscribe = null
+      unsubscribeExecution?.()
+      unsubscribeExecution = null
       clear()
     }
 
     return {
       clear,
       dispose,
+      execution,
+      executionGeneration,
       generation,
       projectComparisonContextId,
       projection,

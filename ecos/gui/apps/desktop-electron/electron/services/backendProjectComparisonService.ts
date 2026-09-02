@@ -10,7 +10,9 @@ import {
   type BackendProjectComparisonInvalidatedEvent,
   type BackendProjectComparisonQueryResult,
   type BackendProjectComparisonSelectResult,
+  type BackendProjectExecutionSnapshotResult,
   type EccPersistedEngineeringSnapshot,
+  type EccRuntimeOperation,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
   type ProjectQorMetricRecord,
@@ -31,6 +33,10 @@ import {
   ProjectComparisonFileWatcher,
   type ProjectComparisonFileWatcherCallbacks,
 } from './projectComparisonFileWatcher'
+import {
+  ProjectExecutionOverlay,
+  type CommittedProjectWorkspace,
+} from './projectExecutionOverlay'
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
@@ -72,12 +78,16 @@ const ANALYSIS_PATHS = new Set<string>(projectManagementWorkspaceSummaryPaths)
 export class BackendProjectComparisonService {
   private readonly contextsByWindow = new Map<number, ProjectComparisonContext>()
   private readonly listeners = new Set<InvalidationListener>()
+  private readonly execution: ProjectExecutionOverlay
 
   constructor(
     private readonly reader: ProjectComparisonReader,
     private readonly createWatcher: ProjectComparisonFileWatcherFactory = (callbacks) =>
       new ProjectComparisonFileWatcher(callbacks),
-  ) {}
+    activeOperations: () => EccRuntimeOperation[] = () => [],
+  ) {
+    this.execution = new ProjectExecutionOverlay(activeOperations)
+  }
 
   async selectProject(
     windowId: number,
@@ -86,6 +96,7 @@ export class BackendProjectComparisonService {
     const previous = this.contextsByWindow.get(windowId)
     if (previous) {
       this.contextsByWindow.delete(windowId)
+      this.execution.unregister(previous.id)
       await previous.watcher.close()
     }
     let watcher: ProjectComparisonFileWatcher | null = null
@@ -145,6 +156,7 @@ export class BackendProjectComparisonService {
         context.watcherIssue = autoRefreshIssue()
       }
       this.contextsByWindow.set(windowId, context)
+      this.execution.register(windowId, context.id)
       return {
         ok: true,
         projectComparisonContextId: context.id,
@@ -191,6 +203,23 @@ export class BackendProjectComparisonService {
     context.cache = null
     context.inFlight = null
     return this.getComparison(windowId, projectComparisonContextId)
+  }
+
+  getExecutionSnapshot(
+    windowId: number,
+    projectComparisonContextId: string,
+  ): Promise<BackendProjectExecutionSnapshotResult> {
+    return Promise.resolve(this.execution.get(windowId, projectComparisonContextId))
+  }
+
+  invalidateExecution(): void {
+    this.execution.invalidate()
+  }
+
+  onExecutionInvalidated(
+    listener: Parameters<ProjectExecutionOverlay['onInvalidated']>[0],
+  ): () => void {
+    return this.execution.onInvalidated(listener)
   }
 
   invalidateWorkspace(workspaceRoot: string): void {
@@ -242,13 +271,17 @@ export class BackendProjectComparisonService {
     const context = this.context(windowId, projectComparisonContextId)
     if (!context) return
     this.contextsByWindow.delete(windowId)
+    this.execution.unregister(context.id)
     await context.watcher.close()
   }
 
   disposeWindow(windowId: number): void {
     const context = this.contextsByWindow.get(windowId)
     this.contextsByWindow.delete(windowId)
-    if (context) void context.watcher.close()
+    if (context) {
+      this.execution.unregister(context.id)
+      void context.watcher.close()
+    }
   }
 
   async checkForUpdates(windowId: number): Promise<void> {
@@ -424,6 +457,12 @@ export class BackendProjectComparisonService {
             )
             return input
               ? {
+                  executionWorkspace: {
+                    engineeringWorkspaceId: engineeringSnapshot.workspaceId,
+                    projectWorkspaceId: workspace.workspace_id,
+                    stepStatuses: input.stepStatuses,
+                    workspaceRevision: engineeringSnapshot.workspaceRevision,
+                  } satisfies CommittedProjectWorkspace,
                   engineeringWorkspaceId: engineeringSnapshot.workspaceId,
                   identityKey,
                   input,
@@ -441,6 +480,13 @@ export class BackendProjectComparisonService {
       if (!this.isCurrent(context, generation)) {
         return { ok: false, code: 'unknown-context' }
       }
+
+      this.execution.setCommittedWorkspaces(
+        context.id,
+        entries.flatMap((entry) =>
+          entry.executionWorkspace ? [entry.executionWorkspace] : [],
+        ),
+      )
 
       context.dependencies = new Set(
         manifest.workspaces.map((workspace) => resolve(workspace.workspace_path)),

@@ -4,6 +4,7 @@ import {
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
   normalizeProjectManifestFlowStep,
+  parseProjectManifestFlowStep,
   parseProjectManifest,
   projectManifestFlowSteps,
   registerWorkspaceInManifest,
@@ -30,6 +31,8 @@ describe('project manifest parsing', () => {
     expect(normalizeProjectManifestFlowStep('lvs')).toBe('LVS')
     expect(normalizeProjectManifestFlowStep('LVS')).toBe('LVS')
     expect(normalizeProjectManifestFlowStep('DRC')).toBe('DRC')
+    expect(parseProjectManifestFlowStep('routing')).toBe('Route')
+    expect(parseProjectManifestFlowStep('future-step')).toBeNull()
     const afterDrc = registerWorkspaceInManifest(
       createProjectManifestDraft({
         rootPath: '/work/gcd',
