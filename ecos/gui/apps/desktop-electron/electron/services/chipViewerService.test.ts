@@ -412,7 +412,7 @@ describe('ChipViewerService', () => {
     await service.open({
       mode: 'edit',
       projectPath: PROJECT_ROOT,
-      step: 'FixFanout',
+      step: 'place',
     })
 
     expect(layoutEditBegin).toHaveBeenNthCalledWith(1, {
@@ -420,7 +420,7 @@ describe('ChipViewerService', () => {
       workspaceHandle: 'workspace-handle-1',
     })
     expect(layoutEditBegin).toHaveBeenNthCalledWith(2, {
-      step: 'FixFanout',
+      step: 'place',
       workspaceHandle: 'workspace-handle-1',
     })
   })

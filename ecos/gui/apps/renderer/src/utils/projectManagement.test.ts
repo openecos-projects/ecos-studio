@@ -161,11 +161,6 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
         metric('instance_count', 612),
         metric('net_count', 376),
       ]),
-      Fanout: metricsArtifact('fixFanout', [
-        metric('fanout_max', 12),
-        metric('instance_count', 618),
-        metric('net_count', 381),
-      ]),
       Place: metricsArtifact('place', [
         metric('place_congestion_egr_overflow_max', 9),
         metric('place_congestion_egr_overflow_total', 37),
@@ -362,7 +357,6 @@ describe('project management V3 model', () => {
     expect(FLOW_STEPS).toEqual([
       'Synth',
       'Floor',
-      'Fanout',
       'Place',
       'CTS',
       'Legal',
@@ -434,11 +428,6 @@ describe('project management V3 model', () => {
       'instance_count',
       'net_count',
     ])
-    expect(
-      model.stepCompareSummaries
-        .find((item) => item.step === 'Fanout')
-        ?.metrics.map((metric) => metric.id),
-    ).toEqual(['fanout_max', 'instance_count', 'net_count'])
     expect(
       model.stepCompareSummaries
         .find((item) => item.step === 'Place')

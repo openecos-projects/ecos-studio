@@ -23,7 +23,6 @@ ECOS_ROOT = AGENT_ROOT.parents[1]
 METRICS = {
     "synthesis": ("synthesis_cell_area", "synthesis_cell_count", "synthesis_port_count", "synthesis_wire_count"),
     "floorplan": ("die_area", "core_area", "core_utilization", "instance_count", "net_count"),
-    "fixfanout": ("fanout_max", "instance_count", "net_count"),
     "cts": ("clock_path_max_buffer", "clock_path_min_buffer", "clock_wirelength", "cts_buffer_area", "cts_buffer_count", "cts_clock_tree_max_level", "cts_clock_wirelength_max", "cts_worst_optimized_skew_ns", "cts_worst_max_insertion_latency_ns", "cts_skew_target_unmet_count", "instance_count", "io_pin_count", "net_count"),
     "legalization": (),
     "route": ("route_dr_total_patch_count", "route_dr_total_via_count", "route_dr_total_violation_count", "route_dr_total_wirelength", "route_la_total_demand", "route_la_total_overflow", "route_via_count", "route_wirelength"),
@@ -65,15 +64,6 @@ STAGES = (
         "The step cannot proceed without an ECC database instance. Its subflow status is progress evidence only; inspect saved artifacts and analysis records before claiming a successful floorplan.",
         "ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count.",
         "ecc/chipcompiler/tools/ecc/configs/floorplan_ecc.json",
-    ),
-    Stage(
-        "fixfanout",
-        "fixFanout",
-        ("fixfanout", "fix fanout", "fanout optimization", "fanout stage", "扇出优化阶段"),
-        "The ECC runner loads the current database, marks the configured clock net when present, invokes `run_net_opt`, saves the resulting design and geometry snapshot, and then produces metrics and checklist evidence.",
-        "The step cannot execute when ECC input loading fails. The reported maximum fanout is evidence from the saved feature database or workspace parameter, not proof that every timing or electrical constraint is closed.",
-        "ECC publishes maximum fanout together with database instance and net counts after net optimization.",
-        "ecc/chipcompiler/tools/ecc/configs/fixfanout_ecc.json",
     ),
     Stage(
         "place",
@@ -184,10 +174,6 @@ FAILURE_DETAILS = {
         ("engine", ("floorplan ECC unavailable", "floorplan load data failed"), "If `get_eda_instance` returns no ECC module, the floorplan runner does not enter `init_fp` or `run_fp` and returns false."),
         ("geometry", ("floorplan geometry missing", "floorplan manifest missing"), "For floorplan, shared persistence requires `geometry_snapshot_save` and an existing geometry manifest. Either failure causes `save_data` to return false."),
     ),
-    "fixfanout": (
-        ("engine", ("fixfanout ECC unavailable", "fixfanout load data failed"), "If ECC input loading fails, the runner never calls `run_net_opt`; no subflow success state is evidence of a fanout fix."),
-        ("metric_fallback", ("fixfanout metric fallback", "fanout evidence missing"), "When `Pins.max_fanout` is absent, the metric builder falls back to the workspace parameter. Treat that fallback as a configured limit reference, not measured post-optimization fanout evidence."),
-    ),
     "cts": (
         ("engine", ("cts ECC unavailable", "cts load data failed"), "Without an ECC module, CTS, its report, map, and timing feature facts are not executed."),
         ("timing_facts", ("cts timing facts missing", "cts skew unavailable"), "If `feature_cts_timing` cannot be persisted after `save_data`, the CTS runner logs an error and returns false. Missing timing facts cannot be repaired by the visual map."),
@@ -242,10 +228,6 @@ PARAMETER_DETAILS = {
         "pdn_generator.rail": ("The follow-pin PDN rail definitions.", "It creates local power rails on declared routing layers."),
         "pdn_generator.stripe": ("The PDN stripe definitions.", "It creates wider periodic power stripes with declared width, pitch, and offset."),
         "pdn_generator.connect_layers": ("The PDN layer-connection definitions.", "It specifies routing-layer pairs to connect through the power network."),
-    },
-    "fixfanout": {
-        "insert_buffer": ("The buffer cell selection for fanout repair.", "It supplies the buffer implementation used when net optimization inserts drivers."),
-        "max_fanout": ("The maximum allowed fanout constraint.", "It is the threshold that directs fanout optimization and validates the resulting fanout metric."),
     },
     "cts": {
         "skew_bound": ("The target upper bound for clock skew.", "It directs CTS optimization and is compared against derived clock-quality facts."),

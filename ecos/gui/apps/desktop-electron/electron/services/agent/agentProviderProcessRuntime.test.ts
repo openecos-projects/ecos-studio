@@ -398,7 +398,6 @@ describe('AgentProviderProcessRuntime', () => {
               steps: [
                 'Synthesis',
                 'Floorplan',
-                'fixFanout',
                 'place',
                 'CTS',
                 'legalization',

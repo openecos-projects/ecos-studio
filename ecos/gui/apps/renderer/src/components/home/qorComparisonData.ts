@@ -48,8 +48,6 @@ const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
   synth: 'Synth',
   floorplan: 'Floor',
   floor: 'Floor',
-  fixfanout: 'Fanout',
-  fanout: 'Fanout',
   place: 'Place',
   placement: 'Place',
   cts: 'CTS',
@@ -68,7 +66,6 @@ const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
 const FLOW_STEP_LABELS: Record<FlowStep, string> = {
   Synth: 'Synthesis',
   Floor: 'Floorplan',
-  Fanout: 'FixFanout',
   Place: 'Place',
   CTS: 'CTS',
   Legal: 'Legalization',

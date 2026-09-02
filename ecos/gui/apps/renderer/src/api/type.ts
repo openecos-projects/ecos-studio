@@ -39,7 +39,6 @@ export enum StepEnum {
   INIT = 'Init',
   SYNTHESIS = 'Synthesis',
   FLOORPLAN = 'Floorplan',
-  NETLIST_OPT = 'fixFanout',
   PLACEMENT = 'place',
   CTS = 'CTS',
   TIMING_OPT = 'Timing optimization',
@@ -108,13 +107,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     icon: 'ri-layout-4-line',
     path: StepEnum.FLOORPLAN,
     showInSidebar: true,
-    group: 'run',
-  },
-  [StepEnum.NETLIST_OPT.toLowerCase()]: {
-    label: 'FixFanout',
-    icon: 'ri-share-line',
-    path: StepEnum.NETLIST_OPT,
-    showInSidebar: false,
     group: 'run',
   },
   [StepEnum.PLACEMENT.toLowerCase()]: {

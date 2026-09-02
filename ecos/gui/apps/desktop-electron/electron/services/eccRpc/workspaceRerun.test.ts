@@ -35,7 +35,7 @@ async function writeSourceWorkspace(): Promise<{
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
     steps: [
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'Floorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
       { name: 'legalization', state: 'Success', tool: 'dreamplace' },
@@ -44,7 +44,7 @@ async function writeSourceWorkspace(): Promise<{
   const artifact = Buffer.from('place-def')
   await mkdir(join(source, 'home'), { recursive: true })
   await mkdir(join(source, 'config'), { recursive: true })
-  await mkdir(join(source, 'fixFanout_ecc', 'output'), { recursive: true })
+  await mkdir(join(source, 'Floorplan_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
@@ -55,7 +55,7 @@ async function writeSourceWorkspace(): Promise<{
     '{"density_weight":0.01}\n',
   )
   await writeFile(
-    join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'),
+    join(source, 'Floorplan_ecc', 'output', 'gcd_Floorplan.def.gz'),
     'checkpoint',
   )
   await writeFile(
@@ -150,7 +150,7 @@ describe('prepareWorkspaceRerun', () => {
 
     await expect(
       readFile(
-        `${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`,
+        `${contract.target_workspace}/Floorplan_ecc/output/gcd_Floorplan.def.gz`,
         'utf8',
       ),
     ).resolves.toBe('checkpoint')
@@ -166,7 +166,7 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
     expect(targetFlow.steps).toEqual([
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'Floorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
       { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
       { name: 'legalization', state: 'Unstart', tool: 'dreamplace', runtime: '' },
@@ -187,15 +187,9 @@ describe('prepareWorkspaceRerun', () => {
           checklist: `${source}/home/checklist.json`,
           metrics: {
             'drc dist.': `${source}/drc_ecc/analysis/drc.png`,
-            'fanout dist.': `${source}/fixFanout_ecc/output/fanout.png`,
           },
           monitor: {
-            step: [
-              'fixFanout - analysis',
-              'place - analysis',
-              'CTS - analysis',
-              'legalization - analysis',
-            ],
+            step: ['place - analysis', 'CTS - analysis', 'legalization - analysis'],
             memory: ['1', '2', '3', '4'],
             runtime: ['1', '2', '3', '4'],
             instance: ['1', '2', '3', '4'],
@@ -216,8 +210,8 @@ describe('prepareWorkspaceRerun', () => {
           summary: { passed: 1, blocked: 2, attention: 0, unavailable: 0 },
           checklist: [
             {
-              id: 'artifact.fixFanout',
-              step: 'fixFanout',
+              id: 'artifact.floorplan',
+              step: 'Floorplan',
               state: 'pass',
               blocked: false,
             },
@@ -257,11 +251,9 @@ describe('prepareWorkspaceRerun', () => {
     expect(home.flow).toBe(`${contract.target_workspace}/home/flow.json`)
     expect(home.checklist).toBe(`${contract.target_workspace}/home/checklist.json`)
     expect(home.layout).toBe('')
-    expect(home.metrics).toEqual({
-      'fanout dist.': `${contract.target_workspace}/fixFanout_ecc/output/fanout.png`,
-    })
-    expect(home.monitor.step).toEqual(['fixFanout - analysis'])
-    expect(home.monitor.memory).toEqual(['1'])
+    expect(home.metrics).toEqual({})
+    expect(home.monitor.step).toEqual([])
+    expect(home.monitor.memory).toEqual([])
 
     const checklist = JSON.parse(
       await readFile(`${contract.target_workspace}/home/checklist.json`, 'utf8'),
@@ -270,7 +262,7 @@ describe('prepareWorkspaceRerun', () => {
       summary: { passed: number; blocked: number }
       checklist: Array<{ step: string }>
     }
-    expect(checklist.checklist.map((item) => item.step)).toEqual(['fixFanout'])
+    expect(checklist.checklist.map((item) => item.step)).toEqual(['Floorplan'])
     expect(checklist.summary).toEqual({
       passed: 1,
       blocked: 0,
@@ -455,7 +447,7 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string }> }
     expect(targetFlow.steps.map((step) => step.name)).toEqual([
-      'fixFanout',
+      'Floorplan',
       'place',
       'CTS',
       'legalization',
@@ -467,9 +459,6 @@ describe('prepareWorkspaceRerun', () => {
       'sta',
       'Harden',
     ])
-    expect(targetFlow.steps.find((step) => step.name === 'fixFanout')?.state).toBe(
-      'Success',
-    )
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
     expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
   })

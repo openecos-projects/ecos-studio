@@ -42,7 +42,6 @@ interface WorkspaceRerunRuntime {
 const FLOW_STEP_SEQUENCE = [
   'Synthesis',
   'Floorplan',
-  'fixFanout',
   'place',
   'CTS',
   'legalization',
@@ -60,7 +59,6 @@ const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
 const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
   Synthesis: 'yosys',
   Floorplan: 'ecc',
-  fixFanout: 'ecc',
   place: 'dreamplace',
   CTS: 'ecc',
   legalization: 'dreamplace',

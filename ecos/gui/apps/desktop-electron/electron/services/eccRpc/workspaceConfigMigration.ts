@@ -12,7 +12,6 @@ const CONFIG_FILENAME_MIGRATIONS: readonly WorkspaceConfigFilenameMigration[] = 
   { canonical: 'cts_ecc.json', legacy: 'cts_default_config.json' },
   { canonical: 'drc_ecc.json', legacy: 'drc_default_config.json' },
   { canonical: 'floorplan_ecc.json', legacy: 'fp_default_config.json' },
-  { canonical: 'fixfanout_ecc.json', legacy: 'no_default_config_fixfanout.json' },
   { canonical: 'route_ecc.json', legacy: 'rt_default_config.json' },
   { canonical: 'filler_ecc.json', legacy: 'pl_default_config.json' },
   { canonical: 'rcx_ecc.json', legacy: 'rcx.json' },

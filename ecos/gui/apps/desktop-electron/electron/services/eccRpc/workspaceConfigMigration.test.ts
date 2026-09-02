@@ -20,7 +20,6 @@ const filenameMigrations = [
   ['cts_default_config.json', 'cts_ecc.json'],
   ['drc_default_config.json', 'drc_ecc.json'],
   ['fp_default_config.json', 'floorplan_ecc.json'],
-  ['no_default_config_fixfanout.json', 'fixfanout_ecc.json'],
   ['rt_default_config.json', 'route_ecc.json'],
   ['pl_default_config.json', 'filler_ecc.json'],
   ['rcx.json', 'rcx_ecc.json'],
