@@ -118,13 +118,6 @@ export interface ProjectQorSignoffComparisonContext {
   staPvtRcFingerprint: string | null
 }
 
-export interface ProjectQorUnsupportedModule {
-  id: string
-  label: string
-  reason: string
-  status: '待后续开发'
-}
-
 export interface ProjectQorBlockingIssue {
   step: FlowStep
   metric: string
@@ -241,7 +234,6 @@ export interface ProjectQorTrendSummary {
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
   timingClosure: ProjectQorTimingSummary
-  unsupportedModules: ProjectQorUnsupportedModule[]
 }
 
 export interface ProjectQorTrendPoint {

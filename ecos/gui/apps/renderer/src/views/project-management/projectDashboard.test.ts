@@ -224,14 +224,6 @@ describe('buildDashboardWorkspaceRows', () => {
       stepCompareSummaries: [
         {
           step: 'Route',
-          title: 'Route',
-          metricLabel: '',
-          metricHint: '',
-          configuredCount: 1,
-          successCount: 1,
-          missingCount: 0,
-          points: [],
-          metrics: [],
         },
       ],
     })

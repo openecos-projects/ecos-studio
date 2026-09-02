@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   createProjectManifestDraft,
   registerWorkspaceInManifest,
+  type BackendProjectComparison,
+  type ReadSection,
   type ResourceInfo,
 } from '@ecos-studio/shared'
 import {
@@ -11,7 +13,12 @@ import {
   resolveProjectQorBaselineWorkspace,
 } from './projectManagement'
 import type { Project } from '@/types'
-import { trendSummaryFixture } from '@/components/projectStepAnalysis.fixture'
+import {
+  metricRecordFixture,
+  signoffReadinessFixture,
+  stepSnapshotFixture,
+  trendSummaryFixture,
+} from '@/components/projectStepAnalysis.fixture'
 
 const project: Project = {
   id: '/projects/gcd',
@@ -67,6 +74,34 @@ function manifestWithWorkspace(workspaceId = 'ws_0004') {
   )
 }
 
+function comparisonWithUnknownStep(): BackendProjectComparison {
+  const ready = <T>(data: T): Extract<ReadSection<T>, { status: 'ready' }> => ({
+    data,
+    issues: [],
+    status: 'ready',
+  })
+  const trend = trendSummaryFixture([{ workspaceId: 'ws_0004' }])
+  return {
+    identity: { designName: 'gcd', projectId: 'gcd', projectName: 'gcd' },
+    refresh: { automatic: 'available' },
+    trend: ready(trend),
+    workspaceSnapshots: ready({ flowStates: {}, items: [] }),
+    stepComparisons: ready({
+      steps: [
+        {
+          stepId: 'CustomSignoff',
+          order: 13,
+          name: 'CustomSignoff',
+          workspaces: [{ workspaceId: 'ws_0004', status: 'success', metrics: [] }],
+        },
+      ],
+    }),
+    recommendation: { issues: [], status: 'unavailable' },
+    risks: ready({ items: trend.risks }),
+    timingTriage: ready({ items: trend.timingClosure.triage }),
+  }
+}
+
 describe('project management V3 model', () => {
   it('selects only healthy managed MPC resources and derives their spec path', () => {
     expect(projectMpcOptionFromResource(managedMpc())).toEqual({
@@ -100,28 +135,93 @@ describe('project management V3 model', () => {
       project,
       manifestWithWorkspace(),
       {},
-      {
-        qorTrendSummary: trendSummaryFixture([{ workspaceId: 'ws_0004' }]),
-        snapshots: [],
-        stepComparisons: [
-          {
-            stepId: 'CustomSignoff',
-            order: 13,
-            name: 'CustomSignoff',
-            workspaces: [{ workspaceId: 'ws_0004', status: 'success', metrics: [] }],
-          },
-        ],
-        recommendation: null,
-      },
+      comparisonWithUnknownStep(),
     )
 
-    expect(model.stepCompareSummaries).toEqual([
-      expect.objectContaining({
-        step: 'CustomSignoff',
-        configuredCount: 1,
-        successCount: 1,
-      }),
+    expect(model.stepCompareSummaries).toEqual([{ step: 'CustomSignoff' }])
+  })
+
+  it('renders Electron-annotated comparison metrics without rebuilding them', () => {
+    const comparison = comparisonWithUnknownStep()
+    const snapshotMetric = metricRecordFixture({
+      metricName: 'route_wirelength',
+      value: 120,
+    })
+    const comparisonMetric = metricRecordFixture({
+      metricName: 'route_wirelength',
+      value: 100,
+      baselineComparison: {
+        baselineValue: 120,
+        absoluteDelta: -20,
+        relativeDeltaPct: -16.666667,
+        verdict: 'improvement',
+      },
+      leads: true,
+    })
+    comparison.workspaceSnapshots = {
+      data: {
+        flowStates: {},
+        items: [
+          {
+            workspaceId: 'ws_0004',
+            steps: { Route: stepSnapshotFixture({ metrics: [snapshotMetric] }) },
+            signoffReadiness: signoffReadinessFixture(),
+            timingConstraints: {
+              status: 'consistent',
+              fingerprint: null,
+              sourceFile: null,
+              step: null,
+            },
+          },
+        ],
+      },
+      issues: [],
+      status: 'ready',
+    }
+    comparison.stepComparisons = {
+      data: {
+        steps: [
+          {
+            stepId: 'Route',
+            order: 7,
+            name: 'Route',
+            workspaces: [
+              { workspaceId: 'ws_0004', status: 'success', metrics: [comparisonMetric] },
+            ],
+          },
+        ],
+      },
+      issues: [],
+      status: 'ready',
+    }
+
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      {},
+      comparison,
+    )
+
+    expect(model.workspaceSummaries[0]?.analysis.steps.Route?.metrics).toEqual([
+      comparisonMetric,
     ])
+  })
+
+  it('does not manufacture step comparisons when the Electron section is unavailable', () => {
+    const comparison = comparisonWithUnknownStep()
+    comparison.stepComparisons = {
+      issues: [{ code: 'STEP_COMPARISON_UNAVAILABLE' }],
+      status: 'unavailable',
+    }
+
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      {},
+      comparison,
+    )
+
+    expect(model.stepCompareSummaries).toEqual([])
   })
 
   it('resolves and persists the project-local default QoR baseline rule', () => {

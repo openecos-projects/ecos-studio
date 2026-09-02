@@ -1,6 +1,7 @@
 import {
   normalizeProjectManifestFlowStep,
   projectManifestFlowSteps,
+  type BackendProjectComparison,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
   type ProjectManifestBaseDesign,
@@ -9,10 +10,10 @@ import {
   type ProjectManifestWorkspaceStatus,
   type ProjectQorMetricRecord,
   type ProjectStepComparison,
-  type ProjectQorTimingSummary,
   type ProjectQorTrendSummary,
   type ProjectQorTrendWorkspaceSummary,
   type ProjectRecommendation,
+  type ReadSection,
   type ResourceInfo,
 } from '@ecos-studio/shared'
 import type { Project } from '@/types'
@@ -186,23 +187,8 @@ export interface ProjectWorkspaceSummary {
   analysis: ProjectAnalysisSnapshot
 }
 
-export interface ProjectStepCompareMetric {
-  id: string
-  label: string
-  hint: string
-  points: ProjectMetricPoint[]
-}
-
 export interface ProjectStepCompareSummary {
   step: string
-  title: string
-  metricLabel: string
-  metricHint: string
-  configuredCount: number
-  successCount: number
-  missingCount: number
-  points: ProjectMetricPoint[]
-  metrics: ProjectStepCompareMetric[]
 }
 
 export interface ProjectRunStateSlice {
@@ -257,13 +243,6 @@ export interface ProjectManagementProject {
   qorTrendSummary: ProjectQorTrendSummary
   branchLinks: ProjectBranchLink[]
   comparisonSummary: ProjectComparisonSummary
-}
-
-export interface ProjectManagementAnalysis {
-  qorTrendSummary: ProjectQorTrendSummary
-  snapshots: ProjectAnalysisSnapshot[]
-  stepComparisons: ProjectStepComparison[]
-  recommendation: ProjectRecommendation | null
 }
 
 export interface ProjectSelectionState {
@@ -374,7 +353,7 @@ export function buildProjectManagementProject(
   project?: Project | null,
   manifest?: ProjectManifest | null,
   workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
-  analysis?: ProjectManagementAnalysis | null,
+  comparison?: BackendProjectComparison | null,
 ): ProjectManagementProject {
   const path = manifest?.root_path ?? project?.path ?? ''
   const name = manifest?.name ?? project?.name ?? 'No Project Selected'
@@ -400,21 +379,26 @@ export function buildProjectManagementProject(
       ),
     )
   })
-  const qorTrendSummary = analysis?.qorTrendSummary ?? emptyProjectQorTrendSummary()
+  const qorTrendSummary = sectionData(comparison?.trend) ?? emptyProjectQorTrendSummary()
+  const stepComparisons = sectionData(comparison?.stepComparisons)?.steps ?? []
   const snapshots = new Map(
-    (analysis?.snapshots ?? []).map((snapshot) => [snapshot.workspaceId, snapshot]),
+    (sectionData(comparison?.workspaceSnapshots)?.items ?? []).map((snapshot) => [
+      snapshot.workspaceId,
+      snapshot,
+    ]),
   )
   const workspaceSummaries = buildV3WorkspaceSummaries(
     sortedWorkspaces,
     workspaces,
     snapshots,
     qorTrendSummary,
+    stepComparisons,
   )
   const comparisonSummary = buildV3ComparisonSummary(
     manifest,
     sortedWorkspaces,
     qorTrendSummary,
-    analysis?.recommendation ?? null,
+    sectionData(comparison?.recommendation),
   )
 
   return {
@@ -429,14 +413,7 @@ export function buildProjectManagementProject(
     workspaces,
     metricsRows: buildV3MetricRows(workspaceSummaries),
     workspaceSummaries,
-    stepCompareSummaries: manifest
-      ? buildStepCompareSummaries(
-          sortedWorkspaces,
-          workspaces,
-          workspaceSummaries,
-          analysis?.stepComparisons,
-        )
-      : [],
+    stepCompareSummaries: stepComparisons.map(({ stepId }) => ({ step: stepId })),
     dashboardSummary: buildProjectDashboardSummary(
       workspaces,
       workspaceSummaries,
@@ -449,12 +426,25 @@ export function buildProjectManagementProject(
   }
 }
 
+function sectionData<T>(section: ReadSection<T> | null | undefined): T | null {
+  return section && 'data' in section ? section.data : null
+}
+
 function buildV3WorkspaceSummaries(
   manifestWorkspaces: ProjectWorkspaceManifest[],
   workspaces: ProjectWorkspace[],
   snapshots: Map<string, ProjectAnalysisSnapshot>,
   qorTrendSummary: ProjectQorTrendSummary,
+  comparisons: readonly ProjectStepComparison[],
 ): ProjectWorkspaceSummary[] {
+  const comparisonMetrics = new Map(
+    comparisons.flatMap((comparison) =>
+      comparison.workspaces.map(
+        (workspace) =>
+          [`${workspace.workspaceId}\0${comparison.stepId}`, workspace.metrics] as const,
+      ),
+    ),
+  )
   return manifestWorkspaces.map((workspace) => {
     const projectWorkspace = workspaces.find((item) => item.id === workspace.workspace_id)
     const snapshot =
@@ -464,7 +454,22 @@ function buildV3WorkspaceSummaries(
       (item) => item.workspaceId === workspace.workspace_id,
     )
     const finalMetrics = v3FinalMetrics(qorWorkspace)
-    const flowMetrics = v3FlowMetrics(snapshot, projectWorkspace)
+    const authoritativeSnapshot = {
+      ...snapshot,
+      steps: Object.fromEntries(
+        Object.entries(snapshot.steps).map(([step, details]) => [
+          step,
+          details
+            ? {
+                ...details,
+                metrics:
+                  comparisonMetrics.get(`${workspace.workspace_id}\0${step}`) ?? [],
+              }
+            : details,
+        ]),
+      ),
+    }
+    const flowMetrics = v3FlowMetrics(qorWorkspace, projectWorkspace)
 
     return {
       workspaceId: workspace.workspace_id,
@@ -475,7 +480,7 @@ function buildV3WorkspaceSummaries(
       steps: FLOW_STEPS.map((step) => {
         const status =
           projectWorkspace?.steps.find((cell) => cell.step === step)?.status ?? 'skipped'
-        const analysis = snapshot.steps[step]
+        const analysis = authoritativeSnapshot.steps[step]
         return {
           step,
           title: step,
@@ -491,7 +496,7 @@ function buildV3WorkspaceSummaries(
         }
       }),
       deltaSummaries: [],
-      analysis: snapshot,
+      analysis: authoritativeSnapshot,
     }
   })
 }
@@ -536,7 +541,6 @@ function emptyProjectQorTrendSummary(): ProjectQorTrendSummary {
       incompleteWorkspaceCount: 0,
       unavailableWorkspaceCount: 0,
     },
-    unsupportedModules: [],
   }
 }
 
@@ -590,7 +594,7 @@ function v3MetricState(record: ProjectQorMetricRecord): ProjectMetricPoint['stat
 }
 
 function v3FlowMetrics(
-  snapshot: ProjectAnalysisSnapshot,
+  qorWorkspace: ProjectQorTrendWorkspaceSummary | undefined,
   workspace: ProjectWorkspace | undefined,
 ): ProjectWorkspaceFlowMetrics {
   const successfulSteps = new Set(
@@ -598,8 +602,8 @@ function v3FlowMetrics(
       .filter((step) => step.status === 'success' || step.status === 'reused')
       .map((step) => step.step) ?? [],
   )
-  const metrics = Object.values(snapshot.steps).flatMap((step) =>
-    step && successfulSteps.has(step.step) ? step.metrics : [],
+  const metrics = (qorWorkspace?.comparisonRecords ?? []).filter((metric) =>
+    successfulSteps.has(metric.step),
   )
   const runtimes = metrics
     .filter((metric) => metric.metricName === 'runtime_seconds')
@@ -1129,95 +1133,10 @@ function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranch
   })
 }
 
-function buildStepCompareSummaries(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
-  workspaces: ProjectWorkspace[],
-  workspaceSummaries: ProjectWorkspaceSummary[],
-  comparisons?: readonly ProjectStepComparison[],
-): ProjectStepCompareSummary[] {
-  const comparisonByStep = new Map(comparisons?.map((item) => [item.stepId, item]))
-  const steps = comparisons?.map((item) => item.stepId) ?? FLOW_STEPS
-  return steps.map((step) => {
-    const knownStep = knownFlowStep(step)
-    const comparison = comparisonByStep.get(step)
-    const definitions = knownStep
-      ? stepMetricDefinitions(knownStep, workspaceSummaries)
-      : []
-    const metrics = definitions.map((definition) => ({
-      id: definition.id,
-      label: definition.label,
-      hint: definition.hint,
-      points: manifestWorkspaces.map((workspace) => {
-        const summary = workspaceSummaries.find(
-          (item) => item.workspaceId === workspace.workspace_id,
-        )
-        const metric = stepMetricFromSummary(summary, knownStep!, definition.id)
-        const value = metric?.value ?? null
-        return {
-          workspaceId: workspace.workspace_id,
-          workspaceName: workspaceDisplayName(workspace),
-          label: metric?.display ?? 'N/A',
-          value,
-          state: metric?.state ?? 'pending',
-        }
-      }),
-    }))
-    const primaryMetric = metrics[0] ?? {
-      id: 'none',
-      label: 'metric',
-      hint: 'No metric available',
-      points: manifestWorkspaces.map((workspace) => ({
-        workspaceId: workspace.workspace_id,
-        workspaceName: workspaceDisplayName(workspace),
-        label: 'N/A',
-        value: null,
-        state: 'pending' as const,
-      })),
-    }
-    const configuredCount = comparison
-      ? comparison.workspaces.filter(
-          (workspace) => workspace.status !== 'skipped' && workspace.status !== 'missing',
-        ).length
-      : workspaces.filter(
-          (workspace) =>
-            knownStep &&
-            workspace.steps.find((cell) => cell.step === knownStep)?.status !== 'skipped',
-        ).length
-    const successCount = comparison
-      ? comparison.workspaces.filter((workspace) =>
-          isCompletedStepStatus(
-            workspace.status === 'missing' ? 'skipped' : workspace.status,
-          ),
-        ).length
-      : workspaces.filter((workspace) =>
-          isCompletedStepStatus(
-            (knownStep &&
-              workspace.steps.find((cell) => cell.step === knownStep)?.status) ??
-              'skipped',
-          ),
-        ).length
-    const missingCount = primaryMetric.points.filter(
-      (point) => point.value === null,
-    ).length
-
-    return {
-      step,
-      title: `${step} Compare`,
-      metricLabel: primaryMetric.label,
-      metricHint: primaryMetric.hint,
-      configuredCount,
-      successCount,
-      missingCount,
-      points: primaryMetric.points,
-      metrics,
-    }
-  })
-}
-
 function buildProjectDashboardSummary(
   workspaces: ProjectWorkspace[],
   workspaceSummaries: ProjectWorkspaceSummary[],
-  timingClosure: ProjectQorTimingSummary,
+  timingClosure: ProjectQorTrendSummary['timingClosure'],
   qorTrendSummary: ProjectQorTrendSummary,
 ): ProjectDashboardSummary {
   const isStepComplete = (cell: ProjectStepCell): boolean =>
@@ -1378,106 +1297,6 @@ function metricFromNumber(
     state,
     hint,
   }
-}
-
-interface StepCompareDefinition {
-  id: string
-  label: string
-  hint: string
-}
-
-const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
-  Synth: [
-    'synthesis_cell_area',
-    'synthesis_cell_count',
-    'synthesis_port_count',
-    'synthesis_wire_count',
-  ],
-  Floor: ['die_area', 'core_area', 'core_utilization', 'instance_count', 'net_count'],
-  Fanout: ['fanout_max', 'instance_count', 'net_count'],
-  Place: [
-    'place_congestion_egr_overflow_max',
-    'place_congestion_egr_overflow_total',
-    'place_flute_wirelength',
-    'place_grwl',
-    'place_hpwl',
-    'place_lutrudy_utilization_max',
-    'place_rudy_utilization_max',
-  ],
-  CTS: [
-    'clock_path_max_buffer',
-    'clock_path_min_buffer',
-    'clock_wirelength',
-    'cts_buffer_area',
-    'cts_buffer_count',
-    'cts_clock_tree_max_level',
-    'cts_clock_wirelength_max',
-    'cts_worst_optimized_skew_ns',
-    'cts_worst_max_insertion_latency_ns',
-    'cts_skew_target_unmet_count',
-    'instance_count',
-    'io_pin_count',
-    'net_count',
-  ],
-  Legal: [],
-  Route: [
-    'route_dr_total_patch_count',
-    'route_dr_total_via_count',
-    'route_dr_total_violation_count',
-    'route_dr_total_wirelength',
-    'route_la_total_demand',
-    'route_la_total_overflow',
-    'route_via_count',
-    'route_wirelength',
-  ],
-  DRC: ['drc_count'],
-  LVS: ['lvs_count'],
-  Filler: [],
-  RCX: [
-    'rcx_missing_corner_count',
-    'rcx_spef_parse_failure_count',
-    'rcx_worst_total_capacitance_ff',
-    'rcx_worst_total_resistance_ohm',
-  ],
-  STA: [
-    'sta_setup_wns',
-    'sta_setup_tns',
-    'sta_hold_wns',
-    'sta_hold_tns',
-    'sta_frequency_mhz',
-  ],
-  Harden: ['harden_artifact_missing_count'],
-}
-
-function stepMetricDefinitions(
-  step: FlowStep,
-  workspaceSummaries: ProjectWorkspaceSummary[],
-): StepCompareDefinition[] {
-  const definitionsById = new Map<string, StepCompareDefinition>()
-  for (const summary of workspaceSummaries) {
-    const stepSummary = summary.steps.find((item) => item.step === step)
-    for (const metric of stepSummary?.metrics ?? []) {
-      if (definitionsById.has(metric.id)) continue
-      definitionsById.set(metric.id, {
-        id: metric.id,
-        label: metric.label,
-        hint: metric.hint ?? metric.label,
-      })
-    }
-  }
-  return STEP_ANALYSIS_METRIC_IDS[step].flatMap(
-    (metricId) => definitionsById.get(metricId) ?? [],
-  )
-}
-
-function stepMetricFromSummary(
-  summary: ProjectWorkspaceSummary | undefined,
-  step: FlowStep,
-  metricId: string,
-): ProjectSummaryMetric | undefined {
-  return summary?.steps
-    .find((item) => item.step === step)
-    ?.metrics.find((metric) => metric.id === metricId)
 }
 
 function detailHintForStep(step: FlowStep): string {

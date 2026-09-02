@@ -11,7 +11,6 @@ import type {
 } from '@ecos-studio/shared'
 import type {
   FlowStep,
-  ProjectStepCompareMetric,
   ProjectStepCompareSummary,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
@@ -274,23 +273,9 @@ export function trendSummaryFixture(
       incompleteWorkspaceCount: 0,
       unavailableWorkspaceCount: 0,
     },
-    unsupportedModules: [],
   }
 }
 
-export function compareSummaryFixture(
-  step: string,
-  metrics: ProjectStepCompareMetric[] = [],
-): ProjectStepCompareSummary {
-  return {
-    step,
-    title: step,
-    metricLabel: metrics[0]?.label ?? '',
-    metricHint: metrics[0]?.hint ?? '',
-    configuredCount: 0,
-    successCount: 0,
-    missingCount: 0,
-    points: [],
-    metrics,
-  }
+export function compareSummaryFixture(step: string): ProjectStepCompareSummary {
+  return { step }
 }

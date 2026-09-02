@@ -964,7 +964,7 @@ const projectCards = computed<ProjectCard[]>(() => {
         project,
         projectManifests.value[project.path] ?? null,
         workspaceFlowStates.value[project.path] ?? {},
-        comparisonAnalysisForProject(project.path),
+        projectComparisonForProject(project.path),
       ),
     }))
 
@@ -972,33 +972,9 @@ const projectCards = computed<ProjectCard[]>(() => {
   return cards.filter((project) => projectCardMatchesSearch(project, query))
 })
 
-function comparisonAnalysisForProject(projectRoot: string) {
+function projectComparisonForProject(projectRoot: string) {
   const comparison = projectComparisonSession.projection.data
-  if (
-    comparisonProjectRoot.value !== projectRoot ||
-    !comparison ||
-    (comparison.trend.status !== 'ready' && comparison.trend.status !== 'partial')
-  ) {
-    return null
-  }
-  const snapshots = comparison.workspaceSnapshots
-  const recommendation = comparison.recommendation
-  return {
-    qorTrendSummary: comparison.trend.data,
-    snapshots:
-      snapshots.status === 'ready' || snapshots.status === 'partial'
-        ? snapshots.data.items
-        : [],
-    recommendation:
-      recommendation.status === 'ready' || recommendation.status === 'partial'
-        ? recommendation.data
-        : null,
-    stepComparisons:
-      comparison.stepComparisons.status === 'ready' ||
-      comparison.stepComparisons.status === 'partial'
-        ? comparison.stepComparisons.data.steps
-        : [],
-  }
+  return comparisonProjectRoot.value === projectRoot ? comparison : null
 }
 
 function projectExecutionOperations(projectRoot: string, workspaceId: string) {

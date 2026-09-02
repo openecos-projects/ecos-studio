@@ -57,7 +57,6 @@ function comparison(projectName: string, contextId = 'context-1', generation = 0
           incompleteWorkspaceCount: 0,
           unavailableWorkspaceCount: 0,
         },
-        unsupportedModules: [],
       }),
       workspaceSnapshots: ready({ items: [], flowStates: {} }),
       stepComparisons: ready({ steps: [] }),

@@ -125,13 +125,6 @@ export interface ProjectQorSignoffComparisonContext {
   staPvtRcFingerprint: string | null
 }
 
-export interface ProjectQorUnsupportedModule {
-  id: string
-  label: string
-  reason: string
-  status: '待后续开发'
-}
-
 export interface ProjectQorBlockingIssue {
   step: FlowStep
   metric: string
@@ -249,7 +242,6 @@ export interface ProjectQorTrendSummary {
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
   timingClosure: ProjectQorTimingSummary
-  unsupportedModules: ProjectQorUnsupportedModule[]
 }
 
 export interface ProjectQorTrendOptions {
@@ -962,49 +954,6 @@ const METRIC_FAIL_VALUES: Record<string, number> = {
   harden_artifact_missing_count: 6,
 }
 
-const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
-  {
-    id: 'sta_analysis',
-    label: 'STA QoR analysis',
-    reason:
-      'sta_ecc/analysis/qor_metrics.json is not available in the current workspace data.',
-    status: '待后续开发',
-  },
-  {
-    id: 'power_ir_em_analysis',
-    label: 'Power / IR / EM analysis',
-    reason: 'Power, IR, and EM metrics are not generated into step analysis files yet.',
-    status: '待后续开发',
-  },
-  {
-    id: 'qor_metrics_standard_output',
-    label: 'Standard qor_metrics.json',
-    reason:
-      'No schema v3 qor_metrics.json artifact is available in the current workspace data.',
-    status: '待后续开发',
-  },
-  {
-    id: 'qor_summary_standard_output',
-    label: 'Standard qor_summary.json',
-    reason: 'No schema v4 step QoR summary is available in the current workspace data.',
-    status: '待后续开发',
-  },
-  {
-    id: 'qor_hotspots',
-    label: 'Spatial hotspot QoR data',
-    reason:
-      'No schema v3 qor_hotspots.json artifact is available in the current workspace data.',
-    status: '待后续开发',
-  },
-  {
-    id: 'project_qor_cache',
-    label: 'Project-level QoR cache',
-    reason:
-      'First version computes from loaded workspace analysis snapshots without a persistent cache.',
-    status: '待后续开发',
-  },
-]
-
 export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetricRecord[] {
   const record = parseJsonObject(input.text)
   if (record?.schema_version !== 3 || !Array.isArray(record.metrics)) return []
@@ -1176,43 +1125,7 @@ export function buildProjectQorTrendSummary(
     improvements,
     risks,
     timingClosure,
-    unsupportedModules: buildUnsupportedModules(sortedInputs, workspaceSummaries),
   }
-}
-
-function buildUnsupportedModules(
-  inputs: ProjectQorWorkspaceInput[],
-  workspaces: ProjectQorTrendWorkspaceSummary[],
-): ProjectQorUnsupportedModule[] {
-  const hasStandardQorMetrics = inputs.some((workspace) =>
-    Object.values(workspace.stepMetricTexts).some(hasStandardQorMetricsText),
-  )
-  const hasStandardQorSummary = inputs.some((workspace) =>
-    Object.values(workspace.stepSummaryTexts ?? {}).some(hasCurrentQorSummaryText),
-  )
-  const hasStandardQorHotspots = inputs.some((workspace) =>
-    Object.values(workspace.stepHotspotTexts ?? {}).some(hasCurrentQorHotspotText),
-  )
-  const records = workspaces.flatMap((workspace) => workspace.records)
-  const hasStaAnalysis = records.some((record) => record.step === 'STA')
-  const hasPowerIntegrityAnalysis = records.some(
-    (record) => record.dimension === 'power_integrity',
-  )
-
-  return UNSUPPORTED_MODULES.filter((module) => {
-    if (module.id === 'qor_metrics_standard_output' && hasStandardQorMetrics) {
-      return false
-    }
-    if (module.id === 'qor_summary_standard_output' && hasStandardQorSummary) {
-      return false
-    }
-    if (module.id === 'qor_hotspots' && hasStandardQorHotspots) {
-      return false
-    }
-    if (module.id === 'sta_analysis' && hasStaAnalysis) return false
-    if (module.id === 'power_ir_em_analysis' && hasPowerIntegrityAnalysis) return false
-    return true
-  }).map((module) => ({ ...module }))
 }
 
 function resolveExplicitBaselineWorkspace(
@@ -2905,11 +2818,6 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => stringValue(item) !== null)
-}
-
-function hasStandardQorMetricsText(text: string | null | undefined): boolean {
-  const record = parseJsonObject(text)
-  return record?.schema_version === 3 && Array.isArray(record.metrics)
 }
 
 export function hasCurrentQorMetricsText(text: string | null | undefined): boolean {
