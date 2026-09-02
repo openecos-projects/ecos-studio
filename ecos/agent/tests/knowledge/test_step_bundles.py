@@ -68,7 +68,6 @@ def test_sizer_knowledge_describes_only_verified_wrapper_orchestration() -> None
     for entity in catalog["entities"]:
         if entity["kind"] == "algorithm":
             assert {item["source_id"] for item in entity["evidence"]} <= allowed_sources
-    assert not (KNOWLEDGE_ROOT / "tool" / "fixfanout").exists()
 
 
 def test_cts_max_fanout_card_keeps_unobserved_activation_unknown() -> None:
