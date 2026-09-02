@@ -1,6 +1,6 @@
 # Project Comparison Engineering Snapshot Loading v1
 
-状态：待实现（2026-09-02）
+状态：已实现并完成本地验证（2026-09-03）；ECC 子模块提交发布后方可准备父仓 PR
 
 ## Problem Statement
 

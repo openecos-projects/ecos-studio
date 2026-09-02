@@ -1,6 +1,6 @@
 # ECOS Studio GUI 行为保持瘦身 v1
 
-状态：修改范围已确认，待实施
+状态：已实现并完成本地验证（2026-09-03）；ECC 子模块提交发布后方可准备父仓 PR
 
 适用范围：ECOS Studio GUI 及为删除 GUI 专用协议表面而必须同步调整的 ECOS Runtime Adapter
 
