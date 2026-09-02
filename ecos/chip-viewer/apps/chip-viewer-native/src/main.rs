@@ -101,20 +101,89 @@ impl GraphicsEnvironment {
     }
 }
 
-fn configure_linux_window_backend(args: &Args) {
+fn check_libxkbcommon_x11() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        extern "C" {
+            fn dlopen(
+                filename: *const std::os::raw::c_char,
+                flag: std::os::raw::c_int,
+            ) -> *mut std::ffi::c_void;
+            fn dlclose(handle: *mut std::ffi::c_void) -> std::os::raw::c_int;
+        }
+        for name in &["libxkbcommon-x11.so.0\0", "libxkbcommon-x11.so\0"] {
+            let handle = unsafe { dlopen(name.as_ptr() as *const _, 1) }; // 1 = RTLD_LAZY
+            if !handle.is_null() {
+                unsafe {
+                    dlclose(handle);
+                }
+                return true;
+            }
+        }
+        let candidate_paths = [
+            "/usr/lib/x86_64-linux-gnu/libxkbcommon-x11.so.0",
+            "/usr/lib/x86_64-linux-gnu/libxkbcommon-x11.so",
+            "/usr/lib64/libxkbcommon-x11.so.0",
+            "/usr/lib64/libxkbcommon-x11.so",
+            "/usr/lib/libxkbcommon-x11.so.0",
+            "/usr/lib/libxkbcommon-x11.so",
+            "/lib/x86_64-linux-gnu/libxkbcommon-x11.so.0",
+            "/lib/x86_64-linux-gnu/libxkbcommon-x11.so",
+            "/lib64/libxkbcommon-x11.so.0",
+            "/lib/libxkbcommon-x11.so.0",
+        ];
+        candidate_paths.iter().any(|p| Path::new(p).exists())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+fn configure_linux_window_backend(args: &Args, env: &GraphicsEnvironment) -> Result<()> {
     if !cfg!(target_os = "linux") {
-        return;
+        return Ok(());
     }
 
-    let force_x11 = args.x11
+    let explicit_wayland = std::env::var("ECOS_WINDOW_BACKEND")
+        .map(|v| v.eq_ignore_ascii_case("wayland"))
+        .unwrap_or(false);
+
+    let explicit_x11 = args.x11
         || std::env::var("ECOS_WINDOW_BACKEND")
             .map(|v| v.eq_ignore_ascii_case("x11"))
             .unwrap_or(false);
 
+    let wsl_prefers_x11 = env.is_wsl && std::env::var_os("DISPLAY").is_some() && !explicit_wayland;
+
+    let force_x11 = explicit_x11 || wsl_prefers_x11;
+
     if force_x11 {
+        if !check_libxkbcommon_x11() {
+            eprintln!("============================================================");
+            eprintln!("ECOS Chip Viewer: Missing Required System Dependency");
+            eprintln!("------------------------------------------------------------");
+            eprintln!("The X11 window backend requires 'libxkbcommon-x11.so.0',");
+            eprintln!("which is not installed on your Linux system.");
+            eprintln!();
+            eprintln!("Alternatively, if running inside WSLg, you can run ECOS Studio");
+            eprintln!("inside a Wayland kiosk compositor:");
+            eprintln!("    sudo apt update && sudo apt install -y cage");
+            eprintln!("    cage -- ./ECOS-Studio... --no-sandbox");
+            eprintln!("============================================================");
+            anyhow::bail!(
+                "Missing required system library 'libxkbcommon-x11.so.0' for X11 rendering. Run: sudo apt install -y libxkbcommon-x11-0"
+            );
+        }
         std::env::remove_var("WAYLAND_DISPLAY");
         std::env::remove_var("WAYLAND_SOCKET");
-        eprintln!("ECOS: forcing X11 window backend (removed WAYLAND_DISPLAY and WAYLAND_SOCKET)");
+        if explicit_x11 {
+            eprintln!("ECOS: forcing X11 window backend via explicit option (removed WAYLAND_DISPLAY and WAYLAND_SOCKET)");
+        } else {
+            eprintln!(
+                "ECOS: WSLg detected - defaulting to X11 to prevent Weston compositor crash (microsoft/wslg#1386)"
+            );
+        }
     }
 
     eprintln!(
@@ -122,6 +191,7 @@ fn configure_linux_window_backend(args: &Args) {
         std::env::var_os("WAYLAND_DISPLAY"),
         std::env::var_os("DISPLAY"),
     );
+    Ok(())
 }
 
 fn is_software_adapter(info: &wgpu::AdapterInfo) -> bool {
@@ -264,8 +334,8 @@ fn print_startup_diagnostics(
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    configure_linux_window_backend(&args);
     let env = GraphicsEnvironment::detect();
+    configure_linux_window_backend(&args, &env)?;
 
     let force_cpu_env = std::env::var("ECOS_FORCE_CPU")
         .ok()
@@ -454,6 +524,15 @@ fn main() -> Result<()> {
 
             if cfg!(target_os = "linux") && is_wayland_active && has_x11_display && !already_retried
             {
+                if !check_libxkbcommon_x11() {
+                    eprintln!("ECOS: X11 window backend cannot be used because 'libxkbcommon-x11.so.0' is missing.");
+                    eprintln!("Please install it with: sudo apt update && sudo apt install -y libxkbcommon-x11-0");
+                    eprintln!(
+                        "Or run ECOS Studio inside cage: cage -- ./ECOS-Studio... --no-sandbox"
+                    );
+                    std::process::exit(1);
+                }
+
                 eprintln!(
                     "ECOS: Wayland windowing failed ({err}). Restarting process with X11 window backend..."
                 );

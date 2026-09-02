@@ -99,6 +99,7 @@ function createService(options: {
   env?: NodeJS.ProcessEnv
   execFile?: (file: string, args: string[]) => Promise<ExecFileResult>
   existingPaths?: string[]
+  fileExists?: (path: string) => boolean
   files?: Record<string, string>
   getFileModifiedTime?: (path: string) => Promise<number | null>
   includeDefaultDefPath?: boolean
@@ -106,6 +107,7 @@ function createService(options: {
   layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
   modifiedTimes?: Record<string, number>
   openLogFile?: (path: string, flags: string) => number
+  readTextFile?: ChipViewerServiceOptions['readTextFile']
   resourcesPath?: string
   spawnProcess?: ChipViewerServiceOptions['spawnProcess']
   stepInfoResult?: WorkspaceStepInfoResult
@@ -217,7 +219,8 @@ function createService(options: {
     env: options.env ?? { DISPLAY: ':99' },
     ensureDirectory,
     execFile,
-    fileExists: (path) => existingPaths.has(path),
+    fileExists: (path) =>
+      existingPaths.has(path) || (options.fileExists ? options.fileExists(path) : false),
     getFileModifiedTime:
       options.getFileModifiedTime ??
       (async (path) => {
@@ -229,13 +232,15 @@ function createService(options: {
     layoutEditRuntime,
     openLogFile,
     platform: 'linux',
-    readTextFile: async (path) => {
-      const text = files.get(path)
-      if (text === undefined) {
-        throw new Error(`file not found: ${path}`)
-      }
-      return text
-    },
+    readTextFile:
+      options.readTextFile ??
+      (async (path) => {
+        const text = files.get(path)
+        if (text === undefined) {
+          throw new Error(`file not found: ${path}`)
+        }
+        return text
+      }),
     renameFile,
     resourcesPath: options.resourcesPath,
     spawnProcess,
@@ -610,6 +615,56 @@ describe('ChipViewerService', () => {
       editSessionId: EDIT_SESSION_ID,
       workspaceHandle: 'workspace-handle-1',
     })
+  })
+
+  it('diagnoses missing libxkbcommon-x11 dependency and provides installation guidance', async () => {
+    const devBinaries = devChipViewerPaths()
+    const child = createSpawnedViewerProcess()
+    const existingPaths = [
+      devBinaries.cargoManifest,
+      devBinaries.viewer,
+      DEF_PATH,
+      GEOMETRY_MANIFEST,
+    ]
+    const logContents = new Map<string, string>()
+    const { service } = createService({
+      existingPaths,
+      fileExists: (path) => logContents.has(path) || existingPaths.includes(path),
+      openLogFile: (path) => {
+        existingPaths.push(path)
+        if (path.endsWith('.stderr.log')) {
+          logContents.set(path, 'Library libxkbcommon-x11.so could not be loaded.')
+        }
+        return 11
+      },
+      readTextFile: async (path) => {
+        const text = logContents.get(path)
+        if (text !== undefined) return text
+        if (path === GEOMETRY_MANIFEST) return geometryManifest()
+        throw new Error(`file not found: ${path}`)
+      },
+      spawnProcess: () => {
+        queueMicrotask(() => {
+          child.emit('exit', 101, null)
+        })
+        return child
+      },
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected viewer startup to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain('Diagnostic: Missing required system library "libxkbcommon-x11.so.0".')
+    expect(message).toContain('sudo apt update && sudo apt install -y libxkbcommon-x11-0')
+    expect(message).toContain('cage -- ./ECOS-Studio... --no-sandbox')
   })
 
   it('reports a missing Linux display environment before spawning the viewer', async () => {
