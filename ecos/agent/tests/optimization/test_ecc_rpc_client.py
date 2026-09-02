@@ -67,6 +67,33 @@ def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
     assert client.command == (str(executable), "rpc", "serve", "--stdio", "--agent")
 
 
+def test_stdio_client_allows_candidate_resume(monkeypatch, tmp_path: Path) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda method, params, *, timeout_seconds: calls.append(
+            (method, params, timeout_seconds)
+        )
+        or {"state": "queued"},
+    )
+
+    assert client.call("candidate.resume", {"candidateId": "candidate-1"}) == {
+        "state": "queued"
+    }
+    assert calls == [
+        (
+            "candidate.resume",
+            {"candidateId": "candidate-1"},
+            10.0,
+        )
+    ]
+
+
 def test_stdio_client_acknowledges_successful_step_events(tmp_path: Path) -> None:
     acknowledgement = tmp_path / "ack.json"
     executable = tmp_path / "fake-ecc"

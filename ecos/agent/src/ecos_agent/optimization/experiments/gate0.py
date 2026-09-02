@@ -451,6 +451,7 @@ def run_pilot_candidate(
     parent_candidate_root_ref: str | None = None,
     rationale_summary: str = "Execute one frozen Gate 0 local-sensitivity probe.",
     knowledge_refs: Sequence[KnowledgeReference] = (),
+    resume_existing: bool = False,
 ) -> PilotCandidateRun:
     output.mkdir()
     ecc_revision = client.ecc_revision()
@@ -496,7 +497,7 @@ def run_pilot_candidate(
         workspace_root=workspace,
     )
     started = time.monotonic()
-    receipt = adapter.start(request)
+    receipt = adapter.resume(request) if resume_existing else adapter.start(request)
     if receipt.outcome is None:
         receipt = adapter.wait_for_terminal(
             receipt.execution_id, timeout_seconds=timeout_seconds

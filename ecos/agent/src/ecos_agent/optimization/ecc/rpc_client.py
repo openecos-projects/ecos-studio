@@ -21,6 +21,7 @@ _ALLOWED_METHODS = frozenset(
     {
         "workspace.open",
         "rpc.hello",
+        "candidate.resume",
         "candidate.rerun",
         "operation.cancel",
         "operation.status",

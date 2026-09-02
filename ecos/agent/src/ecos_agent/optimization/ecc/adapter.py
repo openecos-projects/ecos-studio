@@ -93,16 +93,7 @@ class EccCandidateRerunAdapter:
             close()
 
     def start(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
-        if not _ID.fullmatch(request.episode_id) or not _ID.fullmatch(
-            request.intervention_id
-        ):
-            raise OptimizationEccAdapterError("candidate request id is invalid")
-        if not _SHA256.fullmatch(request.context_sha256):
-            raise OptimizationEccAdapterError("candidate context hash is invalid")
-        if self.ecc_revision() != request.ecc_revision:
-            raise OptimizationEccAdapterError(
-                "candidate ECC revision does not match execution context"
-            )
+        self._validate_request(request)
         patch = self._materialize_patch(request)
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
@@ -114,12 +105,36 @@ class EccCandidateRerunAdapter:
             parent_candidate_root_ref=request.parent_candidate_root_ref,
         )
 
+    def resume(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
+        self._validate_request(request)
+        return self._start_rerun(
+            candidate_id=_candidate_id(request.episode_id, request.intervention_id),
+            idempotency_key=f"{request.episode_id}.{request.intervention_id}.resume",
+            patch=None,
+            requested=request.requested,
+            context_sha256=request.context_sha256,
+            seed=request.seed,
+            parent_candidate_root_ref=request.parent_candidate_root_ref,
+        )
+
+    def _validate_request(self, request: CandidateExecutionRequest) -> None:
+        if not _ID.fullmatch(request.episode_id) or not _ID.fullmatch(
+            request.intervention_id
+        ):
+            raise OptimizationEccAdapterError("candidate request id is invalid")
+        if not _SHA256.fullmatch(request.context_sha256):
+            raise OptimizationEccAdapterError("candidate context hash is invalid")
+        if self.ecc_revision() != request.ecc_revision:
+            raise OptimizationEccAdapterError(
+                "candidate ECC revision does not match execution context"
+            )
+
     def _start_rerun(
         self,
         *,
         candidate_id: str,
         idempotency_key: str,
-        patch: dict[str, object],
+        patch: dict[str, object] | None,
         requested: RequestedKnobValue,
         context_sha256: str,
         seed: int,
@@ -128,20 +143,26 @@ class EccCandidateRerunAdapter:
         if type(seed) is not int:
             raise OptimizationEccAdapterError("candidate seed is invalid")
         candidate_ref = f".agent/candidates/{candidate_id}"
-        params = {
+        params: dict[str, object] = {
             "workspaceId": self._workspace_id,
-            "targetStep": candidate_target_step(requested.knob_id),
-            "endStep": CANDIDATE_END_STEP,
             "candidateId": candidate_id,
-            "patch": [patch],
-            "executionScope": CANDIDATE_EXECUTION_SCOPE,
             "idempotencyKey": idempotency_key,
             "contextSha256": context_sha256,
             "seed": seed,
         }
-        if parent_candidate_root_ref is not None:
-            params["parentCandidateRootRef"] = parent_candidate_root_ref
-        response = self._rpc.call("candidate.rerun", params)
+        method = "candidate.resume" if patch is None else "candidate.rerun"
+        if patch is not None:
+            params.update(
+                {
+                    "targetStep": candidate_target_step(requested.knob_id),
+                    "endStep": CANDIDATE_END_STEP,
+                    "patch": [patch],
+                    "executionScope": CANDIDATE_EXECUTION_SCOPE,
+                }
+            )
+            if parent_candidate_root_ref is not None:
+                params["parentCandidateRootRef"] = parent_candidate_root_ref
+        response = self._rpc.call(method, params)
         operation_id, state = self._validate_operation(response)
         self._validate_execution_contract(response, requested)
         evidence = self._evidence(response)

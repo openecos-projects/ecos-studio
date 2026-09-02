@@ -484,6 +484,45 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
     }
 
 
+def test_pilot_candidate_uses_resume_rpc_for_existing_workspace(
+    monkeypatch, tmp_path: Path
+) -> None:
+    calls = []
+
+    class ResumeAdapter:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def resume(self, request):
+            calls.append(request.intervention_id)
+            return CandidateExecutionReceipt(
+                execution_id="execution-1",
+                started=True,
+                outcome=OptimizationOutcomeKind.EXECUTION_FAILED,
+            )
+
+    monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", ResumeAdapter)
+    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: HASH)
+
+    with pytest.raises(PilotCandidateExecutionError):
+        run_pilot_candidate(
+            SimpleNamespace(ecc_revision=lambda: "ecc-test-revision"),
+            "workspace-1",
+            tmp_path,
+            200,
+            _terminal(10, 5, 100),
+            RequestedKnobValue(knob_id="place.target_density", value=0.15),
+            StrategyDirection.DECREASE,
+            "candidate-1",
+            tmp_path / "resume",
+            HASH,
+            60,
+            resume_existing=True,
+        )
+
+    assert calls == ["candidate-1"]
+
+
 def test_pilot_context_uses_complete_domain_fingerprint(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -60,6 +60,32 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     ]
 
 
+def test_adapter_resumes_only_the_bound_existing_candidate() -> None:
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+
+    receipt = adapter.resume(
+        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+    )
+
+    assert receipt.execution_id == "operation-1"
+    assert rpc.calls == [
+        ("rpc.hello", {"version": 1}),
+        (
+            "candidate.resume",
+            {
+                "workspaceId": "workspace-1",
+                "candidateId": "candidate-0c4c4b249d945101-intervention-1",
+                "idempotencyKey": "episode-1.intervention-1.resume",
+                "contextSha256": HASH,
+                "seed": 17,
+            },
+        ),
+    ]
+
+
 def test_adapter_exposes_ecc_revision_from_rpc_hello() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(

@@ -51,7 +51,7 @@ class _FakeEccRpc:
         self.calls.append((method, params))
         if method == "rpc.hello":
             return {"eccVersion": self.ecc_version}
-        if method == "candidate.rerun":
+        if method in {"candidate.rerun", "candidate.resume"}:
             return self.candidate_response
         if method == "operation.cancel":
             return {
