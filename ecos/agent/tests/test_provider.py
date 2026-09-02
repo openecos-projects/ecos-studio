@@ -782,6 +782,44 @@ def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Pat
     assert contract.rerun_id == "gcd_rerun_place_0001"
 
 
+def test_rerun_discovers_post_route_lec_stage_from_result_json(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    flow = workspace / "home" / "flow.json"
+    flow.parent.mkdir(parents=True)
+    flow.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {"name": "place", "tool": "dreamplace", "state": "Success"},
+                    {"name": "postRouteLec", "tool": "yosys_lec", "state": "Success"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    place_output = workspace / "place_dreamplace" / "output"
+    place_output.mkdir(parents=True)
+    (place_output / "gcd_place.def.gz").write_bytes(b"def")
+    lec_output = workspace / "postRouteLec_yosys_lec" / "output"
+    lec_output.mkdir(parents=True)
+    (lec_output / "gcd_postRouteLec_result.json").write_text(
+        '{"status": "proven"}\n', encoding="utf-8"
+    )
+
+    resolver = GuiWorkspaceRerunResolver(tmp_path)
+    discovery = resolver.discover_workspace(workspace, "gcd")
+
+    assert "postRouteLec" in discovery.allowed_stages
+    assert discovery.source.stage_artifact_ref["postRouteLec"] == (
+        "postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json"
+    )
+
+    contract = resolver.freeze(discovery.source, "postRouteLec", [], "single_step")
+    assert contract.source_stage_artifact == (
+        "postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json"
+    )
+
+
 def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     workspace = tmp_path / "gcd"
     flow = workspace / "home" / "flow.json"

@@ -294,6 +294,12 @@ class GuiWorkspaceRerunResolver:
             output_dir.resolve().relative_to(source)
         except ValueError as exc:
             raise ValueError(f"completed stage {step} output escapes workspace") from exc
+        if tool == "yosys_lec":
+            # LEC stages publish an equivalence result JSON instead of layout outputs.
+            result = output_dir / f"{design_id}_{step}_result.json"
+            if result.is_file() and not result.is_symlink():
+                return result
+            raise ValueError(f"completed stage {step} has no matching output artifact")
         for suffix in _STAGE_OUTPUT_SUFFIXES:
             output = output_dir / f"{design_id}_{step}{suffix}"
             if output.is_file() and not output.is_symlink():
