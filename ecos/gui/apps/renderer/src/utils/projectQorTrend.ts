@@ -445,10 +445,10 @@ interface QorMetricDefinition {
 const QOR_FLOW_STEPS: FlowStep[] = [
   'Synth',
   'Floor',
-  'Fanout',
   'Place',
   'CTS',
   'Legal',
+  'Sizer',
   'Route',
   'DRC',
   'LVS',

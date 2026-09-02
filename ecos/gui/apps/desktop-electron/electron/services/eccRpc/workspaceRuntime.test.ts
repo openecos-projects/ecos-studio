@@ -276,7 +276,12 @@ describe('EccWorkspaceRuntime', () => {
           steps: [
             { name: 'Synthesis', runtime: '0:0:10', state: 'Success', tool: 'yosys' },
             { name: 'Floorplan', runtime: '0:0:05', state: 'Incomplete', tool: 'ecc' },
-            { name: 'fixFanout', runtime: '', state: 'Unstart', tool: 'ecc' },
+            {
+              name: 'Timing optimization',
+              runtime: '',
+              state: 'Unstart',
+              tool: 'sizer',
+            },
           ],
         },
         home: {},
@@ -296,7 +301,7 @@ describe('EccWorkspaceRuntime', () => {
     expect(snapshot.flow.steps.map((step) => step.name)).toEqual([
       'Synthesis',
       'Floorplan',
-      'fixFanout',
+      'Timing optimization',
     ])
     expect(
       client.calls.filter((call) => call.method === 'workspace.snapshot'),

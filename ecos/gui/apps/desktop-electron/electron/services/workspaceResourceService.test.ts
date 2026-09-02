@@ -161,10 +161,19 @@ describe('WorkspaceResourceService', () => {
       { name: 'Timing optimization', tool: 'sizer', state: 'Incomplete' },
     ])
     await mkdir(join(root, 'timing_optimization_sizer', 'log'), { recursive: true })
+    await mkdir(join(root, 'timing_optimization_sizer', 'output'), { recursive: true })
     await writeFile(
       join(root, 'timing_optimization_sizer', 'log', 'Timing optimization.log'),
       'sizer log',
       'utf8',
+    )
+    await writeFile(
+      join(root, 'timing_optimization_sizer', 'output', 'gcd_timing_optimization.def.gz'),
+      'sizer def',
+    )
+    await writeFile(
+      join(root, 'timing_optimization_sizer', 'output', 'gcd_timing_optimization.v.gz'),
+      'sizer verilog',
     )
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
@@ -176,6 +185,25 @@ describe('WorkspaceResourceService', () => {
       exists: true,
       kind: 'log',
     })
+    expect(index.flow.steps[0].resources.output.def).toMatchObject({
+      path: join(
+        root,
+        'timing_optimization_sizer',
+        'output',
+        'gcd_timing_optimization.def.gz',
+      ),
+      exists: true,
+    })
+    expect(index.flow.steps[0].resources.output.verilog).toMatchObject({
+      path: join(
+        root,
+        'timing_optimization_sizer',
+        'output',
+        'gcd_timing_optimization.v.gz',
+      ),
+      exists: true,
+    })
+    expect(index.flow.steps[0].resources.config).toEqual({})
   })
 
   it('exposes workspace-level view package tech resources from the design view directory', async () => {
@@ -400,7 +428,6 @@ describe('WorkspaceResourceService', () => {
 
   it.each([
     ['Floorplan', 'ecc'],
-    ['fixFanout', 'ecc'],
     ['place', 'dreamplace'],
     ['CTS', 'ecc'],
     ['legalization', 'dreamplace'],
@@ -489,7 +516,6 @@ describe('WorkspaceResourceService', () => {
 
   it.each([
     ['Floorplan', 'floorplan_ecc.json'],
-    ['fixFanout', 'fixfanout_ecc.json'],
     ['CTS', 'cts_ecc.json'],
     ['route', 'route_ecc.json'],
     ['drc', 'drc_ecc.json'],
@@ -523,17 +549,17 @@ describe('WorkspaceResourceService', () => {
   )
 
   it.each([
-    ['Timing optimization', []],
-    ['Signoff', []],
-    ['lvs', ['drc_default_config.json', 'flow_config.json']],
-    ['Harden', ['sta_ecc.json']],
-    ['place', ['filler_ecc.json']],
-    ['legalization', ['filler_ecc.json']],
+    ['Timing optimization', 'sizer', []],
+    ['Signoff', 'ecc', []],
+    ['lvs', 'ecc', ['drc_default_config.json', 'flow_config.json']],
+    ['Harden', 'ecc', ['sta_ecc.json']],
+    ['place', 'ecc', ['filler_ecc.json']],
+    ['legalization', 'ecc', ['filler_ecc.json']],
   ])(
     'does not expose configuration for ECC %s even when unrelated config files exist',
-    async (stepName, extraConfigFiles) => {
+    async (stepName, tool, extraConfigFiles) => {
       const root = await tempWorkspace()
-      await writeWorkspace(root, [{ name: stepName, tool: 'ecc' }])
+      await writeWorkspace(root, [{ name: stepName, tool }])
       await mkdir(join(root, 'config'), { recursive: true })
       await writeFile(join(root, 'config', 'flow_ecc.json'), '{"ConfigPath":{}}', 'utf8')
       await Promise.all(

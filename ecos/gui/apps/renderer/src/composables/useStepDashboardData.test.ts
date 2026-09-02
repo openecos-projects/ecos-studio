@@ -301,10 +301,10 @@ describe('useStepDashboardData', () => {
 
   it('uses each physical step feature for Floorplan-style snapshots and step.json metrics', () => {
     expect(source).toContain('floorplanStyleInsightSteps')
-    expect(source).toContain("'fixfanout'")
     expect(source).toContain("'place'")
     expect(source).toContain("'cts'")
     expect(source).toContain("'legalization'")
+    expect(source).toContain("'timing optimization'")
     expect(source).toContain("'route'")
     expect(source).toContain("'filler'")
     expect(source).toContain(

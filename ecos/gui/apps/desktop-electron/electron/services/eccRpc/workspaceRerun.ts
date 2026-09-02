@@ -42,10 +42,10 @@ interface WorkspaceRerunRuntime {
 const FLOW_STEP_SEQUENCE = [
   'Synthesis',
   'Floorplan',
-  'fixFanout',
   'place',
   'CTS',
   'legalization',
+  'Timing optimization',
   'route',
   'drc',
   'lvs',
@@ -60,10 +60,10 @@ const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
 const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
   Synthesis: 'yosys',
   Floorplan: 'ecc',
-  fixFanout: 'ecc',
   place: 'dreamplace',
   CTS: 'ecc',
   legalization: 'dreamplace',
+  'Timing optimization': 'sizer',
   route: 'ecc',
   drc: 'ecc',
   lvs: 'ecc',
@@ -334,7 +334,7 @@ async function verifyWorkspaceRerunContract(
     !STAGE_OUTPUT_SUFFIXES.some(
       (suffix) =>
         contract.source_stage_artifact ===
-        `${contract.target_step}_${targetTool}/output/${contract.design_id}_${contract.target_step}${suffix}`,
+        `${workspaceStepDirectoryName(contract.target_step, targetTool)}/output/${contract.design_id}_${workspaceStepArtifactName(contract.target_step, targetTool)}${suffix}`,
     )
   ) {
     throw new Error('Workspace rerun source artifact does not match the completed stage.')
@@ -761,7 +761,7 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
     const tool =
       toolByStep.get(stageName) ??
       DEFAULT_STEP_TOOLS[stageName as (typeof FLOW_STEP_SEQUENCE)[number]]
-    wipedDirectories.add(`${stageName}_${tool}`)
+    wipedDirectories.add(workspaceStepDirectoryName(stageName, tool))
   }
 
   await pruneWorkspaceRerunHomeJson(join(home, 'home.json'), {
@@ -996,7 +996,7 @@ async function emptyWorkspaceStepDirectory(
   workspace: string,
   step: WorkspaceFlowStep,
 ): Promise<void> {
-  const stageDirectory = join(workspace, `${step.name}_${step.tool}`)
+  const stageDirectory = join(workspace, workspaceStepDirectoryName(step.name, step.tool))
   try {
     const stats = await lstat(stageDirectory)
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -1055,4 +1055,14 @@ function parseWorkspaceFlow(flowText: string): {
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function workspaceStepArtifactName(stepName: string, tool: string): string {
+  return tool.toLowerCase() === 'sizer'
+    ? stepName.trim().split(/\s+/).join('_').toLowerCase()
+    : stepName
+}
+
+function workspaceStepDirectoryName(stepName: string, tool: string): string {
+  return `${workspaceStepArtifactName(stepName, tool)}_${tool}`
 }

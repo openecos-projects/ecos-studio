@@ -269,7 +269,7 @@
 
 /*
  * GenericStepConfig / sc-pro-value: many leaves are NOT wrapped in .field — PrimeVue 4 controls
- * must still respect the sidebar width (FixFanout, DreamPlace flat JSON, nested keys, …).
+ * must still respect the sidebar width (DreamPlace flat JSON, nested keys, ...).
  */
 .step-config-root .sc-pro input.p-inputtext:not(.p-inputnumber-input) {
   width: 100% !important;

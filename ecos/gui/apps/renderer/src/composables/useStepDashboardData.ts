@@ -179,10 +179,10 @@ function siblingAnalysisPath(metricsPath: string, filename: string): string {
 
 const stepDashboardCache = new Map<string, StepDashboardData>()
 const floorplanStyleInsightSteps = new Set([
-  'fixfanout',
   'place',
   'cts',
   'legalization',
+  'timing optimization',
   'route',
   'filler',
 ])

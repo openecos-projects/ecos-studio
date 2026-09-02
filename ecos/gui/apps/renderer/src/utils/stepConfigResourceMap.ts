@@ -22,10 +22,6 @@ const ECC_STEP_CONFIG_FILES: Record<string, { path: string; legacyPaths: string[
     legacyPaths: ['config/rt_default_config.json'],
   },
   drc: { path: 'config/drc_ecc.json', legacyPaths: ['config/drc_default_config.json'] },
-  fixfanout: {
-    path: 'config/fixfanout_ecc.json',
-    legacyPaths: ['config/no_default_config_fixfanout.json'],
-  },
   filler: {
     path: 'config/filler_ecc.json',
     legacyPaths: ['config/pl_default_config.json'],

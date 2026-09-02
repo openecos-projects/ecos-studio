@@ -390,7 +390,7 @@ function stepSection(
     rcx: 'rcx',
     harden: 'harden',
     filler: 'filler',
-    fixfanout: 'fixFanout',
+    'timing optimization': 'Timing optimization',
   }
   const directKey = keyByStep[canonical]
   if (directKey) return record(value[directKey])
@@ -1407,9 +1407,7 @@ export function stepFeatureInsights(
   const metrics =
     normalizedStep === 'place'
       ? placeMetrics(mapValue)
-      : normalizedStep === 'fixfanout' ||
-          normalizedStep === 'legalization' ||
-          normalizedStep === 'filler'
+      : normalizedStep === 'legalization' || normalizedStep === 'filler'
         ? floorplanMetrics(databaseValue)
         : stepFeatureMetrics(stepValue)
   const snapshots = floorplanSnapshots(databaseValue)

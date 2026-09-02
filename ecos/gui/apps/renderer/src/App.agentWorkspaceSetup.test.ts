@@ -139,6 +139,7 @@ describe('quick start resources', () => {
     const workspaceEnd = source.indexOf('const createdConfig', workspaceStart)
     const workspaceSource = source.slice(workspaceStart, workspaceEnd)
     expect(workspaceSource).toContain("design: 'gcd'")
+    expect(workspaceSource).toContain("'Timing optimization'")
     expect(workspaceSource).toContain("top_module: ''")
     expect(workspaceSource).toContain("clock: ''")
     expect(source).toContain('input.value += character')

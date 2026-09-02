@@ -225,6 +225,18 @@ export class WorkspaceResourceService {
         join(root, 'config', 'dreamplace_ecc.json'),
         'config',
       )
+    } else if (toolKey === 'sizer') {
+      addEccLikeResources(resources, root, directory, design, topModule, step.name)
+      const outputName = workspaceStepArtifactName(step.name, tool)
+      resources.output.def = createFile(
+        join(directory, 'output', `${design}_${outputName}.def.gz`),
+        'output',
+      )
+      resources.output.verilog = createFile(
+        join(directory, 'output', `${design}_${outputName}.v.gz`),
+        'output',
+      )
+      resources.config = {}
     } else if (isFrontendTool(toolKey)) {
       addFrontendResources(resources, directory, design, step.name)
     } else {
@@ -622,13 +634,13 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 function workspaceStepDirectoryName(stepName: string, tool: string): string {
-  // Workaround for Sizer step directory name
-  // Perhaps we should establish some conventions for naming folder paths
-  // during the creation of the ecc tool directory to better unify these paths.
-  if (tool.toLowerCase() === 'sizer') {
-    return `${stepName.trim().split(/\s+/).join('_').toLowerCase()}_sizer`
-  }
-  return `${stepName}_${tool}`
+  return `${workspaceStepArtifactName(stepName, tool)}_${tool}`
+}
+
+function workspaceStepArtifactName(stepName: string, tool: string): string {
+  return tool.toLowerCase() === 'sizer'
+    ? stepName.trim().split(/\s+/).join('_').toLowerCase()
+    : stepName
 }
 
 function createEmptyBuckets(): StepFileBuckets {
@@ -827,10 +839,6 @@ function addEccConfigResources(
     join(root, 'config', 'floorplan_ecc.json'),
     'config',
   )
-  resources.config.netlist_opt = createFile(
-    join(root, 'config', 'fixfanout_ecc.json'),
-    'config',
-  )
   resources.config.routing = createFile(join(root, 'config', 'route_ecc.json'), 'config')
   resources.config.rcx = createFile(join(root, 'config', 'rcx_ecc.json'), 'config')
   resources.config.sta = createFile(join(root, 'config', 'sta_ecc.json'), 'config')
@@ -852,8 +860,6 @@ function configResourceForEccStep(
       return config.routing
     case 'drc':
       return config.drc
-    case 'fixfanout':
-      return config.netlist_opt
     case 'filler':
       return config.filler
     case 'rcx':

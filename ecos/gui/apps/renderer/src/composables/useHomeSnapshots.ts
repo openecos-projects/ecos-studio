@@ -56,10 +56,10 @@ interface HomeSnapshotData {
 
 const physicalSnapshotSteps = new Set([
   'floorplan',
-  'fixfanout',
   'place',
   'cts',
   'legalization',
+  'timing optimization',
   'route',
   'filler',
 ])

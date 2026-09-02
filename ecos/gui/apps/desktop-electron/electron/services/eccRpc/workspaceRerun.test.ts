@@ -35,19 +35,21 @@ async function writeSourceWorkspace(): Promise<{
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
     steps: [
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'Floorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
       { name: 'legalization', state: 'Success', tool: 'dreamplace' },
+      { name: 'Timing optimization', state: 'Success', tool: 'sizer' },
     ],
   })
   const artifact = Buffer.from('place-def')
   await mkdir(join(source, 'home'), { recursive: true })
   await mkdir(join(source, 'config'), { recursive: true })
-  await mkdir(join(source, 'fixFanout_ecc', 'output'), { recursive: true })
+  await mkdir(join(source, 'Floorplan_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
+  await mkdir(join(source, 'timing_optimization_sizer', 'output'), { recursive: true })
   await writeFile(join(source, 'home', 'flow.json'), flow)
   await writeFile(join(source, 'home', 'parameters.json'), '{"Target density":0.45}\n')
   await writeFile(
@@ -55,7 +57,7 @@ async function writeSourceWorkspace(): Promise<{
     '{"density_weight":0.01}\n',
   )
   await writeFile(
-    join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'),
+    join(source, 'Floorplan_ecc', 'output', 'gcd_Floorplan.def.gz'),
     'checkpoint',
   )
   await writeFile(
@@ -67,7 +69,16 @@ async function writeSourceWorkspace(): Promise<{
     join(source, 'legalization_dreamplace', 'output', 'gcd_legalization.def.gz'),
     'stale',
   )
-  for (const directory of ['place_dreamplace', 'CTS_ecc', 'legalization_dreamplace']) {
+  await writeFile(
+    join(source, 'timing_optimization_sizer', 'output', 'gcd_timing_optimization.def.gz'),
+    'stale',
+  )
+  for (const directory of [
+    'place_dreamplace',
+    'CTS_ecc',
+    'legalization_dreamplace',
+    'timing_optimization_sizer',
+  ]) {
     await writeFile(join(source, directory, 'subflow.json'), '{"state":"Success"}\n')
   }
   return { artifact, flow, root, source }
@@ -150,7 +161,7 @@ describe('prepareWorkspaceRerun', () => {
 
     await expect(
       readFile(
-        `${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`,
+        `${contract.target_workspace}/Floorplan_ecc/output/gcd_Floorplan.def.gz`,
         'utf8',
       ),
     ).resolves.toBe('checkpoint')
@@ -161,15 +172,24 @@ describe('prepareWorkspaceRerun', () => {
     await expect(
       readdir(`${contract.target_workspace}/legalization_dreamplace`),
     ).resolves.toEqual([])
+    await expect(
+      readdir(`${contract.target_workspace}/timing_optimization_sizer`),
+    ).resolves.toEqual([])
 
     const targetFlow = JSON.parse(
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
     expect(targetFlow.steps).toEqual([
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'Floorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
       { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
       { name: 'legalization', state: 'Unstart', tool: 'dreamplace', runtime: '' },
+      {
+        name: 'Timing optimization',
+        state: 'Unstart',
+        tool: 'sizer',
+        runtime: '',
+      },
     ])
   })
 
@@ -187,11 +207,12 @@ describe('prepareWorkspaceRerun', () => {
           checklist: `${source}/home/checklist.json`,
           metrics: {
             'drc dist.': `${source}/drc_ecc/analysis/drc.png`,
-            'fanout dist.': `${source}/fixFanout_ecc/output/fanout.png`,
+            'floor dist.': `${source}/Floorplan_ecc/output/floor.png`,
+            'sizer timing': `${source}/timing_optimization_sizer/analysis/qor_metrics.json`,
           },
           monitor: {
             step: [
-              'fixFanout - analysis',
+              'Floorplan - analysis',
               'place - analysis',
               'CTS - analysis',
               'legalization - analysis',
@@ -216,8 +237,8 @@ describe('prepareWorkspaceRerun', () => {
           summary: { passed: 1, blocked: 2, attention: 0, unavailable: 0 },
           checklist: [
             {
-              id: 'artifact.fixFanout',
-              step: 'fixFanout',
+              id: 'artifact.floorplan',
+              step: 'Floorplan',
               state: 'pass',
               blocked: false,
             },
@@ -258,9 +279,9 @@ describe('prepareWorkspaceRerun', () => {
     expect(home.checklist).toBe(`${contract.target_workspace}/home/checklist.json`)
     expect(home.layout).toBe('')
     expect(home.metrics).toEqual({
-      'fanout dist.': `${contract.target_workspace}/fixFanout_ecc/output/fanout.png`,
+      'floor dist.': `${contract.target_workspace}/Floorplan_ecc/output/floor.png`,
     })
-    expect(home.monitor.step).toEqual(['fixFanout - analysis'])
+    expect(home.monitor.step).toEqual(['Floorplan - analysis'])
     expect(home.monitor.memory).toEqual(['1'])
 
     const checklist = JSON.parse(
@@ -270,7 +291,7 @@ describe('prepareWorkspaceRerun', () => {
       summary: { passed: number; blocked: number }
       checklist: Array<{ step: string }>
     }
-    expect(checklist.checklist.map((item) => item.step)).toEqual(['fixFanout'])
+    expect(checklist.checklist.map((item) => item.step)).toEqual(['Floorplan'])
     expect(checklist.summary).toEqual({
       passed: 1,
       blocked: 0,
@@ -455,10 +476,11 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string }> }
     expect(targetFlow.steps.map((step) => step.name)).toEqual([
-      'fixFanout',
+      'Floorplan',
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'lvs',
@@ -467,7 +489,7 @@ describe('prepareWorkspaceRerun', () => {
       'sta',
       'Harden',
     ])
-    expect(targetFlow.steps.find((step) => step.name === 'fixFanout')?.state).toBe(
+    expect(targetFlow.steps.find((step) => step.name === 'Floorplan')?.state).toBe(
       'Success',
     )
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')

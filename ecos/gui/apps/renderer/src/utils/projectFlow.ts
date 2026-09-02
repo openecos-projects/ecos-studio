@@ -1,10 +1,10 @@
 export const FLOW_STEPS = [
   'Synth',
   'Floor',
-  'Fanout',
   'Place',
   'CTS',
   'Legal',
+  'Sizer',
   'Route',
   'DRC',
   'LVS',

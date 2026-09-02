@@ -3,6 +3,7 @@ import type { ResourceInfo } from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
+  createWorkspaceBranchDraft,
   createProjectManifestDraft,
   createSelectionState,
   archiveWorkspaceInManifest,
@@ -161,9 +162,9 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
         metric('instance_count', 612),
         metric('net_count', 376),
       ]),
-      Fanout: metricsArtifact('fixFanout', [
-        metric('fanout_max', 12),
+      Sizer: metricsArtifact('Timing optimization', [
         metric('instance_count', 618),
+        metric('io_pin_count', 58),
         metric('net_count', 381),
       ]),
       Place: metricsArtifact('place', [
@@ -362,10 +363,10 @@ describe('project management V3 model', () => {
     expect(FLOW_STEPS).toEqual([
       'Synth',
       'Floor',
-      'Fanout',
       'Place',
       'CTS',
       'Legal',
+      'Sizer',
       'Route',
       'DRC',
       'LVS',
@@ -374,6 +375,20 @@ describe('project management V3 model', () => {
       'STA',
       'Harden',
     ])
+  })
+
+  it('builds Sizer branch artifacts with the ECC native directory and basename', () => {
+    const model = buildProjectManagementProject(project, manifestWithWorkspace())
+    const draft = createWorkspaceBranchDraft(model, 'ws_0004', 'Sizer')
+
+    expect(draft).toMatchObject({
+      targetStartStep: 'Route',
+      sourceOutputType: 'def',
+      sourceOutputPath:
+        '/projects/gcd/ws_0004/timing_optimization_sizer/output/gcd_timing_optimization.def.gz',
+      originVerilog:
+        '/projects/gcd/ws_0004/timing_optimization_sizer/output/gcd_timing_optimization.v.gz',
+    })
   })
 
   it('builds an empty model without manufacturing metric rows', () => {
@@ -436,9 +451,9 @@ describe('project management V3 model', () => {
     ])
     expect(
       model.stepCompareSummaries
-        .find((item) => item.step === 'Fanout')
+        .find((item) => item.step === 'Sizer')
         ?.metrics.map((metric) => metric.id),
-    ).toEqual(['fanout_max', 'instance_count', 'net_count'])
+    ).toEqual(['instance_count', 'io_pin_count', 'net_count'])
     expect(
       model.stepCompareSummaries
         .find((item) => item.step === 'Place')
@@ -580,6 +595,7 @@ describe('project management V3 model', () => {
       parseWorkspaceFlowStateMap(
         JSON.stringify({
           steps: [
+            { name: 'Timing optimization', state: 'success' },
             { name: 'route', state: 'running' },
             { name: 'lvs', state: 'success' },
             { name: 'sta', state: 'success' },
@@ -588,7 +604,13 @@ describe('project management V3 model', () => {
           ],
         }),
       ),
-    ).toEqual({ Route: 'running', LVS: 'success', STA: 'success', Floor: 'reused' })
+    ).toEqual({
+      Sizer: 'success',
+      Route: 'running',
+      LVS: 'success',
+      STA: 'success',
+      Floor: 'reused',
+    })
   })
 
   it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {

@@ -262,10 +262,10 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     for (const step of [
       'Synthesis',
       'Floorplan',
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'lvs',

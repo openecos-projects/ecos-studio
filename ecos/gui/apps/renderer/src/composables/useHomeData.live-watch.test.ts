@@ -283,20 +283,20 @@ describe('useHomeData runtime updates', () => {
         finalLog: '',
         runtimeProtocolType: 'step.completed',
         state: 'Success',
-        step: 'fixFanout',
-        tool: 'ecc',
+        step: 'Timing optimization',
+        tool: 'sizer',
       },
     })
     await nextTick()
     const segment = home.flowLogSegments.value.find(
-      (item) => item.stepName === 'fixFanout',
+      (item) => item.stepName === 'Timing optimization',
     )
     expect(segment).toBeDefined()
     await expect(home.ensureFlowLogSegmentContentLoaded(segment!)).resolves.toBe(true)
 
     expect(testState.readOptionalProjectTextFileChunk).toHaveBeenNthCalledWith(
       1,
-      '/workspace/demo/fixFanout_ecc/log/fixFanout.log',
+      '/workspace/demo/timing_optimization_sizer/log/Timing optimization.log',
       0,
       256 * 1024,
     )
@@ -306,7 +306,7 @@ describe('useHomeData runtime updates', () => {
         expect.objectContaining({
           contentComplete: true,
           contentLoading: false,
-          stepName: 'fixFanout',
+          stepName: 'Timing optimization',
           truncated: false,
         }),
       ]),

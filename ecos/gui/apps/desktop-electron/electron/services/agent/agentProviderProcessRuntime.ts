@@ -1049,10 +1049,10 @@ function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null 
 const workspaceSetupFlowSteps = [
   'Synthesis',
   'Floorplan',
-  'fixFanout',
   'place',
   'CTS',
   'legalization',
+  'Timing optimization',
   'route',
   'drc',
   'lvs',

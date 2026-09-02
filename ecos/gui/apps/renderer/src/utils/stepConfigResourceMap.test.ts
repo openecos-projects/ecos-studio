@@ -18,10 +18,10 @@ describe('resolveStepConfigResource', () => {
       path: 'config/route_ecc.json',
       legacyPaths: ['config/rt_default_config.json'],
     })
-    expect(resolveStepConfigResource({ name: 'fixFanout', tool: 'ecc' })).toEqual({
-      kind: 'config',
-      path: 'config/fixfanout_ecc.json',
-      legacyPaths: ['config/no_default_config_fixfanout.json'],
+    expect(
+      resolveStepConfigResource({ name: 'Timing optimization', tool: 'sizer' }),
+    ).toEqual({
+      kind: 'none',
     })
     expect(resolveStepConfigResource({ name: 'CTS', tool: 'ecc' })).toMatchObject({
       path: 'config/cts_ecc.json',

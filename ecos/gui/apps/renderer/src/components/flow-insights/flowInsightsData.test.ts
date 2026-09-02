@@ -39,18 +39,23 @@ function insightSteps(
   return buildFlowInsightSteps(
     names.map((name, index) => ({
       name,
-      tool: name === 'Synthesis' ? 'yosys' : 'ecc',
+      tool:
+        name === 'Synthesis' ? 'yosys' : name === 'Timing optimization' ? 'sizer' : 'ecc',
       state: extras[index]?.state ?? 'Success',
       runtime: extras[index]?.runtime ?? '',
       peakMemoryMb: extras[index]?.peakMemoryMb ?? null,
-      directory: `/ws/${name.toLowerCase()}_ecc`,
+      directory:
+        name === 'Timing optimization'
+          ? '/ws/timing_optimization_sizer'
+          : `/ws/${name.toLowerCase()}_ecc`,
     })),
   )
 }
 
 describe('flow insights data', () => {
   it('normalizes step keys and parses runtime / memory fallbacks', () => {
-    expect(canonicalStepKey('fixFanout')).toBe('Fanout')
+    expect(canonicalStepKey('Timing optimization')).toBe('Sizer')
+    expect(canonicalStepKey('timing_optimization_sizer')).toBe('Sizer')
     expect(canonicalStepKey('sta_ecc')).toBe('STA')
     expect(parseRuntimeSeconds('0:3:35')).toBe(215)
     expect(parseRuntimeSeconds('0:1:6')).toBe(66)
@@ -71,10 +76,10 @@ describe('flow insights data', () => {
     const names = [
       'Synthesis',
       'Floorplan',
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'filler',
@@ -106,10 +111,10 @@ describe('flow insights data', () => {
     const names = [
       'Synthesis',
       'Floorplan',
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'filler',

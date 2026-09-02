@@ -651,10 +651,10 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
             steps: [
               'Synthesis',
               'Floorplan',
-              'fixFanout',
               'place',
               'CTS',
               'legalization',
+              'Timing optimization',
               'route',
               'drc',
               'lvs',

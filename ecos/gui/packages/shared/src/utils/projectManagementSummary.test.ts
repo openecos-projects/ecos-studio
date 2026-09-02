@@ -19,6 +19,13 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
       metricsPath: 'lvs_ecc/analysis/qor_metrics.json',
       summaryPath: 'lvs_ecc/analysis/qor_summary.json',
     })
+    expect(
+      projectManagementWorkspaceStepAnalysisSpecs.find((spec) => spec.step === 'Sizer'),
+    ).toMatchObject({
+      metricsPath: 'timing_optimization_sizer/analysis/qor_metrics.json',
+      summaryPath: 'timing_optimization_sizer/analysis/qor_summary.json',
+      hotspotsPath: 'timing_optimization_sizer/analysis/qor_hotspots.json',
+    })
     expect(projectManagementWorkspaceSummaryPaths).toContain('home/flow.json')
     expect(projectManagementWorkspaceSummaryPaths).toContain(
       projectManagementStaTimingIssuesPath,
@@ -45,7 +52,6 @@ describe('projectManagementWorkspaceStepConfigPaths', () => {
       'config/cts_ecc.json',
       'config/route_ecc.json',
       'config/drc_ecc.json',
-      'config/fixfanout_ecc.json',
       'config/filler_ecc.json',
       'config/rcx_ecc.json',
       'config/sta_ecc.json',
@@ -55,7 +61,6 @@ describe('projectManagementWorkspaceStepConfigPaths', () => {
       'config/cts_default_config.json',
       'config/rt_default_config.json',
       'config/drc_default_config.json',
-      'config/no_default_config_fixfanout.json',
       'config/pl_default_config.json',
       'config/rcx.json',
       'config/sta.json',

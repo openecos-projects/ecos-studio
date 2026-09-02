@@ -11,14 +11,14 @@ import {
 } from './projectManifest'
 
 describe('project manifest parsing', () => {
-  it('places LVS after DRC and resolves lvs aliases to that catalog step', () => {
+  it('uses the ECC main flow order and resolves native step aliases', () => {
     expect(projectManifestFlowSteps).toEqual([
       'Synth',
       'Floor',
-      'Fanout',
       'Place',
       'CTS',
       'Legal',
+      'Sizer',
       'Route',
       'DRC',
       'LVS',
@@ -30,6 +30,8 @@ describe('project manifest parsing', () => {
     expect(normalizeProjectManifestFlowStep('lvs')).toBe('LVS')
     expect(normalizeProjectManifestFlowStep('LVS')).toBe('LVS')
     expect(normalizeProjectManifestFlowStep('DRC')).toBe('DRC')
+    expect(normalizeProjectManifestFlowStep('Timing optimization')).toBe('Sizer')
+    expect(normalizeProjectManifestFlowStep('timing_optimization_sizer')).toBe('Sizer')
     const afterDrc = registerWorkspaceInManifest(
       createProjectManifestDraft({
         rootPath: '/work/gcd',

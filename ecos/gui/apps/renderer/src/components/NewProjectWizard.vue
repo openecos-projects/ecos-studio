@@ -1621,10 +1621,10 @@ type ProjectMode = 'select' | 'create'
 type FlowStepName =
   | 'Synthesis'
   | 'Floorplan'
-  | 'fixFanout'
   | 'place'
   | 'CTS'
   | 'legalization'
+  | 'Timing optimization'
   | 'route'
   | 'drc'
   | 'lvs'
@@ -1763,10 +1763,10 @@ const steps = [
 const hardenFlowSteps: Array<{ name: FlowStepName; description: string }> = [
   { name: 'Synthesis', description: 'RTL synthesis entry.' },
   { name: 'Floorplan', description: 'Initial floorplan and die setup.' },
-  { name: 'fixFanout', description: 'Fanout repair before placement.' },
   { name: 'place', description: 'Standard cell placement.' },
   { name: 'CTS', description: 'Clock tree synthesis.' },
   { name: 'legalization', description: 'Placement legalization.' },
+  { name: 'Timing optimization', description: 'Post-CTS timing optimization.' },
   { name: 'route', description: 'Detailed routing.' },
   { name: 'drc', description: 'Design rule checking.' },
   { name: 'lvs', description: 'Layout versus netlist connectivity.' },
@@ -2055,13 +2055,14 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     synthesis: 'Synthesis',
     floor: 'Floorplan',
     floorplan: 'Floorplan',
-    fanout: 'fixFanout',
-    fixfanout: 'fixFanout',
     place: 'place',
     placement: 'place',
     cts: 'CTS',
     legal: 'legalization',
     legalization: 'legalization',
+    sizer: 'Timing optimization',
+    timing_optimization: 'Timing optimization',
+    'timing optimization': 'Timing optimization',
     route: 'route',
     drc: 'drc',
     lvs: 'lvs',
@@ -2075,10 +2076,10 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
   const validSteps: FlowStepName[] = [
     'Synthesis',
     'Floorplan',
-    'fixFanout',
     'place',
     'CTS',
     'legalization',
+    'Timing optimization',
     'route',
     'drc',
     'lvs',
