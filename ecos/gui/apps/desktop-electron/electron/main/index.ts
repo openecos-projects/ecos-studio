@@ -228,10 +228,6 @@ function getDesktopServices() {
   const projectManagementReadService = new ProjectManagementReadService()
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
-    {
-      getByDirectory: (directory) =>
-        eccRuntimeService.engineeringSnapshotForDirectory(directory),
-    },
   )
   const backendWorkspaceService = new BackendWorkspaceService({
     engineeringSnapshotProvider: {

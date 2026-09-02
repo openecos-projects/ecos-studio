@@ -5,12 +5,12 @@ import { performance } from 'node:perf_hooks'
 import {
   parseProjectManifest,
   projectManagementWorkspaceSummaryPaths,
+  projectManifestFlowSteps,
   type BackendProjectComparison,
   type BackendProjectComparisonInvalidatedEvent,
   type BackendProjectComparisonQueryResult,
   type BackendProjectComparisonSelectResult,
-  type DesktopProjectManagementWorkspaceTextsResult,
-  type EccEngineeringSnapshot,
+  type EccPersistedEngineeringSnapshot,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
   type ProjectQorMetricRecord,
@@ -26,19 +26,15 @@ import { buildProjectQorTrendSummary } from './qorAnalysis'
 import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { isPathWithinRoot } from './pathScope'
+import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
   readManifest(projectRoot: string): Promise<string | null>
-  readWorkspaceTexts(request: {
+  readEngineeringSnapshot(request: {
     projectRoot: string
     workspacePath: string
-    paths: string[]
-  }): Promise<DesktopProjectManagementWorkspaceTextsResult>
-}
-
-interface EngineeringSnapshotProvider {
-  getByDirectory(directory: string): Promise<EccEngineeringSnapshot>
+  }): Promise<ProjectEngineeringSnapshotReadResult>
 }
 
 interface ProjectComparisonContext {
@@ -50,6 +46,7 @@ interface ProjectComparisonContext {
   cache: BackendProjectComparisonQueryResult | null
   inFlight: Promise<BackendProjectComparisonQueryResult> | null
   coalescedRequests: number
+  engineeringWorkspaceIds: Map<string, string>
 }
 
 type InvalidationListener = (
@@ -57,32 +54,14 @@ type InvalidationListener = (
   event: BackendProjectComparisonInvalidatedEvent,
 ) => void
 
-const FLOW_STEPS = projectManagementWorkspaceSummaryPaths.length
-  ? ([
-      'Synth',
-      'Floor',
-      'Fanout',
-      'Place',
-      'CTS',
-      'Legal',
-      'Route',
-      'DRC',
-      'LVS',
-      'Filler',
-      'RCX',
-      'STA',
-      'Harden',
-    ] as const)
-  : []
+const FLOW_STEPS = projectManifestFlowSteps
+const ANALYSIS_PATHS = new Set<string>(projectManagementWorkspaceSummaryPaths)
 
 export class BackendProjectComparisonService {
   private readonly contextsByWindow = new Map<number, ProjectComparisonContext>()
   private readonly listeners = new Set<InvalidationListener>()
 
-  constructor(
-    private readonly reader: ProjectComparisonReader,
-    private readonly snapshotProvider: EngineeringSnapshotProvider,
-  ) {}
+  constructor(private readonly reader: ProjectComparisonReader) {}
 
   async selectProject(
     windowId: number,
@@ -104,6 +83,7 @@ export class BackendProjectComparisonService {
         cache: null,
         inFlight: null,
         coalescedRequests: 0,
+        engineeringWorkspaceIds: new Map(),
       }
       this.contextsByWindow.set(windowId, context)
       return {
@@ -243,28 +223,71 @@ export class BackendProjectComparisonService {
         2,
         async (workspace) => {
           try {
-            const [{ texts, unavailablePaths }, engineeringSnapshot] = await Promise.all([
-              this.reader.readWorkspaceTexts({
-                projectRoot: context.projectRoot,
-                workspacePath: workspace.workspace_path,
-                paths: [...projectManagementWorkspaceSummaryPaths],
-              }),
-              this.snapshotProvider.getByDirectory(workspace.workspace_path),
-            ])
-            readBytes += Object.values(texts).reduce(
-              (total, text) => total + (text ? Buffer.byteLength(text) : 0),
-              0,
+            const snapshotResult = await this.reader.readEngineeringSnapshot({
+              projectRoot: context.projectRoot,
+              workspacePath: workspace.workspace_path,
+            })
+            readBytes += snapshotResult.readBytes
+            if (!snapshotResult.ok) {
+              unavailableFileCount += 1
+              return {
+                issues: [workspaceIssue(workspace.workspace_id, snapshotResult.issue)],
+              }
+            }
+            const identityKey = engineeringIdentityKey(
+              workspace.workspace_id,
+              workspace.workspace_path,
             )
-            unavailableFileCount += unavailablePaths.length
+            const expectedEngineeringWorkspaceId =
+              context.engineeringWorkspaceIds.get(identityKey)
+            if (
+              expectedEngineeringWorkspaceId &&
+              expectedEngineeringWorkspaceId !== snapshotResult.snapshot.workspaceId
+            ) {
+              unavailableFileCount += 1
+              return {
+                issues: [
+                  workspaceIssue(workspace.workspace_id, {
+                    code: 'ENGINEERING_WORKSPACE_ID_MISMATCH',
+                  }),
+                ],
+              }
+            }
+            const sectionIssues = Object.values(snapshotResult.sections).flatMap(
+              (section) => section.issues,
+            )
+            unavailableFileCount += sectionIssues.length
+            if (
+              snapshotResult.sections.flow.status !== 'ready' ||
+              snapshotResult.sections.qor.status !== 'ready'
+            ) {
+              return {
+                issues: sectionIssues.map((issue) =>
+                  workspaceIssue(workspace.workspace_id, issue),
+                ),
+              }
+            }
+            const engineeringSnapshot = snapshotResult.snapshot
+            const texts = analysisTextsFromSnapshot(engineeringSnapshot)
             const input = projectQorInputForWorkspace(
               manifest,
               workspace.workspace_id,
               texts,
               engineeringSnapshot,
             )
-            return input ? { input } : { issue: workspaceIssue(workspace.workspace_id) }
+            return input
+              ? {
+                  engineeringWorkspaceId: engineeringSnapshot.workspaceId,
+                  identityKey,
+                  input,
+                  issues: sectionIssues.map((issue) =>
+                    workspaceIssue(workspace.workspace_id, issue),
+                  ),
+                }
+              : { issues: [workspaceIssue(workspace.workspace_id)] }
           } catch (error) {
-            return { issue: workspaceIssue(workspace.workspace_id, error) }
+            unavailableFileCount += 1
+            return { issues: [workspaceIssue(workspace.workspace_id, error)] }
           }
         },
       )
@@ -275,8 +298,24 @@ export class BackendProjectComparisonService {
       context.dependencies = new Set(
         manifest.workspaces.map((workspace) => resolve(workspace.workspace_path)),
       )
+      const currentIdentityKeys = new Set(
+        manifest.workspaces.map((workspace) =>
+          engineeringIdentityKey(workspace.workspace_id, workspace.workspace_path),
+        ),
+      )
+      for (const key of context.engineeringWorkspaceIds.keys()) {
+        if (!currentIdentityKeys.has(key)) context.engineeringWorkspaceIds.delete(key)
+      }
+      for (const entry of entries) {
+        if (entry.identityKey && entry.engineeringWorkspaceId) {
+          context.engineeringWorkspaceIds.set(
+            entry.identityKey,
+            entry.engineeringWorkspaceId,
+          )
+        }
+      }
       const inputs = entries.flatMap((entry) => (entry.input ? [entry.input] : []))
-      const issues = entries.flatMap((entry) => (entry.issue ? [entry.issue] : []))
+      const issues = entries.flatMap((entry) => entry.issues)
       const baselineWorkspaceId = manifest.qor_baseline?.workspace_id
       if (
         baselineWorkspaceId &&
@@ -333,8 +372,7 @@ export class BackendProjectComparisonService {
         analysisMs: roundMs(performance.now() - analysisStartedAt),
         coalescedRequests: context.coalescedRequests,
         eventLoopDelayMs: roundMs(await eventLoopDelay),
-        fileCount:
-          manifest.workspaces.length * projectManagementWorkspaceSummaryPaths.length,
+        fileCount: manifest.workspaces.length,
         ipcPayloadBytes: Buffer.byteLength(JSON.stringify(result)),
         readBytes,
         readMs: roundMs(readMs),
@@ -348,6 +386,29 @@ export class BackendProjectComparisonService {
       return queryFailure('read-failed', error)
     }
   }
+}
+
+function analysisTextsFromSnapshot(
+  snapshot: EccPersistedEngineeringSnapshot,
+): Record<string, string | null> {
+  const references = new Map(
+    snapshot.artifacts.map((artifact) => [artifact.artifactId, artifact.reference]),
+  )
+  const texts: Record<string, string | null> = {}
+  for (const step of snapshot.analysis.steps) {
+    for (const file of [step.metrics, step.summary, step.hotspots, step.timingIssues]) {
+      if (!file || file.status !== 'available' || !file.data) continue
+      const reference = references.get(file.artifactId)
+      if (reference && ANALYSIS_PATHS.has(reference)) {
+        texts[reference] = JSON.stringify(file.data)
+      }
+    }
+  }
+  return texts
+}
+
+function engineeringIdentityKey(workspaceId: string, workspacePath: string): string {
+  return `${workspaceId}\0${resolve(workspacePath)}`
 }
 
 function buildStepComparisons(
@@ -465,6 +526,20 @@ function section<T>(data: T, issues: ReadIssue[]): ReadSection<T> {
 }
 
 function workspaceIssue(workspaceId: string, error?: unknown): ReadIssue {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const issue = error as ReadIssue & {
+      actualSizeBytes?: number
+      allowedSizeBytes?: number
+    }
+    const sizeDetail =
+      issue.actualSizeBytes !== undefined && issue.allowedSizeBytes !== undefined
+        ? ` (${issue.actualSizeBytes}/${issue.allowedSizeBytes} bytes)`
+        : ''
+    return {
+      code: issue.code,
+      detail: `${workspaceId}${issue.detail ? `: ${issue.detail}` : ''}${sizeDetail}`,
+    }
+  }
   return {
     code: 'WORKSPACE_ANALYSIS_FAILED',
     detail: error instanceof Error ? `${workspaceId}: ${error.message}` : workspaceId,

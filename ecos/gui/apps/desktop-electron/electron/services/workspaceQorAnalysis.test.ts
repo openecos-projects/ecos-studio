@@ -88,6 +88,26 @@ function workspace(id: string, name: string) {
 }
 
 describe('analyzeWorkspaceQor', () => {
+  it('does not use non-archived Manifest status as committed Flow state', () => {
+    const snapshot = engineeringSnapshot(5000)
+    snapshot.flow = { steps: [] }
+    const failedWorkspace = {
+      ...workspace('current', 'Current'),
+      status: 'failed' as const,
+    }
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [failedWorkspace],
+      qor_baseline: null,
+    } as ProjectManifest
+
+    expect(projectQorInputForWorkspace(manifest, 'current', {}, snapshot)?.status).toBe(
+      'not_started',
+    )
+  })
+
   it('builds current QoR and the selected baseline comparison', () => {
     const manifest = {
       project_id: 'project-1',

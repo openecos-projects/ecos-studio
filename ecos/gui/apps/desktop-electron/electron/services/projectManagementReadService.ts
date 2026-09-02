@@ -1,12 +1,16 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
+  ENGINEERING_SNAPSHOT_MAX_BYTES,
+  parseEngineeringSnapshotJson,
   parseProjectManifest,
   projectManagementWorkspaceReadablePaths,
 } from '@ecos-studio/shared'
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
   DesktopProjectManagementWorkspaceTextsResult,
+  EngineeringSnapshotIssue,
+  EngineeringSnapshotValidationResult,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
 
@@ -20,6 +24,10 @@ const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(
 )
 
 class ProjectManagementWorkspacePathError extends Error {}
+
+export type ProjectEngineeringSnapshotReadResult = EngineeringSnapshotValidationResult & {
+  readBytes: number
+}
 
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
@@ -144,6 +152,75 @@ export class ProjectManagementReadService {
     }
   }
 
+  async readEngineeringSnapshot(request: {
+    projectRoot: string
+    workspacePath: string
+  }): Promise<ProjectEngineeringSnapshotReadResult> {
+    let readBytes = 0
+    try {
+      const projectRoot = await canonicalizeExistingDirectory(request.projectRoot)
+      const workspaceCandidate = resolve(request.workspacePath)
+      if (
+        pathsEqual(workspaceCandidate, projectRoot) ||
+        !isPathWithinRoot(workspaceCandidate, projectRoot)
+      ) {
+        return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+      }
+      const workspaceRoot = await canonicalizeExistingDirectory(workspaceCandidate)
+      if (!isPathWithinRoot(workspaceRoot, projectRoot)) {
+        return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+      }
+
+      let snapshotPath: string
+      try {
+        snapshotPath = await realpath(
+          join(workspaceRoot, 'home', 'engineering-snapshot.json'),
+        )
+      } catch (error) {
+        if (isNodeErrorWithCode(error, 'ENOENT')) {
+          return snapshotFailure('ENGINEERING_SNAPSHOT_MISSING', readBytes)
+        }
+        throw error
+      }
+      if (!isPathWithinRoot(snapshotPath, workspaceRoot)) {
+        return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+      }
+
+      const file = await readBoundedSnapshot(snapshotPath)
+      readBytes = file.sizeBytes
+      if (!file.bytes) {
+        return {
+          ok: false,
+          readBytes,
+          issue: {
+            code: 'ENGINEERING_SNAPSHOT_TOO_LARGE',
+            actualSizeBytes: readBytes,
+            allowedSizeBytes: ENGINEERING_SNAPSHOT_MAX_BYTES,
+          },
+        }
+      }
+      const validated = parseEngineeringSnapshotJson(file.bytes)
+      if (!validated.ok || validated.sections.artifacts.status !== 'ready') {
+        return { ...validated, readBytes }
+      }
+      const artifactIssue = await validateArtifactRealPaths(
+        workspaceRoot,
+        validated.snapshot.artifacts,
+      )
+      if (!artifactIssue) return { ...validated, readBytes }
+      return {
+        ...validated,
+        readBytes,
+        sections: {
+          ...validated.sections,
+          artifacts: { status: 'unavailable', issues: [artifactIssue] },
+        },
+      }
+    } catch {
+      return snapshotFailure('ENGINEERING_SNAPSHOT_READ_FAILED', readBytes)
+    }
+  }
+
   private async loadProject(projectRoot: string) {
     const root = await canonicalizeExistingDirectory(projectRoot)
     const content = await readOptionalBoundedTextFile(
@@ -209,6 +286,68 @@ export class ProjectManagementReadService {
     }
     return await readOptionalBoundedTextFile(canonicalPath, maxBytes)
   }
+}
+
+function snapshotFailure(
+  code: string,
+  readBytes: number,
+): ProjectEngineeringSnapshotReadResult {
+  return { ok: false, readBytes, issue: { code } }
+}
+
+async function readBoundedSnapshot(
+  path: string,
+): Promise<{ bytes: Buffer | null; sizeBytes: number }> {
+  const handle = await open(path, 'r')
+  try {
+    const initialSize = (await handle.stat()).size
+    if (initialSize > ENGINEERING_SNAPSHOT_MAX_BYTES) {
+      return { bytes: null, sizeBytes: initialSize }
+    }
+    const buffer = Buffer.alloc(ENGINEERING_SNAPSHOT_MAX_BYTES + 1)
+    let offset = 0
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        offset,
+      )
+      if (bytesRead === 0) break
+      offset += bytesRead
+    }
+    if (offset > ENGINEERING_SNAPSHOT_MAX_BYTES) {
+      return { bytes: null, sizeBytes: Math.max(offset, (await handle.stat()).size) }
+    }
+    return { bytes: buffer.subarray(0, offset), sizeBytes: offset }
+  } finally {
+    await handle.close()
+  }
+}
+
+async function validateArtifactRealPaths(
+  workspaceRoot: string,
+  artifacts: Array<{ availability: string; reference: string }>,
+): Promise<EngineeringSnapshotIssue | null> {
+  for (const artifact of artifacts) {
+    if (artifact.availability !== 'available') continue
+    let path: string
+    try {
+      path = await realpath(join(workspaceRoot, artifact.reference))
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return { code: 'ARTIFACT_REFERENCE_MISSING' }
+      }
+      throw error
+    }
+    if (!isPathWithinRoot(path, workspaceRoot)) {
+      return { code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' }
+    }
+    if (!(await stat(path)).isFile()) {
+      return { code: 'ARTIFACT_REFERENCE_MISSING' }
+    }
+  }
+  return null
 }
 
 function normalizeRequestedPaths(paths: string[]): string[] {

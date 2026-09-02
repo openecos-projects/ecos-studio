@@ -2,7 +2,6 @@ import {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManifestFlowSteps,
-  type DesktopProjectManagementWorkspaceTextsResult,
   type EccEngineeringMetric,
   type EccPersistedEngineeringSnapshot,
   type ProjectManifest,
@@ -29,7 +28,6 @@ const metricIds: Partial<Record<ProjectManifestFlowStep, string[]>> = {
 export interface RepresentativeProjectComparisonFixture {
   manifest: ProjectManifest
   engineeringSnapshots: Record<string, EccPersistedEngineeringSnapshot>
-  workspaceTexts: Record<string, DesktopProjectManagementWorkspaceTextsResult>
 }
 
 export function representativeProjectComparisonFixture(
@@ -79,12 +77,6 @@ export function representativeProjectComparisonFixture(
         engineeringSnapshot(`engineering-gcd-${index + 1}`, index === 0 ? 72 : 84),
       ]),
     ),
-    workspaceTexts: Object.fromEntries(
-      workspaceIds.map((workspaceId, index) => [
-        workspaceId,
-        analysisTexts(index === 0 ? 0 : 1),
-      ]),
-    ),
   }
 }
 
@@ -92,7 +84,7 @@ function engineeringSnapshot(
   workspaceId: string,
   score: number,
 ): EccPersistedEngineeringSnapshot {
-  const texts = analysisTexts(score > 80 ? 1 : 0).texts
+  const texts = analysisTexts(score > 80 ? 1 : 0)
   const artifacts: EccPersistedEngineeringSnapshot['artifacts'] = []
   const analysisFile = (stepId: string, kind: string, reference: string) => {
     const text = texts[reference]!
@@ -159,8 +151,8 @@ function engineeringSnapshot(
   }
 }
 
-function analysisTexts(candidate: number): DesktopProjectManagementWorkspaceTextsResult {
-  const texts: Record<string, string | null> = {}
+function analysisTexts(candidate: number): Record<string, string> {
+  const texts: Record<string, string> = {}
   for (const [stepIndex, spec] of projectManagementWorkspaceStepAnalysisSpecs.entries()) {
     texts[spec.metricsPath] = JSON.stringify({
       schema_version: 3,
@@ -235,7 +227,7 @@ function analysisTexts(candidate: number): DesktopProjectManagementWorkspaceText
       },
     ],
   })
-  return { texts, unavailablePaths: [] }
+  return texts
 }
 
 function stepMetrics(

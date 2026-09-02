@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   projectManifestFlowSteps,
+  validateEngineeringSnapshot,
   type EccEngineeringSnapshot,
   type ProjectManifest,
 } from '@ecos-studio/shared'
+import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
 import { electronLogger } from './logger'
 import { representativeProjectComparisonFixture } from './backendProjectComparison.fixture'
 import { BackendProjectComparisonService } from './backendProjectComparisonService'
@@ -107,29 +109,31 @@ function engineeringSnapshot(
   }
 }
 
+function snapshotResult(
+  snapshot: EccEngineeringSnapshot,
+): ProjectEngineeringSnapshotReadResult {
+  const validated = validateEngineeringSnapshot(snapshot)
+  if (!validated.ok) throw new Error(validated.issue.code)
+  return { ...validated, readBytes: Buffer.byteLength(JSON.stringify(snapshot)) }
+}
+
 function serviceFixture() {
   const project = manifest()
   const readManifest = vi.fn().mockResolvedValue(JSON.stringify(project))
-  const readWorkspaceTexts = vi.fn().mockResolvedValue({
-    texts: {},
-    unavailablePaths: [],
-  })
-  const getByDirectory = vi
+  const readEngineeringSnapshot = vi
     .fn()
-    .mockImplementation(async (workspacePath) => engineeringSnapshot(workspacePath))
+    .mockImplementation(async ({ workspacePath }) =>
+      snapshotResult(engineeringSnapshot(workspacePath)),
+    )
   return {
-    getByDirectory,
     project,
+    readEngineeringSnapshot,
     readManifest,
-    readWorkspaceTexts,
-    service: new BackendProjectComparisonService(
-      {
-        readManifest,
-        readWorkspaceTexts,
-        resolveProjectRoot: async (path) => path,
-      },
-      { getByDirectory },
-    ),
+    service: new BackendProjectComparisonService({
+      readEngineeringSnapshot,
+      readManifest,
+      resolveProjectRoot: async (path) => path,
+    }),
   }
 }
 
@@ -139,23 +143,18 @@ describe('BackendProjectComparisonService', () => {
   it('freezes representative Project Comparison behavior and deterministic read costs', async () => {
     const fixture = representativeProjectComparisonFixture()
     const readManifest = vi.fn().mockResolvedValue(JSON.stringify(fixture.manifest))
-    const readWorkspaceTexts = vi.fn().mockImplementation(async ({ workspacePath }) => {
-      const workspaceId = workspacePath.split('/').at(-1)!
-      return fixture.workspaceTexts[workspaceId]
-    })
-    const getByDirectory = vi.fn().mockImplementation(async (workspacePath) => {
-      const workspaceId = workspacePath.split('/').at(-1)!
-      return fixture.engineeringSnapshots[workspaceId]
-    })
+    const readEngineeringSnapshot = vi
+      .fn()
+      .mockImplementation(async ({ workspacePath }) => {
+        const workspaceId = workspacePath.split('/').at(-1)!
+        return snapshotResult(fixture.engineeringSnapshots[workspaceId]!)
+      })
     const debug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
-    const service = new BackendProjectComparisonService(
-      {
-        readManifest,
-        readWorkspaceTexts,
-        resolveProjectRoot: async (path) => path,
-      },
-      { getByDirectory },
-    )
+    const service = new BackendProjectComparisonService({
+      readEngineeringSnapshot,
+      readManifest,
+      resolveProjectRoot: async (path) => path,
+    })
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/gcd',
     })
@@ -227,13 +226,12 @@ describe('BackendProjectComparisonService', () => {
       metrics: expect.any(Array),
       hotspots: [expect.objectContaining({ metric: 'route_congestion' })],
     })
-    expect(readWorkspaceTexts).toHaveBeenCalledTimes(2)
-    expect(getByDirectory).toHaveBeenCalledTimes(2)
+    expect(readEngineeringSnapshot).toHaveBeenCalledTimes(2)
     expect(debug).toHaveBeenCalledWith(
       '[backend-project-comparison] query metrics',
       expect.objectContaining({
         coalescedRequests: 1,
-        fileCount: 80,
+        fileCount: 2,
         ipcPayloadBytes: expect.any(Number),
         readBytes: expect.any(Number),
         workspaceCount: 2,
@@ -256,7 +254,7 @@ describe('BackendProjectComparisonService', () => {
   })
 
   it('selects an opaque context and coalesces comparison reads in one generation', async () => {
-    const { getByDirectory, service, readWorkspaceTexts } = serviceFixture()
+    const { readEngineeringSnapshot, service } = serviceFixture()
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',
     })
@@ -280,13 +278,21 @@ describe('BackendProjectComparisonService', () => {
         left.data.stepComparisons.data.steps,
     ).toEqual(expect.arrayContaining([expect.objectContaining({ stepId: 'Route' })]))
     expect(JSON.stringify(left)).not.toContain('/projects/demo/ws_')
-    expect(readWorkspaceTexts).toHaveBeenCalledTimes(2)
-    expect(getByDirectory).toHaveBeenCalledTimes(2)
+    expect(readEngineeringSnapshot).toHaveBeenCalledTimes(2)
+
+    await expect(
+      service.getComparison(11, selected.projectComparisonContextId),
+    ).resolves.toEqual(left)
+    expect(readEngineeringSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps readable workspaces when one workspace analysis fails', async () => {
-    const { service, readWorkspaceTexts } = serviceFixture()
-    readWorkspaceTexts.mockRejectedValueOnce(new Error('broken workspace'))
+  it('keeps readable workspaces when one Engineering Snapshot is invalid', async () => {
+    const { service, readEngineeringSnapshot } = serviceFixture()
+    readEngineeringSnapshot.mockResolvedValueOnce({
+      ok: false,
+      readBytes: 0,
+      issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' },
+    })
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',
     })
@@ -299,6 +305,37 @@ describe('BackendProjectComparisonService', () => {
         result.data.workspaceSnapshots.status === 'partial' &&
         result.data.workspaceSnapshots.data.items,
     ).toHaveLength(1)
+    expect(result.ok && result.data.workspaceSnapshots.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'ENGINEERING_SNAPSHOT_INVALID' }),
+      ]),
+    )
+  })
+
+  it('rejects a changed Engineering Workspace identity at the same Project locator', async () => {
+    const { service, readEngineeringSnapshot } = serviceFixture()
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+    await service.getComparison(11, selected.projectComparisonContextId)
+    readEngineeringSnapshot.mockImplementation(async ({ workspacePath }) => {
+      const snapshot = engineeringSnapshot(workspacePath)
+      if (workspacePath.endsWith('ws_1')) snapshot.workspaceId = 'replacement-id'
+      return snapshotResult(snapshot)
+    })
+
+    const result = await service.refreshComparison(
+      11,
+      selected.projectComparisonContextId,
+    )
+
+    expect(result.ok && result.data.workspaceSnapshots).toMatchObject({
+      status: 'partial',
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: 'ENGINEERING_WORKSPACE_ID_MISMATCH' }),
+      ]),
+    })
   })
 
   it('rejects a manifest that redirects the selected Project root', async () => {
@@ -311,9 +348,9 @@ describe('BackendProjectComparisonService', () => {
   })
 
   it('preserves an unknown Flow Step as an opaque comparison identity', async () => {
-    const { getByDirectory, service } = serviceFixture()
-    getByDirectory.mockImplementation(async (workspacePath) =>
-      engineeringSnapshot(workspacePath, 'CustomSignoff'),
+    const { readEngineeringSnapshot, service } = serviceFixture()
+    readEngineeringSnapshot.mockImplementation(async ({ workspacePath }) =>
+      snapshotResult(engineeringSnapshot(workspacePath, 'CustomSignoff')),
     )
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',

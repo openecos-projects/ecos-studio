@@ -235,7 +235,7 @@ function workspaceStatus(
   if (values.some((state) => state === 'success' || state === 'reused')) {
     return 'success'
   }
-  return manifestStatus
+  return 'not_started'
 }
 
 export function projectQorInputForWorkspace(

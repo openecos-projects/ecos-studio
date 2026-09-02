@@ -11,13 +11,36 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  ENGINEERING_SNAPSHOT_MAX_BYTES,
   createProjectManifestDraft,
   projectManagementWorkspaceSummaryPaths,
   registerWorkspaceInManifest,
+  type EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
 import { ProjectManagementReadService } from './projectManagementReadService'
 
 const temporaryDirectories: string[] = []
+
+function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
+  return {
+    analysis: { steps: [] },
+    artifacts: [],
+    checklist: {},
+    flow: { steps: [] },
+    metrics: [],
+    parameters: {},
+    qorAssessment: {
+      status: 'unavailable',
+      metrics: [],
+      score: { value: null, threshold: 60, gate: 'unavailable' },
+      steps: [],
+    },
+    schemaVersion: 1,
+    signoffAssessment: { status: 'ready', groups: [], risks: [] },
+    workspaceId: 'engineering-workspace',
+    workspaceRevision: 1,
+  }
+}
 
 async function createProject(): Promise<{ projectRoot: string; workspaceRoot: string }> {
   const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-project-management-read-'))
@@ -202,5 +225,145 @@ describe('ProjectManagementReadService', () => {
         paths: ['config/evil.json'],
       }),
     ).rejects.toThrow('not allowed')
+  })
+
+  it('reads and validates one persisted Engineering Snapshot without a Runtime session', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const text = JSON.stringify(engineeringSnapshot())
+    await writeFile(join(workspaceRoot, 'home', 'engineering-snapshot.json'), text)
+
+    const result = await new ProjectManagementReadService().readEngineeringSnapshot({
+      projectRoot,
+      workspacePath: workspaceRoot,
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      readBytes: Buffer.byteLength(text),
+      sections: {
+        artifacts: { status: 'ready' },
+        flow: { status: 'ready' },
+        qor: { status: 'ready' },
+        signoff: { status: 'ready' },
+      },
+      snapshot: {
+        workspaceId: 'engineering-workspace',
+        workspaceRevision: 1,
+      },
+    })
+  })
+
+  it('returns a stable reason when the Engineering Snapshot is missing', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+
+    await expect(
+      new ProjectManagementReadService().readEngineeringSnapshot({
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      readBytes: 0,
+      issue: { code: 'ENGINEERING_SNAPSHOT_MISSING' },
+    })
+  })
+
+  it('returns a stable reason for an unsupported Engineering Snapshot schema', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    await writeFile(
+      join(workspaceRoot, 'home', 'engineering-snapshot.json'),
+      JSON.stringify({ ...engineeringSnapshot(), schemaVersion: 2 }),
+    )
+
+    await expect(
+      new ProjectManagementReadService().readEngineeringSnapshot({
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      issue: { code: 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED' },
+    })
+  })
+
+  it('rejects a declared Workspace symlink that resolves outside the Project', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const outside = await mkdtemp(join(tmpdir(), 'ecos-project-workspace-outside-'))
+    temporaryDirectories.push(outside)
+    await mkdir(join(outside, 'home'))
+    await writeFile(
+      join(outside, 'home', 'engineering-snapshot.json'),
+      JSON.stringify(engineeringSnapshot()),
+    )
+    await rm(workspaceRoot, { recursive: true })
+    await symlink(outside, workspaceRoot, 'dir')
+
+    await expect(
+      new ProjectManagementReadService().readEngineeringSnapshot({
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      readBytes: 0,
+      issue: { code: 'WORKSPACE_PATH_OUTSIDE_PROJECT' },
+    })
+  })
+
+  it('rejects an oversized Engineering Snapshot before parsing with exact sizes', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    await writeFile(
+      join(workspaceRoot, 'home', 'engineering-snapshot.json'),
+      Buffer.alloc(ENGINEERING_SNAPSHOT_MAX_BYTES + 1),
+    )
+
+    await expect(
+      new ProjectManagementReadService().readEngineeringSnapshot({
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      readBytes: ENGINEERING_SNAPSHOT_MAX_BYTES + 1,
+      issue: {
+        code: 'ENGINEERING_SNAPSHOT_TOO_LARGE',
+        actualSizeBytes: ENGINEERING_SNAPSHOT_MAX_BYTES + 1,
+        allowedSizeBytes: ENGINEERING_SNAPSHOT_MAX_BYTES,
+      },
+    })
+  })
+
+  it('marks an available Artifact reference invalid when its symlink escapes the Workspace', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const outside = join(projectRoot, 'outside.json')
+    const reference = 'sta_ecc/analysis/qor_metrics.json'
+    await writeFile(outside, '{}')
+    await mkdir(join(workspaceRoot, 'sta_ecc', 'analysis'), { recursive: true })
+    await symlink(outside, join(workspaceRoot, reference))
+    const snapshot = engineeringSnapshot()
+    snapshot.artifacts.push({
+      artifactId: 'artifact-metrics',
+      availability: 'available',
+      kind: 'qor_metrics',
+      name: 'qor_metrics.json',
+      reference,
+      sha256: 'a'.repeat(64),
+      sizeBytes: 2,
+      stepId: 'sta',
+    })
+    await writeFile(
+      join(workspaceRoot, 'home', 'engineering-snapshot.json'),
+      JSON.stringify(snapshot),
+    )
+
+    const result = await new ProjectManagementReadService().readEngineeringSnapshot({
+      projectRoot,
+      workspacePath: workspaceRoot,
+    })
+
+    expect(result.ok && result.sections.artifacts).toEqual({
+      status: 'unavailable',
+      issues: [{ code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' }],
+    })
   })
 })
