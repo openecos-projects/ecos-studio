@@ -1950,7 +1950,7 @@ function stepMetricFromSummary(
 function detailHintForStep(step: FlowStep): string {
   const hints: Record<FlowStep, string> = {
     Synth: 'Open workspace Synthesis for cell type and netlist details.',
-    Floor: 'Open workspace Floorplan for geometry, pin and fanout details.',
+    Floor: 'Open workspace Floorplan for geometry and pin details.',
     Place: 'Open workspace Place for density and congestion maps.',
     CTS: 'Open workspace CTS for clock tree and post-CTS congestion.',
     Legal: 'Open workspace Legalization for placement cleanup details.',

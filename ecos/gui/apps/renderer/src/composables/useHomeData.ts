@@ -1130,11 +1130,12 @@ export function useHomeData() {
     name: string,
     tool: string,
   ): string {
-    const directoryStep =
-      tool.trim().toLowerCase() === 'sizer'
-        ? name.trim().split(/\s+/).join('_').toLowerCase()
-        : name
-    return `${rootNorm}/${directoryStep}_${tool}/log/${name}.log`
+    const toolKey = tool.trim().toLowerCase()
+    if (toolKey === 'sizer') {
+      const safeName = name.trim().split(/\s+/).join('_').toLowerCase()
+      return `${rootNorm}/${safeName}_sizer/log/${name}.log`
+    }
+    return `${rootNorm}/${name}_${tool}/log/${name}.log`
   }
 
   /**

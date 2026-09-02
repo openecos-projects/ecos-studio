@@ -6,8 +6,6 @@
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
-        :signoff-package-export-enabled="signoffPackageExportEnabled"
-        :design-report-export-enabled="designReportExportEnabled"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -309,7 +307,6 @@ const zoomSettingKey = 'ui.zoomFactor'
 const {
   loadRecentProjects,
   currentProject,
-  resourceVersions,
   workspaceSession,
   openProject,
   newProject,
@@ -331,18 +328,15 @@ const {
   confirmSignoffPackageExport,
   exportSignoffPackage,
   refreshSignoffPackageReview,
-  signoffPackageExportEnabled,
   signoffPackageReview,
 } = useSignoffPackageExport({
   currentProject,
-  resourceVersions,
   showToast,
   workspaceSession,
 })
 const {
   closeDesignReportExport,
   copyToClipboard: copyDesignReport,
-  designReportExportEnabled,
   dialogVisible: showDesignReportDialog,
   error: designReportError,
   exportAllFormats: exportAllDesignReportFormats,
@@ -366,8 +360,8 @@ function updatePdkNameDialogVisibility(visible: boolean): void {
 }
 
 watch(
-  () => Boolean(currentProject.value?.path),
-  (hasWorkspace) => {
+  () => [Boolean(currentProject.value?.path), isWorkspaceRoute.value] as const,
+  ([hasWorkspace, workspaceRoute]) => {
     void (async () => {
       try {
         const api = desktopApi.value ?? (await waitForDesktopApi({ timeoutMs: 5000 }))
@@ -376,6 +370,11 @@ watch(
           api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
           api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
           api.menu.setActionEnabled(appMenuActionIds.exportDesignMetrics, hasWorkspace),
+          api.menu.setActionEnabled(
+            appMenuActionIds.exportSignoffPackage,
+            workspaceRoute,
+          ),
+          api.menu.setActionEnabled(appMenuActionIds.exportDesignSummary, workspaceRoute),
         ])
       } catch (error) {
         console.warn('[App] Failed to sync workspace menu availability:', error)
@@ -1851,9 +1850,15 @@ const { handleMenuAction } = useAppMenuActions({
   },
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
-  exportSignoffPackage,
-  exportDesignSummary: openDesignReportExport,
-  exportDesignMetrics: openDesignReportExport,
+  exportSignoffPackage: () => {
+    if (isWorkspaceRoute.value) return exportSignoffPackage()
+  },
+  exportDesignSummary: () => {
+    if (isWorkspaceRoute.value) openDesignReportExport()
+  },
+  exportDesignMetrics: () => {
+    if (isWorkspaceRoute.value) openDesignReportExport()
+  },
   manageDesignFiles: openManageDialog,
   adjustZoom,
 })

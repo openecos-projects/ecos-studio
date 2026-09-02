@@ -166,11 +166,12 @@ describe('AgentInteractionCard', () => {
       },
     })
 
-    expect(wrapper.findAll('.interaction-card__parameter-list div').map((row) => row.text())).toEqual([
-      'floorplan.aspect_ratio0.996',
-      'floorplan.die_height53.0',
-    ])
-    expect(wrapper.find('.interaction-card__parameter-summary').text()).not.toContain('| --- |')
+    expect(
+      wrapper.findAll('.interaction-card__parameter-list div').map((row) => row.text()),
+    ).toEqual(['floorplan.aspect_ratio0.996', 'floorplan.die_height53.0'])
+    expect(wrapper.find('.interaction-card__parameter-summary').text()).not.toContain(
+      '| --- |',
+    )
     expect(wrapper.text().split('Parameter changes')).toHaveLength(2)
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
 

@@ -44,9 +44,9 @@ describe('groupMessagesIntoTurns', () => {
     expect(describeInteractionAnswer(parameterForm, { values: { value: '' } })).toBe(
       'Keep current values',
     )
-    expect(describeInteractionAnswer(parameterForm, { values: { value: 'density = 0.4' } })).toBe(
-      'density = 0.4',
-    )
+    expect(
+      describeInteractionAnswer(parameterForm, { values: { value: 'density = 0.4' } }),
+    ).toBe('density = 0.4')
   })
 
   it('anchors each user message as a turn header for following assistant nodes', () => {

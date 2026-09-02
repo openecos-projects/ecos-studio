@@ -1,6 +1,5 @@
 import { computed, onUnmounted, reactive, ref, watch, type Ref } from 'vue'
 import {
-  appMenuActionIds,
   canonicalizeStageName,
   extractDesignReportData,
   generateDesignReport,
@@ -13,7 +12,7 @@ import {
   type DesignReportFormat,
   type WorkspaceResourceIndex,
 } from '@ecos-studio/shared'
-import { getDesktopApi, getOptionalDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import {
   getWorkspaceResourceIndexApi,
   readWorkspaceFlowResourceApi,
@@ -21,7 +20,11 @@ import {
   readWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import {
+  readOptionalProjectTextFile,
+  resolveProjectFilePath,
+  writeProjectTextFile,
+} from '@/utils/projectFiles'
 import { parseDrcStatisCsv } from '@/components/flow-insights/flowInsightsData'
 
 interface WorkspaceProject {
@@ -66,12 +69,15 @@ function formatFileExtension(format: DesignReportFormat): string {
 
 async function readJsonFrom(
   path: string | undefined,
+  projectPath: string,
 ): Promise<Record<string, unknown> | null> {
   if (!path) return null
-  const authorized = await resolveProjectPathAccess(path)
-  const pathToRead = authorized || path
+  const authorized = await resolveProjectPathAccess(
+    resolveProjectFilePath(path, projectPath),
+  )
+  if (!authorized) return null
   try {
-    const text = await readOptionalProjectTextFile(pathToRead)
+    const text = await readOptionalProjectTextFile(authorized)
     if (!text) return null
     return JSON.parse(text) as Record<string, unknown>
   } catch {
@@ -79,12 +85,17 @@ async function readJsonFrom(
   }
 }
 
-async function readOptionalTextFrom(path: string | undefined): Promise<string | null> {
+async function readOptionalTextFrom(
+  path: string | undefined,
+  projectPath: string,
+): Promise<string | null> {
   if (!path) return null
-  const authorized = await resolveProjectPathAccess(path)
-  const pathToRead = authorized || path
+  const authorized = await resolveProjectPathAccess(
+    resolveProjectFilePath(path, projectPath),
+  )
+  if (!authorized) return null
   try {
-    return await readOptionalProjectTextFile(pathToRead)
+    return await readOptionalProjectTextFile(authorized)
   } catch {
     return null
   }
@@ -120,8 +131,6 @@ export function useDesignReportExport({
   const error = ref('')
   const selectedFormat = ref<DesignReportFormat>('latex')
   const reportData = ref<DesignReportData | null>(null)
-  const designReportExportEnabled = ref(false)
-
   const exportOptions = reactive<DesignReportExportOptions>({
     includeMultiCorner: true,
     includeStageBreakdown: true,
@@ -141,27 +150,9 @@ export function useDesignReportExport({
     return generateDesignReport(reportData.value, selectedFormat.value, exportOptions)
   })
 
-  async function setMenuEnabled(enabled: boolean): Promise<void> {
-    designReportExportEnabled.value = enabled
-    try {
-      const api = getOptionalDesktopApi()
-      if (api) {
-        await api.menu.setActionEnabled(appMenuActionIds.exportDesignSummary, enabled)
-      }
-    } catch (err) {
-      console.warn('[design-report-export] Failed to set menu action state:', err)
-    }
-  }
-
-  async function syncMenuEligibility(): Promise<void> {
-    const hasWorkspace = Boolean(currentProject.value?.path)
-    await setMenuEnabled(hasWorkspace)
-  }
-
   watch(
     () => currentProject.value?.path,
     (newPath, oldPath) => {
-      void syncMenuEligibility()
       if (newPath !== oldPath) {
         loadGeneration++
         reportData.value = null
@@ -181,7 +172,6 @@ export function useDesignReportExport({
   onUnmounted(() => {
     unmounted = true
     closeDesignReportExport()
-    void setMenuEnabled(false)
   })
 
   async function loadWorkspaceReportData(): Promise<void> {
@@ -194,6 +184,10 @@ export function useDesignReportExport({
     const generation = ++loadGeneration
     loading.value = true
     error.value = ''
+    const readWorkspaceJson = (path: string | undefined) =>
+      readJsonFrom(path, workspacePath)
+    const readWorkspaceText = (path: string | undefined) =>
+      readOptionalTextFrom(path, workspacePath)
 
     try {
       const api = getDesktopApi()
@@ -225,10 +219,10 @@ export function useDesignReportExport({
         /* ignore */
       }
       if (!flow && resourceIndex?.home.flowJson?.exists) {
-        flow = await readJsonFrom(resourceIndex.home.flowJson.path)
+        flow = await readWorkspaceJson(resourceIndex.home.flowJson.path)
       }
       if (!flow) {
-        flow = await readJsonFrom('home/flow.json')
+        flow = await readWorkspaceJson('home/flow.json')
       }
 
       try {
@@ -240,10 +234,10 @@ export function useDesignReportExport({
         parameters = resourceIndex.parameters
       }
       if (!parameters && resourceIndex?.home.parametersJson?.exists) {
-        parameters = await readJsonFrom(resourceIndex.home.parametersJson.path)
+        parameters = await readWorkspaceJson(resourceIndex.home.parametersJson.path)
       }
       if (!parameters) {
-        parameters = await readJsonFrom('home/parameters.json')
+        parameters = await readWorkspaceJson('home/parameters.json')
       }
 
       try {
@@ -258,9 +252,9 @@ export function useDesignReportExport({
       let pdkJson: Record<string, unknown> | null = null
       try {
         pdkJson =
-          (await readJsonFrom('home/pdk.json')) ||
-          (await readJsonFrom('config/pdk.json')) ||
-          (await readJsonFrom('pdk.json'))
+          (await readWorkspaceJson('home/pdk.json')) ||
+          (await readWorkspaceJson('config/pdk.json')) ||
+          (await readWorkspaceJson('pdk.json'))
       } catch {
         /* ignore */
       }
@@ -311,7 +305,7 @@ export function useDesignReportExport({
 
           // 4.1 Check analysis metrics
           if (resources?.analysis?.metrics?.exists) {
-            const m = await readJsonFrom(resources.analysis.metrics.path)
+            const m = await readWorkspaceJson(resources.analysis.metrics.path)
             if (m) {
               stepMetrics[stepName] = {
                 ...(stepMetrics[stepName] as Record<string, unknown>),
@@ -323,7 +317,7 @@ export function useDesignReportExport({
               }
             }
           } else {
-            const m = await readJsonFrom(`${stepDir}/analysis/qor_metrics.json`)
+            const m = await readWorkspaceJson(`${stepDir}/analysis/qor_metrics.json`)
             if (m) {
               stepMetrics[stepName] = {
                 ...(stepMetrics[stepName] as Record<string, unknown>),
@@ -338,7 +332,7 @@ export function useDesignReportExport({
 
           // 4.2 Check analysis summary
           if (resources?.analysis?.summary?.exists) {
-            const s = await readJsonFrom(resources.analysis.summary.path)
+            const s = await readWorkspaceJson(resources.analysis.summary.path)
             if (s) {
               stepSummaries[stepName] = {
                 ...(stepSummaries[stepName] as Record<string, unknown>),
@@ -350,7 +344,7 @@ export function useDesignReportExport({
               }
             }
           } else {
-            const s = await readJsonFrom(`${stepDir}/analysis/qor_summary.json`)
+            const s = await readWorkspaceJson(`${stepDir}/analysis/qor_summary.json`)
             if (s) {
               stepSummaries[stepName] = {
                 ...(stepSummaries[stepName] as Record<string, unknown>),
@@ -365,7 +359,7 @@ export function useDesignReportExport({
 
           // 4.3 Check feature db (step.db.json)
           if (resources?.feature?.db?.exists) {
-            const db = await readJsonFrom(resources.feature.db.path)
+            const db = await readWorkspaceJson(resources.feature.db.path)
             if (db) {
               stepMetrics[stepName] = {
                 ...(stepMetrics[stepName] as Record<string, unknown>),
@@ -384,7 +378,7 @@ export function useDesignReportExport({
               `${stepDir}/feature/${canonical}.db.json`,
             ]
             for (const cand of dbCandidates) {
-              const db = await readJsonFrom(cand)
+              const db = await readWorkspaceJson(cand)
               if (db) {
                 stepMetrics[stepName] = {
                   ...(stepMetrics[stepName] as Record<string, unknown>),
@@ -402,7 +396,7 @@ export function useDesignReportExport({
           // 4.4 Check feature stat (Synthesis_stat.json)
           const statFile = resources?.feature?.stat ?? resources?.feature?.generic_stat
           if (statFile?.exists) {
-            const stat = await readJsonFrom(statFile.path)
+            const stat = await readWorkspaceJson(statFile.path)
             if (stat) {
               stepMetrics[stepName] = {
                 ...(stepMetrics[stepName] as Record<string, unknown>),
@@ -415,8 +409,8 @@ export function useDesignReportExport({
             }
           } else {
             const stat =
-              (await readJsonFrom(`${stepDir}/feature/Synthesis_stat.json`)) ||
-              (await readJsonFrom(`${stepDir}/report/Synthesis_stat.json`))
+              (await readWorkspaceJson(`${stepDir}/feature/Synthesis_stat.json`)) ||
+              (await readWorkspaceJson(`${stepDir}/report/Synthesis_stat.json`))
             if (stat) {
               stepMetrics[stepName] = {
                 ...(stepMetrics[stepName] as Record<string, unknown>),
@@ -432,14 +426,14 @@ export function useDesignReportExport({
           // 4.5 Check feature step (e.g. sta.step.json, cts.step.json)
           let stepJson: Record<string, unknown> | null = null
           if (resources?.feature?.step?.exists) {
-            stepJson = await readJsonFrom(resources.feature.step.path)
+            stepJson = await readWorkspaceJson(resources.feature.step.path)
           } else {
             stepJson =
-              (await readJsonFrom(`${stepDir}/feature/${stepName}.step.json`)) ||
-              (await readJsonFrom(
+              (await readWorkspaceJson(`${stepDir}/feature/${stepName}.step.json`)) ||
+              (await readWorkspaceJson(
                 `${stepDir}/feature/${canonical.toLowerCase()}.step.json`,
               )) ||
-              (await readJsonFrom(`${stepDir}/feature/step.json`))
+              (await readWorkspaceJson(`${stepDir}/feature/step.json`))
           }
           if (stepJson) {
             stepMetrics[stepName] = {
@@ -454,7 +448,7 @@ export function useDesignReportExport({
 
           // 4.6 Check DRC statis CSV
           if (resources?.analysis?.statis_csv?.exists) {
-            const drcCsv = await readOptionalTextFrom(resources.analysis.statis_csv.path)
+            const drcCsv = await readWorkspaceText(resources.analysis.statis_csv.path)
             if (drcCsv) {
               const parsedDrc = parseDrcStatisCsv(drcCsv)
               if (parsedDrc) {
@@ -467,9 +461,7 @@ export function useDesignReportExport({
               }
             }
           } else if (canonical === 'DRC') {
-            const drcCsv = await readOptionalTextFrom(
-              `${stepDir}/analysis/drc_statis.csv`,
-            )
+            const drcCsv = await readWorkspaceText(`${stepDir}/analysis/drc_statis.csv`)
             if (drcCsv) {
               const parsedDrc = parseDrcStatisCsv(drcCsv)
               if (parsedDrc) {
@@ -485,10 +477,8 @@ export function useDesignReportExport({
 
           // 4.7 Scan for power.rpt and qor_summary.rpt at step level
           const directPowerRpt =
-            (await readOptionalTextFrom(
-              `${stepDir}/data/sta/power_reporter/power.rpt`,
-            )) ||
-            (await readOptionalTextFrom(`${stepDir}/report/post_synthesis/power.rpt`))
+            (await readWorkspaceText(`${stepDir}/data/sta/power_reporter/power.rpt`)) ||
+            (await readWorkspaceText(`${stepDir}/report/post_synthesis/power.rpt`))
           if (directPowerRpt) {
             const parsed = parsePowerRpt(directPowerRpt)
             stepMetrics[stepName] = {
@@ -502,12 +492,10 @@ export function useDesignReportExport({
           }
 
           const directQorRpt =
-            (await readOptionalTextFrom(
+            (await readWorkspaceText(
               `${stepDir}/data/sta/timing_reporter/qor_summary.rpt`,
             )) ||
-            (await readOptionalTextFrom(
-              `${stepDir}/report/post_synthesis/qor_summary.rpt`,
-            ))
+            (await readWorkspaceText(`${stepDir}/report/post_synthesis/qor_summary.rpt`))
           if (directQorRpt) {
             const parsed = parseQorSummaryRpt(directQorRpt)
             stepMetrics[stepName] = {
@@ -525,19 +513,19 @@ export function useDesignReportExport({
 
           await Promise.all(
             COMMON_CORNER_CANDIDATES.map(async (corner) => {
-              const qorJson = await readJsonFrom(
+              const qorJson = await readWorkspaceJson(
                 `${stepDir}/feature/${corner}/qor_summary.json`,
               )
-              const powerJson = await readJsonFrom(
+              const powerJson = await readWorkspaceJson(
                 `${stepDir}/feature/${corner}/power_summary.json`,
               )
-              const pathsJson = await readJsonFrom(
+              const pathsJson = await readWorkspaceJson(
                 `${stepDir}/feature/${corner}/timing_paths.json`,
               )
-              const powerRptText = await readOptionalTextFrom(
+              const powerRptText = await readWorkspaceText(
                 `${stepDir}/report/${corner}/power.rpt`,
               )
-              const qorRptText = await readOptionalTextFrom(
+              const qorRptText = await readWorkspaceText(
                 `${stepDir}/report/${corner}/qor_summary.rpt`,
               )
 
@@ -591,15 +579,15 @@ export function useDesignReportExport({
       await Promise.all(
         projectManagementWorkspaceStepAnalysisSpecs.map(async (spec) => {
           if (!stepMetrics[spec.step]) {
-            const m = await readJsonFrom(spec.metricsPath)
+            const m = await readWorkspaceJson(spec.metricsPath)
             if (m) stepMetrics[spec.step] = m
           }
           if (!stepSummaries[spec.step]) {
-            const s = await readJsonFrom(spec.summaryPath)
+            const s = await readWorkspaceJson(spec.summaryPath)
             if (s) stepSummaries[spec.step] = s
           }
           if (!stepHotspots[spec.step]) {
-            const h = await readJsonFrom(spec.hotspotsPath)
+            const h = await readWorkspaceJson(spec.hotspotsPath)
             if (h) stepHotspots[spec.step] = h
           }
         }),
@@ -607,7 +595,7 @@ export function useDesignReportExport({
 
       // 6. STA timing issues
       let staTimingIssues: Record<string, unknown> | null = null
-      staTimingIssues = await readJsonFrom('sta_ecc/analysis/sta_timing_issues.json')
+      staTimingIssues = await readWorkspaceJson('sta_ecc/analysis/sta_timing_issues.json')
 
       if (unmounted || generation !== loadGeneration) return
 
@@ -769,7 +757,6 @@ export function useDesignReportExport({
     reportData,
     generatedContent,
     exportOptions,
-    designReportExportEnabled,
     openDesignReportExport,
     closeDesignReportExport,
     copyToClipboard,

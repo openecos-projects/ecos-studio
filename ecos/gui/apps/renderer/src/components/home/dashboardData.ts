@@ -185,19 +185,23 @@ export function reconcileFlowChecklistItems<
       states.set(key, state)
     }
   }
-  return items.map((item) => {
-    if (item.category !== 'flow') return item
-    const flowState = flowStepLookupKeys(item)
-      .map((key) => states.get(key)?.toLowerCase())
-      .find((state) => state)
-    if (flowState !== 'success' || item.state === 'pass') return item
-    return {
-      ...item,
-      state: 'pass',
-      blocked: false,
-      summary: FLOW_COMPLETED_SUMMARY,
-    }
-  })
+  return items
+    .filter(
+      (item) => item.category !== 'artifact' || item.step?.trim().toLowerCase() !== 'lvs',
+    )
+    .map((item) => {
+      if (item.category !== 'flow') return item
+      const flowState = flowStepLookupKeys(item)
+        .map((key) => states.get(key)?.toLowerCase())
+        .find((state) => state)
+      if (flowState !== 'success' || item.state === 'pass') return item
+      return {
+        ...item,
+        state: 'pass',
+        blocked: false,
+        summary: FLOW_COMPLETED_SUMMARY,
+      }
+    })
 }
 
 export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
@@ -357,6 +361,11 @@ export function instanceMetricsFromDbFeature(value: unknown): Map<string, number
   const source = record(value)
   const instances = record(source?.Instances)
   const metrics = new Map<string, number>()
+  const layout = record(source?.['Design Layout'])
+  for (const metricId of ['die_area', 'core_area'] as const) {
+    const metricValue = finiteNumber(layout?.[metricId])
+    if (metricValue !== null) metrics.set(metricId, metricValue)
+  }
   const metricKeys: readonly [string, string, 'num' | 'area'][] = [
     ['macro_count', 'macros', 'num'],
     ['macro_area', 'macros', 'area'],
@@ -506,6 +515,7 @@ export function dashboardMetrics(
   }
   return [
     { id: 'die-area', label: 'Die Area', value: findMetric('die_area'), unit: 'um2' },
+    { id: 'core-area', label: 'Core Area', value: findMetric('core_area'), unit: 'um2' },
     {
       id: 'core-utilization',
       label: 'Core Utility',
@@ -582,8 +592,14 @@ export function dashboardMetrics(
     { id: 'hold-tns', label: 'Hold TNS', value: findMetric('sta_hold_tns'), unit: 'ns' },
     {
       id: 'drc',
-      label: 'DRC Number',
+      label: 'DRC Violation Number',
       value: findMetric('drc_count', 'drc_num'),
+      unit: '',
+    },
+    {
+      id: 'lvs',
+      label: 'LVS Violation Number',
+      value: findMetric('lvs_count'),
       unit: '',
     },
   ]

@@ -204,8 +204,12 @@ const confirmInteraction = computed(() =>
 const formInteraction = computed(() =>
   props.interaction.interaction.kind === 'form' ? props.interaction.interaction : null,
 )
-const descriptionTable = computed(() => parseDescriptionTable(props.interaction.description))
-const isParameterForm = computed(() => formInteraction.value !== null && descriptionTable.value !== null)
+const descriptionTable = computed(() =>
+  parseDescriptionTable(props.interaction.description),
+)
+const isParameterForm = computed(
+  () => formInteraction.value !== null && descriptionTable.value !== null,
+)
 const customAnswerIndex = computed(
   () => (choiceInteraction.value?.options.length ?? 0) + 1,
 )
@@ -232,12 +236,16 @@ function parseDescriptionTable(description?: string): {
   if (!description) return null
   const lines = description.split('\n').map((line) => line.trim())
   const tableStart = lines.findIndex((line) => line.startsWith('|') && line.endsWith('|'))
-  if (tableStart < 0 || !/^\|(?:\s*-+\s*\|){2}$/.test(lines[tableStart + 1] ?? '')) return null
+  if (tableStart < 0 || !/^\|(?:\s*-+\s*\|){2}$/.test(lines[tableStart + 1] ?? ''))
+    return null
 
   const rows: { label: string; value: string }[] = []
   let tableEnd = tableStart + 2
   for (; tableEnd < lines.length; tableEnd += 1) {
-    const cells = lines[tableEnd]?.slice(1, -1).split('|').map((cell) => cell.trim())
+    const cells = lines[tableEnd]
+      ?.slice(1, -1)
+      .split('|')
+      .map((cell) => cell.trim())
     if (cells?.length !== 2) break
     rows.push({ label: cells[0], value: cells[1] })
   }
@@ -255,7 +263,9 @@ function submitForm(): void {
 
 function submitWithoutChanges(): void {
   emit('answer', {
-    values: Object.fromEntries((formInteraction.value?.fields ?? []).map((field) => [field.id, ''])),
+    values: Object.fromEntries(
+      (formInteraction.value?.fields ?? []).map((field) => [field.id, '']),
+    ),
   })
 }
 

@@ -579,12 +579,6 @@ const QOR_METRIC_REGISTRY: Record<string, QorMetricDefinition> = {
     dimension: 'routability_physical',
     polarity: 'trend_only',
   },
-  'max fanout': {
-    metricName: 'fanout_max',
-    displayName: 'Max Fanout',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
   hpwl: {
     metricName: 'place_hpwl',
     displayName: 'Place HPWL',
@@ -986,7 +980,6 @@ const METRIC_FAIL_VALUES: Record<string, number> = {
   core_area: 2500,
   core_utilization: 0.85,
   synthesis_cell_area: 3000,
-  fanout_max: 100,
   place_hpwl: 10000,
   place_grwl: 12000,
   place_flute_wirelength: 10000,

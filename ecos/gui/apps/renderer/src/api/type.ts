@@ -246,10 +246,28 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
 
 /**
  * 根据步骤名称获取元数据
- * @param stepName flow.json 中的 step.name
+ * @param stepName flow.json 中的 step.name、路由 path，或侧栏显示 label
  */
 export function getStepMetadata(stepName: string): StepMetadata | undefined {
-  return STEP_METADATA[stepName.toLowerCase()]
+  const key = stepName.trim().toLowerCase()
+  if (!key) return undefined
+  return (
+    STEP_METADATA[key] ??
+    Object.values(STEP_METADATA).find(
+      (meta) => meta.label.toLowerCase() === key || meta.path.toLowerCase() === key,
+    )
+  )
+}
+
+/** True when both names refer to the same flow step, including display labels. */
+export function sameFlowStepName(left: string, right: string): boolean {
+  const a = left.trim().toLowerCase()
+  const b = right.trim().toLowerCase()
+  if (!a || !b) return false
+  if (a === b) return true
+  const leftMeta = getStepMetadata(left)
+  const rightMeta = getStepMetadata(right)
+  return Boolean(leftMeta && rightMeta && leftMeta.path === rightMeta.path)
 }
 
 const STEP_TOOL_LABELS: Record<string, string> = {
@@ -257,6 +275,7 @@ const STEP_TOOL_LABELS: Record<string, string> = {
   dreamplace: 'DreamPlace',
   yosys: 'Yosys',
   klayout: 'KLayout',
+  sizer: 'Sizer',
 }
 
 /** Display name for a flow step tool from flow.json. */

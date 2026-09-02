@@ -206,6 +206,84 @@ describe('WorkspaceResourceService', () => {
     expect(index.flow.steps[0].resources.config).toEqual({})
   })
 
+  it('indexes sizer layout, geometry, and analysis like other physical steps', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'Timing optimization', tool: 'sizer', state: 'Success' },
+    ])
+    const stepDirectory = join(root, 'timing_optimization_sizer')
+    const outputDirectory = join(stepDirectory, 'output')
+    await mkdir(join(outputDirectory, 'gcd_Timing optimization_db'), { recursive: true })
+    await mkdir(join(outputDirectory, 'geometry'), { recursive: true })
+    await mkdir(join(stepDirectory, 'feature'), { recursive: true })
+    await mkdir(join(stepDirectory, 'analysis'), { recursive: true })
+    await writeFile(join(outputDirectory, 'gcd_timing_optimization.def.gz'), 'def')
+    await writeFile(join(outputDirectory, 'gcd_timing_optimization.v.gz'), 'verilog')
+    await writeFile(join(outputDirectory, 'gcd_Timing optimization.gds'), 'gds')
+    await writeFile(join(outputDirectory, 'gcd_Timing optimization.png'), 'png')
+    await writeFile(join(outputDirectory, 'geometry', 'geometry.manifest'), 'manifest')
+    await writeJson(join(stepDirectory, 'feature', 'Timing optimization.db.json'), {
+      'Design Layout': { die_area: 1 },
+    })
+    await writeJson(join(stepDirectory, 'analysis', 'qor_metrics.json'), { metrics: [] })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const step = index.flow.steps[0]
+
+    expect(step.resources.output.image).toMatchObject({
+      path: join(outputDirectory, 'gcd_Timing optimization.png'),
+      exists: true,
+      kind: 'layout-image',
+    })
+    expect(step.resources.output.def).toMatchObject({
+      path: join(outputDirectory, 'gcd_timing_optimization.def.gz'),
+      exists: true,
+    })
+    expect(step.resources.output.verilog).toMatchObject({
+      path: join(outputDirectory, 'gcd_timing_optimization.v.gz'),
+      exists: true,
+    })
+    expect(step.resources.output.geometryManifest).toMatchObject({
+      path: join(outputDirectory, 'geometry', 'geometry.manifest'),
+      exists: true,
+    })
+    expect(step.resources.feature.db).toMatchObject({
+      path: join(stepDirectory, 'feature', 'Timing optimization.db.json'),
+      exists: true,
+    })
+    expect(step.resources.analysis.metrics).toMatchObject({
+      path: join(stepDirectory, 'analysis', 'qor_metrics.json'),
+      exists: true,
+    })
+
+    await expect(
+      service.resolveStepInfo({ step: 'Timing optimization', id: 'layout' }),
+    ).resolves.toMatchObject({
+      step: 'Timing optimization',
+      id: 'layout',
+      response: 'available',
+      info: {
+        image: join(outputDirectory, 'gcd_Timing optimization.png'),
+        gds: join(outputDirectory, 'gcd_Timing optimization.gds'),
+        def: join(outputDirectory, 'gcd_timing_optimization.def.gz'),
+        geometryManifest: join(outputDirectory, 'geometry', 'geometry.manifest'),
+      },
+      missing: [],
+    })
+    await expect(
+      service.resolveStepInfo({ step: 'Timing optimization', id: 'analysis' }),
+    ).resolves.toMatchObject({
+      step: 'Timing optimization',
+      id: 'analysis',
+      info: {
+        metrics: join(stepDirectory, 'analysis', 'qor_metrics.json'),
+        'data summary': join(stepDirectory, 'feature', 'Timing optimization.db.json'),
+        'step feature': join(stepDirectory, 'feature', 'Timing optimization.step.json'),
+      },
+    })
+  })
+
   it('exposes workspace-level view package tech resources from the design view directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])

@@ -18,6 +18,7 @@ import {
 } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { writeJsonAtomic } from './pdkInventoryMigration'
 import { ResourceManagerService } from './resourceManagerService'
 
 const tempDirectories: string[] = []
@@ -392,6 +393,20 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   ])
 }
 
+async function isProcessRunning(pid: number): Promise<boolean> {
+  try {
+    if (process.platform === 'linux') {
+      const processStat = await readFile(`/proc/${pid}/stat`, 'utf8')
+      const commandEnd = processStat.lastIndexOf(')')
+      return commandEnd < 0 || processStat.slice(commandEnd + 2, commandEnd + 3) !== 'Z'
+    }
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function testRegistryCachePath(cacheDir: string, registryUrl: string): string {
   const key = createHash('sha256').update(registryUrl).digest('hex').slice(0, 12)
   return join(cacheDir, `resource-registry-${key}.json`)
@@ -433,7 +448,7 @@ async function writeYosysRegistry(
   options: {
     platforms?: Record<string, unknown>
     sha256?: string
-    size?: number
+    size?: number | null
     url?: string
     version?: string
     stripPrefix?: string
@@ -458,7 +473,7 @@ async function writeYosysRegistry(
                 'all-platform': {
                   url: options.url ?? 'file:///tmp/yosys.tar',
                   sha256: options.sha256 ?? 'managed-sha',
-                  size: options.size ?? 12,
+                  size: options.size === undefined ? 12 : options.size,
                   strip_prefix: options.stripPrefix,
                 },
               },
@@ -3142,6 +3157,169 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it.each(['tool:ecc-fe', 'tool:ecc-fe-soc-ysyx-am'])(
+    'cancels the whole install chain from the %s resource row',
+    async (cancelResourceId) => {
+      const root = await createTempDir('ecos-resources-')
+      const registryPath = join(root, 'registry.json')
+      await writeFile(
+        registryPath,
+        JSON.stringify({
+          schema_version: 2,
+          tools: [
+            {
+              name: 'ecc-fe',
+              display_name: 'Parent Tool',
+              description: 'Depends on another tool',
+              category: 'frontend',
+              homepage: '',
+              versions: [
+                {
+                  version: '1.0.0',
+                  platforms: {
+                    'all-platform': {
+                      url: 'https://example.com/ecc-fe.tar',
+                      sha256: 'parent-sha',
+                      size: 9,
+                    },
+                  },
+                  requires: ['tool:ecc-fe-soc-ysyx-am'],
+                },
+              ],
+            },
+            {
+              name: 'ecc-fe-soc-ysyx-am',
+              display_name: 'Dependency Tool',
+              description: 'Blocking dependency download',
+              category: 'frontend',
+              homepage: '',
+              versions: [
+                {
+                  version: '1.0.0',
+                  platforms: {
+                    'all-platform': {
+                      url: 'https://example.com/ecc-fe-soc-ysyx-am.tar',
+                      sha256: 'dependency-sha',
+                      size: 9,
+                    },
+                  },
+                  requires: [],
+                },
+              ],
+            },
+          ],
+          pdks: [],
+        }),
+        'utf8',
+      )
+      let downloadController: ReadableStreamDefaultController<Uint8Array> | null = null
+      let dependencyStarted = false
+      const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe('https://example.com/ecc-fe-soc-ysyx-am.tar')
+        init?.signal?.addEventListener('abort', () => {
+          downloadController?.error(
+            new DOMException('The operation was aborted.', 'AbortError'),
+          )
+        })
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              dependencyStarted = true
+              downloadController = controller
+              controller.enqueue(new Uint8Array([1, 2, 3]))
+            },
+          }),
+          { status: 200 },
+        )
+      }) as typeof fetch
+      const service = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        resourcesDir: join(root, 'state', 'resources'),
+        toolsDir: join(root, 'data', 'tools'),
+        pdksDir: join(root, 'data', 'pdks'),
+        fetchImpl,
+      })
+      const progress = vi.fn()
+
+      const install = service.installResource('tool:ecc-fe', '1.0.0', progress)
+      await vi.waitFor(() => {
+        expect(dependencyStarted).toBe(true)
+      })
+
+      await expect(service.cancelResource(cancelResourceId)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: cancelResourceId,
+      })
+      await expect(install).rejects.toThrow('Cancelled installation for tool:ecc-fe')
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe-soc-ysyx-am',
+          phase: 'cancelled',
+        }),
+      )
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          phase: 'cancelled',
+          message: 'Cancelled installation for tool:ecc-fe',
+        }),
+      )
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      await expect(service.cancelResource(cancelResourceId)).rejects.toThrow(
+        `No active job for ${cancelResourceId}`,
+      )
+    },
+  )
+
+  it('aborts a pending registry request before cancellation completes', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryStarted = deferred()
+    let registrySignal: AbortSignal | null = null
+    const fetchImpl = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        registrySignal = init?.signal ?? null
+        registryStarted.resolve()
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('The operation was aborted.', 'AbortError')),
+            { once: true },
+          )
+        })
+      },
+    ) as typeof fetch
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      cacheDir: join(root, 'cache'),
+      fetchImpl,
+      pdksDir: join(root, 'data', 'pdks'),
+      registryUrl: 'https://example.com/registry.json',
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+    })
+
+    const install = service.installResource('tool:yosys', undefined, progress)
+    const installResult = install.catch((error: unknown) => error)
+    await withTimeout(registryStarted.promise, 2000)
+
+    await expect(
+      withTimeout(service.cancelResource('tool:yosys'), 2000),
+    ).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    expect(registrySignal).toMatchObject({ aborted: true })
+    await expect(installResult).resolves.toMatchObject({
+      message: 'Cancelled installation for tool:yosys',
+    })
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_id: 'tool:yosys',
+        phase: 'cancelled',
+      }),
+    )
+  })
+
   it('satisfies registry dependencies from a Ready managed PDK Installation', async () => {
     const root = await createTempDir('ecos-resources-')
     const dirs = testResourceDirs(root)
@@ -3598,6 +3776,304 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('marks a versioned PDK dependency operation as installing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const pdkArchive = await createPdkArchive(root)
+    const toolArchive = await createFixtureArchive(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'parent',
+            display_name: 'Parent Tool',
+            description: 'Installs a PDK dependency.',
+            category: 'test',
+            homepage: '',
+            versions: [
+              {
+                version: '1.0.0',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${toolArchive.path}`,
+                    sha256: toolArchive.sha256,
+                    size: toolArchive.size,
+                  },
+                },
+                requires: ['pdk:ics55'],
+              },
+            ],
+          },
+        ],
+        pdks: [
+          {
+            id: 'ics55',
+            display_name: 'ICsprout 55nm PDK',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${pdkArchive.path}`,
+                    sha256: pdkArchive.sha256,
+                    size: pdkArchive.size,
+                    strip_prefix: 'icsprout55-pdk-1.10.100',
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const extractStarted = deferred()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, _destination, _stripPrefix, signal) => {
+        extractStarted.resolve()
+        await new Promise<void>((_resolve, reject) => {
+          const abort = (): void =>
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          signal?.addEventListener('abort', abort, { once: true })
+          if (signal?.aborted) abort()
+        })
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    const install = service.installResource('tool:parent', '1.0.0')
+    const installResult = install.catch((error: unknown) => error)
+    await withTimeout(extractStarted.promise, 2000)
+
+    await expect(service.getResource('pdk:ics55')).resolves.toMatchObject({
+      status: 'installing',
+      actions: [],
+    })
+    await expect(service.cancelResource('tool:parent')).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:parent',
+    })
+    await expect(installResult).resolves.toMatchObject({
+      message: 'Cancelled installation for tool:parent',
+    })
+  })
+
+  it('keeps a shared dependency running when one concurrent root is cancelled', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const socArchive = await createEccFeSocArchive(root)
+    const cpuRtlArchive = await createEccFeCpuRtlArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    await mkdir(join(toolsDir, 'ecc-fe', 'latest'), { recursive: true })
+    await mkdir(join(toolsDir, 'ecc-fe-soc-ysyx-am', 'latest'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'ecc-fe',
+            display_name: 'ECC-FE Frontend Flow',
+            description: 'Frontend flow runtime CLI',
+            category: 'frontend',
+            homepage: 'https://github.com/openecos-projects/ecc-fe',
+            versions: [
+              {
+                version: 'latest',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${archive.path}`,
+                    sha256: archive.sha256,
+                    size: archive.size,
+                    strip_prefix: 'ecc-fe-runtime',
+                  },
+                },
+                requires: ['tool:ecc-fe-cpu-rtl'],
+              },
+            ],
+          },
+          {
+            name: 'ecc-fe-soc-ysyx-am',
+            display_name: 'ECC-FE YSYX AM SoC Harness',
+            description: 'Frontend SoC harness resource',
+            category: 'frontend',
+            homepage: 'https://github.com/openecos-projects/ecc-fe',
+            versions: [
+              {
+                version: 'latest',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${socArchive.path}`,
+                    sha256: socArchive.sha256,
+                    size: socArchive.size,
+                    strip_prefix: 'ecc-fe-soc-ysyx-am',
+                  },
+                },
+                requires: ['tool:ecc-fe-cpu-rtl'],
+              },
+            ],
+          },
+          {
+            name: 'ecc-fe-cpu-rtl',
+            display_name: 'ECC-FE CPU RTL Resources',
+            description: 'Frontend CPU RTL resource bundle',
+            category: 'frontend',
+            homepage: 'https://github.com/openecos-projects/ecc-fe',
+            versions: [
+              {
+                version: 'latest',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${cpuRtlArchive.path}`,
+                    sha256: cpuRtlArchive.sha256,
+                    size: cpuRtlArchive.size,
+                    strip_prefix: 'ecc-fe-cpu-rtl',
+                  },
+                },
+                requires: [],
+              },
+            ],
+          },
+        ],
+        pdks: [],
+      }),
+      'utf8',
+    )
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
+    await createInstalledEccFeSocRoot(join(toolsDir, 'ecc-fe-soc-ysyx-am', 'latest'))
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:ecc-fe': {
+            type: 'tool',
+            name: 'ecc-fe',
+            version: 'latest',
+            path: join(toolsDir, 'ecc-fe', 'latest'),
+            installed_at: '2026-06-30T00:00:00Z',
+            sha256: 'old-ecc-fe-sha',
+            executable: 'bin/ecc-fe',
+            detected_executables: ['bin/ecc-fe'],
+            active: true,
+            managed: true,
+          },
+          'tool:ecc-fe-soc-ysyx-am': {
+            type: 'tool',
+            name: 'ecc-fe-soc-ysyx-am',
+            version: 'latest',
+            path: join(toolsDir, 'ecc-fe-soc-ysyx-am', 'latest'),
+            installed_at: '2026-06-30T00:00:00Z',
+            sha256: 'old-ecc-fe-soc-sha',
+            executable: '',
+            detected_executables: [],
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+
+    const cpuExtractStarted = deferred()
+    const releaseCpuExtract = deferred()
+    const waitedForCpuJob = deferred()
+    const extract = vi.fn(async (archivePath: string, destination: string) => {
+      if (archivePath.includes('ecc-fe-cpu-rtl-latest')) {
+        cpuExtractStarted.resolve()
+        await releaseCpuExtract.promise
+        await createInstalledEccFeCpuRtlRoot(destination)
+        return
+      }
+      if (archivePath.includes('ecc-fe-soc-ysyx-am-latest')) {
+        await createInstalledEccFeSocRoot(destination)
+        return
+      }
+      if (archivePath.includes('ecc-fe-latest')) {
+        await createInstalledEccFeRoot(destination)
+        return
+      }
+      throw new Error(`unexpected archive ${archivePath}`)
+    })
+    const verifySha256 = vi.fn(async () => true)
+    const progress = vi.fn((event: { resource_id: string; phase: string }) => {
+      if (
+        event.resource_id === 'tool:ecc-fe-cpu-rtl' &&
+        event.phase === 'waiting_for_active_job'
+      ) {
+        waitedForCpuJob.resolve()
+      }
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+      archiveExtractor: extract,
+      sha256Verifier: verifySha256,
+    })
+
+    const firstUpdate = service.updateResource('tool:ecc-fe', progress)
+    const firstResult = firstUpdate.catch((error: unknown) => error)
+    await withTimeout(cpuExtractStarted.promise, 2000)
+    const secondUpdate = service.updateResource('tool:ecc-fe-soc-ysyx-am', progress)
+
+    await withTimeout(waitedForCpuJob.promise, 2000)
+    await expect(service.cancelResource('tool:ecc-fe')).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:ecc-fe',
+    })
+    await expect(firstResult).resolves.toMatchObject({
+      message: 'Cancelled installation for tool:ecc-fe',
+    })
+
+    releaseCpuExtract.resolve()
+    await expect(secondUpdate).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:ecc-fe-soc-ysyx-am',
+      version: 'latest',
+    })
+
+    const cpuExtractCalls = extract.mock.calls.filter(([archivePath]) => {
+      return archivePath.includes('ecc-fe-cpu-rtl-latest')
+    })
+    expect(cpuExtractCalls).toHaveLength(1)
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource_id: 'tool:ecc-fe-cpu-rtl',
+        phase: 'waiting_for_active_job',
+      }),
+    )
+    const manifest = JSON.parse(
+      await readFile(join(resourcesDir, 'manifest.json'), 'utf8'),
+    ) as {
+      installed: Record<
+        string,
+        { version?: string; sha256?: string; detected_executables?: string[] }
+      >
+    }
+    expect(manifest.installed['tool:ecc-fe']).toMatchObject({
+      version: 'latest',
+      sha256: 'old-ecc-fe-sha',
+    })
+    expect(manifest.installed['tool:ecc-fe-soc-ysyx-am']).toMatchObject({
+      version: 'latest',
+      sha256: socArchive.sha256,
+    })
+    expect(manifest.installed['tool:ecc-fe-cpu-rtl']).toMatchObject({
+      version: 'latest',
+      sha256: cpuRtlArchive.sha256,
+      detected_executables: [],
+    })
+  })
+
   it('does not fetch rolling release sidecars while listing resources', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
@@ -4026,7 +4502,11 @@ describe('ResourceManagerService', () => {
       sha256: registrySha,
       size: archive.size,
     })
-    expect(verifySha256).toHaveBeenCalledWith(expect.any(String), registrySha)
+    expect(verifySha256).toHaveBeenCalledWith(
+      expect.any(String),
+      registrySha,
+      expect.any(AbortSignal),
+    )
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
@@ -4556,6 +5036,764 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('stops copying a local archive before cancellation completes', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archivePath = join(root, 'large-yosys.tar')
+    const archiveSize = 4 * 1024 * 1024
+    await writeFile(archivePath, Buffer.alloc(archiveSize, 1))
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archivePath}`,
+      sha256: 'fixture-sha',
+      size: archiveSize,
+    })
+    const extract = vi.fn(async () => undefined)
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string; progress: number }) => {
+      if (
+        event.phase === 'downloading' &&
+        event.progress > 0 &&
+        event.progress < 1 &&
+        !cancellation
+      ) {
+        cancellation = service.cancelResource('tool:yosys')
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: extract,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    const installResult = service
+      .installResource('tool:yosys', undefined, progress)
+      .catch((error: unknown) => error)
+    await vi.waitFor(() => expect(cancellation).toBeDefined())
+
+    await expect(cancellation).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    await expect(installResult).resolves.toMatchObject({
+      message: 'Cancelled download for tool:yosys',
+    })
+    expect(extract).not.toHaveBeenCalled()
+  })
+
+  it('passes cancellation to checksum verification and waits for it to stop', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const verifierStarted = deferred()
+    const verifierStopped = deferred()
+    const verifySha256 = vi.fn(
+      async (_filePath: string, _expected: string, signal?: AbortSignal) => {
+        verifierStarted.resolve()
+        await new Promise<void>((_resolve, reject) => {
+          const abort = (): void => {
+            verifierStopped.resolve()
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          }
+          if (signal?.aborted) {
+            abort()
+            return
+          }
+          signal?.addEventListener('abort', abort, { once: true })
+        })
+        return true
+      },
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      sha256Verifier: verifySha256,
+    })
+
+    const installResult = service
+      .installResource('tool:yosys')
+      .catch((error: unknown) => error)
+    await withTimeout(verifierStarted.promise, 2000)
+    const cancellation = service.cancelResource('tool:yosys')
+
+    await withTimeout(verifierStopped.promise, 2000)
+    await expect(cancellation).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    await expect(installResult).resolves.toMatchObject({
+      message: 'Cancelled download for tool:yosys',
+    })
+    expect(verifySha256).toHaveBeenCalledWith(
+      expect.any(String),
+      archive.sha256,
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('rolls back a tool install cancelled during its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      manifestWriter: async (path, content) => {
+        commitStarted.resolve()
+        await allowCommit.promise
+        await writeFile(path, content, 'utf8')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('tool:yosys', undefined, progress)
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('tool:yosys').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      expect(cancellationCompleted).toBe(false)
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'tool:yosys',
+      })
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'Cancelled download for tool:yosys',
+      })
+      await expect(
+        stat(join(root, 'data', 'tools', 'yosys', '2026-05-13')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+        status: 'available',
+      })
+      expect(progress).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'done' }),
+      )
+      expect(progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phase: 'cancelled' }),
+      )
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('preserves tool files when a cancelled manifest cannot be restored', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    let manifestWriteCount = 0
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      manifestWriter: async (path, content) => {
+        manifestWriteCount += 1
+        if (manifestWriteCount === 1) {
+          commitStarted.resolve()
+          await allowCommit.promise
+          await writeFile(path, content, 'utf8')
+          return
+        }
+        throw new Error('manifest restore failed')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('tool:yosys')
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+    const cancellation = service.cancelResource('tool:yosys')
+
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).rejects.toThrow(
+        'Resource installation was cancelled but its manifest could not be restored',
+      )
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message:
+          'Resource installation was cancelled but its manifest could not be restored',
+      })
+      await expect(
+        stat(join(root, 'data', 'tools', 'yosys', '2026-05-13')),
+      ).resolves.toMatchObject({})
+      await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+        status: 'installed',
+        installed_version: '2026-05-13',
+      })
+      expect(manifestWriteCount).toBe(2)
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('rolls back an MPC install cancelled during its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeMpcRegistry(registryPath, archive)
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir: join(root, 'data', 'mpcs'),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await mkdir(join(destination, 'spec'), { recursive: true })
+        await writeFile(join(destination, 'FrameTop.sv'), 'module FrameTop; endmodule\n')
+        await writeFile(
+          join(destination, 'spec', 'spec.json.in'),
+          JSON.stringify({ designs: [{ core_template: { name: 'frame' } }] }),
+        )
+      },
+      manifestWriter: async (path, content) => {
+        commitStarted.resolve()
+        await allowCommit.promise
+        await writeFile(path, content, 'utf8')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('mpc:mpc-frame', undefined, progress)
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('mpc:mpc-frame').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      expect(cancellationCompleted).toBe(false)
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'mpc:mpc-frame',
+      })
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'Cancelled download for mpc:mpc-frame',
+      })
+      await expect(
+        stat(join(root, 'data', 'mpcs', 'mpc-frame', '0.1.0')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+        status: 'available',
+      })
+      expect(progress).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'done' }),
+      )
+      expect(progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phase: 'cancelled' }),
+      )
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('rolls back a PDK install cancelled during its inventory commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createPdkArchive(root)
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
+          recursive: true,
+        })
+      },
+      pdkInventoryWriter: async (path, value) => {
+        commitStarted.resolve()
+        await allowCommit.promise
+        await writeJsonAtomic(path, value)
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('pdk:ics55', '1.10.100', progress)
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('pdk:ics55').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      expect(cancellationCompleted).toBe(false)
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'pdk:ics55',
+      })
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'Cancelled download for pdk:ics55',
+      })
+      await expect(
+        stat(join(root, 'data', 'pdks', 'ics55', '1.10.100')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(service.getPdkInventoryService().listInstallations()).resolves.toEqual(
+        [],
+      )
+      expect(progress).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: 'done' }),
+      )
+      expect(progress).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phase: 'cancelled' }),
+      )
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('does not cancel a tool install after its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !cancellation) {
+        cancellation = service
+          .cancelResource('tool:yosys')
+          .catch((error: unknown) => error)
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination) => {
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(
+      service.installResource('tool:yosys', undefined, progress),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+    expect(cancellation).toBeDefined()
+    await expect(cancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for tool:yosys',
+    })
+    await expect(
+      stat(join(root, 'data', 'tools', 'yosys', '2026-05-13')),
+    ).resolves.toMatchObject({})
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'installed',
+      installed_version: '2026-05-13',
+    })
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'done' }))
+    expect(progress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'cancelled' }),
+    )
+  })
+
+  it('does not cancel an MPC install after its manifest commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeMpcRegistry(registryPath, archive)
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !cancellation) {
+        cancellation = service
+          .cancelResource('mpc:mpc-frame')
+          .catch((error: unknown) => error)
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      mpcsDir: join(root, 'data', 'mpcs'),
+      archiveExtractor: async (_archivePath, destination) => {
+        await mkdir(join(destination, 'spec'), { recursive: true })
+        await writeFile(join(destination, 'FrameTop.sv'), 'module FrameTop; endmodule\n')
+        await writeFile(
+          join(destination, 'spec', 'spec.json.in'),
+          JSON.stringify({ designs: [{ core_template: { name: 'frame' } }] }),
+        )
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(
+      service.installResource('mpc:mpc-frame', undefined, progress),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'mpc:mpc-frame',
+      version: '0.1.0',
+    })
+    expect(cancellation).toBeDefined()
+    await expect(cancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for mpc:mpc-frame',
+    })
+    await expect(
+      stat(join(root, 'data', 'mpcs', 'mpc-frame', '0.1.0')),
+    ).resolves.toMatchObject({})
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'installed',
+      installed_version: '0.1.0',
+    })
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'done' }))
+    expect(progress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'cancelled' }),
+    )
+  })
+
+  it('does not cancel a PDK install after its inventory commit', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createPdkArchive(root)
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    let cancellation: Promise<unknown> | undefined
+    let service!: ResourceManagerService
+    const progress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !cancellation) {
+        cancellation = service
+          .cancelResource('pdk:ics55')
+          .catch((error: unknown) => error)
+      }
+    })
+    service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination) => {
+        await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
+          recursive: true,
+        })
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(
+      service.installResource('pdk:ics55', '1.10.100', progress),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'pdk:ics55',
+      version: '1.10.100',
+    })
+    expect(cancellation).toBeDefined()
+    await expect(cancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for pdk:ics55',
+    })
+    await expect(
+      stat(join(root, 'data', 'pdks', 'ics55', '1.10.100')),
+    ).resolves.toMatchObject({})
+    await expect(service.getPdkInventoryService().listInstallations()).resolves.toEqual([
+      expect.objectContaining({
+        familyId: 'ics55',
+        readiness: 'ready',
+        version: '1.10.100',
+      }),
+    ])
+
+    let repeatCancellation: Promise<unknown> | undefined
+    const repeatProgress = vi.fn((event: { phase: string }) => {
+      if (event.phase === 'done' && !repeatCancellation) {
+        repeatCancellation = service
+          .cancelResource('pdk:ics55')
+          .catch((error: unknown) => error)
+      }
+    })
+    await expect(service.updateResource('pdk:ics55', repeatProgress)).resolves.toEqual({
+      status: 'started',
+      resource_id: 'pdk:ics55',
+      version: '1.10.100',
+    })
+    await expect(repeatCancellation).resolves.toMatchObject({
+      message: 'Resource installation has already committed for pdk:ics55',
+    })
+    expect(repeatProgress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: 'ics55 v1.10.100 is already installed',
+        phase: 'done',
+      }),
+    )
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'done' }))
+    expect(progress).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'cancelled' }),
+    )
+  })
+
+  it('preserves PDK files when a cancelled inventory cannot be restored', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createPdkArchive(root)
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const commitStarted = deferred()
+    const allowCommit = deferred()
+    let operationSignal: AbortSignal | undefined
+    let inventoryWriteCount = 0
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archivePath, destination, _stripPrefix, signal) => {
+        operationSignal = signal
+        await cp(join(root, 'pdk-source', 'icsprout55-pdk-1.10.100'), destination, {
+          recursive: true,
+        })
+      },
+      pdkInventoryWriter: async (path, value) => {
+        inventoryWriteCount += 1
+        if (inventoryWriteCount === 1) {
+          commitStarted.resolve()
+          await allowCommit.promise
+          await writeJsonAtomic(path, value)
+          return
+        }
+        throw new Error('inventory restore failed')
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const installResult = service
+      .installResource('pdk:ics55', '1.10.100')
+      .catch((error: unknown) => error)
+    await withTimeout(commitStarted.promise, 2000)
+    const cancellation = service.cancelResource('pdk:ics55')
+
+    try {
+      await vi.waitFor(() => expect(operationSignal?.aborted).toBe(true))
+      allowCommit.resolve()
+
+      await expect(withTimeout(cancellation, 2000)).rejects.toThrow(
+        'PDK installation was cancelled but its inventory could not be restored',
+      )
+      await expect(withTimeout(installResult, 2000)).resolves.toMatchObject({
+        message: 'PDK installation was cancelled but its inventory could not be restored',
+      })
+      await expect(
+        stat(join(root, 'data', 'pdks', 'ics55', '1.10.100')),
+      ).resolves.toMatchObject({})
+      await expect(service.getPdkInventoryService().listInstallations()).resolves.toEqual(
+        [
+          expect.objectContaining({
+            familyId: 'ics55',
+            version: '1.10.100',
+            readiness: 'ready',
+          }),
+        ],
+      )
+      expect(inventoryWriteCount).toBe(2)
+    } finally {
+      allowCommit.resolve()
+      await Promise.allSettled([
+        withTimeout(cancellation, 2000),
+        withTimeout(installResult, 2000),
+      ])
+    }
+  })
+
+  it('feeds a recovered archive into download resumption', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const sourceUrl = 'https://example.com/yosys.tar'
+    const payload = Buffer.from('completed archive payload')
+    const sha256 = createHash('sha256').update(payload).digest('hex')
+    await writeYosysRegistry(registryPath, { url: sourceUrl, sha256, size: null })
+    const downloadsDir = join(root, 'state', 'resources', 'downloads')
+    const sourceHash = createHash('sha256').update(sourceUrl).digest('hex').slice(0, 12)
+    const checksumHash = createHash('sha256').update(sha256).digest('hex').slice(0, 16)
+    const interruptedArchive = join(
+      downloadsDir,
+      `tool-yosys-2026-05-13-${sourceHash}-${checksumHash}-11111111-1111-4111-8111-111111111111.tar`,
+    )
+    await mkdir(downloadsDir, { recursive: true })
+    await writeFile(interruptedArchive, payload)
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('range')).toBe(`bytes=${payload.byteLength}-`)
+      return new Response(null, {
+        status: 416,
+        headers: { 'content-range': `bytes */${payload.byteLength}` },
+      })
+    }) as typeof fetch
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (archivePath, destination) => {
+        expect(archivePath).not.toBe(interruptedArchive)
+        await expect(readFile(archivePath)).resolves.toEqual(payload)
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        await writeFile(join(destination, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+        await chmod(join(destination, 'bin', 'yosys'), 0o755)
+      },
+      fetchImpl,
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toMatchObject({
+      status: 'started',
+      resource_id: 'tool:yosys',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await expect(stat(interruptedArchive)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('aborts extraction and waits for extractor cleanup before reporting cancellation', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    await writeMpcRegistry(registryPath, archive)
+    const extractStarted = deferred()
+    const allowExtractorCleanup = deferred()
+    const extractorStopped = deferred()
+    const extract = vi.fn(
+      async (
+        _archivePath: string,
+        _destination: string,
+        _stripPrefix?: string | null,
+        signal?: AbortSignal,
+      ) => {
+        extractStarted.resolve()
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            async () => {
+              await allowExtractorCleanup.promise
+              extractorStopped.resolve()
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      },
+    )
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      archiveExtractor: extract,
+      mpcsDir: join(root, 'data', 'mpcs'),
+      pdksDir: join(root, 'data', 'pdks'),
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      sha256Verifier: vi.fn(async () => true),
+      toolsDir: join(root, 'data', 'tools'),
+    })
+
+    const install = service.installResource('mpc:mpc-frame', undefined, progress)
+    const installResult = install.catch((error: unknown) => error)
+    await withTimeout(extractStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('mpc:mpc-frame').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    await Promise.resolve()
+    expect(cancellationCompleted).toBe(false)
+
+    allowExtractorCleanup.resolve()
+    await withTimeout(extractorStopped.promise, 2000)
+    await expect(cancellation).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'mpc:mpc-frame',
+    })
+    await expect(installResult).resolves.toMatchObject({
+      message: 'Cancelled download for mpc:mpc-frame',
+    })
+    const eventCountAfterCancellation = progress.mock.calls.length
+    await new Promise((resolve) => setTimeout(resolve, 550))
+    expect(progress).toHaveBeenCalledTimes(eventCountAfterCancellation)
+    expect(extract).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.anything(),
+      expect.any(AbortSignal),
+    )
+  })
+
   it('returns cached registry data immediately and refreshes the registry in the background', async () => {
     const root = await createTempDir('ecos-resources-')
     const cacheDir = join(root, 'cache')
@@ -4743,6 +5981,321 @@ describe('ResourceManagerService', () => {
         ownership: 'managed',
       }),
     ])
+  })
+
+  it('shares a PDK install across canonical, managed, and local IDs', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const registryPath = join(root, 'registry.json')
+    await writeIcs55Registry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    const extractStarted = deferred()
+    const releaseExtract = deferred()
+    const sourceDir = join(root, 'pdk-source', 'icsprout55-pdk-1.10.100')
+    const extract = vi.fn(async (_archivePath: string, destination: string) => {
+      extractStarted.resolve()
+      await releaseExtract.promise
+      await cp(sourceDir, destination, { recursive: true })
+    })
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: extract,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    const canonicalInstall = service.installResource('pdk:ics55', '1.10.100')
+    await withTimeout(extractStarted.promise, 2000)
+    const instanceInstall = service.installResource(
+      'pdk:ics55:managed:1.10.100',
+      undefined,
+      progress,
+    )
+    const localInstall = service.installResource(
+      'pdk:ics55:local:fixture',
+      undefined,
+      progress,
+    )
+
+    await vi.waitFor(() => {
+      expect(
+        progress.mock.calls.filter(([event]) => event.phase === 'waiting_for_active_job'),
+      ).toHaveLength(2)
+    })
+    releaseExtract.resolve()
+    await expect(canonicalInstall).resolves.toMatchObject({
+      status: 'started',
+      version: '1.10.100',
+    })
+    await expect(instanceInstall).resolves.toMatchObject({
+      status: 'started',
+      version: '1.10.100',
+    })
+    await expect(localInstall).resolves.toMatchObject({
+      status: 'started',
+      version: '1.10.100',
+    })
+    expect(extract).toHaveBeenCalledTimes(1)
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'waiting_for_active_job' }),
+    )
+  })
+
+  it('shares a latest PDK update started from an older managed ID', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const asset = {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      strip_prefix: 'icsprout55-pdk-1.10.100',
+    }
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'ics55',
+            versions: [
+              { version: '1.10.101', platforms: { 'all-platform': asset } },
+              { version: '1.10.100', platforms: { 'all-platform': asset } },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const extractStarted = deferred()
+    const releaseExtract = deferred()
+    const sourceDir = join(root, 'pdk-source', 'icsprout55-pdk-1.10.100')
+    const extract = vi.fn(async (_archivePath: string, destination: string) => {
+      extractStarted.resolve()
+      await releaseExtract.promise
+      await cp(sourceDir, destination, { recursive: true })
+    })
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: extract,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    const update = service.updateResource('pdk:ics55:managed:1.10.100')
+    const updateResult = update.catch((error: unknown) => error)
+    await withTimeout(extractStarted.promise, 2000)
+    const canonicalInstall = service.installResource('pdk:ics55', undefined, progress)
+    const canonicalResult = canonicalInstall.catch((error: unknown) => error)
+
+    try {
+      await vi.waitFor(() => {
+        expect(progress).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: 'waiting_for_active_job' }),
+        )
+      })
+      expect(extract).toHaveBeenCalledTimes(1)
+    } finally {
+      releaseExtract.resolve()
+    }
+
+    await expect(updateResult).resolves.toMatchObject({
+      status: 'started',
+      version: '1.10.101',
+    })
+    await expect(canonicalResult).resolves.toMatchObject({
+      status: 'started',
+      version: '1.10.101',
+    })
+    expect(extract).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts PDK post-install work before cancellation completes', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'ics55',
+            display_name: 'ICsprout 55nm PDK',
+            description: 'ICsprout 55nm open-source process design kit.',
+            category: 'pdk',
+            homepage: 'https://example.com/ics55',
+            versions: [
+              {
+                version: '1.10.100',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${archive.path}`,
+                    sha256: archive.sha256,
+                    size: archive.size,
+                    strip_prefix: 'icsprout55-pdk-1.10.100',
+                    post_install: [{ command: ['make', 'unzip'], cwd: '.' }],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const runnerStarted = deferred()
+    const allowRunnerCleanup = deferred()
+    const runnerStopped = deferred()
+    const commandRunner = vi.fn(
+      async (
+        _command: string,
+        _args: string[],
+        options?: { cwd?: string; signal?: AbortSignal },
+      ) => {
+        runnerStarted.resolve()
+        await new Promise<void>((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            'abort',
+            async () => {
+              await allowRunnerCleanup.promise
+              runnerStopped.resolve()
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      },
+    )
+    const service = new ResourceManagerService({
+      commandRunner,
+      pdksDir: join(root, 'data', 'pdks'),
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      sha256Verifier: vi.fn(async () => true),
+      toolsDir: join(root, 'data', 'tools'),
+    })
+
+    const install = service.installResource('pdk:ics55', '1.10.100')
+    const installResult = install.catch((error: unknown) => error)
+    await withTimeout(runnerStarted.promise, 2000)
+
+    let cancellationCompleted = false
+    const cancellation = service.cancelResource('pdk:ics55').then((result) => {
+      cancellationCompleted = true
+      return result
+    })
+    await Promise.resolve()
+    expect(cancellationCompleted).toBe(false)
+
+    allowRunnerCleanup.resolve()
+    await withTimeout(runnerStopped.promise, 2000)
+    await expect(cancellation).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'pdk:ics55',
+    })
+    await expect(installResult).resolves.toMatchObject({
+      message: 'Cancelled download for pdk:ics55',
+    })
+    expect(commandRunner).toHaveBeenCalledWith(
+      'make',
+      ['unzip'],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('waits for post-install descendants to be force-terminated', async () => {
+    if (process.platform === 'win32') return
+
+    const root = await createTempDir('ecos-resources-')
+    const archivePath = join(root, 'fixture-pdk.tar')
+    const descendantPidPath = join(root, 'descendant.pid')
+    await writeFile(archivePath, 'fixture', 'utf8')
+    const descendantScript = [
+      "const fs = require('node:fs')",
+      "process.on('SIGTERM', () => {})",
+      `fs.writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid))`,
+      'setInterval(() => {}, 1000)',
+    ].join(';')
+    const parentScript = [
+      "const { spawn } = require('node:child_process')",
+      `spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' })`,
+      'setInterval(() => {}, 1000)',
+    ].join(';')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [
+          {
+            id: 'fixture',
+            display_name: 'Fixture PDK',
+            versions: [
+              {
+                version: '1.0.0',
+                platforms: {
+                  'all-platform': {
+                    url: `file://${archivePath}`,
+                    sha256: 'fixture-sha',
+                    size: 7,
+                    post_install: [
+                      { command: [process.execPath, '-e', parentScript], cwd: '.' },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...testResourceDirs(root),
+      archiveExtractor: async (_archive, destination) => {
+        await mkdir(destination, { recursive: true })
+      },
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const install = service.installResource('pdk:fixture', '1.0.0')
+    const installResult = install.catch((error: unknown) => error)
+    let descendantPid = 0
+
+    try {
+      await vi.waitFor(async () => {
+        descendantPid = Number(await readFile(descendantPidPath, 'utf8'))
+        expect(descendantPid).toBeGreaterThan(0)
+      })
+
+      const cancelStartedAt = Date.now()
+      await expect(service.cancelResource('pdk:fixture')).resolves.toEqual({
+        status: 'cancelled',
+        resource_id: 'pdk:fixture',
+      })
+      expect(Date.now() - cancelStartedAt).toBeGreaterThanOrEqual(800)
+      await vi.waitFor(async () => {
+        expect(await isProcessRunning(descendantPid)).toBe(false)
+      })
+      await expect(installResult).resolves.toMatchObject({
+        message: 'Cancelled download for pdk:fixture',
+      })
+    } finally {
+      await service.cancelResource('pdk:fixture').catch(() => undefined)
+      if (descendantPid && (await isProcessRunning(descendantPid))) {
+        process.kill(descendantPid, 'SIGKILL')
+      }
+      await installResult
+    }
   })
 
   it('fails closed instead of installing a PDK without a checksum', async () => {

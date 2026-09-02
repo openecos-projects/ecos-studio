@@ -25,10 +25,16 @@ export function describeInteractionAnswer(
   if ('optionId' in answer) {
     const payload = interaction.interaction
     if (payload.kind === 'choice') {
-      return payload.options.find((option) => option.id === answer.optionId)?.label ?? 'Selected'
+      return (
+        payload.options.find((option) => option.id === answer.optionId)?.label ??
+        'Selected'
+      )
     }
     if (payload.kind === 'confirm') {
-      return [payload.confirm, payload.cancel].find((option) => option.id === answer.optionId)?.label ?? 'Selected'
+      return (
+        [payload.confirm, payload.cancel].find((option) => option.id === answer.optionId)
+          ?.label ?? 'Selected'
+      )
     }
   }
   if ('values' in answer && interaction.interaction.kind === 'form') {
