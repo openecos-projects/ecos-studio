@@ -179,6 +179,108 @@ describe('prepareWorkspaceRerun', () => {
     ])
   })
 
+  it('accepts the LEC result JSON as stage evidence and wipes the LEC stage', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-lec-'))
+    temporaryRoots.push(root)
+    const source = join(root, 'gcd')
+    const flow = JSON.stringify({
+      steps: [
+        { name: 'place', state: 'Success', tool: 'dreamplace' },
+        { name: 'postRouteLec', state: 'Success', tool: 'yosys_lec', runtime: '12s' },
+      ],
+    })
+    const artifact = Buffer.from('place-def')
+    const lecResult = Buffer.from('{"status":"proven"}\n')
+    await mkdir(join(source, 'home'), { recursive: true })
+    await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
+    await mkdir(join(source, 'postRouteLec_yosys_lec', 'output'), { recursive: true })
+    await writeFile(join(source, 'home', 'flow.json'), flow)
+    await writeFile(join(source, 'home', 'parameters.json'), '{}\n')
+    await writeFile(
+      join(source, 'home', 'home.json'),
+      `${JSON.stringify({
+        monitor: {
+          step: ['place - analysis', 'postRouteLec - analysis'],
+          memory: ['1', '2'],
+          runtime: ['1', '2'],
+          instance: ['1', '2'],
+          frequency: ['1', '2'],
+        },
+      })}\n`,
+    )
+    await writeFile(
+      join(source, 'home', 'checklist.json'),
+      `${JSON.stringify({
+        schema_version: 3,
+        kind: 'signoff_checklist',
+        status: 'ready',
+        summary: { passed: 1, blocked: 0, attention: 0, unavailable: 0 },
+        checklist: [
+          { id: 'lec.postroute', step: 'postRouteLec', state: 'pass', blocked: false },
+        ],
+      })}\n`,
+    )
+    await writeFile(
+      join(source, 'place_dreamplace', 'output', 'gcd_place.def.gz'),
+      artifact,
+    )
+    await writeFile(
+      join(source, 'postRouteLec_yosys_lec', 'output', 'gcd_postRouteLec_result.json'),
+      lecResult,
+    )
+
+    const contract: DesktopAgentWorkspaceRerunContract = {
+      design_id: 'gcd',
+      end_step: 'postRouteLec',
+      execution_scope: 'single_step',
+      parameter_patch: [],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_postroutelec',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact: 'postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json',
+      source_flow_json_sha256: sha256(flow),
+      source_stage_artifact_sha256: sha256(lecResult),
+      source_workspace: source,
+      target_step: 'postRouteLec',
+      target_workspace: `${source}_rerun_postroutelec`,
+      writes: [],
+    }
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    // The LEC stage is wiped while the earlier completed stage is preserved.
+    await expect(
+      readdir(join(contract.target_workspace, 'postRouteLec_yosys_lec')),
+    ).resolves.toEqual([])
+    await expect(
+      readFile(
+        join(contract.target_workspace, 'place_dreamplace', 'output', 'gcd_place.def.gz'),
+        'utf8',
+      ),
+    ).resolves.toBe('place-def')
+
+    const targetFlow = JSON.parse(
+      await readFile(join(contract.target_workspace, 'home', 'flow.json'), 'utf8'),
+    ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
+    expect(targetFlow.steps).toEqual([
+      { name: 'place', state: 'Success', tool: 'dreamplace' },
+      { name: 'postRouteLec', state: 'Unstart', tool: 'yosys_lec', runtime: '' },
+    ])
+
+    const home = JSON.parse(
+      await readFile(join(contract.target_workspace, 'home', 'home.json'), 'utf8'),
+    ) as { monitor: { step: string[]; memory: string[] } }
+    expect(home.monitor.step).toEqual(['place - analysis'])
+    expect(home.monitor.memory).toEqual(['1'])
+
+    const checklist = JSON.parse(
+      await readFile(join(contract.target_workspace, 'home', 'checklist.json'), 'utf8'),
+    ) as { checklist: Array<{ step: string }> }
+    expect(checklist.checklist).toEqual([])
+  })
+
   it('rewrites home.json paths and prunes post-target home aggregates', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await mkdir(join(source, 'drc_ecc', 'analysis'), { recursive: true })

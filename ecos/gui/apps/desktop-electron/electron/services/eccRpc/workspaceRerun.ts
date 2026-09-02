@@ -344,13 +344,15 @@ async function verifyWorkspaceRerunContract(
   if (!targetTool) {
     throw new Error('Workspace rerun target step is not completed in the source flow.')
   }
-  if (
-    !STAGE_OUTPUT_SUFFIXES.some(
-      (suffix) =>
-        contract.source_stage_artifact ===
-        `${contract.target_step}_${targetTool}/output/${contract.design_id}_${contract.target_step}${suffix}`,
-    )
-  ) {
+  const stageOutputPrefix = `${contract.target_step}_${targetTool}/output/${contract.design_id}_${contract.target_step}`
+  const isStageArtifact = STAGE_OUTPUT_SUFFIXES.some(
+    (suffix) => contract.source_stage_artifact === `${stageOutputPrefix}${suffix}`,
+  )
+  // LEC stages publish an equivalence result JSON instead of layout outputs.
+  const isLecResultArtifact =
+    targetTool === 'yosys_lec' &&
+    contract.source_stage_artifact === `${stageOutputPrefix}_result.json`
+  if (!isStageArtifact && !isLecResultArtifact) {
     throw new Error('Workspace rerun source artifact does not match the completed stage.')
   }
   const artifact = await resolvePathWithinWorkspace(
