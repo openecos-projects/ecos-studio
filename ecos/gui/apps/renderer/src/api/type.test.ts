@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { StepEnum, getStepMetadata, sameFlowStepName } from './type'
+import { StepEnum, formatStepToolName, getStepMetadata, sameFlowStepName } from './type'
 
 describe('sameFlowStepName', () => {
   it('treats Timing Opt display labels as the Timing optimization flow step', () => {
@@ -16,5 +16,14 @@ describe('sameFlowStepName', () => {
     expect(sameFlowStepName('LEC', StepEnum.LEC)).toBe(true)
     expect(sameFlowStepName('Post-Route LEC', 'lec')).toBe(false)
     expect(sameFlowStepName('LEC', StepEnum.POST_ROUTE_LEC)).toBe(false)
+  })
+})
+
+describe('formatStepToolName', () => {
+  it('labels the Yosys LEC tool and falls back to the raw tool name', () => {
+    expect(formatStepToolName('yosys_lec')).toBe('Yosys LEC')
+    expect(formatStepToolName('YOSYS_LEC')).toBe('Yosys LEC')
+    expect(formatStepToolName('unknown_tool')).toBe('unknown_tool')
+    expect(formatStepToolName('')).toBe('')
   })
 })

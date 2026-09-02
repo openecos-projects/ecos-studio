@@ -273,6 +273,12 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('setFlowBoundary')
   })
 
+  it('normalizes flow step aliases case- and separator-insensitively like ECC', () => {
+    expect(source).toContain("postlec: 'postRouteLec'")
+    expect(source).toContain("postroutelec: 'postRouteLec'")
+    expect(source).toContain('candidate.toLowerCase().replace(/[_\\-\\s]+/g,')
+  })
+
   it('uses neutral connector lines between flow setup step cards', () => {
     expect(source).toContain('flow-step-connector')
     expect(source).toContain('flow-step-connector-line')

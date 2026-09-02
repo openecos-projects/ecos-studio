@@ -2064,7 +2064,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     sta: 'sta',
     harden: 'Harden',
   }
-  const alias = aliases[candidate.toLowerCase()]
+  const alias = aliases[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
   const validSteps: FlowStepName[] = [
     'Synthesis',

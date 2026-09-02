@@ -45,6 +45,29 @@ describe('project manifest parsing', () => {
     expect(afterDrc.workspaces[0]?.start_step).toBe('LVS')
   })
 
+  it('maps Timing Opt and post-route LEC boundaries to the preceding catalog step', () => {
+    expect(normalizeProjectManifestFlowStep('Timing optimization')).toBe('Legal')
+    expect(normalizeProjectManifestFlowStep('timing-opt')).toBe('Legal')
+    expect(normalizeProjectManifestFlowStep('postRouteLec')).toBe('Filler')
+    expect(normalizeProjectManifestFlowStep('post_route_lec')).toBe('Filler')
+    expect(normalizeProjectManifestFlowStep('Post-LEC')).toBe('Filler')
+
+    const afterLec = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_from_lec',
+        sourceWorkspaceId: 'ws_0001',
+        sourceStep: 'postRouteLec',
+      },
+    )
+    expect(afterLec.workspaces[0]?.start_step).toBe('RCX')
+  })
+
   it('records an optional MPC association with the canonical spec path', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/work/gcd',
