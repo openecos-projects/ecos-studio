@@ -9,7 +9,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use app::ChipViewerApp;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RenderMode {
+    #[value(name = "gpu")]
+    Gpu,
+    #[value(name = "software")]
+    Software,
+    #[value(name = "egui-only")]
+    EguiOnly,
+}
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -45,6 +55,12 @@ struct Args {
 
     #[arg(long)]
     force_cpu: bool,
+
+    #[arg(long, value_enum)]
+    render_mode: Option<RenderMode>,
+
+    #[arg(long, alias = "safe-mode")]
+    egui_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -87,9 +103,10 @@ fn configure_linux_window_backend() {
         return;
     }
     eprintln!(
-        "ECOS window environment: WAYLAND_DISPLAY={:?}, DISPLAY={:?}",
+        "ECOS window environment: WAYLAND_DISPLAY={:?}, DISPLAY={:?}, WINIT_UNIX_BACKEND={:?}",
         std::env::var_os("WAYLAND_DISPLAY"),
         std::env::var_os("DISPLAY"),
+        std::env::var_os("WINIT_UNIX_BACKEND"),
     );
     if std::env::var_os("WINIT_UNIX_BACKEND").is_some() {
         return;
@@ -148,7 +165,7 @@ fn print_startup_diagnostics(
     env: &GraphicsEnvironment,
     hardware_adapter: Option<&wgpu::AdapterInfo>,
     fallback_adapter: Option<&wgpu::AdapterInfo>,
-    preferred_gpu_available: bool,
+    render_mode: RenderMode,
 ) {
     let platform = if env.is_wsl {
         "WSL2 / WSLg"
@@ -186,16 +203,15 @@ fn print_startup_diagnostics(
         })
         .unwrap_or("Unavailable");
 
-    let rendering_mode = if preferred_gpu_available {
-        "GPU Canvas (Hardware Accelerated)"
-    } else {
-        "CPU 2D (Software OpenGL)"
+    let rendering_mode = match render_mode {
+        RenderMode::Gpu => "GPU Accelerated (wgpu)",
+        RenderMode::Software => "Software (egui)",
+        RenderMode::EguiOnly => "Software (egui Safe Mode)",
     };
 
-    let three_d_mode = if preferred_gpu_available {
-        "Available (GPU Instanced)"
-    } else {
-        "Unavailable (Requires Hardware GPU)"
+    let three_d_mode = match render_mode {
+        RenderMode::Gpu => "Available (GPU Instanced)",
+        RenderMode::Software | RenderMode::EguiOnly => "Unavailable (Requires Hardware GPU)",
     };
 
     eprintln!("============================================================");
@@ -249,135 +265,206 @@ fn main() -> Result<()> {
         .map(|v| canvas_gpu::env_flag_requested(Some(&v)))
         .unwrap_or(false);
 
-    let wgpu_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
-    let (hardware_adapter, fallback_adapter) = probe_hardware_adapter(wgpu_backends);
-    let preferred_gpu_available = hardware_adapter.is_some() && !args.force_cpu && !force_cpu_env;
+    let env_mode = std::env::var("ECOS_RENDER_MODE").ok().and_then(|v| {
+        match v.to_ascii_lowercase().as_str() {
+            "gpu" => Some(RenderMode::Gpu),
+            "software" | "glow" => Some(RenderMode::Software),
+            "egui-only" | "egui" | "safe" | "cpu" => Some(RenderMode::EguiOnly),
+            _ => None,
+        }
+    });
 
-    let renderer = if preferred_gpu_available {
-        eframe::Renderer::Wgpu
+    let forced_egui_only = args.egui_only
+        || args.force_cpu
+        || force_cpu_env
+        || args.render_mode == Some(RenderMode::EguiOnly)
+        || env_mode == Some(RenderMode::EguiOnly);
+
+    let wgpu_backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::all());
+
+    let (render_mode, hardware_adapter, fallback_adapter) = if forced_egui_only {
+        (RenderMode::EguiOnly, None, None)
+    } else if args.render_mode == Some(RenderMode::Software)
+        || env_mode == Some(RenderMode::Software)
+    {
+        let (hw, fb) = probe_hardware_adapter(wgpu_backends);
+        (RenderMode::Software, hw, fb)
+    } else if args.render_mode == Some(RenderMode::Gpu) || env_mode == Some(RenderMode::Gpu) {
+        let (hw, fb) = probe_hardware_adapter(wgpu_backends);
+        (RenderMode::Gpu, hw, fb)
     } else {
-        eframe::Renderer::Glow
+        let (hw, fb) = probe_hardware_adapter(wgpu_backends);
+        if hw.is_some() {
+            (RenderMode::Gpu, hw, fb)
+        } else {
+            (RenderMode::EguiOnly, hw, fb)
+        }
     };
 
     print_startup_diagnostics(
         &env,
         hardware_adapter.as_ref(),
         fallback_adapter.as_ref(),
-        preferred_gpu_available,
+        render_mode,
     );
-    eprintln!("ECOS eframe: selected renderer = {:?}", renderer);
+    eprintln!("ECOS eframe: selected mode = {:?}", render_mode);
 
-    let force_cpu = args.force_cpu || force_cpu_env;
-    let adapter_selector: egui_wgpu::NativeAdapterSelectorMethod = std::sync::Arc::new(
-        move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
-            if !force_cpu {
-                for adapter in adapters {
-                    let info = adapter.get_info();
-                    let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
-                    if surface_ok && is_hardware_adapter(&info) {
+    let native_options = match render_mode {
+        RenderMode::Gpu => {
+            let adapter_selector: egui_wgpu::NativeAdapterSelectorMethod = std::sync::Arc::new(
+                move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
+                    for adapter in adapters {
+                        let info = adapter.get_info();
+                        let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
+                        if surface_ok && is_hardware_adapter(&info) {
+                            eprintln!(
+                                "ECOS eframe: selected hardware GPU '{}' ({:?})",
+                                info.name, info.backend
+                            );
+                            return Ok(adapter.clone());
+                        }
+                    }
+
+                    if let Some(adapter) = adapters.first() {
+                        let info = adapter.get_info();
                         eprintln!(
-                            "ECOS eframe: selected hardware GPU '{}' ({:?})",
+                            "ECOS eframe: fallback to first adapter '{}' ({:?})",
                             info.name, info.backend
                         );
-                        return Ok(adapter.clone());
+                        Ok(adapter.clone())
+                    } else {
+                        Err("No compatible graphics adapter found".to_string())
                     }
-                }
-            }
+                },
+            );
 
-            for adapter in adapters {
-                let info = adapter.get_info();
-                let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
-                if surface_ok {
-                    eprintln!(
-                        "ECOS eframe: selected fallback adapter '{}' ({:?})",
-                        info.name, info.backend
-                    );
-                    return Ok(adapter.clone());
-                }
-            }
-
-            if let Some(adapter) = adapters.first() {
-                let info = adapter.get_info();
-                eprintln!(
-                    "ECOS eframe: fallback to first adapter '{}' ({:?})",
-                    info.name, info.backend
-                );
-                Ok(adapter.clone())
-            } else {
-                Err("No compatible graphics adapter found".to_string())
-            }
-        },
-    );
-
-    let native_options = eframe::NativeOptions {
-        renderer,
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 860.0])
-            .with_min_inner_size([960.0, 640.0])
-            .with_active(true),
-        centered: true,
-        wgpu_options: egui_wgpu::WgpuConfiguration {
-            wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
-                instance_descriptor: wgpu::InstanceDescriptor {
-                    backends: wgpu_backends,
+            eframe::NativeOptions {
+                renderer: eframe::Renderer::Wgpu,
+                viewport: eframe::egui::ViewportBuilder::default()
+                    .with_inner_size([1280.0, 860.0])
+                    .with_min_inner_size([960.0, 640.0])
+                    .with_active(true),
+                centered: true,
+                wgpu_options: egui_wgpu::WgpuConfiguration {
+                    wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
+                        instance_descriptor: wgpu::InstanceDescriptor {
+                            backends: wgpu_backends,
+                            ..Default::default()
+                        },
+                        power_preference: wgpu::PowerPreference::HighPerformance,
+                        native_adapter_selector: Some(adapter_selector),
+                        device_descriptor: std::sync::Arc::new(|adapter| {
+                            let adapter_limits = adapter.limits();
+                            let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
+                                wgpu::Limits::downlevel_webgl2_defaults()
+                                    .using_resolution(adapter_limits)
+                            } else {
+                                wgpu::Limits::downlevel_defaults().using_resolution(adapter_limits)
+                            };
+                            wgpu::DeviceDescriptor {
+                                label: Some("egui wgpu device"),
+                                required_features: wgpu::Features::empty(),
+                                required_limits: base_limits,
+                                memory_hints: wgpu::MemoryHints::default(),
+                            }
+                        }),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                native_adapter_selector: Some(adapter_selector),
-                device_descriptor: std::sync::Arc::new(|adapter| {
-                    let adapter_limits = adapter.limits();
-                    let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
-                        wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter_limits)
-                    } else {
-                        wgpu::Limits::downlevel_defaults().using_resolution(adapter_limits)
-                    };
-                    wgpu::DeviceDescriptor {
-                        label: Some("egui wgpu device"),
-                        required_features: wgpu::Features::empty(),
-                        required_limits: base_limits,
-                        memory_hints: wgpu::MemoryHints::default(),
-                    }
-                }),
                 ..Default::default()
-            }),
+            }
+        }
+        RenderMode::Software | RenderMode::EguiOnly => eframe::NativeOptions {
+            renderer: eframe::Renderer::Glow,
+            viewport: eframe::egui::ViewportBuilder::default()
+                .with_inner_size([1280.0, 860.0])
+                .with_min_inner_size([960.0, 640.0])
+                .with_active(true),
+            centered: true,
             ..Default::default()
         },
-        ..Default::default()
     };
 
-    match eframe::run_native(
+    let manifest = args.manifest.clone();
+    let mode = args.mode.clone();
+    let edit_command_dir = args.edit_command_dir.clone();
+    let edit_result_dir = args.edit_result_dir.clone();
+    let edit_dirty = args.edit_dirty;
+    let drc_data = args.drc_data.clone();
+    let drc_statis = args.drc_statis.clone();
+    let antenna_data = args.antenna_data.clone();
+    let antenna_statis = args.antenna_statis.clone();
+    let map_root = args.map_root.clone();
+
+    let run_result = eframe::run_native(
         "Chip Viewer",
         native_options,
         Box::new(move |_cc| {
-            let has_wgpu = _cc.wgpu_render_state.as_ref().is_some_and(|rs| {
-                let limits = rs.device.limits();
-                let info = rs.adapter.get_info();
-                limits.max_storage_buffers_per_shader_stage >= 1 && is_hardware_adapter(&info)
-            }) && !args.force_cpu
-                && !force_cpu_env;
+            let actual_render_mode = match render_mode {
+                RenderMode::Gpu => {
+                    let has_wgpu = _cc.wgpu_render_state.as_ref().is_some_and(|rs| {
+                        let limits = rs.device.limits();
+                        let info = rs.adapter.get_info();
+                        limits.max_storage_buffers_per_shader_stage >= 1
+                            && is_hardware_adapter(&info)
+                    });
+                    if has_wgpu {
+                        RenderMode::Gpu
+                    } else {
+                        RenderMode::EguiOnly
+                    }
+                }
+                RenderMode::Software => RenderMode::Software,
+                RenderMode::EguiOnly => RenderMode::EguiOnly,
+            };
 
             Ok(Box::new(ChipViewerApp::open(
-                args.manifest.clone(),
-                args.mode.clone(),
-                args.edit_command_dir.clone(),
-                args.edit_result_dir.clone(),
-                args.edit_dirty,
-                args.drc_data.clone(),
-                args.drc_statis.clone(),
-                args.antenna_data.clone(),
-                args.antenna_statis.clone(),
-                args.map_root.clone(),
+                manifest,
+                mode,
+                edit_command_dir,
+                edit_result_dir,
+                edit_dirty,
+                drc_data,
+                drc_statis,
+                antenna_data,
+                antenna_statis,
+                map_root,
                 _cc.wgpu_render_state
                     .as_ref()
                     .map(|s| s.target_format)
                     .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
-                has_wgpu,
+                actual_render_mode,
             )))
         }),
-    ) {
+    );
+
+    match run_result {
         Ok(()) => Ok(()),
         Err(err) => {
             eprintln!("Chip Viewer windowing failure: {err}");
+
+            let is_wayland_active = std::env::var_os("WINIT_UNIX_BACKEND").as_deref()
+                == Some(std::ffi::OsStr::new("wayland"))
+                || (std::env::var_os("WINIT_UNIX_BACKEND").is_none()
+                    && std::env::var_os("WAYLAND_DISPLAY").is_some());
+            let has_x11_display = std::env::var_os("DISPLAY").is_some();
+            let already_retried = std::env::var_os("ECOS_RESTARTED_WITH_X11").is_some();
+
+            if cfg!(target_os = "linux") && is_wayland_active && has_x11_display && !already_retried
+            {
+                eprintln!(
+                    "ECOS: Wayland windowing failed ({err}). Restarting process with X11 window backend..."
+                );
+                let current_exe = std::env::current_exe()?;
+                let mut cmd = std::process::Command::new(current_exe);
+                cmd.args(std::env::args_os().skip(1));
+                cmd.env("WINIT_UNIX_BACKEND", "x11");
+                cmd.env("ECOS_RESTARTED_WITH_X11", "1");
+                let status = cmd.status()?;
+                std::process::exit(status.code().unwrap_or(1));
+            }
+
             eprintln!("Check that your display server (Wayland or X11) is running and accessible.");
             std::process::exit(1);
         }
