@@ -3,7 +3,7 @@
 Baseline commit: `7e453775`
 
 Validation date: 2026-09-03. The completed implementation was measured after
-parent commit `79692f5f` and ECC commits `ff9bd5c` and `c54de4b`, before this
+parent commit `7e20bcd7` and ECC commits `ff9bd5c` and `c54de4b`, before this
 final validation commit.
 
 The representative service fixture fixes the observable baseline at two Project
@@ -46,10 +46,10 @@ Preload surface counts typed invoke and subscription leaf methods exposed by
 
 | Measurement | Baseline | Completed | Delta |
 | --- | ---: | ---: | ---: |
-| Production modules | 353 | 357 | +4 |
-| Production lines | 133,189 | 133,788 | +599 |
+| Production modules | 353 | 359 | +6 |
+| Production lines | 133,189 | 133,938 | +749 |
 | Preload leaf methods | 133 | 132 | -1 |
-| Clean built assets | 35,823,816 bytes | 35,851,239 bytes | +27,423 bytes |
+| Clean built assets | 35,823,816 bytes | 35,855,862 bytes | +32,046 bytes |
 
 No deletion target was imposed. The added Snapshot reader, watcher, Findings,
 and execution-overlay modules replace self-invalidating and duplicated fact
@@ -85,10 +85,10 @@ only for `frontendRpcCore`, which this migration explicitly freezes.
 
 | Check | Result |
 | --- | --- |
-| `cd ecos/gui && pnpm run check` | passed: infra 7, Shared 85, Renderer 781, Electron 699 tests; typecheck, lint, and format passed |
+| `cd ecos/gui && pnpm run check` | passed: infra 7, Shared 87, Renderer 781, Electron 700 tests; typecheck, lint, and format passed |
 | `cd ecos/gui && pnpm run build` | passed from a clean `dist` |
 | sandbox-disabled Electron smoke | passed with `ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 LIBGL_ALWAYS_SOFTWARE=1 pnpm run desktop:smoke` |
-| Runtime Adapter `pytest -q` | 225 passed |
+| Runtime Adapter `pytest -q` | 226 passed |
 | Runtime Adapter `ruff check` | passed |
 | ECC full non-packaging pytest | 1,277 passed, 8 skipped, 1 deselected, 4 expected failures |
 | ECC `ruff format --check` and `ruff check` | passed across `chipcompiler` and `test` |
@@ -98,6 +98,14 @@ only for `frontendRpcCore`, which this migration explicitly freezes.
 The Runtime Adapter has no local formatter configuration; an ad hoc Ruff format
 check using ECC defaults would reformat 21 existing Adapter files, so it is not
 treated as a component gate. Its full tests and lint pass.
+
+The final two-axis Standards and Spec review found and corrected cancellation
+request projection, active Operation revision advancement after each committed
+Step, unsafe whole-Snapshot type assertions, unstable Findings reason codes,
+duplicate concurrency loops, and an oversized Project Comparison service. The
+orchestration service is now 721 lines with its pure projection in a focused
+204-line module. ADR 0012, 0029, and 0030 are tracked under `ecos/docs/adr` and
+record the implemented state.
 
 Release/AppImage packaging was not run because no packaging input, staged
 Runtime resource, dependency, lockfile, or release configuration changed. The

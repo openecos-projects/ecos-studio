@@ -208,5 +208,5 @@ ECC Engineering Snapshot producer 不再构造通用递归 Artifact inventory。
 - 现有日志记录曾显示约 45 分钟内触发 4,693 次 Project Comparison query，每次读取两个 Workspace、约 80 个文件，并产生约 448 KiB 读取和 712 KiB IPC。修复应通过消除自失效和批量详情读取解决，而不是依赖 debounce 掩盖循环。
 - HMR 只会扰动请求、generation 和 render 的时序。任何验收都必须在不触发 HMR 的情况下完成。
 - 本 spec 延续 [Backend QoR 与 Project Comparison v1](./backend-qor-project-comparison-v1.md) 的领域所有权，并细化其 committed fact acquisition、live execution overlay、按需 Findings 和外部 invalidation 行为。
-- 相关架构决定记录在仓库 ADR 0012、0029 和 0030；实现不得重新引入 Event-as-fact、Runtime-open-for-read 或 legacy fallback。
+- 相关架构决定记录在 [ADR 0012](../adr/0012-events-for-transient-state-queries-for-committed-facts.md)、[ADR 0029](../adr/0029-project-comparison-separates-committed-and-running-state.md) 和 [ADR 0030](../adr/0030-project-comparison-reads-persisted-engineering-snapshots.md)；实现不得重新引入 Event-as-fact、Runtime-open-for-read 或 legacy fallback。
 - 本文只保存在本地仓库，不发布到 issue tracker，也不应用 triage label。
