@@ -346,6 +346,46 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('indexes the yosys_lec result JSON, log, reports, and subflow', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'postRouteLec', tool: 'yosys_lec', state: 'Success' },
+    ])
+    const stepDirectory = join(root, 'postRouteLec_yosys_lec')
+    await mkdir(join(stepDirectory, 'output'), { recursive: true })
+    await mkdir(join(stepDirectory, 'log'), { recursive: true })
+    await mkdir(join(stepDirectory, 'report'), { recursive: true })
+    await writeJson(join(stepDirectory, 'output', 'gcd_postRouteLec_result.json'), {
+      status: 'proven',
+    })
+    await writeFile(join(stepDirectory, 'log', 'postRouteLec.log'), 'lec log', 'utf8')
+    await writeFile(join(stepDirectory, 'report', 'equiv_status.rpt'), 'status', 'utf8')
+    await writeJson(join(stepDirectory, 'subflow.json'), { subflow: [] })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const step = index.flow.steps[0]!
+
+    expect(step.directory).toBe(stepDirectory)
+    expect(step.resources.output.result).toMatchObject({
+      path: join(stepDirectory, 'output', 'gcd_postRouteLec_result.json'),
+      exists: true,
+      kind: 'output',
+    })
+    expect(step.resources.log.file).toMatchObject({
+      path: join(stepDirectory, 'log', 'postRouteLec.log'),
+      exists: true,
+      kind: 'log',
+    })
+    expect(step.resources.subflow.path).toMatchObject({ exists: true })
+    expect(step.resources.report['rpt:equiv_status.rpt']).toMatchObject({
+      path: join(stepDirectory, 'report', 'equiv_status.rpt'),
+      exists: true,
+    })
+    expect(step.resources.output.image).toBeUndefined()
+    expect(step.resources.output.def).toBeUndefined()
+  })
+
   it('exposes workspace-level view package tech resources from the design view directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])

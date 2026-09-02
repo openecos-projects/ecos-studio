@@ -354,6 +354,8 @@ export class WorkspaceResourceService {
         join(root, 'config', 'dreamplace_ecc.json'),
         'config',
       )
+    } else if (toolKey === 'yosys_lec') {
+      addLecResources(resources, directory, design, step.name)
     } else if (isFrontendTool(toolKey)) {
       addFrontendResources(resources, directory, design, step.name)
     } else {
@@ -1092,6 +1094,20 @@ function addUnknownResources(
   resources.log.file = createFile(join(directory, 'log', `${stepName}.log`), 'log')
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
+}
+
+/** Yosys LEC publishes no layout; its key artifact is the equivalence result JSON. */
+function addLecResources(
+  resources: StepFileBuckets,
+  directory: string,
+  design: string,
+  stepName: string,
+): void {
+  addUnknownResources(resources, directory, stepName)
+  resources.output.result = createFile(
+    join(directory, 'output', `${design}_${stepName}_result.json`),
+    'output',
+  )
 }
 
 function collectFiles(resources: StepFileBuckets): WorkspaceResourceFile[] {

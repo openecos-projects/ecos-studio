@@ -503,6 +503,7 @@ const workspaceSetupFlowSteps = [
   'drc',
   'lvs',
   'filler',
+  'postRouteLec',
   'RCX',
   'sta',
   'Harden',

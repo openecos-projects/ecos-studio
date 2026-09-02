@@ -462,6 +462,7 @@ describe('prepareWorkspaceRerun', () => {
       'drc',
       'lvs',
       'filler',
+      'postRouteLec',
       'RCX',
       'sta',
       'Harden',
