@@ -156,6 +156,29 @@ def test_rerun_preparation_projection_carries_its_committed_revision():
     assert event["workspaceRevision"] == 3
 
 
+def test_cancel_request_projection_preserves_the_active_operation_state():
+    event = _project_runtime_event(
+        {
+            "eventId": "event-1",
+            "operationId": "operation-1",
+            "origin": "gui",
+            "payload": {
+                "cancelRequested": True,
+                "state": "running",
+                "workspaceRevision": 3,
+            },
+            "sequence": 1,
+            "timestamp": 1,
+            "type": "operation.cancel_requested",
+            "workspaceId": "workspace-1",
+        }
+    )
+
+    assert event["type"] == "operation.changed"
+    assert event["payload"]["cancelRequested"] is True
+    assert event["payload"]["state"] == "running"
+
+
 def test_unknown_method_keeps_request_id():
     server = RuntimeServer()
 

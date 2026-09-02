@@ -215,7 +215,17 @@ class RuntimeOperationManager:
             operation.cancel_requested = True
             operation.updated_at = time.time()
             self._persist_workspace_ledger_locked(operation.workspace_id)
-            event = self._new_event_locked(operation, "operation.cancel_requested", {})
+            event = self._new_event_locked(
+                operation,
+                "operation.cancel_requested",
+                {
+                    "cancelRequested": True,
+                    "state": operation.state,
+                    "step": operation.current_step or operation.step,
+                    "tool": operation.current_tool,
+                    "workspaceRevision": operation.workspace_revision,
+                },
+            )
         self._publish(event)
         return {"accepted": True, "operationId": operation_id, "state": operation.state}
 

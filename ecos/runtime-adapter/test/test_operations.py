@@ -468,7 +468,8 @@ def test_cancel_does_not_replace_a_specific_tool_error(tmp_path):
 
 
 def test_cancel_stops_at_the_next_step_boundary():
-    manager = RuntimeOperationManager()
+    events = []
+    manager = RuntimeOperationManager(events.append)
     first_step_finished = threading.Event()
     continue_runner = threading.Event()
     executed = []
@@ -493,6 +494,14 @@ def test_cancel_stops_at_the_next_step_boundary():
     )
     assert first_step_finished.wait(timeout=1)
     assert manager.request_cancel(started["operationId"])["accepted"] is True
+    requested = _wait_for_event(events, "operation.cancel_requested")
+    assert requested["payload"] == {
+        "cancelRequested": True,
+        "state": "running",
+        "step": "",
+        "tool": "",
+        "workspaceRevision": 0,
+    }
     continue_runner.set()
 
     status = _wait_for_terminal(manager, started["operationId"])

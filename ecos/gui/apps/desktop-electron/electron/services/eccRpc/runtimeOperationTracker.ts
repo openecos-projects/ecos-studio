@@ -36,24 +36,30 @@ export class RuntimeOperationTracker {
   }
 
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
-    const rerunPrepared =
-      protocolEvent.type === 'execution.progress' &&
-      protocolEvent.payload.sourceType === 'operation.rerun_prepared'
-    if (protocolEvent.type !== 'operation.changed' && !rerunPrepared) return false
+    const updatesActiveOperation =
+      protocolEvent.type === 'execution.progress' ||
+      protocolEvent.type === 'workspace.committed'
+    if (protocolEvent.type !== 'operation.changed' && !updatesActiveOperation) {
+      return false
+    }
     const latestSequence = this.latestSequences.get(protocolEvent.operationId)
     if (latestSequence !== undefined && protocolEvent.sequence <= latestSequence) {
       return false
     }
-    if (rerunPrepared) {
+    if (updatesActiveOperation) {
       const active = this.active.get(protocolEvent.operationId)
       const workspaceRevision =
         protocolEvent.payload.workspaceRevision ?? protocolEvent.workspaceRevision
-      if (!active || typeof workspaceRevision !== 'number') return false
+      if (!active) return false
       this.latestSequences.set(protocolEvent.operationId, protocolEvent.sequence)
       this.active.set(protocolEvent.operationId, {
         ...active,
+        currentStep:
+          stringPayloadValue(protocolEvent.payload, 'step') || active.currentStep,
+        currentTool:
+          stringPayloadValue(protocolEvent.payload, 'tool') || active.currentTool,
         updatedAt: protocolEvent.timestamp,
-        workspaceRevision,
+        ...(typeof workspaceRevision === 'number' ? { workspaceRevision } : {}),
       })
       return false
     }

@@ -12,7 +12,7 @@ function operationEvent(
     operationId: 'operation-1',
     origin: 'gui',
     payload: {
-      cancelRequested: state === 'running',
+      cancelRequested: false,
       state,
       step: 'Route',
       workspaceRevision: 7,
@@ -41,6 +41,17 @@ describe('RuntimeOperationTracker active operations', () => {
 
     tracker.track(operationEvent('running', { sequence: 2 }))
     tracker.track(operationEvent('queued'))
+    tracker.track(
+      operationEvent('running', {
+        payload: {
+          cancelRequested: true,
+          state: 'running',
+          step: 'Route',
+          workspaceRevision: 7,
+        },
+        sequence: 3,
+      }),
+    )
     expect(tracker.activeOperations()).toEqual([
       expect.objectContaining({
         cancelRequested: true,
@@ -49,8 +60,8 @@ describe('RuntimeOperationTracker active operations', () => {
       }),
     ])
 
-    tracker.track(operationEvent('succeeded', { sequence: 3 }))
-    tracker.track(operationEvent('succeeded', { sequence: 3 }))
+    tracker.track(operationEvent('succeeded', { sequence: 4 }))
+    tracker.track(operationEvent('succeeded', { sequence: 4 }))
     expect(tracker.activeOperations()).toEqual([])
   })
 
@@ -89,5 +100,43 @@ describe('RuntimeOperationTracker active operations', () => {
     })
     reordered.track(operationEvent('queued'))
     expect(reordered.activeOperations()).toHaveLength(1)
+  })
+
+  it('keeps an active flow revision-matched as steps commit', () => {
+    const tracker = new RuntimeOperationTracker()
+    tracker.track(operationEvent('running', { sequence: 2 }))
+
+    tracker.track({
+      ...operationEvent('running'),
+      payload: {
+        sourceType: 'step.completed',
+        step: 'Route',
+        tool: 'openroad',
+        workspaceRevision: 8,
+      },
+      sequence: 3,
+      type: 'workspace.committed',
+      workspaceRevision: 8,
+    })
+    tracker.track({
+      ...operationEvent('running'),
+      payload: {
+        sourceType: 'step.started',
+        step: 'STA',
+        tool: 'opensta',
+      },
+      sequence: 4,
+      type: 'execution.progress',
+    })
+
+    expect(tracker.activeOperations()).toEqual([
+      expect.objectContaining({
+        currentStep: 'STA',
+        currentTool: 'opensta',
+        operationId: 'operation-1',
+        state: 'running',
+        workspaceRevision: 8,
+      }),
+    ])
   })
 })
