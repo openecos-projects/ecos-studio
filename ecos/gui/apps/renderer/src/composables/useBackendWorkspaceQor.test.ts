@@ -17,7 +17,15 @@ const session = vi.hoisted(() => ({
         status: 'ready' as const,
         issues: [],
         data: {
-          metrics: [],
+          metrics: [
+            {
+              id: 'route_wirelength',
+              name: 'Route Wirelength',
+              polarity: 'lower_is_better' as const,
+              stepId: 'Route',
+              value: 5000,
+            },
+          ],
           score: { gate: 'pass' as const, threshold: 60, value: 82 },
           steps: [],
         },
@@ -43,6 +51,14 @@ describe('useBackendWorkspaceQor', () => {
       comparison: {
         baselineWorkspaceId: 'ws-base',
         baselineScore: null,
+        metrics: [
+          expect.objectContaining({
+            baselineValue: null,
+            currentValue: 5000,
+            isDirectional: false,
+            metricName: 'route_wirelength',
+          }),
+        ],
         score: 82,
         workspaceId: 'ws-current',
       },

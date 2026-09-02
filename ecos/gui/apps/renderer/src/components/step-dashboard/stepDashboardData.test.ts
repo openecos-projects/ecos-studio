@@ -379,6 +379,27 @@ describe('step dashboard data', () => {
       isComparisonAvailable: false,
     })
 
+    const currentOnly = prioritizeQorMetricComparisons(qor.metrics, 'RCX', [
+      {
+        step: 'RCX',
+        metricName: 'gate-first',
+        baselineValue: null,
+        currentValue: 40,
+        absoluteDelta: null,
+        relativeDeltaPct: null,
+        state: 'neutral',
+        isDirectional: false,
+        polarity: 'lower_is_better',
+        baselinePolarity: null,
+      },
+    ])
+    expect(currentOnly[0]).toMatchObject({
+      baselineValue: null,
+      currentValue: 40,
+      comparisonState: 'unavailable',
+      isComparisonAvailable: false,
+    })
+
     const changedFirst = prioritizeQorMetricComparisons(
       qor.metrics,
       'RCX',

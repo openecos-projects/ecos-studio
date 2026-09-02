@@ -6,6 +6,7 @@
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
+        :signoff-export-disabled="signoffExportDisabled"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -225,6 +226,7 @@ import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
+import { isFlowExecutionActiveForWorkspace } from '@/composables/flowExecutionState'
 import {
   getOptionalDesktopApi,
   hasDesktopApi,
@@ -305,6 +307,9 @@ const {
   showToast,
   workspaceSession,
 })
+const signoffExportDisabled = computed(() =>
+  isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+)
 const {
   closeDesignReportExport,
   copyToClipboard: copyDesignReport,
@@ -1053,7 +1058,18 @@ const { handleMenuAction } = useAppMenuActions({
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage: () => {
-    if (isWorkspaceRoute.value) return exportSignoffPackage()
+    if (!isWorkspaceRoute.value) return
+    if (signoffExportDisabled.value) {
+      showToast({
+        severity: 'warn',
+        summary: 'Signoff Export Unavailable',
+        detail:
+          'Wait for the current flow to finish before exporting the signoff package.',
+        life: 5000,
+      })
+      return
+    }
+    return exportSignoffPackage()
   },
   exportDesignSummary: () => {
     if (isWorkspaceRoute.value) openDesignReportExport()

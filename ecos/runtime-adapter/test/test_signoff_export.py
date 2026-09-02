@@ -15,6 +15,25 @@ from ecos_runtime_adapter.sessions import WorkspaceSessionRegistry
 from ecos_runtime_adapter.workspace_api import RuntimeApiError, WorkspaceRuntimeApi
 
 
+def _start_blocking_operation(api, workspace_id):
+    release = threading.Event()
+
+    def runner(_observer):
+        release.wait(timeout=2)
+        return {}
+
+    api.operations.start(
+        workspace_id=workspace_id,
+        kind="flow",
+        origin="gui",
+        rerun=False,
+        step="",
+        idempotency_key="active-flow",
+        runner=runner,
+    )
+    return release
+
+
 def test_workspace_export_signoff_returns_exact_output_path(monkeypatch, tmp_path):
     workspace = SimpleNamespace(directory=tmp_path / "workspace")
     sessions = WorkspaceSessionRegistry()
@@ -47,17 +66,18 @@ def test_workspace_export_signoff_returns_exact_output_path(monkeypatch, tmp_pat
     assert calls == [(workspace, str(output_path))]
 
 
-def test_workspace_export_signoff_waits_for_session_mutation_lock(monkeypatch, tmp_path):
+def test_workspace_export_signoff_rejects_active_operation_without_waiting_for_session_mutation_lock(
+    monkeypatch, tmp_path
+):
     workspace = SimpleNamespace(directory=tmp_path / "workspace")
     sessions = WorkspaceSessionRegistry()
     session = sessions.open_session(workspace.directory, workspace=workspace)
     output_path = tmp_path / "export.tar.gz"
-    entered = threading.Event()
     results = queue.Queue()
+    api = WorkspaceRuntimeApi(sessions=sessions)
 
     def fake_export(_workspace, requested_output, additional_files=None):
-        entered.set()
-        return requested_output
+        pytest.fail("active operation must prevent signoff export")
 
     monkeypatch.setattr(
         "chipcompiler.engine.signoff_export.export_signoff_package_archive",
@@ -67,7 +87,8 @@ def test_workspace_export_signoff_waits_for_session_mutation_lock(monkeypatch, t
         "chipcompiler.engine.signoff_export.inspect_signoff_package",
         lambda _workspace: {"status": "ready", "groups": [], "risks": []},
     )
-    api = WorkspaceRuntimeApi(sessions=sessions)
+    release_operation = _start_blocking_operation(api, session.workspace_id)
+    assert api.operations.has_active_workspace(session.workspace_id)
 
     def run_export():
         try:
@@ -82,19 +103,18 @@ def test_workspace_export_signoff_waits_for_session_mutation_lock(monkeypatch, t
         except BaseException as error:  # pragma: no cover - re-raised below
             results.put(error)
 
-    with session.mutation_lock:
-        worker = threading.Thread(target=run_export)
-        worker.start()
-        assert not entered.wait(0.1)
-        assert worker.is_alive()
-
-    worker.join(timeout=2)
-    assert not worker.is_alive()
-    result = results.get_nowait()
-    if isinstance(result, BaseException):
-        raise result
-    assert result == {"outputPath": str(output_path)}
-    assert entered.is_set()
+    worker = threading.Thread(target=run_export)
+    try:
+        with session.mutation_lock:
+            worker.start()
+            worker.join(timeout=0.5)
+            assert not worker.is_alive()
+        result = results.get_nowait()
+        assert isinstance(result, RuntimeApiError)
+        assert result.code == "operation_conflict"
+    finally:
+        release_operation.set()
+        worker.join(timeout=2)
 
 
 def test_workspace_export_signoff_rejects_current_blocked_assessment(monkeypatch, tmp_path):
@@ -254,20 +274,22 @@ def test_inspect_signoff_package_blocks_when_current_checklist_is_unavailable(
     assert review["risks"][0]["title"] == "Signoff checklist unavailable"
 
 
-def test_workspace_inspect_signoff_waits_for_session_mutation_lock(monkeypatch, tmp_path):
+def test_workspace_inspect_signoff_rejects_active_operation_without_waiting_for_session_mutation_lock(
+    monkeypatch, tmp_path
+):
     workspace = SimpleNamespace(directory=tmp_path / "workspace")
     sessions = WorkspaceSessionRegistry()
     session = sessions.open_session(workspace.directory, workspace=workspace)
-    entered = threading.Event()
     results = queue.Queue()
+    api = WorkspaceRuntimeApi(sessions=sessions)
+    release_operation = _start_blocking_operation(api, session.workspace_id)
+    assert api.operations.has_active_workspace(session.workspace_id)
 
     def fake_inspect(active_workspace):
         assert active_workspace is workspace
-        entered.set()
-        return {"status": "ready", "groups": [], "risks": []}
+        pytest.fail("active operation must prevent signoff inspection")
 
     monkeypatch.setattr(signoff_export, "inspect_signoff_package", fake_inspect)
-    api = WorkspaceRuntimeApi(sessions=sessions)
 
     def run_inspection():
         try:
@@ -279,18 +301,18 @@ def test_workspace_inspect_signoff_waits_for_session_mutation_lock(monkeypatch, 
         except BaseException as error:  # pragma: no cover - re-raised below
             results.put(error)
 
-    with session.mutation_lock:
-        worker = threading.Thread(target=run_inspection)
-        worker.start()
-        assert not entered.wait(0.1)
-        assert worker.is_alive()
-
-    worker.join(timeout=2)
-    assert not worker.is_alive()
-    result = results.get_nowait()
-    if isinstance(result, BaseException):
-        raise result
-    assert result == {"status": "ready", "groups": [], "risks": []}
+    worker = threading.Thread(target=run_inspection)
+    try:
+        with session.mutation_lock:
+            worker.start()
+            worker.join(timeout=0.5)
+            assert not worker.is_alive()
+        result = results.get_nowait()
+        assert isinstance(result, RuntimeApiError)
+        assert result.code == "operation_conflict"
+    finally:
+        release_operation.set()
+        worker.join(timeout=2)
 
 
 def test_export_signoff_package_archive_collects_temporarily_and_replaces_atomically(

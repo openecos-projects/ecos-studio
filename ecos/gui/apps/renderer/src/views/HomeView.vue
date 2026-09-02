@@ -904,7 +904,8 @@ function sourcePath(value: Record<string, unknown>): string {
   return typeof value.path === 'string' ? value.path : '--'
 }
 
-function formatQorValue(value: number, unit?: string): string {
+function formatQorValue(value: number | null | undefined, unit?: string): string {
+  if (value === null || value === undefined) return '--'
   const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3)
   return unit ? `${formatted} ${unit}` : formatted
 }
@@ -915,11 +916,12 @@ function formatQorScore(score: number | null | undefined): string {
 }
 
 function qorDeltaLabel(delta: {
-  absoluteDelta: number
+  absoluteDelta: number | null
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
   unit?: string
 }): string {
+  if (delta.absoluteDelta === null) return 'Not compared'
   if (delta.state === 'neutral') return 'Unchanged'
   const direction = delta.state === 'improvement' ? 'Improved' : 'Regressed'
   const amount = formatQorValue(Math.abs(delta.absoluteDelta), delta.unit)
@@ -929,15 +931,16 @@ function qorDeltaLabel(delta: {
 }
 
 function qorMetricComparisonLabel(metric: {
-  absoluteDelta: number
+  absoluteDelta: number | null
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
   unit?: string
   isDirectional: boolean
-  polarity: string
-  baselinePolarity: string
+  polarity: string | null
+  baselinePolarity: string | null
 }): string {
   if (!metric.isDirectional) {
+    if (metric.baselinePolarity === null) return 'No baseline available'
     return metric.polarity === metric.baselinePolarity
       ? 'No directional QoR rule'
       : 'QoR rule changed'

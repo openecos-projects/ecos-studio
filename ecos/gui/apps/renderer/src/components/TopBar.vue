@@ -28,6 +28,7 @@
                   @click="handleItemClick(item.event)"
                   class="dropdown-item"
                   :disabled="item.disabled"
+                  :title="item.title"
                 >
                   <i v-if="item.icon" :class="item.icon" class="item-icon" />
                   <span class="item-label">{{ item.label }}</span>
@@ -212,6 +213,7 @@ interface DropdownItem {
   event?: TopBarMenuAction
   separator?: boolean
   disabled?: boolean
+  title?: string
 }
 
 interface Menu {
@@ -229,6 +231,7 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 const props = defineProps<{
   projectName?: string | null
   hasWorkspace?: boolean
+  signoffExportDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -315,6 +318,10 @@ const menus = computed<Menu[]>(() => [
               label: 'Export Signoff Package',
               icon: 'ri-archive-line',
               event: appMenuActionIds.exportSignoffPackage,
+              disabled: props.signoffExportDisabled,
+              title: props.signoffExportDisabled
+                ? 'Signoff export is unavailable while a flow is running.'
+                : undefined,
             },
             {
               label: 'Export Design Summary',

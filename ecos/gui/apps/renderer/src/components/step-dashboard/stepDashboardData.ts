@@ -211,14 +211,14 @@ export interface StepDashboardQorMetricRating {
 export interface StepDashboardQorBaselineMetric {
   step: FlowStep
   metricName: string
-  baselineValue: number
+  baselineValue: number | null
   currentValue: number
-  absoluteDelta: number
+  absoluteDelta: number | null
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
   isDirectional: boolean
-  polarity: string
-  baselinePolarity: string
+  polarity: string | null
+  baselinePolarity: string | null
 }
 
 export interface StepDashboardQorMetricComparison extends StepDashboardQorMetric {
@@ -1664,8 +1664,12 @@ export function prioritizeQorMetricComparisons(
         currentValue: comparison?.currentValue ?? metric.value,
         absoluteDelta: comparison?.absoluteDelta ?? null,
         relativeDeltaPct: comparison?.relativeDeltaPct ?? null,
-        comparisonState: comparison?.state ?? 'unavailable',
-        isComparisonAvailable: comparison !== undefined,
+        comparisonState:
+          comparison !== undefined && comparison.baselineValue !== null
+            ? comparison.state
+            : 'unavailable',
+        isComparisonAvailable:
+          comparison !== undefined && comparison.baselineValue !== null,
         isDirectional: comparison?.isDirectional ?? false,
         polarity: comparison?.polarity ?? null,
         baselinePolarity: comparison?.baselinePolarity ?? null,

@@ -1,5 +1,9 @@
 import { computed } from 'vue'
-import type { MetricComparison, ProjectManifestFlowStep } from '@ecos-studio/shared'
+import type {
+  MetricComparison,
+  MetricValue,
+  ProjectManifestFlowStep,
+} from '@ecos-studio/shared'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 export interface BackendWorkspaceQorMetric {
@@ -7,13 +11,13 @@ export interface BackendWorkspaceQorMetric {
   metricName: string
   displayName: string
   currentValue: number
-  baselineValue: number
-  absoluteDelta: number
+  baselineValue: number | null
+  absoluteDelta: number | null
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
   unit?: string
   polarity: MetricComparison['polarity']
-  baselinePolarity: MetricComparison['polarity']
+  baselinePolarity: MetricComparison['polarity'] | null
   isDirectional: boolean
 }
 
@@ -62,6 +66,24 @@ function projectMetric(metric: MetricComparison): BackendWorkspaceQorMetric {
   }
 }
 
+function projectCurrentMetric(metric: MetricValue): BackendWorkspaceQorMetric | null {
+  if (metric.value === null || !Number.isFinite(metric.value)) return null
+  return {
+    step: metric.stepId as ProjectManifestFlowStep,
+    metricName: metric.id,
+    displayName: metric.name,
+    currentValue: metric.value,
+    baselineValue: null,
+    absoluteDelta: null,
+    relativeDeltaPct: null,
+    state: 'neutral',
+    polarity: metric.polarity,
+    baselinePolarity: null,
+    isDirectional: false,
+    ...(metric.unit ? { unit: metric.unit } : {}),
+  }
+}
+
 export function useBackendWorkspaceQor() {
   const session = useBackendWorkspaceSession()
   const state = computed(() => {
@@ -88,6 +110,10 @@ export function useBackendWorkspaceQor() {
       } as const
     }
     if (baseline.status !== 'ready' && baseline.status !== 'partial') {
+      const metrics = qor.data.metrics.flatMap((metric) => {
+        const projected = projectCurrentMetric(metric)
+        return projected ? [projected] : []
+      })
       const comparison: BackendWorkspaceQorComparison = {
         workspaceId: overview.identity.workspaceId ?? '',
         workspaceName: overview.identity.workspaceName,
@@ -100,7 +126,7 @@ export function useBackendWorkspaceQor() {
         baselineScoreGate: 'unavailable',
         isBaselineWorkspace: false,
         available: false,
-        metrics: [],
+        metrics,
         deltas: [],
       }
       return {

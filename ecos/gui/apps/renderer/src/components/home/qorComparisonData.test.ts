@@ -153,4 +153,43 @@ describe('Home QoR comparison data', () => {
       ]),
     )
   })
+
+  it('keeps current-only metrics in the detail model without inventing a baseline', () => {
+    const detail = buildHomeQorDetailModel({
+      ...comparison,
+      baselineScore: null,
+      baselineScoreGate: 'unavailable',
+      baselineWorkspaceName: null,
+      available: false,
+      deltas: [],
+      metrics: [
+        {
+          ...comparison.metrics[0]!,
+          absoluteDelta: null,
+          baselinePolarity: null,
+          baselineValue: null,
+          isDirectional: false,
+          relativeDeltaPct: null,
+          state: 'neutral',
+        },
+      ],
+    })
+
+    expect(detail).toMatchObject({
+      baseline: { score: null },
+      current: { score: 78.4 },
+      steps: [
+        {
+          metrics: [
+            expect.objectContaining({
+              baselineValue: null,
+              currentValue: 5000,
+              metricName: 'route_wirelength',
+            }),
+          ],
+          step: 'Route',
+        },
+      ],
+    })
+  })
 })

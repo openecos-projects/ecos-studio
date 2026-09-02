@@ -210,7 +210,11 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 raise RuntimeApiError("command_failed", str(exc)) from exc
             return {"outputPath": output_path}
 
-        return self._with_session_mutation_lock(request.workspace_id, export)
+        return self._with_session_mutation_lock(
+            request.workspace_id,
+            export,
+            reject_active_operation=True,
+        )
 
     def inspect_signoff(self, request: WorkspaceInspectSignoffRequest) -> dict:
         def inspect(session: WorkspaceSession) -> dict:
@@ -218,7 +222,11 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
 
             return inspect_signoff_package(session.workspace)
 
-        return self._with_session_mutation_lock(request.workspace_id, inspect)
+        return self._with_session_mutation_lock(
+            request.workspace_id,
+            inspect,
+            reject_active_operation=True,
+        )
 
     def close_workspace(self, request: WorkspaceIdRequest) -> dict:
         def close(session: WorkspaceSession) -> dict:
@@ -926,10 +934,23 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
         self,
         workspace_id: str,
         operation: Callable[[WorkspaceSession], _T],
+        *,
+        reject_active_operation: bool = False,
     ) -> _T:
         session = self._get_session(workspace_id)
+        if reject_active_operation:
+            self._ensure_no_active_operation(session)
         with session.mutation_lock:
+            if reject_active_operation:
+                self._ensure_no_active_operation(session)
             return operation(session)
+
+    def _ensure_no_active_operation(self, session: WorkspaceSession) -> None:
+        if self.operations.has_active_workspace(session.workspace_id):
+            raise RuntimeApiError(
+                "operation_conflict",
+                "Workspace has an active Operation",
+            )
 
     def _refresh_workspace_config(self, workspace) -> None:
         import chipcompiler.data as data_api

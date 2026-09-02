@@ -1331,7 +1331,7 @@ export function staConvergenceFromComparison(
     metrics: Array<{
       metricName: string
       currentValue: number
-      baselineValue: number
+      baselineValue: number | null
     }>
   } | null,
 ): StaConvergenceModel | null {
