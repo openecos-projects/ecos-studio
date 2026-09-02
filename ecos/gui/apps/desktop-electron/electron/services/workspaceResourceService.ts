@@ -501,7 +501,11 @@ export class WorkspaceResourceService {
     const detailPath = nestedResource(step.resources.report, 'frontend_detail')?.path
     if (detailPath) {
       const detail = await this.readJsonOrNull(detailPath)
-      if (detail) return stepInfo(detail)
+      if (detail) {
+        if (Object.hasOwn(detail, 'qor')) return stepInfo(detail)
+        const qor = await this.readFrontendQor(step.directory)
+        return stepInfo(qor ? { ...detail, qor } : detail)
+      }
     }
 
     const cases = await this.readFrontendCases(
@@ -518,6 +522,19 @@ export class WorkspaceResourceService {
       subflow: step.resources.subflow.path?.path,
       cases,
     })
+  }
+
+  private async readFrontendQor(
+    stepDirectory: string,
+  ): Promise<Record<string, unknown> | null> {
+    const analysisDirectory = join(stepDirectory, 'analysis')
+    const [metrics, summary, hotspots] = await Promise.all([
+      this.readJsonOrNull(join(analysisDirectory, 'qor_metrics.json')),
+      this.readJsonOrNull(join(analysisDirectory, 'qor_summary.json')),
+      this.readJsonOrNull(join(analysisDirectory, 'qor_hotspots.json')),
+    ])
+    if (!metrics && !summary && !hotspots) return null
+    return { metrics, summary, hotspots }
   }
 
   private async readFrontendCases(path: string | undefined): Promise<unknown[]> {
