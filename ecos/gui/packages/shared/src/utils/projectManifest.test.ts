@@ -52,20 +52,28 @@ describe('project manifest parsing', () => {
     expect(normalizeProjectManifestFlowStep('post_route_lec')).toBe('Filler')
     expect(normalizeProjectManifestFlowStep('Post-LEC')).toBe('Filler')
 
-    const afterLec = registerWorkspaceInManifest(
-      createProjectManifestDraft({
-        rootPath: '/work/gcd',
-        name: 'gcd',
-        designName: 'gcd',
-      }),
-      {
-        projectRoot: '/work/gcd',
-        workspacePath: '/work/gcd/ws_from_lec',
-        sourceWorkspaceId: 'ws_0001',
-        sourceStep: 'postRouteLec',
-      },
-    )
+    const draft = createProjectManifestDraft({
+      rootPath: '/work/gcd',
+      name: 'gcd',
+      designName: 'gcd',
+    })
+    const afterLec = registerWorkspaceInManifest(draft, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_from_lec',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'postRouteLec',
+    })
+    expect(afterLec.workspaces[0]?.branch_from?.source_step).toBe('Filler')
     expect(afterLec.workspaces[0]?.start_step).toBe('RCX')
+
+    const afterTimingOpt = registerWorkspaceInManifest(afterLec, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_from_timing_opt',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'Timing optimization',
+    })
+    expect(afterTimingOpt.workspaces[1]?.branch_from?.source_step).toBe('Legal')
+    expect(afterTimingOpt.workspaces[1]?.start_step).toBe('Route')
   })
 
   it('records an optional MPC association with the canonical spec path', () => {

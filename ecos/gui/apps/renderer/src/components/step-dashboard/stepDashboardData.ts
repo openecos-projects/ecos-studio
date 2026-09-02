@@ -857,6 +857,12 @@ function formatByteSize(value: number): string {
   return `${value} B`
 }
 
+const SHA256_HEX = /^[0-9a-f]{64}$/
+
+function isNetlistSize(value: number | null): value is number {
+  return value !== null && Number.isInteger(value) && value >= 0
+}
+
 /** Parses the yosys_lec result JSON (`output/<design>_<step>_result.json`). */
 export function lecInsights(value: unknown): StepDashboardLecInsights | null {
   const source = record(value)
@@ -869,11 +875,14 @@ export function lecInsights(value: unknown): StepDashboardLecInsights | null {
   const gateSizeBytes = finiteNumber(source.gate_size_bytes)
 
   // ECC only treats a proven result as valid with complete netlist paths,
-  // digests, and sizes; a partial payload must not render as a proof.
+  // real SHA-256 digests, and non-negative integer sizes; a partial or
+  // malformed payload must not render as a proof.
   const complete =
-    Boolean(goldenVerilog && gateVerilog && goldenSha256 && gateSha256) &&
-    goldenSizeBytes !== null &&
-    gateSizeBytes !== null
+    Boolean(goldenVerilog && gateVerilog) &&
+    SHA256_HEX.test(goldenSha256) &&
+    SHA256_HEX.test(gateSha256) &&
+    isNetlistSize(goldenSizeBytes) &&
+    isNetlistSize(gateSizeBytes)
   const rawStatus = textValue(source.status, '').trim().toLowerCase()
   const status =
     rawStatus === 'proven' && complete

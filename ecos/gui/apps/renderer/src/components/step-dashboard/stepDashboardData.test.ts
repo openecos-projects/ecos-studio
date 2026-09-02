@@ -187,6 +187,28 @@ describe('step dashboard data', () => {
         gate_sha256: 'b'.repeat(64),
       }),
     ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
+    expect(
+      lecInsights({
+        status: 'proven',
+        golden_verilog: '/ws/golden.v',
+        gate_verilog: '/ws/gate.v',
+        golden_sha256: 'not-a-digest',
+        gate_sha256: 'b'.repeat(64),
+        golden_size_bytes: 512,
+        gate_size_bytes: 2048,
+      }),
+    ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
+    expect(
+      lecInsights({
+        status: 'proven',
+        golden_verilog: '/ws/golden.v',
+        gate_verilog: '/ws/gate.v',
+        golden_sha256: 'a'.repeat(64),
+        gate_sha256: 'b'.repeat(64),
+        golden_size_bytes: -1,
+        gate_size_bytes: 2.5,
+      }),
+    ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
     expect(lecInsights(null)).toBeNull()
     expect(lecInsights('nope')).toBeNull()
   })
