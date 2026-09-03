@@ -787,7 +787,9 @@ export interface DrcLayerTypeMatrix {
     maxLayer: string | null
   }>
   totalByLayer: number[]
-  totalCount: number
+  totalCount: number | null
+  reportedCount?: number
+  truncated?: boolean
 }
 
 export interface DrcRelatedMetrics {
@@ -918,8 +920,8 @@ export interface StaOverviewModel {
   worstSetup: { corner: string; wns: number } | null
   worstHold: { corner: string; wns: number } | null
   frequencyMhz: number | null
-  setupViolationCount: number
-  holdViolationCount: number
+  setupViolationCount: number | null
+  holdViolationCount: number | null
   allCornersMet: boolean | null
 }
 

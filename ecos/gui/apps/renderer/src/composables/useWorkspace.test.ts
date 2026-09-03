@@ -170,6 +170,13 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
     projectManifest: {
       mutate: vi.fn(async () => ({ content: '' })),
     },
+    backendWorkspace: {
+      getArtifact: vi.fn(),
+      getOverview: vi.fn(),
+      getStepDetail: vi.fn(),
+      refreshOverview: vi.fn(),
+      onInvalidated: vi.fn(() => vi.fn()),
+    },
     dialog: {
       pickDirectory: vi.fn(),
       pickFiles: vi.fn(),
@@ -846,7 +853,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-new')
   })
 
-  it('snapshots recent project summary from workspace resources without direct project file reads', async () => {
+  it('snapshots a Backend recent-project summary from committed facts only', async () => {
     const workspace = useWorkspace()
     const project: Project = {
       id: '/work/demo',
@@ -856,25 +863,78 @@ describe('useWorkspace openProject', () => {
     }
     workspace.currentProject.value = project
     workspace.recentProjects.value = [{ ...project }]
-    readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
-      steps: [
-        { name: 'synthesis', state: 'Success', runtime: '00:01:05' },
-        { name: 'floorplan', state: 'Ongoing', runtime: '00:00:30' },
-        { name: 'placement', state: 'Pending', runtime: '' },
-      ],
-    })
-    readWorkspaceParametersResourceApiMock.mockResolvedValueOnce({
-      PDK: 'ics55',
-      'Top module': 'top',
-      'Frequency max [MHz]': 125,
-      Core: {
-        Utilitization: 0.62,
+    vi.mocked(desktopApi.backendWorkspace.getOverview).mockResolvedValueOnce({
+      generation: 0,
+      workspaceContextId: 'context-a',
+      overview: {
+        revision: {
+          status: 'ready',
+          data: { workspaceId: 'engineering-a', workspaceRevision: 9 },
+          issues: [],
+        },
+        configuration: {
+          status: 'ready',
+          data: {
+            pdk: 'ics55',
+            design: 'gcd',
+            topModule: 'top',
+            dieArea: null,
+            maxFanout: null,
+            clock: 'clk',
+            frequencyMaxMhz: 125,
+            mpcDisplayName: null,
+            mpcConstraints: null,
+          },
+          issues: [],
+        },
+        flow: {
+          status: 'ready',
+          data: {
+            steps: [
+              {
+                name: 'synthesis',
+                order: 0,
+                runtimeSeconds: 65,
+                state: 'succeeded',
+                stepId: 'synthesis',
+              },
+              {
+                name: 'floorplan',
+                order: 1,
+                runtimeSeconds: 30,
+                state: 'running',
+                stepId: 'floorplan',
+              },
+              {
+                name: 'placement',
+                order: 2,
+                state: 'not-started',
+                stepId: 'placement',
+              },
+            ],
+          },
+          issues: [],
+        },
+        keyMetrics: {
+          status: 'ready',
+          data: {
+            items: [
+              {
+                id: 'core-utilization',
+                label: 'Core Utility',
+                value: 0.62,
+                unit: 'ratio',
+              },
+            ],
+          },
+          issues: [],
+        },
       },
-    })
+    } as never)
     await workspace.closeProject()
 
-    expect(readWorkspaceFlowResourceApiMock).toHaveBeenCalledTimes(1)
-    expect(readWorkspaceParametersResourceApiMock).toHaveBeenCalledTimes(1)
+    expect(readWorkspaceFlowResourceApiMock).not.toHaveBeenCalled()
+    expect(readWorkspaceParametersResourceApiMock).not.toHaveBeenCalled()
     expect(desktopApi.workspace.readProjectTextFile).not.toHaveBeenCalled()
     expect(settingsData.get('recent_projects')).toEqual([
       expect.objectContaining({
@@ -891,6 +951,9 @@ describe('useWorkspace openProject', () => {
         topModule: 'top',
         frequencyTarget: 125,
         coreUtilization: 0.62,
+        committedWorkspaceId: 'engineering-a',
+        committedRevision: 9,
+        committedVerifiedAt: expect.any(String),
       }),
     ])
   })
@@ -901,6 +964,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/old',
       name: 'old',
       path: '/work/old',
+      designTool: 'frontend',
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     const newProject: Project = {
@@ -1128,6 +1192,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/demo',
       name: 'demo',
       path: '/work/demo',
+      designTool: 'frontend',
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
@@ -1212,6 +1277,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/demo',
       name: 'demo',
       path: '/work/demo',
+      designTool: 'frontend',
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
@@ -1353,6 +1419,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/old',
       name: 'old',
       path: '/work/old',
+      designTool: 'frontend',
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     const newProject: Project = {
@@ -1533,6 +1600,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/current',
       name: 'current',
       path: '/work/current',
+      designTool: 'frontend',
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     const projectA: Project = {
@@ -1616,6 +1684,7 @@ describe('useWorkspace openProject', () => {
       id: '/work/old',
       name: 'old',
       path: '/work/old',
+      designTool: 'frontend',
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     const oldSummary: Project = {

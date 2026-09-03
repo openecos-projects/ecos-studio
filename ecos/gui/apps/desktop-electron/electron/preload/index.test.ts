@@ -34,7 +34,9 @@ async function loadDesktopBridge() {
       getVersions(): Promise<unknown>
     }
     backendWorkspace: {
+      getArtifact(request: unknown): Promise<unknown>
       getOverview(): Promise<unknown>
+      getStepDetail(request: unknown): Promise<unknown>
       refreshOverview(): Promise<unknown>
       onInvalidated(listener: (event: unknown) => void): () => void
     }
@@ -267,8 +269,23 @@ describe('preload desktop bridge contract', () => {
       workspaceContextId: 'workspace-context-1',
     }
     ipcRenderer.invoke.mockResolvedValue(overview)
+    const detailRequest = {
+      stepId: 'Place',
+      workspaceContextId: 'workspace-context-1',
+      workspaceRevision: 9,
+    }
 
     await expect(bridge.backendWorkspace.getOverview()).resolves.toEqual(overview)
+    await expect(bridge.backendWorkspace.getStepDetail(detailRequest)).resolves.toEqual(
+      overview,
+    )
+    await expect(
+      bridge.backendWorkspace.getArtifact({
+        artifactId: 'layout-place',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      }),
+    ).resolves.toEqual(overview)
     await expect(bridge.backendWorkspace.refreshOverview()).resolves.toEqual(overview)
 
     const listener = vi.fn()
@@ -283,6 +300,20 @@ describe('preload desktop bridge contract', () => {
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       2,
+      desktopApiIpcChannels.backendWorkspaceGetStepDetail,
+      detailRequest,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.backendWorkspaceGetArtifact,
+      {
+        artifactId: 'layout-place',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      4,
       desktopApiIpcChannels.backendWorkspaceRefreshOverview,
     )
     expect(ipcRenderer.on).toHaveBeenCalledWith(

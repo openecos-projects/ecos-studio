@@ -1,43 +1,64 @@
 import { randomUUID } from 'node:crypto'
-import { open } from 'node:fs/promises'
-import { dirname, relative, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
   parseProjectManifest,
-  parseRuntimeSeconds,
   type BackendWorkspaceOverviewResult,
-  type ChecklistFinding,
-  type FlowStepState,
-  type EccEngineeringSnapshot,
+  type BackendWorkspaceArtifactRequest,
+  type BackendWorkspaceArtifactResult,
+  type BackendWorkspaceStepDetailRequest,
+  type BackendWorkspaceStepDetailResult,
   type ProjectManifest,
   type ReadIssue,
   type ReadSection,
-  type WorkspaceConfigurationSummary,
   type WorkspaceDashboardMetric,
-  type WorkspaceChecklistSummary,
-  type WorkspaceFlowSummary,
+  type WorkspaceFlowInsightsSummary,
   type WorkspaceOverviewCore,
-  type WorkspaceOverviewIdentity,
   type WorkspaceBaselineComparison,
   type WorkspaceQorSummary,
-  type WorkspaceResourceIndex,
 } from '@ecos-studio/shared'
 import { requireWindowScopeId } from './windowScopeContext'
-import { analyzeWorkspaceQor } from './workspaceQorAnalysis'
+import {
+  analyzeWorkspaceQor,
+  type WorkspaceEngineeringFacts,
+} from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { workspaceDashboardMetrics } from './workspaceDashboardAnalysis'
+import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
+import { artifactDescriptor, workspaceStepDetail } from './backendWorkspaceDetail'
+import {
+  readWorkspaceArtifact,
+  type WorkspaceArtifactReader,
+} from './backendWorkspaceArtifact'
+import type {
+  ProjectComparisonFileWatcher,
+  ProjectComparisonFileWatcherCallbacks,
+} from './projectComparisonFileWatcher'
+import {
+  checklistSection,
+  configurationSection,
+  flowSection,
+  identityFromManifest,
+  pathsEqual,
+} from './backendWorkspaceOverviewProjection'
+import { flowInsightsSection } from './backendWorkspaceFlowInsights'
+import { isPathWithinRoot } from './pathScope'
 
 interface BackendWorkspaceServiceOptions {
-  engineeringSnapshotProvider?: {
-    getByDirectory(directory: string): Promise<EccEngineeringSnapshot>
+  workspaceRootProvider: {
+    getProjectRoot(): Promise<string>
   }
-  workspaceResourceService: {
-    getIndex(): Promise<WorkspaceResourceIndex>
-  }
-  projectManagementReadService?: {
+  projectManagementReadService: {
     readManifest(projectRoot: string): Promise<string | null>
+    readEngineeringSnapshot(request: {
+      projectRoot: string
+      workspacePath: string
+    }): Promise<ProjectEngineeringSnapshotReadResult>
+    readVerifiedArtifact?: WorkspaceArtifactReader
   }
-  readWorkspaceTextFile?: (path: string) => Promise<string | null>
+  snapshotWatcherFactory?: (
+    callbacks: ProjectComparisonFileWatcherCallbacks,
+  ) => ProjectComparisonFileWatcher
 }
 
 interface WorkspaceContext {
@@ -46,6 +67,20 @@ interface WorkspaceContext {
   cache?: BackendWorkspaceOverviewResult
   inFlight?: Promise<BackendWorkspaceOverviewResult>
   coalescedRequests: number
+  snapshot?: ProjectEngineeringSnapshotReadResult
+  workspaceRoot?: string
+  watchKey?: string
+  watchedRoots?: string[]
+  watcher?: ProjectComparisonFileWatcher
+  flowInsights?: ReadSection<WorkspaceFlowInsightsSummary>
+  windowId: number
+}
+
+interface BuiltWorkspaceOverview {
+  result: BackendWorkspaceOverviewResult
+  snapshot: ProjectEngineeringSnapshotReadResult | null
+  workspaceRoot: string
+  watchedRoots: string[]
 }
 
 export interface BackendWorkspaceInvalidation {
@@ -55,268 +90,9 @@ export interface BackendWorkspaceInvalidation {
 }
 
 const NOT_MIGRATED_ISSUE: ReadIssue = { code: 'BACKEND_SECTION_NOT_MIGRATED' }
-const WORKSPACE_TEXT_MAX_BYTES = 512 * 1024
 
 function unavailable<T>(): ReadSection<T> {
   return { status: 'unavailable', issues: [NOT_MIGRATED_ISSUE] }
-}
-
-function stringValue(record: Record<string, unknown> | null, key: string): string {
-  const value = record?.[key]
-  return typeof value === 'string' ? value : ''
-}
-
-function finiteNumber(value: unknown): number | null {
-  const number = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(number) ? number : null
-}
-
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-async function readBoundedText(path: string): Promise<string | null> {
-  let handle: Awaited<ReturnType<typeof open>> | null = null
-  try {
-    handle = await open(path, 'r')
-    const buffer = Buffer.alloc(WORKSPACE_TEXT_MAX_BYTES + 1)
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    if (bytesRead > WORKSPACE_TEXT_MAX_BYTES) {
-      throw new Error(`Workspace file exceeds ${WORKSPACE_TEXT_MAX_BYTES} bytes`)
-    }
-    return buffer.subarray(0, bytesRead).toString('utf8')
-  } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
-      return null
-    }
-    throw error
-  } finally {
-    await handle?.close()
-  }
-}
-
-function pathsEqual(left: string, right: string): boolean {
-  return relative(resolve(left), resolve(right)) === ''
-}
-
-function configurationSection(
-  snapshot: EccEngineeringSnapshot | null,
-): ReadSection<WorkspaceConfigurationSummary> {
-  if (!snapshot) {
-    return {
-      status: 'unavailable',
-      issues: [{ code: 'WORKSPACE_CONFIGURATION_UNAVAILABLE' }],
-    }
-  }
-
-  const parameters = snapshot.parameters
-  const die = recordValue(parameters.Die)
-  const mpc = recordValue(parameters.MPC)
-  const template = recordValue(mpc?.core_template)
-  const ports = Array.isArray(template?.ports)
-    ? template.ports.flatMap((value) => {
-        const port = recordValue(value)
-        const name = stringValue(port, 'name').trim()
-        return name
-          ? [
-              {
-                name,
-                direction: stringValue(port, 'direction').trim() || '--',
-                dataType: stringValue(port, 'data_type').trim() || '--',
-                width: finiteNumber(port?.width),
-                info: stringValue(port, 'info').trim(),
-              },
-            ]
-          : []
-      })
-    : []
-  return {
-    status: 'ready',
-    data: {
-      pdk: stringValue(parameters, 'PDK'),
-      design: stringValue(parameters, 'Design'),
-      topModule: stringValue(parameters, 'Top module'),
-      dieArea: finiteNumber(die?.Area),
-      maxFanout: finiteNumber(parameters['Max fanout']),
-      clock: stringValue(parameters, 'Clock'),
-      frequencyMaxMhz: finiteNumber(parameters['Frequency max [MHz]']),
-      mpcDisplayName: stringValue(mpc, 'display_name').trim() || null,
-      mpcConstraints: template
-        ? {
-            minimumArea: finiteNumber(template.minimum_area),
-            maximumArea: finiteNumber(template.maximum_area),
-            maximumCellCount: finiteNumber(template.maximum_cell_num),
-            ports,
-          }
-        : null,
-    },
-    issues: [],
-  }
-}
-
-function normalizeFlowState(value: string): FlowStepState {
-  switch (value.trim().toLowerCase()) {
-    case 'success':
-    case 'succeeded':
-    case 'completed':
-    case 'complete':
-      return 'succeeded'
-    case 'ongoing':
-    case 'running':
-      return 'running'
-    case 'incomplete':
-      return 'failed'
-    case 'invalid':
-    case 'failed':
-    case 'failure':
-    case 'error':
-      return 'failed'
-    case 'pending':
-    case 'unstart':
-    case 'unstarted':
-    case 'not_started':
-    case 'not-started':
-    case 'not started':
-      return 'not-started'
-    case 'skipped':
-      return 'skipped'
-    case 'cancelled':
-    case 'canceled':
-      return 'cancelled'
-    default:
-      return value.trim() ? 'unknown' : 'not-started'
-  }
-}
-
-function flowSection(
-  snapshot: EccEngineeringSnapshot | null,
-): ReadSection<WorkspaceFlowSummary> {
-  if (!snapshot) {
-    return {
-      status: 'unavailable',
-      issues: [{ code: 'WORKSPACE_FLOW_UNAVAILABLE' }],
-    }
-  }
-  const steps = recordValue(snapshot.flow)?.steps
-  if (!Array.isArray(steps)) {
-    return {
-      status: 'error',
-      issues: [{ code: 'WORKSPACE_FLOW_INVALID' }],
-    }
-  }
-  return {
-    status: 'ready',
-    data: {
-      steps: steps.flatMap((value, order) => {
-        const step = recordValue(value)
-        if (!step || typeof step.name !== 'string') return []
-        const runtimeSeconds = parseRuntimeSeconds(String(step.runtime ?? ''))
-        const peakMemoryMb = finiteNumber(
-          step['peak memory (mb)'] ?? recordValue(step.info)?.['peak memory (mb)'],
-        )
-        return [
-          {
-            stepId: step.name,
-            order,
-            name: step.name,
-            state: normalizeFlowState(String(step.state ?? '')),
-            ...(typeof step.tool === 'string' && step.tool ? { toolId: step.tool } : {}),
-            ...(runtimeSeconds === null ? {} : { runtimeSeconds }),
-            ...(peakMemoryMb === null ? {} : { peakMemoryMb }),
-          },
-        ]
-      }),
-    },
-    issues: [],
-  }
-}
-
-function checklistFinding(value: unknown): ChecklistFinding | null {
-  const item = recordValue(value)
-  if (!item) return null
-  const requiredStrings = [
-    'id',
-    'step',
-    'category',
-    'owner',
-    'policy',
-    'state',
-    'title',
-    'summary',
-  ] as const
-  if (requiredStrings.some((key) => typeof item[key] !== 'string')) return null
-  if (typeof item.blocked !== 'boolean') return null
-  const source = recordValue(item.source)
-  if (!source || !Array.isArray(item.evidence)) return null
-  const evidence = item.evidence.filter(
-    (entry): entry is Record<string, unknown> => recordValue(entry) !== null,
-  )
-  return {
-    id: item.id as string,
-    step: item.step as string,
-    category: item.category as string,
-    owner: item.owner as string,
-    policy: item.policy as string,
-    state: item.state as string,
-    blocked: item.blocked,
-    title: item.title as string,
-    summary: item.summary as string,
-    source,
-    evidence,
-  }
-}
-
-function reconcileChecklistFinding(
-  finding: ChecklistFinding,
-  successfulSteps: ReadonlySet<string>,
-): ChecklistFinding {
-  if (
-    finding.category !== 'flow' ||
-    finding.state !== 'failed' ||
-    !successfulSteps.has(finding.step.trim().toLowerCase())
-  ) {
-    return finding
-  }
-  return {
-    ...finding,
-    blocked: false,
-    state: 'pass',
-    evidence: [
-      ...finding.evidence,
-      {
-        kind: 'flow-checklist-reconciliation',
-        previousState: 'failed',
-        committedFlowState: 'Success',
-      },
-    ],
-  }
-}
-
-function identityFromManifest(
-  index: WorkspaceResourceIndex,
-  manifest: ProjectManifest | null,
-): WorkspaceOverviewIdentity {
-  const workspace = manifest?.workspaces.find((candidate) =>
-    pathsEqual(candidate.workspace_path, index.root),
-  )
-  return {
-    ...(manifest ? { projectId: manifest.project_id, projectName: manifest.name } : {}),
-    ...(workspace
-      ? { workspaceId: workspace.workspace_id, workspaceName: workspace.name }
-      : {
-          workspaceName: index.root.split(/[\\/]/).filter(Boolean).pop() ?? 'Workspace',
-        }),
-    ...(manifest?.qor_baseline?.workspace_id
-      ? { baselineWorkspaceId: manifest.qor_baseline.workspace_id }
-      : {}),
-  }
 }
 
 export class BackendWorkspaceService {
@@ -339,10 +115,15 @@ export class BackendWorkspaceService {
     const generation = context.generation
     let query: Promise<BackendWorkspaceOverviewResult>
     query = this.buildOverview(context, generation)
-      .then((result) => {
+      .then(({ result, snapshot, workspaceRoot, watchedRoots }) => {
         const current = this.contexts.get(windowId)
         if (current === context && current.generation === generation) {
           current.cache = result
+          current.flowInsights = result.overview.flowInsights
+          if (snapshot?.ok || !current.snapshot) current.snapshot = snapshot ?? undefined
+          current.workspaceRoot = workspaceRoot
+          this.observeWorkspace(current, workspaceRoot, watchedRoots)
+          current.coalescedRequests = 0
         }
         return result
       })
@@ -357,6 +138,125 @@ export class BackendWorkspaceService {
     const windowId = requireWindowScopeId()
     this.invalidateWindow(windowId, false)
     return await this.getOverview()
+  }
+
+  async checkForUpdates(windowId: number): Promise<void> {
+    const context = this.contexts.get(windowId)
+    if (!context?.workspaceRoot || !context.snapshot?.ok) return
+    const latest = await this.readEngineeringSnapshot(context.workspaceRoot)
+    if (
+      latest?.ok &&
+      (latest.snapshot.workspaceId !== context.snapshot.snapshot.workspaceId ||
+        latest.snapshot.workspaceRevision !== context.snapshot.snapshot.workspaceRevision)
+    ) {
+      this.invalidateWindow(windowId)
+    }
+  }
+
+  async getStepDetail(
+    request: BackendWorkspaceStepDetailRequest,
+  ): Promise<BackendWorkspaceStepDetailResult> {
+    const context = this.contextForWindow(requireWindowScopeId())
+    if (
+      !request ||
+      typeof request.stepId !== 'string' ||
+      !request.stepId.trim() ||
+      typeof request.workspaceContextId !== 'string' ||
+      !Number.isSafeInteger(request.workspaceRevision) ||
+      request.workspaceRevision < 1
+    ) {
+      return this.unavailableStepDetail(context, 'BACKEND_WORKSPACE_REQUEST_INVALID')
+    }
+    if (request.workspaceContextId !== context.id) {
+      return this.unavailableStepDetail(context, 'BACKEND_WORKSPACE_CONTEXT_MISMATCH')
+    }
+    if (!context.snapshot) await this.getOverview()
+    const snapshot = context.snapshot
+    if (!snapshot?.ok) {
+      return this.unavailableStepDetail(
+        context,
+        snapshot?.issue.code ?? 'ENGINEERING_SNAPSHOT_READ_FAILED',
+      )
+    }
+    if (snapshot.snapshot.workspaceRevision !== request.workspaceRevision) {
+      return this.unavailableStepDetail(
+        context,
+        'ENGINEERING_SNAPSHOT_REVISION_MISMATCH',
+        snapshot,
+      )
+    }
+    const flow = flowSection(snapshot)
+    const checklist = checklistSection(snapshot, flow)
+    const insights = context.flowInsights
+    return {
+      detail: workspaceStepDetail(
+        snapshot,
+        request.stepId,
+        flow,
+        checklist,
+        insights?.status === 'ready' || insights?.status === 'partial'
+          ? insights.data
+          : null,
+      ),
+      generation: context.generation,
+      workspaceContextId: context.id,
+      workspaceId: snapshot.snapshot.workspaceId,
+      workspaceRevision: snapshot.snapshot.workspaceRevision,
+    }
+  }
+
+  async getArtifact(
+    request: BackendWorkspaceArtifactRequest,
+  ): Promise<BackendWorkspaceArtifactResult> {
+    const context = this.contextForWindow(requireWindowScopeId())
+    const unavailable = (code: string): BackendWorkspaceArtifactResult => ({
+      artifact: { status: 'unavailable', issues: [{ code }] },
+      generation: context.generation,
+      workspaceContextId: context.id,
+      ...(context.snapshot?.ok
+        ? {
+            workspaceId: context.snapshot.snapshot.workspaceId,
+            workspaceRevision: context.snapshot.snapshot.workspaceRevision,
+          }
+        : {}),
+    })
+    if (
+      !request ||
+      typeof request.artifactId !== 'string' ||
+      !request.artifactId ||
+      typeof request.workspaceContextId !== 'string' ||
+      !Number.isSafeInteger(request.workspaceRevision) ||
+      request.workspaceRevision < 1
+    ) {
+      return unavailable('BACKEND_WORKSPACE_REQUEST_INVALID')
+    }
+    if (request.workspaceContextId !== context.id) {
+      return unavailable('BACKEND_WORKSPACE_CONTEXT_MISMATCH')
+    }
+    const snapshot = context.snapshot
+    if (!snapshot?.ok || !context.workspaceRoot) {
+      return unavailable('ENGINEERING_SNAPSHOT_READ_FAILED')
+    }
+    if (snapshot.snapshot.workspaceRevision !== request.workspaceRevision) {
+      return unavailable('ENGINEERING_SNAPSHOT_REVISION_MISMATCH')
+    }
+    return {
+      artifact: await readWorkspaceArtifact(
+        snapshot,
+        context.workspaceRoot,
+        request.artifactId,
+        this.options.projectManagementReadService.readVerifiedArtifact
+          ? (artifactRequest) =>
+              this.options.projectManagementReadService.readVerifiedArtifact!(
+                artifactRequest,
+              )
+          : undefined,
+      ),
+      generation: context.generation,
+      workspaceContextId: context.id,
+      workspaceId: snapshot.snapshot.workspaceId,
+      workspaceRevision: snapshot.snapshot.workspaceRevision,
+    }
   }
 
   invalidateWindow(windowId: number, notify = true): void {
@@ -381,13 +281,20 @@ export class BackendWorkspaceService {
   }
 
   clearWindow(windowId: number): void {
+    const context = this.contexts.get(windowId)
     this.contexts.delete(windowId)
+    void context?.watcher?.close()
   }
 
   private contextForWindow(windowId: number): WorkspaceContext {
     const existing = this.contexts.get(windowId)
     if (existing) return existing
-    const context = { id: randomUUID(), generation: 0, coalescedRequests: 0 }
+    const context = {
+      id: randomUUID(),
+      generation: 0,
+      coalescedRequests: 0,
+      windowId,
+    }
     this.contexts.set(windowId, context)
     return context
   }
@@ -395,25 +302,95 @@ export class BackendWorkspaceService {
   private async buildOverview(
     context: WorkspaceContext,
     generation: number,
-  ): Promise<BackendWorkspaceOverviewResult> {
+  ): Promise<BuiltWorkspaceOverview> {
     const startedAt = performance.now()
     const eventLoopDelay = eventLoopDelayMs()
     const readStartedAt = performance.now()
-    const index = await this.options.workspaceResourceService.getIndex()
+    const previousSnapshot = context.snapshot
+    const previousWorkspaceRoot = context.workspaceRoot
+    const workspaceRoot = await this.options.workspaceRootProvider.getProjectRoot()
     const [manifest, snapshot] = await Promise.all([
-      this.readManifest(index.root),
-      this.readEngineeringSnapshot(index.root),
+      this.readManifest(workspaceRoot),
+      this.readEngineeringSnapshot(workspaceRoot),
     ])
+    if (!manifest && previousSnapshot?.ok && previousWorkspaceRoot) {
+      throw new Error('PROJECT_MANIFEST_READ_FAILED')
+    }
+    const projectRoot = dirname(workspaceRoot)
+    const baseline = manifest?.workspaces.find(
+      (workspace) => workspace.workspace_id === manifest.qor_baseline?.workspace_id,
+    )
+    const baselineRoot = baseline ? resolve(baseline.workspace_path) : null
+    const watchedRoots = [
+      workspaceRoot,
+      ...(baselineRoot &&
+      baselineRoot !== projectRoot &&
+      isPathWithinRoot(baselineRoot, projectRoot) &&
+      !pathsEqual(baselineRoot, workspaceRoot)
+        ? [baselineRoot]
+        : []),
+    ]
+    if (!snapshot?.ok && previousSnapshot?.ok) {
+      throw new Error(snapshot?.issue.code ?? 'ENGINEERING_SNAPSHOT_READ_FAILED')
+    }
+    if (
+      snapshot?.ok &&
+      previousSnapshot?.ok &&
+      previousWorkspaceRoot &&
+      pathsEqual(workspaceRoot, previousWorkspaceRoot)
+    ) {
+      if (snapshot.snapshot.workspaceId !== previousSnapshot.snapshot.workspaceId) {
+        throw new Error('ENGINEERING_WORKSPACE_ID_MISMATCH')
+      }
+      if (
+        snapshot.snapshot.workspaceRevision < previousSnapshot.snapshot.workspaceRevision
+      ) {
+        throw new Error('ENGINEERING_SNAPSHOT_REVISION_REGRESSION')
+      }
+    }
     const flow = flowSection(snapshot)
-    const checklist = this.readChecklist(snapshot, flow)
-    const qor = await this.readQor(index, manifest, snapshot)
-    const keyMetrics = await this.readKeyMetrics(index, qor.qor)
+    const checklist = checklistSection(snapshot, flow)
+    const qor = await this.readQor(workspaceRoot, manifest, snapshot)
+    const flowInsights = flowInsightsSection(snapshot, flow, qor.qor)
+    const keyMetrics = this.readKeyMetrics(qor.qor)
     const readMs = performance.now() - readStartedAt
     const normalizeStartedAt = performance.now()
     const overview: WorkspaceOverviewCore = {
-      identity: identityFromManifest(index, manifest),
+      revision: snapshot?.ok
+        ? {
+            status: 'ready',
+            data: {
+              workspaceId: snapshot.snapshot.workspaceId,
+              workspaceRevision: snapshot.snapshot.workspaceRevision,
+            },
+            issues: [],
+          }
+        : {
+            status: 'unavailable',
+            issues: [snapshot?.issue ?? { code: 'ENGINEERING_SNAPSHOT_READ_FAILED' }],
+          },
+      artifacts:
+        snapshot?.ok && snapshot.sections.artifacts.status === 'ready'
+          ? {
+              status: 'ready',
+              data: {
+                items: snapshot.sections.artifacts.data.map(artifactDescriptor),
+              },
+              issues: [],
+            }
+          : {
+              status: 'unavailable',
+              issues:
+                snapshot?.ok && snapshot.sections.artifacts.status !== 'ready'
+                  ? snapshot.sections.artifacts.issues
+                  : snapshot && !snapshot.ok
+                    ? [snapshot.issue]
+                    : [{ code: 'ENGINEERING_ARTIFACT_INVALID' }],
+            },
+      identity: identityFromManifest(workspaceRoot, manifest),
       configuration: configurationSection(snapshot),
       flow,
+      flowInsights,
       checklist,
       qor: qor.qor,
       keyMetrics,
@@ -424,23 +401,25 @@ export class BackendWorkspaceService {
       generation,
       overview,
     }
-    const files = workspaceIndexFiles(index)
     electronLogger.debug('[backend-workspace] query metrics', {
+      baselineSnapshotReads:
+        manifest?.qor_baseline?.workspace_id &&
+        manifest.qor_baseline.workspace_id !== overview.identity.workspaceId
+          ? 1
+          : 0,
       coalescedRequests: context.coalescedRequests,
       eventLoopDelayMs: roundMs(await eventLoopDelay),
-      fileCount: files.length,
-      indexedBytes: files.reduce((total, file) => total + (file.sizeBytes ?? 0), 0),
+      snapshotFileCount: snapshot ? 1 : 0,
+      snapshotBytes: snapshot?.readBytes ?? 0,
       ipcPayloadBytes: Buffer.byteLength(JSON.stringify(result)),
       normalizeMs: roundMs(performance.now() - normalizeStartedAt),
       readMs: roundMs(readMs),
       totalMs: roundMs(performance.now() - startedAt),
     })
-    context.coalescedRequests = 0
-    return result
+    return { result, snapshot, workspaceRoot, watchedRoots }
   }
 
   private async readManifest(workspaceRoot: string): Promise<ProjectManifest | null> {
-    if (!this.options.projectManagementReadService) return null
     try {
       const content = await this.options.projectManagementReadService.readManifest(
         dirname(workspaceRoot),
@@ -453,85 +432,29 @@ export class BackendWorkspaceService {
 
   private async readEngineeringSnapshot(
     workspaceRoot: string,
-  ): Promise<EccEngineeringSnapshot | null> {
+  ): Promise<ProjectEngineeringSnapshotReadResult | null> {
     try {
-      return (
-        (await this.options.engineeringSnapshotProvider?.getByDirectory(workspaceRoot)) ??
-        null
-      )
+      return await this.options.projectManagementReadService.readEngineeringSnapshot({
+        projectRoot: dirname(workspaceRoot),
+        workspacePath: workspaceRoot,
+      })
     } catch {
       return null
     }
   }
 
-  private readChecklist(
-    snapshot: EccEngineeringSnapshot | null,
-    flow: ReadSection<WorkspaceFlowSummary>,
-  ): ReadSection<WorkspaceChecklistSummary> {
-    if (!snapshot) {
-      return {
-        status: 'unavailable',
-        issues: [{ code: 'WORKSPACE_CHECKLIST_UNAVAILABLE' }],
-      }
-    }
-    try {
-      const root = recordValue(snapshot.checklist)
-      if (!root || !Array.isArray(root.checklist)) {
-        return {
-          status: 'error',
-          issues: [{ code: 'WORKSPACE_CHECKLIST_INVALID' }],
-        }
-      }
-      const findings = root.checklist.map(checklistFinding)
-      const invalidCount = findings.filter((finding) => finding === null).length
-      const successfulSteps = new Set(
-        (flow.status === 'ready' || flow.status === 'partial' ? flow.data.steps : [])
-          .filter((step) => normalizeFlowState(step.state) === 'succeeded')
-          .map((step) => step.name.trim().toLowerCase()),
-      )
-      const data = {
-        findings: findings
-          .filter((finding): finding is ChecklistFinding => finding !== null)
-          .map((finding) => reconcileChecklistFinding(finding, successfulSteps)),
-      }
-      return invalidCount
-        ? {
-            status: 'partial',
-            data,
-            issues: [
-              {
-                code: 'WORKSPACE_CHECKLIST_ITEM_INVALID',
-                detail: `${invalidCount} invalid checklist item(s)`,
-              },
-            ],
-          }
-        : { status: 'ready', data, issues: [] }
-    } catch (error) {
-      return {
-        status: 'error',
-        issues: [
-          {
-            code: 'WORKSPACE_CHECKLIST_READ_FAILED',
-            detail: error instanceof Error ? error.message : String(error),
-          },
-        ],
-      }
-    }
-  }
-
   private async readQor(
-    index: WorkspaceResourceIndex,
+    workspaceRoot: string,
     manifest: ProjectManifest | null,
-    snapshot: EccEngineeringSnapshot | null,
+    snapshot: ProjectEngineeringSnapshotReadResult | null,
   ): Promise<{
     qor: ReadSection<WorkspaceQorSummary>
     baselineComparison: ReadSection<WorkspaceBaselineComparison>
   }> {
     const currentWorkspace = manifest?.workspaces.find((workspace) =>
-      pathsEqual(workspace.workspace_path, index.root),
+      pathsEqual(workspace.workspace_path, workspaceRoot),
     )
-    const snapshotProvider = this.options.engineeringSnapshotProvider
-    if (!manifest || !currentWorkspace || !snapshotProvider) {
+    if (!manifest || !currentWorkspace) {
       return { qor: unavailable(), baselineComparison: unavailable() }
     }
 
@@ -542,7 +465,7 @@ export class BackendWorkspaceService {
         ? [baselineWorkspaceId]
         : []),
     ]
-    const snapshotsByWorkspaceId: Record<string, EccEngineeringSnapshot | null> = {}
+    const snapshotsByWorkspaceId: Record<string, WorkspaceEngineeringFacts | null> = {}
     const failedIds = new Set<string>()
     await Promise.all(
       requestedIds.map(async (workspaceId) => {
@@ -553,14 +476,22 @@ export class BackendWorkspaceService {
           failedIds.add(workspaceId)
           return
         }
+        const projectRoot = dirname(workspaceRoot)
+        const candidate = resolve(workspace.workspace_path)
+        if (candidate === projectRoot || !isPathWithinRoot(candidate, projectRoot)) {
+          failedIds.add(workspaceId)
+          return
+        }
         if (workspaceId === currentWorkspace.workspace_id && snapshot) {
-          snapshotsByWorkspaceId[workspaceId] = snapshot
+          snapshotsByWorkspaceId[workspaceId] = engineeringFacts(snapshot)
+          if (!snapshotsByWorkspaceId[workspaceId]) failedIds.add(workspaceId)
           return
         }
         try {
-          snapshotsByWorkspaceId[workspaceId] = await snapshotProvider.getByDirectory(
-            workspace.workspace_path,
+          snapshotsByWorkspaceId[workspaceId] = engineeringFacts(
+            await this.readEngineeringSnapshot(workspace.workspace_path),
           )
+          if (!snapshotsByWorkspaceId[workspaceId]) failedIds.add(workspaceId)
         } catch {
           snapshotsByWorkspaceId[workspaceId] = null
           failedIds.add(workspaceId)
@@ -594,52 +525,89 @@ export class BackendWorkspaceService {
     return result
   }
 
-  private async readKeyMetrics(
-    index: WorkspaceResourceIndex,
+  private readKeyMetrics(
     qor: ReadSection<WorkspaceQorSummary>,
-  ): Promise<ReadSection<{ items: WorkspaceDashboardMetric[] }>> {
+  ): ReadSection<{ items: WorkspaceDashboardMetric[] }> {
     const metrics =
       qor.status === 'ready' || qor.status === 'partial' ? qor.data.metrics : []
-    try {
-      return {
-        status: 'ready',
-        data: {
-          items: await workspaceDashboardMetrics(
-            index,
-            metrics,
-            this.options.readWorkspaceTextFile ?? readBoundedText,
-          ),
-        },
-        issues: [],
+    return {
+      status: 'ready',
+      data: {
+        items: workspaceDashboardMetrics(metrics),
+      },
+      issues: [],
+    }
+  }
+
+  private observeWorkspace(
+    context: WorkspaceContext,
+    workspaceRoot: string,
+    watchedRoots: string[],
+  ): void {
+    const createWatcher = this.options.snapshotWatcherFactory
+    const watchKey = watchedRoots
+      .map((root) => resolve(root))
+      .sort()
+      .join('\0')
+    if (!createWatcher || context.watchKey === watchKey) return
+    void context.watcher?.close()
+    const watcher = createWatcher({
+      onError: (error) =>
+        electronLogger.warn('[backend-workspace] snapshot watcher failed', error),
+      onManifestChanged: () => this.invalidateWindow(context.windowId),
+      onSnapshotChanged: (changedRoot) => {
+        if (context.watchedRoots?.some((root) => pathsEqual(changedRoot, root))) {
+          this.invalidateWindow(context.windowId)
+        }
+      },
+    })
+    context.watcher = watcher
+    context.watchKey = watchKey
+    context.watchedRoots = watchedRoots
+    void Promise.all([
+      watcher.startProject(dirname(workspaceRoot)),
+      watcher.reconcile(dirname(workspaceRoot), watchedRoots),
+    ]).catch((error) => {
+      if (context.watcher === watcher) {
+        context.watcher = undefined
+        context.watchKey = undefined
+        context.watchedRoots = undefined
       }
-    } catch (error) {
-      return {
-        status: 'error',
-        issues: [
-          {
-            code: 'WORKSPACE_KEY_METRICS_READ_FAILED',
-            detail: error instanceof Error ? error.message : String(error),
-          },
-        ],
-      }
+      void watcher.close()
+      electronLogger.warn('[backend-workspace] snapshot watcher start failed', error)
+    })
+  }
+
+  private unavailableStepDetail(
+    context: WorkspaceContext,
+    code: string,
+    snapshot?: ProjectEngineeringSnapshotReadResult,
+  ): BackendWorkspaceStepDetailResult {
+    return {
+      detail: { status: 'unavailable', issues: [{ code }] },
+      generation: context.generation,
+      workspaceContextId: context.id,
+      ...(snapshot?.ok
+        ? {
+            workspaceId: snapshot.snapshot.workspaceId,
+            workspaceRevision: snapshot.snapshot.workspaceRevision,
+          }
+        : {}),
     }
   }
 }
 
-function workspaceIndexFiles(index: WorkspaceResourceIndex) {
-  const files = new Map<string, { path: string; sizeBytes?: number }>()
-  const visit = (value: unknown): void => {
-    if (!value || typeof value !== 'object') return
-    if ('path' in value && typeof value.path === 'string' && 'exists' in value) {
-      files.set(value.path, value as { path: string; sizeBytes?: number })
-      return
-    }
-    for (const nested of Object.values(value)) visit(nested)
+function engineeringFacts(
+  result: ProjectEngineeringSnapshotReadResult | null,
+): WorkspaceEngineeringFacts | null {
+  if (!result?.ok || result.sections.qor.status !== 'ready') return null
+  const flow = result.sections.flow
+  const signoff = result.sections.signoff
+  return {
+    ...result.sections.qor.data,
+    ...(flow.status === 'ready' ? { flow: flow.data } : {}),
+    ...(signoff.status === 'ready' ? { signoffAssessment: signoff.data } : {}),
   }
-  visit(index.home)
-  visit(index.flow.steps)
-  if (index.tech) visit(index.tech)
-  return [...files.values()]
 }
 
 function eventLoopDelayMs(): Promise<number> {

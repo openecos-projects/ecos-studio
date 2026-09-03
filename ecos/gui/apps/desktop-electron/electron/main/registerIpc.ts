@@ -172,7 +172,13 @@ export interface DesktopBridgeServices {
   }
   backendWorkspaceService: {
     clearWindow(windowId: number): void
+    getArtifact(
+      request: import('@ecos-studio/shared').BackendWorkspaceArtifactRequest,
+    ): Promise<import('@ecos-studio/shared').BackendWorkspaceArtifactResult>
     getOverview(): Promise<import('@ecos-studio/shared').BackendWorkspaceOverviewResult>
+    getStepDetail(
+      request: import('@ecos-studio/shared').BackendWorkspaceStepDetailRequest,
+    ): Promise<import('@ecos-studio/shared').BackendWorkspaceStepDetailResult>
     invalidateWindow(windowId: number): void
     onInvalidated(
       listener: (
@@ -1700,6 +1706,18 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.backendWorkspaceGetOverview, async () => {
     return await services.backendWorkspaceService.getOverview()
+  })
+
+  handle(desktopApiIpcChannels.backendWorkspaceGetArtifact, async (_event, request) => {
+    return await services.backendWorkspaceService.getArtifact(
+      request as import('@ecos-studio/shared').BackendWorkspaceArtifactRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.backendWorkspaceGetStepDetail, async (_event, request) => {
+    return await services.backendWorkspaceService.getStepDetail(
+      request as import('@ecos-studio/shared').BackendWorkspaceStepDetailRequest,
+    )
   })
 
   handle(desktopApiIpcChannels.backendWorkspaceRefreshOverview, async () => {

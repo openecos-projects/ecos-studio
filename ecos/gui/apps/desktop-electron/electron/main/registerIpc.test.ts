@@ -115,7 +115,9 @@ function registerHandlers(
     },
     backendWorkspaceService: {
       clearWindow: vi.fn(),
+      getArtifact: vi.fn(),
       getOverview: vi.fn(),
+      getStepDetail: vi.fn(),
       invalidateWindow: vi.fn(),
       onInvalidated: vi.fn(),
       refreshOverview: vi.fn(),
@@ -2022,16 +2024,45 @@ describe('registerIpc', () => {
       workspaceContextId: 'workspace-context-1',
     }
     services.backendWorkspaceService.getOverview.mockResolvedValue(result)
+    const detailRequest = {
+      stepId: 'Place',
+      workspaceContextId: 'workspace-context-1',
+      workspaceRevision: 9,
+    }
+    const detail = { detail: { status: 'unavailable', issues: [] } }
+    services.backendWorkspaceService.getStepDetail.mockResolvedValue(detail)
+    services.backendWorkspaceService.getArtifact.mockResolvedValue(detail)
     services.backendWorkspaceService.refreshOverview.mockResolvedValue(result)
 
     await expect(
       handlers.get(desktopApiIpcChannels.backendWorkspaceGetOverview)?.(event),
     ).resolves.toEqual(result)
     await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceGetStepDetail)?.(
+        event,
+        detailRequest,
+      ),
+    ).resolves.toEqual(detail)
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceGetArtifact)?.(event, {
+        artifactId: 'layout-place',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      }),
+    ).resolves.toEqual(detail)
+    await expect(
       handlers.get(desktopApiIpcChannels.backendWorkspaceRefreshOverview)?.(event),
     ).resolves.toEqual(result)
 
     expect(services.backendWorkspaceService.getOverview).toHaveBeenCalledTimes(1)
+    expect(services.backendWorkspaceService.getStepDetail).toHaveBeenCalledWith(
+      detailRequest,
+    )
+    expect(services.backendWorkspaceService.getArtifact).toHaveBeenCalledWith({
+      artifactId: 'layout-place',
+      workspaceContextId: 'workspace-context-1',
+      workspaceRevision: 9,
+    })
     expect(services.backendWorkspaceService.refreshOverview).toHaveBeenCalledTimes(1)
   })
 

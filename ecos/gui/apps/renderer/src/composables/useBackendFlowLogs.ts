@@ -234,7 +234,7 @@ export function useBackendFlowLogs() {
       return
     }
 
-    if (protocolType === 'step.log' && typeof record.logChunk === 'string') {
+    if (protocolType === 'step.log' && typeof record.chunk === 'string') {
       const segment = upsertRuntimeSegment({
         live: true,
         state: backendRuntimeEventState(event) ?? 'Ongoing',
@@ -243,11 +243,11 @@ export function useBackendFlowLogs() {
       })
       const key = segmentKey(segment)
       const cursor =
-        typeof record.logCursor === 'number' && Number.isFinite(record.logCursor)
-          ? record.logCursor
+        typeof record.cursor === 'number' && Number.isFinite(record.cursor)
+          ? record.cursor
           : null
       if (cursor === null || cursor > (flowLogCursorByKey.get(key) ?? -1)) {
-        appendContent(key, record.logChunk)
+        appendContent(key, record.chunk)
         if (cursor !== null) flowLogCursorByKey.set(key, cursor)
       }
       flowLogStepNameState.value = stepName

@@ -1,414 +1,210 @@
+import type { WorkspaceArtifactDescriptor } from '@ecos-studio/shared'
 import { onScopeDispose, ref, watch } from 'vue'
-import type { WorkspaceResourceIndex, WorkspaceStepResource } from '@ecos-studio/shared'
-import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
-import type { DashboardPieSlice } from '@/components/home/dashboardData'
-import {
-  drcInsights,
-  floorplanInsights,
-  type StepDashboardFloorplanSnapshot,
-} from '@/components/step-dashboard/stepDashboardData'
-import { isSuccessfulFlowStep } from './flowRunArtifacts'
+import { onWorkspaceRerunPrepared } from './homeRunArtifacts'
 import { useWorkspace } from './useWorkspace'
-import { readOptionalProjectTextFile, readProjectBlobUrl } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
-import {
-  normalizeWorkspaceProjectPath,
-  onWorkspaceRerunPrepared,
-} from './homeRunArtifacts'
-import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
+import { getDesktopApi } from '@/platform/desktop'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 export interface HomeLayoutThumbnail {
   id: string
   kind: 'layout'
   label: string
   step: string
-  path: string
-  url: string
+  url: string | null
   hasGeometry: boolean
+  availability: WorkspaceArtifactDescriptor['availability']
+  reason: string | null
 }
 
-export interface HomeSnapshotImage {
-  id: string
-  kind: 'image'
-  label: string
-  path: string
-  url: string
-}
-
-export interface HomeSnapshotDistribution {
-  id: string
-  kind: 'distribution'
-  label: string
-  sourceStep: string
-  total: number
-  unit: StepDashboardFloorplanSnapshot['unit']
-  slices: DashboardPieSlice[]
-}
-
-export type HomeInsightSnapshot = HomeSnapshotImage | HomeSnapshotDistribution
-
-interface HomeSnapshotData {
-  insightSnapshots: HomeInsightSnapshot[]
-  layoutThumbnails: HomeLayoutThumbnail[]
-  signature: string
-}
-
-const physicalSnapshotSteps = new Set([
+const layoutUrls = new Map<string, string>()
+const layoutSteps = new Set([
   'floorplan',
   'fixfanout',
   'place',
   'cts',
   'legalization',
   'route',
+  'drc',
+  'lvs',
   'filler',
+  'rcx',
+  'sta',
+  'harden',
 ])
 
-const homeSnapshotCache = new Map<string, HomeSnapshotData>()
-
-function snapshotStepKey(step: WorkspaceStepResource): string {
-  return step.name.trim().toLowerCase()
-}
-
-function snapshotFileFingerprint(
-  step: WorkspaceStepResource,
-  key: 'layout' | 'db' | 'geometry',
-): string {
-  const file =
-    key === 'layout'
-      ? step.resources.output.image
-      : key === 'geometry'
-        ? step.resources.output.geometryManifest
-        : step.resources.feature.db
-  return file
-    ? `${file.path}:${file.exists}:${file.sizeBytes ?? 0}:${file.mtimeMs ?? 0}`
-    : ''
-}
-
-function homeSnapshotSignature(index: WorkspaceResourceIndex): string {
-  return index.flow.steps
-    .map((step) => {
-      const drcCsv = step.resources.analysis.statis_csv
-      return [
-        snapshotStepKey(step),
-        step.state.trim().toLowerCase(),
-        snapshotFileFingerprint(step, 'layout'),
-        snapshotFileFingerprint(step, 'geometry'),
-        snapshotFileFingerprint(step, 'db'),
-        drcCsv
-          ? `${drcCsv.path}:${drcCsv.exists}:${drcCsv.sizeBytes ?? 0}:${drcCsv.mtimeMs ?? 0}`
-          : '',
-      ].join('|')
-    })
-    .join('\u001f')
-}
-
-function floorplanToHardenSteps(steps: WorkspaceStepResource[]): WorkspaceStepResource[] {
-  const floorplanIndex = steps.findIndex((step) => snapshotStepKey(step) === 'floorplan')
-  if (floorplanIndex < 0) return []
-  const hardenIndex = steps.findIndex((step) => snapshotStepKey(step) === 'harden')
-  return steps.slice(
-    floorplanIndex,
-    hardenIndex >= floorplanIndex ? hardenIndex + 1 : undefined,
-  )
-}
-
-function latestSuccessfulPhysicalStep(
-  steps: WorkspaceStepResource[],
-): WorkspaceStepResource | null {
-  return (
-    [...steps]
-      .reverse()
-      .find(
-        (step) =>
-          physicalSnapshotSteps.has(snapshotStepKey(step)) && isSuccessfulFlowStep(step),
-      ) ?? null
-  )
-}
-
-function findSnapshot(
-  snapshots: StepDashboardFloorplanSnapshot[],
-  id: string,
-): StepDashboardFloorplanSnapshot | null {
-  return snapshots.find((snapshot) => snapshot.id === id) ?? null
-}
-
-function distributionSnapshot(
-  snapshot: StepDashboardFloorplanSnapshot,
-  sourceStep: string,
-): HomeSnapshotDistribution {
-  return {
-    id: `${sourceStep.toLowerCase()}-${snapshot.id}`,
-    kind: 'distribution',
-    label: snapshot.label,
-    sourceStep,
-    total: snapshot.total,
-    unit: snapshot.unit,
-    slices: snapshot.slices,
-  }
-}
-
-function imageUrlByPath(data: HomeSnapshotData | undefined): Map<string, string> {
-  return new Map(
-    [...(data?.layoutThumbnails ?? []), ...(data?.insightSnapshots ?? [])].flatMap(
-      (item) =>
-        item.kind !== 'distribution' && item.url ? [[item.path, item.url] as const] : [],
-    ),
-  )
-}
-
-function revokeImage(url: string): void {
+function revoke(url: string): void {
   if (url.startsWith('blob:')) URL.revokeObjectURL(url)
 }
 
-function releaseReplacedImages(
-  previous: HomeSnapshotData | undefined,
-  next: HomeSnapshotData,
-): void {
-  const retainedUrls = new Set(
-    [...next.layoutThumbnails, ...next.insightSnapshots].flatMap((item) =>
-      item.kind === 'distribution' ? [] : [item.url],
-    ),
-  )
-  for (const item of [
-    ...(previous?.layoutThumbnails ?? []),
-    ...(previous?.insightSnapshots ?? []),
-  ]) {
-    if (item.kind !== 'distribution' && !retainedUrls.has(item.url)) revokeImage(item.url)
-  }
-}
-
-function releaseSnapshotImages(data: HomeSnapshotData): void {
-  for (const item of [...data.layoutThumbnails, ...data.insightSnapshots]) {
-    if (item.kind !== 'distribution') revokeImage(item.url)
-  }
-}
-
-async function readText(path: string): Promise<string | null> {
-  if (!path) return null
-  const authorizedPath = await resolveProjectPathAccess(path)
-  return authorizedPath ? readOptionalProjectTextFile(authorizedPath) : null
-}
-
-async function readJson(path: string): Promise<unknown | null> {
-  const text = await readText(path)
-  if (!text) return null
-  try {
-    return JSON.parse(text) as unknown
-  } catch {
-    return null
-  }
-}
-
-async function readImage(path: string): Promise<string | null> {
-  if (!path) return null
-  try {
-    const authorizedPath = await resolveProjectPathAccess(path)
-    return authorizedPath
-      ? await readProjectBlobUrl(authorizedPath, { mimeType: 'image/png' })
-      : null
-  } catch {
-    return null
-  }
-}
-
-async function buildHomeSnapshotData(
-  index: WorkspaceResourceIndex,
-  cachedData: HomeSnapshotData | undefined,
-): Promise<HomeSnapshotData> {
-  const reusableUrls = imageUrlByPath(cachedData)
-  const getImage = async (path: string): Promise<string | null> =>
-    reusableUrls.get(path) ?? readImage(path)
-  const insightSnapshots: HomeInsightSnapshot[] = []
-  const steps = floorplanToHardenSteps(index.flow.steps)
-  const layouts = await Promise.all(
-    steps.filter(isSuccessfulFlowStep).map(async (step) => {
-      const image = step.resources.output.image
-      if (!image?.exists) return null
-      const url = await getImage(image.path)
-      return url
-        ? ({
-            id: `layout-${snapshotStepKey(step)}`,
-            kind: 'layout' as const,
-            label: `${step.name} Layout`,
-            step: step.name,
-            path: image.path,
-            url,
-            hasGeometry: Boolean(step.resources.output.geometryManifest?.exists),
-          } satisfies HomeLayoutThumbnail)
-        : null
-    }),
-  )
-  const layoutThumbnails = layouts.filter(
-    (item): item is HomeLayoutThumbnail => item !== null,
-  )
-
-  const physicalStep = latestSuccessfulPhysicalStep(index.flow.steps)
-  if (physicalStep) {
-    const dbPath = physicalStep.resources.feature.db
-    const dbJson = dbPath?.exists ? await readJson(dbPath.path) : null
-    const snapshots = floorplanInsights(dbJson)?.snapshots ?? []
-    const instDistPath = `${physicalStep.directory}/feature/${physicalStep.name}.db.inst_dist.png`
-    const instDistUrl = await getImage(instDistPath)
-    if (instDistUrl) {
-      insightSnapshots.push({
-        id: 'physical-instance-distribution',
-        kind: 'image',
-        label: `${physicalStep.name} Instance Distribution`,
-        path: instDistPath,
-        url: instDistUrl,
-      })
-    }
-    for (const id of ['pin-distribution-net_num', 'layer-via_num', 'layer-wire_len']) {
-      const snapshot = findSnapshot(snapshots, id)
-      if (snapshot)
-        insightSnapshots.push(distributionSnapshot(snapshot, physicalStep.name))
-    }
-  }
-
-  const placeStep = index.flow.steps.find(
-    (step) => snapshotStepKey(step) === 'place' && isSuccessfulFlowStep(step),
-  )
-  if (placeStep) {
-    const densityMapPath = `${placeStep.directory}/feature/density_map/place_allcell_density.png`
-    const densityMapUrl = await getImage(densityMapPath)
-    if (densityMapUrl) {
-      insightSnapshots.push({
-        id: 'place-all-cell-density',
-        kind: 'image',
-        label: 'Place All Cell Density',
-        path: densityMapPath,
-        url: densityMapUrl,
-      })
-    }
-  }
-
-  const drcStep = index.flow.steps.find(
-    (step) => snapshotStepKey(step) === 'drc' && isSuccessfulFlowStep(step),
-  )
-  const drcCsv = drcStep?.resources.analysis.statis_csv
-  if (drcStep && drcCsv?.exists) {
-    const snapshots = drcInsights(await readText(drcCsv.path))?.snapshots ?? []
-    for (const snapshot of snapshots) {
-      insightSnapshots.push(distributionSnapshot(snapshot, drcStep.name))
-    }
-  }
-
-  return { insightSnapshots, layoutThumbnails, signature: homeSnapshotSignature(index) }
-}
-
-/** Releases Home Snapshot image Blob URLs after the workspace is closed. */
 export function clearHomeSnapshotCache(): void {
-  for (const data of homeSnapshotCache.values()) {
-    releaseSnapshotImages(data)
-  }
-  homeSnapshotCache.clear()
+  for (const url of layoutUrls.values()) revoke(url)
+  layoutUrls.clear()
 }
 
-function clearHomeSnapshotCacheForWorkspace(projectPath: string): void {
-  const normalizedProjectPath = normalizeWorkspaceProjectPath(projectPath)
-  for (const [cachedProjectPath, cachedData] of homeSnapshotCache.entries()) {
-    if (normalizeWorkspaceProjectPath(cachedProjectPath) !== normalizedProjectPath) {
-      continue
-    }
-    homeSnapshotCache.delete(cachedProjectPath)
-    releaseSnapshotImages(cachedData)
-  }
+function availableArtifacts(
+  artifacts: WorkspaceArtifactDescriptor[],
+  kind: string,
+): WorkspaceArtifactDescriptor[] {
+  return artifacts.filter(
+    (artifact) => artifact.kind === kind && artifact.availability === 'available',
+  )
 }
 
 export function useHomeSnapshots() {
-  const { currentProject, resourceVersions } = useWorkspace()
-  const insightSnapshots = ref<HomeInsightSnapshot[]>([])
+  const { currentProject } = useWorkspace()
+  const session = useBackendWorkspaceSession()
   const layoutThumbnails = ref<HomeLayoutThumbnail[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
   let requestVersion = 0
 
-  const unregisterWorkspaceRerunPrepared = onWorkspaceRerunPrepared((event) => {
-    const projectPath = currentProject.value?.path
-    if (
-      !projectPath ||
-      normalizeWorkspaceProjectPath(projectPath) !==
-        normalizeWorkspaceProjectPath(event.projectPath)
-    ) {
-      return
-    }
-    requestVersion += 1
-    clearHomeSnapshotCacheForWorkspace(projectPath)
-    insightSnapshots.value = []
-    layoutThumbnails.value = []
-    error.value = null
-    loading.value = false
-  })
-
-  async function refresh(resourceIndex?: WorkspaceResourceIndex): Promise<void> {
-    const projectPath = currentProject.value?.path
+  async function refresh(): Promise<void> {
+    const contextId = session.workspaceContextId
+    const overview = session.projection.data
+    const revisionSection = overview?.revision
+    const artifactSection = overview?.artifacts
+    const flowSection = overview?.flow
+    const revision =
+      revisionSection?.status === 'ready' || revisionSection?.status === 'partial'
+        ? revisionSection.data.workspaceRevision
+        : null
     const version = ++requestVersion
-    if (!projectPath) {
-      insightSnapshots.value = []
+    if (
+      !currentProject.value ||
+      !contextId ||
+      revision === null ||
+      !artifactSection ||
+      (artifactSection.status !== 'ready' && artifactSection.status !== 'partial') ||
+      !flowSection ||
+      (flowSection.status !== 'ready' && flowSection.status !== 'partial')
+    ) {
+      clearHomeSnapshotCache()
       layoutThumbnails.value = []
-      error.value = null
       loading.value = false
       return
     }
 
-    const cachedData = homeSnapshotCache.get(projectPath)
-    if (cachedData) {
-      insightSnapshots.value = cachedData.insightSnapshots
-      layoutThumbnails.value = cachedData.layoutThumbnails
-    }
+    const artifacts = artifactSection.data.items
+    const successfulSteps = new Set(
+      flowSection.data.steps
+        .filter((step) => step.state === 'succeeded' || step.state === 'skipped')
+        .map((step) => step.stepId.trim().toLowerCase()),
+    )
+    const images = artifacts
+      .filter(
+        (artifact) =>
+          artifact.kind === 'layout_image' &&
+          artifact.stepId &&
+          layoutSteps.has(artifact.stepId.trim().toLowerCase()) &&
+          successfulSteps.has(artifact.stepId.trim().toLowerCase()),
+      )
+      .slice(0, 16)
+    const geometrySteps = new Set(
+      availableArtifacts(artifacts, 'layout_geometry').map((artifact) =>
+        artifact.stepId?.trim().toLowerCase(),
+      ),
+    )
     loading.value = true
     error.value = null
     try {
-      const index = resourceIndex ?? (await getWorkspaceResourceIndexApi())
-      if (version !== requestVersion || currentProject.value?.path !== projectPath) return
-      const signature = homeSnapshotSignature(index)
-      if (cachedData?.signature === signature) return
-
-      const nextData = await buildHomeSnapshotData(index, cachedData)
-      if (version !== requestVersion || currentProject.value?.path !== projectPath) {
-        releaseReplacedImages(
-          nextData,
-          cachedData ?? { insightSnapshots: [], layoutThumbnails: [], signature: '' },
-        )
-        return
+      const thumbnails = await Promise.all(
+        images.map(async (artifact) => {
+          const step = artifact.stepId!
+          const thumbnail = (
+            url: string | null,
+            availability: WorkspaceArtifactDescriptor['availability'] = artifact.availability,
+            reason: string | null = null,
+          ): HomeLayoutThumbnail => ({
+            id: artifact.artifactId,
+            kind: 'layout',
+            label: `${step} Layout`,
+            step,
+            url,
+            hasGeometry: geometrySteps.has(step.trim().toLowerCase()),
+            availability,
+            reason,
+          })
+          if (artifact.availability !== 'available') return thumbnail(null)
+          const cacheId = `${contextId}:${revision}:${artifact.artifactId}`
+          let url = layoutUrls.get(cacheId)
+          if (!url) {
+            const result = await getDesktopApi().backendWorkspace.getArtifact({
+              artifactId: artifact.artifactId,
+              workspaceContextId: contextId,
+              workspaceRevision: revision,
+            })
+            if (
+              version !== requestVersion ||
+              result.workspaceContextId !== contextId ||
+              result.workspaceRevision !== revision
+            ) {
+              return null
+            }
+            if (result.artifact.status !== 'ready') {
+              return thumbnail(
+                null,
+                'stale',
+                result.artifact.issues[0]?.code ?? 'ARTIFACT_READ_FAILED',
+              )
+            }
+            const content = result.artifact.data
+            url = URL.createObjectURL(
+              new Blob([content.bytes.slice()], { type: content.mimeType }),
+            )
+            if (version !== requestVersion) {
+              revoke(url)
+              return null
+            }
+            layoutUrls.set(cacheId, url)
+          }
+          return thumbnail(url)
+        }),
+      )
+      if (version !== requestVersion) return
+      const next = thumbnails.filter(
+        (thumbnail): thumbnail is HomeLayoutThumbnail => thumbnail !== null,
+      )
+      const retained = new Set(
+        next.flatMap((thumbnail) => (thumbnail.url ? [thumbnail.url] : [])),
+      )
+      for (const [key, url] of layoutUrls) {
+        if (!retained.has(url)) {
+          revoke(url)
+          layoutUrls.delete(key)
+        }
       }
-      homeSnapshotCache.set(projectPath, nextData)
-      releaseReplacedImages(cachedData, nextData)
-      insightSnapshots.value = nextData.insightSnapshots
-      layoutThumbnails.value = nextData.layoutThumbnails
+      layoutThumbnails.value = next
     } catch (cause) {
-      if (version !== requestVersion || currentProject.value?.path !== projectPath) return
+      if (version !== requestVersion) return
       error.value = cause instanceof Error ? cause.message : String(cause)
-      if (!cachedData) {
-        insightSnapshots.value = []
-        layoutThumbnails.value = []
-      }
     } finally {
       if (version === requestVersion) loading.value = false
     }
   }
 
-  const unregisterStepRenderTask = registerRuntimeStepRenderTask(async (commit) => {
-    await refresh(await commit.resourceIndex())
-  })
-  onScopeDispose(() => {
-    unregisterStepRenderTask()
-    unregisterWorkspaceRerunPrepared()
+  const unregisterRerun = onWorkspaceRerunPrepared(() => {
+    requestVersion += 1
+    clearHomeSnapshotCache()
+    layoutThumbnails.value = []
   })
 
   watch(
     () => [
       currentProject.value?.path ?? '',
-      resourceVersions.value.flow,
-      resourceVersions.value.step,
-      resourceVersions.value.maps,
-      resourceVersions.value.all,
+      session.workspaceContextId,
+      session.generation,
+      session.projection.data?.revision?.status === 'ready'
+        ? session.projection.data.revision.data.workspaceRevision
+        : null,
     ],
-    () => {
-      void refresh()
-    },
+    () => void refresh(),
     { immediate: true },
   )
 
-  return { error, insightSnapshots, layoutThumbnails, loading, refresh }
+  onScopeDispose(() => {
+    requestVersion += 1
+    unregisterRerun()
+  })
+
+  return { error, layoutThumbnails, loading, refresh }
 }

@@ -14,7 +14,7 @@ import {
   type ProjectManifest,
   type ReadIssue,
 } from '@ecos-studio/shared'
-import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
+import { projectQorInputForWorkspace, workspaceFlowStates } from './workspaceQorAnalysis'
 import { electronLogger } from './logger'
 import { isPathWithinRoot } from './pathScope'
 import { mapWithConcurrency } from './boundedConcurrency'
@@ -41,6 +41,7 @@ import {
   buildProjectComparisonTrend,
   comparisonSection,
   selectRecommendation,
+  type ProjectComparisonInput,
   workspaceIssue,
 } from './projectComparisonProjection'
 
@@ -72,6 +73,14 @@ interface ProjectComparisonContext {
   snapshotCache: Map<string, ProjectEngineeringSnapshotReadResult>
   watcher: ProjectComparisonFileWatcher
   watcherIssue: ReadIssue | null
+}
+
+interface WorkspaceComparisonEntry {
+  engineeringWorkspaceId?: string
+  executionWorkspace?: CommittedProjectWorkspace
+  identityKey?: string
+  input?: ProjectComparisonInput
+  issues: ReadIssue[]
 }
 
 type ProjectComparisonFileWatcherFactory = (
@@ -423,7 +432,7 @@ export class BackendProjectComparisonService {
       let readFileCount = 0
       let unavailableFileCount = 0
       const readStartedAt = performance.now()
-      const entries = await mapWithConcurrency(
+      const entries: WorkspaceComparisonEntry[] = await mapWithConcurrency(
         manifest.workspaces,
         2,
         async (workspace) => {
@@ -468,17 +477,30 @@ export class BackendProjectComparisonService {
               (section) => section.issues,
             )
             unavailableFileCount += sectionIssues.length
-            if (
-              snapshotResult.sections.flow.status !== 'ready' ||
-              snapshotResult.sections.qor.status !== 'ready'
-            ) {
-              return {
-                issues: sectionIssues.map((issue) =>
-                  workspaceIssue(workspace.workspace_id, issue),
-                ),
-              }
-            }
             const envelope = snapshotResult.snapshot
+            const flow =
+              snapshotResult.sections.flow.status === 'ready'
+                ? snapshotResult.sections.flow.data
+                : undefined
+            const stepStatuses = workspaceFlowStates(flow)
+            const entry = {
+              ...(flow
+                ? {
+                    executionWorkspace: {
+                      engineeringWorkspaceId: envelope.workspaceId,
+                      projectWorkspaceId: workspace.workspace_id,
+                      stepStatuses,
+                      workspaceRevision: envelope.workspaceRevision,
+                    } satisfies CommittedProjectWorkspace,
+                  }
+                : {}),
+              engineeringWorkspaceId: envelope.workspaceId,
+              identityKey,
+              issues: sectionIssues.map((issue) =>
+                workspaceIssue(workspace.workspace_id, issue),
+              ),
+            }
+            if (snapshotResult.sections.qor.status !== 'ready') return entry
             const qor = snapshotResult.sections.qor.data
             const artifacts =
               snapshotResult.sections.artifacts.status === 'ready'
@@ -486,9 +508,9 @@ export class BackendProjectComparisonService {
                 : []
             const engineeringFacts = {
               analysis: qor.analysis,
-              flow: snapshotResult.sections.flow.data,
               metrics: qor.metrics,
               qorAssessment: qor.qorAssessment,
+              ...(flow ? { flow } : {}),
               ...(snapshotResult.sections.signoff.status === 'ready'
                 ? { signoffAssessment: snapshotResult.sections.signoff.data }
                 : {}),
@@ -502,20 +524,13 @@ export class BackendProjectComparisonService {
             )
             return input
               ? {
-                  executionWorkspace: {
-                    engineeringWorkspaceId: envelope.workspaceId,
-                    projectWorkspaceId: workspace.workspace_id,
-                    stepStatuses: input.stepStatuses,
-                    workspaceRevision: envelope.workspaceRevision,
-                  } satisfies CommittedProjectWorkspace,
-                  engineeringWorkspaceId: envelope.workspaceId,
-                  identityKey,
+                  ...entry,
                   input,
-                  issues: sectionIssues.map((issue) =>
-                    workspaceIssue(workspace.workspace_id, issue),
-                  ),
                 }
-              : { issues: [workspaceIssue(workspace.workspace_id)] }
+              : {
+                  ...entry,
+                  issues: [...entry.issues, workspaceIssue(workspace.workspace_id)],
+                }
           } catch (error) {
             unavailableFileCount += 1
             return { issues: [workspaceIssue(workspace.workspace_id, error)] }
@@ -575,9 +590,23 @@ export class BackendProjectComparisonService {
       )
       const snapshots = buildProjectComparisonSnapshots(inputs)
       const flowStates = Object.fromEntries(
-        inputs.map((input) => [input.workspaceId, input.stepStatuses]),
+        entries.flatMap((entry) =>
+          entry.executionWorkspace
+            ? [
+                [
+                  entry.executionWorkspace.projectWorkspaceId,
+                  entry.executionWorkspace.stepStatuses,
+                ],
+              ]
+            : [],
+        ),
       )
-      const stepComparisons = buildProjectComparisonSteps(manifest, inputs, trend)
+      const stepComparisons = buildProjectComparisonSteps(
+        manifest,
+        inputs,
+        trend,
+        flowStates,
+      )
       const analysisByWorkspace = new Map(
         snapshots.map((snapshot) => [snapshot.workspaceId, snapshot]),
       )

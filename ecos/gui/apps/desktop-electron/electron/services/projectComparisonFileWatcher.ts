@@ -42,20 +42,43 @@ export class ProjectComparisonFileWatcher {
 
   async reconcile(projectRoot: string, workspaceRoots: readonly string[]): Promise<void> {
     const project = resolve(projectRoot)
-    const expected = new Map<string, string>()
+    const expected = new Map<
+      string,
+      { directory: string; target: string; allowedParents: string[] }
+    >()
     for (const root of workspaceRoots) {
       const locator = resolve(root)
-      const canonical = await this.canonicalize(locator)
+      let canonical: string
+      try {
+        canonical = await this.canonicalize(locator)
+      } catch (error) {
+        if (isNodeErrorWithCode(error, 'ENOENT')) continue
+        throw error
+      }
       if (canonical === project || !isPathWithinRoot(canonical, project)) {
         throw new Error('Workspace watcher path resolves outside the Project root.')
       }
-      const home = await this.canonicalize(join(canonical, 'home'))
-      if (!isPathWithinRoot(home, canonical)) {
-        throw new Error(
-          'Workspace home watcher path resolves outside the Workspace root.',
-        )
+      const unresolvedHome = join(canonical, 'home')
+      try {
+        const home = await this.canonicalize(unresolvedHome)
+        if (!isPathWithinRoot(home, canonical)) {
+          throw new Error(
+            'Workspace home watcher path resolves outside the Workspace root.',
+          )
+        }
+        expected.set(locator, {
+          directory: home,
+          target: join(home, 'engineering-snapshot.json'),
+          allowedParents: [],
+        })
+      } catch (error) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+        expected.set(locator, {
+          directory: canonical,
+          target: join(unresolvedHome, 'engineering-snapshot.json'),
+          allowedParents: [unresolvedHome],
+        })
       }
-      expected.set(locator, home)
     }
     await Promise.all(
       [...this.workspaceWatchers].flatMap(([root, watcher]) => {
@@ -65,11 +88,13 @@ export class ProjectComparisonFileWatcher {
       }),
     )
     await Promise.all(
-      [...expected].flatMap(([workspaceRoot, homeDirectory]) => {
+      [...expected].flatMap(([workspaceRoot, targetInfo]) => {
         if (this.workspaceWatchers.has(workspaceRoot)) return []
-        const target = join(homeDirectory, 'engineering-snapshot.json')
-        const watcher = this.create(homeDirectory, target, () =>
-          this.callbacks.onSnapshotChanged(workspaceRoot),
+        const watcher = this.create(
+          targetInfo.directory,
+          targetInfo.target,
+          () => this.callbacks.onSnapshotChanged(workspaceRoot),
+          targetInfo.allowedParents,
         )
         this.workspaceWatchers.set(workspaceRoot, watcher)
         return [
@@ -95,12 +120,21 @@ export class ProjectComparisonFileWatcher {
     await Promise.all(watchers.map((watcher) => watcher.close()))
   }
 
-  private create(directory: string, target: string, callback: () => void): FSWatcher {
+  private create(
+    directory: string,
+    target: string,
+    callback: () => void,
+    allowedParents: readonly string[] = [],
+  ): FSWatcher {
+    const allowed = new Set(
+      [directory, target, ...allowedParents].map((path) => resolve(path)),
+    )
     const watcher = this.watchDirectory(directory, {
-      depth: 0,
+      depth: allowedParents.length ? 1 : 0,
+      followSymlinks: false,
       ignored: (path) => {
         const candidate = resolve(path)
-        return candidate !== directory && candidate !== target
+        return !allowed.has(candidate)
       },
       ignoreInitial: true,
       persistent: false,
@@ -130,6 +164,15 @@ export class ProjectComparisonFileWatcher {
       }, DEBOUNCE_MS),
     )
   }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as NodeJS.ErrnoException).code === code
+  )
 }
 
 function ready(watcher: FSWatcher): Promise<void> {

@@ -1,213 +1,177 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, ref, type Ref } from 'vue'
+import { effectScope, reactive, ref, type EffectScope, type Ref } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({
-  currentProject: null as Ref<{ path: string } | null> | null,
-  resourceVersions: null as Ref<{
-    flow: number
-    step: number
-    maps: number
-    all: number
-  }> | null,
-  getWorkspaceResourceIndexApi: vi.fn(),
-  readOptionalProjectTextFile: vi.fn(),
-  readProjectBlobUrl: vi.fn(),
-  resolveProjectPathAccess: vi.fn(),
+  currentProject: null as Ref<{ path: string }> | null,
+  getArtifact: vi.fn(),
+  session: null as Record<string, any> | null,
 }))
 
 vi.mock('./useWorkspace', () => ({
-  useWorkspace: () => ({
-    currentProject: testState.currentProject,
-    resourceVersions: testState.resourceVersions,
-  }),
+  useWorkspace: () => ({ currentProject: testState.currentProject }),
 }))
-
-vi.mock('@/api/workspaceResources', () => ({
-  getWorkspaceResourceIndexApi: testState.getWorkspaceResourceIndexApi,
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => ({ backendWorkspace: { getArtifact: testState.getArtifact } }),
 }))
-
-vi.mock('@/utils/projectFiles', () => ({
-  readOptionalProjectTextFile: testState.readOptionalProjectTextFile,
-  readProjectBlobUrl: testState.readProjectBlobUrl,
-}))
-
-vi.mock('@/utils/projectFs', () => ({
-  resolveProjectPathAccess: testState.resolveProjectPathAccess,
+vi.mock('@/stores/backendWorkspaceSession', () => ({
+  useBackendWorkspaceSession: () => testState.session,
 }))
 
 import { clearHomeSnapshotCache, useHomeSnapshots } from './useHomeSnapshots'
 
-function resource(path: string, exists = true) {
-  return { path, exists, kind: 'analysis' as const, mtimeMs: 1, sizeBytes: 1 }
-}
-
-function step(
-  name: string,
-  state: string,
-  directory: string,
-  options: { db?: string; drcCsv?: string; geometry?: string; image?: string } = {},
-) {
+function overview(revision = 9) {
   return {
-    name,
-    tool: 'ecc',
-    state,
-    runtime: '',
-    directory,
-    info: {},
-    resources: {
-      output: {
-        ...(options.image ? { image: resource(options.image) } : {}),
-        ...(options.geometry ? { geometryManifest: resource(options.geometry) } : {}),
+    artifacts: {
+      status: 'ready',
+      issues: [],
+      data: {
+        items: [
+          {
+            artifactId: 'layout-place',
+            availability: 'available',
+            kind: 'layout_image',
+            name: 'gcd_Place.png',
+            stepId: 'Place',
+          },
+          {
+            artifactId: 'geometry-place',
+            availability: 'available',
+            kind: 'layout_geometry',
+            name: 'geometry.manifest',
+            stepId: 'Place',
+          },
+        ],
       },
-      data: {},
-      feature: options.db ? { db: resource(options.db) } : {},
-      report: {},
-      log: {},
-      script: {},
-      analysis: options.drcCsv ? { statis_csv: resource(options.drcCsv) } : {},
-      subflow: {},
-      checklist: {},
-      config: {},
+    },
+    flow: {
+      status: 'ready',
+      issues: [],
+      data: {
+        steps: [{ name: 'Place', order: 0, state: 'succeeded', stepId: 'Place' }],
+      },
+    },
+    revision: {
+      status: 'ready',
+      issues: [],
+      data: { workspaceId: 'engineering-a', workspaceRevision: revision },
     },
   }
 }
 
-const physicalDb = JSON.stringify({
-  Instances: {},
-  Pins: {
-    pin_distribution: [
-      { pin_num: 1, inst_num: 2, net_num: 3 },
-      { pin_num: 2, inst_num: 4, net_num: 5 },
-    ],
-  },
-  Layers: {
-    cut_layers: [{ layer_name: 'VIA1', via_num: 7 }],
-    routing_layers: [{ layer_name: 'M1', wire_len: 12 }],
-  },
-})
-
 describe('useHomeSnapshots', () => {
+  let scope: EffectScope
+  const createObjectURL = vi.fn(() => 'blob:layout-place')
+  const revokeObjectURL = vi.fn()
+
   beforeEach(() => {
     clearHomeSnapshotCache()
-    testState.currentProject = ref({ path: '/workspace/demo' })
-    testState.resourceVersions = ref({ flow: 0, step: 0, maps: 0, all: 0 })
-    testState.getWorkspaceResourceIndexApi.mockReset()
-    testState.readOptionalProjectTextFile.mockReset()
-    testState.readProjectBlobUrl.mockReset()
-    testState.resolveProjectPathAccess.mockReset()
-    testState.resolveProjectPathAccess.mockImplementation(async (path: string) => path)
-    testState.readProjectBlobUrl.mockImplementation(
-      async (path: string) => `blob:${path}`,
-    )
-    testState.readOptionalProjectTextFile.mockImplementation(async (path: string) => {
-      if (path.endsWith('.db.json')) return physicalDb
-      if (path.endsWith('drc_statis.csv')) {
-        return 'Type,M1,M2,Total\nSpacing,2,3,5\nTotal,2,3,5'
-      }
-      return null
+    createObjectURL.mockClear()
+    revokeObjectURL.mockClear()
+    scope = effectScope()
+    testState.currentProject = ref({ path: '/project/ws-a' })
+    testState.session = reactive({
+      generation: 0,
+      projection: { data: overview() },
+      workspaceContextId: 'context-a',
     })
-    testState.getWorkspaceResourceIndexApi.mockResolvedValue({
-      root: '/workspace/demo',
-      flow: {
-        steps: [
-          step('Synthesis', 'Success', '/workspace/demo/Synthesis_yosys'),
-          step('Floorplan', 'Success', '/workspace/demo/Floorplan_ecc', {
-            db: '/workspace/demo/Floorplan_ecc/feature/Floorplan.db.json',
-            geometry: '/workspace/demo/Floorplan_ecc/output/geometry/geometry.manifest',
-            image: '/workspace/demo/Floorplan_ecc/output/floorplan.png',
-          }),
-          step('place', 'Success', '/workspace/demo/place_dreamplace', {
-            db: '/workspace/demo/place_dreamplace/feature/place.db.json',
-            geometry:
-              '/workspace/demo/place_dreamplace/output/geometry/geometry.manifest',
-            image: '/workspace/demo/place_dreamplace/output/place.png',
-          }),
-          step('drc', 'Success', '/workspace/demo/drc_ecc', {
-            drcCsv: '/workspace/demo/drc_ecc/analysis/drc_statis.csv',
-            image: '/workspace/demo/drc_ecc/output/drc.png',
-          }),
-          step('Harden', 'Success', '/workspace/demo/Harden_ecc', {
-            image: '/workspace/demo/Harden_ecc/output/harden.png',
-          }),
-        ],
+    testState.getArtifact.mockReset()
+    testState.getArtifact.mockResolvedValue({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId: 'layout-place',
+          bytes: new Uint8Array([1, 2, 3]),
+          kind: 'layout_image',
+          mimeType: 'image/png',
+          name: 'gcd_Place.png',
+        },
       },
+      generation: 0,
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
     })
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }))
   })
 
-  it('separates ordered layouts from insight snapshots and exposes geometry availability', async () => {
-    const scope = effectScope()
+  afterEach(() => {
+    scope.stop()
+    clearHomeSnapshotCache()
+    vi.unstubAllGlobals()
+  })
+
+  it('loads declared layout bytes by artifact identity and reuses the Blob URL', async () => {
+    const snapshots = scope.run(() => useHomeSnapshots())!
+    await vi.waitFor(() => expect(snapshots.layoutThumbnails.value).toHaveLength(1))
+
+    expect(testState.getArtifact).toHaveBeenCalledWith({
+      artifactId: 'layout-place',
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
+    })
+    expect(snapshots.layoutThumbnails.value[0]).toMatchObject({
+      hasGeometry: true,
+      step: 'Place',
+      url: 'blob:layout-place',
+    })
+    expect(JSON.stringify(snapshots.layoutThumbnails.value)).not.toContain('/project/')
+
+    await snapshots.refresh()
+    expect(testState.getArtifact).toHaveBeenCalledTimes(1)
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not display an Artifact response from another revision', async () => {
+    testState.getArtifact.mockResolvedValue({
+      artifact: { status: 'ready', issues: [], data: {} },
+      generation: 0,
+      workspaceContextId: 'context-a',
+      workspaceRevision: 8,
+    })
     const snapshots = scope.run(() => useHomeSnapshots())!
 
-    await vi.waitFor(() => {
-      expect(snapshots.layoutThumbnails.value).toHaveLength(4)
-      expect(snapshots.insightSnapshots.value).toHaveLength(7)
-    })
+    await vi.waitFor(() => expect(snapshots.loading.value).toBe(false))
+
+    expect(snapshots.layoutThumbnails.value).toEqual([])
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('keeps a stale declared preview visible without requesting its bytes', async () => {
+    testState.session!.projection.data.artifacts.data.items[0].availability = 'stale'
+    const snapshots = scope.run(() => useHomeSnapshots())!
+
+    await vi.waitFor(() => expect(snapshots.loading.value).toBe(false))
 
     expect(snapshots.layoutThumbnails.value).toEqual([
       expect.objectContaining({
-        hasGeometry: true,
-        label: 'Floorplan Layout',
-        step: 'Floorplan',
-      }),
-      expect.objectContaining({
-        hasGeometry: true,
-        label: 'place Layout',
-        step: 'place',
-      }),
-      expect.objectContaining({
-        hasGeometry: false,
-        label: 'drc Layout',
-        step: 'drc',
-      }),
-      expect.objectContaining({
-        hasGeometry: false,
-        label: 'Harden Layout',
-        step: 'Harden',
+        availability: 'stale',
+        step: 'Place',
+        url: null,
       }),
     ])
-    expect(snapshots.insightSnapshots.value.map((item) => item.label)).toEqual([
-      'place Instance Distribution',
-      'Net Pin Bins',
-      'Cut Layer Vias',
-      'Routing Wire Length',
-      'Place All Cell Density',
-      'Layer Totals',
-      'Type Totals',
-    ])
-    expect(
-      snapshots.insightSnapshots.value.find(
-        (item) => item.id === 'physical-instance-distribution',
-      ),
-    ).toMatchObject({
-      path: '/workspace/demo/place_dreamplace/feature/place.db.inst_dist.png',
-    })
-    expect(
-      snapshots.insightSnapshots.value.find(
-        (item) => item.id === 'place-pin-distribution-net_num',
-      ),
-    ).toMatchObject({ kind: 'distribution', sourceStep: 'place' })
-
-    scope.stop()
+    expect(testState.getArtifact).not.toHaveBeenCalled()
   })
 
-  it('reuses cached Blob URLs when a resource refresh has no new artifacts', async () => {
-    const scope = effectScope()
+  it('marks a preview stale when its declared bytes fail verification', async () => {
+    testState.getArtifact.mockResolvedValue({
+      artifact: {
+        status: 'unavailable',
+        issues: [{ code: 'FINDINGS_ARTIFACT_HASH_MISMATCH' }],
+      },
+      generation: 0,
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
+    })
     const snapshots = scope.run(() => useHomeSnapshots())!
 
-    await vi.waitFor(() => {
-      expect(snapshots.layoutThumbnails.value).not.toHaveLength(0)
-    })
-    const imageReadCount = testState.readProjectBlobUrl.mock.calls.length
-    testState.resourceVersions!.value = {
-      ...testState.resourceVersions!.value,
-      all: 1,
-    }
+    await vi.waitFor(() => expect(snapshots.loading.value).toBe(false))
 
-    await vi.waitFor(() => {
-      expect(testState.getWorkspaceResourceIndexApi).toHaveBeenCalledTimes(2)
-    })
-    expect(testState.readProjectBlobUrl).toHaveBeenCalledTimes(imageReadCount)
-
-    scope.stop()
+    expect(snapshots.layoutThumbnails.value).toEqual([
+      expect.objectContaining({
+        availability: 'stale',
+        reason: 'FINDINGS_ARTIFACT_HASH_MISMATCH',
+        url: null,
+      }),
+    ])
   })
 })

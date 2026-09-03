@@ -140,6 +140,66 @@ describe('ProjectComparisonFileWatcher', () => {
     }
   })
 
+  it('keeps valid Workspace watchers when a selected baseline is missing', async () => {
+    const created: FakeWatcher[] = []
+    const watch = vi.fn(() => {
+      const watcher = new FakeWatcher()
+      created.push(watcher)
+      return watcher as unknown as FSWatcher
+    })
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' })
+    const watcher = new ProjectComparisonFileWatcher(
+      { onError: vi.fn(), onManifestChanged: vi.fn(), onSnapshotChanged: vi.fn() },
+      watch as never,
+      async (path) => {
+        if (path.includes('ws_missing')) throw missing
+        return path
+      },
+    )
+
+    const pending = watcher.reconcile('/project', [
+      '/project/ws_current',
+      '/project/ws_missing',
+    ])
+    await vi.waitFor(() => expect(created).toHaveLength(1))
+    created[0]!.emit('ready')
+    await pending
+
+    expect(watch).toHaveBeenCalledWith(
+      '/project/ws_current/home',
+      expect.objectContaining({ depth: 0 }),
+    )
+    await watcher.close()
+  })
+
+  it('observes creation of an initially missing current Snapshot', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-comparison-project-'))
+    const workspaceRoot = join(projectRoot, 'ws_current')
+    await mkdir(workspaceRoot)
+    const onSnapshotChanged = vi.fn()
+    const watcher = new ProjectComparisonFileWatcher({
+      onError: (error) => {
+        throw error
+      },
+      onManifestChanged: vi.fn(),
+      onSnapshotChanged,
+    })
+
+    try {
+      await watcher.reconcile(projectRoot, [workspaceRoot])
+      await mkdir(join(workspaceRoot, 'home'))
+      await writeFile(join(workspaceRoot, 'home', 'engineering-snapshot.json'), '{}')
+
+      await vi.waitFor(
+        () => expect(onSnapshotChanged).toHaveBeenCalledWith(workspaceRoot),
+        { timeout: 3000 },
+      )
+    } finally {
+      await watcher.close()
+      await rm(projectRoot, { force: true, recursive: true })
+    }
+  })
+
   it('refuses to watch a home symlink outside its Workspace root', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-comparison-project-'))
     const outside = await mkdtemp(join(tmpdir(), 'ecos-comparison-home-outside-'))

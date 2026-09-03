@@ -549,7 +549,8 @@ describe('BackendProjectComparisonService', () => {
     if (
       !result.ok ||
       !('data' in result.data.stepComparisons) ||
-      !('data' in result.data.trend)
+      !('data' in result.data.trend) ||
+      !('data' in result.data.workspaceSnapshots)
     ) {
       throw new Error('comparison unavailable')
     }
@@ -559,11 +560,15 @@ describe('BackendProjectComparisonService', () => {
 
     expect(route?.workspaces).toEqual([
       expect.objectContaining({ workspaceId: 'ws_1' }),
-      { workspaceId: 'ws_2', status: 'missing', metrics: [] },
+      { workspaceId: 'ws_2', status: 'success', metrics: [] },
     ])
     expect(
       result.data.trend.data.workspaces.map((workspace) => workspace.workspaceId),
     ).toEqual(['ws_1'])
+    expect(result.data.workspaceSnapshots.data.flowStates).toMatchObject({
+      ws_1: { Route: 'success' },
+      ws_2: { Route: 'success' },
+    })
   })
 
   it('captures the no-HMR initial-load failure when a lifecycle event invalidates the query', async () => {

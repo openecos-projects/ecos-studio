@@ -11,6 +11,7 @@ import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProvid
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import { BackendWorkspaceService } from '../services/backendWorkspaceService'
+import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
 import { BackendProjectComparisonService } from '../services/backendProjectComparisonService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
@@ -233,12 +234,9 @@ function getDesktopServices() {
     () => eccRuntimeService.activeOperations(),
   )
   const backendWorkspaceService = new BackendWorkspaceService({
-    engineeringSnapshotProvider: {
-      getByDirectory: (directory) =>
-        eccRuntimeService.engineeringSnapshotForDirectory(directory),
-    },
     projectManagementReadService,
-    workspaceResourceService,
+    snapshotWatcherFactory: (callbacks) => new ProjectComparisonFileWatcher(callbacks),
+    workspaceRootProvider: projectScopeService,
   })
   const shellService = new ShellPtyService({
     env: runtimeEnv,
@@ -365,6 +363,11 @@ async function launchWindow(
   })
   mainWindow.on('focus', () => {
     applyWindowMenuState(windowId)
+    void services?.backendWorkspaceService
+      .checkForUpdates(windowId)
+      .catch((error) =>
+        electronLogger.warn('[backend-workspace] focus check failed', error),
+      )
     void services?.backendProjectComparisonService
       .checkForUpdates(windowId)
       .catch((error) =>

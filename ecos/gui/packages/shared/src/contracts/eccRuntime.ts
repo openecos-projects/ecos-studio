@@ -370,8 +370,21 @@ export interface EccEngineeringAnalysisStep {
   order: number
   stepId: string
   summary: EccEngineeringAnalysisFile
+  subflow?: EccEngineeringSubflowSummary
   timingIssues: EccEngineeringAnalysisFile | null
   toolId: string
+}
+
+export interface EccEngineeringSubflowStep {
+  name: string
+  state: string
+  runtime?: string
+  peakMemoryMb?: number
+}
+
+export interface EccEngineeringSubflowSummary {
+  status: 'available' | 'missing' | 'invalid' | 'unsafe' | 'oversized'
+  steps: EccEngineeringSubflowStep[]
 }
 
 export interface EccEngineeringAnalysis {
@@ -386,7 +399,7 @@ export interface EccEngineeringSnapshot {
   metrics: EccEngineeringMetric[]
   parameters: Record<string, unknown>
   qorAssessment: Record<string, unknown>
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   signoffAssessment: EccWorkspaceInspectSignoffResult
   workspaceId: string
   workspaceRevision: number

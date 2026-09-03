@@ -105,6 +105,7 @@ function snapshot() {
               artifact_paths: [],
             },
           },
+          subflow: { status: 'missing', steps: [] as Array<Record<string, unknown>> },
         },
       ],
     },
@@ -209,6 +210,32 @@ describe('Engineering Snapshot validation', () => {
       flow: { status: 'ready' },
       qor: { status: 'ready' },
       signoff: { status: 'ready' },
+    })
+  })
+
+  it('requires normalized committed Subflow data in schema v2', () => {
+    const current = snapshot()
+    current.schemaVersion = 2
+    current.analysis.steps[0]!.subflow = {
+      status: 'available',
+      steps: [
+        {
+          name: 'run sta',
+          state: 'Success',
+          runtime: '0:0:2',
+          peakMemoryMb: 12.5,
+        },
+      ],
+    }
+
+    const valid = validateEngineeringSnapshot(current)
+    expect(valid.ok && valid.sections.qor.status).toBe('ready')
+
+    current.analysis.steps[0]!.subflow.steps[0]!.peakMemoryMb = Number.NaN
+    const invalid = validateEngineeringSnapshot(current)
+    expect(invalid.ok && invalid.sections.qor).toEqual({
+      status: 'unavailable',
+      issues: [{ code: 'ENGINEERING_QOR_INVALID' }],
     })
   })
 })

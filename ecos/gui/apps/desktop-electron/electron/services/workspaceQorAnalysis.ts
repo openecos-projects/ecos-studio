@@ -56,9 +56,9 @@ interface SnapshotQorProjection {
 
 export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
-  'analysis' | 'flow' | 'metrics' | 'qorAssessment'
+  'analysis' | 'metrics' | 'qorAssessment'
 > &
-  Partial<Pick<EccEngineeringSnapshot, 'signoffAssessment'>>
+  Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment'>>
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -101,6 +101,12 @@ function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
     value: number,
     ...(typeof metric.unit === 'string' && metric.unit ? { unit: metric.unit } : {}),
     polarity: polarity as MetricValue['polarity'],
+    ...(typeof metric.corner === 'string' && metric.corner
+      ? { corner: metric.corner }
+      : {}),
+    ...(record(metric.corner_context)
+      ? { cornerContext: metric.corner_context as Record<string, unknown> }
+      : {}),
   }
 }
 
@@ -222,7 +228,7 @@ function flowState(value: unknown): ProjectStepStatus | undefined {
   }
 }
 
-function flowStates(flow: unknown): Record<string, ProjectStepStatus> {
+export function workspaceFlowStates(flow: unknown): Record<string, ProjectStepStatus> {
   const steps = record(flow)?.steps
   if (!Array.isArray(steps)) return {}
   return Object.fromEntries(
@@ -278,7 +284,7 @@ export function projectQorInputForWorkspace(
     (candidate) => candidate.workspace_id === workspaceId,
   )
   if (!workspace) return null
-  const statuses = flowStates(engineeringSnapshot?.flow)
+  const statuses = workspaceFlowStates(engineeringSnapshot?.flow)
   const snapshot = snapshotQorProjection(engineeringSnapshot)
   return {
     branchFrom: workspace.branch_from,
@@ -352,7 +358,7 @@ function metricDelta(
 export function analyzeWorkspaceQor(
   manifest: ProjectManifest,
   currentWorkspaceId: string,
-  snapshotsByWorkspaceId: Record<string, EccEngineeringSnapshot | null>,
+  snapshotsByWorkspaceId: Record<string, WorkspaceEngineeringFacts | null>,
 ): {
   qor: ReadSection<WorkspaceQorSummary>
   baselineComparison: ReadSection<WorkspaceBaselineComparison>

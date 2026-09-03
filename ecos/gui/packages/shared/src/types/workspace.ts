@@ -28,6 +28,10 @@ export interface WorkspaceSummary {
   totalRuntime?: string
   cellCount?: number
   frequency?: number
+  committedWorkspaceId?: string
+  committedRevision?: number
+  committedVerifiedAt?: string
+  committedFreshness?: 'last-verified' | 'stale'
 }
 
 export interface WorkspaceParameters {

@@ -58,6 +58,7 @@ import {
   workspaceParentPath,
 } from './workspaceReplacement'
 import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
+import { recentProjectFreshness, recentProjectSnapshot } from './recentProjectSnapshot'
 
 interface SerializedProject {
   id: string
@@ -74,6 +75,10 @@ interface SerializedProject {
   completedSteps?: number
   currentStep?: string
   totalRuntime?: string
+  committedWorkspaceId?: string
+  committedRevision?: number
+  committedVerifiedAt?: string
+  committedFreshness?: 'last-verified' | 'stale'
 }
 
 const currentProject = ref<Project | null>()
@@ -507,6 +512,10 @@ export function useWorkspace() {
         // 2. 异步并行检测 workspace 识别状态（不阻塞 UI 首屏渲染）
         const checks = projects.map(async (project) => {
           project.workspaceRecognized = await isProjectValid(project.path)
+          project.committedFreshness = recentProjectFreshness(
+            project.workspaceRecognized,
+            project.committedRevision,
+          )
         })
         await Promise.all(checks)
 
@@ -1374,91 +1383,103 @@ export function useWorkspace() {
 
     const snapshot: Partial<Project> = {}
 
-    try {
-      const flowData = await readWorkspaceFlowResourceApi()
-      if (!isCurrent()) return
-      if (isRecord(flowData) && Array.isArray(flowData.steps)) {
-        const steps = flowData.steps
-        const hasMalformedStep = steps.some(
-          (step) =>
-            !isRecord(step) ||
-            asString(step.name) === undefined ||
-            asString(step.state) === undefined,
-        )
-        if (hasMalformedStep) {
-          throw new Error('Malformed flow steps in snapshot payload')
-        }
+    if ((project.designTool ?? 'backend') === 'backend') {
+      try {
+        const result = await getDesktopApi().backendWorkspace.getOverview()
+        if (!isCurrent()) return
+        Object.assign(snapshot, recentProjectSnapshot(result.overview))
+      } catch {
+        console.warn('Failed to read committed workspace summary')
+      }
+    } else {
+      try {
+        const flowData = await readWorkspaceFlowResourceApi()
+        if (!isCurrent()) return
+        if (isRecord(flowData) && Array.isArray(flowData.steps)) {
+          const steps = flowData.steps
+          const hasMalformedStep = steps.some(
+            (step) =>
+              !isRecord(step) ||
+              asString(step.name) === undefined ||
+              asString(step.state) === undefined,
+          )
+          if (hasMalformedStep) {
+            throw new Error('Malformed flow steps in snapshot payload')
+          }
 
-        const completedSteps = steps.filter((s) => asString(s.state) === 'Success').length
-        const totalSteps = steps.length
-        const failedStep = steps.find(
-          (s) => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid',
-        )
-        const ongoingStep = steps.find((s) => asString(s.state) === 'Ongoing')
-        const firstPending = steps.find(
-          (s) => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending',
-        )
+          const completedSteps = steps.filter(
+            (s) => asString(s.state) === 'Success',
+          ).length
+          const totalSteps = steps.length
+          const failedStep = steps.find(
+            (s) => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid',
+          )
+          const ongoingStep = steps.find((s) => asString(s.state) === 'Ongoing')
+          const firstPending = steps.find(
+            (s) => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending',
+          )
 
-        let status: ProjectStatus = 'not_started'
-        if (ongoingStep) status = 'running'
-        else if (completedSteps === totalSteps && totalSteps > 0) status = 'success'
-        else if (failedStep) status = 'failed'
-        else if (completedSteps > 0) status = 'in_progress'
+          let status: ProjectStatus = 'not_started'
+          if (ongoingStep) status = 'running'
+          else if (completedSteps === totalSteps && totalSteps > 0) status = 'success'
+          else if (failedStep) status = 'failed'
+          else if (completedSteps > 0) status = 'in_progress'
 
-        let totalSeconds = 0
-        let hasValidRuntime = false
-        for (const step of steps) {
-          const runtime = asString(step.runtime)
-          if (runtime) {
-            const parts = runtime.split(':')
-            const numericParts = parts.map((part) =>
-              part.trim() === '' ? Number.NaN : Number(part),
-            )
-            if (numericParts.length === 3 && numericParts.every(Number.isFinite)) {
-              totalSeconds +=
-                numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
-              hasValidRuntime = true
+          let totalSeconds = 0
+          let hasValidRuntime = false
+          for (const step of steps) {
+            const runtime = asString(step.runtime)
+            if (runtime) {
+              const parts = runtime.split(':')
+              const numericParts = parts.map((part) =>
+                part.trim() === '' ? Number.NaN : Number(part),
+              )
+              if (numericParts.length === 3 && numericParts.every(Number.isFinite)) {
+                totalSeconds +=
+                  numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
+                hasValidRuntime = true
+              }
             }
           }
-        }
-        const h = Math.floor(totalSeconds / 3600)
-        const m = Math.floor((totalSeconds % 3600) / 60)
-        const s = totalSeconds % 60
-        const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
-        const currentStep =
-          asString(ongoingStep?.name) ||
-          asString(failedStep?.name) ||
-          asString(firstPending?.name)
+          const h = Math.floor(totalSeconds / 3600)
+          const m = Math.floor((totalSeconds % 3600) / 60)
+          const s = totalSeconds % 60
+          const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
+          const currentStep =
+            asString(ongoingStep?.name) ||
+            asString(failedStep?.name) ||
+            asString(firstPending?.name)
 
-        snapshot.status = status
-        snapshot.totalSteps = totalSteps
-        snapshot.completedSteps = completedSteps
-        snapshot.currentStep = currentStep
-        if (totalSteps > 0 && hasValidRuntime) snapshot.totalRuntime = totalRuntime
-        else if (totalSteps === 0) snapshot.totalRuntime = undefined
-      }
-    } catch {
-      console.warn('Failed to read flow.json for snapshot')
-    }
-
-    try {
-      const params = await readWorkspaceParametersResourceApi()
-      if (!isCurrent()) return
-      if (isRecord(params)) {
-        const pdk = asString(params['PDK'])
-        const topModule = asString(params['Top module'])
-        const frequencyTarget = asNumber(params['Frequency max [MHz]'])
-        if (pdk !== undefined) snapshot.pdk = pdk
-        if (topModule !== undefined) snapshot.topModule = topModule
-        if (frequencyTarget !== undefined) snapshot.frequencyTarget = frequencyTarget
-        const core = params['Core']
-        if (isRecord(core)) {
-          const coreUtilization = asNumber(core['Utilitization'])
-          if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
+          snapshot.status = status
+          snapshot.totalSteps = totalSteps
+          snapshot.completedSteps = completedSteps
+          snapshot.currentStep = currentStep
+          if (totalSteps > 0 && hasValidRuntime) snapshot.totalRuntime = totalRuntime
+          else if (totalSteps === 0) snapshot.totalRuntime = undefined
         }
+      } catch {
+        console.warn('Failed to read flow.json for snapshot')
       }
-    } catch {
-      console.warn('Failed to read parameters.json for snapshot')
+
+      try {
+        const params = await readWorkspaceParametersResourceApi()
+        if (!isCurrent()) return
+        if (isRecord(params)) {
+          const pdk = asString(params['PDK'])
+          const topModule = asString(params['Top module'])
+          const frequencyTarget = asNumber(params['Frequency max [MHz]'])
+          if (pdk !== undefined) snapshot.pdk = pdk
+          if (topModule !== undefined) snapshot.topModule = topModule
+          if (frequencyTarget !== undefined) snapshot.frequencyTarget = frequencyTarget
+          const core = params['Core']
+          if (isRecord(core)) {
+            const coreUtilization = asNumber(core['Utilitization'])
+            if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
+          }
+        }
+      } catch {
+        console.warn('Failed to read parameters.json for snapshot')
+      }
     }
 
     const currentIdx = recentProjects.value.findIndex(

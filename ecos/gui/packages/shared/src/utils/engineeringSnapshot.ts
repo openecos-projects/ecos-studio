@@ -71,7 +71,7 @@ export function validateEngineeringSnapshot(
   if (!record(value)) {
     return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
   }
-  if (value.schemaVersion !== 1) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
     return {
       ok: false,
       issue: {
@@ -99,7 +99,7 @@ export function validateEngineeringSnapshot(
     snapshot: {
       checklist: value.checklist,
       parameters: value.parameters,
-      schemaVersion: 1,
+      schemaVersion: value.schemaVersion,
       workspaceId: value.workspaceId,
       workspaceRevision: value.workspaceRevision,
     },
@@ -145,7 +145,7 @@ function validQor(
   if (
     !Array.isArray(snapshot.metrics) ||
     !snapshot.metrics.every(validMetric) ||
-    !validAnalysis(snapshot.analysis)
+    !validAnalysis(snapshot.analysis, snapshot.schemaVersion)
   ) {
     return false
   }
@@ -214,7 +214,10 @@ function validRating(value: unknown): boolean {
   )
 }
 
-function validAnalysis(value: unknown): value is EccEngineeringAnalysis {
+function validAnalysis(
+  value: unknown,
+  schemaVersion: unknown,
+): value is EccEngineeringAnalysis {
   if (!record(value) || !Array.isArray(value.steps)) return false
   return value.steps.every(
     (step) =>
@@ -226,7 +229,27 @@ function validAnalysis(value: unknown): value is EccEngineeringAnalysis {
       validMetricFile(step.metrics) &&
       validSummaryFile(step.summary) &&
       validAnalysisFile(step.hotspots, 3, 'hotspots') &&
-      (step.timingIssues === null || validTimingFile(step.timingIssues)),
+      (step.timingIssues === null || validTimingFile(step.timingIssues)) &&
+      (schemaVersion === 1 || validSubflow(step.subflow)),
+  )
+}
+
+function validSubflow(value: unknown): boolean {
+  if (!record(value) || !Array.isArray(value.steps)) return false
+  if (
+    !['available', 'missing', 'invalid', 'unsafe', 'oversized'].includes(
+      String(value.status),
+    )
+  ) {
+    return false
+  }
+  return value.steps.every(
+    (step) =>
+      record(step) &&
+      nonEmptyString(step.name) &&
+      typeof step.state === 'string' &&
+      (step.runtime === undefined || typeof step.runtime === 'string') &&
+      (step.peakMemoryMb === undefined || finiteNumber(step.peakMemoryMb)),
   )
 }
 

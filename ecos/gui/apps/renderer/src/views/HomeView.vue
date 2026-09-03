@@ -315,7 +315,13 @@
                   :title="layoutThumbnailTitle(thumbnail)"
                   @click="void openLayoutThumbnail(thumbnail)"
                 >
-                  <img :src="thumbnail.url" :alt="thumbnail.label" />
+                  <img v-if="thumbnail.url" :src="thumbnail.url" :alt="thumbnail.label" />
+                  <div v-else class="layout-thumbnail-placeholder">
+                    <i class="ri-image-2-line" aria-hidden="true" />
+                    <small>{{
+                      thumbnail.availability === 'stale' ? 'Stale' : 'Missing'
+                    }}</small>
+                  </div>
                   <i
                     v-if="thumbnail.step === openingLayoutStep"
                     class="ri-loader-4-line spin"
@@ -361,6 +367,7 @@
               :sta-critical-paths="flowInsightStaPaths"
               :sta-convergence="flowInsightStaConvergence"
               :loading="flowInsightsLoading"
+              :load-congestion="loadFlowInsightCongestion"
             />
           </section>
         </div>
@@ -644,6 +651,7 @@ const {
   sta: flowInsightSta,
   staCriticalPaths: flowInsightStaPaths,
   loading: flowInsightsLoading,
+  loadCongestion: loadFlowInsightCongestion,
 } = useFlowInsights()
 const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
 const { keyMetrics, maxFanout, mpcDisplayName, mpcConstraints, qorSteps } =
@@ -980,7 +988,13 @@ function openStepQorAnalysis(step: string): void {
 }
 
 function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
-  if (!thumbnail.hasGeometry) return false
+  if (
+    !thumbnail.url ||
+    thumbnail.availability !== 'available' ||
+    !thumbnail.hasGeometry
+  ) {
+    return false
+  }
   return canOpenChipViewer({
     chipViewerBusy: openingLayoutStep.value !== null,
     chipViewerEditBusy: false,
@@ -991,6 +1005,9 @@ function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
 }
 
 function layoutThumbnailTitle(thumbnail: HomeLayoutThumbnail): string {
+  if (thumbnail.availability !== 'available') {
+    return `${thumbnail.label}: preview is ${thumbnail.availability}${thumbnail.reason ? ` (${thumbnail.reason})` : ''}.`
+  }
   if (!thumbnail.hasGeometry) {
     return `${thumbnail.label}: saved layout data is unavailable.`
   }
@@ -1321,6 +1338,31 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   min-height: 0;
   object-fit: contain;
   width: 100%;
+}
+
+.layout-thumbnail-placeholder {
+  align-items: center;
+  background: var(--dashboard-soft-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  min-height: 0;
+}
+
+.layout-thumbnail-placeholder i {
+  animation: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 18px;
+  padding: 0;
+  position: static;
+}
+
+.layout-thumbnail-placeholder small {
+  font-size: 9px;
 }
 
 .layout-thumbnail-cell i {

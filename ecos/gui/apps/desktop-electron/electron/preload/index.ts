@@ -135,7 +135,11 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.projectManifestMutate, request),
   },
   backendWorkspace: {
+    getArtifact: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetArtifact, request),
     getOverview: () => invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetOverview),
+    getStepDetail: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetStepDetail, request),
     refreshOverview: () =>
       invokeDesktop(desktopApiIpcChannels.backendWorkspaceRefreshOverview),
     onInvalidated: (listener) =>

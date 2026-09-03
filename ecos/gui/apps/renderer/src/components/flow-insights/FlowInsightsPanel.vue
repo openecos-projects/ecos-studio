@@ -104,6 +104,7 @@ const props = defineProps<{
   staCriticalPaths?: StaCriticalPathsModel | null
   staConvergence?: StaConvergenceModel | null
   loading?: boolean
+  loadCongestion?: () => void | Promise<void>
 }>()
 
 const DATA_SNAPSHOT_ROWS = 4
@@ -139,6 +140,7 @@ function openModule(moduleId: string): void {
   activeTab.value = moduleId
   dialogMaximized.value = false
   dialogVisible.value = true
+  if (moduleId === 'congestion') void props.loadCongestion?.()
 }
 </script>
 

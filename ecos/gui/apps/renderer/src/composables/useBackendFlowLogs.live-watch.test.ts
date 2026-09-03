@@ -130,8 +130,8 @@ describe('useBackendFlowLogs runtime updates', () => {
 
     testState.runtimeEvents.value.push(
       runtimeEvent({
-        logChunk: 'live synthesis log\n',
-        logCursor: 19,
+        chunk: 'live synthesis log\n',
+        cursor: 19,
         runtimeProtocolType: 'step.log',
         step: 'Synthesis',
         tool: 'yosys',
@@ -140,8 +140,8 @@ describe('useBackendFlowLogs runtime updates', () => {
     await nextTick()
     testState.runtimeEvents.value.push(
       runtimeEvent({
-        logChunk: 'live synthesis log\n',
-        logCursor: 19,
+        chunk: 'live synthesis log\n',
+        cursor: 19,
         runtimeProtocolType: 'step.log',
         step: 'Synthesis',
         tool: 'yosys',
@@ -199,8 +199,8 @@ describe('useBackendFlowLogs runtime updates', () => {
     )
     testState.runtimeEvents.value.push(
       runtimeEvent({
-        logChunk: 'route line one\n',
-        logCursor: 15,
+        chunk: 'route line one\n',
+        cursor: 15,
         runtimeEventId: 'runtime-1:2',
         runtimeProtocolType: 'step.log',
         step: 'route',
@@ -209,8 +209,8 @@ describe('useBackendFlowLogs runtime updates', () => {
     )
     testState.runtimeEvents.value.push(
       runtimeEvent({
-        logChunk: 'route line two\n',
-        logCursor: 30,
+        chunk: 'route line two\n',
+        cursor: 30,
         runtimeEventId: 'runtime-1:3',
         runtimeProtocolType: 'step.log',
         step: 'route',
@@ -249,8 +249,8 @@ describe('useBackendFlowLogs runtime updates', () => {
     )
     testState.runtimeEvents.value.push(
       runtimeEvent({
-        logChunk: 'cts completed output\n',
-        logCursor: 21,
+        chunk: 'cts completed output\n',
+        cursor: 21,
         runtimeEventId: 'runtime-2:2',
         runtimeProtocolType: 'step.log',
         step: 'cts',

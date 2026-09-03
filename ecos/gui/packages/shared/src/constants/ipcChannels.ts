@@ -23,6 +23,8 @@ export const desktopApiIpcChannels = {
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceTexts: 'project-management:read-workspace-texts',
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
+  backendWorkspaceGetArtifact: 'backend-workspace:get-artifact',
+  backendWorkspaceGetStepDetail: 'backend-workspace:get-step-detail',
   backendWorkspaceRefreshOverview: 'backend-workspace:refresh-overview',
   backendProjectComparisonSelectProject: 'backend-project-comparison:select-project',
   backendProjectComparisonCloseProject: 'backend-project-comparison:close-project',

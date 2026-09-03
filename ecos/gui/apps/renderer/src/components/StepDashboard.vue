@@ -280,7 +280,13 @@
           </button>
           <div v-else class="card-empty">
             <i class="ri-image-2-line" aria-hidden="true" />
-            <span>No layout information</span>
+            <span v-if="data.layoutAvailability === 'stale'"
+              >Layout preview is stale</span
+            >
+            <span v-else-if="data.layoutAvailability === 'missing'"
+              >Layout preview is missing</span
+            >
+            <span v-else>No layout information</span>
           </div>
         </section>
       </div>
@@ -1088,12 +1094,11 @@ import {
   type StepDashboardReport,
 } from '@/composables/useStepDashboardData'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
+import { useStepReportDialog } from '@/composables/useStepReportDialog'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
 import CongestionPanel from './flow-insights/CongestionPanel.vue'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { getDesktopApi } from '@/platform/desktop'
 import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
 import StatusPieChart from './home/StatusPieChart.vue'
@@ -1120,6 +1125,10 @@ import {
 } from './step-dashboard/stepDashboardData'
 
 const { currentStep, data, error, loading, refresh } = useStepDashboardData()
+const { openReport, reportDialog } = useStepReportDialog(
+  currentStep,
+  computed(() => data.value?.step),
+)
 const { currentProject } = useWorkspace()
 const { flowStages } = useBackendFlowStages()
 const { state: qorComparisonState } = useBackendWorkspaceQor()
@@ -1139,13 +1148,6 @@ const showCongestionDialog = ref(false)
 const showStepConfiguration = ref(false)
 const dataSummaryFocusId = ref<string | null>(null)
 const imagePreview = ref({ label: '', url: '', visible: false })
-const reportDialog = ref({
-  label: '',
-  content: '',
-  error: '',
-  loading: false,
-  visible: false,
-})
 
 const chipViewerStep = computed(() =>
   Object.values(StepEnum).find(
@@ -1463,27 +1465,6 @@ async function openChipViewer(): Promise<void> {
     console.error('Failed to open Chip Viewer from step dashboard:', cause)
   } finally {
     chipViewerBusy.value = false
-  }
-}
-
-async function openReport(report: StepDashboardReport): Promise<void> {
-  reportDialog.value = {
-    label: report.label,
-    content: '',
-    error: '',
-    loading: true,
-    visible: true,
-  }
-  try {
-    const path = await resolveProjectPathAccess(report.path)
-    if (!path) throw new Error('Report is outside the active workspace scope.')
-    const content = await readOptionalProjectTextFile(path)
-    reportDialog.value.content =
-      content === null ? 'Report is no longer available.' : content
-  } catch (cause) {
-    reportDialog.value.error = cause instanceof Error ? cause.message : String(cause)
-  } finally {
-    reportDialog.value.loading = false
   }
 }
 

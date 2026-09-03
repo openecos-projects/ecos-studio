@@ -10,6 +10,7 @@ import {
   type ProjectQorTrendWorkspaceSummary,
   type ProjectRecommendation,
   type ProjectStepComparison,
+  type ProjectStepStatus,
   type ReadIssue,
   type ReadSection,
 } from '@ecos-studio/shared'
@@ -63,10 +64,11 @@ export function buildProjectComparisonSteps(
   manifest: ProjectManifest,
   inputs: ProjectComparisonInput[],
   trend: ProjectQorTrendSummary,
+  flowStates: Record<string, Record<string, ProjectStepStatus>>,
 ): ProjectStepComparison[] {
   const stepIds = new Set<string>(FLOW_STEPS)
-  for (const input of inputs) {
-    for (const stepId of Object.keys(input.stepStatuses)) stepIds.add(stepId)
+  for (const states of Object.values(flowStates)) {
+    for (const stepId of Object.keys(states)) stepIds.add(stepId)
   }
   for (const workspace of manifest.workspaces) {
     stepIds.add(workspace.start_step)
@@ -74,7 +76,6 @@ export function buildProjectComparisonSteps(
     if (workspace.branch_from?.source_step) stepIds.add(workspace.branch_from.source_step)
   }
   const knownOrder = new Map(FLOW_STEPS.map((step, order) => [step, order]))
-  const inputsByWorkspace = new Map(inputs.map((input) => [input.workspaceId, input]))
   const metricsByWorkspace = new Map(
     trend.workspaces.map((workspace) => [
       workspace.workspaceId,
@@ -92,10 +93,9 @@ export function buildProjectComparisonSteps(
         FLOW_STEPS.length + unknownSteps.indexOf(stepId),
       name: stepId,
       workspaces: manifest.workspaces.map((workspace) => {
-        const input = inputsByWorkspace.get(workspace.workspace_id)
         return {
           workspaceId: workspace.workspace_id,
-          status: (input?.stepStatuses[stepId] ??
+          status: (flowStates[workspace.workspace_id]?.[stepId] ??
             'missing') as ProjectStepComparison['workspaces'][number]['status'],
           metrics: (metricsByWorkspace.get(workspace.workspace_id) ?? []).filter(
             (metric) => metric.step === stepId && metric.stepRole !== 'hidden',

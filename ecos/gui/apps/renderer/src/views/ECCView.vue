@@ -164,6 +164,22 @@
                   >
                     Workspace not recognized
                   </span>
+                  <span
+                    v-if="project.committedRevision !== undefined"
+                    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    :class="
+                      project.committedFreshness === 'stale'
+                        ? 'bg-amber-500/10 text-amber-500'
+                        : 'bg-(--accent-color)/10 text-(--accent-color)'
+                    "
+                    :title="project.committedVerifiedAt"
+                  >
+                    {{
+                      project.committedFreshness === 'stale'
+                        ? `Stale · last verified r${project.committedRevision}`
+                        : `Last verified · r${project.committedRevision}`
+                    }}
+                  </span>
                 </div>
               </div>
             </div>

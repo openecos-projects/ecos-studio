@@ -276,7 +276,7 @@ describe('ProjectManagementReadService', () => {
     const { projectRoot, workspaceRoot } = await createProject()
     await writeFile(
       join(workspaceRoot, 'home', 'engineering-snapshot.json'),
-      JSON.stringify({ ...engineeringSnapshot(), schemaVersion: 2 }),
+      JSON.stringify({ ...engineeringSnapshot(), schemaVersion: 3 }),
     )
 
     await expect(
@@ -337,7 +337,7 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
-  it('marks an available Artifact reference invalid when its symlink escapes the Workspace', async () => {
+  it('defers Artifact realpath validation until the declared Artifact is requested', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const outside = join(projectRoot, 'outside.json')
     const reference = 'sta_ecc/analysis/qor_metrics.json'
@@ -360,14 +360,26 @@ describe('ProjectManagementReadService', () => {
       JSON.stringify(snapshot),
     )
 
-    const result = await new ProjectManagementReadService().readEngineeringSnapshot({
+    const service = new ProjectManagementReadService()
+    const result = await service.readEngineeringSnapshot({
       projectRoot,
       workspacePath: workspaceRoot,
     })
 
     expect(result.ok && result.sections.artifacts).toEqual({
-      status: 'unavailable',
-      issues: [{ code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' }],
+      status: 'ready',
+      data: snapshot.artifacts,
+      issues: [],
+    })
+    await expect(
+      service.readVerifiedArtifact({
+        artifact: { reference, sha256: 'a'.repeat(64), sizeBytes: 2 },
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE',
     })
   })
 
@@ -393,6 +405,18 @@ describe('ProjectManagementReadService', () => {
         ),
       ),
     ).resolves.toEqual({ ok: true, texts: { [reference]: valid } })
+    await expect(
+      service.readVerifiedArtifact({
+        ...request(
+          Buffer.byteLength(valid),
+          createHash('sha256').update(valid).digest('hex'),
+        ),
+        artifact: request(
+          Buffer.byteLength(valid),
+          createHash('sha256').update(valid).digest('hex'),
+        ).artifacts[0]!,
+      }),
+    ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(valid) })
 
     await expect(
       service.readVerifiedArtifacts(

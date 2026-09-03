@@ -17,6 +17,8 @@ import {
   onWorkspaceRerunPrepared,
 } from './homeRunArtifacts'
 import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
+import { getDesktopApi } from '@/platform/desktop'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 // ============ 类型定义 ============
 
@@ -130,6 +132,7 @@ export function useSubflow() {
   const { backendRuntimeEvents, currentProject, resourceVersions, runtimeEvents } =
     useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
+  const backendSession = useBackendWorkspaceSession()
   const route = useRoute()
 
   // 状态
@@ -251,6 +254,39 @@ export function useSubflow() {
     error.value = null
 
     try {
+      if (currentProject.value?.designTool !== 'frontend') {
+        const revisionSection = backendSession.projection.data?.revision
+        const revision =
+          revisionSection?.status === 'ready' || revisionSection?.status === 'partial'
+            ? revisionSection.data.workspaceRevision
+            : null
+        const contextId = backendSession.workspaceContextId
+        if (!contextId || revision === null) return
+        const result = await getDesktopApi().backendWorkspace.getStepDetail({
+          stepId: stepEnum,
+          workspaceContextId: contextId,
+          workspaceRevision: revision,
+        })
+        if (
+          !isCurrent() ||
+          result.workspaceContextId !== contextId ||
+          result.workspaceRevision !== revision ||
+          (result.detail.status !== 'ready' && result.detail.status !== 'partial')
+        ) {
+          return
+        }
+        if (expectedRuntimeRevision === runtimeUpdateRevision) {
+          subflowSteps.value = result.detail.data.subflow.steps.map((step, index) => ({
+            id: `step-${index}`,
+            name: step.name,
+            description: `Peak Memory: ${step.peakMemoryMb ?? 0} MB`,
+            status: mapState(step.state),
+            duration: step.runtime || undefined,
+            peakMemory: step.peakMemoryMb,
+          }))
+        }
+        return
+      }
       const response = await workspaceLifecycle.runForSession(sessionId, () =>
         resolveWorkspaceStepInfoApi({
           step: stepEnum,
@@ -321,48 +357,6 @@ export function useSubflow() {
   }
 
   /**
-   * 从指定路径直接加载子流程数据
-   * 用于 runtime event 推送的 subflow_path
-   */
-  async function loadSubflowFromPath(subflowPath: string): Promise<void> {
-    if (!subflowPath) {
-      console.warn('Cannot load subflow: path is empty')
-      return
-    }
-
-    const sessionId = workspaceLifecycle.currentSessionId.value
-    const expectedRuntimeRevision = runtimeUpdateRevision
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
-    try {
-      const localPath = currentProject.value?.path
-        ? convertRemoteToLocalPath(subflowPath, currentProject.value.path)
-        : subflowPath
-
-      console.log('Loading subflow from runtime event path:', localPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(localPath),
-      )
-      if (!isCurrent()) return
-      if (!resolvedPath) return
-
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
-      )
-      if (!isCurrent() || fileContent === undefined) return
-      const subflowData: SubflowData = JSON.parse(fileContent)
-
-      console.log('Subflow data from runtime event path:', subflowData)
-
-      if (expectedRuntimeRevision === runtimeUpdateRevision) {
-        subflowSteps.value = convertSubflowToSteps(subflowData)
-      }
-    } catch (err) {
-      if (!isCurrent()) return
-      console.error('Failed to load subflow from path:', subflowPath, err)
-    }
-  }
-
-  /**
    * 获取当前路由对应的 step 名称
    */
   function getCurrentRouteStep(): WorkspaceFlowStep | undefined {
@@ -428,6 +422,7 @@ export function useSubflow() {
   watch(
     [
       () => currentProject.value?.path,
+      () => backendSession.generation,
       () => resourceVersions.value.step,
       () => resourceVersions.value.all,
     ],
@@ -629,7 +624,6 @@ export function useSubflow() {
     // 方法
     fetchSubflowInfo,
     refreshCurrentSubflow,
-    loadSubflowFromPath,
     clearSubflow,
     updateCurrentStep,
   }

@@ -10,7 +10,6 @@ import {
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
   DesktopProjectManagementWorkspaceTextsResult,
-  EngineeringSnapshotIssue,
   EngineeringSnapshotValidationResult,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
@@ -21,6 +20,7 @@ const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
 const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
 const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceReadablePaths.length
 export const PROJECT_FINDINGS_ARTIFACT_MAX_BYTES = 1024 * 1024
+export const PROJECT_BINARY_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
 
 const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(
   projectManagementWorkspaceReadablePaths,
@@ -45,6 +45,10 @@ export type VerifiedProjectArtifactsReadResult =
         | 'FINDINGS_READ_FAILED'
       reference: string
     }
+
+export type VerifiedProjectArtifactReadResult =
+  | { ok: true; bytes: Uint8Array }
+  | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
@@ -196,22 +200,7 @@ export class ProjectManagementReadService {
         }
       }
       const validated = parseEngineeringSnapshotJson(file.bytes)
-      if (!validated.ok || validated.sections.artifacts.status !== 'ready') {
-        return { ...validated, readBytes }
-      }
-      const artifactIssue = await validateArtifactRealPaths(
-        workspaceRoot,
-        validated.sections.artifacts.data,
-      )
-      if (!artifactIssue) return { ...validated, readBytes }
-      return {
-        ...validated,
-        readBytes,
-        sections: {
-          ...validated.sections,
-          artifacts: { status: 'unavailable', issues: [artifactIssue] },
-        },
-      }
+      return { ...validated, readBytes }
     } catch {
       return snapshotFailure('ENGINEERING_SNAPSHOT_READ_FAILED', readBytes)
     }
@@ -242,11 +231,52 @@ export class ProjectManagementReadService {
       )
       const texts: Record<string, string> = {}
       for (const artifact of request.artifacts) {
-        const result = await readVerifiedArtifact(workspaceRoot, artifact)
+        const result = await readVerifiedArtifactBytes(
+          workspaceRoot,
+          artifact,
+          PROJECT_FINDINGS_ARTIFACT_MAX_BYTES,
+        )
         if (!result.ok) return result
-        texts[artifact.reference] = result.text
+        let text: string
+        try {
+          text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes)
+          JSON.parse(text)
+        } catch {
+          return {
+            ok: false,
+            code: 'FINDINGS_ARTIFACT_INVALID_JSON',
+            reference: artifact.reference,
+          }
+        }
+        texts[artifact.reference] = text
       }
       return { ok: true, texts }
+    } catch {
+      return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
+    }
+  }
+
+  async readVerifiedArtifact(request: {
+    projectRoot: string
+    workspacePath: string
+    artifact: { reference: string; sha256: string; sizeBytes: number }
+  }): Promise<VerifiedProjectArtifactReadResult> {
+    try {
+      const project = await this.loadProject(request.projectRoot)
+      if (!project.manifest) {
+        return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
+      }
+      const workspaceRoot = await this.resolveDeclaredWorkspace(
+        project.root,
+        project.manifest.workspaces.map((workspace) => workspace.workspace_path),
+        request.workspacePath,
+      )
+      const result = await readVerifiedArtifactBytes(
+        workspaceRoot,
+        request.artifact,
+        PROJECT_BINARY_ARTIFACT_MAX_BYTES,
+      )
+      return result.ok ? { ok: true, bytes: Uint8Array.from(result.bytes) } : result
     } catch {
       return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
     }
@@ -319,11 +349,12 @@ export class ProjectManagementReadService {
   }
 }
 
-async function readVerifiedArtifact(
+async function readVerifiedArtifactBytes(
   workspaceRoot: string,
   artifact: { reference: string; sha256: string; sizeBytes: number },
+  maxBytes: number,
 ): Promise<
-  { ok: true; text: string } | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
+  { ok: true; bytes: Buffer } | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 > {
   const unsafe = (): Exclude<VerifiedProjectArtifactsReadResult, { ok: true }> => ({
     ok: false,
@@ -363,10 +394,7 @@ async function readVerifiedArtifact(
         reference: artifact.reference,
       }
     }
-    if (
-      fileStats.size > PROJECT_FINDINGS_ARTIFACT_MAX_BYTES ||
-      artifact.sizeBytes > PROJECT_FINDINGS_ARTIFACT_MAX_BYTES
-    ) {
+    if (fileStats.size > maxBytes || artifact.sizeBytes > maxBytes) {
       return {
         ok: false,
         code: 'FINDINGS_ARTIFACT_TOO_LARGE',
@@ -392,7 +420,7 @@ async function readVerifiedArtifact(
       if (bytesRead === 0) break
       offset += bytesRead
     }
-    if (offset > PROJECT_FINDINGS_ARTIFACT_MAX_BYTES) {
+    if (offset > maxBytes) {
       return {
         ok: false,
         code: 'FINDINGS_ARTIFACT_TOO_LARGE',
@@ -414,18 +442,7 @@ async function readVerifiedArtifact(
         reference: artifact.reference,
       }
     }
-    let text: string
-    try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-      JSON.parse(text)
-    } catch {
-      return {
-        ok: false,
-        code: 'FINDINGS_ARTIFACT_INVALID_JSON',
-        reference: artifact.reference,
-      }
-    }
-    return { ok: true, text }
+    return { ok: true, bytes }
   } finally {
     await handle.close()
   }
@@ -466,31 +483,6 @@ async function readBoundedSnapshot(
   } finally {
     await handle.close()
   }
-}
-
-async function validateArtifactRealPaths(
-  workspaceRoot: string,
-  artifacts: Array<{ availability: string; reference: string }>,
-): Promise<EngineeringSnapshotIssue | null> {
-  for (const artifact of artifacts) {
-    if (artifact.availability !== 'available') continue
-    let path: string
-    try {
-      path = await realpath(join(workspaceRoot, artifact.reference))
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return { code: 'ARTIFACT_REFERENCE_MISSING' }
-      }
-      throw error
-    }
-    if (!isPathWithinRoot(path, workspaceRoot)) {
-      return { code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' }
-    }
-    if (!(await stat(path)).isFile()) {
-      return { code: 'ARTIFACT_REFERENCE_MISSING' }
-    }
-  }
-  return null
 }
 
 function normalizeRequestedPaths(paths: string[]): string[] {
