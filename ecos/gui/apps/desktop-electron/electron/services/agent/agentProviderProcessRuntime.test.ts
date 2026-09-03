@@ -581,6 +581,48 @@ describe('AgentProviderProcessRuntime', () => {
     expect(emitParameterUpdate(undefined)).not.toHaveBeenCalled()
   })
 
+  it('drops parameter updates whose write value does not match the advertised patch', () => {
+    expect(
+      emitParameterUpdate([
+        {
+          file: 'home/params.toml',
+          json_path: ['pdk_root'],
+          knob_id: 'floorplan.utilitization',
+          surface: 'parameters',
+          value: '/tmp/other',
+        },
+      ]),
+    ).not.toHaveBeenCalled()
+  })
+
+  it('drops parameter updates whose json_path would pollute Object.prototype', () => {
+    expect(
+      emitParameterUpdate([
+        {
+          file: 'config/dreamplace_ecc.json',
+          json_path: ['__proto__', 'toString'],
+          knob_id: 'floorplan.utilitization',
+          surface: 'step_config',
+          value: 0.7,
+        },
+      ]),
+    ).not.toHaveBeenCalled()
+  })
+
+  it('drops parameter updates that pair the parameters surface with a step-config file', () => {
+    expect(
+      emitParameterUpdate([
+        {
+          file: 'config/dreamplace_ecc.json',
+          json_path: ['utilitization'],
+          knob_id: 'floorplan.utilitization',
+          surface: 'parameters',
+          value: 0.7,
+        },
+      ]),
+    ).not.toHaveBeenCalled()
+  })
+
   it('rejects pending requests when the provider process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

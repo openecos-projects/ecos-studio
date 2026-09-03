@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WorkspaceResourceFile } from '@ecos-studio/shared'
@@ -31,6 +31,7 @@ function provider(root: string): ProjectScopeProviderDouble {
   return {
     getProjectRoot: vi.fn().mockResolvedValue(root),
     requestProjectPathAccess: vi.fn(async (path: string) => path),
+    requestWritableProjectPathAccess: vi.fn(async (path: string) => path),
   }
 }
 
@@ -75,6 +76,36 @@ describe('WorkspaceResourceService', () => {
     )
   })
 
+  it('rejects a parameters save that omits the workspace binding', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+
+    await expect(
+      service.writeParameters({
+        parameters: { Design: 'gcd' },
+        workspace: '',
+      }),
+    ).rejects.toThrow(/requires a workspace path/)
+  })
+
+  it('writes parameters when the workspace binding matches the active root', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+
+    const result = await service.writeParameters({
+      parameters: { Design: 'aes' },
+      workspace: root,
+    })
+
+    expect(result.format).toBe('json')
+    const written = JSON.parse(
+      await readFile(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written.Design).toBe('aes')
+  })
+
   it('builds an ECC step resource index from parameters and flow files', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
@@ -116,6 +147,65 @@ describe('WorkspaceResourceService', () => {
       exists: true,
       kind: 'layout-image',
     })
+  })
+
+  it('builds the resource index from home/params.toml workspaces', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(join(root, 'place_ecc', 'output'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'params.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        'top = "gcd"',
+        '',
+        '[pdk]',
+        'name = "ics55"',
+        'root = "/pdk/ics55"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'top_module = "gcd"',
+        'pdk = "ics55"',
+        'frequency_max = 100.0',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeJson(join(root, 'home', 'flow.json'), {
+      steps: [
+        { name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} },
+      ],
+    })
+    await writeJson(join(root, 'home', 'home.json'), {
+      flow: join(root, 'home', 'flow.json'),
+    })
+    await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.json'), '{}', 'utf8')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.status).toBe('available')
+    expect(index.design).toBe('gcd')
+    expect(index.topModule).toBe('gcd')
+    expect(index.pdk).toBe('ics55')
+    expect(index.parameters).toMatchObject({
+      design: 'gcd',
+      top_module: 'gcd',
+      pdk: 'ics55',
+      frequency_max: 100.0,
+    })
+    expect(index.home.parametersJson).toMatchObject({
+      path: join(root, 'home', 'params.toml'),
+      exists: true,
+      kind: 'parameters',
+    })
+    expect(index.flow.steps).toHaveLength(1)
+    expect(index.flow.steps[0].directory).toBe(join(root, 'place_ecc'))
+
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd', top_module: 'gcd', pdk: 'ics55' })
   })
 
   it('discovers every file below a step report directory', async () => {
@@ -787,7 +877,7 @@ describe('WorkspaceResourceService', () => {
     expect(result.message).toEqual(
       expect.arrayContaining([
         `Workspace step not found: place`,
-        `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace parameters: ${join(root, 'home', 'params.toml')} or ${join(root, 'home', 'parameters.json')}`,
         `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
       ]),
     )
@@ -896,7 +986,7 @@ describe('WorkspaceResourceService', () => {
     expect(index.flow.steps).toEqual([])
     expect(index.messages).toEqual(
       expect.arrayContaining([
-        `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace parameters: ${join(root, 'home', 'params.toml')} or ${join(root, 'home', 'parameters.json')}`,
         `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
       ]),
     )
@@ -913,5 +1003,109 @@ describe('WorkspaceResourceService', () => {
 
     expect(index.status).toBe('error')
     expect(index.messages.join('\n')).toContain('Failed to parse')
+  })
+})
+
+describe('writeParameters', () => {
+  it('writes parameters into home/params.toml and reports the format', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'params.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'frequency_max = 100.0',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.writeParameters({
+      parameters: { 'Frequency max [MHz]': 150 },
+      workspace: root,
+    })
+
+    expect(result.format).toBe('toml')
+    expect(result.path).toBe(join(root, 'home', 'params.toml'))
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd', frequency_max: 150 })
+  })
+
+  it('writes home/parameters.json workspaces as JSON', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeJson(join(root, 'home', 'parameters.json'), { Design: 'gcd' })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.writeParameters({
+      parameters: { Design: 'gcd', 'Max fanout': 24 },
+      workspace: root,
+    })
+
+    expect(result.format).toBe('json')
+    const written = JSON.parse(
+      await readFile(join(root, 'home', 'parameters.json'), 'utf8'),
+    )
+    expect(written).toEqual({ Design: 'gcd', 'Max fanout': 24 })
+  })
+
+  it('refuses to write while the workspace runtime is active', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'params.toml'),
+      ['[params]', 'design = "gcd"', ''].join('\n'),
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({
+      projectScopeProvider: provider(root),
+      runtimeMutationGuard: { isWorkspaceRuntimeActive: async () => true },
+    })
+
+    await expect(
+      service.writeParameters({ parameters: { frequency_max: 150 }, workspace: root }),
+    ).rejects.toThrow(/flow is running/i)
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd' })
+    expect(parameters?.frequency_max).toBeUndefined()
+  })
+
+  it('rejects a malformed write request', async () => {
+    const root = await tempWorkspace()
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    await expect(
+      service.writeParameters(
+        {} as { parameters: Record<string, unknown>; workspace: string },
+      ),
+    ).rejects.toThrow(/parameters object/i)
+  })
+
+  it('rejects a save dispatched for a different workspace than the active one', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'params.toml'),
+      ['[params]', 'design = "gcd"', ''].join('\n'),
+      'utf8',
+    )
+    const other = await tempWorkspace()
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    await expect(
+      service.writeParameters({ parameters: { design: 'gcd' }, workspace: other }),
+    ).rejects.toThrow(/active workspace changed/i)
+
+    // A matching workspace writes through.
+    const result = await service.writeParameters({
+      parameters: { design: 'gcd' },
+      workspace: root,
+    })
+    expect(result.format).toBe('toml')
   })
 })

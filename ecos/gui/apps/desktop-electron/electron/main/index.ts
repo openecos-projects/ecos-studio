@@ -145,8 +145,14 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
+  const runtimeMutationGuard = {
+    isWorkspaceRuntimeActive: async (directory: string) =>
+      eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
+      frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
+  }
   const workspaceResourceService = new WorkspaceResourceService({
     projectScopeProvider: projectScopeService,
+    runtimeMutationGuard,
   })
   const resourceManagerService = new ResourceManagerService()
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
@@ -202,11 +208,7 @@ function getDesktopServices() {
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
     replacementJournalDirectory: join(app.getPath('userData'), 'workspace-replacements'),
-    runtimeMutationGuard: {
-      isWorkspaceRuntimeActive: async (directory) =>
-        eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
-        frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
-    },
+    runtimeMutationGuard,
   })
   const projectManifestService = new ProjectManifestService(
     projectScopeService,

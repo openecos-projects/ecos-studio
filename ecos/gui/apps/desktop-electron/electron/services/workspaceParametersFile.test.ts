@@ -1,0 +1,1364 @@
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+
+import {
+  applyQueuedWorkspaceParameterWrites,
+  hasWorkspaceConfigShadow,
+  editWorkspaceParameters,
+  locateWorkspaceParametersFile,
+  mergePayloadIntoTomlDocument,
+  mergeTomlSections,
+  readWorkspaceParameters,
+  restoreTextIfCurrentRevision,
+  writeWorkspaceParameters,
+} from './workspaceParametersFile'
+
+const temporaryDirectories: string[] = []
+
+function createWorkspace(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'ecos-workspace-parameters-'))
+  temporaryDirectories.push(directory)
+  mkdirSync(join(directory, 'home'), { recursive: true })
+  return directory
+}
+
+function writeHomeFile(root: string, name: string, content: string): void {
+  writeFileSync(join(root, 'home', name), content)
+}
+
+const ECC_TOML = `
+[design]
+name = "gcd"
+top = "gcd"
+clock_port = "clk"
+frequency_mhz = 100.0
+
+[pdk]
+name = "ics55"
+root = "/pdk/ics55"
+
+[flow]
+preset = "rtl2gds"
+
+[params]
+pdk = "ics55"
+design = "gcd"
+top_module = "gcd"
+clock = "clk"
+frequency_max = 100.0
+max_fanout = 20
+target_density = 0.2
+pdk_root = "/pdk/ics55"
+pdk_config = "home/pdk.json"
+
+[params.core]
+utilitization = 0.2
+margin = [ 2, 2 ]
+`
+
+const JSON_PARAMETERS = JSON.stringify(
+  {
+    PDK: 'ICS55',
+    Design: 'gcd',
+    'Top module': 'gcd',
+    'Frequency max [MHz]': 100,
+  },
+  null,
+  4,
+)
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true })
+  }
+})
+
+describe('locateWorkspaceParametersFile', () => {
+  it('prefers home/params.toml over home/parameters.json', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const location = await locateWorkspaceParametersFile(root)
+    expect(location?.format).toBe('toml')
+    expect(location?.path).toBe(join(root, 'home', 'params.toml'))
+  })
+
+  it('falls back to home/parameters.json', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    const location = await locateWorkspaceParametersFile(root)
+    expect(location?.format).toBe('json')
+    expect(location?.path).toBe(join(root, 'home', 'parameters.json'))
+  })
+
+  it('returns null when neither file exists', async () => {
+    const root = createWorkspace()
+    expect(await locateWorkspaceParametersFile(root)).toBeNull()
+  })
+
+  it('detects the TOML/JSON shadow pair', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    expect(await hasWorkspaceConfigShadow(root)).toBe(false)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    expect(await hasWorkspaceConfigShadow(root)).toBe(true)
+  })
+
+  it('treats a dangling legacy symlink as a shadow (lexists semantics)', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    symlinkSync(join(root, 'home', 'gone.json'), join(root, 'home', 'parameters.json'))
+    expect(await hasWorkspaceConfigShadow(root)).toBe(true)
+  })
+
+  it('refuses a broken params.toml symlink instead of falling back to parameters.json', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    symlinkSync(join(root, 'home', 'missing.toml'), join(root, 'home', 'params.toml'))
+    await expect(locateWorkspaceParametersFile(root)).rejects.toThrow(
+      /symlink|params.toml/i,
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/symlink|params.toml/i)
+  })
+})
+
+describe('mergeTomlSections', () => {
+  it('flattens [params] with [design]/[pdk] mirrors overriding mapped keys', () => {
+    const document = {
+      design: { name: 'gcd', top: 'gcd', clock_port: 'clk', frequency_mhz: 100.0 },
+      pdk: { name: 'ics55', root: '/pdk/ics55' },
+      params: { design: 'stale', frequency_max: 50, max_fanout: 20 },
+    }
+    expect(mergeTomlSections(document, '/ws')).toEqual({
+      design: 'gcd',
+      top_module: 'gcd',
+      clock: 'clk',
+      frequency_max: 100.0,
+      pdk: 'ics55',
+      pdk_root: '/pdk/ics55',
+      max_fanout: 20,
+    })
+  })
+
+  it('keeps [params] values when section mirrors are empty', () => {
+    const document = {
+      design: { name: '' },
+      params: { design: 'gcd', frequency_max: 100 },
+    }
+    const merged = mergeTomlSections(document, '/ws')
+    expect(merged.design).toBe('gcd')
+    expect(merged.frequency_max).toBe(100)
+  })
+
+  it('resolves workspace-relative pdk_config against the workspace root', () => {
+    const document = { params: { pdk_config: 'home/pdk.json' } }
+    const merged = mergeTomlSections(document, '/ws')
+    expect(merged.pdk_config).toBe(join('/ws', 'home/pdk.json'))
+  })
+
+  it('keeps absolute pdk_config unchanged', () => {
+    const document = { params: { pdk_config: '/elsewhere/pdk.json' } }
+    const merged = mergeTomlSections(document, '/ws')
+    expect(merged.pdk_config).toBe('/elsewhere/pdk.json')
+  })
+
+  it('ignores the [flow] section', () => {
+    const document = { flow: { preset: 'rtl2gds' }, params: { design: 'gcd' } }
+    const merged = mergeTomlSections(document, '/ws')
+    expect(merged).toEqual({ design: 'gcd' })
+  })
+})
+
+describe('readWorkspaceParameters', () => {
+  it('reads and flattens home/params.toml', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters).toMatchObject({
+      design: 'gcd',
+      top_module: 'gcd',
+      clock: 'clk',
+      frequency_max: 100.0,
+      max_fanout: 20,
+      target_density: 0.2,
+      pdk: 'ics55',
+      pdk_root: '/pdk/ics55',
+      core: { utilitization: 0.2, margin: [2, 2] },
+    })
+    expect(parameters?.pdk_config).toBe(join(root, 'home/pdk.json'))
+  })
+
+  it('reads home/parameters.json unchanged', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters).toEqual({
+      PDK: 'ICS55',
+      Design: 'gcd',
+      'Top module': 'gcd',
+      'Frequency max [MHz]': 100,
+    })
+  })
+
+  it('returns null when neither file exists', async () => {
+    const root = createWorkspace()
+    expect(await readWorkspaceParameters(root)).toBeNull()
+  })
+
+  it('throws on malformed TOML instead of falling back', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', '[design\nname = ')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/toml/i)
+  })
+
+  it('throws on malformed JSON instead of falling back', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', '{not json')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/json/i)
+  })
+
+  it('rejects a GUI-known scalar that a section mirror presents as an array', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      `
+[design]
+name = "gcd"
+frequency_mhz = [100]
+
+[params]
+pdk = "ics55"
+design = "gcd"
+`,
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+  })
+
+  it('rejects an array in a GUI-known nested scalar such as die_area.width', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      `
+[params]
+design = "gcd"
+pdk = "ics55"
+
+[params.die_area]
+width = [120]
+height = 80
+`,
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+  })
+
+  it('rejects a JSON GUI-known scalar that is already a nested table', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      JSON.stringify({ Design: { extra: 'keep' }, PDK: 'ics55' }),
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+  })
+
+  it('keeps a JSON workspace whose canonical duplicate is an inert table', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      JSON.stringify({
+        PDK: 'ics55',
+        Design: 'gcd',
+        'Max fanout': 20,
+        max_fanout: { future: true },
+      }),
+    )
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.['Max fanout']).toBe(20)
+    expect(parameters?.max_fanout).toEqual({ future: true })
+  })
+})
+
+describe('mergePayloadIntoTomlDocument', () => {
+  it('merges display-key payload into [params] and re-syncs mirrors', () => {
+    const document = {
+      design: { name: 'gcd', top: 'gcd', clock_port: 'clk', frequency_mhz: 100.0 },
+      pdk: { name: 'ics55', root: '/pdk/ics55' },
+      flow: { preset: 'rtl2gds' },
+      params: {
+        design: 'gcd',
+        top_module: 'gcd',
+        clock: 'clk',
+        frequency_max: 100.0,
+        max_fanout: 20,
+        sta_max_paths: 1000,
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { 'Frequency max [MHz]': 200, 'Max fanout': 32 },
+      '/ws',
+    )
+    expect(merged.params).toMatchObject({ frequency_max: 200, max_fanout: 32 })
+    expect(merged.params.sta_max_paths).toBe(1000)
+    expect(merged.design).toMatchObject({ frequency_mhz: 200 })
+    expect(merged.flow).toEqual({ preset: 'rtl2gds' })
+  })
+
+  it('merges die/core subtrees leaf-wise and keeps [flow] untouched', () => {
+    const document = {
+      params: {
+        core: { utilitization: 0.2, margin: [2, 2], future_knob: 'keep' },
+        design: 'gcd',
+      },
+      flow: { preset: 'syn_sta' },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { Core: { Utilitization: 0.45, Margin: [3, 3] } },
+      '/ws',
+    )
+    // Known members update and unknown nested members survive the save;
+    // arrays replace wholesale.
+    expect(merged.params.core).toEqual({
+      utilitization: 0.45,
+      margin: [3, 3],
+      future_knob: 'keep',
+    })
+    expect(merged.flow).toEqual({ preset: 'syn_sta' })
+  })
+
+  it('stores pdk_config relative when it points inside the workspace', () => {
+    const document = { params: { design: 'gcd' } }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { pdk_config: '/ws/home/pdk.json' },
+      '/ws',
+    )
+    expect(merged.params.pdk_config).toBe('home/pdk.json')
+  })
+
+  it('folds Configure Die/Core geometry into an existing die_area table', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: {
+          width: 100,
+          height: 80,
+          utilitization: 0.4,
+          margin: 2,
+          extra: 'keep',
+        },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      {
+        Die: { Size: [120, 90], Area: 10800 },
+        Core: { Utilitization: 0.55, Margin: [4, 4] },
+      },
+      '/ws',
+    )
+    expect(merged.params.die_area).toEqual({
+      width: 120,
+      height: 90,
+      utilitization: 0.55,
+      margin: 4,
+      extra: 'keep',
+    })
+    expect(merged.params.die).toEqual({ area: 10800 })
+    expect(merged.params.core).toBeUndefined()
+  })
+
+  it('keeps geometry fields that die_area cannot represent', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: { width: 100, height: 80, utilitization: 0.4, margin: 2 },
+        die: { size: [100, 80], area: 8000 },
+        core: { size: [80, 60], area: 4800, utilitization: 0.4, margin: [2, 2] },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      {
+        Die: { Size: [120, 90], Area: 10800 },
+        Core: { Size: [96, 72], Area: 6912, Utilitization: 0.55, Margin: [4, 4] },
+      },
+      '/ws',
+    )
+    expect(merged.params.die_area).toEqual({
+      width: 120,
+      height: 90,
+      utilitization: 0.55,
+      margin: 4,
+    })
+    expect(merged.params.die).toEqual({ area: 10800 })
+    expect(merged.params.core).toEqual({ size: [96, 72], area: 6912 })
+  })
+
+  it('keeps an asymmetric core.margin that die_area cannot represent', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: { width: 100, height: 80, utilitization: 0.4, margin: 2 },
+        core: { utilitization: 0.4, margin: [2, 2] },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { Core: { Utilitization: 0.55, Margin: [5, 7] } },
+      '/ws',
+    )
+    expect(merged.params.die_area).toMatchObject({ utilitization: 0.55, margin: 2 })
+    expect(merged.params.core).toEqual({ margin: [5, 7] })
+  })
+
+  it('keeps unknown nested die/core leaves when folding geometry into die_area', () => {
+    const document = {
+      params: {
+        design: 'gcd',
+        die_area: { width: 100, height: 80, utilitization: 0.4, margin: 2 },
+        core: { utilitization: 0.4, margin: [2, 2], future_knob: 'keep' },
+      },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { Core: { Utilitization: 0.55, Margin: [4, 4] } },
+      '/ws',
+    )
+    expect(merged.params.die_area).toMatchObject({ utilitization: 0.55, margin: 4 })
+    expect(merged.params.core).toEqual({ future_knob: 'keep' })
+  })
+
+  it('keeps outside pdk_config absolute', () => {
+    const document = { params: { design: 'gcd' } }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { pdk_config: '/elsewhere/pdk.json' },
+      '/ws',
+    )
+    expect(merged.params.pdk_config).toBe('/elsewhere/pdk.json')
+  })
+})
+
+describe('writeWorkspaceParameters', () => {
+  it('round-trips a TOML write: edit survives, other sections preserved', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const location = await writeWorkspaceParameters(root, {
+      'Frequency max [MHz]': 250,
+      'Max fanout': 24,
+    })
+    expect(location.format).toBe('toml')
+
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.frequency_max).toBe(250)
+    expect(parameters?.max_fanout).toBe(24)
+    expect(parameters?.design).toBe('gcd')
+    expect(parameters?.sta_max_paths).toBeUndefined()
+
+    const text = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
+    expect(text).toContain('[flow]')
+    expect(text).toContain('preset = "rtl2gds"')
+    expect(text).toContain('frequency_mhz = 250.0')
+    expect(text).not.toContain('parameters.json')
+  })
+
+  it('preserves integral float tokens and integer tokens through a rewrite', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      ECC_TOML.replace(
+        'preset = "rtl2gds"',
+        'preset = "rtl2gds"\nthreshold = 1.0\ncount = 2',
+      ),
+    )
+    await writeWorkspaceParameters(root, { design: 'gcd' })
+    const text = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
+    expect(text).toMatch(/threshold\s*=\s*1\.0\b/)
+    expect(text).toMatch(/count\s*=\s*2\b/)
+    expect(text).not.toMatch(/count\s*=\s*2\.0\b/)
+    expect(text).toContain('frequency_mhz = 100.0')
+    expect(text).toContain('max_fanout = 20')
+  })
+
+  it('writes home/parameters.json merging the payload into the existing document', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    const location = await writeWorkspaceParameters(root, {
+      PDK: 'ICS55',
+      Design: 'gcd',
+      'Max fanout': 48,
+    })
+    expect(location.format).toBe('json')
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    )
+    // The payload overrides its own keys; keys the GUI does not display
+    // (frontend extras, unrelated agent edits) survive the save.
+    expect(written).toEqual({
+      PDK: 'ICS55',
+      Design: 'gcd',
+      'Top module': 'gcd',
+      'Frequency max [MHz]': 100,
+      'Max fanout': 48,
+    })
+  })
+
+  it.each([
+    ['0.123456789012345678901234', 'extra decimal digits'],
+    ['0.12345678901234567', '17-digit decimal'],
+    ['123456789012345678901e-20', 'integer-mantissa exponent'],
+    ['0.123_456_789_012_345_678', 'underscore-decorated TOML float'],
+  ])(
+    'rejects a high-precision float %s (%s) that a rewrite would silently round',
+    async (literal) => {
+      const root = createWorkspace()
+      const content = `${ECC_TOML}\n[flow]\nthreshold = ${literal}\n`
+      writeHomeFile(root, 'params.toml', content)
+      await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+        /cannot round-trip/,
+      )
+      expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+    },
+  )
+
+  it('rejects a high-precision float in a multiline array that a rewrite would silently round', async () => {
+    const root = createWorkspace()
+    const content = ECC_TOML.replace(
+      'preset = "rtl2gds"',
+      'preset = "rtl2gds"\nweights = [\n  0.12345678901234567,\n]',
+    )
+    writeHomeFile(root, 'params.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /cannot round-trip/,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it('does not treat identifier-embedded digits as numeric values', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\ncorner1e20 = "slow"\n`
+    writeHomeFile(root, 'params.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toContain(
+      'corner1e20',
+    )
+  })
+
+  it('does not treat dashed or dotted key segments as numeric values', async () => {
+    const root = createWorkspace()
+    const content = `foo-1e20 = "keep"\n${ECC_TOML}\n[params.extra]\nfoo.1e20 = "keep"\n`
+    writeHomeFile(root, 'params.toml', content)
+    await expect(readWorkspaceParameters(root)).resolves.toMatchObject({ design: 'gcd' })
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
+    const written = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
+    expect(written).toContain('keep')
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters).toMatchObject({ design: 'gcd' })
+  })
+
+  it('rejects a JSON float that cannot round-trip through Number', async () => {
+    const root = createWorkspace()
+    const content = '{ "Design": "gcd", "threshold": 0.12345678901234567 }\n'
+    writeHomeFile(root, 'parameters.json', content)
+    await expect(
+      writeWorkspaceParameters(root, { Design: 'gcd', 'Max fanout': 48 }),
+    ).rejects.toThrow(/cannot round-trip/)
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(content)
+  })
+
+  it('rejects a home/parameters.json holding an unsafe integer instead of rounding it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Area": 17912481922736482372 }\n',
+    )
+    await expect(
+      writeWorkspaceParameters(root, { Design: 'gcd', 'Max fanout': 48 }),
+    ).rejects.toThrow(/MAX_SAFE_INTEGER/)
+    // The file is left untouched.
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
+      '17912481922736482372',
+    )
+  })
+
+  it('preserves unknown nested keys in home/parameters.json saves', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Core": { "Utilitization": 0.2, "Extra": "keep" } }\n',
+    )
+    await writeWorkspaceParameters(root, { Core: { Utilitization: 0.45 } })
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, Record<string, unknown>>
+    expect(written.Core).toEqual({ Utilitization: 0.45, Extra: 'keep' })
+  })
+
+  it('rejects a non-object JSON root on save instead of overwriting it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', '[1, 2, 3]\n')
+    await expect(writeWorkspaceParameters(root, { Design: 'gcd' })).rejects.toThrow(
+      /JSON object/i,
+    )
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(
+      '[1, 2, 3]\n',
+    )
+  })
+
+  it('rejects a GUI-known scalar that is already a nested table in [params]', async () => {
+    const root = createWorkspace()
+    const content = `
+[design]
+name = "gcd"
+
+[params]
+pdk = "ics55"
+top_module = "gcd"
+
+[params.design]
+future = "keep"
+`
+    writeHomeFile(root, 'params.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /not a scalar/,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it('rejects a JSON GUI-known scalar that became a table before the queued save', async () => {
+    const root = createWorkspace()
+    const content = JSON.stringify({
+      PDK: 'ics55',
+      Design: 'gcd',
+      'Max fanout': { future: true },
+    })
+    writeHomeFile(root, 'parameters.json', content)
+    await expect(writeWorkspaceParameters(root, { 'Max fanout': 48 })).rejects.toThrow(
+      /not a scalar/,
+    )
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toBe(content)
+  })
+
+  it('rejects a [pdk] scalar that would overwrite a nested [params.pdk_config] table', async () => {
+    const root = createWorkspace()
+    const content = `
+[pdk]
+config = "home/pdk.json"
+
+[params]
+pdk = "ics55"
+design = "gcd"
+
+[params.pdk_config]
+future = "keep"
+`
+    writeHomeFile(root, 'params.toml', content)
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /not a scalar/,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it('rejects a non-table TOML section on save instead of replacing it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', 'params = [1]\n')
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /must be a table/i,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe('params = [1]\n')
+  })
+
+  it('rejects a TOML date scalar as a section instead of flattening it away', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', 'params = 2026-08-27\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /must be a table/i,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(
+      'params = 2026-08-27\n',
+    )
+  })
+
+  it('rejects invalid calendar dates instead of normalizing them on save', async () => {
+    const root = createWorkspace()
+    const content = ECC_TOML.replace(
+      'preset = "rtl2gds"',
+      'preset = "rtl2gds"\ncheckpoint = 2023-02-30',
+    )
+    writeHomeFile(root, 'params.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /invalid calendar date/i,
+    )
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: 'aes' }]),
+    ).rejects.toThrow(/invalid calendar date/i)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it('rejects sub-millisecond datetimes instead of truncating them on save', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\n[params.flow_meta]\ncheckpoint = 07:32:00.999999\n`
+    writeHomeFile(root, 'params.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /millisecond precision/i,
+    )
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: 'aes' }]),
+    ).rejects.toThrow(/millisecond precision/i)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it('accepts millisecond-precision datetimes and time-looking comments', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      `${ECC_TOML}\n# checkpoint was 07:32:00.999999 here\nmeta_note = "see 07:32:00.999999 in the log"\n`,
+    )
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
+  })
+
+  it('still rejects sub-millisecond datetimes after multiline strings with embedded quotes', async () => {
+    const root = createWorkspace()
+    const content = `${ECC_TOML}\nnote = """one " quote"""\ncheckpoint = 07:32:00.999999\n`
+    writeHomeFile(root, 'params.toml', content)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /millisecond precision/i,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it.each([
+    ['four-quote closer', 'note = """foo""""\n'],
+    ['five-quote closer', 'note = """foo"""""\n'],
+  ])(
+    'still rejects sub-millisecond datetimes after a %s multiline string',
+    async (_label, note) => {
+      const root = createWorkspace()
+      const content = `${ECC_TOML}\n${note}checkpoint = 1979-05-27T07:32:00.999999Z\n`
+      writeHomeFile(root, 'params.toml', content)
+      await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+        /millisecond precision/i,
+      )
+      expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+    },
+  )
+
+  it('rejects a nested Map payload instead of serializing it as an empty table', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await expect(
+      writeWorkspaceParameters(root, {
+        design: 'gcd',
+        core: new Map([['utilitization', 0.5]]) as unknown as Record<string, unknown>,
+      }),
+    ).rejects.toThrow(/plain record|not a scalar|not representable/i)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('rejects undefined payload leaves instead of silently deleting them', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await expect(
+      writeWorkspaceParameters(root, { Design: undefined as unknown as string }),
+    ).rejects.toThrow(/undefined/)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('rejects null, Date, and bigint edit values instead of silently rewriting them', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: null }]),
+    ).rejects.toThrow(/null/)
+    await expect(
+      editWorkspaceParameters(root, [
+        { json_path: ['design'], value: new Date('2026-08-27T00:00:00Z') },
+      ]),
+    ).rejects.toThrow(/losslessly/)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64n }]),
+    ).rejects.toThrow(/losslessly/)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('rejects non-finite numbers in the incoming payload and edit values', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await expect(
+      writeWorkspaceParameters(root, { target_density: Number.NaN }),
+    ).rejects.toThrow(/non-finite/)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['target_density'], value: Infinity }]),
+    ).rejects.toThrow(/non-finite/)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('rejects a malformed TOML document on save instead of replacing it', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', '2026-08-27\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/toml/i)
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /toml/i,
+    )
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe('2026-08-27\n')
+  })
+
+  it('re-runs the writable guard inside the serialized operation', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    let calls = 0
+    await expect(
+      writeWorkspaceParameters(root, { design: 'gcd' }, undefined, async () => {
+        calls += 1
+        throw new Error('blocked')
+      }),
+    ).rejects.toThrow('blocked')
+    expect(calls).toBe(1)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('re-checks the writable guard before the rename', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    let calls = 0
+    await expect(
+      writeWorkspaceParameters(root, { design: 'gcd' }, undefined, async () => {
+        calls += 1
+        if (calls === 2) throw new Error('blocked')
+      }),
+    ).rejects.toThrow('blocked')
+    expect(calls).toBe(2)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
+  })
+
+  it('lands the save on the newly preferred config when the format migrates mid-queue', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    const location = await writeWorkspaceParameters(
+      root,
+      { 'Max fanout': 48 },
+      undefined,
+      async () => {
+        // Simulate the ecc migration landing while the save was queued.
+        writeHomeFile(root, 'params.toml', ECC_TOML)
+      },
+    )
+    expect(location.format).toBe('toml')
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(48)
+  })
+
+  it('preserves the existing file mode through an atomic replace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    chmodSync(join(root, 'home', 'params.toml'), 0o600)
+    await writeWorkspaceParameters(root, { design: 'gcd' })
+    expect(statSync(join(root, 'home', 'params.toml')).mode & 0o777).toBe(0o600)
+  })
+
+  it('refuses a symlinked config inside the serialized write', async () => {
+    const root = createWorkspace()
+    const alias = join(root, 'home', 'other.toml')
+    writeFileSync(alias, '[params]\ndesign = "gcd"\n')
+    symlinkSync(alias, join(root, 'home', 'params.toml'))
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /symlink/i,
+    )
+    expect(readFileSync(alias, 'utf8')).toBe('[params]\ndesign = "gcd"\n')
+  })
+
+  it('refuses a symlinked config pointing outside the config directory', async () => {
+    const root = createWorkspace()
+    const outside = join(root, 'outside.toml')
+    writeFileSync(outside, '[params]\ndesign = "gcd"\n')
+    symlinkSync(outside, join(root, 'home', 'params.toml'))
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /symlink|no longer resolves/i,
+    )
+    expect(readFileSync(outside, 'utf8')).toBe('[params]\ndesign = "gcd"\n')
+  })
+
+  it('throws when no parameters file exists', async () => {
+    const root = createWorkspace()
+    await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
+      /not found/i,
+    )
+  })
+})
+
+describe('mergePayloadIntoTomlDocument regressions', () => {
+  it('deletes a mirror key when the corresponding parameter is emptied', () => {
+    const document = {
+      design: { name: 'gcd', top: 'gcd' },
+      pdk: { root: '/pdk/ics55' },
+      params: { design: '', top_module: 'gcd', pdk_root: '' },
+    }
+    const merged = mergePayloadIntoTomlDocument(
+      document,
+      { design: '', pdk_root: '' },
+      '/ws',
+    )
+    expect('name' in merged.design).toBe(false)
+    expect(merged.design.top).toBe('gcd')
+    expect('root' in merged.pdk).toBe(false)
+  })
+
+  it('canonicalizes a hand-authored display key before merging so the edit wins', () => {
+    const document = {
+      params: { 'Target density': 0.45, design: 'gcd' },
+    }
+    const merged = mergePayloadIntoTomlDocument(document, { target_density: 0.55 }, '/ws')
+    expect(merged.params.target_density).toBe(0.55)
+    expect('Target density' in merged.params).toBe(false)
+  })
+
+  it('keeps a section-only [pdk] config through a save', () => {
+    const document = {
+      pdk: { name: 'ics55', root: '/pdk/ics55', config: 'home/pdk.json' },
+      params: { pdk: 'ics55', design: 'gcd' },
+    }
+    const merged = mergePayloadIntoTomlDocument(document, { 'Max fanout': 32 }, '/ws')
+    expect(merged.pdk.config).toBe('home/pdk.json')
+    expect(merged.params.pdk_config).toBe('home/pdk.json')
+  })
+})
+
+describe('editWorkspaceParameters', () => {
+  it('applies display-key paths to a TOML workspace after canonicalizing them', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await editWorkspaceParameters(root, [
+      { json_path: ['Target density'], value: 0.55 },
+      { json_path: ['Core', 'Utilitization'], value: 0.45 },
+    ])
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.target_density).toBe(0.55)
+    expect(parameters?.core).toMatchObject({ utilitization: 0.45, margin: [2, 2] })
+  })
+
+  it('applies flat paths to a TOML workspace unchanged', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64 }])
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(64)
+  })
+
+  it('rejects edits to parameters that do not exist', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['nonexistent_knob'], value: 1 }]),
+    ).rejects.toThrow(/does not exist/i)
+  })
+
+  it('rejects TOML edits when a GUI-known leaf already holds a Date or bigint', async () => {
+    const root = createWorkspace()
+    const content = ECC_TOML.replace(
+      'target_density = 0.2',
+      'target_density = 1979-05-27',
+    )
+    writeHomeFile(root, 'params.toml', content)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 32 }]),
+    ).rejects.toThrow(/cannot be represented losslessly/)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
+  })
+
+  it('rejects TOML edits when a GUI-known scalar already holds a table or array', async () => {
+    const tableContent = `
+[params]
+pdk = "ics55"
+top_module = "gcd"
+max_fanout = 20
+
+[params.design]
+extra = "keep-me"
+`
+    const arrayRoot = createWorkspace()
+    const arrayContent = ECC_TOML.replace('name = "gcd"', 'name = ""').replace(
+      'design = "gcd"',
+      'design = ["gcd"]',
+    )
+    writeHomeFile(arrayRoot, 'params.toml', arrayContent)
+    await expect(
+      editWorkspaceParameters(arrayRoot, [{ json_path: ['top_module'], value: 'aes' }]),
+    ).rejects.toThrow(/not a scalar/)
+    expect(readFileSync(join(arrayRoot, 'home', 'params.toml'), 'utf8')).toBe(
+      arrayContent,
+    )
+
+    const tableRoot = createWorkspace()
+    writeHomeFile(tableRoot, 'params.toml', tableContent)
+    await expect(
+      editWorkspaceParameters(tableRoot, [{ json_path: ['top_module'], value: 'aes' }]),
+    ).rejects.toThrow(/not a scalar/)
+    expect(readFileSync(join(tableRoot, 'home', 'params.toml'), 'utf8')).toBe(
+      tableContent,
+    )
+  })
+
+  it('still allows TOML edits when an unknown leaf holds a Date', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      ECC_TOML.replace('max_fanout = 20', 'max_fanout = 20\ncheckpoint = 1979-05-27'),
+    )
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 32 }])
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(32)
+  })
+
+  it('applies display-key paths to a home/parameters.json workspace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    await editWorkspaceParameters(root, [
+      { json_path: ['Frequency max [MHz]'], value: 200 },
+    ])
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written['Frequency max [MHz]']).toBe(200)
+  })
+
+  it('applies canonical agent paths to a home/parameters.json workspace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      JSON.stringify(
+        { Design: 'gcd', 'Target density': 0.2, 'Routability opt flag': 1 },
+        null,
+        4,
+      ),
+    )
+    await editWorkspaceParameters(root, [
+      { json_path: ['target_density'], value: 0.55 },
+      { json_path: ['routability_opt_flag'], value: 0 },
+    ])
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written['Target density']).toBe(0.55)
+    expect(written['Routability opt flag']).toBe(0)
+    expect(written).not.toHaveProperty('target_density')
+  })
+
+  it('throws when no parameters file exists', async () => {
+    const root = createWorkspace()
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['design'], value: 'x' }]),
+    ).rejects.toThrow(/not found/i)
+  })
+
+  it('rejects edits when the legacy file holds an unsafe integer', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Area": 9007199254740993 }\n',
+    )
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }]),
+    ).rejects.toThrow(/MAX_SAFE_INTEGER/)
+    // The file is left untouched.
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
+      '9007199254740993',
+    )
+  })
+
+  it('rejects unsafe numbers in decimal and exponent forms', async () => {
+    for (const literal of ['9007199254740993.0', '9.007199254740993e15']) {
+      const root = createWorkspace()
+      writeHomeFile(root, 'parameters.json', `{ "Design": "gcd", "Area": ${literal} }\n`)
+      await expect(
+        editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }]),
+      ).rejects.toThrow(/MAX_SAFE_INTEGER/)
+      expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain(
+        literal,
+      )
+    }
+  })
+
+  it('rejects numbers that overflow to a non-finite value', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', '{ "Design": "gcd", "Area": 1e400 }\n')
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }]),
+    ).rejects.toThrow(/not representable/)
+    expect(readFileSync(join(root, 'home', 'parameters.json'), 'utf8')).toContain('1e400')
+  })
+
+  it('rejects unsafe numbers and non-object roots on reads', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd", "Area": 9007199254740993 }\n',
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/MAX_SAFE_INTEGER/)
+
+    const arrayRoot = createWorkspace()
+    writeHomeFile(arrayRoot, 'parameters.json', '[1, 2, 3]\n')
+    await expect(readWorkspaceParameters(arrayRoot)).rejects.toThrow(/JSON object/i)
+  })
+
+  it('accepts integers up to Number.MAX_SAFE_INTEGER and digit runs inside strings', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'parameters.json',
+      '{ "Design": "gcd17912481922736482372x", "Area": 9007199254740991, "Ratio": 1.5 }\n',
+    )
+    await editWorkspaceParameters(root, [{ json_path: ['Design'], value: 'aes' }])
+    const written = JSON.parse(
+      readFileSync(join(root, 'home', 'parameters.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(written.Design).toBe('aes')
+    expect(written.Area).toBe(9007199254740991)
+  })
+})
+
+describe('hand-authored display keys in TOML', () => {
+  it('canonicalizes them on read and accepts edits against the canonical path', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      '[params]\n"Target density" = 0.45\ndesign = "gcd"\n',
+    )
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.target_density).toBe(0.45)
+    expect(parameters && 'Target density' in parameters).toBe(false)
+
+    await editWorkspaceParameters(root, [{ json_path: ['target_density'], value: 0.55 }])
+    const updated = await readWorkspaceParameters(root)
+    expect(updated?.target_density).toBe(0.55)
+  })
+})
+
+describe('malformed TOML sections', () => {
+  it('rejects a non-table [params] section instead of treating it as empty', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', 'params = [1]\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
+  })
+
+  it('rejects a scalar [design] section', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', 'design = "gcd"\n[params]\ntop_module = "gcd"\n')
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
+  })
+})
+
+describe('editWorkspaceParameters with an authorized location', () => {
+  it('operates on exactly the authorized file instead of re-locating', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const authorized = join(root, 'home', 'params.toml')
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 48 }], {
+      format: 'toml',
+      path: authorized,
+    })
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.max_fanout).toBe(48)
+  })
+})
+
+describe('json_path hardening', () => {
+  it('rejects prototype-related segments instead of mutating Object.prototype', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['__proto__', 'toString'], value: 1 }]),
+    ).rejects.toThrow(/not allowed/i)
+    expect(({} as Record<string, unknown>).toString).toBe(Object.prototype.toString)
+  })
+
+  it('rejects a constructor segment on a legacy workspace', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    await expect(
+      editWorkspaceParameters(root, [{ json_path: ['constructor'], value: {} }]),
+    ).rejects.toThrow(/not allowed/i)
+  })
+})
+
+describe('write hardening', () => {
+  it('parses 64-bit TOML integers beyond the 53-bit safe range', async () => {
+    const root = createWorkspace()
+    writeHomeFile(
+      root,
+      'params.toml',
+      '[params]\nseed = 9007199254740993\ndesign = "gcd"\n',
+    )
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.seed).toBe(9007199254740993n)
+    expect(parameters?.design).toBe('gcd')
+  })
+
+  it('writes atomically without reusing an existing temp file', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const staleTemps = (await import('node:fs/promises')).readdir(join(root, 'home'))
+    await writeWorkspaceParameters(root, { 'Frequency max [MHz]': 175 })
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.frequency_max).toBe(175)
+    expect((await staleTemps).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+})
+
+describe('parameter write serialization', () => {
+  it('serializes overlapping save and edit operations so no update is lost', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+
+    const [saved] = await Promise.all([
+      writeWorkspaceParameters(root, { 'Frequency max [MHz]': 175 }),
+      editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 48 }]),
+    ])
+
+    const parameters = await readWorkspaceParameters(root)
+    expect(parameters?.frequency_max).toBe(175)
+    expect(parameters?.max_fanout).toBe(48)
+    expect(saved.format).toBe('toml')
+  })
+})
+
+describe('queued agent rollback', () => {
+  it('restores the parameter file when a later step-config write fails', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const original = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
+    const missingStep = join(root, 'config', 'dreamplace_ecc.json')
+
+    await expect(
+      applyQueuedWorkspaceParameterWrites(
+        root,
+        [{ json_path: ['max_fanout'], value: 64 }],
+        [
+          {
+            canonicalPath: missingStep,
+            edits: [{ json_path: ['density_weight'], value: 0.1 }],
+            spelledPath: missingStep,
+          },
+        ],
+      ),
+    ).rejects.toThrow(/ENOENT|no such file|missing or empty/i)
+
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(original)
+  })
+
+  it('does not restore a later Configure save that replaced the agent revision', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const path = join(root, 'home', 'params.toml')
+    const previous = readFileSync(path, 'utf8')
+    await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64 }])
+    const agentRevision = readFileSync(path, 'utf8')
+    await writeWorkspaceParameters(root, { 'Max fanout': 80 })
+    const configureRevision = readFileSync(path, 'utf8')
+
+    await expect(
+      restoreTextIfCurrentRevision(path, path, agentRevision, previous),
+    ).resolves.toBe('skipped')
+    expect(readFileSync(path, 'utf8')).toBe(configureRevision)
+    expect(configureRevision).not.toBe(agentRevision)
+  })
+
+  it('re-checks the runtime guard immediately before a step-config rename', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    mkdirSync(join(root, 'config'), { recursive: true })
+    writeFileSync(
+      join(root, 'config', 'dreamplace_ecc.json'),
+      '{\n    "density_weight": 0.2\n}\n',
+    )
+    const original = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
+    const originalStep = readFileSync(join(root, 'config', 'dreamplace_ecc.json'), 'utf8')
+    let guardCalls = 0
+
+    await expect(
+      applyQueuedWorkspaceParameterWrites(
+        root,
+        [{ json_path: ['max_fanout'], value: 64 }],
+        [
+          {
+            canonicalPath: join(root, 'config', 'dreamplace_ecc.json'),
+            edits: [{ json_path: ['density_weight'], value: 0.1 }],
+            spelledPath: join(root, 'config', 'dreamplace_ecc.json'),
+          },
+        ],
+        undefined,
+        async () => {
+          guardCalls += 1
+          // 1 queue, 2 prepare, 3 parameter rename, 4 step pre-read,
+          // 5 step pre-rename. Fail only on the last so rollback can still run.
+          if (guardCalls === 5) {
+            throw new Error('workspace flow is running')
+          }
+        },
+      ),
+    ).rejects.toThrow(/workspace flow is running/)
+
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(original)
+    expect(readFileSync(join(root, 'config', 'dreamplace_ecc.json'), 'utf8')).toBe(
+      originalStep,
+    )
+  })
+
+  it('surfaces a rollback failure when the restore rename is blocked', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const original = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
+    const missingStep = join(root, 'config', 'dreamplace_ecc.json')
+    let guardCalls = 0
+
+    await expect(
+      applyQueuedWorkspaceParameterWrites(
+        root,
+        [{ json_path: ['max_fanout'], value: 64 }],
+        [
+          {
+            canonicalPath: missingStep,
+            edits: [{ json_path: ['density_weight'], value: 0.1 }],
+            spelledPath: missingStep,
+          },
+        ],
+        undefined,
+        async () => {
+          guardCalls += 1
+          // Parameter commit succeeds (1-3). Step read then fails; restore is 5.
+          if (guardCalls === 5) {
+            throw new Error('workspace flow is running')
+          }
+        },
+      ),
+    ).rejects.toThrow(/rollback failed/)
+
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).not.toBe(original)
+  })
+})

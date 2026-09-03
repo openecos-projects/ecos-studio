@@ -23,7 +23,11 @@ import type {
   DesktopAgentStartSessionResponse,
   DesktopAgentStatus,
 } from '@ecos-studio/shared'
-import { desktopAgentParameterWriteFiles } from '@ecos-studio/shared'
+import {
+  desktopAgentParameterWriteFiles,
+  hasSafeJsonPath,
+  parameterWritesMatchPatch,
+} from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import type { ResolvedAgentProviderManifest } from './agentProviderPlugin'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
@@ -543,6 +547,7 @@ function readWorkspaceRerunContract(
       workspaceSetupFlowSteps.indexOf(targetStep) ||
     !patch ||
     !writes ||
+    !parameterWritesMatchPatch(patch, writes) ||
     !sourceStageArtifact ||
     !sourceFlowJsonSha256 ||
     !sourceStageArtifactSha256
@@ -883,7 +888,7 @@ function readWorkspaceParameterUpdateContract(
     !updateId ||
     !patch ||
     !writes ||
-    writes.length !== patch.length
+    !parameterWritesMatchPatch(patch, writes)
   ) {
     return null
   }
@@ -919,13 +924,7 @@ function readWorkspaceParameterWrites(
       (surface !== 'parameters' && surface !== 'step_config') ||
       !isWorkspaceRerunParameterValue(record.value) ||
       !Array.isArray(jsonPath) ||
-      jsonPath.length === 0 ||
-      jsonPath.length > 8 ||
-      !jsonPath.every(
-        (segment) =>
-          (typeof segment === 'string' && segment.length > 0 && segment.length <= 128) ||
-          (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0),
-      )
+      !hasSafeJsonPath(jsonPath as (string | number)[])
     ) {
       return null
     }

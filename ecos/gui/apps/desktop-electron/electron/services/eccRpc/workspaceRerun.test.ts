@@ -14,7 +14,13 @@ import { join } from 'node:path'
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { executeWorkspaceRerun, prepareWorkspaceRerun } from './workspaceRerun'
+import {
+  executeWorkspaceRerun,
+  prepareWorkspaceRerun,
+  rewriteHomeJsonSourcePaths,
+  rewriteJsonSourcePathStrings,
+  rewriteSourceRootedPath,
+} from './workspaceRerun'
 
 const temporaryRoots: string[] = []
 
@@ -489,6 +495,46 @@ describe('prepareWorkspaceRerun', () => {
         contract.parameter_patch = [{ knob_id: 'place.target_density', value: 1 }]
       },
     ],
+    [
+      'uses a prototype-polluting json_path',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
+        contract.writes = [
+          {
+            file: 'config/dreamplace_ecc.json',
+            json_path: ['__proto__', 'toString'],
+            knob_id: 'place.density_weight',
+            surface: 'step_config',
+            value: 0.1,
+          },
+        ]
+      },
+    ],
+    [
+      'aliases the same parameter leaf through both config files',
+      (contract: DesktopAgentWorkspaceRerunContract) => {
+        contract.parameter_patch = [
+          { knob_id: 'place.target_density', value: 0.55 },
+          { knob_id: 'place.target_overflow', value: 0.1 },
+        ]
+        contract.writes = [
+          {
+            file: 'home/params.toml',
+            json_path: ['target_density'],
+            knob_id: 'place.target_density',
+            surface: 'parameters',
+            value: 0.55,
+          },
+          {
+            file: 'home/parameters.json',
+            json_path: ['Target density'],
+            knob_id: 'place.target_overflow',
+            surface: 'parameters',
+            value: 0.1,
+          },
+        ]
+      },
+    ],
   ])('fails closed before copying when the contract %s', async (_case, mutate) => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
@@ -510,5 +556,247 @@ describe('prepareWorkspaceRerun', () => {
     await rm(join(source, 'home'), { force: true, recursive: true })
     await symlink(outsideHome, join(source, 'home'))
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow('outside')
+  })
+})
+
+describe('prepareWorkspaceRerun with home/params.toml workspaces', () => {
+  it('applies parameter writes to home/params.toml after display-key canonicalization', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'params.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'target_density = 0.45',
+        '',
+      ].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = [
+      {
+        file: 'home/params.toml',
+        json_path: ['Target density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ]
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    const written = await readFile(
+      `${contract.target_workspace}/home/params.toml`,
+      'utf8',
+    )
+    expect(written).toContain('target_density = 0.55')
+    expect(written).not.toContain('0.45')
+  })
+
+  it('follows disk reality when the contract file says parameters.json but params.toml exists', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'params.toml'),
+      ['[params]', 'target_density = 0.45', ''].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = [
+      {
+        file: 'home/parameters.json',
+        json_path: ['target_density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ]
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+
+    const written = await readFile(
+      `${contract.target_workspace}/home/params.toml`,
+      'utf8',
+    )
+    expect(written).toContain('target_density = 0.55')
+    await expect(
+      readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
+    ).rejects.toThrow(/ENOENT/)
+  })
+
+  it('refuses to materialize parameters through a symlinked config', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    const outside = join(source, 'outside.toml')
+    await writeFile(outside, '[params]\ntarget_density = 0.45\n')
+    await symlink(outside, join(source, 'home', 'params.toml'))
+    const contract = contractFor(source, flow, artifact)
+    contract.writes = [
+      {
+        file: 'home/params.toml',
+        json_path: ['target_density'],
+        knob_id: 'place.target_density',
+        surface: 'parameters',
+        value: 0.55,
+      },
+    ]
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(/symlink/i)
+    await expect(readFile(outside, 'utf8')).resolves.toBe(
+      '[params]\ntarget_density = 0.45\n',
+    )
+  })
+
+  it('rewrites source-rooted values in home/params.toml', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'params.toml'),
+      [
+        '[params]',
+        'design = "gcd"',
+        'target_density = 0.45',
+        `source_output_path = "${source}/place_dreamplace/output"`,
+        `note = "compare ${source}-old against this run"`,
+        '',
+      ].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+
+    await prepareWorkspaceRerun(contract)
+
+    const written = await readFile(
+      `${contract.target_workspace}/home/params.toml`,
+      'utf8',
+    )
+    expect(written).toContain(`${contract.target_workspace}/place_dreamplace/output`)
+    expect(written).not.toContain(`${source}/place_dreamplace/output`)
+    // Prose that merely shares the prefix is never rewritten.
+    expect(written).toContain(`compare ${source}-old against this run`)
+  })
+
+  it('refuses to rewrite through a home directory swapped for a symlink', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-home-swap-'))
+    temporaryRoots.push(root)
+    const home = join(root, 'home')
+    const outside = join(root, 'outside')
+    await mkdir(home)
+    await mkdir(outside)
+    const original = [
+      '[params]',
+      'design = "gcd"',
+      'source_output_path = "/src/ws/place_dreamplace/output"',
+      '',
+    ].join('\n')
+    await writeFile(join(home, 'params.toml'), original)
+    await writeFile(join(outside, 'params.toml'), original)
+    const authorizedHome = home
+
+    await rm(home, { recursive: true })
+    await symlink(outside, home)
+
+    await expect(
+      rewriteHomeJsonSourcePaths(authorizedHome, {
+        sourceWorkspace: '/src/ws',
+        sourceWorkspaceRaw: '/src/ws',
+        targetWorkspace: '/src/ws_rerun',
+      }),
+    ).rejects.toThrow(/authorized|no longer resolves|parent directory changed|symlink/i)
+    await expect(readFile(join(outside, 'params.toml'), 'utf8')).resolves.toBe(original)
+  })
+
+  it('refuses to rewrite home/params.toml when an untouched float cannot round-trip', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    await rm(join(source, 'home', 'parameters.json'))
+    await writeFile(
+      join(source, 'home', 'params.toml'),
+      [
+        '[params]',
+        'design = "gcd"',
+        `source_output_path = "${source}/place_dreamplace/output"`,
+        '[flow]',
+        'threshold = 0.12345678901234567',
+        '',
+      ].join('\n'),
+    )
+    const contract = contractFor(source, flow, artifact)
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(/cannot round-trip/)
+  })
+})
+
+describe('rewriteJsonSourcePathStrings', () => {
+  it('rewrites JSON-escaped Windows path tokens without breaking the document', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"origin":"C:\\\\runs\\\\gcd\\\\origin\\\\gcd.v","keep":0.55}',
+      [String.raw`C:\runs\gcd`],
+      String.raw`C:\runs\gcd_rerun_place`,
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      origin: String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`,
+      keep: 0.55,
+    })
+  })
+
+  it('re-escapes a native Windows replacement into slash-based JSON', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"origin":"C:/runs/gcd/origin/gcd.v"}',
+      [String.raw`C:\runs\gcd`],
+      String.raw`C:\runs\gcd_rerun_place`,
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      origin: String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`,
+    })
+  })
+
+  it('does not rewrite object keys that look like workspace paths', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"/src/ws/cache":"metadata","origin":"/src/ws/origin/gcd.v"}',
+      ['/src/ws'],
+      '/src/ws_rerun',
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      '/src/ws/cache': 'metadata',
+      origin: '/src/ws_rerun/origin/gcd.v',
+    })
+  })
+
+  it('rewrites string values inside arrays', () => {
+    const rewritten = rewriteJsonSourcePathStrings(
+      '{"files":["/src/ws/origin/gcd.v"]}',
+      ['/src/ws'],
+      '/src/ws_rerun',
+    )
+    expect(JSON.parse(rewritten)).toEqual({
+      files: ['/src/ws_rerun/origin/gcd.v'],
+    })
+  })
+})
+
+describe('rewriteSourceRootedPath', () => {
+  it('rewrites Windows leaves against a slash-terminated prefix', () => {
+    expect(
+      rewriteSourceRootedPath(
+        String.raw`C:\runs\gcd\origin\gcd.v`,
+        [String.raw`C:\runs\gcd/`],
+        String.raw`C:\runs\gcd_rerun_place`,
+      ),
+    ).toBe(String.raw`C:\runs\gcd_rerun_place\origin\gcd.v`)
+  })
+
+  it('leaves prose that only shares the prefix untouched', () => {
+    expect(
+      rewriteSourceRootedPath(
+        String.raw`compare C:\runs\gcd-old against this run`,
+        [String.raw`C:\runs\gcd`],
+        String.raw`C:\runs\gcd_rerun_place`,
+      ),
+    ).toBe(String.raw`compare C:\runs\gcd-old against this run`)
   })
 })

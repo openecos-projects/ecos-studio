@@ -75,7 +75,7 @@ function stringValue(value: unknown): string {
 }
 
 export function mpcConstraintsFromParameters(value: unknown): MpcConstraints | null {
-  const mpc = record(record(value)?.MPC)
+  const mpc = record(record(value)?.MPC ?? record(value)?.mpc)
   const template = record(mpc?.core_template)
   if (!template) return null
 
@@ -105,12 +105,12 @@ export function mpcConstraintsFromParameters(value: unknown): MpcConstraints | n
 }
 
 export function mpcDisplayNameFromParameters(value: unknown): string | null {
-  const mpc = record(record(value)?.MPC)
+  const mpc = record(record(value)?.MPC ?? record(value)?.mpc)
   return stringValue(mpc?.display_name) || null
 }
 
 export function maxFanoutFromParameters(value: unknown): number | null {
-  return finiteNumber(record(value)?.['Max fanout'])
+  return finiteNumber(record(value)?.['Max fanout'] ?? record(value)?.max_fanout)
 }
 
 export function checklistPieSlices(

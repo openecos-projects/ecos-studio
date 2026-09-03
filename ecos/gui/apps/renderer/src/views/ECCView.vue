@@ -210,7 +210,18 @@ import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  hasCanonicalDieDimensions,
+  losslessNumberList,
+  losslessOptionalNumber,
+  losslessOptionalString,
+  losslessOptionalRecord,
+  scalarMarginFromCore,
+} from '@/utils/numbers'
+import {
+  readOptionalProjectTextFile,
+  readWorkspaceParametersFile,
+} from '@/utils/projectFiles'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
@@ -327,11 +338,10 @@ const prefillWorkspaceDirectory = async () => {
   let sourceWorkspaceConfig: ProjectWorkspaceInitialConfig | undefined
 
   await registerProjectRootForProjectManagement(projectRoot)
-  try {
-    sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
-  } catch (error) {
-    console.warn('Failed to load source workspace defaults.', error)
-  }
+  // Guard and parse failures (an unrepresentable value, a malformed config)
+  // must abort the prefill instead of silently becoming wizard defaults;
+  // genuinely missing files already read as null and are tolerated above.
+  sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
 
   initialWizardConfig.value = mergeBranchInitialConfig(
     {
@@ -393,40 +403,32 @@ async function loadSourceWorkspaceInitialConfig(
 ): Promise<ProjectWorkspaceInitialConfig | undefined> {
   if (!sourceWorkspacePath) return undefined
 
-  try {
-    const [parametersText, pdkText, dbConfigText] = await Promise.all([
-      readOptionalProjectTextFile('home/parameters.json', {
-        projectPath: sourceWorkspacePath,
-      }),
-      readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
-      readOptionalProjectTextFile('config/db_ecc.json', {
-        projectPath: sourceWorkspacePath,
-      }),
-    ])
+  const [parametersJson, pdkText, dbConfigText] = await Promise.all([
+    readWorkspaceParametersFile(sourceWorkspacePath),
+    readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
+    readOptionalProjectTextFile('config/db_ecc.json', {
+      projectPath: sourceWorkspacePath,
+    }),
+  ])
 
-    const parametersJson = parseOptionalJson(parametersText)
-    const pdkJson = parseOptionalJson(pdkText)
-    const dbConfigJson = parseOptionalJson(dbConfigText)
-    const dbInput = optionalRecord(dbConfigJson?.INPUT)
-    const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
+  const pdkJson = parseOptionalJson(pdkText)
+  const dbConfigJson = parseOptionalJson(dbConfigText)
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
 
-    return {
-      pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
-      pdk_root:
-        optionalString(parametersJson?.['PDK Root']) ||
-        optionalString(parametersJson?.pdk_root),
-      sdc:
-        sourceWorkspaceSdcPath(sourceWorkspacePath, parametersJson) ||
-        optionalString(pdkJson?.sdc) ||
-        optionalString(dbInput?.sdc_path),
-      pdk_config_mode: pdkConfig.mode,
-      pdk_config: pdkConfig,
-      pdk_json: pdkText ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json` : '',
-      parameters: normalizeSourceParameters(parametersJson),
-    }
-  } catch (error) {
-    console.warn('Failed to load source workspace config for wizard prefill.', error)
-    return undefined
+  return {
+    pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
+    pdk_root:
+      optionalString(parametersJson?.['PDK Root']) ||
+      optionalString(parametersJson?.pdk_root),
+    sdc:
+      sourceWorkspaceSdcPath(sourceWorkspacePath, parametersJson) ||
+      optionalString(pdkJson?.sdc) ||
+      optionalString(dbInput?.sdc_path),
+    pdk_config_mode: pdkConfig.mode,
+    pdk_config: pdkConfig,
+    pdk_json: pdkText ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json` : '',
+    parameters: normalizeSourceParameters(parametersJson),
   }
 }
 
@@ -471,8 +473,17 @@ function normalizeSourceParameters(
   parametersJson: Record<string, unknown> | null,
 ): Record<string, unknown> {
   if (!parametersJson) return {}
-  const dieAreaRecord = optionalRecord(parametersJson['Die Area']) ?? {}
-  const core = optionalRecord(parametersJson.Core) ?? {}
+  const dieAreaRecord =
+    optionalRecord(parametersJson['Die Area']) ??
+    optionalRecord(parametersJson.die_area) ??
+    {}
+  const die =
+    optionalRecord(parametersJson.Die) ?? optionalRecord(parametersJson.die) ?? {}
+  const core =
+    optionalRecord(parametersJson.Core) ?? optionalRecord(parametersJson.core) ?? {}
+  const dieSize = numberList(die.Size ?? die.size)
+  const coreMargin = numberList(core.Margin ?? core.margin)
+  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieAreaRecord)
 
   return {
     design:
@@ -490,14 +501,30 @@ function normalizeSourceParameters(
       32,
     ),
     die_area_mode:
-      optionalString(dieAreaRecord.mode) || optionalString(parametersJson.die_area_mode),
-    die_width: optionalNumber(dieAreaRecord.width ?? parametersJson.die_width, 100),
-    die_height: optionalNumber(dieAreaRecord.height ?? parametersJson.die_height, 100),
+      optionalString(dieAreaRecord.mode) ||
+      optionalString(parametersJson.die_area_mode) ||
+      (hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height' : ''),
+    die_width: optionalNumber(
+      dieAreaRecord.width ?? dieSize[0] ?? parametersJson.die_width,
+      100,
+    ),
+    die_height: optionalNumber(
+      dieAreaRecord.height ?? dieSize[1] ?? parametersJson.die_height,
+      100,
+    ),
     utilitization: optionalNumber(
-      dieAreaRecord.utilitization ?? core.Utilitization ?? parametersJson.utilitization,
+      dieAreaRecord.utilitization ??
+        core.Utilitization ??
+        core.utilitization ??
+        parametersJson.utilitization,
       0.6,
     ),
-    margin: optionalNumber(dieAreaRecord.margin ?? parametersJson.margin, 0),
+    margin: optionalNumber(
+      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
+        dieAreaRecord.margin ??
+        parametersJson.margin,
+      0,
+    ),
   }
 }
 
@@ -530,8 +557,7 @@ function normalizeSourcePdkConfig(
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
+  return losslessOptionalRecord(value, 'workspace parameter')
 }
 
 function stringList(value: unknown): string[] {
@@ -544,12 +570,15 @@ function stringList(value: unknown): string[] {
 }
 
 function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
+  return losslessOptionalString(value, 'workspace parameter')
 }
 
 function optionalNumber(value: unknown, fallback: number): number {
-  const numberValue = Number(value)
-  return Number.isFinite(numberValue) ? numberValue : fallback
+  return losslessOptionalNumber(value, fallback, 'workspace parameter')
+}
+
+function numberList(value: unknown): number[] {
+  return losslessNumberList(value, 'workspace parameter')
 }
 
 function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | undefined {

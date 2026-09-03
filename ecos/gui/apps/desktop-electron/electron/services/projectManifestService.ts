@@ -413,12 +413,14 @@ function baselineBaseDesign(
 function normalizedBaselineParameters(
   parameters: Record<string, unknown>,
 ): Record<string, unknown> {
-  const die = recordValue(parameters.Die) ?? {}
-  const core = recordValue(parameters.Core) ?? {}
-  const dieArea = recordValue(parameters['Die Area']) ?? {}
-  const dieSize = numberArray(die.Size)
-  const margins = numberArray(core.Margin)
-  return {
+  const die = recordValue(parameters.Die) ?? recordValue(parameters.die) ?? {}
+  const core = recordValue(parameters.Core) ?? recordValue(parameters.core) ?? {}
+  const dieArea =
+    recordValue(parameters['Die Area']) ?? recordValue(parameters.die_area) ?? {}
+  const dieSize = numberArray(die.Size ?? die.size)
+  const margins = numberArray(core.Margin ?? core.margin)
+  const hasCanonicalDieSize = dieArea.width != null && dieArea.height != null
+  const normalized: Record<string, unknown> = {
     design: firstString(parameters.Design, parameters.design),
     top_module: firstString(
       parameters['Top module'],
@@ -431,19 +433,40 @@ function normalizedBaselineParameters(
       parameters.frequency_max,
     ),
     max_fanout: firstValue(parameters['Max fanout'], parameters.max_fanout),
-    die_area_mode: firstString(dieArea.mode, parameters.die_area_mode),
+    die_area_mode:
+      firstString(dieArea.mode, parameters.die_area_mode) ||
+      (hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height' : ''),
     die_width: firstValue(dieArea.width, dieSize[0], parameters.die_width),
     die_height: firstValue(dieArea.height, dieSize[1], parameters.die_height),
     utilitization: firstValue(
       dieArea.utilitization,
       core.Utilitization,
+      core.utilitization,
       parameters.utilitization,
     ),
-    margin: firstValue(dieArea.margin, margins[0], parameters.margin),
+    margin: firstValue(scalarMarginFromCore(margins), dieArea.margin, parameters.margin),
+  }
+  assertBaselineScalarsSafe(normalized)
+  return Object.fromEntries(
+    Object.entries(normalized).filter(([, value]) => value !== undefined && value !== ''),
+  )
+}
+
+function assertBaselineScalarClass(value: unknown): void {
+  if (
+    value instanceof Date ||
+    typeof value === 'bigint' ||
+    (typeof value === 'number' && !Number.isFinite(value))
+  ) {
+    throw new Error(
+      'Baseline workspace snapshot holds a parameter value the manifest cannot ' +
+        'represent losslessly; edit the workspace configuration manually',
+    )
   }
 }
 
 function firstString(...values: unknown[]): string {
+  for (const value of values) assertBaselineScalarClass(value)
   return (
     values
       .find(
@@ -454,6 +477,7 @@ function firstString(...values: unknown[]): string {
 }
 
 function firstValue(...values: unknown[]): unknown {
+  for (const value of values) assertBaselineScalarClass(value)
   return values.find((value) => value !== undefined && value !== null)
 }
 
@@ -468,16 +492,107 @@ function stringArray(...values: unknown[]): string[] {
   return []
 }
 
+function scalarMarginFromCore(margins: number[]): number | undefined {
+  if (margins.length === 0) return undefined
+  if (!margins.every((item) => Object.is(item, margins[0]))) {
+    throw new Error(
+      'Baseline workspace snapshot holds an asymmetric core.margin that the ' +
+        'manifest cannot represent as a single scalar; edit the workspace ' +
+        'configuration manually',
+    )
+  }
+  return margins[0]
+}
+
 function numberArray(value: unknown): number[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is number => typeof entry === 'number')
-    : []
+  if (value == null) return []
+  if (!Array.isArray(value)) {
+    throw new Error(
+      'Baseline workspace snapshot holds a scalar where a die/core dimension ' +
+        'array was expected; edit the workspace configuration manually',
+    )
+  }
+  // Positional semantics: dropping or rounding ANY element would silently
+  // shift the rest into the wrong slots (die.size[0] -> die_width). Numeric
+  // strings convert (legacy JSON writes them); everything else fails loud.
+  return value.map((entry) => {
+    if (typeof entry === 'number') {
+      if (!Number.isFinite(entry)) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that is not a ' +
+            'finite number; edit the workspace configuration manually',
+        )
+      }
+      if (Number.isInteger(entry) && !Number.isSafeInteger(entry)) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that exceeds ' +
+            'the safe integer range; edit the workspace configuration manually',
+        )
+      }
+      return entry
+    }
+    if (typeof entry === 'string' && entry.trim() !== '') {
+      const parsed = Number(entry.trim())
+      if (!Number.isFinite(parsed) || String(parsed) !== entry.trim()) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that cannot ' +
+            'round-trip as a JavaScript number; edit the workspace configuration manually',
+        )
+      }
+      if (Number.isInteger(parsed) && !Number.isSafeInteger(parsed)) {
+        throw new Error(
+          'Baseline workspace snapshot holds a die/core dimension that exceeds ' +
+            'the safe integer range; edit the workspace configuration manually',
+        )
+      }
+      return parsed
+    }
+    throw new Error(
+      'Baseline workspace snapshot holds a die/core dimension that is not a ' +
+        'finite number; edit the workspace configuration manually',
+    )
+  })
+}
+
+/**
+ * The manifest serializes to JSON: non-finite numbers would become null,
+ * bigints would throw inside JSON.stringify, and TOML dates would persist
+ * as lossy strings. Reject every unsupported scalar before constructing the
+ * baseline, never after serializing it.
+ */
+function assertBaselineScalarsSafe(value: unknown): void {
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      'Baseline workspace snapshot holds a non-finite parameter value; ' +
+        'edit the workspace configuration manually',
+    )
+  }
+  if (typeof value === 'bigint' || value instanceof Date) {
+    throw new Error(
+      'Baseline workspace snapshot holds a parameter value the manifest cannot ' +
+        'represent losslessly; edit the workspace configuration manually',
+    )
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertBaselineScalarsSafe(item)
+    return
+  }
+  if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+    for (const item of Object.values(value)) assertBaselineScalarsSafe(item)
+  }
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+  if (value === null || value === undefined) return null
+  if (value instanceof Date || Array.isArray(value) || typeof value !== 'object') {
+    // A scalar where a table is expected (e.g. die = 1979-05-27) must not
+    // degrade into an empty table and silently lose the baseline geometry.
+    throw new Error(
+      'Baseline workspace snapshot holds a scalar where a parameter table was ' +
+        'expected; edit the workspace configuration manually',
+    )
+  }
+  return value as Record<string, unknown>
 }
 
 function validateProjectManifestMpc(value: unknown): void {

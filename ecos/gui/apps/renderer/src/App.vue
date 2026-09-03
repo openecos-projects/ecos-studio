@@ -226,6 +226,14 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
 import {
+  hasCanonicalDieDimensions,
+  losslessNumberList,
+  losslessOptionalNumber,
+  losslessOptionalString,
+  losslessOptionalRecord,
+  scalarMarginFromCore,
+} from '@/utils/numbers'
+import {
   getOptionalDesktopApi,
   hasDesktopApi,
   waitForDesktopApi,
@@ -252,7 +260,10 @@ import {
   requestOpenStepConfigAfterCreate,
   usePendingOpenStepConfigAfterCreate,
 } from '@/composables/openStepConfigAfterCreate'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  readOptionalProjectTextFile,
+  readWorkspaceParametersFile,
+} from '@/utils/projectFiles'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
   projectContextFromWorkspaceConfig,
@@ -606,8 +617,8 @@ async function buildReconfigureWizardInitialConfig(
     projectContext === undefined
       ? await resolveProjectRouteContextForWorkspace(workspacePath)
       : projectContext
-  const [parametersText, pdkText, dbConfigText, flowText] = await Promise.all([
-    readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
+  const [parametersJson, pdkText, dbConfigText, flowText] = await Promise.all([
+    readWorkspaceParametersFile(workspacePath),
     readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
     readOptionalProjectTextFile('config/db_ecc.json', {
       projectPath: workspacePath,
@@ -615,7 +626,6 @@ async function buildReconfigureWizardInitialConfig(
     readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
   ])
 
-  const parametersJson = parseOptionalJson(parametersText)
   const pdkJson = parseOptionalJson(pdkText)
   const dbConfigJson = parseOptionalJson(dbConfigText)
   const flowConfig = normalizeWorkspaceFlowConfig(flowText)
@@ -731,12 +741,20 @@ function normalizeWorkspaceParameters(
   parametersJson: Record<string, unknown> | null,
   workspacePath: string,
 ): WorkspaceConfig['parameters'] {
-  const dieArea = optionalRecord(parametersJson?.['Die Area']) ?? {}
-  const die = optionalRecord(parametersJson?.Die) ?? {}
-  const core = optionalRecord(parametersJson?.Core) ?? {}
-  const dieSize = numberList(die.Size)
-  const coreMargin = numberList(core.Margin)
+  const dieArea =
+    optionalRecord(parametersJson?.['Die Area']) ??
+    optionalRecord(parametersJson?.die_area) ??
+    {}
+  const die =
+    optionalRecord(parametersJson?.Die) ?? optionalRecord(parametersJson?.die) ?? {}
+  const core =
+    optionalRecord(parametersJson?.Core) ?? optionalRecord(parametersJson?.core) ?? {}
+  const dieSize = numberList(die.Size ?? die.size)
+  const coreMargin = numberList(core.Margin ?? core.margin)
   const hasDieSize = dieSize.length >= 2
+  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieArea)
+  const inferredDieAreaMode: NonNullable<WorkspaceConfig['parameters']['die_area_mode']> =
+    hasCanonicalDieSize || hasDieSize ? 'width_height' : 'utilitization_margin'
 
   return {
     design:
@@ -758,15 +776,29 @@ function normalizeWorkspaceParameters(
     ),
     die_area_mode: normalizeDieAreaMode(
       dieArea.mode ?? parametersJson?.die_area_mode,
-      hasDieSize ? 'width_height' : 'utilitization_margin',
+      inferredDieAreaMode,
     ),
-    die_width: optionalNumber(dieArea.width ?? dieSize[0], 100),
-    die_height: optionalNumber(dieArea.height ?? dieSize[1], 100),
+    die_width: optionalNumber(
+      dieArea.width ?? dieSize[0] ?? parametersJson?.die_width,
+      100,
+    ),
+    die_height: optionalNumber(
+      dieArea.height ?? dieSize[1] ?? parametersJson?.die_height,
+      100,
+    ),
     utilitization: optionalNumber(
-      dieArea.utilitization ?? core.Utilitization ?? parametersJson?.utilitization,
+      dieArea.utilitization ??
+        core.Utilitization ??
+        core.utilitization ??
+        parametersJson?.utilitization,
       0.6,
     ),
-    margin: optionalNumber(dieArea.margin ?? coreMargin[0] ?? parametersJson?.margin, 0),
+    margin: optionalNumber(
+      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
+        dieArea.margin ??
+        parametersJson?.margin,
+      0,
+    ),
   }
 }
 
@@ -942,17 +974,15 @@ async function workspaceTextFileExists(path: string): Promise<boolean> {
 }
 
 function optionalRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
+  return losslessOptionalRecord(value, 'workspace parameter')
 }
 
 function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
+  return losslessOptionalString(value, 'workspace parameter')
 }
 
 function optionalNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
+  return losslessOptionalNumber(value, fallback, 'workspace parameter')
 }
 
 function normalizeDieAreaMode(
@@ -973,8 +1003,7 @@ function stringList(value: unknown): string[] {
 }
 
 function numberList(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  return value.map(Number).filter(Number.isFinite)
+  return losslessNumberList(value, 'workspace parameter')
 }
 
 function normalizeLocalPath(path: string): string {

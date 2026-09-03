@@ -169,6 +169,16 @@ export type {
 } from './contracts/desktopAgent.ts'
 export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
+  canonicalParameterWriteKey,
+  parameterWritesMatchPatch,
+} from './utils/agentParameterWrites.ts'
+export {
+  assignOwnJsonPathValue,
+  hasSafeJsonPath,
+  isForbiddenJsonPathSegment,
+  readOwnJsonPathSegment,
+} from './utils/jsonPath.ts'
+export {
   appMenuActionIds,
   desktopMenuEventIds,
   type DesktopProjectFileChangedEvent,
@@ -232,6 +242,7 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,

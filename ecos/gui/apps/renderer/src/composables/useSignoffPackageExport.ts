@@ -48,6 +48,25 @@ function workspaceLeaf(path: string): string {
   return parts[parts.length - 1] || normalized
 }
 
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+/**
+ * Prefer the configured design name from either vocabulary: legacy JSON
+ * uses `Design`, TOML-flattened parameters use `design`.
+ */
+function signoffPackageDesignName(parameters: unknown, workspacePath: string): string {
+  if (!isRecord(parameters)) return workspaceLeaf(workspacePath)
+  return (
+    firstNonEmptyString(parameters.Design, parameters.design) ||
+    workspaceLeaf(workspacePath)
+  )
+}
+
 function projectPathForWorkspace(workspacePath: string): string {
   const normalized = workspacePath.replace(/[\\/]+$/g, '')
   const separatorIndex = Math.max(
@@ -221,12 +240,7 @@ export function useSignoffPackageExport({
       const parameters = await api.workspaceResources.readParameters()
       if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
 
-      const design =
-        isRecord(parameters) &&
-        typeof parameters.Design === 'string' &&
-        parameters.Design.trim()
-          ? parameters.Design.trim()
-          : workspaceLeaf(workspace.workspacePath)
+      const design = signoffPackageDesignName(parameters, workspace.workspacePath)
       const outputPath = await api.dialog.saveFile({
         title: 'Export Signoff Package',
         defaultPath: signoffPackageDefaultPath(workspace.workspacePath, design),
