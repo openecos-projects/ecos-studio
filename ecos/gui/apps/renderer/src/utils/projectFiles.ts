@@ -155,7 +155,8 @@ export async function readWorkspaceParametersFile(
     return null
   }
   const parameters = await workspace.readWorkspaceParameters(workspacePath)
-  await warnOnceOnConfigShadow(workspacePath)
+  // Fire-and-forget: the advisory probe must not delay or block the read.
+  void warnOnceOnConfigShadow(workspacePath)
   return parameters
 }
 

@@ -607,6 +607,33 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
+  it('probes the config shadow on the running-flow snapshot fast path', async () => {
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/params.toml',
+    })
+    readWorkspaceParametersFile.mockResolvedValue(asParametersRecord(parametersJson()))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+
+    markFlowExecutionActiveForWorkspace('/workspace/demo')
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
+      parameters: asParametersRecord(parametersJson()),
+      home: { parameters: '/workspace/demo/home/params.toml' },
+    })
+    warnOnceOnConfigShadow.mockClear()
+    await parameters.refreshParameters()
+
+    expect(readWorkspaceParametersFile).toHaveBeenCalledTimes(1)
+    expect(warnOnceOnConfigShadow).toHaveBeenCalledWith('/workspace/demo')
+
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
+  })
+
   it('does not poll the parameters file while a flow is running', async () => {
     vi.useFakeTimers()
     fetchSharedHomeData.mockResolvedValue({

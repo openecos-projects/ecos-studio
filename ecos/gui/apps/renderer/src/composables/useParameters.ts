@@ -803,6 +803,9 @@ export function useParameters() {
           applyParametersData(
             parseParametersRecord(snapshot.parameters as Record<string, unknown>),
           )
+          // Advisory shadow check on this snapshot fast path too (the
+          // running-flow reload never touches the disk read below).
+          void warnOnceOnConfigShadow(projectPath)
           return true
         }
       }
