@@ -440,6 +440,7 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
         time.sleep(0.01)
 
     assert runner_contexts[0]["objective"] == session.optimization_objective
+    assert runner_contexts[0]["baseline_eligibility_exempt"] is True
     progress = next(event["optimization"] for event in events if event["type"] == "optimization")
     assert progress["objective_sha256"] == session.optimization_objective_sha256
     assert progress["primary_metric"] == "route_wirelength"

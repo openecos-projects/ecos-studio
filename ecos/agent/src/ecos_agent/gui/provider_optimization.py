@@ -349,6 +349,7 @@ class ProviderOptimizationMixin:
                     "episode_id": session.optimization_episode_id,
                     "workspace": workspace,
                     "objective": session.optimization_objective,
+                    "baseline_eligibility_exempt": True,
                 },
                 provider,
             )
