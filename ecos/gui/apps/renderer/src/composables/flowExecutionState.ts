@@ -38,3 +38,7 @@ export function isFlowExecutionActiveForWorkspace(
 ): boolean {
   return Boolean(path && activeFlowWorkspaces.has(normalizeWorkspacePath(path)))
 }
+
+export function activeFlowExecutionWorkspacePaths(): string[] {
+  return [...activeFlowWorkspaces]
+}

@@ -308,6 +308,8 @@ describe('useWorkspace openProject', () => {
     requestHomeRunArtifactResetMock.mockReset()
     notifyWorkspaceRerunPreparedMock.mockReset()
     clearFlowExecutionActiveForWorkspaceMock.mockReset()
+    isFlowExecutionActiveForWorkspaceMock.mockReset()
+    isFlowExecutionActiveForWorkspaceMock.mockReturnValue(false)
     resolveProjectRouteContextForWorkspaceMock.mockReset()
     resolveProjectRouteContextForWorkspaceMock.mockResolvedValue(null)
     settingsData.clear()
@@ -851,6 +853,53 @@ describe('useWorkspace openProject', () => {
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
     expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
     expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-new')
+  })
+
+  it('does not wait for the previous runtime release when opening another workspace', async () => {
+    const workspace = useWorkspace()
+    let flowActive = true
+    isFlowExecutionActiveForWorkspaceMock.mockImplementation(() => flowActive)
+    const oldProject: Project = {
+      id: '/work/old',
+      name: 'old',
+      path: '/work/old',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    const newProject: Project = {
+      id: '/work/new',
+      name: 'new',
+      path: '/work/new',
+      lastOpened: new Date('2026-01-02T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock
+      .mockResolvedValueOnce({
+        response: 'success',
+        data: { directory: '/work/old', workspace_handle: 'workspace-old' },
+      })
+      .mockResolvedValueOnce({
+        response: 'success',
+        data: { directory: '/work/new', workspace_handle: 'workspace-new' },
+      })
+    await expect(workspace.openProject(oldProject)).resolves.toBe(true)
+
+    let releaseOldWorkspace: (() => void) | undefined
+    closeWorkspaceApiMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseOldWorkspace = () => resolve({ ok: true })
+        }),
+    )
+
+    await expect(workspace.openProject(newProject)).resolves.toBe(true)
+    expect(workspace.currentProject.value?.path).toBe('/work/new')
+    expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-new')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalled()
+
+    flowActive = false
+    await vi.waitFor(() => {
+      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
+    })
+    releaseOldWorkspace?.()
   })
 
   it('snapshots a Backend recent-project summary from committed facts only', async () => {
@@ -2599,6 +2648,212 @@ describe('useWorkspace openProject', () => {
 
     await expect(createPromise).resolves.toBe(true)
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
+  })
+
+  it('creates a candidate workspace before awaiting the previous runtime release', async () => {
+    const workspace = useWorkspace()
+    let flowActive = true
+    isFlowExecutionActiveForWorkspaceMock.mockImplementation(() => flowActive)
+    const oldProject: Project = {
+      id: '/work/old',
+      name: 'old',
+      path: '/work/old',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/old',
+        workspace_handle: 'workspace-old',
+      },
+    })
+    await expect(workspace.openProject(oldProject)).resolves.toBe(true)
+
+    let releaseOldWorkspace: (() => void) | undefined
+    closeWorkspaceApiMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseOldWorkspace = () => resolve({ ok: true })
+        }),
+    )
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/new',
+        workspace_handle: 'workspace-new',
+      },
+      message: [],
+    })
+
+    const createPromise = workspace.newProject({
+      directory: '/work/new',
+      pdk: 'ics55',
+      pdk_root: '/pdk/ics55',
+      parameters: { design: 'new', top_module: 'top', clock: 'clk' },
+      origin_def: '',
+      origin_verilog: '',
+      rtl_list: [],
+    })
+
+    await expect(createPromise).resolves.toBe(true)
+    expect(createWorkspaceApiMock).toHaveBeenCalledOnce()
+    expect(workspace.currentProject.value?.path).toBe('/work/new')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalled()
+
+    flowActive = false
+    await vi.waitFor(() => {
+      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
+    })
+    releaseOldWorkspace?.()
+  })
+
+  it('treats creating the canonical current workspace as a no-op', async () => {
+    const workspace = useWorkspace()
+    workspace.currentProject.value = {
+      id: '/work/current',
+      name: 'current',
+      path: '/work/current',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/current/',
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: { design: 'current', top_module: 'top', clock: 'clk' },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    expect(createWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(workspace.currentProject.value?.path).toBe('/work/current')
+  })
+
+  it('retains a background runtime when its final snapshot fails', async () => {
+    const workspace = useWorkspace()
+    let flowActive = true
+    isFlowExecutionActiveForWorkspaceMock.mockImplementation(() => flowActive)
+    const snapshotMock = vi.mocked(desktopApi.ecc.runtime!.snapshot)
+    snapshotMock.mockRejectedValueOnce(new Error('snapshot unavailable'))
+
+    loadWorkspaceApiMock
+      .mockResolvedValueOnce({
+        response: 'success',
+        data: { directory: '/work/old', workspace_handle: 'workspace-old' },
+      })
+      .mockResolvedValueOnce({
+        response: 'success',
+        data: { directory: '/work/new', workspace_handle: 'workspace-new' },
+      })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/old',
+        name: 'old',
+        path: '/work/old',
+        lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true)
+    await expect(
+      workspace.openProject({
+        id: '/work/new',
+        name: 'new',
+        path: '/work/new',
+        lastOpened: new Date('2026-01-02T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true)
+
+    flowActive = false
+    await vi.waitFor(() =>
+      expect(snapshotMock).toHaveBeenCalledWith({
+        workspaceHandle: 'workspace-old',
+      }),
+    )
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-old', 'backend')
+    expect(workspace.backgroundWorkspaceSnapshotFailures.value['/work/old']).toBe(
+      'snapshot unavailable',
+    )
+    await expect(workspace.retryBackgroundWorkspaceSnapshot('/work/old')).resolves.toBe(
+      true,
+    )
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
+    expect(
+      workspace.backgroundWorkspaceSnapshotFailures.value['/work/old'],
+    ).toBeUndefined()
+  })
+
+  it('registers a created workspace without replacing a newer foreground choice', async () => {
+    const workspace = useWorkspace()
+    workspace.currentProject.value = {
+      id: '/work/current',
+      name: 'current',
+      path: '/work/current',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: { directory: '/work/new', workspace_handle: 'workspace-new' },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject(
+        {
+          directory: '/work/new',
+          pdk: 'ics55',
+          pdk_root: '/pdk/ics55',
+          parameters: { design: 'new', top_module: 'top', clock: 'clk' },
+          origin_def: '',
+          origin_verilog: '',
+          rtl_list: [],
+        },
+        { shouldActivate: () => false },
+      ),
+    ).resolves.toBe(true)
+
+    expect(workspace.currentProject.value?.path).toBe('/work/current')
+    expect(desktopApi.workspace.registerProjectRoot).toHaveBeenLastCalledWith(
+      '/work/current',
+    )
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new', 'backend')
+  })
+
+  it('rejects a duplicate workspace creation while the first request is pending', async () => {
+    const workspace = useWorkspace()
+    let resolveCreateWorkspace: ((value: unknown) => void) | undefined
+    createWorkspaceApiMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreateWorkspace = resolve
+      }),
+    )
+    const config = {
+      directory: '/work/new-project',
+      pdk: 'ics55',
+      pdk_root: '/pdk/ics55',
+      parameters: { design: 'new', top_module: 'top', clock: 'clk' },
+      origin_def: '',
+      origin_verilog: '',
+      rtl_list: [],
+    }
+
+    const firstCreate = workspace.newProject(config)
+    await vi.waitFor(() => expect(createWorkspaceApiMock).toHaveBeenCalledOnce())
+
+    await expect(
+      workspace.newProject({ ...config, directory: '/work/other' }),
+    ).resolves.toBe(false)
+    expect(createWorkspaceApiMock).toHaveBeenCalledOnce()
+
+    resolveCreateWorkspace?.({
+      response: 'success',
+      data: { directory: '/work/new-project', workspace_handle: 'workspace-new' },
+      message: [],
+    })
+    await expect(firstCreate).resolves.toBe(true)
   })
 
   it('opens and closes frontend workspaces through the unified runtime scope', async () => {

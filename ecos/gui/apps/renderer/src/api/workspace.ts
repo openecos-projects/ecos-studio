@@ -15,6 +15,7 @@ export interface WorkspaceResponse {
   data: {
     directory: string
     designTool?: DesignTool
+    reused?: boolean
     workspace_handle?: string
     workspaceHandle?: string
     workspaceRevision?: number
@@ -231,6 +232,7 @@ export function loadWorkspaceApi(directory: string, designTool: DesignTool = 'ba
       data: {
         designTool,
         directory: result.directory,
+        reused: result.reused,
         workspace_handle: result.workspaceHandle,
         workspaceHandle: result.workspaceHandle,
         workspaceRevision: result.workspaceRevision,

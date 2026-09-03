@@ -777,6 +777,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
+import {
+  consumeWorkspaceManagementReturnRoute,
+  requestWorkspaceWizard,
+} from '@/utils/workspaceNavigation'
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import ProjectComparisonRefreshStatus from './project-management/ProjectComparisonRefreshStatus.vue'
 import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
@@ -834,7 +838,7 @@ const PROJECT_MANIFEST_READ_CONCURRENCY = 2
 
 const route = useRoute()
 const router = useRouter()
-const { openProject, showToast } = useWorkspace()
+const { openProject, showToast, currentProject } = useWorkspace()
 const projectComparisonSession = useBackendProjectComparisonSession()
 
 const searchQuery = ref('')
@@ -1477,47 +1481,85 @@ function closeWorkspaceDraftDialog() {
 
 async function continueWorkspaceDraft() {
   if (!branchDraft.value) return
-  await router.push({
-    path: '/ecc',
-    query: {
-      workspacePath: branchDraft.value.targetWorkspacePath,
-      projectRoot: selectedProject.value.path,
+  const draft = branchDraft.value
+  requestWorkspaceWizard({
+    directory: draft.targetWorkspacePath,
+    lockWorkspaceDirectory: true,
+    managedWorkspaceRoot: selectedProject.value.path,
+    origin_def: draft.originDef,
+    origin_verilog: draft.originVerilog,
+    sdc: draft.originSdc,
+    project_context: {
+      mode: 'select',
+      project_name: selectedProject.value.name,
+      project_root: selectedProject.value.path,
+      project_json_path: joinProjectPath(selectedProject.value.path, 'project.json'),
+      project_id: selectedProject.value.id,
+    },
+    source_context: {
       projectName: selectedProject.value.name,
-      designName: selectedProject.value.designName,
-      sourceWorkspace: branchDraft.value.sourceWorkspaceId,
-      sourceWorkspacePath: branchDraft.value.sourceWorkspacePath,
-      sourceStep: branchDraft.value.step,
-      sourceOutputPath: branchDraft.value.sourceOutputPath,
-      sourceOutputType: branchDraft.value.sourceOutputType,
-      originDef: branchDraft.value.originDef,
-      originVerilog: branchDraft.value.originVerilog,
-      sdc: branchDraft.value.originSdc,
-      startStep: branchDraft.value.targetStartStep,
-      endStep: branchDraft.value.targetEndStep,
-      workspaceId: branchDraft.value.targetWorkspaceId,
+      projectRoot: selectedProject.value.path,
+      workspaceId: draft.sourceWorkspaceId,
+      workspacePath: draft.sourceWorkspacePath,
+      step: draft.step,
+      outputPath: draft.sourceOutputPath,
+      outputType: draft.sourceOutputType,
+      startStep: draft.targetStartStep,
+    },
+    parameters: {
+      design: selectedProject.value.designName,
+      description: `Created from ${draft.sourceWorkspaceId} ${draft.step} output`,
+      source_output_path: draft.sourceOutputPath,
+      source_output_type: draft.sourceOutputType,
+      start_step: draft.targetStartStep,
+      end_step: draft.targetEndStep,
     },
   })
+  closeWorkspaceDraftDialog()
 }
 
 async function openWorkspace(workspace: ProjectWorkspace) {
   closeRowActionMenus()
-  const success = await openProject({
-    id: workspace.workspacePath,
-    name: `${selectedProject.value.name}/${workspace.id}`,
-    path: workspace.workspacePath,
-    lastOpened: new Date(),
-  })
+  const originFullPath = route.fullPath
+  const originWorkspacePath = currentProject.value?.path
+  const success = await openProject(
+    {
+      id: workspace.workspacePath,
+      name: `${selectedProject.value.name}/${workspace.id}`,
+      path: workspace.workspacePath,
+      lastOpened: new Date(),
+    },
+    {
+      shouldActivate: () =>
+        route.fullPath === originFullPath &&
+        normalizePath(currentProject.value?.path ?? '') ===
+          normalizePath(originWorkspacePath ?? ''),
+    },
+  )
   if (success) {
-    await router.push({
-      path: '/workspace/home',
-      query: workspaceRouteQuery(workspace.workspacePath, workspace.id),
-    })
+    if (route.fullPath === originFullPath) {
+      await router.push({
+        path: '/workspace/home',
+        query: workspaceRouteQuery(workspace.workspacePath, workspace.id),
+      })
+    } else {
+      showToast({
+        severity: 'info',
+        summary: 'Workspace ready',
+        detail: `${workspace.id} is available in Recent Workspaces.`,
+        life: 5000,
+      })
+    }
   } else {
     showToast({
       severity: 'warn',
       summary: 'Workspace not opened',
       detail: `${workspace.workspacePath} is not available yet.`,
     })
+    if (route.fullPath === originFullPath) {
+      const returnRoute = consumeWorkspaceManagementReturnRoute() ?? '/workspace/home'
+      await router.replace(returnRoute)
+    }
   }
 }
 
@@ -1668,14 +1710,20 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
   if (!project.path) return
   const workspaceId = await nextAvailableWorkspaceId(project)
   if (!workspaceId) return
-  await router.push({
-    path: '/ecc',
-    query: {
-      projectRoot: project.path,
-      projectName: project.name,
-      designName: project.designName,
-      workspacePath: joinProjectPath(project.path, workspaceId),
-      workspaceId,
+  requestWorkspaceWizard({
+    directory: joinProjectPath(project.path, workspaceId),
+    lockWorkspaceDirectory: true,
+    managedWorkspaceRoot: project.path,
+    parameters: {
+      design: project.designName,
+      description: 'Created from Project Management',
+    },
+    project_context: {
+      mode: 'select',
+      project_name: project.name,
+      project_root: project.path,
+      project_json_path: joinProjectPath(project.path, 'project.json'),
+      project_id: project.id,
     },
   })
 }
@@ -1927,7 +1975,14 @@ async function createProjectFolderDraft() {
   closeNewProjectDialog()
 }
 
-const goBack = () => router.push('/')
+const goBack = () => {
+  const returnRoute = consumeWorkspaceManagementReturnRoute()
+  if (returnRoute) {
+    void router.replace(returnRoute)
+    return
+  }
+  void router.replace(route.path.startsWith('/workspace/') ? '/workspace/home' : '/')
+}
 
 function workspaceCountLabel(count: number): string {
   return `${count} workspace${count === 1 ? '' : 's'}`

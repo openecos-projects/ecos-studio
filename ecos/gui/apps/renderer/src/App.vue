@@ -191,7 +191,7 @@
     <Teleport to="body">
       <Transition name="runtime-backend-overlay">
         <div
-          v-if="runtimeBackendConnecting"
+          v-if="runtimeBackendConnecting && !workspaceCreation"
           class="runtime-backend-overlay"
           role="status"
           aria-busy="true"
@@ -225,7 +225,10 @@ import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { isFlowExecutionActiveForWorkspace } from '@/composables/flowExecutionState'
+import {
+  activeFlowExecutionWorkspacePaths,
+  isFlowExecutionActiveForWorkspace,
+} from '@/composables/flowExecutionState'
 import { getDesktopApi } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
@@ -257,14 +260,15 @@ import {
   resolveProjectRouteContextForWorkspace,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
-
-type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
-  managedWorkspaceRoot?: string
-  deriveDirectoryFromDesign?: boolean
-  lockWorkspaceDirectory?: boolean
-  standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
-}
+import {
+  beginWorkspaceCreation,
+  consumeWorkspaceWizardRequest,
+  finishWorkspaceCreation,
+  useWorkspaceWizardRequest,
+  type WorkspaceWizardInitialConfig,
+  consumeWorkspaceManagementReturnRoute,
+  useWorkspaceCreation,
+} from '@/utils/workspaceNavigation'
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -364,6 +368,18 @@ watch(
   { immediate: true },
 )
 
+watch(
+  [() => route.path, () => Boolean(currentProject.value?.path)] as const,
+  ([path, hasWorkspace]) => {
+    if (path === '/projects' && hasWorkspace) {
+      void router.replace({ path: '/workspace/projects', query: route.query })
+    } else if (path === '/workspace/projects' && !hasWorkspace) {
+      void router.replace({ path: '/projects', query: route.query })
+    }
+  },
+  { immediate: true },
+)
+
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
@@ -388,6 +404,20 @@ const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
+const workspaceCreation = useWorkspaceCreation()
+
+watch(
+  pendingWorkspaceWizardRequest,
+  (request) => {
+    if (!request) return
+    consumeWorkspaceWizardRequest()
+    workspaceWizardInitialConfig.value = request.initialConfig
+    reconfigureWorkspacePath.value = ''
+    showNewProjectWizard.value = true
+  },
+  { flush: 'sync' },
+)
 
 function closeStepConfigDialog(): void {
   if (
@@ -405,6 +435,28 @@ function updateStepConfigDialogVisibility(visible: boolean): void {
     return
   }
   closeStepConfigDialog()
+}
+
+function confirmWorkspaceShutdown(): boolean {
+  const activeWorkspaces = activeFlowExecutionWorkspacePaths()
+  const pendingCreation = workspaceCreation.value
+  if (activeWorkspaces.length === 0 && !pendingCreation) return true
+
+  const flowDetails = activeWorkspaces.map((path) => `- ${path}: Flow is still running`)
+  const creationDetails = pendingCreation
+    ? [`- ${pendingCreation.targetPath}: Workspace creation is still in progress`]
+    : []
+  return window.confirm(
+    [
+      'Still have work in progress',
+      '',
+      ...flowDetails,
+      ...creationDetails,
+      '',
+      'The application will wait for completion and save the final Workspace data before closing.',
+      'Choose Cancel to keep the window open.',
+    ].join('\n'),
+  )
 }
 const pendingWorkspaceUpdatePath = ref('')
 const showWorkspaceUpdateBackupDialog = ref(false)
@@ -499,13 +551,47 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     return
   }
 
-  resetWorkspaceWizard()
-  const success = await newProject(config)
-  if (!success) return
+  const creationToken = beginWorkspaceCreation(config.directory)
+  if (creationToken === null) {
+    showToast({
+      severity: 'info',
+      summary: 'Workspace creation already in progress',
+      detail:
+        'Wait for the current Workspace creation to finish before submitting again.',
+      life: 4000,
+    })
+    return
+  }
 
-  await syncProjectManagedWorkspace(config)
-  requestOpenStepConfigAfterCreate()
-  router.push('/workspace')
+  const creationOriginPath = route.path
+  const creationOriginFullPath = route.fullPath
+  const creationOriginWorkspacePath = currentProject.value?.path
+  const managementRoute =
+    creationOriginPath === '/projects' || creationOriginPath === '/workspace/projects'
+  resetWorkspaceWizard()
+  try {
+    const success = await newProject(config, {
+      shouldActivate: () =>
+        route.fullPath === creationOriginFullPath &&
+        normalizeLocalPath(currentProject.value?.path ?? '') ===
+          normalizeLocalPath(creationOriginWorkspacePath ?? ''),
+    })
+    if (!success) {
+      if (managementRoute && route.fullPath === creationOriginFullPath) {
+        const returnRoute = consumeWorkspaceManagementReturnRoute()
+        await router.replace(returnRoute ?? '/workspace/home')
+      }
+      return
+    }
+
+    await syncProjectManagedWorkspace(config, config.directory)
+    if (route.fullPath === creationOriginFullPath) {
+      requestOpenStepConfigAfterCreate()
+      await router.push('/workspace/home')
+    }
+  } finally {
+    finishWorkspaceCreation(creationToken)
+  }
 }
 
 function cancelWorkspaceUpdateBackup() {
@@ -1072,7 +1158,7 @@ const { handleMenuAction } = useAppMenuActions({
   manageDesignFiles: openManageDialog,
   adjustZoom,
 })
-useAppWindowClose(closeProject)
+useAppWindowClose(closeProject, { beforeClose: confirmWorkspaceShutdown })
 
 let isResizing = false
 

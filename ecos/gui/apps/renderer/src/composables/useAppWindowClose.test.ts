@@ -94,4 +94,28 @@ describe('useAppWindowClose', () => {
     expect(consoleError).toHaveBeenCalledTimes(1)
     expect(confirmClose).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps the window open when the lifecycle prompt is declined', async () => {
+    const confirmClose = vi.fn().mockResolvedValue(undefined)
+    let onCloseRequested: (() => void) | undefined
+
+    getDesktopApi.mockReturnValue({
+      window: {
+        confirmClose,
+        onCloseRequested: vi.fn((listener: () => void) => {
+          onCloseRequested = listener
+          return vi.fn()
+        }),
+      },
+    })
+
+    const cleanup = vi.fn().mockResolvedValue(undefined)
+    useAppWindowClose(cleanup, { beforeClose: () => false })
+
+    await mountedCallbacks[0]?.()
+    await onCloseRequested?.()
+
+    expect(cleanup).not.toHaveBeenCalled()
+    expect(confirmClose).not.toHaveBeenCalled()
+  })
 })

@@ -197,14 +197,16 @@ export class EccRpcRuntimeService {
     const runtime = this.getOrCreateRuntime(request.directory)
     return runtime.openWorkspace(request).then(async (result) => {
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
-      try {
-        await runtime.recoverInterrupted(result.workspaceHandle)
-      } catch (error) {
-        electronLogger.error(
-          '[runtime] failed to recover interrupted operations while opening %s: %s',
-          result.directory,
-          error,
-        )
+      if (!result.reused) {
+        try {
+          await runtime.recoverInterrupted(result.workspaceHandle)
+        } catch (error) {
+          electronLogger.error(
+            '[runtime] failed to recover interrupted operations while opening %s: %s',
+            result.directory,
+            error,
+          )
+        }
       }
       return result
     })

@@ -118,6 +118,7 @@ export interface EccSignoffReviewRisk {
 
 export interface EccWorkspaceOpenResult {
   directory: string
+  reused?: boolean
   workspaceId?: string
   workspaceHandle: string
   workspaceRevision?: number

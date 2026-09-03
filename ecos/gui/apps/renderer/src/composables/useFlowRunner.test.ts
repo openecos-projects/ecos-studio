@@ -155,6 +155,12 @@ describe('useFlowRunner desktop and design-tool routing', () => {
       step: StepEnum.FLOORPLAN,
       workspaceHandle: 'workspace-demo',
     })
+    expect(waitForRuntimeOperation).toHaveBeenCalledWith('operation-flow', {
+      workspaceHandle: 'workspace-demo',
+    })
+    expect(waitForRuntimeOperation).toHaveBeenCalledWith('operation-step', {
+      workspaceHandle: 'workspace-demo',
+    })
     expect(rtl2gdsApi).not.toHaveBeenCalled()
     expect(runStepApi).not.toHaveBeenCalled()
   })

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { normalizeWorkspacePath } from '../workspacePath'
 
 export interface WorkspaceSessionRecord {
   directory: string
@@ -128,8 +129,9 @@ export class WorkspaceSessionRegistry {
   }
 
   findByDirectory(directory: string): WorkspaceSessionRecord | null {
+    const normalizedDirectory = normalizeWorkspacePath(directory)
     for (const session of this.sessions.values()) {
-      if (session.directory === directory) {
+      if (normalizeWorkspacePath(session.directory) === normalizedDirectory) {
         return { ...session }
       }
     }

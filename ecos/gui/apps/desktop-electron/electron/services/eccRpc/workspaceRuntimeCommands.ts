@@ -59,6 +59,7 @@ interface WorkspaceRuntimeCommandContext {
     metadata?: RuntimeOperationMetadata,
   ): Promise<T>
   ensureStarted(): Promise<EccRpcRuntimeClient>
+  hasActiveOperations(): boolean
   lazyWorkspaceOpen: boolean
   resolveEccWorkspaceId(workspaceHandle: string): Promise<string>
   sessions: WorkspaceSessionRegistry
@@ -92,6 +93,22 @@ export class WorkspaceRuntimeCommands {
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.context.enqueue('workspace.open', undefined, async () => {
       await migrateWorkspaceConfigFilenames(request.directory)
+      const existing = this.context.sessions.findByDirectory(request.directory)
+      if (existing && this.context.hasActiveOperations()) {
+        if (request.workspaceBindings) {
+          this.context.sessions.updateBindings(
+            existing.workspaceHandle,
+            request.workspaceBindings,
+          )
+        }
+        return {
+          directory: existing.directory,
+          reused: true,
+          workspaceHandle: existing.workspaceHandle,
+          workspaceId: existing.eccWorkspaceId ?? undefined,
+          workspaceRevision: existing.workspaceRevision,
+        }
+      }
       if (this.context.lazyWorkspaceOpen) {
         const existing = this.context.sessions.findByDirectory(request.directory)
         if (existing && request.workspaceBindings) {
@@ -108,7 +125,11 @@ export class WorkspaceRuntimeCommands {
               0,
               request.workspaceBindings,
             )
-        return { directory: session.directory, workspaceHandle: session.workspaceHandle }
+        return {
+          directory: session.directory,
+          reused: Boolean(existing),
+          workspaceHandle: session.workspaceHandle,
+        }
       }
       const client = await this.context.ensureStarted()
       const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {

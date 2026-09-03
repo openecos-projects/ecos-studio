@@ -52,6 +52,11 @@ const routes: RouteRecordRaw[] = [
         name: 'Configure',
         component: () => import('../views/ConfigureView.vue'),
       },
+      {
+        path: 'projects',
+        name: 'WorkspaceProjects',
+        component: () => import('../views/ProjectsView.vue'),
+      },
       // 动态步骤路由：匹配所有 flow 步骤
       // 路由验证放宽，允许任何步骤路径（由 flow.json 动态决定）
       {

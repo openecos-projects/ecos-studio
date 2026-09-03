@@ -148,13 +148,19 @@ export function useFlowRunner() {
     return { directory, workspaceHandle }
   }
 
-  function observeRuntimeOperation(operationId: string, directory: string): void {
-    void waitForRuntimeOperation(operationId)
+  function observeRuntimeOperation(
+    operationId: string,
+    directory: string,
+    workspaceHandle: string,
+  ): void {
+    void waitForRuntimeOperation(operationId, { workspaceHandle })
       .then(() => {
         // The main-process operation tracker is authoritative when renderer IPC
         // delivery was delayed or replayed. Reconcile resource-backed panels
         // before releasing the shared run lock.
-        invalidateWorkspaceResources('all')
+        if (getCurrentWorkspacePath() === directory) {
+          invalidateWorkspaceResources('all')
+        }
       })
       .catch((reason: unknown) => {
         error.value = reason instanceof Error ? reason.message : String(reason)
@@ -251,7 +257,11 @@ export function useFlowRunner() {
         step,
         workspaceHandle: requestScope.workspaceHandle,
       })
-      observeRuntimeOperation(operation.operationId, directory)
+      observeRuntimeOperation(
+        operation.operationId,
+        directory,
+        requestScope.workspaceHandle,
+      )
       lastRunResult.value = { step: step as StepEnum, state: StateEnum.Ongoing }
       showToast({
         severity: 'info',
@@ -366,7 +376,11 @@ export function useFlowRunner() {
       })
       // Keep the rerun marker until the backend emits its authoritative
       // rerun-prepared protocol event. A failed start must clear it below.
-      observeRuntimeOperation(operation.operationId, directory)
+      observeRuntimeOperation(
+        operation.operationId,
+        directory,
+        requestScope.workspaceHandle,
+      )
       showToast({
         severity: 'info',
         summary: 'RTL2GDS Started',

@@ -500,7 +500,7 @@ describe('EccRpcRuntimeService pool', () => {
 
   it('defers Electron shutdown while a Workspace operation is active', async () => {
     const pool = createPool()
-    await pool.service.openWorkspace({ directory: '/work/demo' })
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
     const sidecar = pool.sidecarFor('/work/demo')
     pool.sidecarNotification('/work/demo', {
       jsonrpc: '2.0',
@@ -517,6 +517,14 @@ describe('EccRpcRuntimeService pool', () => {
         workspaceId: 'id-/work/demo',
       },
     })
+    const reopened = await pool.service.openWorkspace({ directory: '/work/demo' })
+    expect(reopened.workspaceHandle).toBe(workspace.workspaceHandle)
+    expect(
+      pool
+        .clientFor('/work/demo')
+        .calls.filter((call) => call.method === 'workspace.open'),
+    ).toHaveLength(1)
+
     await expect(pool.service.shutdown()).resolves.toEqual({
       deferred: true,
       ok: false,

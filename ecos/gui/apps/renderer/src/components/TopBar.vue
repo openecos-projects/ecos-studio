@@ -81,6 +81,16 @@
       >
         <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
       </button>
+      <div
+        v-if="workspaceCreation"
+        class="workspace-creation-tip"
+        role="status"
+        aria-live="polite"
+        title="Workspace creation is in progress. Duplicate submission is disabled."
+      >
+        <i class="ri-loader-4-line" aria-hidden="true"></i>
+        <span>Creating Workspace</span>
+      </div>
       <NotificationCenter />
       <button
         @click="toggleTheme"
@@ -202,6 +212,10 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useRoute, useRouter } from 'vue-router'
 import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
+import {
+  rememberWorkspaceManagementReturnRoute,
+  useWorkspaceCreation,
+} from '@/utils/workspaceNavigation'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -242,6 +256,7 @@ const workspaceFocusId = computed(
   () =>
     queryString(route.query.workspaceId) || workspaceIdFromProjectName(props.projectName),
 )
+const workspaceCreation = useWorkspaceCreation()
 
 const themeStore = useThemeStore()
 const agentShell = useAgentShellStore()
@@ -429,6 +444,9 @@ const toggleQuickMenu = async () => {
 
 const goToProjectManagement = () => {
   quickMenuOpen.value = false
+  if (props.hasWorkspace && route.path !== '/workspace/projects') {
+    rememberWorkspaceManagementReturnRoute(route)
+  }
   const query: Record<string, string> = {}
   if (workspaceProjectRoot.value) {
     query.projectRoot = workspaceProjectRoot.value
@@ -436,7 +454,7 @@ const goToProjectManagement = () => {
   }
   if (workspaceFocusId.value) query.workspaceId = workspaceFocusId.value
   router.push({
-    path: '/projects',
+    path: props.hasWorkspace ? '/workspace/projects' : '/projects',
     query,
   })
 }
@@ -795,6 +813,31 @@ const handleClose = async () => {
   height: 18px;
   margin: 0 2px;
   background: var(--border-color);
+}
+
+.workspace-creation-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  margin: 0 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workspace-creation-tip i {
+  color: var(--accent-color);
+  animation: workspace-creation-spin 1.2s linear infinite;
+}
+
+@keyframes workspace-creation-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .quick-dropdown-menu {

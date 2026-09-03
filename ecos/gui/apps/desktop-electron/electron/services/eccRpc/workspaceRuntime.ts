@@ -161,6 +161,7 @@ export class EccWorkspaceRuntime {
       enqueue: (method, workspaceHandle, operation, metadata) =>
         this.enqueue(method, workspaceHandle, operation, metadata),
       ensureStarted: () => this.ensureStarted(),
+      hasActiveOperations: () => this.operationTracker.hasActiveOperations(),
       lazyWorkspaceOpen: Boolean(options.lazyWorkspaceOpen),
       resolveEccWorkspaceId: (workspaceHandle) =>
         this.resolveEccWorkspaceId(workspaceHandle),
