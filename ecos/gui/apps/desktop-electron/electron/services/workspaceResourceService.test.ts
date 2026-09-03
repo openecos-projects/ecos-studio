@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -344,6 +345,121 @@ describe('WorkspaceResourceService', () => {
         'step feature': join(stepDirectory, 'feature', 'Timing optimization.step.json'),
       },
     })
+  })
+
+  it('indexes the yosys_lec result JSON, log, reports, and subflow', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'postRouteLec', tool: 'yosys_lec', state: 'Success' },
+    ])
+    const stepDirectory = join(root, 'postRouteLec_yosys_lec')
+    await mkdir(join(stepDirectory, 'output'), { recursive: true })
+    await mkdir(join(stepDirectory, 'log'), { recursive: true })
+    await mkdir(join(stepDirectory, 'report'), { recursive: true })
+    await writeJson(join(stepDirectory, 'output', 'gcd_postRouteLec_result.json'), {
+      status: 'proven',
+    })
+    await writeFile(join(stepDirectory, 'log', 'postRouteLec.log'), 'lec log', 'utf8')
+    await writeFile(join(stepDirectory, 'report', 'equiv_status.rpt'), 'status', 'utf8')
+    await writeJson(join(stepDirectory, 'subflow.json'), { subflow: [] })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const step = index.flow.steps[0]!
+
+    expect(step.directory).toBe(stepDirectory)
+    expect(step.resources.output.result).toMatchObject({
+      path: join(stepDirectory, 'output', 'gcd_postRouteLec_result.json'),
+      exists: true,
+      kind: 'output',
+    })
+    expect(step.resources.log.file).toMatchObject({
+      path: join(stepDirectory, 'log', 'postRouteLec.log'),
+      exists: true,
+      kind: 'log',
+    })
+    expect(step.resources.subflow.path).toMatchObject({ exists: true })
+    expect(step.resources.report['rpt:equiv_status.rpt']).toMatchObject({
+      path: join(stepDirectory, 'report', 'equiv_status.rpt'),
+      exists: true,
+    })
+    expect(step.resources.output.image).toBeUndefined()
+    expect(step.resources.output.def).toBeUndefined()
+  })
+
+  it('revalidates a proven LEC result against the current netlists', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'Synthesis', tool: 'yosys', state: 'Success' },
+      { name: 'filler', tool: 'ecc', state: 'Success' },
+      { name: 'postRouteLec', tool: 'yosys_lec', state: 'Success' },
+    ])
+    const stepDirectory = join(root, 'postRouteLec_yosys_lec')
+    // ECC chains the postRouteLec golden to the Synthesis output verilog.
+    const goldenPath = join(root, 'Synthesis_yosys', 'output', 'gcd_Synthesis.v.gz')
+    const gatePath = join(root, 'filler_ecc', 'output', 'gcd_filler.v.gz')
+    await mkdir(join(root, 'Synthesis_yosys', 'output'), { recursive: true })
+    await mkdir(join(root, 'filler_ecc', 'output'), { recursive: true })
+    await mkdir(join(stepDirectory, 'output'), { recursive: true })
+    const goldenText = 'module gcd; endmodule\n'
+    const gateText = 'gate-netlist-bytes'
+    await writeFile(goldenPath, goldenText, 'utf8')
+    await writeFile(gatePath, gateText, 'utf8')
+    const digest = (content: string) => createHash('sha256').update(content).digest('hex')
+    const resultPath = join(stepDirectory, 'output', 'gcd_postRouteLec_result.json')
+    const writeResult = (gate: string, gateContent: string) =>
+      writeJson(resultPath, {
+        status: 'proven',
+        golden_verilog: goldenPath,
+        gate_verilog: gate,
+        golden_sha256: digest(goldenText),
+        gate_sha256: digest(gateContent),
+        golden_size_bytes: Buffer.byteLength(goldenText),
+        gate_size_bytes: Buffer.byteLength(gateContent),
+      })
+    await writeResult(gatePath, gateText)
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const proven = await service.resolveStepInfo({ step: 'postRouteLec', id: 'analysis' })
+    expect(proven.info['lec status']).toBe('proven')
+    expect(proven.info['lec result']).toBe(resultPath)
+
+    // Same path, changed contents.
+    await writeFile(gatePath, `${gateText}-changed`, 'utf8')
+    const staleContent = await service.resolveStepInfo({
+      step: 'postRouteLec',
+      id: 'analysis',
+    })
+    expect(staleContent.info['lec status']).toBe('stale')
+
+    // Restored contents, but the recorded gate is no longer the current input.
+    await writeFile(gatePath, gateText, 'utf8')
+    const otherPath = join(root, 'filler_ecc', 'output', 'gcd_other.v.gz')
+    await writeFile(otherPath, gateText, 'utf8')
+    await writeResult(otherPath, gateText)
+    const stalePath = await service.resolveStepInfo({
+      step: 'postRouteLec',
+      id: 'analysis',
+    })
+    expect(stalePath.info['lec status']).toBe('stale')
+
+    await writeJson(resultPath, { status: 'incomplete' })
+    const incomplete = await service.resolveStepInfo({
+      step: 'postRouteLec',
+      id: 'analysis',
+    })
+    expect(incomplete.info['lec status']).toBe('incomplete')
+  })
+
+  it('reports a missing LEC result when the step never ran', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'postRouteLec', tool: 'yosys_lec', state: 'Unstart' },
+    ])
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({ step: 'postRouteLec', id: 'analysis' })
+    expect(result.info['lec status']).toBe('missing')
   })
 
   it('exposes workspace-level view package tech resources from the design view directory', async () => {

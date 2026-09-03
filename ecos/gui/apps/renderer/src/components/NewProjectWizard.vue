@@ -1616,6 +1616,7 @@ type FlowStepName =
   | 'drc'
   | 'lvs'
   | 'filler'
+  | 'postRouteLec'
   | 'RCX'
   | 'sta'
   | 'Harden'
@@ -1758,6 +1759,7 @@ const hardenFlowSteps: Array<{ name: FlowStepName; description: string }> = [
   { name: 'drc', description: 'Design rule checking.' },
   { name: 'lvs', description: 'Layout versus netlist connectivity.' },
   { name: 'filler', description: 'Filler insertion.' },
+  { name: 'postRouteLec', description: 'Post-route logic equivalence check.' },
   { name: 'RCX', description: 'Parasitic extraction.' },
   { name: 'sta', description: 'Static timing analysis.' },
   { name: 'Harden', description: 'Final harden output.' },
@@ -2056,11 +2058,13 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     drc: 'drc',
     lvs: 'lvs',
     filler: 'filler',
+    postlec: 'postRouteLec',
+    postroutelec: 'postRouteLec',
     rcx: 'RCX',
     sta: 'sta',
     harden: 'Harden',
   }
-  const alias = aliases[candidate.toLowerCase()]
+  const alias = aliases[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
   const validSteps: FlowStepName[] = [
     'Synthesis',
@@ -2073,6 +2077,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     'drc',
     'lvs',
     'filler',
+    'postRouteLec',
     'RCX',
     'sta',
     'Harden',

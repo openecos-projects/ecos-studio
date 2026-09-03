@@ -406,6 +406,7 @@ describe('AgentProviderProcessRuntime', () => {
                 'drc',
                 'lvs',
                 'filler',
+                'postRouteLec',
                 'RCX',
                 'sta',
                 'Harden',

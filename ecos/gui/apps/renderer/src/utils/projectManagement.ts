@@ -421,11 +421,19 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   cts: 'CTS',
   legalization: 'Legal',
   legal: 'Legal',
+  // Timing Opt runs between Legal and Route; report it under the preceding
+  // coarse step. parseWorkspaceFlowStateMap merges duplicate coarse entries
+  // failure-first so a failed Timing Opt still fails the workspace.
+  timingopt: 'Legal',
+  timingoptimization: 'Legal',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  // postRouteLec runs between Filler and RCX; same failure-first rationale.
+  postlec: 'Filler',
+  postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
   gds: 'Harden',
@@ -1134,7 +1142,14 @@ export function parseWorkspaceFlowStateMap(
     const flowStep = knownFlowStep(name)
     if (!flowStep || !status) return stateMap
 
-    stateMap[flowStep] = status
+    // Timing Opt and postRouteLec alias onto the preceding coarse step; keep
+    // the earlier entry unless the aliased check is more urgent (failed, or
+    // running over a finished stage), so the gate stays visible without
+    // hiding an unstarted one behind a completed predecessor.
+    const existing = stateMap[flowStep]
+    const overrides =
+      status === 'failed' || (status === 'running' && existing !== 'failed')
+    if (existing === undefined || overrides) stateMap[flowStep] = status
     return stateMap
   }, {})
 }
@@ -2091,7 +2106,13 @@ function normalizeFlowStep(step: FlowStep | string): FlowStep {
 
 function knownFlowStep(step: FlowStep | string): FlowStep | null {
   if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
+  return (
+    FLOW_STEP_ALIASES[
+      String(step)
+        .toLowerCase()
+        .replace(/[_\-\s]+/g, '')
+    ] ?? null
+  )
 }
 
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {

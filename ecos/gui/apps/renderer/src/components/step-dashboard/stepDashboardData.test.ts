@@ -9,6 +9,7 @@ import {
   drcInsights,
   floorplanInsights,
   hardenOutputInsights,
+  lecInsights,
   lvsInsights,
   mapHighlights,
   POST_SYNTHESIS_TIMING_CORNER,
@@ -127,6 +128,121 @@ describe('step dashboard data', () => {
       })?.entities,
     ).toEqual([expect.objectContaining({ entity: 'Net', difference: 0 })])
     expect(lvsInsights({ lvs: { lvs_count: 0 }, run: { state: 'Success' } })).toBeNull()
+  })
+
+  it('parses the LEC result JSON with status, fingerprints, and sizes', () => {
+    const proven = lecInsights({
+      status: 'proven',
+      golden_verilog: '/ws/Synthesis_yosys/output/gcd_Synthesis_golden.v',
+      gate_verilog: '/ws/filler_ecc/output/gcd_filler.v.gz',
+      golden_sha256: 'a'.repeat(64),
+      gate_sha256: 'b'.repeat(64),
+      golden_size_bytes: 512,
+      gate_size_bytes: 2048,
+      equiv_status: '/ws/postRouteLec_yosys_lec/report/equiv_status.rpt',
+      status_report: '/ws/postRouteLec_yosys_lec/report/run_lec_status.rpt',
+    })
+    expect(proven).toEqual({
+      status: 'proven',
+      tone: 'good',
+      metrics: [
+        {
+          id: 'lec-golden-netlist',
+          label: 'Golden netlist',
+          value: '/ws/Synthesis_yosys/output/gcd_Synthesis_golden.v',
+        },
+        {
+          id: 'lec-gate-netlist',
+          label: 'Gate netlist',
+          value: '/ws/filler_ecc/output/gcd_filler.v.gz',
+        },
+        { id: 'lec-golden-sha256', label: 'Golden SHA-256', value: 'a'.repeat(64) },
+        { id: 'lec-gate-sha256', label: 'Gate SHA-256', value: 'b'.repeat(64) },
+        { id: 'lec-golden-size', label: 'Golden size', value: '512 B' },
+        { id: 'lec-gate-size', label: 'Gate size', value: '2.0 KiB' },
+      ],
+    })
+
+    expect(lecInsights({ status: 'incomplete' })).toEqual({
+      status: 'incomplete',
+      tone: 'bad',
+      metrics: [],
+    })
+    expect(lecInsights({})).toEqual({
+      status: 'unavailable',
+      tone: 'neutral',
+      metrics: [],
+    })
+    expect(lecInsights({ status: 'proven' })).toEqual({
+      status: 'unavailable',
+      tone: 'neutral',
+      metrics: [],
+    })
+    expect(
+      lecInsights({
+        status: 'proven',
+        golden_verilog: '/ws/golden.v',
+        gate_verilog: '/ws/gate.v',
+        golden_sha256: 'a'.repeat(64),
+        gate_sha256: 'b'.repeat(64),
+      }),
+    ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
+    expect(
+      lecInsights({
+        status: 'proven',
+        golden_verilog: '/ws/golden.v',
+        gate_verilog: '/ws/gate.v',
+        golden_sha256: 'not-a-digest',
+        gate_sha256: 'b'.repeat(64),
+        golden_size_bytes: 512,
+        gate_size_bytes: 2048,
+      }),
+    ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
+    expect(
+      lecInsights({
+        status: 'proven',
+        golden_verilog: '/ws/golden.v',
+        gate_verilog: '/ws/gate.v',
+        golden_sha256: 'a'.repeat(64),
+        gate_sha256: 'b'.repeat(64),
+        golden_size_bytes: -1,
+        gate_size_bytes: 2.5,
+      }),
+    ).toMatchObject({ status: 'unavailable', tone: 'neutral' })
+    expect(lecInsights(null)).toBeNull()
+    expect(lecInsights('nope')).toBeNull()
+  })
+
+  it('defers to the backend-revalidated LEC status when provided', () => {
+    const completePayload = {
+      status: 'proven',
+      golden_verilog: '/ws/golden.v',
+      gate_verilog: '/ws/gate.v',
+      golden_sha256: 'a'.repeat(64),
+      gate_sha256: 'b'.repeat(64),
+      golden_size_bytes: 512,
+      gate_size_bytes: 2048,
+    }
+    expect(lecInsights(completePayload, 'proven')).toMatchObject({
+      status: 'proven',
+      tone: 'good',
+    })
+    expect(lecInsights(completePayload, 'stale')).toMatchObject({
+      status: 'stale',
+      tone: 'warn',
+    })
+    expect(lecInsights(completePayload, 'missing')).toMatchObject({
+      status: 'unavailable',
+      tone: 'neutral',
+    })
+    expect(lecInsights(completePayload, 'incomplete')).toMatchObject({
+      status: 'incomplete',
+      tone: 'bad',
+    })
+    // A backend claim of proven still requires the complete payload shape.
+    expect(lecInsights({ status: 'incomplete' }, 'proven')).toMatchObject({
+      status: 'unavailable',
+    })
   })
 
   it('uses the final routing iteration rather than an intermediate result', () => {

@@ -261,6 +261,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'drc',
       'lvs',
       'filler',
+      'postRouteLec',
       'RCX',
       'sta',
       'Harden',
@@ -270,6 +271,12 @@ describe('NewProjectWizard workspace wizard redesign', () => {
 
     expect(source).toContain('selectedFlowSteps')
     expect(source).toContain('setFlowBoundary')
+  })
+
+  it('normalizes flow step aliases case- and separator-insensitively like ECC', () => {
+    expect(source).toContain("postlec: 'postRouteLec'")
+    expect(source).toContain("postroutelec: 'postRouteLec'")
+    expect(source).toContain('candidate.toLowerCase().replace(/[_\\-\\s]+/g,')
   })
 
   it('uses neutral connector lines between flow setup step cards', () => {
