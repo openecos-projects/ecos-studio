@@ -42,18 +42,7 @@ function shouldUseSoftwareGpu(options: Omit<ConfigureGpuModeOptions, 'app'>): bo
 }
 
 export function configureGpuMode(options: ConfigureGpuModeOptions): void {
-  const isWsl =
-    options.env.WSL_DISTRO_NAME !== undefined || options.env.WSL_INTEROP !== undefined
-
-  if (isWsl && options.platform === 'linux') {
-    options.app.commandLine.appendSwitch(
-      'disable-features',
-      'Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VizDisplayCompositor',
-    )
-    options.app.commandLine.appendSwitch('disable-gpu-sandbox')
-  }
-
-  if (!shouldUseSoftwareGpu(options) && !isWsl) {
+  if (!shouldUseSoftwareGpu(options)) {
     return
   }
 
