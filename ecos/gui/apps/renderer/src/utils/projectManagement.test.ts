@@ -581,16 +581,18 @@ describe('project management V3 model', () => {
   })
 
   it('maps Timing Opt and post-route LEC states onto the preceding coarse step', () => {
-    expect(
-      parseWorkspaceFlowStateMap(
-        JSON.stringify({
-          steps: [
-            { name: 'filler', state: 'Success' },
-            { name: 'postRouteLec', state: 'Unstart' },
-          ],
-        }),
-      ),
-    ).toEqual({ Filler: 'success' })
+    // A pending gate is more urgent than the completed predecessor: the
+    // workspace stays in_progress instead of claiming success.
+    const lecPending = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'filler', state: 'Success' },
+          { name: 'postRouteLec', state: 'Unstart' },
+        ],
+      }),
+    )
+    expect(lecPending).toEqual({ Filler: 'unstart' })
+    expect(workspaceStatusFromFlow('success', lecPending)).toBe('in_progress')
 
     expect(
       parseWorkspaceFlowStateMap(
