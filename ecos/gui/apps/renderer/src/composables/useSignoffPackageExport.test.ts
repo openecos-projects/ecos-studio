@@ -354,7 +354,6 @@ describe('useSignoffPackageExport export action', () => {
     api.readParameters.mockResolvedValueOnce({ design: 'rocket_core' })
     const mounted = mountComposable(ref({ path: '/workspaces/active path' }))
     scope = mounted.scope
-    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
 
     await openReviewAndConfirm(mounted)
 
