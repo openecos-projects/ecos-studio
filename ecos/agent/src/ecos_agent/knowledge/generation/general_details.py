@@ -195,6 +195,7 @@ def _claim_contract(
                 "feature_id": feature_id,
                 "op": "true",
                 "rule_ref": "rules.anti_condition.absent.v1",
+                "required": False,
             }
             for feature_id in statement["anti_conditions"]
         ],

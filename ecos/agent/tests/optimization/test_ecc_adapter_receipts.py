@@ -59,6 +59,35 @@ def test_adapter_rejects_application_receipt_from_foreign_context(
         adapter.wait_for_terminal("operation-1")
 
 
+def test_adapter_rejects_application_receipt_from_foreign_parameter_card(
+    tmp_path: Path,
+) -> None:
+    native, evidence, paths = _write_candidate_evidence(tmp_path)
+    native["context"]["parameter_card_sha256"] = "sha256:" + "b" * 64
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v1.json")
+    receipt_path.write_text(json.dumps(native), encoding="utf-8")
+    evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
+    rpc = _FakeEccRpc(
+        _running_operation(),
+        terminal_response={
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "state": "succeeded",
+            "result": {**evidence, "parameterApplicationReceipt": native},
+        },
+    )
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
+    )
+    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
+
+    with pytest.raises(OptimizationEccAdapterError, match="parameter card"):
+        adapter.wait_for_terminal("operation-1")
+
+
 def test_adapter_rejects_application_receipt_from_foreign_seed(tmp_path: Path) -> None:
     native, evidence, _ = _write_candidate_evidence(tmp_path)
     native["context"]["seed"] = 18

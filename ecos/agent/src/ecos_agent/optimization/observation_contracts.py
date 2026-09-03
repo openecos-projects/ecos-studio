@@ -62,9 +62,8 @@ class StageEvidenceFeature(_ContractModel):
     def validate_evidence_ref(cls, value: str) -> str:
         path, separator, fragment = value.partition("#")
         if (
-            not separator
-            or not fragment.startswith("/hotspots/")
-            or not safe_relative_ref(path)
+            not safe_relative_ref(path)
+            or (separator and not fragment.startswith("/hotspots/"))
         ):
             raise ValueError("stage evidence reference is invalid")
         return value

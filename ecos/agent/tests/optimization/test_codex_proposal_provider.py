@@ -542,6 +542,8 @@ def test_optimization_planner_v2_uses_closed_object_schema(
     while pending:
         value = pending.pop()
         if isinstance(value, dict):
+            if "$ref" in value:
+                assert set(value) == {"$ref"}
             if value.get("type") == "object":
                 assert value.get("additionalProperties") is False
             pending.extend(value.values())
@@ -617,6 +619,42 @@ def test_optimization_planner_v2_schema_exposes_all_domains() -> None:
     assert "supplied current observation" in schema["properties"]["observation_refs"][
         "description"
     ]
+
+
+def test_optimization_planner_v2_schema_keeps_compiled_action_binding_atomic() -> None:
+    domain = _domain()
+    schema = _optimization_proposal_output_schema_v2(
+        domain,
+        ("increase",),
+        (
+            {
+                "claim_ref": {"entity_id": "strategy-1", "chunk_sha256": CHUNK_HASH},
+                "claim_sha256": HASH,
+                "binding_id": "binding-1",
+                "binding_sha256": HASH,
+                "knob_id": "place.target_density",
+                "direction": "increase",
+                "effective_domain_sha256": domain.snapshot_sha256,
+                "allowed_requested_values": (0.25,),
+            },
+        ),
+    )
+
+    action = schema["properties"]["action"]["anyOf"][0]["properties"]
+    assert action["claim_id"]["const"] == "strategy-1"
+    assert action["claim_sha256"]["const"] == HASH
+    assert action["binding_id"]["const"] == "binding-1"
+    assert action["binding_sha256"]["const"] == HASH
+    assert action["knob_id"]["const"] == "place.target_density"
+    assert action["direction"]["const"] == "increase"
+    assert action["requested_value"]["enum"] == [0.25]
+    assert action["effective_domain_sha256"]["const"] == domain.snapshot_sha256
+    assert action["threshold_refs"] == {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 0,
+        "maxItems": 0,
+    }
 
 
 def test_optimization_planner_v2_rejects_untrusted_domain(

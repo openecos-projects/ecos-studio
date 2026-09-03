@@ -250,6 +250,14 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 ))
                 for domain in domains
             ),
+            (
+                tuple(
+                    action.model_dump(mode="json")
+                    for action in context.supported_action_view.actions
+                )
+                if context.supported_action_view is not None
+                else ()
+            ),
         )
         envelope_payload = {
             "schema_version": "ecos.optimization_planning_provider_envelope.v1",

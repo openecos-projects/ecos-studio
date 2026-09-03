@@ -60,6 +60,22 @@ def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
     validate_numeric_proposal(bound, domain)
 
 
+def test_v2_proposal_expected_effect_uses_controller_objective_metrics() -> None:
+    with pytest.raises(ValueError, match="route_dr_total_violation_count"):
+        NumericProposalActionV2(
+            knob_id="place.cell_padding_x",
+            direction="increase",
+            requested_value=2,
+            effective_domain_sha256=HASH,
+            expected_effects=(
+                {
+                    "metric_id": "place_congestion_egr_overflow_total",
+                    "direction": "decrease",
+                },
+            ),
+        )
+
+
 def test_v2_validator_binds_action_to_compiled_knowledge_support() -> None:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     domain = compile_effective_domain(

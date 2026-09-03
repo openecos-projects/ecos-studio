@@ -103,6 +103,7 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
         "overflow_map",
         "cell_density_map",
     }
+    assert all(not predicate.required for predicate in spreading.anti_predicates)
     assert ("place.target_density", "decrease") in {
         (action.knob_id, action.direction.value) for action in binding.actions
     }

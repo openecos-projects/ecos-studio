@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ecos_agent.optimization.ecc.evidence import OptimizationEccAdapterError
 
+_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(

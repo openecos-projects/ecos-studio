@@ -368,6 +368,7 @@ def _optimization_proposal_output_schema_v2(
     | EffectiveDomainSnapshot,
     legal_directions: Sequence[tuple[str, tuple[str, ...]]]
     | tuple[str, ...],
+    supported_actions: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Schema for the opt-in exact-value proposal contract."""
     domains = _normalize_v2_domains(domains)
@@ -419,12 +420,81 @@ def _optimization_proposal_output_schema_v2(
         "requested_value": "Select one allowed requested value for that knob.",
         "effective_domain_sha256": "Use the hash of that knob's effective domain.",
     }
-    for field, description in action_descriptions.items():
-        action_schema["properties"][field]["description"] = description
+    schema["$defs"]["OptimizationKnob"]["description"] = action_descriptions["knob_id"]
+    schema["$defs"]["StrategyDirection"]["description"] = action_descriptions[
+        "direction"
+    ]
+    for field in ("requested_value", "effective_domain_sha256"):
+        action_schema["properties"][field]["description"] = action_descriptions[field]
     schema["$defs"]["OptimizationKnob"]["enum"] = list(allowed_by_knob)
     schema["$defs"]["StrategyDirection"]["enum"] = sorted(
         {direction for directions in direction_map.values() for direction in directions}
     )
+    if supported_actions:
+        domains_by_knob = {domain.knob_id.value: domain for domain in domains}
+        action_variants: list[dict[str, Any]] = []
+        for supported in supported_actions:
+            knob_id = supported.get("knob_id")
+            direction = supported.get("direction")
+            domain = domains_by_knob.get(knob_id)
+            allowed = supported.get("allowed_requested_values")
+            if (
+                domain is None
+                or direction not in direction_map.get(knob_id, ())
+                or not isinstance(allowed, (tuple, list))
+            ):
+                continue
+            values = [value for value in allowed_by_knob[knob_id] if value in allowed]
+            if not values:
+                continue
+            claim_ref = supported.get("claim_ref")
+            claim_id = (
+                claim_ref.get("entity_id") if isinstance(claim_ref, Mapping) else None
+            )
+            variant = copy.deepcopy(action_schema)
+            for field, value in (
+                ("claim_id", claim_id),
+                ("claim_sha256", supported.get("claim_sha256")),
+                ("binding_id", supported.get("binding_id")),
+                ("binding_sha256", supported.get("binding_sha256")),
+                ("knob_id", knob_id),
+                ("direction", direction),
+                ("effective_domain_sha256", domain.snapshot_sha256),
+            ):
+                variant["properties"][field] = {"type": "string", "const": value}
+            variant["properties"]["requested_value"] = {
+                "type": (
+                    "boolean"
+                    if all(type(value) is bool for value in values)
+                    else "integer"
+                    if all(type(value) is int for value in values)
+                    else "number"
+                ),
+                "enum": values,
+                "description": action_descriptions["requested_value"],
+            }
+            threshold_ids = [threshold.threshold_id for threshold in domain.thresholds]
+            variant["properties"]["threshold_refs"] = {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    **({"enum": threshold_ids} if threshold_ids else {}),
+                },
+                "minItems": len(threshold_ids),
+                "maxItems": len(threshold_ids),
+            }
+            action_variants.append(variant)
+        if not action_variants:
+            raise CodexProviderError(
+                "optimization proposal v2 has no compiled action output",
+                failure_class="missing_input",
+            )
+        schema["properties"]["action"] = {
+            "anyOf": [*action_variants, {"type": "null"}],
+            "description": "Use one fully paired compiled action, or null.",
+        }
+        _require_all_schema_properties(schema)
+        return schema
     value_schema = schema["$defs"]["NumericProposalActionV2"]["properties"][
         "requested_value"
     ]

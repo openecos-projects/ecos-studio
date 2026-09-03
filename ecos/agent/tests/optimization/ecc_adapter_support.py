@@ -32,7 +32,7 @@ from ecos_agent.optimization.ecc.adapter import (
     _step_render_ack,
 )
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
-from ecos_agent.optimization.parameters.semantics import load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
@@ -170,6 +170,7 @@ def _native_receipt_payload(
             "stage": "place",
             "lattice_version": "ecos.optimization_lattice.v1",
             "context_sha256": HASH,
+            "parameter_card_sha256": card_hash(card),
             "seed": 17,
             "ecc_revision": "ecc-test-revision",
         },

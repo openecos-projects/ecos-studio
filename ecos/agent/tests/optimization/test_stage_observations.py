@@ -116,6 +116,32 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
     assert repeated.evidence_manifest_sha256 == observation.evidence_manifest_sha256
 
 
+def test_stage_observation_publishes_hash_bound_place_map_availability(
+    frozen_workspace: Path,
+) -> None:
+    evidence_files = {
+        "overflow_map": "place_dreamplace/feature/egr_congestion_map/place_egr_union_overflow.csv",
+        "egr_or_rudy_map": "place_dreamplace/feature/RUDY_map/place_rudy_union.csv",
+        "cell_density_map": "place_dreamplace/feature/density_map/place_allcell_density.csv",
+        "net_density_map": "place_dreamplace/feature/density_map/place_allnet_density.csv",
+        "pin_density_map": "place_dreamplace/feature/density_map/place_allcell_pin_density.csv",
+        "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
+    }
+    for relative_path in evidence_files.values():
+        path = frozen_workspace / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("0,1\n", encoding="utf-8")
+
+    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    features = {item.feature_id: item for item in observation.state_evidence}
+
+    for feature_id, relative_path in evidence_files.items():
+        feature = features[feature_id]
+        assert feature.value is True
+        assert feature.evidence_ref == relative_path
+        assert feature.evidence_sha256 == file_sha256(frozen_workspace / relative_path)
+
+
 def test_stage_observation_rejects_incomplete_and_unsafe_workspace_evidence(
     frozen_workspace: Path,
     tmp_path: Path,

@@ -54,6 +54,14 @@ _STAGE_DIRECTORIES = {
     ECCStepName.STA: "sta_ecc",
     ECCStepName.HARDEN: "Harden_ecc",
 }
+_PLACE_STATE_EVIDENCE_FILES = {
+    "overflow_map": "place_dreamplace/feature/egr_congestion_map/place_egr_union_overflow.csv",
+    "egr_or_rudy_map": "place_dreamplace/feature/RUDY_map/place_rudy_union.csv",
+    "cell_density_map": "place_dreamplace/feature/density_map/place_allcell_density.csv",
+    "net_density_map": "place_dreamplace/feature/density_map/place_allnet_density.csv",
+    "pin_density_map": "place_dreamplace/feature/density_map/place_allcell_pin_density.csv",
+    "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
+}
 _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
 _TERMINAL_FLOW_STEPS = (
     ECCStepName.PLACEMENT,
@@ -112,12 +120,18 @@ def build_stage_observation(
     metrics_payload = _read_json(root, metrics_path)
     metrics = _qor_metrics(metrics_payload)
     hotspots_path = f"{_STAGE_DIRECTORIES[canonical_stage]}/analysis/qor_hotspots.json"
-    state_evidence = _hotspot_state_evidence(root, hotspots_path)
+    state_evidence = (
+        *_hotspot_state_evidence(root, hotspots_path),
+        *_place_map_state_evidence(root, canonical_stage),
+    )
+    evidence_paths = tuple(
+        dict.fromkeys(item.evidence_ref.partition("#")[0] for item in state_evidence)
+    )
     manifest_paths = (
         "home/flow.json",
         "home/parameters.json",
         metrics_path,
-        *((hotspots_path,) if state_evidence else ()),
+        *evidence_paths,
     )
     manifest = build_optimization_artifact_manifest(
         root,
@@ -176,6 +190,23 @@ def _hotspot_state_evidence(
                 "stage hotspot evidence is invalid"
             ) from exc
     return tuple(features)
+
+
+def _place_map_state_evidence(
+    root: Path, stage: ECCStepName
+) -> tuple[StageEvidenceFeature, ...]:
+    if stage != ECCStepName.PLACEMENT:
+        return ()
+    return tuple(
+        StageEvidenceFeature(
+            feature_id=feature_id,
+            value=True,
+            evidence_sha256=file_sha256(_workspace_path(root, relative_path)),
+            evidence_ref=relative_path,
+        )
+        for feature_id, relative_path in _PLACE_STATE_EVIDENCE_FILES.items()
+        if _is_file(root, relative_path)
+    )
 
 
 def build_terminal_observation(workspace_root: Path) -> TerminalObservation:

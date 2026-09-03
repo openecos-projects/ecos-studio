@@ -26,6 +26,7 @@ from ecos_agent.optimization.contracts import (
     HistoryReference,
     KnowledgeReference,
     ObservationReference,
+    ObjectiveMetric,
     OptimizationKnob,
     OptimizationTaskMemoryReference,
     ProposalContextRef,
@@ -552,7 +553,7 @@ class ParameterApplicationReceipt(_Model):
 
 
 class ExpectedEffectV2(_Model):
-    metric_id: str
+    metric_id: ObjectiveMetric
     direction: Literal["increase", "decrease", "unchanged", "unknown"]
 
 

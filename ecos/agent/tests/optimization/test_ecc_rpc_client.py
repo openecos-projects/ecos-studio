@@ -81,6 +81,23 @@ def test_stdio_client_exposes_ecc_revision(monkeypatch, tmp_path: Path) -> None:
     assert client.ecc_revision() == "ecc-test-revision"
 
 
+def test_stdio_client_opens_workspace(monkeypatch, tmp_path: Path) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda method, params, *, timeout_seconds: {
+            "workspaceId": "workspace-1",
+            "directory": str(tmp_path.resolve()),
+        },
+    )
+
+    assert client.open_workspace(tmp_path) == "workspace-1"
+
+
 def test_stdio_client_allows_candidate_resume(monkeypatch, tmp_path: Path) -> None:
     executable = tmp_path / "ecc"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")

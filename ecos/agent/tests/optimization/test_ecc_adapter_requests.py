@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from ecos_agent.optimization.contracts import (
+    OptimizationKnob,
     RequestedKnobValue,
     StrategyDirection,
 )
@@ -13,9 +14,11 @@ from ecos_agent.optimization.ecc.adapter import (
     EccCandidateRerunAdapter,
     OptimizationEccAdapterError,
 )
+from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 CHUNK_HASH = "b" * 64
+CARD_HASH = card_hash(load_parameter_cards()[OptimizationKnob.TARGET_DENSITY])
 
 
 
@@ -54,6 +57,7 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
                 "executionScope": "full_flow",
                 "idempotencyKey": "episode-1.intervention-1",
                 "contextSha256": HASH,
+                "parameterCardSha256": CARD_HASH,
                 "seed": 17,
             },
         ),
@@ -80,6 +84,7 @@ def test_adapter_resumes_only_the_bound_existing_candidate() -> None:
                 "candidateId": "candidate-0c4c4b249d945101-intervention-1",
                 "idempotencyKey": "episode-1.intervention-1.resume",
                 "contextSha256": HASH,
+                "parameterCardSha256": CARD_HASH,
                 "seed": 17,
             },
         ),

@@ -32,11 +32,11 @@ from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 from ecos_agent.optimization.parameters.semantics import (
     ParameterSemanticsError,
+    card_hash,
     load_parameter_cards,
     validate_application_receipt,
 )
 
-_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
@@ -148,6 +148,9 @@ class EccCandidateRerunAdapter:
             "candidateId": candidate_id,
             "idempotencyKey": idempotency_key,
             "contextSha256": context_sha256,
+            "parameterCardSha256": card_hash(
+                load_parameter_cards()[requested.knob_id]
+            ),
             "seed": seed,
         }
         method = "candidate.resume" if patch is None else "candidate.rerun"
@@ -421,6 +424,12 @@ class EccCandidateRerunAdapter:
             )
         self._validate_receipt_result_binding(result, raw, candidate_ref)
         cards = load_parameter_cards()
+        if receipt.context.get("parameter_card_sha256") != card_hash(
+            cards[requested.knob_id]
+        ):
+            raise OptimizationEccAdapterError(
+                "application receipt parameter card does not match"
+            )
         try:
             validate_application_receipt(receipt, cards)
         except (ParameterSemanticsError, ValueError) as exc:
@@ -562,6 +571,7 @@ def _normalize_receipt_payload(value: object) -> object:
 from ecos_agent.optimization.ecc.rpc_client import (  # noqa: E402
     EccContentLengthRpcClient,
     _ContentLengthDecoder,
+    _ID,
     _candidate_id,
     _safe_rpc_error_detail,
     _step_render_ack,
