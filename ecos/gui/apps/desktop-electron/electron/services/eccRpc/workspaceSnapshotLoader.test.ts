@@ -157,7 +157,7 @@ describe('WorkspaceSnapshotLoader', () => {
     const directory = createWorkspace()
     const external = join(directory, 'external.toml')
     writeFileSync(external, '[params]\ndesign = "external"\n')
-    symlinkSync(external, join(directory, 'home', 'ecc.toml'))
+    symlinkSync(external, join(directory, 'home', 'params.toml'))
     writeFileSync(join(directory, 'home', 'home.json'), '{}')
     writeFileSync(join(directory, 'home', 'flow.json'), JSON.stringify({ steps: [] }))
 
@@ -171,7 +171,10 @@ describe('WorkspaceSnapshotLoader', () => {
     const external = mkdtempSync(join(tmpdir(), 'ecos-snapshot-external-'))
     temporaryDirectories.push(external)
     mkdirSync(join(external, 'home'))
-    writeFileSync(join(external, 'home', 'ecc.toml'), '[params]\ndesign = "external"\n')
+    writeFileSync(
+      join(external, 'home', 'params.toml'),
+      '[params]\ndesign = "external"\n',
+    )
     rmSync(join(directory, 'home'), { recursive: true, force: true })
     symlinkSync(join(external, 'home'), join(directory, 'home'))
 

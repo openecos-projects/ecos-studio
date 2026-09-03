@@ -565,7 +565,7 @@ async function materializeWorkspaceRerunParameterWrites(
     writesByFile.set(write.file, fileWrites)
   }
   for (const [file, fileWrites] of writesByFile) {
-    if (file === 'home/ecc.toml' || file === 'home/parameters.json') {
+    if (file === 'home/params.toml' || file === 'home/parameters.json') {
       await materializeParameterSurfaceWrites(workspace, fileWrites)
       continue
     }
@@ -584,7 +584,7 @@ async function materializeWorkspaceRerunParameterWrites(
 
 /**
  * Apply `surface: 'parameters'` writes to the workspace configuration that
- * actually exists on disk: `home/ecc.toml` when present, `home/parameters.json`
+ * actually exists on disk: `home/params.toml` when present, `home/parameters.json`
  * otherwise. The contract's `file` field names the format the Agent saw; disk
  * reality wins when the two disagree, and the `json_path` keys are interpreted
  * in the on-disk file's vocabulary (display keys for JSON, flat snake_case
@@ -597,7 +597,7 @@ async function materializeParameterSurfaceWrites(
   const location = await locateWorkspaceParametersFile(workspace)
   if (!location) {
     throw new Error(
-      `Workspace rerun parameter file is invalid: neither home/ecc.toml nor home/parameters.json exists`,
+      `Workspace rerun parameter file is invalid: neither home/params.toml nor home/parameters.json exists`,
     )
   }
   const locationStats = await lstat(location.path)

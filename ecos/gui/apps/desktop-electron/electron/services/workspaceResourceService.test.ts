@@ -149,12 +149,12 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('builds the resource index from home/ecc.toml workspaces', async () => {
+  it('builds the resource index from home/params.toml workspaces', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
     await mkdir(join(root, 'place_ecc', 'output'), { recursive: true })
     await writeFile(
-      join(root, 'home', 'ecc.toml'),
+      join(root, 'home', 'params.toml'),
       [
         '[design]',
         'name = "gcd"',
@@ -197,7 +197,7 @@ describe('WorkspaceResourceService', () => {
       frequency_max: 100.0,
     })
     expect(index.home.parametersJson).toMatchObject({
-      path: join(root, 'home', 'ecc.toml'),
+      path: join(root, 'home', 'params.toml'),
       exists: true,
       kind: 'parameters',
     })
@@ -877,7 +877,7 @@ describe('WorkspaceResourceService', () => {
     expect(result.message).toEqual(
       expect.arrayContaining([
         `Workspace step not found: place`,
-        `Missing workspace parameters: ${join(root, 'home', 'ecc.toml')} or ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace parameters: ${join(root, 'home', 'params.toml')} or ${join(root, 'home', 'parameters.json')}`,
         `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
       ]),
     )
@@ -986,7 +986,7 @@ describe('WorkspaceResourceService', () => {
     expect(index.flow.steps).toEqual([])
     expect(index.messages).toEqual(
       expect.arrayContaining([
-        `Missing workspace parameters: ${join(root, 'home', 'ecc.toml')} or ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace parameters: ${join(root, 'home', 'params.toml')} or ${join(root, 'home', 'parameters.json')}`,
         `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
       ]),
     )
@@ -1007,11 +1007,11 @@ describe('WorkspaceResourceService', () => {
 })
 
 describe('writeParameters', () => {
-  it('writes parameters into home/ecc.toml and reports the format', async () => {
+  it('writes parameters into home/params.toml and reports the format', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
     await writeFile(
-      join(root, 'home', 'ecc.toml'),
+      join(root, 'home', 'params.toml'),
       [
         '[design]',
         'name = "gcd"',
@@ -1031,7 +1031,7 @@ describe('writeParameters', () => {
     })
 
     expect(result.format).toBe('toml')
-    expect(result.path).toBe(join(root, 'home', 'ecc.toml'))
+    expect(result.path).toBe(join(root, 'home', 'params.toml'))
     const parameters = await service.readParameters()
     expect(parameters).toMatchObject({ design: 'gcd', frequency_max: 150 })
   })
@@ -1058,7 +1058,7 @@ describe('writeParameters', () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
     await writeFile(
-      join(root, 'home', 'ecc.toml'),
+      join(root, 'home', 'params.toml'),
       ['[params]', 'design = "gcd"', ''].join('\n'),
       'utf8',
     )
@@ -1090,7 +1090,7 @@ describe('writeParameters', () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
     await writeFile(
-      join(root, 'home', 'ecc.toml'),
+      join(root, 'home', 'params.toml'),
       ['[params]', 'design = "gcd"', ''].join('\n'),
       'utf8',
     )

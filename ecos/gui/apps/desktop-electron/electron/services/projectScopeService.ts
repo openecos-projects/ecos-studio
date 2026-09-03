@@ -10,9 +10,9 @@ import { requireWindowScopeId } from './windowScopeContext'
 import { isPathWithinRoot } from './pathScope'
 
 const REQUIRED_PROJECT_FILES = ['flow.json']
-// A workspace persists its configuration as either home/ecc.toml (preferred)
+// A workspace persists its configuration as either home/params.toml (preferred)
 // or home/parameters.json (JSON workspaces, including ecc-fe).
-const WORKSPACE_CONFIG_FILES = ['ecc.toml', 'parameters.json']
+const WORKSPACE_CONFIG_FILES = ['params.toml', 'parameters.json']
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
   'sim_soc_root',

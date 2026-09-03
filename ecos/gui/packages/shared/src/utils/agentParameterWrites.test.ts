@@ -9,7 +9,7 @@ import {
 const densityWrite = (
   overrides: Partial<DesktopAgentWorkspaceParameterWrite> = {},
 ): DesktopAgentWorkspaceParameterWrite => ({
-  file: 'home/ecc.toml',
+  file: 'home/params.toml',
   json_path: ['target_density'],
   knob_id: 'place.target_density',
   surface: 'parameters',
@@ -86,7 +86,7 @@ describe('parameterWritesMatchPatch', () => {
         [{ knob_id: 'place.routability_opt', value: true }],
         [
           {
-            file: 'home/ecc.toml',
+            file: 'home/params.toml',
             json_path: ['routability_opt_flag'],
             knob_id: 'place.routability_opt',
             surface: 'parameters',
@@ -103,7 +103,7 @@ describe('parameterWritesMatchPatch', () => {
         [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
         [
           {
-            file: 'home/ecc.toml',
+            file: 'home/params.toml',
             json_path: ['die_area', 'utilitization'],
             knob_id: 'floorplan.utilitization',
             surface: 'parameters',

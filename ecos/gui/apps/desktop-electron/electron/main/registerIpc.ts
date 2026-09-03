@@ -180,6 +180,7 @@ export interface DesktopBridgeServices {
     readWorkspaceParameters(
       workspacePath: string,
     ): Promise<Record<string, unknown> | null>
+    hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean>
     editWorkspaceParameters(
       workspacePath: string,
       edits: { json_path: (string | number)[]; value: unknown }[],
@@ -1493,6 +1494,15 @@ export function registerIpc(
     desktopApiIpcChannels.workspaceReadWorkspaceParameters,
     async (_event, workspacePath) => {
       return await services.workspaceService.readWorkspaceParameters(
+        workspacePath as string,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceHasConfigShadow,
+    async (_event, workspacePath) => {
+      return await services.workspaceService.hasWorkspaceConfigShadow(
         workspacePath as string,
       )
     },

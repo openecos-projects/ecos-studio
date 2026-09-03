@@ -1,6 +1,6 @@
 /**
  * Mechanical normalization between display parameter keys and the
- * canonical flat snake_case vocabulary used by `home/ecc.toml`.
+ * canonical flat snake_case vocabulary used by `home/params.toml`.
  *
  * Mirrors `ecc/chipcompiler/data/parameter_keys.py` (normalize_key /
  * normalize_parameter_dict): strip `[unit]` suffixes, lowercase, fold

@@ -21,7 +21,7 @@ import {
   readOwnJsonPathSegment,
 } from '@ecos-studio/shared'
 
-export const WORKSPACE_CONFIG_BASENAME = 'ecc.toml'
+export const WORKSPACE_CONFIG_BASENAME = 'params.toml'
 export const JSON_PARAMETERS_BASENAME = 'parameters.json'
 
 export type WorkspaceParametersFormat = 'toml' | 'json'
@@ -68,7 +68,7 @@ async function isFile(path: string): Promise<boolean> {
 
 /**
  * Distinguish a missing preferred config from a dangling symlink or other
- * non-regular entry. `stat()` follows links, so a broken `home/ecc.toml`
+ * non-regular entry. `stat()` follows links, so a broken `home/params.toml`
  * would otherwise look absent and fall through to `parameters.json`.
  */
 async function assertPreferredConfigIsRegularFile(path: string): Promise<boolean> {
@@ -176,10 +176,21 @@ function hasValue(value: unknown): boolean {
 }
 
 /**
- * Locate the workspace's persisted parameters: `home/ecc.toml` (preferred)
+ * Locate the workspace's persisted parameters: `home/params.toml` (preferred)
  * first, `home/parameters.json` (JSON workspaces, including ecc-fe) as
  * fallback when the preferred file is absent.
  */
+/**
+ * Both the canonical TOML and the legacy JSON exist: the JSON is inert
+ * (the TOML wins) and the user should delete it — surfaced as a one-shot
+ * renderer toast by the parameters read path.
+ */
+export async function hasWorkspaceConfigShadow(root: string): Promise<boolean> {
+  const tomlPath = join(root, 'home', WORKSPACE_CONFIG_BASENAME)
+  if (!(await isFile(tomlPath))) return false
+  return isFile(join(root, 'home', JSON_PARAMETERS_BASENAME))
+}
+
 export async function locateWorkspaceParametersFile(
   root: string,
 ): Promise<WorkspaceParametersFileLocation | null> {
@@ -213,7 +224,7 @@ function assertTomlSectionShapes(document: Record<string, unknown>): void {
 }
 
 /**
- * Flatten an ecc.toml document into the canonical flat parameter payload.
+ * Flatten an params.toml document into the canonical flat parameter payload.
  * Mirrors ecc's `_merge_payload`: `[params]` is the base, then non-empty
  * `[design]`/`[pdk]` mirror values override their mapped parameter keys.
  * A workspace-relative `pdk_config` resolves against the workspace root.
@@ -868,7 +879,7 @@ export function mergePayloadIntoTomlDocument(
 
 /**
  * Persist workspace parameters. On a TOML workspace the payload is merged
- * into `home/ecc.toml`; on a JSON workspace (`parameters.json`, including
+ * into `home/params.toml`; on a JSON workspace (`parameters.json`, including
  * ecc-fe) the JSON file is rewritten as-is. Throws when neither file exists.
  *
  * When `authorizedLocation` is provided (a path already authorized and
@@ -891,7 +902,7 @@ export async function writeWorkspaceParameters(
   // Serialize per canonical config slot, not per raw root spelling or file:
   // equivalent roots ("/ws" vs "/ws/.", native vs slash-normalized) must
   // share one queue, and two operations must never interleave across the
-  // two formats (a JSON workspace can grow an ecc.toml mid-queue).
+  // two formats (a JSON workspace can grow an params.toml mid-queue).
   return await enqueueParameterWrite(
     await workspaceParameterWriteQueueKey(root, authorizedLocation),
     async () => {
@@ -900,7 +911,7 @@ export async function writeWorkspaceParameters(
       await assertWritable?.()
       assertFiniteNumbers(payload, location.path)
       // Re-locate at the head of the queue: when the preferred config changed
-      // while this operation waited (parameters.json -> ecc.toml migration),
+      // while this operation waited (parameters.json -> params.toml migration),
       // the write must land where subsequent reads will look.
       const onDisk = await locateWorkspaceParametersFile(root)
       if (!onDisk) {
@@ -1361,7 +1372,7 @@ function resolveExistingJsonPathSegment(
 
 /**
  * Apply existing-path-only edits to the workspace configuration that
- * actually exists on disk (`home/ecc.toml` preferred, `home/parameters.json`
+ * actually exists on disk (`home/params.toml` preferred, `home/parameters.json`
  * fallback). Edit paths are interpreted in the on-disk file's vocabulary:
  * display keys for JSON, and for TOML every string segment is canonicalized
  * through the ecc mechanical rule, so an agent emitting display-key paths

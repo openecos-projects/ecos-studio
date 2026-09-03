@@ -108,10 +108,33 @@ export async function readOptionalProjectTextFile(
 }
 
 /**
- * Read a workspace's persisted parameters (home/ecc.toml preferred,
+ * Read a workspace's persisted parameters (home/params.toml preferred,
  * home/parameters.json fallback) by workspace directory. The main process
  * owns the on-disk format; the renderer always gets a JSON object.
  */
+const shadowNotifiedWorkspaces = new Set<string>()
+
+/**
+ * One warn toast per workspace per session when both home/params.toml and
+ * home/parameters.json exist: the JSON is inert and deletable. The check is
+ * a cheap main-process probe riding the parameters read path.
+ */
+async function warnOnceOnConfigShadow(workspacePath: string): Promise<void> {
+  if (shadowNotifiedWorkspaces.has(workspacePath)) return
+  const workspace = getDesktopApi().workspace
+  if (typeof workspace.hasWorkspaceConfigShadow !== 'function') return
+  if (!(await workspace.hasWorkspaceConfigShadow(workspacePath))) return
+  shadowNotifiedWorkspaces.add(workspacePath)
+  const { useWorkspace } = await import('@/composables/useWorkspace')
+  useWorkspace().showToast({
+    severity: 'warn',
+    summary: 'Workspace configuration shadowed',
+    detail:
+      'home/params.toml wins over home/parameters.json; the legacy JSON is inert — delete it to silence this warning.',
+    life: 6000,
+  })
+}
+
 export async function readWorkspaceParametersFile(
   workspacePath: string,
 ): Promise<Record<string, unknown> | null> {
@@ -119,7 +142,9 @@ export async function readWorkspaceParametersFile(
   if (typeof workspace.readWorkspaceParameters !== 'function') {
     return null
   }
-  return await workspace.readWorkspaceParameters(workspacePath)
+  const parameters = await workspace.readWorkspaceParameters(workspacePath)
+  await warnOnceOnConfigShadow(workspacePath)
+  return parameters
 }
 
 export async function readProjectTextFileTail(

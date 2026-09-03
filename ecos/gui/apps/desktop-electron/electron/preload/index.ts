@@ -180,6 +180,8 @@ const desktopApi: DesktopApi = {
         desktopApiIpcChannels.workspaceReadWorkspaceParameters,
         workspacePath,
       ),
+    hasWorkspaceConfigShadow: (workspacePath: string) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceHasConfigShadow, workspacePath),
     editWorkspaceParameters: (workspacePath, edits) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceEditWorkspaceParameters,

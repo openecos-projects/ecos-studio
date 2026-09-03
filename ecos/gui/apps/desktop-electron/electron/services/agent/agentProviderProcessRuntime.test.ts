@@ -585,7 +585,7 @@ describe('AgentProviderProcessRuntime', () => {
     expect(
       emitParameterUpdate([
         {
-          file: 'home/ecc.toml',
+          file: 'home/params.toml',
           json_path: ['pdk_root'],
           knob_id: 'floorplan.utilitization',
           surface: 'parameters',

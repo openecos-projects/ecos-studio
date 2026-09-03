@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   applyQueuedWorkspaceParameterWrites,
+  hasWorkspaceConfigShadow,
   editWorkspaceParameters,
   locateWorkspaceParametersFile,
   mergePayloadIntoTomlDocument,
@@ -84,13 +85,13 @@ afterEach(() => {
 })
 
 describe('locateWorkspaceParametersFile', () => {
-  it('prefers home/ecc.toml over home/parameters.json', async () => {
+  it('prefers home/params.toml over home/parameters.json', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     const location = await locateWorkspaceParametersFile(root)
     expect(location?.format).toBe('toml')
-    expect(location?.path).toBe(join(root, 'home', 'ecc.toml'))
+    expect(location?.path).toBe(join(root, 'home', 'params.toml'))
   })
 
   it('falls back to home/parameters.json', async () => {
@@ -106,12 +107,22 @@ describe('locateWorkspaceParametersFile', () => {
     expect(await locateWorkspaceParametersFile(root)).toBeNull()
   })
 
-  it('refuses a broken ecc.toml symlink instead of falling back to parameters.json', async () => {
+  it('detects the TOML/JSON shadow pair', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
-    symlinkSync(join(root, 'home', 'missing.toml'), join(root, 'home', 'ecc.toml'))
-    await expect(locateWorkspaceParametersFile(root)).rejects.toThrow(/symlink|ecc.toml/i)
-    await expect(readWorkspaceParameters(root)).rejects.toThrow(/symlink|ecc.toml/i)
+    expect(await hasWorkspaceConfigShadow(root)).toBe(false)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    expect(await hasWorkspaceConfigShadow(root)).toBe(true)
+  })
+
+  it('refuses a broken params.toml symlink instead of falling back to parameters.json', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)
+    symlinkSync(join(root, 'home', 'missing.toml'), join(root, 'home', 'params.toml'))
+    await expect(locateWorkspaceParametersFile(root)).rejects.toThrow(
+      /symlink|params.toml/i,
+    )
+    await expect(readWorkspaceParameters(root)).rejects.toThrow(/symlink|params.toml/i)
   })
 })
 
@@ -163,9 +174,9 @@ describe('mergeTomlSections', () => {
 })
 
 describe('readWorkspaceParameters', () => {
-  it('reads and flattens home/ecc.toml', async () => {
+  it('reads and flattens home/params.toml', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     const parameters = await readWorkspaceParameters(root)
     expect(parameters).toMatchObject({
       design: 'gcd',
@@ -200,7 +211,7 @@ describe('readWorkspaceParameters', () => {
 
   it('throws on malformed TOML instead of falling back', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', '[design\nname = ')
+    writeHomeFile(root, 'params.toml', '[design\nname = ')
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/toml/i)
   })
 
@@ -214,7 +225,7 @@ describe('readWorkspaceParameters', () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
-      'ecc.toml',
+      'params.toml',
       `
 [design]
 name = "gcd"
@@ -232,7 +243,7 @@ design = "gcd"
     const root = createWorkspace()
     writeHomeFile(
       root,
-      'ecc.toml',
+      'params.toml',
       `
 [params]
 design = "gcd"
@@ -440,7 +451,7 @@ describe('mergePayloadIntoTomlDocument', () => {
 describe('writeWorkspaceParameters', () => {
   it('round-trips a TOML write: edit survives, other sections preserved', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     const location = await writeWorkspaceParameters(root, {
       'Frequency max [MHz]': 250,
       'Max fanout': 24,
@@ -453,7 +464,7 @@ describe('writeWorkspaceParameters', () => {
     expect(parameters?.design).toBe('gcd')
     expect(parameters?.sta_max_paths).toBeUndefined()
 
-    const text = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const text = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
     expect(text).toContain('[flow]')
     expect(text).toContain('preset = "rtl2gds"')
     expect(text).toContain('frequency_mhz = 250.0')
@@ -464,14 +475,14 @@ describe('writeWorkspaceParameters', () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
-      'ecc.toml',
+      'params.toml',
       ECC_TOML.replace(
         'preset = "rtl2gds"',
         'preset = "rtl2gds"\nthreshold = 1.0\ncount = 2',
       ),
     )
     await writeWorkspaceParameters(root, { design: 'gcd' })
-    const text = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const text = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
     expect(text).toMatch(/threshold\s*=\s*1\.0\b/)
     expect(text).toMatch(/count\s*=\s*2\b/)
     expect(text).not.toMatch(/count\s*=\s*2\.0\b/)
@@ -512,11 +523,11 @@ describe('writeWorkspaceParameters', () => {
     async (literal) => {
       const root = createWorkspace()
       const content = `${ECC_TOML}\n[flow]\nthreshold = ${literal}\n`
-      writeHomeFile(root, 'ecc.toml', content)
+      writeHomeFile(root, 'params.toml', content)
       await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
         /cannot round-trip/,
       )
-      expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+      expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
     },
   )
 
@@ -526,28 +537,30 @@ describe('writeWorkspaceParameters', () => {
       'preset = "rtl2gds"',
       'preset = "rtl2gds"\nweights = [\n  0.12345678901234567,\n]',
     )
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /cannot round-trip/,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it('does not treat identifier-embedded digits as numeric values', async () => {
     const root = createWorkspace()
     const content = `${ECC_TOML}\ncorner1e20 = "slow"\n`
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toContain('corner1e20')
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toContain(
+      'corner1e20',
+    )
   })
 
   it('does not treat dashed or dotted key segments as numeric values', async () => {
     const root = createWorkspace()
     const content = `foo-1e20 = "keep"\n${ECC_TOML}\n[params.extra]\nfoo.1e20 = "keep"\n`
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(readWorkspaceParameters(root)).resolves.toMatchObject({ design: 'gcd' })
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
-    const written = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const written = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
     expect(written).toContain('keep')
     const parameters = await readWorkspaceParameters(root)
     expect(parameters).toMatchObject({ design: 'gcd' })
@@ -617,11 +630,11 @@ top_module = "gcd"
 [params.design]
 future = "keep"
 `
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /not a scalar/,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it('rejects a JSON GUI-known scalar that became a table before the queued save', async () => {
@@ -651,31 +664,31 @@ design = "gcd"
 [params.pdk_config]
 future = "keep"
 `
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/not a scalar/)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /not a scalar/,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it('rejects a non-table TOML section on save instead of replacing it', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', 'params = [1]\n')
+    writeHomeFile(root, 'params.toml', 'params = [1]\n')
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /must be a table/i,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe('params = [1]\n')
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe('params = [1]\n')
   })
 
   it('rejects a TOML date scalar as a section instead of flattening it away', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', 'params = 2026-08-27\n')
+    writeHomeFile(root, 'params.toml', 'params = 2026-08-27\n')
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /must be a table/i,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(
       'params = 2026-08-27\n',
     )
   })
@@ -686,34 +699,34 @@ future = "keep"
       'preset = "rtl2gds"',
       'preset = "rtl2gds"\ncheckpoint = 2023-02-30',
     )
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /invalid calendar date/i,
     )
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['design'], value: 'aes' }]),
     ).rejects.toThrow(/invalid calendar date/i)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it('rejects sub-millisecond datetimes instead of truncating them on save', async () => {
     const root = createWorkspace()
     const content = `${ECC_TOML}\n[params.flow_meta]\ncheckpoint = 07:32:00.999999\n`
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /millisecond precision/i,
     )
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['design'], value: 'aes' }]),
     ).rejects.toThrow(/millisecond precision/i)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it('accepts millisecond-precision datetimes and time-looking comments', async () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
-      'ecc.toml',
+      'params.toml',
       `${ECC_TOML}\n# checkpoint was 07:32:00.999999 here\nmeta_note = "see 07:32:00.999999 in the log"\n`,
     )
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).resolves.toBeTruthy()
@@ -722,11 +735,11 @@ future = "keep"
   it('still rejects sub-millisecond datetimes after multiline strings with embedded quotes', async () => {
     const root = createWorkspace()
     const content = `${ECC_TOML}\nnote = """one " quote"""\ncheckpoint = 07:32:00.999999\n`
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /millisecond precision/i,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it.each([
@@ -737,38 +750,38 @@ future = "keep"
     async (_label, note) => {
       const root = createWorkspace()
       const content = `${ECC_TOML}\n${note}checkpoint = 1979-05-27T07:32:00.999999Z\n`
-      writeHomeFile(root, 'ecc.toml', content)
+      writeHomeFile(root, 'params.toml', content)
       await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
         /millisecond precision/i,
       )
-      expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+      expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
     },
   )
 
   it('rejects a nested Map payload instead of serializing it as an empty table', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await expect(
       writeWorkspaceParameters(root, {
         design: 'gcd',
         core: new Map([['utilitization', 0.5]]) as unknown as Record<string, unknown>,
       }),
     ).rejects.toThrow(/plain record|not a scalar|not representable/i)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
   it('rejects undefined payload leaves instead of silently deleting them', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await expect(
       writeWorkspaceParameters(root, { Design: undefined as unknown as string }),
     ).rejects.toThrow(/undefined/)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
   it('rejects null, Date, and bigint edit values instead of silently rewriting them', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['design'], value: null }]),
     ).rejects.toThrow(/null/)
@@ -780,34 +793,34 @@ future = "keep"
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64n }]),
     ).rejects.toThrow(/losslessly/)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
   it('rejects non-finite numbers in the incoming payload and edit values', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await expect(
       writeWorkspaceParameters(root, { target_density: Number.NaN }),
     ).rejects.toThrow(/non-finite/)
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['target_density'], value: Infinity }]),
     ).rejects.toThrow(/non-finite/)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
   it('rejects a malformed TOML document on save instead of replacing it', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', '2026-08-27\n')
+    writeHomeFile(root, 'params.toml', '2026-08-27\n')
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/toml/i)
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /toml/i,
     )
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe('2026-08-27\n')
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe('2026-08-27\n')
   })
 
   it('re-runs the writable guard inside the serialized operation', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     let calls = 0
     await expect(
       writeWorkspaceParameters(root, { design: 'gcd' }, undefined, async () => {
@@ -816,12 +829,12 @@ future = "keep"
       }),
     ).rejects.toThrow('blocked')
     expect(calls).toBe(1)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
   it('re-checks the writable guard before the rename', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     let calls = 0
     await expect(
       writeWorkspaceParameters(root, { design: 'gcd' }, undefined, async () => {
@@ -830,7 +843,7 @@ future = "keep"
       }),
     ).rejects.toThrow('blocked')
     expect(calls).toBe(2)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(ECC_TOML)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(ECC_TOML)
   })
 
   it('lands the save on the newly preferred config when the format migrates mid-queue', async () => {
@@ -842,7 +855,7 @@ future = "keep"
       undefined,
       async () => {
         // Simulate the ecc migration landing while the save was queued.
-        writeHomeFile(root, 'ecc.toml', ECC_TOML)
+        writeHomeFile(root, 'params.toml', ECC_TOML)
       },
     )
     expect(location.format).toBe('toml')
@@ -852,17 +865,17 @@ future = "keep"
 
   it('preserves the existing file mode through an atomic replace', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
-    chmodSync(join(root, 'home', 'ecc.toml'), 0o600)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    chmodSync(join(root, 'home', 'params.toml'), 0o600)
     await writeWorkspaceParameters(root, { design: 'gcd' })
-    expect(statSync(join(root, 'home', 'ecc.toml')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(root, 'home', 'params.toml')).mode & 0o777).toBe(0o600)
   })
 
   it('refuses a symlinked config inside the serialized write', async () => {
     const root = createWorkspace()
     const alias = join(root, 'home', 'other.toml')
     writeFileSync(alias, '[params]\ndesign = "gcd"\n')
-    symlinkSync(alias, join(root, 'home', 'ecc.toml'))
+    symlinkSync(alias, join(root, 'home', 'params.toml'))
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /symlink/i,
     )
@@ -873,7 +886,7 @@ future = "keep"
     const root = createWorkspace()
     const outside = join(root, 'outside.toml')
     writeFileSync(outside, '[params]\ndesign = "gcd"\n')
-    symlinkSync(outside, join(root, 'home', 'ecc.toml'))
+    symlinkSync(outside, join(root, 'home', 'params.toml'))
     await expect(writeWorkspaceParameters(root, { design: 'gcd' })).rejects.toThrow(
       /symlink|no longer resolves/i,
     )
@@ -928,7 +941,7 @@ describe('mergePayloadIntoTomlDocument regressions', () => {
 describe('editWorkspaceParameters', () => {
   it('applies display-key paths to a TOML workspace after canonicalizing them', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await editWorkspaceParameters(root, [
       { json_path: ['Target density'], value: 0.55 },
       { json_path: ['Core', 'Utilitization'], value: 0.45 },
@@ -940,7 +953,7 @@ describe('editWorkspaceParameters', () => {
 
   it('applies flat paths to a TOML workspace unchanged', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64 }])
     const parameters = await readWorkspaceParameters(root)
     expect(parameters?.max_fanout).toBe(64)
@@ -948,7 +961,7 @@ describe('editWorkspaceParameters', () => {
 
   it('rejects edits to parameters that do not exist', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['nonexistent_knob'], value: 1 }]),
     ).rejects.toThrow(/does not exist/i)
@@ -960,11 +973,11 @@ describe('editWorkspaceParameters', () => {
       'target_density = 0.2',
       'target_density = 1979-05-27',
     )
-    writeHomeFile(root, 'ecc.toml', content)
+    writeHomeFile(root, 'params.toml', content)
     await expect(
       editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 32 }]),
     ).rejects.toThrow(/cannot be represented losslessly/)
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(content)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(content)
   })
 
   it('rejects TOML edits when a GUI-known scalar already holds a table or array', async () => {
@@ -982,25 +995,29 @@ extra = "keep-me"
       'design = "gcd"',
       'design = ["gcd"]',
     )
-    writeHomeFile(arrayRoot, 'ecc.toml', arrayContent)
+    writeHomeFile(arrayRoot, 'params.toml', arrayContent)
     await expect(
       editWorkspaceParameters(arrayRoot, [{ json_path: ['top_module'], value: 'aes' }]),
     ).rejects.toThrow(/not a scalar/)
-    expect(readFileSync(join(arrayRoot, 'home', 'ecc.toml'), 'utf8')).toBe(arrayContent)
+    expect(readFileSync(join(arrayRoot, 'home', 'params.toml'), 'utf8')).toBe(
+      arrayContent,
+    )
 
     const tableRoot = createWorkspace()
-    writeHomeFile(tableRoot, 'ecc.toml', tableContent)
+    writeHomeFile(tableRoot, 'params.toml', tableContent)
     await expect(
       editWorkspaceParameters(tableRoot, [{ json_path: ['top_module'], value: 'aes' }]),
     ).rejects.toThrow(/not a scalar/)
-    expect(readFileSync(join(tableRoot, 'home', 'ecc.toml'), 'utf8')).toBe(tableContent)
+    expect(readFileSync(join(tableRoot, 'home', 'params.toml'), 'utf8')).toBe(
+      tableContent,
+    )
   })
 
   it('still allows TOML edits when an unknown leaf holds a Date', async () => {
     const root = createWorkspace()
     writeHomeFile(
       root,
-      'ecc.toml',
+      'params.toml',
       ECC_TOML.replace('max_fanout = 20', 'max_fanout = 20\ncheckpoint = 1979-05-27'),
     )
     await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 32 }])
@@ -1121,7 +1138,11 @@ extra = "keep-me"
 describe('hand-authored display keys in TOML', () => {
   it('canonicalizes them on read and accepts edits against the canonical path', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', '[params]\n"Target density" = 0.45\ndesign = "gcd"\n')
+    writeHomeFile(
+      root,
+      'params.toml',
+      '[params]\n"Target density" = 0.45\ndesign = "gcd"\n',
+    )
     const parameters = await readWorkspaceParameters(root)
     expect(parameters?.target_density).toBe(0.45)
     expect(parameters && 'Target density' in parameters).toBe(false)
@@ -1135,13 +1156,13 @@ describe('hand-authored display keys in TOML', () => {
 describe('malformed TOML sections', () => {
   it('rejects a non-table [params] section instead of treating it as empty', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', 'params = [1]\n')
+    writeHomeFile(root, 'params.toml', 'params = [1]\n')
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
   })
 
   it('rejects a scalar [design] section', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', 'design = "gcd"\n[params]\ntop_module = "gcd"\n')
+    writeHomeFile(root, 'params.toml', 'design = "gcd"\n[params]\ntop_module = "gcd"\n')
     await expect(readWorkspaceParameters(root)).rejects.toThrow(/must be a table/i)
   })
 })
@@ -1149,8 +1170,8 @@ describe('malformed TOML sections', () => {
 describe('editWorkspaceParameters with an authorized location', () => {
   it('operates on exactly the authorized file instead of re-locating', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
-    const authorized = join(root, 'home', 'ecc.toml')
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const authorized = join(root, 'home', 'params.toml')
     await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 48 }], {
       format: 'toml',
       path: authorized,
@@ -1182,7 +1203,11 @@ describe('json_path hardening', () => {
 describe('write hardening', () => {
   it('parses 64-bit TOML integers beyond the 53-bit safe range', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', '[params]\nseed = 9007199254740993\ndesign = "gcd"\n')
+    writeHomeFile(
+      root,
+      'params.toml',
+      '[params]\nseed = 9007199254740993\ndesign = "gcd"\n',
+    )
     const parameters = await readWorkspaceParameters(root)
     expect(parameters?.seed).toBe(9007199254740993n)
     expect(parameters?.design).toBe('gcd')
@@ -1190,7 +1215,7 @@ describe('write hardening', () => {
 
   it('writes atomically without reusing an existing temp file', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     const staleTemps = (await import('node:fs/promises')).readdir(join(root, 'home'))
     await writeWorkspaceParameters(root, { 'Frequency max [MHz]': 175 })
     const parameters = await readWorkspaceParameters(root)
@@ -1202,7 +1227,7 @@ describe('write hardening', () => {
 describe('parameter write serialization', () => {
   it('serializes overlapping save and edit operations so no update is lost', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
 
     const [saved] = await Promise.all([
       writeWorkspaceParameters(root, { 'Frequency max [MHz]': 175 }),
@@ -1219,8 +1244,8 @@ describe('parameter write serialization', () => {
 describe('queued agent rollback', () => {
   it('restores the parameter file when a later step-config write fails', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
-    const original = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const original = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
     const missingStep = join(root, 'config', 'dreamplace_ecc.json')
 
     await expect(
@@ -1237,13 +1262,13 @@ describe('queued agent rollback', () => {
       ),
     ).rejects.toThrow(/ENOENT|no such file|missing or empty/i)
 
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(original)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(original)
   })
 
   it('does not restore a later Configure save that replaced the agent revision', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
-    const path = join(root, 'home', 'ecc.toml')
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const path = join(root, 'home', 'params.toml')
     const previous = readFileSync(path, 'utf8')
     await editWorkspaceParameters(root, [{ json_path: ['max_fanout'], value: 64 }])
     const agentRevision = readFileSync(path, 'utf8')
@@ -1259,13 +1284,13 @@ describe('queued agent rollback', () => {
 
   it('re-checks the runtime guard immediately before a step-config rename', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
+    writeHomeFile(root, 'params.toml', ECC_TOML)
     mkdirSync(join(root, 'config'), { recursive: true })
     writeFileSync(
       join(root, 'config', 'dreamplace_ecc.json'),
       '{\n    "density_weight": 0.2\n}\n',
     )
-    const original = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    const original = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
     const originalStep = readFileSync(join(root, 'config', 'dreamplace_ecc.json'), 'utf8')
     let guardCalls = 0
 
@@ -1292,7 +1317,7 @@ describe('queued agent rollback', () => {
       ),
     ).rejects.toThrow(/workspace flow is running/)
 
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).toBe(original)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).toBe(original)
     expect(readFileSync(join(root, 'config', 'dreamplace_ecc.json'), 'utf8')).toBe(
       originalStep,
     )
@@ -1300,8 +1325,8 @@ describe('queued agent rollback', () => {
 
   it('surfaces a rollback failure when the restore rename is blocked', async () => {
     const root = createWorkspace()
-    writeHomeFile(root, 'ecc.toml', ECC_TOML)
-    const original = readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    const original = readFileSync(join(root, 'home', 'params.toml'), 'utf8')
     const missingStep = join(root, 'config', 'dreamplace_ecc.json')
     let guardCalls = 0
 
@@ -1327,6 +1352,6 @@ describe('queued agent rollback', () => {
       ),
     ).rejects.toThrow(/rollback failed/)
 
-    expect(readFileSync(join(root, 'home', 'ecc.toml'), 'utf8')).not.toBe(original)
+    expect(readFileSync(join(root, 'home', 'params.toml'), 'utf8')).not.toBe(original)
   })
 })

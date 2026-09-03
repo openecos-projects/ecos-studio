@@ -42,6 +42,7 @@ import {
   applyQueuedWorkspaceParameterWrites,
   editWorkspaceParameters as editWorkspaceParametersFile,
   enqueueParameterWrite,
+  hasWorkspaceConfigShadow as hasWorkspaceConfigShadowFile,
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
   readWorkspaceConfigContained,
@@ -238,7 +239,7 @@ function isRuntimeProtectedProjectPath(
 ): boolean {
   const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
   return (
-    relativePath === 'home/ecc.toml' ||
+    relativePath === 'home/params.toml' ||
     relativePath === 'home/parameters.json' ||
     (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
   )
@@ -467,10 +468,16 @@ export class WorkspaceService {
   }
 
   /**
-   * Read a workspace's persisted parameters (home/ecc.toml preferred,
+   * Read a workspace's persisted parameters (home/params.toml preferred,
    * home/parameters.json fallback) for callers that only know the workspace
    * directory — e.g. wizard prefill before the workspace is opened.
    */
+  /** True when a workspace home/ holds both the canonical TOML and the
+   * legacy JSON: the JSON is inert and the user should delete it. */
+  async hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean> {
+    return await hasWorkspaceConfigShadowFile(workspacePath)
+  }
+
   async readWorkspaceParameters(
     workspacePath: string,
   ): Promise<Record<string, unknown> | null> {
@@ -587,7 +594,7 @@ export class WorkspaceService {
           `Parameter path ${JSON.stringify(write.json_path)} is not allowed in ${write.file}.`,
         )
       }
-      if (write.file === 'home/ecc.toml' || write.file === 'home/parameters.json') {
+      if (write.file === 'home/params.toml' || write.file === 'home/parameters.json') {
         parameterEdits.push({ json_path: write.json_path, value: write.value })
         continue
       }

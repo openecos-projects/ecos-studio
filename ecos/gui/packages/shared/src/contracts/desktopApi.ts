@@ -286,6 +286,7 @@ export interface DesktopApi {
     readWorkspaceParameters(
       workspacePath: string,
     ): Promise<Record<string, unknown> | null>
+    hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean>
     editWorkspaceParameters(
       workspacePath: string,
       edits: { json_path: (string | number)[]; value: unknown }[],

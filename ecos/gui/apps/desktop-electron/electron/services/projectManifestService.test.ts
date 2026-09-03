@@ -223,7 +223,7 @@ describe('ProjectManifestService', () => {
     )
   })
 
-  it('retains canonical ecc.toml geometry when synchronizing the baseline', async () => {
+  it('retains canonical params.toml geometry when synchronizing the baseline', async () => {
     const projectRoot = await createTemporaryProject()
     const workspacePath = join(projectRoot, 'ws_0001')
     const service = createService(projectRoot, undefined, {

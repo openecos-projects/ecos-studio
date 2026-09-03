@@ -387,7 +387,7 @@ function losslessString(value: unknown, label: string): string {
 /**
  * Normalize a raw parameters record into ParametersData. Accepts both the
  * display-key JSON shape (home/parameters.json) and the canonical flat
- * snake_case shape (home/ecc.toml / workspace snapshot).
+ * snake_case shape (home/params.toml / workspace snapshot).
  */
 export function parseParametersRecord(raw: Record<string, unknown>): ParametersData {
   return {
@@ -632,7 +632,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
 
 /**
  * 参数配置管理 Hook。
- * 通过主进程按工作区现有格式读取参数（ecc.toml 优先，parameters.json 回退）。
+ * 通过主进程按工作区现有格式读取参数（params.toml 优先，parameters.json 回退）。
  */
 export function useParameters() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
@@ -828,7 +828,7 @@ export function useParameters() {
       if (parametersRecord === undefined) return true
       if (loadResourceToken !== parametersResourceToken) return true
 
-      // The format-aware read locates the actual config (home/ecc.toml
+      // The format-aware read locates the actual config (home/params.toml
       // preferred), so a stale home.json pointer never gates the reload.
       resolvedParametersPath = resolvedPath ?? (parametersRecord ? knownPath : '')
       if (parametersRecord) {
@@ -959,7 +959,7 @@ export function useParameters() {
       if (parametersRecord === undefined) return
 
       if (loadResourceToken !== parametersResourceToken) return
-      // The main-process helper locates the actual config (home/ecc.toml
+      // The main-process helper locates the actual config (home/params.toml
       // preferred, home/parameters.json fallback), so a TOML-only
       // workspace loads even when home.json did not resolve a config path.
       resolvedParametersPath = resolvedPath ?? (parametersRecord ? parametersPath : '')

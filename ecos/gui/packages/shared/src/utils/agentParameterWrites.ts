@@ -6,7 +6,7 @@ import {
 import { hasSafeJsonPath } from './jsonPath.ts'
 import { normalizeParameterKey } from './parameterKeys.ts'
 
-const PARAMETER_SURFACE_FILES = ['home/ecc.toml', 'home/parameters.json'] as const
+const PARAMETER_SURFACE_FILES = ['home/params.toml', 'home/parameters.json'] as const
 const STEP_CONFIG_FILE_BY_KNOB_PREFIX: Record<string, string> = {
   place: 'config/dreamplace_ecc.json',
   legalization: 'config/dreamplace_ecc.json',
@@ -36,7 +36,7 @@ const PARAMETER_SURFACE_KNOB_LEAVES: Record<string, readonly string[]> = {
 
 /**
  * Canonical identity of a resolved write: both workspace-config aliases
- * (`home/ecc.toml` and `home/parameters.json`) materialize onto whichever
+ * (`home/params.toml` and `home/parameters.json`) materialize onto whichever
  * config actually exists, so they must collide. String path segments are
  * folded through the ecc mechanical key rule so display-key and snake_case
  * spellings of the same leaf also collide.
@@ -57,7 +57,7 @@ export function canonicalParameterWriteKey(
  * True when every advertised patch entry has exactly one matching write:
  * same knob, corresponding value, legal surface/file pairing, and a unique
  * canonical target. Length equality alone is not enough — a hostile contract
- * can advertise `place.target_density` and write `pdk_root` in `home/ecc.toml`.
+ * can advertise `place.target_density` and write `pdk_root` in `home/params.toml`.
  */
 export function parameterWritesMatchPatch(
   patch: readonly DesktopAgentWorkspaceRerunParameterPatch[],

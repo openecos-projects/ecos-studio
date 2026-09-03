@@ -519,7 +519,7 @@ describe('prepareWorkspaceRerun', () => {
         ]
         contract.writes = [
           {
-            file: 'home/ecc.toml',
+            file: 'home/params.toml',
             json_path: ['target_density'],
             knob_id: 'place.target_density',
             surface: 'parameters',
@@ -559,12 +559,12 @@ describe('prepareWorkspaceRerun', () => {
   })
 })
 
-describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
-  it('applies parameter writes to home/ecc.toml after display-key canonicalization', async () => {
+describe('prepareWorkspaceRerun with home/params.toml workspaces', () => {
+  it('applies parameter writes to home/params.toml after display-key canonicalization', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await rm(join(source, 'home', 'parameters.json'))
     await writeFile(
-      join(source, 'home', 'ecc.toml'),
+      join(source, 'home', 'params.toml'),
       [
         '[design]',
         'name = "gcd"',
@@ -578,7 +578,7 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     const contract = contractFor(source, flow, artifact)
     contract.writes = [
       {
-        file: 'home/ecc.toml',
+        file: 'home/params.toml',
         json_path: ['Target density'],
         knob_id: 'place.target_density',
         surface: 'parameters',
@@ -590,16 +590,19 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
       directory: contract.target_workspace,
     })
 
-    const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
+    const written = await readFile(
+      `${contract.target_workspace}/home/params.toml`,
+      'utf8',
+    )
     expect(written).toContain('target_density = 0.55')
     expect(written).not.toContain('0.45')
   })
 
-  it('follows disk reality when the contract file says parameters.json but ecc.toml exists', async () => {
+  it('follows disk reality when the contract file says parameters.json but params.toml exists', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await rm(join(source, 'home', 'parameters.json'))
     await writeFile(
-      join(source, 'home', 'ecc.toml'),
+      join(source, 'home', 'params.toml'),
       ['[params]', 'target_density = 0.45', ''].join('\n'),
     )
     const contract = contractFor(source, flow, artifact)
@@ -617,7 +620,10 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
       directory: contract.target_workspace,
     })
 
-    const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
+    const written = await readFile(
+      `${contract.target_workspace}/home/params.toml`,
+      'utf8',
+    )
     expect(written).toContain('target_density = 0.55')
     await expect(
       readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
@@ -629,11 +635,11 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     await rm(join(source, 'home', 'parameters.json'))
     const outside = join(source, 'outside.toml')
     await writeFile(outside, '[params]\ntarget_density = 0.45\n')
-    await symlink(outside, join(source, 'home', 'ecc.toml'))
+    await symlink(outside, join(source, 'home', 'params.toml'))
     const contract = contractFor(source, flow, artifact)
     contract.writes = [
       {
-        file: 'home/ecc.toml',
+        file: 'home/params.toml',
         json_path: ['target_density'],
         knob_id: 'place.target_density',
         surface: 'parameters',
@@ -647,11 +653,11 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
     )
   })
 
-  it('rewrites source-rooted values in home/ecc.toml', async () => {
+  it('rewrites source-rooted values in home/params.toml', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await rm(join(source, 'home', 'parameters.json'))
     await writeFile(
-      join(source, 'home', 'ecc.toml'),
+      join(source, 'home', 'params.toml'),
       [
         '[params]',
         'design = "gcd"',
@@ -665,7 +671,10 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
 
     await prepareWorkspaceRerun(contract)
 
-    const written = await readFile(`${contract.target_workspace}/home/ecc.toml`, 'utf8')
+    const written = await readFile(
+      `${contract.target_workspace}/home/params.toml`,
+      'utf8',
+    )
     expect(written).toContain(`${contract.target_workspace}/place_dreamplace/output`)
     expect(written).not.toContain(`${source}/place_dreamplace/output`)
     // Prose that merely shares the prefix is never rewritten.
@@ -685,8 +694,8 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
       'source_output_path = "/src/ws/place_dreamplace/output"',
       '',
     ].join('\n')
-    await writeFile(join(home, 'ecc.toml'), original)
-    await writeFile(join(outside, 'ecc.toml'), original)
+    await writeFile(join(home, 'params.toml'), original)
+    await writeFile(join(outside, 'params.toml'), original)
     const authorizedHome = home
 
     await rm(home, { recursive: true })
@@ -699,14 +708,14 @@ describe('prepareWorkspaceRerun with home/ecc.toml workspaces', () => {
         targetWorkspace: '/src/ws_rerun',
       }),
     ).rejects.toThrow(/authorized|no longer resolves|parent directory changed|symlink/i)
-    await expect(readFile(join(outside, 'ecc.toml'), 'utf8')).resolves.toBe(original)
+    await expect(readFile(join(outside, 'params.toml'), 'utf8')).resolves.toBe(original)
   })
 
-  it('refuses to rewrite home/ecc.toml when an untouched float cannot round-trip', async () => {
+  it('refuses to rewrite home/params.toml when an untouched float cannot round-trip', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     await rm(join(source, 'home', 'parameters.json'))
     await writeFile(
-      join(source, 'home', 'ecc.toml'),
+      join(source, 'home', 'params.toml'),
       [
         '[params]',
         'design = "gcd"',

@@ -928,7 +928,7 @@ describe('editWorkspaceParameters', () => {
     await mkdir(homeDir, { recursive: true })
     const externalPath = join(directory, 'external.toml')
     await writeFile(externalPath, '[params]\ndesign = "gcd"\n', 'utf8')
-    await symlink(externalPath, join(homeDir, 'ecc.toml'))
+    await symlink(externalPath, join(homeDir, 'params.toml'))
 
     const { service } = createWorkspaceService(directory, externalPath)
 
@@ -944,7 +944,7 @@ describe('editWorkspaceParameters', () => {
     const directory = await createTempDir('ecos-workspace-service-')
     const nested = join(directory, 'archive', 'other')
     await mkdir(join(nested, 'home'), { recursive: true })
-    const tomlPath = join(nested, 'home', 'ecc.toml')
+    const tomlPath = join(nested, 'home', 'params.toml')
     await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
 
     const { service } = createWorkspaceService(directory, tomlPath)
@@ -954,11 +954,11 @@ describe('editWorkspaceParameters', () => {
     await expect(readFile(tomlPath, 'utf8')).resolves.toBe('[params]\ndesign = "gcd"\n')
   })
 
-  it('edits parameters in a real ecc.toml file', async () => {
+  it('edits parameters in a real params.toml file', async () => {
     const directory = await createTempDir('ecos-workspace-service-')
     const homeDir = join(directory, 'home')
     await mkdir(homeDir, { recursive: true })
-    const tomlPath = join(homeDir, 'ecc.toml')
+    const tomlPath = join(homeDir, 'params.toml')
     await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
 
     const { service } = createWorkspaceService(directory, tomlPath)
@@ -987,7 +987,7 @@ describe('applyWorkspaceParameterWrites', () => {
     const directory = await createTempDir('ecos-workspace-service-apply-rollback-')
     await mkdir(join(directory, 'home'), { recursive: true })
     await mkdir(join(directory, 'config'), { recursive: true })
-    const tomlPath = join(directory, 'home', 'ecc.toml')
+    const tomlPath = join(directory, 'home', 'params.toml')
     const original = '[params]\ndesign = "gcd"\nmax_fanout = 20\n'
     await writeFile(tomlPath, original, 'utf8')
     await writeFile(
@@ -1000,7 +1000,7 @@ describe('applyWorkspaceParameterWrites', () => {
     await expect(
       service.applyWorkspaceParameterWrites(directory, [
         {
-          file: 'home/ecc.toml',
+          file: 'home/params.toml',
           json_path: ['max_fanout'],
           knob_id: 'cts.max_fanout',
           surface: 'parameters',
@@ -1023,7 +1023,7 @@ describe('applyWorkspaceParameterWrites', () => {
     const directory = await createTempDir('ecos-workspace-service-apply-ok-')
     await mkdir(join(directory, 'home'), { recursive: true })
     await mkdir(join(directory, 'config'), { recursive: true })
-    const tomlPath = join(directory, 'home', 'ecc.toml')
+    const tomlPath = join(directory, 'home', 'params.toml')
     const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
     await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
     await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
@@ -1031,7 +1031,7 @@ describe('applyWorkspaceParameterWrites', () => {
     const service = createApplyService(directory)
     await service.applyWorkspaceParameterWrites(directory, [
       {
-        file: 'home/ecc.toml',
+        file: 'home/params.toml',
         json_path: ['max_fanout'],
         knob_id: 'cts.max_fanout',
         surface: 'parameters',
@@ -1092,7 +1092,7 @@ describe('applyWorkspaceParameterWrites', () => {
     const directory = await createTempDir('ecos-workspace-service-step-config-overlap-')
     await mkdir(join(directory, 'home'), { recursive: true })
     await mkdir(join(directory, 'config'), { recursive: true })
-    const tomlPath = join(directory, 'home', 'ecc.toml')
+    const tomlPath = join(directory, 'home', 'params.toml')
     const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
     await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
     await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')

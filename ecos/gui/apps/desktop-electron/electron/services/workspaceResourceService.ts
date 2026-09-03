@@ -99,7 +99,7 @@ export class WorkspaceResourceService {
 
   /**
    * Persist workspace parameters in the workspace's own format
-   * (home/ecc.toml preferred, home/parameters.json fallback). Refused
+   * (home/params.toml preferred, home/parameters.json fallback). Refused
    * while the workspace runtime is active, mirroring the mutation guard on
    * direct config file writes.
    */

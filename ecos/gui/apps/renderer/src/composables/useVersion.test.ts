@@ -61,6 +61,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     workspace: {
       openOrFocus: async () => ({ action: 'proceed' as const }),
+      hasWorkspaceConfigShadow: async () => false,
       bindWindow: async (path: string) => path,
       unbindWindow: async () => undefined,
       getBoundPath: async () => null,
@@ -76,7 +77,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readWorkspaceParameters: async () => null,
       editWorkspaceParameters: async () => ({
         format: 'toml',
-        path: '/tmp/home/ecc.toml',
+        path: '/tmp/home/params.toml',
       }),
       applyWorkspaceParameterWrites: async () => undefined,
       readProjectTextFileTail: async () => null,
@@ -130,7 +131,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readHome: async () => null,
       readFlow: async () => null,
       readParameters: async () => null,
-      writeParameters: async () => ({ format: 'toml', path: '/tmp/home/ecc.toml' }),
+      writeParameters: async () => ({ format: 'toml', path: '/tmp/home/params.toml' }),
       resolveStepInfo: async (request) => ({
         step: request.step,
         id: request.id,

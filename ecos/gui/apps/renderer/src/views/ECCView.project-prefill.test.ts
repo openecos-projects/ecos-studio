@@ -226,7 +226,7 @@ describe('ECCView project management handoff', () => {
 })
 
 describe('branch prefill canonical parameters', () => {
-  it('reads canonical nested die size and core margin from ecc.toml workspaces', () => {
+  it('reads canonical nested die size and core margin from params.toml workspaces', () => {
     const normalizeStart = source.indexOf('function normalizeSourceParameters')
     const normalizeEnd = source.indexOf(
       'function normalizeSourcePdkConfig',
