@@ -115,6 +115,13 @@ describe('locateWorkspaceParametersFile', () => {
     expect(await hasWorkspaceConfigShadow(root)).toBe(true)
   })
 
+  it('treats a dangling legacy symlink as a shadow (lexists semantics)', async () => {
+    const root = createWorkspace()
+    writeHomeFile(root, 'params.toml', ECC_TOML)
+    symlinkSync(join(root, 'home', 'gone.json'), join(root, 'home', 'parameters.json'))
+    expect(await hasWorkspaceConfigShadow(root)).toBe(true)
+  })
+
   it('refuses a broken params.toml symlink instead of falling back to parameters.json', async () => {
     const root = createWorkspace()
     writeHomeFile(root, 'parameters.json', JSON_PARAMETERS)

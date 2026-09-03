@@ -67,6 +67,20 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
+ * Python os.path.lexists semantics: true when the entry exists at all,
+ * including a dangling symlink.
+ */
+async function lexists(path: string): Promise<boolean> {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if (isErrno(error, 'ENOENT')) return false
+    throw error
+  }
+}
+
+/**
  * Distinguish a missing preferred config from a dangling symlink or other
  * non-regular entry. `stat()` follows links, so a broken `home/params.toml`
  * would otherwise look absent and fall through to `parameters.json`.
@@ -183,12 +197,14 @@ function hasValue(value: unknown): boolean {
 /**
  * Both the canonical TOML and the legacy JSON exist: the JSON is inert
  * (the TOML wins) and the user should delete it — surfaced as a one-shot
- * renderer toast by the parameters read path.
+ * renderer toast by the parameters read path. Existence uses lstat
+ * (Python lexists semantics, mirroring the CLI's workspace_config_shadowed
+ * probe): a dangling legacy symlink still shadows.
  */
 export async function hasWorkspaceConfigShadow(root: string): Promise<boolean> {
   const tomlPath = join(root, 'home', WORKSPACE_CONFIG_BASENAME)
-  if (!(await isFile(tomlPath))) return false
-  return isFile(join(root, 'home', JSON_PARAMETERS_BASENAME))
+  if (!(await lexists(tomlPath))) return false
+  return lexists(join(root, 'home', JSON_PARAMETERS_BASENAME))
 }
 
 export async function locateWorkspaceParametersFile(

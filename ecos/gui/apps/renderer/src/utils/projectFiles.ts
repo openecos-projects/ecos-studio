@@ -123,8 +123,19 @@ async function warnOnceOnConfigShadow(workspacePath: string): Promise<void> {
   if (shadowNotifiedWorkspaces.has(workspacePath)) return
   const workspace = getDesktopApi().workspace
   if (typeof workspace.hasWorkspaceConfigShadow !== 'function') return
-  if (!(await workspace.hasWorkspaceConfigShadow(workspacePath))) return
+  // Mark synchronously so overlapping reads cannot double-toast; a `false`
+  // or failed probe unmarks so a later read can still warn.
   shadowNotifiedWorkspaces.add(workspacePath)
+  try {
+    if (!(await workspace.hasWorkspaceConfigShadow(workspacePath))) {
+      shadowNotifiedWorkspaces.delete(workspacePath)
+      return
+    }
+  } catch {
+    // Advisory only: a probe failure must never reject the parameters read.
+    shadowNotifiedWorkspaces.delete(workspacePath)
+    return
+  }
   const { useWorkspace } = await import('@/composables/useWorkspace')
   useWorkspace().showToast({
     severity: 'warn',
