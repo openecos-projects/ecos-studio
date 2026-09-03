@@ -46,6 +46,7 @@ import {
   locateWorkspaceParametersFile,
   parseWorkspaceParametersText,
   readWorkspaceConfigContained,
+  WORKSPACE_CONFIG_BASENAME,
   workspaceParameterWriteQueueKey,
   writeTextAtomically,
   type PreparedStepConfigWrite,
@@ -467,17 +468,23 @@ export class WorkspaceService {
     }
   }
 
+  /** True when a workspace home/ holds both the canonical TOML and the
+   * legacy JSON: the JSON is inert and the user should delete it. */
+  async hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean> {
+    // Advisory probe, but still scope-checked like the parameter read it
+    // rides on: one access check on the TOML candidate covers its JSON
+    // sibling (scope is per-root, not per-file).
+    await this.projectScopeProvider.requestProjectPathAccess(
+      join(workspacePath, 'home', WORKSPACE_CONFIG_BASENAME),
+    )
+    return await hasWorkspaceConfigShadowFile(workspacePath)
+  }
+
   /**
    * Read a workspace's persisted parameters (home/params.toml preferred,
    * home/parameters.json fallback) for callers that only know the workspace
    * directory — e.g. wizard prefill before the workspace is opened.
    */
-  /** True when a workspace home/ holds both the canonical TOML and the
-   * legacy JSON: the JSON is inert and the user should delete it. */
-  async hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean> {
-    return await hasWorkspaceConfigShadowFile(workspacePath)
-  }
-
   async readWorkspaceParameters(
     workspacePath: string,
   ): Promise<Record<string, unknown> | null> {

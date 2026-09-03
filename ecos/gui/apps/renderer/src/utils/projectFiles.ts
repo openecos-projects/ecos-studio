@@ -117,9 +117,10 @@ const shadowNotifiedWorkspaces = new Set<string>()
 /**
  * One warn toast per workspace per session when both home/params.toml and
  * home/parameters.json exist: the JSON is inert and deletable. The check is
- * a cheap main-process probe riding the parameters read path.
+ * a cheap main-process probe riding the parameters read paths (disk read
+ * and runtime snapshot alike). Advisory only: never throws.
  */
-async function warnOnceOnConfigShadow(workspacePath: string): Promise<void> {
+export async function warnOnceOnConfigShadow(workspacePath: string): Promise<void> {
   if (shadowNotifiedWorkspaces.has(workspacePath)) return
   const workspace = getDesktopApi().workspace
   if (typeof workspace.hasWorkspaceConfigShadow !== 'function') return
@@ -131,19 +132,19 @@ async function warnOnceOnConfigShadow(workspacePath: string): Promise<void> {
       shadowNotifiedWorkspaces.delete(workspacePath)
       return
     }
+    const { useWorkspace } = await import('@/composables/useWorkspace')
+    useWorkspace().showToast({
+      severity: 'warn',
+      summary: 'Workspace configuration shadowed',
+      detail:
+        'home/params.toml wins over home/parameters.json; the legacy JSON is inert — delete it to silence this warning.',
+      life: 6000,
+    })
   } catch {
-    // Advisory only: a probe failure must never reject the parameters read.
+    // A probe/toast failure must never reject the parameters read; unmark
+    // so a later read can retry the warning.
     shadowNotifiedWorkspaces.delete(workspacePath)
-    return
   }
-  const { useWorkspace } = await import('@/composables/useWorkspace')
-  useWorkspace().showToast({
-    severity: 'warn',
-    summary: 'Workspace configuration shadowed',
-    detail:
-      'home/params.toml wins over home/parameters.json; the legacy JSON is inert — delete it to silence this warning.',
-    life: 6000,
-  })
 }
 
 export async function readWorkspaceParametersFile(

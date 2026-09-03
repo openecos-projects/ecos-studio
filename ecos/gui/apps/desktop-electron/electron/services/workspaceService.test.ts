@@ -1180,3 +1180,33 @@ describe('applyWorkspaceParameterWrites', () => {
     await expect(readFile(stepPath, 'utf8')).resolves.toBe(original)
   })
 })
+
+describe('hasWorkspaceConfigShadow', () => {
+  it('refuses to probe paths outside the project scope', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+    projectScopeProvider.requestProjectPathAccess = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('Refusing to grant access outside current project root'),
+      )
+
+    await expect(service.hasWorkspaceConfigShadow('/etc')).rejects.toThrow(
+      /outside current project root/,
+    )
+  })
+
+  it('probes the shadow pair for in-scope workspaces', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const workspace = join(directory, 'ws')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    await writeFile(join(workspace, 'home', 'params.toml'), '[params]\n', 'utf8')
+    await writeFile(join(workspace, 'home', 'parameters.json'), '{}', 'utf8')
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+
+    await expect(service.hasWorkspaceConfigShadow(workspace)).resolves.toBe(true)
+    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+      join(workspace, 'home', 'params.toml'),
+    )
+  })
+})

@@ -1281,7 +1281,7 @@
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Spec Setting</h2>
                   <p class="mt-2 text-sm text-(--text-secondary)">
-                    These values are saved into the workspace home parameters.json.
+                    These values are saved into the workspace home params.toml.
                   </p>
                 </header>
 

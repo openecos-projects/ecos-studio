@@ -8,6 +8,7 @@ const {
   invalidateWorkspaceResources,
   readWorkspaceParametersFile,
   refreshConfigApi,
+  warnOnceOnConfigShadow,
   runtimeEvents,
   resourceVersions,
   workspaceSession,
@@ -31,6 +32,7 @@ const {
     },
   ),
   readWorkspaceParametersFile: vi.fn(),
+  warnOnceOnConfigShadow: vi.fn(),
   refreshConfigApi: vi.fn(),
   runtimeEvents: { value: [] },
   resourceVersions: {
@@ -73,6 +75,7 @@ vi.mock('./useHomeData', () => ({
 
 vi.mock('@/utils/projectFiles', () => ({
   readWorkspaceParametersFile,
+  warnOnceOnConfigShadow,
 }))
 
 vi.mock('@/utils/projectFs', () => ({
@@ -177,6 +180,7 @@ describe('useParameters desktop bridge integration', () => {
     fetchSharedHomeData.mockReset()
     invalidateWorkspaceResources.mockClear()
     readWorkspaceParametersFile.mockReset()
+    warnOnceOnConfigShadow.mockReset()
     refreshConfigApi.mockReset()
     refreshConfigApi.mockResolvedValue({
       cmd: 'refresh_config',
@@ -515,6 +519,25 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.config.die.area).toBe(10000)
     expect(getWorkspaceRuntimeSnapshotApi).toHaveBeenCalledWith('workspace-demo')
     expect(readWorkspaceParametersFile).toHaveBeenCalledWith('/workspace/demo')
+  })
+
+  it('probes the config shadow when a valid runtime snapshot skips the disk read', async () => {
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/params.toml',
+    })
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
+      parameters: asParametersRecord(parametersJson()),
+      home: { parameters: '/workspace/demo/home/params.toml' },
+    })
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+    expect(readWorkspaceParametersFile).not.toHaveBeenCalled()
+    expect(warnOnceOnConfigShadow).toHaveBeenCalledWith('/workspace/demo')
   })
 
   it('keeps the last parameters snapshot while a flow is running', async () => {

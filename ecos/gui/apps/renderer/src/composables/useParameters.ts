@@ -7,7 +7,7 @@ import {
   writeWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { readWorkspaceParametersFile } from '@/utils/projectFiles'
+import { readWorkspaceParametersFile, warnOnceOnConfigShadow } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
@@ -940,6 +940,9 @@ export function useParameters() {
           applyParametersData(
             parseParametersRecord(snapshot.parameters as Record<string, unknown>),
           )
+          // The disk-read shadow probe is bypassed on the snapshot path, so
+          // fire the advisory check here too (once per workspace per session).
+          void warnOnceOnConfigShadow(projectPath)
           return
         }
       }
