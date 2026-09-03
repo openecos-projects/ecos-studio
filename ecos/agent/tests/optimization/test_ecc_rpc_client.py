@@ -67,6 +67,20 @@ def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
     assert client.command == (str(executable), "rpc", "serve", "--stdio", "--agent")
 
 
+def test_stdio_client_exposes_ecc_revision(monkeypatch, tmp_path: Path) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    monkeypatch.setattr(
+        client,
+        "call",
+        lambda method, params: {"eccVersion": "ecc-test-revision"},
+    )
+
+    assert client.ecc_revision() == "ecc-test-revision"
+
+
 def test_stdio_client_allows_candidate_resume(monkeypatch, tmp_path: Path) -> None:
     executable = tmp_path / "ecc"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")

@@ -559,11 +559,6 @@ def _normalize_receipt_payload(value: object) -> object:
     return value
 
 
-def _valid_revision(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip()) and value.strip() != "unknown"
-
-
-
 from ecos_agent.optimization.ecc.rpc_client import (  # noqa: E402
     EccContentLengthRpcClient,
     _ContentLengthDecoder,
@@ -571,4 +566,5 @@ from ecos_agent.optimization.ecc.rpc_client import (  # noqa: E402
     _safe_rpc_error_detail,
     _step_render_ack,
     _terminal_event,
+    _valid_revision,
 )

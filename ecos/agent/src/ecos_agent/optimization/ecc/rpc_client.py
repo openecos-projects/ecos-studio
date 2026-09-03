@@ -277,6 +277,10 @@ class _ContentLengthDecoder:
         return length
 
 
+def _valid_revision(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and value.strip() != "unknown"
+
+
 def _step_render_ack(event: Mapping[str, object]) -> dict[str, object] | None:
     payload = event.get("payload")
     if event.get("type") != "step.completed" or not isinstance(payload, Mapping):
