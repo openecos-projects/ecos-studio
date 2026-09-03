@@ -78,6 +78,30 @@ describe('createEccRuntimeEnv', () => {
     )
   })
 
+  it('uses the staged Sizer runtime in development', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
+    const wrapperDir = join(fixture.repoRoot, 'ecos', 'scripts')
+    mkdirSync(wrapperDir, { recursive: true })
+    writeFileSync(join(wrapperDir, 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
+    const sizerRoot = join(fixture.appPath, 'resources', 'binaries', 'sizer')
+    mkdirSync(join(sizerRoot, 'bin'), { recursive: true })
+    mkdirSync(join(sizerRoot, 'src'), { recursive: true })
+    writeFileSync(join(sizerRoot, 'bin', 'Sizer'), '#!/usr/bin/env bash\n')
+    writeFileSync(join(sizerRoot, 'src', 'sizer_os.tcl'), '')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { PATH: '/usr/bin' },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.CHIPCOMPILER_ECC_SIZER_ROOT).toBe(sizerRoot)
+  })
+
   it('leaves Windows development env unchanged', () => {
     const fixture = createRepoFixture()
     writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')

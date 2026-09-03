@@ -194,9 +194,13 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
   }
 
   const nextPath = prependPath(options.env, developmentBinDir, options.platform)
+  const sizerEnv = options.env.CHIPCOMPILER_ECC_SIZER_ROOT?.trim()
+    ? {}
+    : packagedSizerEnv(resolvePackagedBinariesPath(options), options.platform)
 
   return {
     ...options.env,
+    ...sizerEnv,
     [nextPath.key]: nextPath.value,
   }
 }
