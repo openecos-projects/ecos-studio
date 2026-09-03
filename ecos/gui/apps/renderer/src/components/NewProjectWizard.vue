@@ -454,7 +454,7 @@
                           v-for="step in hardenFlowSteps"
                           :key="step.name"
                           :value="step.name"
-                          :disabled="isFlowStepLocked(step.name)"
+                          :disabled="isFlowStepStartDisabled(step.name)"
                         >
                           {{ step.name }}
                         </option>
@@ -1703,8 +1703,23 @@ const projectParentPath = ref(parentPath(initialProjectRoot(props.initialConfig)
 const designNameTouched = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim() !== '',
 )
+/**
+ * LEC compares the golden netlist against the final one; starting a fresh
+ * workspace at it would let ECC self-compare the origin netlist.
+ * Declared before the flowStartStep initializer below (const TDZ).
+ */
+const FLOW_START_DISABLED_STEPS: ReadonlySet<FlowStepName> = new Set(['postRouteLec'])
+
+function isFlowStepStartDisabled(stepName: FlowStepName) {
+  return isFlowStepLocked(stepName) || FLOW_START_DISABLED_STEPS.has(stepName)
+}
+
+function normalizeFlowStartStep(value: unknown, fallback: FlowStepName): FlowStepName {
+  const step = normalizeFlowStepName(value, fallback)
+  return FLOW_START_DISABLED_STEPS.has(step) ? fallback : step
+}
 const flowStartStep = ref<FlowStepName>(
-  normalizeFlowStepName(
+  normalizeFlowStartStep(
     props.initialConfig?.flow_config?.start_step ??
       props.initialConfig?.parameters?.start_step,
     'Synthesis',
@@ -2553,7 +2568,7 @@ function applyProjectFlowDefaults(
   const nextStart = firstString(parameters.start_step, baseDesign.start_step)
   const nextEnd = firstString(parameters.end_step, baseDesign.end_step)
   if (nextStart) {
-    flowStartStep.value = normalizeFlowStepName(nextStart, flowStartStep.value)
+    flowStartStep.value = normalizeFlowStartStep(nextStart, flowStartStep.value)
   }
   if (nextEnd) {
     flowEndStep.value = normalizeFlowStepName(nextEnd, flowEndStep.value)
@@ -2856,6 +2871,7 @@ function selectFlowStartStep(event: Event) {
 }
 
 function applyFlowStartStep(stepName: FlowStepName) {
+  if (FLOW_START_DISABLED_STEPS.has(stepName)) return
   const index = hardenFlowSteps.findIndex((step) => step.name === stepName)
   if (index < 0) return
 

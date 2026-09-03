@@ -1142,16 +1142,30 @@ export function parseWorkspaceFlowStateMap(
     const flowStep = knownFlowStep(name)
     if (!flowStep || !status) return stateMap
 
-    // Timing Opt and postRouteLec alias onto the preceding coarse step; keep
-    // the earlier entry unless the aliased check is more urgent (failed, or
-    // running over a finished stage), so the gate stays visible without
-    // hiding an unstarted one behind a completed predecessor.
+    // Timing Opt and postRouteLec alias onto the preceding coarse step; the
+    // aliased gate's state wins whenever it is more urgent than the
+    // predecessor's, so a pending or failed gate keeps the workspace out of
+    // success and blocks branching past it.
     const existing = stateMap[flowStep]
-    const overrides =
-      status === 'failed' || (status === 'running' && existing !== 'failed')
-    if (existing === undefined || overrides) stateMap[flowStep] = status
+    if (existing === undefined || statusUrgency(status) > statusUrgency(existing)) {
+      stateMap[flowStep] = status
+    }
     return stateMap
   }, {})
+}
+
+/** Project-step status severity for merging aliased gates: failed > running > unstart. */
+function statusUrgency(status: ProjectStepStatus): number {
+  switch (status) {
+    case 'failed':
+      return 3
+    case 'running':
+      return 2
+    case 'unstart':
+      return 1
+    default:
+      return 0
+  }
 }
 
 export function nextWorkspaceId(
