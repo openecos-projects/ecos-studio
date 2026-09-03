@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import frontendQorPanelSource from '@/components/frontend/FrontendWorkspaceQorPanel.vue?raw'
 import frontendWorkspaceViewSource from './FrontendWorkspaceView.vue?raw'
 
 describe('FrontendWorkspaceView QoR layout', () => {
@@ -23,5 +24,14 @@ describe('FrontendWorkspaceView QoR layout', () => {
     expect(frontendWorkspaceViewSource).toMatch(
       /if \(\s*isCompleted &&[\s\S]*?detailRequestStepName\.value\.trim\(\)\.toLowerCase\(\) === stepKey[\s\S]*?void loadDetail\(\)/,
     )
+  })
+
+  it('keeps long QoR and hotspot reports scrollable', () => {
+    expect(frontendQorPanelSource).toContain('height: 100%')
+    expect(frontendQorPanelSource).toContain('max-height: 100%')
+    expect(frontendQorPanelSource).toContain('max-height: clamp(160px, 38vh, 360px)')
+    expect(frontendQorPanelSource).toContain('overflow-y: auto')
+    expect(frontendQorPanelSource).toContain('scrollbar-gutter: stable')
+    expect(frontendQorPanelSource).toContain('aria-label="QoR hotspots"')
   })
 })

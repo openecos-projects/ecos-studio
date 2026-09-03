@@ -229,13 +229,21 @@
             </header>
 
             <div v-if="activeStep.qor.available" class="fe-qor-body">
+              <div v-if="activeStep.qor.score" class="fe-qor-score">
+                <FrontendQorScoreBreakdown
+                  :score="activeStep.qor.score"
+                  :status="activeStep.qor.status"
+                  compact
+                />
+              </div>
+
               <div class="fe-qor-gates">
                 <span class="fe-eyebrow">Quality gates</span>
                 <div class="fe-qor-gate-list">
                   <div v-for="gate in activeStep.qor.gates" :key="gate.id">
                     <i :class="qorGateIcon(gate.state)" aria-hidden="true"></i>
                     <span>{{ gate.label }}</span>
-                    <small>{{ qorGateEvidence(gate) }}</small>
+                    <small>{{ frontendQorGateEvidence(gate) }}</small>
                   </div>
                 </div>
               </div>
@@ -253,7 +261,7 @@
 
               <div v-if="activeStep.qor.hotspots.length > 0" class="fe-qor-hotspots">
                 <span class="fe-eyebrow">QoR hotspots</span>
-                <ul>
+                <ul tabindex="0" aria-label="QoR hotspots">
                   <li v-for="hotspot in activeStep.qor.hotspots" :key="hotspot.id">
                     <i :class="qorHotspotIcon(hotspot.severity)" aria-hidden="true"></i>
                     <div>
@@ -307,6 +315,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import FrontendQorScoreBreakdown from '@/components/frontend/FrontendQorScoreBreakdown.vue'
+import { frontendQorGateEvidence } from '@/utils/frontendQor'
 import {
   FRONTEND_FLOW_STEPS,
   type ProjectManagementProject,
@@ -436,11 +446,6 @@ function qorGateIcon(state: FrontendQorGate['state']): string {
   if (state === 'pass') return 'ri-checkbox-circle-fill tone-good'
   if (state === 'failed') return 'ri-close-circle-fill tone-bad'
   return 'ri-question-line tone-warn'
-}
-
-function qorGateEvidence(gate: FrontendQorGate): string {
-  if (!gate.operator || gate.actual === null || gate.expected === null) return gate.state
-  return `${gate.actual} ${gate.operator} ${gate.expected}`
 }
 
 function qorHotspotIcon(severity: FrontendQorHotspot['severity']): string {

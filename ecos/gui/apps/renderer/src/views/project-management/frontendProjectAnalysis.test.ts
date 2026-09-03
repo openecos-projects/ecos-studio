@@ -359,6 +359,7 @@ describe('buildFrontendProjectAnalysis', () => {
         analysisStatus: 'incomplete',
         available: false,
         comparisonFingerprint: '',
+        score: null,
         metrics: [],
         gates: [],
         hotspots: [],

@@ -29,11 +29,28 @@ export interface FrontendQorHotspot {
   source: string
 }
 
+export interface FrontendQorScoreComponent {
+  id: string
+  label: string
+  earned: number
+  possible: number
+  summary: string
+}
+
+export interface FrontendQorScore {
+  label: string
+  value: number
+  maximum: number
+  scoringVersion: number
+  components: FrontendQorScoreComponent[]
+}
+
 export interface FrontendStepQorAnalysis {
   status: FrontendQorStatus
   analysisStatus: string
   available: boolean
   comparisonFingerprint: string
+  score: FrontendQorScore | null
   metrics: FrontendQorMetric[]
   gates: FrontendQorGate[]
   hotspots: FrontendQorHotspot[]
@@ -53,6 +70,46 @@ const CURRENT_QOR_STEP_STATES = new Set([
   'incomplete',
   'imcomplete',
 ])
+const COUNT_GATE_EVIDENCE: Record<
+  string,
+  { singular: string; plural: string; requirement: string }
+> = {
+  frontend_contracts: {
+    singular: 'input contract failure',
+    plural: 'input contract failures',
+    requirement: 'none allowed',
+  },
+  no_actionable_errors: {
+    singular: 'actionable RTL error',
+    plural: 'actionable RTL errors',
+    requirement: 'none allowed',
+  },
+  no_elaboration_errors: {
+    singular: 'elaboration error',
+    plural: 'elaboration errors',
+    requirement: 'none allowed',
+  },
+  all_modules_resolved: {
+    singular: 'unresolved module',
+    plural: 'unresolved modules',
+    requirement: 'none allowed',
+  },
+  no_cpu_lint_errors: {
+    singular: 'CPU-owned lint error',
+    plural: 'CPU-owned lint errors',
+    requirement: 'none allowed',
+  },
+  all_required_cases_pass: {
+    singular: 'required simulation failure',
+    plural: 'required simulation failures',
+    requirement: 'none allowed',
+  },
+  difftest_matches_reference: {
+    singular: 'Difftest mismatch',
+    plural: 'Difftest mismatches',
+    requirement: 'none allowed',
+  },
+}
 
 export interface FrontendQorStepStateOptions {
   running?: boolean
@@ -110,6 +167,7 @@ export function parseFrontendStepQorArtifacts(
     comparisonFingerprint: artifactAvailable
       ? stringAt(summaryRecord, ['context', 'comparison', 'fingerprint'])
       : '',
+    score: artifactAvailable ? frontendQorScore(summaryRecord?.score) : null,
     metrics: (artifactAvailable ? arrayValue(metricsRecord?.metrics) : []).flatMap(
       (value) => {
         const metric = recordValue(value)
@@ -193,6 +251,7 @@ export function frontendQorForStepState(
     analysisStatus: 'incomplete',
     available: false,
     comparisonFingerprint: '',
+    score: null,
     metrics: [],
     gates: [],
     hotspots: [],
@@ -220,8 +279,44 @@ export function frontendQorGateIcon(state: FrontendQorGate['state']): string {
 }
 
 export function frontendQorGateEvidence(gate: FrontendQorGate): string {
-  if (!gate.operator || gate.actual === null || gate.expected === null) return gate.state
-  return `${gate.actual} ${gate.operator} ${gate.expected}`
+  const actual = typeof gate.actual === 'number' ? gate.actual : null
+  if (actual !== null) {
+    const countRule = COUNT_GATE_EVIDENCE[gate.id]
+    if (countRule) {
+      const noun = actual === 1 ? countRule.singular : countRule.plural
+      return `${actual} ${noun}; ${countRule.requirement}`
+    }
+
+    if (gate.id === 'simulation_cases_present') {
+      return `${actual} simulation case${actual === 1 ? '' : 's'} produced; at least 1 required`
+    }
+  }
+
+  if (gate.id === 'yosys_precheck') {
+    if (gate.state === 'pass') return 'Yosys structural precheck completed successfully'
+    if (gate.state === 'failed') return 'Yosys structural precheck did not pass'
+    return `Yosys structural precheck is ${gate.state}`
+  }
+  if (gate.id === 'top_module_resolved') {
+    if (gate.state === 'pass') return 'Top module resolved successfully'
+    if (gate.state === 'failed') return 'Top module could not be resolved'
+    return `Top module resolution is ${gate.state}`
+  }
+
+  if (!gate.operator || gate.actual === null || gate.expected === null) {
+    return `Requirement ${gate.state}`
+  }
+  return `Actual: ${gate.actual}; required: ${gateOperatorPhrase(gate.operator)} ${gate.expected}`
+}
+
+function gateOperatorPhrase(operator: string): string {
+  if (operator === '==') return 'exactly'
+  if (operator === '!=') return 'not'
+  if (operator === '>') return 'greater than'
+  if (operator === '>=') return 'at least'
+  if (operator === '<') return 'less than'
+  if (operator === '<=') return 'at most'
+  return operator
 }
 
 export function frontendQorHotspotIcon(severity: FrontendQorHotspot['severity']): string {
@@ -293,6 +388,57 @@ function frontendGateState(value: unknown): FrontendQorGate['state'] | null {
 function frontendHotspotSeverity(value: unknown): FrontendQorHotspot['severity'] {
   const severity = stringValue(value)
   return severity === 'critical' || severity === 'warning' ? severity : 'info'
+}
+
+function frontendQorScore(value: unknown): FrontendQorScore | null {
+  const score = recordValue(value)
+  const label = stringValue(score?.label)
+  const numericValue = numberValue(score?.value)
+  const maximum = numberValue(score?.maximum)
+  const scoringVersion = numberValue(score?.scoring_version)
+  const rawComponents = arrayValue(score?.components)
+  const components = rawComponents.flatMap((value) => {
+    const component = recordValue(value)
+    const id = stringValue(component?.id)
+    const componentLabel = stringValue(component?.label)
+    const earned = numberValue(component?.earned)
+    const possible = numberValue(component?.possible)
+    const summary = stringValue(component?.summary)
+    if (
+      !id ||
+      !componentLabel ||
+      earned === null ||
+      possible === null ||
+      possible <= 0 ||
+      earned < 0 ||
+      earned > possible ||
+      !summary
+    ) {
+      return []
+    }
+    return [{ id, label: componentLabel, earned, possible, summary }]
+  })
+  if (
+    !score ||
+    !label ||
+    numericValue === null ||
+    maximum === null ||
+    maximum <= 0 ||
+    numericValue < 0 ||
+    numericValue > maximum ||
+    scoringVersion === null ||
+    !Number.isInteger(scoringVersion) ||
+    scoringVersion < 1 ||
+    components.length === 0 ||
+    components.length !== rawComponents.length ||
+    Math.abs(components.reduce((total, item) => total + item.earned, 0) - numericValue) >
+      0.11 ||
+    Math.abs(components.reduce((total, item) => total + item.possible, 0) - maximum) >
+      0.01
+  ) {
+    return null
+  }
+  return { label, value: numericValue, maximum, scoringVersion, components }
 }
 
 function formatQorMetric(value: number, unit: string): string {

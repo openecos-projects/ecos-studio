@@ -551,6 +551,12 @@
   min-width: 0;
 }
 
+.fe-qor-score {
+  grid-column: 1 / -1;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
 .fe-qor-gates,
 .fe-qor-metrics,
 .fe-qor-hotspots {
@@ -643,9 +649,19 @@
 
 .fe-qor-hotspots ul {
   display: grid;
+  max-height: min(360px, 38vh);
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   list-style: none;
+}
+
+.fe-qor-hotspots ul:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 72%, transparent);
+  outline-offset: 2px;
 }
 
 .fe-qor-hotspots li {

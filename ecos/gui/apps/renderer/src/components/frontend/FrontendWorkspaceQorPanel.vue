@@ -12,6 +12,10 @@
     </header>
 
     <template v-if="qor.available">
+      <section v-if="qor.score" class="workspace-qor__section">
+        <FrontendQorScoreBreakdown :score="qor.score" :status="qor.status" />
+      </section>
+
       <section class="workspace-qor__section">
         <header>
           <span>Quality Gates</span>
@@ -48,7 +52,7 @@
           <span>Hotspots</span>
           <small>{{ qor.hotspots.length }} reported</small>
         </header>
-        <ul class="workspace-qor__hotspots">
+        <ul class="workspace-qor__hotspots" tabindex="0" aria-label="QoR hotspots">
           <li v-for="hotspot in qor.hotspots" :key="hotspot.id">
             <i :class="frontendQorHotspotIcon(hotspot.severity)" aria-hidden="true"></i>
             <span>
@@ -73,6 +77,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import FrontendQorScoreBreakdown from '@/components/frontend/FrontendQorScoreBreakdown.vue'
 import {
   frontendQorGateEvidence,
   frontendQorGateIcon,
@@ -96,7 +101,12 @@ const passingGateCount = computed(
 .workspace-qor {
   display: flex;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
   flex-direction: column;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   color: var(--text-primary);
   background: var(--bg-primary);
 }
@@ -289,12 +299,21 @@ const passingGateCount = computed(
 }
 
 .workspace-qor__hotspots {
+  max-height: clamp(160px, 38vh, 360px);
   margin: 0;
   padding: 0;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   list-style: none;
+}
+
+.workspace-qor__hotspots:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 72%, transparent);
+  outline-offset: 2px;
 }
 
 .workspace-qor__hotspots li {

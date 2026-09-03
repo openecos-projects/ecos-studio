@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   frontendQorForStepState,
+  frontendQorGateEvidence,
   parseFrontendStepQorArtifacts,
   parseFrontendStepQorTexts,
+  type FrontendQorGate,
 } from './frontendQor'
 
 const generation = 'qor-generation-1'
@@ -54,6 +56,74 @@ const hotspots = {
 }
 
 describe('frontend QoR parser', () => {
+  it.each([
+    ['frontend_contracts', 0, 'pass', '0 input contract failures; none allowed'],
+    ['no_actionable_errors', 1, 'failed', '1 actionable RTL error; none allowed'],
+    ['no_elaboration_errors', 2, 'failed', '2 elaboration errors; none allowed'],
+    ['all_modules_resolved', 0, 'pass', '0 unresolved modules; none allowed'],
+    ['no_cpu_lint_errors', 3, 'failed', '3 CPU-owned lint errors; none allowed'],
+    [
+      'all_required_cases_pass',
+      0,
+      'pass',
+      '0 required simulation failures; none allowed',
+    ],
+    [
+      'simulation_cases_present',
+      1,
+      'pass',
+      '1 simulation case produced; at least 1 required',
+    ],
+    ['difftest_matches_reference', 0, 'pass', '0 Difftest mismatches; none allowed'],
+  ] as const)(
+    'explains the %s gate without exposing a raw comparison',
+    (id, actual, state, evidence) => {
+      expect(
+        frontendQorGateEvidence({
+          id,
+          label: id,
+          state,
+          actual,
+          operator: id === 'simulation_cases_present' ? '>' : '==',
+          expected: 0,
+        }),
+      ).toBe(evidence)
+    },
+  )
+
+  it('explains boolean and unknown gates in plain language', () => {
+    expect(
+      frontendQorGateEvidence({
+        id: 'yosys_precheck',
+        label: 'Yosys structural precheck',
+        state: 'pass',
+        actual: 1,
+        operator: '==',
+        expected: 1,
+      }),
+    ).toBe('Yosys structural precheck completed successfully')
+    expect(
+      frontendQorGateEvidence({
+        id: 'top_module_resolved',
+        label: 'Top module resolved',
+        state: 'failed',
+        actual: 0,
+        operator: '==',
+        expected: 1,
+      }),
+    ).toBe('Top module could not be resolved')
+    expect(
+      frontendQorGateEvidence({
+        id: 'future_gate',
+        label: 'Future gate',
+        state: 'failed',
+        actual: 7,
+        operator: '<=',
+        expected: 4,
+      } satisfies FrontendQorGate),
+    ).toBe('Actual: 7; required: at most 4')
+  })
+
   it('parses structured artifacts used by Frontend Workspace', () => {
     expect(parseFrontendStepQorArtifacts({ metrics, summary, hotspots })).toMatchObject({
       status: 'pass',
@@ -74,6 +144,77 @@ describe('frontend QoR parser', () => {
         JSON.stringify(hotspots),
       ),
     ).toEqual(parseFrontendStepQorArtifacts({ metrics, summary, hotspots }))
+  })
+
+  it('parses an explainable preparation readiness score', () => {
+    const scoreSummary = {
+      ...summary,
+      score: {
+        label: 'Preparation readiness',
+        value: 100,
+        maximum: 100,
+        scoring_version: 1,
+        components: [
+          {
+            id: 'source_resolution',
+            label: 'Source resolution',
+            earned: 30,
+            possible: 30,
+            summary: '44 of 44 RTL sources and 0 of 0 include directories resolved.',
+          },
+          {
+            id: 'top_resolution',
+            label: 'Top resolution',
+            earned: 20,
+            possible: 20,
+            summary: '1 matching definition found; source is in prepared inputs.',
+          },
+          {
+            id: 'interface_contract',
+            label: 'Interface contract',
+            earned: 40,
+            possible: 40,
+            summary: '61 of 61 required ports matched; 0 unexpected.',
+          },
+          {
+            id: 'reproducibility',
+            label: 'Reproducibility',
+            earned: 10,
+            possible: 10,
+            summary: 'Input fingerprint recorded; normalized outputs persisted.',
+          },
+        ],
+      },
+    }
+
+    expect(
+      parseFrontendStepQorArtifacts({ metrics, summary: scoreSummary, hotspots }).score,
+    ).toEqual({
+      label: 'Preparation readiness',
+      value: 100,
+      maximum: 100,
+      scoringVersion: 1,
+      components: expect.arrayContaining([
+        expect.objectContaining({ id: 'interface_contract', earned: 40, possible: 40 }),
+      ]),
+    })
+  })
+
+  it('ignores a malformed optional score without hiding valid QoR artifacts', () => {
+    const malformedSummary = {
+      ...summary,
+      score: {
+        label: 'Preparation readiness',
+        value: 120,
+        maximum: 100,
+        scoring_version: 1,
+        components: [],
+      },
+    }
+
+    expect(
+      parseFrontendStepQorArtifacts({ metrics, summary: malformedSummary, hotspots }),
+    ).toMatchObject({ available: true, status: 'pass', score: null })
   })
 
   it('does not report pass when the artifact triplet is incomplete', () => {
@@ -113,6 +254,7 @@ describe('frontend QoR parser', () => {
         analysisStatus: 'incomplete',
         available: false,
         comparisonFingerprint: '',
+        score: null,
         metrics: [],
         gates: [],
         hotspots: [],
