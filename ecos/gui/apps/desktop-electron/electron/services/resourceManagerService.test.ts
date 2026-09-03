@@ -2165,7 +2165,7 @@ describe('ResourceManagerService', () => {
     expect(env.PATH?.split(':')).toEqual([slangRoot, '/usr/bin'])
   })
 
-  it('returns a copied base env when no Resource Manager manifest exists', async () => {
+  it('preserves pre-resolved ECC runtime env when no Resource Manager manifest exists', async () => {
     const root = await createTempDir('ecos-resources-')
     const service = new ResourceManagerService({
       resourcesDir: join(root, 'state', 'resources'),
@@ -2175,6 +2175,7 @@ describe('ResourceManagerService', () => {
     const baseEnv = {
       PATH: '/usr/bin',
       ECOS_ELECTRON_OSS_CAD_DIR: '/packaged/oss-cad-suite',
+      CHIPCOMPILER_ECC_SIZER_ROOT: '/packaged/sizer',
     }
 
     const env = await service.createRuntimeEnv(baseEnv, { platform: 'linux' })

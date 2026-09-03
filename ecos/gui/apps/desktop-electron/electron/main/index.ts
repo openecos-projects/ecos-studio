@@ -60,6 +60,7 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
+  runtimeEnv: NodeJS.ProcessEnv
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
@@ -258,6 +259,7 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
+    runtimeEnv,
     frontendRpcRuntimeService,
     chipViewerService,
     codexDependencyService,
@@ -291,7 +293,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
 
   if (!ipcRegistered) {
     const agentEnv = await desktopServices.resourceManagerService.createRuntimeEnv(
-      process.env,
+      desktopServices.runtimeEnv,
       { platform: process.platform },
     )
     const agentRuntimeService = await createAgentRuntimeFromEnvironment(
