@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "app_name", "value": "ECOS Studio" },
+    { "name": "module_desc", "value": "ECOS Studio entry module" },
+    { "name": "ability_desc", "value": "Hosts the ECOS Studio web app" }
+  ]
+}
