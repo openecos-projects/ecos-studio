@@ -284,7 +284,11 @@
               <span>Findings</span>
               <small>{{ activeStep.findings.length }} actionable</small>
             </header>
-            <ul v-if="activeStep.findings.length > 0">
+            <ul
+              v-if="activeStep.findings.length > 0"
+              tabindex="0"
+              aria-label="Step findings"
+            >
               <li v-for="finding in activeStep.findings" :key="finding.id">
                 <i :class="findingIcon(finding.severity)" aria-hidden="true"></i>
                 <div>
