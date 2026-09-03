@@ -227,14 +227,14 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
     tmp_path: Path,
 ) -> None:
     origin = tmp_path / "origin"
-    rtl = origin / "rtl"
-    rtl.mkdir(parents=True)
+    rtl = origin
+    rtl.mkdir()
     (rtl / "a.v").write_text("module a; endmodule\n", encoding="utf-8")
     (rtl / "b.v").write_text("module b; endmodule\n", encoding="utf-8")
     (origin / "a.sdc").write_text("create_clock -period 10 clk\n", encoding="utf-8")
     (origin / "b.sdc").write_text("set_false_path -from rst\n", encoding="utf-8")
-    filelist = origin / "filelist.f"
-    filelist.write_text("rtl/a.v\nrtl/b.v\n", encoding="utf-8")
+    filelist = origin / "filelist"
+    filelist.write_text("a.v\nb.v\n", encoding="utf-8")
     pdk = tmp_path / "pdk"
     tech_lef = pdk / "prtech" / "techLEF" / "N551P6M_ecos.lef"
     tech_lef.parent.mkdir(parents=True)

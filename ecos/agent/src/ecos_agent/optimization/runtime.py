@@ -485,18 +485,22 @@ def _optimization_execution_context(
     design_id = design_id or _design_id(workspace)
     origin = workspace / "origin"
     input_hashes: dict[str, str] = {}
-    for key, relative in (
-        ("rtl_sha256", "rtl"),
-        ("filelist_sha256", "filelist.f"),
-        ("sdc_sha256", ""),
+    rtl_files = sorted(
+        path
+        for path in origin.rglob("*")
+        if path.is_file()
+        and path.name.casefold().removesuffix(".gz").endswith(
+            (".v", ".sv", ".vh", ".svh", ".vhd", ".vhdl")
+        )
+    )
+    filelists = [
+        path for path in (origin / "filelist", origin / "filelist.f") if path.is_file()
+    ]
+    for key, files in (
+        ("rtl_sha256", rtl_files),
+        ("filelist_sha256", filelists[:1]),
+        ("sdc_sha256", sorted(origin.glob("*.sdc"))),
     ):
-        if relative == "rtl":
-            candidates = sorted((origin / relative).glob("*"))
-        elif relative:
-            candidates = [origin / relative]
-        else:
-            candidates = sorted(origin.glob("*.sdc"))
-        files = [path for path in candidates if path.is_file()]
         if not files:
             raise OptimizationRuntimeError(f"optimization {key} input is unavailable")
         hashes = [file_sha256(path) for path in files]
