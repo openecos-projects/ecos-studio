@@ -237,6 +237,12 @@
                 />
               </div>
 
+              <div class="fe-qor-snapshot">
+                <FrontendQorInputSnapshot
+                  :fingerprint="activeStep.qor.inputFingerprint"
+                />
+              </div>
+
               <div class="fe-qor-gates">
                 <span class="fe-eyebrow">Quality gates</span>
                 <div class="fe-qor-gate-list">
@@ -319,6 +325,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import FrontendQorInputSnapshot from '@/components/frontend/FrontendQorInputSnapshot.vue'
 import FrontendQorScoreBreakdown from '@/components/frontend/FrontendQorScoreBreakdown.vue'
 import { frontendQorGateEvidence } from '@/utils/frontendQor'
 import {

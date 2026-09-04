@@ -36,7 +36,8 @@ const score: FrontendQorScore = {
       label: 'Reproducibility',
       earned: 10,
       possible: 10,
-      summary: 'Input fingerprint recorded; normalized outputs persisted.',
+      summary:
+        'Input snapshot tracked; normalized input manifest and file list persisted.',
     },
   ],
 }

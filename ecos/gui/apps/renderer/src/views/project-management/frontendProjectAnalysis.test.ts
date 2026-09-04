@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildFrontendProjectAnalysis } from './frontendProjectAnalysis'
 
+const inputFingerprint = 'a'.repeat(64)
+
 describe('buildFrontendProjectAnalysis', () => {
   it('builds frontend health, comparison, and actionable findings from ECC-FE details', () => {
     const analysis = buildFrontendProjectAnalysis([
@@ -234,7 +236,12 @@ describe('buildFrontendProjectAnalysis', () => {
       generation,
       analysis_status: 'valid',
       quality_status: 'blocked',
-      context: { comparison: { fingerprint: 'same-workload' } },
+      context: {
+        comparison: {
+          fingerprint: 'same-workload',
+          inputs: { input_fingerprint: inputFingerprint },
+        },
+      },
       gates: [
         {
           id: 'no_cpu_lint_errors',
@@ -292,6 +299,7 @@ describe('buildFrontendProjectAnalysis', () => {
     expect(analysis.workspaces[0]?.steps[0]?.qor).toMatchObject({
       status: 'blocked',
       comparisonFingerprint: 'same-workload',
+      inputFingerprint,
       available: true,
       metrics: [expect.objectContaining({ id: 'cpu_lint_error_count', display: '1' })],
       gates: [expect.objectContaining({ id: 'no_cpu_lint_errors', state: 'failed' })],
@@ -359,6 +367,7 @@ describe('buildFrontendProjectAnalysis', () => {
         analysisStatus: 'incomplete',
         available: false,
         comparisonFingerprint: '',
+        inputFingerprint: '',
         score: null,
         metrics: [],
         gates: [],

@@ -17,6 +17,10 @@
       </section>
 
       <section class="workspace-qor__section">
+        <FrontendQorInputSnapshot :fingerprint="qor.inputFingerprint" />
+      </section>
+
+      <section class="workspace-qor__section">
         <header>
           <span>Quality Gates</span>
           <small>{{ passingGateCount }}/{{ qor.gates.length }} passed</small>
@@ -77,6 +81,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import FrontendQorInputSnapshot from '@/components/frontend/FrontendQorInputSnapshot.vue'
 import FrontendQorScoreBreakdown from '@/components/frontend/FrontendQorScoreBreakdown.vue'
 import {
   frontendQorGateEvidence,

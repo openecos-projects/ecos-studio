@@ -8,6 +8,7 @@ import {
 } from './frontendQor'
 
 const generation = 'qor-generation-1'
+const inputFingerprint = 'a'.repeat(64)
 
 const metrics = {
   schema_version: 3,
@@ -30,7 +31,12 @@ const summary = {
   generation,
   analysis_status: 'valid',
   quality_status: 'pass',
-  context: { comparison: { fingerprint: 'same-workload' } },
+  context: {
+    comparison: {
+      fingerprint: 'same-workload',
+      inputs: { input_fingerprint: inputFingerprint },
+    },
+  },
   gates: [
     {
       id: 'all_required_cases_pass',
@@ -130,6 +136,7 @@ describe('frontend QoR parser', () => {
       available: true,
       analysisStatus: 'valid',
       comparisonFingerprint: 'same-workload',
+      inputFingerprint,
       metrics: [{ id: 'simulation_pass_rate', display: '100%' }],
       gates: [{ id: 'all_required_cases_pass', state: 'pass' }],
       hotspots: [{ id: 'slow_case-0', severity: 'warning' }],
@@ -145,6 +152,26 @@ describe('frontend QoR parser', () => {
       ),
     ).toEqual(parseFrontendStepQorArtifacts({ metrics, summary, hotspots }))
   })
+
+  it.each(['truncated', 'g'.repeat(64), ` ${inputFingerprint} `])(
+    'does not present an invalid input identity as a complete SHA-256 value',
+    (invalidFingerprint) => {
+      const invalidSummary = {
+        ...summary,
+        context: {
+          comparison: {
+            ...summary.context.comparison,
+            inputs: { input_fingerprint: invalidFingerprint },
+          },
+        },
+      }
+
+      expect(
+        parseFrontendStepQorArtifacts({ metrics, summary: invalidSummary, hotspots })
+          .inputFingerprint,
+      ).toBe('')
+    },
+  )
 
   it('parses an explainable preparation readiness score', () => {
     const scoreSummary = {
@@ -187,17 +214,49 @@ describe('frontend QoR parser', () => {
       },
     }
 
-    expect(
-      parseFrontendStepQorArtifacts({ metrics, summary: scoreSummary, hotspots }).score,
-    ).toEqual({
+    const parsed = parseFrontendStepQorArtifacts({
+      metrics,
+      summary: scoreSummary,
+      hotspots,
+    })
+
+    expect(parsed.score).toEqual({
       label: 'Preparation readiness',
       value: 100,
       maximum: 100,
       scoringVersion: 1,
       components: expect.arrayContaining([
         expect.objectContaining({ id: 'interface_contract', earned: 40, possible: 40 }),
+        expect.objectContaining({
+          id: 'reproducibility',
+          summary:
+            'Input snapshot tracked; normalized input manifest and file list persisted.',
+        }),
       ]),
     })
+
+    const invalidIdentitySummary = {
+      ...scoreSummary,
+      context: {
+        comparison: {
+          ...scoreSummary.context.comparison,
+          inputs: { input_fingerprint: 'invalid' },
+        },
+      },
+    }
+    const invalidIdentity = parseFrontendStepQorArtifacts({
+      metrics,
+      summary: invalidIdentitySummary,
+      hotspots,
+    })
+
+    expect(invalidIdentity.inputFingerprint).toBe('')
+    expect(
+      invalidIdentity.score?.components.find(({ id }) => id === 'reproducibility')
+        ?.summary,
+    ).toBe(
+      'Input snapshot not tracked; normalized input manifest and file list persisted.',
+    )
   })
 
   it('ignores a malformed optional score without hiding valid QoR artifacts', () => {
@@ -238,6 +297,7 @@ describe('frontend QoR parser', () => {
       analysisStatus: 'incomplete',
       available: false,
       comparisonFingerprint: '',
+      inputFingerprint: '',
       metrics: [],
       gates: [],
       hotspots: [],
@@ -254,6 +314,7 @@ describe('frontend QoR parser', () => {
         analysisStatus: 'incomplete',
         available: false,
         comparisonFingerprint: '',
+        inputFingerprint: '',
         score: null,
         metrics: [],
         gates: [],

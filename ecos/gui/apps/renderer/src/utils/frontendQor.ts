@@ -50,6 +50,7 @@ export interface FrontendStepQorAnalysis {
   analysisStatus: string
   available: boolean
   comparisonFingerprint: string
+  inputFingerprint: string
   score: FrontendQorScore | null
   metrics: FrontendQorMetric[]
   gates: FrontendQorGate[]
@@ -155,6 +156,14 @@ export function parseFrontendStepQorArtifacts(
       : artifactPresent
         ? 'incomplete'
         : 'unavailable'
+  const comparison = artifactAvailable
+    ? recordValue(recordValue(summaryRecord?.context)?.comparison)
+    : null
+  const rawInputFingerprint = recordValue(comparison?.inputs)?.input_fingerprint
+  const inputFingerprint =
+    typeof rawInputFingerprint === 'string' && /^[a-f0-9]{64}$/i.test(rawInputFingerprint)
+      ? rawInputFingerprint
+      : ''
 
   return {
     status,
@@ -164,10 +173,11 @@ export function parseFrontendStepQorArtifacts(
         ? 'incomplete'
         : 'unavailable',
     available: artifactAvailable,
-    comparisonFingerprint: artifactAvailable
-      ? stringAt(summaryRecord, ['context', 'comparison', 'fingerprint'])
-      : '',
-    score: artifactAvailable ? frontendQorScore(summaryRecord?.score) : null,
+    comparisonFingerprint: stringValue(comparison?.fingerprint),
+    inputFingerprint,
+    score: artifactAvailable
+      ? frontendQorScore(summaryRecord?.score, Boolean(inputFingerprint))
+      : null,
     metrics: (artifactAvailable ? arrayValue(metricsRecord?.metrics) : []).flatMap(
       (value) => {
         const metric = recordValue(value)
@@ -251,6 +261,7 @@ export function frontendQorForStepState(
     analysisStatus: 'incomplete',
     available: false,
     comparisonFingerprint: '',
+    inputFingerprint: '',
     score: null,
     metrics: [],
     gates: [],
@@ -344,16 +355,6 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
 
-function stringAt(source: JsonRecord | null, path: readonly string[]): string {
-  let value: unknown = source
-  for (const key of path) {
-    const record = recordValue(value)
-    if (!record) return ''
-    value = record[key]
-  }
-  return stringValue(value)
-}
-
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -390,7 +391,10 @@ function frontendHotspotSeverity(value: unknown): FrontendQorHotspot['severity']
   return severity === 'critical' || severity === 'warning' ? severity : 'info'
 }
 
-function frontendQorScore(value: unknown): FrontendQorScore | null {
+function frontendQorScore(
+  value: unknown,
+  inputSnapshotTracked: boolean,
+): FrontendQorScore | null {
   const score = recordValue(value)
   const label = stringValue(score?.label)
   const numericValue = numberValue(score?.value)
@@ -403,7 +407,11 @@ function frontendQorScore(value: unknown): FrontendQorScore | null {
     const componentLabel = stringValue(component?.label)
     const earned = numberValue(component?.earned)
     const possible = numberValue(component?.possible)
-    const summary = stringValue(component?.summary)
+    const summary = frontendQorScoreComponentSummary(
+      id,
+      stringValue(component?.summary),
+      inputSnapshotTracked,
+    )
     if (
       !id ||
       !componentLabel ||
@@ -439,6 +447,28 @@ function frontendQorScore(value: unknown): FrontendQorScore | null {
     return null
   }
   return { label, value: numericValue, maximum, scoringVersion, components }
+}
+
+function frontendQorScoreComponentSummary(
+  id: string,
+  summary: string,
+  inputSnapshotTracked: boolean,
+): string {
+  if (id !== 'reproducibility') return summary
+
+  return summary
+    .replace(
+      /^(?:Input fingerprint (?:recorded|missing)|Input snapshot (?:tracked|not tracked));/,
+      `Input snapshot ${inputSnapshotTracked ? 'tracked' : 'not tracked'};`,
+    )
+    .replace(
+      'normalized outputs persisted.',
+      'normalized input manifest and file list persisted.',
+    )
+    .replace(
+      'normalized outputs incomplete.',
+      'normalized input manifest or file list is incomplete.',
+    )
 }
 
 function formatQorMetric(value: number, unit: string): string {
