@@ -24,6 +24,7 @@ vi.mock('@/platform/desktop', () => ({
 }))
 
 import BackgroundTasksButton from './BackgroundTasksButton.vue'
+import NotificationCenter from './NotificationCenter.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 
 function operation(
@@ -178,5 +179,24 @@ describe('BackgroundTasksButton', () => {
     await wrapper.get('.shutdown-actions button').trigger('click')
     expect(cancelShutdown).toHaveBeenCalledOnce()
     wrapper.unmount()
+  })
+
+  it('keeps the background task and notification popovers mutually exclusive', async () => {
+    const backgroundTasks = mount(BackgroundTasksButton)
+    const notifications = mount(NotificationCenter)
+
+    await backgroundTasks.get('.background-tasks-trigger').trigger('click')
+    expect(backgroundTasks.find('.background-tasks-popover').exists()).toBe(true)
+
+    await notifications.get('.notification-trigger').trigger('click')
+    expect(notifications.find('.notification-panel').exists()).toBe(true)
+    expect(backgroundTasks.find('.background-tasks-popover').exists()).toBe(false)
+
+    await backgroundTasks.get('.background-tasks-trigger').trigger('click')
+    expect(backgroundTasks.find('.background-tasks-popover').exists()).toBe(true)
+    expect(notifications.find('.notification-panel').exists()).toBe(false)
+
+    backgroundTasks.unmount()
+    notifications.unmount()
   })
 })

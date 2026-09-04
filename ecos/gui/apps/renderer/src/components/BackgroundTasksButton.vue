@@ -24,7 +24,7 @@
       type="button"
       class="shutdown-waiting"
       title="View shutdown progress"
-      @click.stop="open = true"
+      @click.stop="openTasks"
     >
       <i class="ri-shut-down-line" aria-hidden="true"></i>
       <span>{{ shutdownLabel }}</span>
@@ -227,6 +227,7 @@ const trigger = ref<HTMLButtonElement | null>(null)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | null = null
 const retryingHandle = ref('')
+const topbarOverlayEvent = 'ecos-topbar-overlay-open'
 
 type PresentedCreation = EccBackgroundWorkspaceCreation & {
   local?: boolean
@@ -288,7 +289,22 @@ watch(open, (isOpen) => {
 })
 
 function toggle(): void {
-  open.value = !open.value
+  if (open.value) {
+    open.value = false
+    return
+  }
+  openTasks()
+}
+
+function openTasks(): void {
+  document.dispatchEvent(
+    new CustomEvent(topbarOverlayEvent, { detail: 'background-tasks' }),
+  )
+  open.value = true
+}
+
+function closeForOverlay(event: Event): void {
+  if ((event as CustomEvent<string>).detail === 'notifications') open.value = false
 }
 
 function projectManagementPath(): string {
@@ -394,12 +410,14 @@ function closeFromKeyboard(event: KeyboardEvent): void {
 onMounted(() => {
   document.addEventListener('click', closeFromDocument)
   document.addEventListener('keydown', closeFromKeyboard)
+  document.addEventListener(topbarOverlayEvent, closeForOverlay)
 })
 
 onUnmounted(() => {
   if (clock) clearInterval(clock)
   document.removeEventListener('click', closeFromDocument)
   document.removeEventListener('keydown', closeFromKeyboard)
+  document.removeEventListener(topbarOverlayEvent, closeForOverlay)
 })
 </script>
 

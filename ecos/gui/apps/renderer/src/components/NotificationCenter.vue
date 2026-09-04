@@ -7,7 +7,7 @@
       :aria-expanded="open"
       aria-label="Open notifications"
       title="Notifications"
-      @click="open = !open"
+      @click="toggle"
     >
       <i class="ri-notification-3-line" aria-hidden="true" />
       <span v-if="unreadCount" class="notification-count">{{ unreadCountLabel }}</span>
@@ -24,16 +24,28 @@
           <p class="notification-eyebrow">Activity</p>
           <h2>Notifications</h2>
         </div>
-        <button
-          type="button"
-          class="notification-icon-button"
-          aria-label="Clear all notifications"
-          title="Clear all"
-          :disabled="!notifications.length"
-          @click="clear"
-        >
-          <i class="ri-delete-bin-6-line" aria-hidden="true" />
-        </button>
+        <div class="notification-header-actions">
+          <button
+            type="button"
+            class="notification-icon-button"
+            aria-label="Mark all notifications as read"
+            title="Mark all as read"
+            :disabled="!unreadCount"
+            @click="markAllRead"
+          >
+            <i class="ri-check-double-line" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="notification-icon-button"
+            aria-label="Clear all notifications"
+            title="Clear all"
+            :disabled="!notifications.length"
+            @click="clear"
+          >
+            <i class="ri-delete-bin-6-line" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div v-if="!notifications.length" class="notification-empty">
@@ -93,17 +105,38 @@ import {
 } from '@/stores/notificationStore'
 
 const open = ref(false)
-const { notifications, unreadCount, markRead, remove, clear } = useNotificationStore()
+const { notifications, unreadCount, markRead, markAllRead, remove, clear } =
+  useNotificationStore()
+const topbarOverlayEvent = 'ecos-topbar-overlay-open'
 const unreadCountLabel = computed(() =>
   unreadCount.value > 99 ? '99+' : unreadCount.value,
 )
+
+function toggle(): void {
+  if (open.value) {
+    open.value = false
+    return
+  }
+  document.dispatchEvent(new CustomEvent(topbarOverlayEvent, { detail: 'notifications' }))
+  open.value = true
+}
+
+function closeForOverlay(event: Event): void {
+  if ((event as CustomEvent<string>).detail === 'background-tasks') open.value = false
+}
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && open.value) open.value = false
 }
 
-onMounted(() => document.addEventListener('keydown', handleKeydown))
-onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown)
+  document.addEventListener(topbarOverlayEvent, closeForOverlay)
+})
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener(topbarOverlayEvent, closeForOverlay)
+})
 
 function iconFor(severity: AppNotificationSeverity): string {
   if (severity === 'error') return 'ri-error-warning-line'
@@ -210,6 +243,11 @@ function formatTime(timestamp: number): string {
 .notification-header h2 {
   font-size: 0.95rem;
   font-weight: 650;
+}
+
+.notification-header-actions {
+  display: flex;
+  gap: 0.35rem;
 }
 
 .notification-eyebrow {
