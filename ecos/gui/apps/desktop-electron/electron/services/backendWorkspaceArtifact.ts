@@ -12,7 +12,7 @@ import type {
   VerifiedProjectArtifactReadResult,
 } from './projectManagementReadService'
 
-type ValidSnapshot = Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>
+type ValidSnapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnapshot']>
 
 export type WorkspaceArtifactReader = (request: {
   projectRoot: string

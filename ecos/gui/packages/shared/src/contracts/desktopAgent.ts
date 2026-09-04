@@ -31,6 +31,10 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   projectRoot?: string
   sessionId?: string
   workspaceId?: string
+  /** Electron-populated canonical context; renderer values are ignored. */
+  workspaceDesignId?: string
+  workspaceParameterValues?: Record<string, DesktopAgentWorkspaceRerunParameterValue>
+  workspaceRevision?: number
 }
 
 export interface DesktopAgentStartSessionResponse {
@@ -38,8 +42,12 @@ export interface DesktopAgentStartSessionResponse {
 }
 
 export interface DesktopAgentSendMessageRequest extends DesktopAgentProviderRequest {
+  /** Electron-issued token returned only when the user confirms an execution card. */
+  confirmationToken?: string
   message: string
   sessionId: string
+  /** Electron-populated canonical context; renderer values are ignored. */
+  workspaceRevision?: number
 }
 
 export interface DesktopAgentSendMessageResponse {
@@ -91,10 +99,16 @@ export interface DesktopAgentContractField {
 }
 
 export interface DesktopAgentExecutionContract {
+  confirmation_token?: string
   fields: DesktopAgentContractField[]
+  parameter_patch?: DesktopAgentWorkspaceRerunParameterPatch[]
   presentation?: 'workspace_rerun' | 'workspace_continue' | 'workspace_parameter_update'
   schema_version: 'flow-agent.resolved_execution_contract.v1'
   title: string
+  update_id?: string
+  workspace?: string
+  workspace_rerun?: DesktopAgentWorkspaceRerunContract
+  workspace_revision?: number
 }
 
 export interface DesktopAgentWorkspaceContinueContract {
@@ -104,40 +118,19 @@ export interface DesktopAgentWorkspaceContinueContract {
   workspace: string
 }
 
-/**
- * Workspace files the Agent may write a parameter into. `home/parameters.json`
- * is authoritative; ECC regenerates the `config/*.json` step configs from it.
- */
-export const desktopAgentParameterWriteFiles = [
-  'home/parameters.json',
-  'config/dreamplace_ecc.json',
-  'config/cts_ecc.json',
-  'config/route_ecc.json',
-] as const
-
-export type DesktopAgentParameterWriteFile =
-  (typeof desktopAgentParameterWriteFiles)[number]
-
-export type DesktopAgentParameterWriteSurface = 'parameters' | 'step_config'
-
-/**
- * A resolved write instruction. The Agent owns the knob-to-location mapping and
- * emits it with the contract, so the GUI executes rather than re-deriving it.
- */
-export interface DesktopAgentWorkspaceParameterWrite {
-  file: DesktopAgentParameterWriteFile
-  json_path: (string | number)[]
-  knob_id: string
-  surface: DesktopAgentParameterWriteSurface
-  value: DesktopAgentWorkspaceRerunParameterValue
+export interface DesktopAgentStepConfigurationUpdate {
+  options: Record<string, unknown>
+  step_id: string
 }
 
 export interface DesktopAgentWorkspaceParameterUpdateContract {
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
-  schema_version: 'flow-agent.workspace_parameter_update_contract.v2'
+  schema_version: 'flow-agent.workspace_parameter_update_contract.v3'
+  step_configurations: DesktopAgentStepConfigurationUpdate[]
   update_id: string
   workspace: string
-  writes: DesktopAgentWorkspaceParameterWrite[]
+  workspace_parameters: Record<string, unknown>
+  workspace_revision?: number
 }
 
 export interface DesktopAgentWorkspaceSetupParameters {
@@ -206,8 +199,8 @@ export interface DesktopAgentWorkspaceRerunContract {
   end_step: string
   execution_scope: 'single_step' | 'full_flow'
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
-  /** Optional only for pre-write-contract Agent providers; nonempty patches fail closed. */
-  writes?: DesktopAgentWorkspaceParameterWrite[]
+  step_configurations: DesktopAgentStepConfigurationUpdate[]
+  workspace_parameters: Record<string, unknown>
   requires_gui_review: true
   rerun_id: string
   schema_version: 'flow-agent.workspace_rerun_contract.v1'

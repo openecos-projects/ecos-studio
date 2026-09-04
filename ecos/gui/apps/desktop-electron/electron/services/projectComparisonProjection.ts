@@ -1,6 +1,7 @@
 import {
   projectManagementWorkspaceSummaryPaths,
   projectManifestFlowSteps,
+  parseProjectManifestFlowStep,
   type EccEngineeringAnalysis,
   type EccEngineeringAnalysisArtifactRef,
   type ProjectAnalysisSnapshot,
@@ -20,6 +21,12 @@ import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 
 const FLOW_STEPS = projectManifestFlowSteps
 const ANALYSIS_PATHS = new Set<string>(projectManagementWorkspaceSummaryPaths)
+
+function comparisonStepId(stepId: string): string | null {
+  const canonical = parseProjectManifestFlowStep(stepId)
+  if (canonical) return canonical
+  return stepId.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout' ? null : stepId
+}
 
 export type ProjectComparisonInput = NonNullable<
   ReturnType<typeof projectQorInputForWorkspace>
@@ -66,14 +73,28 @@ export function buildProjectComparisonSteps(
   trend: ProjectQorTrendSummary,
   flowStates: Record<string, Record<string, ProjectStepStatus>>,
 ): ProjectStepComparison[] {
-  const stepIds = new Set<string>(FLOW_STEPS)
-  for (const states of Object.values(flowStates)) {
-    for (const stepId of Object.keys(states)) stepIds.add(stepId)
+  const stepIds = new Set<string>()
+  const normalizedFlowStates: typeof flowStates = {}
+  for (const [workspaceId, states] of Object.entries(flowStates)) {
+    const normalized: Record<string, ProjectStepStatus> = {}
+    for (const [rawStepId, status] of Object.entries(states)) {
+      const stepId = comparisonStepId(rawStepId)
+      if (!stepId) continue
+      normalized[stepId] = status
+      stepIds.add(stepId)
+    }
+    normalizedFlowStates[workspaceId] = normalized
   }
   for (const workspace of manifest.workspaces) {
-    stepIds.add(workspace.start_step)
-    stepIds.add(workspace.end_step)
-    if (workspace.branch_from?.source_step) stepIds.add(workspace.branch_from.source_step)
+    for (const rawStepId of [
+      workspace.start_step,
+      workspace.end_step,
+      workspace.branch_from?.source_step,
+    ]) {
+      if (!rawStepId) continue
+      const stepId = comparisonStepId(rawStepId)
+      if (stepId) stepIds.add(stepId)
+    }
   }
   const knownOrder = new Map(FLOW_STEPS.map((step, order) => [step, order]))
   const metricsByWorkspace = new Map(
@@ -82,6 +103,7 @@ export function buildProjectComparisonSteps(
       workspace.comparisonRecords ?? workspace.records,
     ]),
   )
+  const availableWorkspaceIds = new Set(inputs.map((input) => input.workspaceId))
   const unknownSteps = [...stepIds]
     .filter((step) => !knownOrder.has(step as (typeof FLOW_STEPS)[number]))
     .sort((left, right) => left.localeCompare(right))
@@ -95,10 +117,13 @@ export function buildProjectComparisonSteps(
       workspaces: manifest.workspaces.map((workspace) => {
         return {
           workspaceId: workspace.workspace_id,
-          status: (flowStates[workspace.workspace_id]?.[stepId] ??
-            'missing') as ProjectStepComparison['workspaces'][number]['status'],
+          status: (!availableWorkspaceIds.has(workspace.workspace_id)
+            ? 'unavailable'
+            : (normalizedFlowStates[workspace.workspace_id]?.[stepId] ??
+              'not_applicable')) as ProjectStepComparison['workspaces'][number]['status'],
           metrics: (metricsByWorkspace.get(workspace.workspace_id) ?? []).filter(
-            (metric) => metric.step === stepId && metric.stepRole !== 'hidden',
+            (metric) =>
+              comparisonStepId(metric.step) === stepId && metric.stepRole !== 'hidden',
           ),
         }
       }),

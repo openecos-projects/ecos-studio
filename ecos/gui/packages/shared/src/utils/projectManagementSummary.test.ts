@@ -3,13 +3,12 @@ import {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,
-  projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
 } from './projectManagementSummary'
 
 describe('projectManagementWorkspaceSummaryPaths', () => {
   it('is the unique bounded summary allowlist derived from every analysis step', () => {
-    expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(13)
+    expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(12)
     expect(projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)).toEqual(
       expect.arrayContaining(['DRC', 'LVS', 'Filler']),
     )
@@ -41,47 +40,16 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
   })
 })
 
-describe('projectManagementWorkspaceStepConfigPaths', () => {
-  it('lists the canonical step-config files plus their legacy pre-migration names', () => {
-    expect(projectManagementWorkspaceStepConfigPaths).toEqual([
-      'config/floorplan_ecc.json',
-      'config/cts_ecc.json',
-      'config/route_ecc.json',
-      'config/drc_ecc.json',
-      'config/fixfanout_ecc.json',
-      'config/filler_ecc.json',
-      'config/rcx_ecc.json',
-      'config/sta_ecc.json',
-      'config/db_ecc.json',
-      'config/dreamplace_ecc.json',
-      'config/fp_default_config.json',
-      'config/cts_default_config.json',
-      'config/rt_default_config.json',
-      'config/drc_default_config.json',
-      'config/no_default_config_fixfanout.json',
-      'config/pl_default_config.json',
-      'config/rcx.json',
-      'config/sta.json',
-      'config/db_default_config.json',
-      'config/dreamplace.json',
-    ])
-    expect(new Set(projectManagementWorkspaceStepConfigPaths).size).toBe(
-      projectManagementWorkspaceStepConfigPaths.length,
-    )
-  })
-
-  it('keeps the summary allowlist unchanged and merges it into the readable allowlist', () => {
+describe('projectManagementWorkspaceReadablePaths', () => {
+  it('contains only flow and analysis inputs, not Backend configuration files', () => {
     expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
     expect(projectManagementWorkspaceReadablePaths).toHaveLength(
-      projectManagementWorkspaceSummaryPaths.length +
-        projectManagementWorkspaceStepConfigPaths.length +
-        1,
+      projectManagementWorkspaceSummaryPaths.length + 1,
     )
     expect(projectManagementWorkspaceReadablePaths).toEqual(
       expect.arrayContaining([
         'home/flow.json',
         ...projectManagementWorkspaceSummaryPaths,
-        ...projectManagementWorkspaceStepConfigPaths,
       ]),
     )
     expect(new Set(projectManagementWorkspaceReadablePaths).size).toBe(

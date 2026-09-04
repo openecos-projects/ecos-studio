@@ -6,7 +6,7 @@ import type {
   EccWorkspaceCreateRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceHandleRequest,
-  EccWorkspaceSyncConfigRequest,
+  EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceUpdateRequest,
   ProductCommandRequest,
 } from '@ecos-studio/shared'
@@ -20,7 +20,9 @@ interface ProductCommandRuntime {
   resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
   startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<unknown>
   startStepOperation(request: EccRuntimeStartStepRequest): Promise<unknown>
-  syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
+  updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<unknown>
   updateWorkspaceConfiguration(
     request: EccWorkspaceConfigurationUpdateRequest,
   ): Promise<unknown>
@@ -141,6 +143,8 @@ export async function executeProductCommand(
     }
     case 'workspace.updateConfiguration':
       return await context.runtime.updateWorkspaceConfiguration(request.payload)
+    case 'workspace.updateStepConfiguration':
+      return await context.runtime.updateWorkspaceStepConfiguration(request.payload)
     case 'workspace.cancel':
       return await context.runtime.cancelOperation(request.payload)
     case 'workspace.retrySnapshot':
@@ -149,8 +153,6 @@ export async function executeProductCommand(
       }
     case 'workspace.reset':
       return await context.runtime.resetFlow(request.payload)
-    case 'workspace.syncConfig':
-      return await context.runtime.syncConfig(request.payload)
     case 'workspace.exportSignoff':
       return await context.runtime.exportSignoff(request.payload)
   }
@@ -195,6 +197,13 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireRecord(payload, 'configuration')
       validateRevision(payload.expectedWorkspaceRevision)
       break
+    case 'workspace.updateStepConfiguration':
+      requireString(payload, 'commandId')
+      requireString(payload, 'workspaceHandle')
+      requireString(payload, 'stepId')
+      requireRecord(payload, 'options')
+      validateRevision(payload.expectedWorkspaceRevision)
+      break
     case 'workspace.cancel':
       requireString(payload, 'workspaceHandle')
       requireString(payload, 'operationId')
@@ -213,11 +222,6 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       break
     case 'workspace.reset':
       requireString(payload, 'workspaceHandle')
-      validateRevision(payload.expectedWorkspaceRevision)
-      break
-    case 'workspace.syncConfig':
-      requireString(payload, 'workspaceHandle')
-      requireString(payload, 'configPath')
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.exportSignoff':

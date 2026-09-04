@@ -91,10 +91,11 @@ function normalizeStep(step: string): string {
     synthesis: 'synthesis',
     synth: 'synthesis',
     floor: 'floorplan',
-    fixfanout: 'fixfanout',
-    fanout: 'fixfanout',
+    lec: 'lec',
     placement: 'place',
     routing: 'route',
+    timingoptimization: 'timingoptimization',
+    postroutelec: 'postroutelec',
   }
   const normalized = step.toLowerCase()
   return aliases[normalized] ?? normalized

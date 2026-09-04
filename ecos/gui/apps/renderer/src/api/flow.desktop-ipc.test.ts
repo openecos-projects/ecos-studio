@@ -44,22 +44,13 @@ describe('flow API desktop bridge payloads', () => {
       expect(() => structuredClone(request)).not.toThrow()
       return { directory: '/work/demo', refreshed: true }
     })
-    const syncConfig = vi.fn(async (request: unknown) => {
-      expect(() => structuredClone(request)).not.toThrow()
-      return {
-        configPath: '/work/demo/config/route_ecc.json',
-        directory: '/work/demo',
-        parametersChanged: true,
-        refreshed: true,
-      }
-    })
     const execute = vi.fn(async (request: { command: string }) => {
       expect(() => structuredClone(request)).not.toThrow()
       if (request.command === 'workspace.run') return { rerun: true }
       if (request.command === 'workspace.runStep') {
         return { state: 'Success', step: StepEnum.PLACEMENT }
       }
-      return await syncConfig(request)
+      throw new Error(`Unexpected Product Command: ${request.command}`)
     })
 
     setWindow({
@@ -73,13 +64,12 @@ describe('flow API desktop bridge payloads', () => {
           workspace: {
             info,
             refreshConfig,
-            syncConfig,
           },
         },
       },
     })
 
-    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } =
+    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi } =
       await import('./flow')
 
     await runStepApi(
@@ -124,17 +114,6 @@ describe('flow API desktop bridge payloads', () => {
         },
       }),
     )
-    await syncConfigApi(
-      reactive({
-        cmd: CMDEnum.sync_config,
-        data: {
-          config_path: '/work/demo/config/route_ecc.json',
-          directory: '/work/demo',
-          workspaceHandle: 'workspace-handle-1',
-          workspaceRevision: 1,
-        },
-      }),
-    )
 
     expect(execute).toHaveBeenCalledWith({
       command: 'workspace.runStep',
@@ -160,14 +139,6 @@ describe('flow API desktop bridge payloads', () => {
     expect(refreshConfig).toHaveBeenCalledWith({
       designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
-    })
-    expect(execute).toHaveBeenCalledWith({
-      command: 'workspace.syncConfig',
-      payload: {
-        configPath: '/work/demo/config/route_ecc.json',
-        expectedWorkspaceRevision: 1,
-        workspaceHandle: 'workspace-handle-1',
-      },
     })
   })
 

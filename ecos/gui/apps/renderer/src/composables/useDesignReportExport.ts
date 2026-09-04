@@ -15,6 +15,7 @@ import {
 import { getDesktopApi } from '@/platform/desktop'
 import {
   getWorkspaceResourceIndexApi,
+  getWorkspaceRuntimeSnapshotApi,
   readWorkspaceFlowResourceApi,
   readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
@@ -46,6 +47,7 @@ interface ToastOptions {
 interface UseDesignReportExportDependencies {
   currentProject: Readonly<Ref<WorkspaceProject | null | undefined>>
   showToast(options: ToastOptions): void
+  workspaceSession?: Readonly<Ref<{ state: string; workspaceId: string }>>
 }
 
 function errorDetail(error: unknown): string {
@@ -125,6 +127,7 @@ const COMMON_CORNER_CANDIDATES = [
 export function useDesignReportExport({
   currentProject,
   showToast,
+  workspaceSession,
 }: UseDesignReportExportDependencies) {
   const dialogVisible = ref(false)
   const loading = ref(false)
@@ -191,6 +194,7 @@ export function useDesignReportExport({
 
     try {
       const api = getDesktopApi()
+      const isBackend = (currentProject.value?.designTool ?? 'backend') === 'backend'
 
       // 1. Get version info from desktop app
       let versionInfo = null
@@ -202,69 +206,75 @@ export function useDesignReportExport({
 
       // 2. Query workspace resource index
       let resourceIndex: WorkspaceResourceIndex | null = null
-      try {
-        resourceIndex = await getWorkspaceResourceIndexApi()
-      } catch {
-        /* ignore if index API fails */
+      if (!isBackend) {
+        try {
+          resourceIndex = await getWorkspaceResourceIndexApi()
+        } catch {
+          /* ignore if index API fails */
+        }
       }
 
-      // 3. Read flow.json and parameters.json and home.json
+      // 3. Backend configuration comes from ECC; frontend keeps its file resources.
       let flow: Record<string, unknown> | null = null
       let parameters: Record<string, unknown> | null = null
       let homeData: Record<string, unknown> | null = null
 
-      try {
-        flow = await readWorkspaceFlowResourceApi()
-      } catch {
-        /* ignore */
-      }
-      if (!flow && resourceIndex?.home.flowJson?.exists) {
-        flow = await readWorkspaceJson(resourceIndex.home.flowJson.path)
-      }
-      if (!flow) {
-        flow = await readWorkspaceJson('home/flow.json')
+      const runtimeSnapshot =
+        isBackend &&
+        workspaceSession?.value.state === 'active' &&
+        workspaceSession.value.workspaceId
+          ? await getWorkspaceRuntimeSnapshotApi(workspaceSession.value.workspaceId)
+          : null
+
+      if (isBackend && !runtimeSnapshot) {
+        throw new Error('ECC Workspace Runtime Snapshot is unavailable.')
       }
 
-      try {
-        parameters = await readWorkspaceParametersResourceApi()
-      } catch {
-        /* ignore */
-      }
-      if (!parameters && resourceIndex?.parameters) {
-        parameters = resourceIndex.parameters
-      }
-      if (!parameters && resourceIndex?.home.parametersJson?.exists) {
-        parameters = await readWorkspaceJson(resourceIndex.home.parametersJson.path)
-      }
-      if (!parameters) {
-        parameters = await readWorkspaceJson('home/parameters.json')
+      if (runtimeSnapshot) {
+        flow = runtimeSnapshot.flow
+        parameters = runtimeSnapshot.parameters
+        homeData = runtimeSnapshot.home
       }
 
-      try {
-        homeData = await readWorkspaceHomeResourceApi()
-      } catch {
-        /* ignore */
-      }
-      if (!homeData && resourceIndex?.homeData) {
-        homeData = resourceIndex.homeData
-      }
+      if (!runtimeSnapshot && !isBackend) {
+        try {
+          flow = await readWorkspaceFlowResourceApi()
+        } catch {
+          /* ignore */
+        }
+        if (!flow && resourceIndex?.home.flowJson?.exists) {
+          flow = await readWorkspaceJson(resourceIndex.home.flowJson.path)
+        }
+        if (!flow) flow = await readWorkspaceJson('home/flow.json')
 
-      let pdkJson: Record<string, unknown> | null = null
-      try {
-        pdkJson =
+        try {
+          parameters = await readWorkspaceParametersResourceApi()
+        } catch {
+          /* ignore */
+        }
+        if (!parameters && resourceIndex?.parameters)
+          parameters = resourceIndex.parameters
+        if (!parameters && resourceIndex?.home.parametersJson?.exists) {
+          parameters = await readWorkspaceJson(resourceIndex.home.parametersJson.path)
+        }
+        if (!parameters) parameters = await readWorkspaceJson('home/parameters.json')
+
+        try {
+          homeData = await readWorkspaceHomeResourceApi()
+        } catch {
+          /* ignore */
+        }
+        if (!homeData && resourceIndex?.homeData) homeData = resourceIndex.homeData
+
+        const pdkJson =
           (await readWorkspaceJson('home/pdk.json')) ||
           (await readWorkspaceJson('config/pdk.json')) ||
           (await readWorkspaceJson('pdk.json'))
-      } catch {
-        /* ignore */
-      }
-      if (pdkJson) {
-        homeData = { ...homeData, ...pdkJson }
+        if (pdkJson) homeData = { ...homeData, ...pdkJson }
       }
 
       const topModule =
-        resourceIndex?.topModule ||
-        resourceIndex?.design ||
+        (!isBackend && (resourceIndex?.topModule || resourceIndex?.design)) ||
         currentProject.value?.topModule ||
         currentProject.value?.name ||
         'gcd'

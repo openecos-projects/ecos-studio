@@ -133,7 +133,6 @@ export type {
   DesignRuntimeWorkspaceHandleRequest,
   DesignRuntimeWorkspaceInfoRequest,
   DesignRuntimeWorkspaceOpenRequest,
-  DesignRuntimeWorkspaceSyncConfigRequest,
 } from './contracts/designRuntime.ts'
 export type {
   DesktopApi,
@@ -146,6 +145,8 @@ export type {
   DesktopProjectDirectoryEntry,
   DesktopProjectManagementWorkspaceTextsRequest,
   DesktopProjectManagementWorkspaceTextsResult,
+  DesktopProjectManagementWorkspaceStepConfigurationRequest,
+  DesktopProjectManagementWorkspaceStepConfigurationResult,
   DesktopProjectTextFileChunk,
   DesktopProjectTextFileTail,
   DesktopSettingsValue,
@@ -225,8 +226,7 @@ export type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -277,11 +277,9 @@ export type {
   DesktopAgentChoiceOption,
   DesktopAgentContractField,
   DesktopAgentExecutionContract,
-  DesktopAgentParameterWriteFile,
-  DesktopAgentParameterWriteSurface,
+  DesktopAgentStepConfigurationUpdate,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
-  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunContract,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunParameterPatch,
@@ -310,7 +308,6 @@ export type {
   DesktopAgentStatus,
   DesktopAgentStatusState,
 } from './contracts/desktopAgent.ts'
-export { desktopAgentParameterWriteFiles } from './contracts/desktopAgent.ts'
 export {
   appMenuActionIds,
   desktopMenuEventIds,
@@ -371,11 +368,11 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,
-  projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
 } from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'

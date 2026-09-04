@@ -24,7 +24,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceRecoverInterruptedRequest,
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
-    WorkspaceSyncConfigRequest,
+    WorkspaceStepConfigurationUpdateRequest,
 )
 from ecos_runtime_adapter.sessions import WorkspaceSessionRegistry
 from ecos_runtime_adapter.workspace_api import RuntimeApiError, WorkspaceRuntimeApi
@@ -838,10 +838,9 @@ def test_workspace_home_and_info_use_session_id(monkeypatch, tmp_path):
     }
 
 
-def test_refresh_sync_and_reset_flow_use_session(monkeypatch, tmp_path):
+def test_refresh_and_reset_flow_use_session(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     refreshed = []
-    synced = []
     prepared = []
 
     monkeypatch.setattr(
@@ -849,48 +848,25 @@ def test_refresh_sync_and_reset_flow_use_session(monkeypatch, tmp_path):
         lambda workspace: refreshed.append(workspace.directory),
     )
     monkeypatch.setattr(
-        "chipcompiler.data.sync_workspace_config_to_parameters",
-        lambda workspace, path: synced.append((workspace.directory, path)) or True,
-    )
-    monkeypatch.setattr(
         "chipcompiler.data.prepare_workspace_for_rerun",
         lambda workspace, flow, **_kwargs: prepared.append((workspace.directory, flow)),
     )
-    config_dir = ws / "config"
-    config_dir.mkdir()
-    config_path = config_dir / "route.json"
-    config_path.write_text("{}")
     api = WorkspaceRuntimeApi()
     workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
         "workspaceId"
     ]
 
     refresh = api.refresh_config(WorkspaceIdRequest(workspace_id=workspace_id))
-    sync = api.sync_config(
-        WorkspaceSyncConfigRequest(
-            workspace_id=workspace_id,
-            config_path=str(config_path),
-            expected_workspace_revision=1,
-        )
-    )
     reset = api.reset_flow(
         WorkspaceMutationRequest(
             workspace_id=workspace_id,
-            expected_workspace_revision=2,
+            expected_workspace_revision=1,
         )
     )
 
     assert refresh == {"directory": str(ws.resolve()), "refreshed": True}
-    assert sync == {
-        "directory": str(ws.resolve()),
-        "configPath": str(config_path.resolve()),
-        "parametersChanged": True,
-        "refreshed": True,
-        "workspaceRevision": 2,
-    }
-    assert reset == {"directory": str(ws.resolve()), "workspaceRevision": 3}
-    assert refreshed == [ws.resolve(), ws.resolve()]
-    assert synced == [(ws.resolve(), config_path.resolve())]
+    assert reset == {"directory": str(ws.resolve()), "workspaceRevision": 2}
+    assert refreshed == [ws.resolve()]
     assert prepared == [(ws.resolve(), DummyFlow.instances[-1])]
 
 
@@ -910,61 +886,38 @@ def test_refresh_config_releases_active_session_db(monkeypatch, tmp_path):
     assert api.sessions.get_session(workspace_id).db_handle is None
 
 
-def test_sync_config_releases_active_session_db_only_when_parameters_change(
-    monkeypatch,
-    tmp_path,
-):
+def test_step_configuration_update_releases_active_session_db(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    config_dir = ws / "config"
-    config_dir.mkdir()
-    config_path = config_dir / "route.json"
-    config_path.write_text("{}")
-    changed = [False, True]
-
-    monkeypatch.setattr(
-        "chipcompiler.data.sync_workspace_config_to_parameters",
-        lambda _workspace, _path: changed.pop(0),
-    )
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
     workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
         "workspaceId"
     ]
+    session = api.sessions.get_session(workspace_id)
+    monkeypatch.setattr(
+        "chipcompiler.engine.update_workspace_step_configuration",
+        lambda *_args: session.workspace,
+    )
+    monkeypatch.setattr(
+        api,
+        "_read_engineering_snapshot",
+        lambda _workspace: {"workspaceId": workspace_id, "workspaceRevision": 2},
+    )
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
-    db_handle = api.sessions.get_session(workspace_id).db_handle
+    db_handle = session.db_handle
 
-    unchanged = api.sync_config(
-        WorkspaceSyncConfigRequest(
+    result = api.update_workspace_step_configuration(
+        WorkspaceStepConfigurationUpdateRequest(
+            command_id="step-configuration-1",
             workspace_id=workspace_id,
-            config_path=str(config_path),
             expected_workspace_revision=1,
-        )
-    )
-    assert unchanged["parametersChanged"] is False
-    assert unchanged["refreshed"] is False
-    assert db_handle.close_calls == 0
-
-    changed_result = api.sync_config(
-        WorkspaceSyncConfigRequest(
-            workspace_id=workspace_id,
-            config_path=str(config_path),
-            expected_workspace_revision=1,
+            step_id="Floorplan",
+            options={"ifp": {"thread_number": 8}},
         )
     )
 
-    assert changed_result["parametersChanged"] is True
-    assert changed_result["refreshed"] is True
-    assert changed_result["workspaceRevision"] == 2
+    assert result["workspaceRevision"] == 2
     assert db_handle.close_calls == 1
-    assert api.sessions.get_session(workspace_id).db_handle is None
-
-    with pytest.raises(RuntimeApiError, match="Workspace Revision does not match"):
-        api.sync_config(
-            WorkspaceSyncConfigRequest(
-                workspace_id=workspace_id,
-                config_path=str(config_path),
-                expected_workspace_revision=1,
-            )
-        )
+    assert session.db_handle is None
 
 
 def test_reset_flow_releases_active_session_db_before_prepare(monkeypatch, tmp_path):
@@ -1016,34 +969,40 @@ def test_refresh_config_waits_for_session_mutation_lock(monkeypatch, tmp_path):
     )
 
 
-def test_sync_config_waits_for_session_mutation_lock(monkeypatch, tmp_path):
+def test_step_configuration_update_waits_for_session_mutation_lock(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    config_dir = ws / "config"
-    config_dir.mkdir()
-    config_path = config_dir / "route.json"
-    config_path.write_text("{}")
     api = WorkspaceRuntimeApi()
     workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
         "workspaceId"
     ]
     entered = threading.Event()
 
-    def sync_config(_workspace, _path):
+    session = api.sessions.get_session(workspace_id)
+
+    def update_step_configuration(*_args):
         entered.set()
-        return False
+        return session.workspace
 
     monkeypatch.setattr(
-        "chipcompiler.data.sync_workspace_config_to_parameters", sync_config
+        "chipcompiler.engine.update_workspace_step_configuration",
+        update_step_configuration,
+    )
+    monkeypatch.setattr(
+        api,
+        "_read_engineering_snapshot",
+        lambda _workspace: {"workspaceId": workspace_id, "workspaceRevision": 2},
     )
 
     _assert_call_waits_for_session_lock(
         api=api,
         workspace_id=workspace_id,
-        call=lambda: api.sync_config(
-            WorkspaceSyncConfigRequest(
+        call=lambda: api.update_workspace_step_configuration(
+            WorkspaceStepConfigurationUpdateRequest(
+                command_id="step-configuration-1",
                 workspace_id=workspace_id,
-                config_path=str(config_path),
                 expected_workspace_revision=1,
+                step_id="Floorplan",
+                options={"ifp": {"thread_number": 8}},
             )
         ),
         entered=entered,
@@ -1287,6 +1246,36 @@ def test_flow_run_uses_run_steps_and_prepare_on_rerun(monkeypatch, tmp_path):
     snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
     assert snapshot["workspaceRevision"] == 2
     assert snapshot["cause"] == "flow.rerun_prepared"
+
+
+def test_flow_run_prepares_stale_steps_before_normal_execution(monkeypatch, tmp_path):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    prepared = []
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
+    snapshot_path = ws / "home" / "engineering-snapshot.json"
+    snapshot = json.loads(snapshot_path.read_text())
+    snapshot["stalePredecessor"] = {
+        "workspaceRevision": snapshot["workspaceRevision"] - 1,
+        "invalidatedStepIds": ["Synthesis", "Floorplan"],
+    }
+    snapshot_path.write_text(json.dumps(snapshot))
+    monkeypatch.setattr(
+        api,
+        "_prepare_steps_for_rerun",
+        lambda _workspace, _flow, steps: prepared.extend(step.name for step in steps),
+    )
+
+    result = api.flow_run(FlowRunRequest(workspace_id=workspace_id, rerun=False))
+
+    flow = DummyFlow.instances[-1]
+    assert result == {"rerun": False}
+    assert prepared == ["Synthesis", "Floorplan"]
+    assert flow.run_steps_calls == [False]
+    committed = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
+    assert committed["cause"] == "flow.rerun_prepared"
 
 
 def test_failed_rerun_keeps_the_reset_revision_as_committed_truth(

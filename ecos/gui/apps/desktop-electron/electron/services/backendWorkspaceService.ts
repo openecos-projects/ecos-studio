@@ -196,6 +196,7 @@ export class BackendWorkspaceService {
         insights?.status === 'ready' || insights?.status === 'partial'
           ? insights.data
           : null,
+        snapshot.staleSnapshot,
       ),
       generation: context.generation,
       workspaceContextId: context.id,
@@ -232,11 +233,18 @@ export class BackendWorkspaceService {
     if (request.workspaceContextId !== context.id) {
       return unavailable('BACKEND_WORKSPACE_CONTEXT_MISMATCH')
     }
-    const snapshot = context.snapshot
-    if (!snapshot?.ok || !context.workspaceRoot) {
+    const currentSnapshot = context.snapshot
+    if (!currentSnapshot?.ok || !context.workspaceRoot) {
       return unavailable('ENGINEERING_SNAPSHOT_READ_FAILED')
     }
-    if (snapshot.snapshot.workspaceRevision !== request.workspaceRevision) {
+    const snapshot =
+      currentSnapshot.snapshot.workspaceRevision === request.workspaceRevision
+        ? currentSnapshot
+        : currentSnapshot.staleSnapshot?.snapshot.workspaceRevision ===
+            request.workspaceRevision
+          ? currentSnapshot.staleSnapshot
+          : null
+    if (!snapshot) {
       return unavailable('ENGINEERING_SNAPSHOT_REVISION_MISMATCH')
     }
     return {
@@ -368,6 +376,9 @@ export class BackendWorkspaceService {
             data: {
               workspaceId: snapshot.snapshot.workspaceId,
               workspaceRevision: snapshot.snapshot.workspaceRevision,
+              ...(snapshot.snapshot.stalePredecessor
+                ? { stalePredecessor: snapshot.snapshot.stalePredecessor }
+                : {}),
             },
             issues: [],
           }

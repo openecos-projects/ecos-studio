@@ -1001,6 +1001,40 @@ describe('useWorkspace openProject', () => {
     ])
   })
 
+  it('reads canonical die_area utilization through committed Backend facts', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/demo',
+      name: 'demo',
+      path: '/work/demo',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    workspace.currentProject.value = project
+    workspace.recentProjects.value = [{ ...project }]
+    vi.mocked(desktopApi.backendWorkspace.getOverview).mockResolvedValueOnce({
+      generation: 0,
+      workspaceContextId: 'context-a',
+      overview: {
+        configuration: {
+          status: 'ready',
+          data: { coreUtilization: 0.41 },
+          issues: [],
+        },
+        flow: { status: 'unavailable', issues: [] },
+        keyMetrics: { status: 'unavailable', issues: [] },
+        revision: { status: 'unavailable', issues: [] },
+      },
+    } as never)
+    await workspace.closeProject()
+
+    expect(readWorkspaceParametersResourceApiMock).not.toHaveBeenCalled()
+    expect(settingsData.get('recent_projects')).toEqual([
+      expect.objectContaining({
+        coreUtilization: 0.41,
+      }),
+    ])
+  })
+
   it('applies a delayed snapshot to the original recent project after the list is prepended', async () => {
     const workspace = useWorkspace()
     const oldProject: Project = {

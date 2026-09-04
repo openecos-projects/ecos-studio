@@ -542,7 +542,11 @@ export function useParameters() {
 
     try {
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
-      if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
+      const isBackendWorkspace =
+        currentProject.value?.designTool === 'backend' ||
+        (currentProject.value?.designTool !== 'frontend' && Boolean(workspaceHandle))
+      if (isBackendWorkspace) {
+        if (!workspaceHandle) throw new Error('ECC Workspace session is unavailable.')
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
           getWorkspaceRuntimeSnapshotApi(workspaceHandle),
         )
@@ -558,6 +562,10 @@ export function useParameters() {
           applyParametersData(snapshot.parameters as unknown as ParametersData)
           return true
         }
+        if (!keepLastParametersDuringFlowReload()) {
+          throw new Error('ECC Workspace Parameters are unavailable.')
+        }
+        return true
       }
 
       // Do not fall back to NFS while a GUI-originated flow is running. A
@@ -634,7 +642,11 @@ export function useParameters() {
       const projectPath = currentProject.value.path
       const parametersPath = fallbackParametersPath(projectPath)
       const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
-      if (workspaceHandle && currentProject.value?.designTool !== 'frontend') {
+      const isBackendWorkspace =
+        currentProject.value?.designTool === 'backend' ||
+        (currentProject.value?.designTool !== 'frontend' && Boolean(workspaceHandle))
+      if (isBackendWorkspace) {
+        if (!workspaceHandle) throw new Error('ECC Workspace session is unavailable.')
         const snapshot = await workspaceLifecycle.runForSession(sessionId, () =>
           getWorkspaceRuntimeSnapshotApi(workspaceHandle),
         )
@@ -646,20 +658,12 @@ export function useParameters() {
           isParametersRecord(snapshot.parameters) &&
           parametersHaveChipIdentity(snapshot.parameters)
         ) {
-          const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-            resolveProjectPathAccess(parametersPath),
-          )
-          if (
-            resolvedPath === undefined &&
-            !workspaceLifecycle.isCurrentSession(sessionId)
-          ) {
-            return
-          }
           if (loadResourceToken !== parametersResourceToken) return
-          resolvedParametersPath = resolvedPath ?? parametersPath
+          resolvedParametersPath = parametersPath
           applyParametersData(snapshot.parameters as unknown as ParametersData)
           return
         }
+        throw new Error('ECC Workspace Parameters are unavailable.')
       }
       const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
         resolveProjectPathAccess(parametersPath),

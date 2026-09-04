@@ -15,8 +15,6 @@ SOURCE_PATHS = {
     "ifp.macro_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/macro_placer/MacroPlacer.cpp",
     "ifp.pdn": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/pdn_generator/PDNGenerator.cpp",
     "ifp.phy_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/phy_placer/PhyPlacer.cpp",
-    "izh.config": "ecc/chipcompiler/thirdparty/ecc-tools/src/interface/python/py_izh/py_izh_utils.cpp",
-    "izh.fanout": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iZH/source/module/fanout_fixer/FanoutFixer.cpp",
     "izh.filler": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iZH/source/module/filler_inserter/FillerInserter.cpp",
     "icts.api": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/interface/CTSAPI.cc",
     "icts.synthesis": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/source/module/synthesis/Synthesis.cc",
@@ -113,32 +111,6 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
             ("floorplan pdn tap endcap generation", "floorplan physical cell insertion"),
             "**Input and state:** PDN global-connect, rails, stripes, layer pairs, macro routing halos, rows, and physical-cell masters are loaded from the Floorplan configuration.\n\n**Algorithm:** The PDN generator builds power nets, rails and stripes, clips wires around macro halos, then adds vias at layer and macro-pin overlaps. `PhyPlacer` builds available regions and inserts side/edge endcaps, well taps, and boundary taps on the site grid.\n\n**Output boundary:** `FPInterface::output()` writes die/core/rows/tracks, special-net wires/vias, IO pins, macros, and new instances back to iDB; all generation loops are finite configuration and geometry traversals.",
             ("ifp.pdn", "ifp.phy_placer", "ifp.interface"),
-        ),
-    ),
-    "fixfanout": (
-        (
-            "model_initialization",
-            ("fixfanout model initialization", "fanout fixer config"),
-            "**Input and state:** The JSON adapter maps `insert_buffer` and `max_fanout` into iZH configuration, then `FanoutFixer::initFFModel()` creates an `FFModel` with buffer master, fanout limit, and insertion counters.\n\n**Constraint:** A non-positive maximum fanout is rejected before repair. The model is a structural netlist-editing state, not a placement legalization model.",
-            ("izh.config", "izh.fanout"),
-        ),
-        (
-            "violating_net_scan",
-            ("fixfanout violating net scan", "fanout fixer candidate nets"),
-            "**Input and state:** The live iDB design net list and the `FFModel.max_fanout` limit are scanned each repair round.\n\n**Algorithm:** `FanoutFixer::fix()` skips clock nets and collects every non-clock net whose load-pin count exceeds the limit. This is a full net-list scan per round rather than a timing-driven priority queue.\n\n**Stop:** The repair loop terminates when the candidate set is empty.",
-            ("izh.fanout",),
-        ),
-        (
-            "buffer_tree_construction",
-            ("fixfanout buffer tree construction", "fanout buffer grouping"),
-            "**Input and state:** For each violating net, its load pins are detached and partitioned into chunks of at most `max_fanout`.\n\n**Algorithm:** Each chunk receives a `zh_fanout_net_*` and `zh_fanout_buf_*`: the buffer input reconnects to the original net, its output drives the new net, and the chunk's load pins move to that new net. Power and ground pins are skipped.\n\n**Boundary:** New buffers begin unplaced at `(0, 0)`, so this repair changes connectivity and requires a later physical implementation stage for legal placement.",
-            ("izh.fanout",),
-        ),
-        (
-            "hierarchical_convergence",
-            ("fixfanout hierarchical convergence", "fanout buffer tree convergence"),
-            "**Algorithm:** If the original net still drives too many inserted buffer inputs after one grouping round, it is selected again. Repeated partitioning therefore constructs a multi-level buffer tree.\n\n**Stop and output:** Convergence means every non-clock net has at most the configured number of load pins. The model records fixed-net, inserted-net, and inserted-buffer counts; ECOS persistence then exports the modified logical and physical database state.",
-            ("izh.fanout", "ecc.runner"),
         ),
     ),
     "cts": (

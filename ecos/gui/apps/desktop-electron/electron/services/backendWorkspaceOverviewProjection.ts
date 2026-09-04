@@ -3,6 +3,7 @@ import {
   parseRuntimeSeconds,
   type ChecklistFinding,
   type FlowStepState,
+  type EngineeringSnapshotValidationResult,
   type ProjectManifest,
   type ReadSection,
   type WorkspaceChecklistSummary,
@@ -10,7 +11,6 @@ import {
   type WorkspaceFlowSummary,
   type WorkspaceOverviewIdentity,
 } from '@ecos-studio/shared'
-import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
 
 function stringValue(record: Record<string, unknown> | null, key: string): string {
   const value = record?.[key]
@@ -36,7 +36,7 @@ export function pathsEqual(left: string, right: string): boolean {
 }
 
 export function configurationSection(
-  snapshot: ProjectEngineeringSnapshotReadResult | null,
+  snapshot: EngineeringSnapshotValidationResult | null,
 ): ReadSection<WorkspaceConfigurationSummary> {
   if (!snapshot?.ok) {
     return {
@@ -46,6 +46,8 @@ export function configurationSection(
   }
   const parameters = snapshot.snapshot.parameters
   const die = record(parameters.Die)
+  const canonicalDie = record(parameters.die_area)
+  const core = record(parameters.Core) ?? record(parameters.core)
   const mpc = record(parameters.MPC)
   const template = record(mpc?.core_template)
   const ports = Array.isArray(template?.ports)
@@ -72,6 +74,10 @@ export function configurationSection(
       design: stringValue(parameters, 'Design'),
       topModule: stringValue(parameters, 'Top module'),
       dieArea: finiteNumber(die?.Area),
+      coreUtilization:
+        finiteNumber(canonicalDie?.utilitization) ??
+        finiteNumber(core?.Utilitization) ??
+        finiteNumber(core?.utilitization),
       maxFanout: finiteNumber(parameters['Max fanout']),
       clock: stringValue(parameters, 'Clock'),
       frequencyMaxMhz: finiteNumber(parameters['Frequency max [MHz]']),
@@ -123,7 +129,7 @@ function normalizeFlowState(value: string): FlowStepState {
 }
 
 export function flowSection(
-  snapshot: ProjectEngineeringSnapshotReadResult | null,
+  snapshot: EngineeringSnapshotValidationResult | null,
 ): ReadSection<WorkspaceFlowSummary> {
   if (!snapshot?.ok) {
     return {
@@ -145,6 +151,7 @@ export function flowSection(
       steps: steps.flatMap((value, order) => {
         const step = record(value)
         if (!step || typeof step.name !== 'string') return []
+        if (step.name.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout') return []
         const runtimeSeconds = parseRuntimeSeconds(String(step.runtime ?? ''))
         const peakMemoryMb = finiteNumber(
           step['peak memory (mb)'] ?? record(step.info)?.['peak memory (mb)'],
@@ -227,7 +234,7 @@ function reconcileFinding(
 }
 
 export function checklistSection(
-  snapshot: ProjectEngineeringSnapshotReadResult | null,
+  snapshot: EngineeringSnapshotValidationResult | null,
   flow: ReadSection<WorkspaceFlowSummary>,
 ): ReadSection<WorkspaceChecklistSummary> {
   if (!snapshot?.ok) {

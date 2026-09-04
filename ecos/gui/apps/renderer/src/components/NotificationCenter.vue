@@ -145,9 +145,11 @@ function iconFor(severity: AppNotificationSeverity): string {
 }
 
 function formatTime(timestamp: number): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone,
   }).format(timestamp)
 }
 </script>

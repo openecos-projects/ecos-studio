@@ -10,7 +10,6 @@ import type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
-  EccWorkspaceSyncConfigResult,
 } from './eccRuntime.ts'
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
 import type { DesignTool } from '../types/workspace.ts'
@@ -64,10 +63,6 @@ export interface DesignRuntimeWorkspaceInfoRequest extends DesignRuntimeWorkspac
   step: string
 }
 
-export interface DesignRuntimeWorkspaceSyncConfigRequest extends DesignRuntimeWorkspaceHandleRequest {
-  configPath: string
-}
-
 export interface DesignRuntimeFlowRunRequest extends DesignRuntimeWorkspaceHandleRequest {
   rerun?: boolean
 }
@@ -118,8 +113,5 @@ export interface DesignRuntimeApi {
     resetFlow(
       request: DesignRuntimeWorkspaceHandleRequest,
     ): Promise<EccWorkspaceResetFlowResult>
-    syncConfig(
-      request: DesignRuntimeWorkspaceSyncConfigRequest,
-    ): Promise<EccWorkspaceSyncConfigResult>
   }
 }

@@ -227,11 +227,13 @@ describe('BackendWorkspaceService', () => {
         },
       ],
     })
+    const snapshot = engineeringSnapshot()
+    snapshot.parameters.die_area = { utilitization: 0.41 }
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi
           .fn()
-          .mockResolvedValue(persistedSnapshotResult(engineeringSnapshot())),
+          .mockResolvedValue(persistedSnapshotResult(snapshot)),
         readManifest,
       },
       workspaceRootProvider: workspaceRootProvider(),
@@ -245,6 +247,7 @@ describe('BackendWorkspaceService', () => {
         configuration: {
           data: {
             clock: 'clk',
+            coreUtilization: 0.41,
             design: 'gcd',
             dieArea: 14400,
             frequencyMaxMhz: 200,
@@ -1001,6 +1004,88 @@ describe('BackendWorkspaceService', () => {
       detail: {
         status: 'unavailable',
         issues: [{ code: 'ENGINEERING_SNAPSHOT_REVISION_MISMATCH' }],
+      },
+    })
+  })
+
+  it('attaches stale Step evidence to an invalidated current Revision', async () => {
+    const stale = engineeringSnapshot()
+    stale.schemaVersion = 2
+    stale.workspaceRevision = 1
+    stale.flow = {
+      steps: [{ name: 'Place', tool: 'ecc', state: 'Success', runtime: '0:0:2' }],
+    }
+    stale.analysis.steps = [
+      {
+        flowState: 'Success',
+        hotspots: {
+          artifactId: 'hotspots',
+          data: null,
+          reasonCode: 'ANALYSIS_FILE_MISSING',
+          status: 'missing',
+        },
+        metrics: {
+          artifactId: 'metrics',
+          data: {
+            schema_version: 3,
+            metrics: [engineeringMetric('place_hpwl', 1234)],
+          },
+          status: 'available',
+        },
+        order: 0,
+        stepId: 'Place',
+        subflow: { status: 'available', steps: [] },
+        summary: {
+          artifactId: 'summary',
+          data: null,
+          reasonCode: 'ANALYSIS_FILE_MISSING',
+          status: 'missing',
+        },
+        timingIssues: null,
+        toolId: 'ecc',
+      },
+    ]
+    const current = structuredClone(stale)
+    current.workspaceRevision = 2
+    current.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Place'],
+    }
+    current.flow = {
+      steps: [{ name: 'Place', tool: 'ecc', state: 'Unstart', runtime: '0:0:2' }],
+    }
+    current.analysis.steps = []
+    const readResult = persistedSnapshotResult(current)
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        readEngineeringSnapshot: vi.fn().mockResolvedValue({
+          ...readResult,
+          staleSnapshot: persistedSnapshotResult(stale),
+        }),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(51, () => service.getOverview())
+
+    const detail = await runWithWindowScope(51, () =>
+      service.getStepDetail({
+        stepId: 'Place',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+
+    expect(detail).toMatchObject({
+      detail: {
+        status: 'ready',
+        data: {
+          step: { state: 'not-started' },
+          staleEvidence: {
+            workspaceRevision: 1,
+            analysis: { metrics: [{ id: 'place_hpwl', value: 1234 }] },
+          },
+        },
       },
     })
   })

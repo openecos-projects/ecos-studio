@@ -85,6 +85,8 @@ interface DirectoryReplacementJournalRecord {
 const UTF8_MAX_BYTES_PER_CODE_UNIT = 4
 const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
   'Cannot save workspace configuration while the workspace flow is running. Wait for it to finish before editing parameters or step config.'
+const WORKSPACE_CONFIGURATION_WRITE_BLOCKED_MESSAGE =
+  'Backend Workspace configuration must be changed through an ECC configuration command.'
 const WORKSPACE_REPLACEMENT_BLOCKED_MESSAGE =
   'Cannot replace a workspace while its flow is running. Wait for it to finish before deleting or replacing the workspace.'
 
@@ -209,15 +211,23 @@ async function readManifestReplacementReferences(
   }
 }
 
-function isRuntimeProtectedProjectPath(
-  canonicalPath: string,
-  projectRoot: string,
-): boolean {
-  const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
-  return (
-    relativePath === 'home/parameters.json' ||
-    (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
-  )
+function protectedWorkspaceRoot(canonicalPath: string): string | null {
+  const parent = dirname(canonicalPath)
+  const directory = basename(parent).toLowerCase()
+  const filename = basename(canonicalPath).toLowerCase()
+  if (
+    directory === 'home' &&
+    [
+      'workspace.toml',
+      'params.toml',
+      'parameters.json',
+      'pdk.json',
+      'flow.json',
+    ].includes(filename)
+  ) {
+    return dirname(parent)
+  }
+  return directory === 'config' && filename.endsWith('.json') ? dirname(parent) : null
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -854,12 +864,20 @@ export class WorkspaceService {
   }
 
   private async assertCanWriteProjectTextFile(canonicalPath: string): Promise<void> {
-    if (!this.runtimeMutationGuard) return
+    const workspaceRoot = protectedWorkspaceRoot(canonicalPath)
+    if (!workspaceRoot) return
 
-    const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    if (!isRuntimeProtectedProjectPath(canonicalPath, projectRoot)) return
+    const relativePath = normalizeRelativePathForMatch(
+      relative(workspaceRoot, canonicalPath),
+    )
+    if (
+      relativePath === 'home/workspace.toml' ||
+      (await pathExists(join(workspaceRoot, 'home', 'workspace.toml')))
+    ) {
+      throw new Error(WORKSPACE_CONFIGURATION_WRITE_BLOCKED_MESSAGE)
+    }
 
-    if (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(projectRoot)) {
+    if (await this.runtimeMutationGuard?.isWorkspaceRuntimeActive(workspaceRoot)) {
       throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
     }
   }

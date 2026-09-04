@@ -309,7 +309,7 @@ describe('useBackendFlowLogs runtime updates', () => {
     scope.stop()
   })
 
-  it('hydrates a completed step log from bounded chunks when ECC has no final tail', async () => {
+  it('ignores obsolete FixFanout logs from snapshots and runtime events', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
     testState.readOptionalProjectTextFileChunk.mockReset()
@@ -367,26 +367,8 @@ describe('useBackendFlowLogs runtime updates', () => {
     const segment = home.flowLogSegments.value.find(
       (item) => item.stepName === 'fixFanout',
     )
-    expect(segment).toBeDefined()
-    await expect(home.ensureFlowLogSegmentContentLoaded(segment!)).resolves.toBe(true)
-
-    expect(testState.readOptionalProjectTextFileChunk).toHaveBeenNthCalledWith(
-      1,
-      '/workspace/demo/fixFanout_ecc/log/fixFanout.log',
-      0,
-      256 * 1024,
-    )
-    expect(Object.values(home.flowLogContentByKey.value)).toContain('complete log')
-    expect(home.flowLogSegments.value).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          contentComplete: true,
-          contentLoading: false,
-          stepName: 'fixFanout',
-          truncated: false,
-        }),
-      ]),
-    )
+    expect(segment).toBeUndefined()
+    expect(testState.readOptionalProjectTextFileChunk).not.toHaveBeenCalled()
     scope.stop()
     resetSharedHomeDataProjectState()
   })

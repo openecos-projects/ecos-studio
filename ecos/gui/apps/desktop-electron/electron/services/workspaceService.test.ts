@@ -672,4 +672,22 @@ describe('WorkspaceService', () => {
     await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(runtimeMutationGuard.isWorkspaceRuntimeActive).toHaveBeenCalledWith(directory)
   })
+
+  it('blocks direct configuration writes for an idle descriptor Workspace', async () => {
+    const directory = await createTempDir('ecos-workspace-service-domain-write-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await writeFile(join(directory, 'home', 'workspace.toml'), 'format = 1\n')
+    const filePath = join(directory, 'home', 'parameters.json')
+    const runtimeMutationGuard = {
+      isWorkspaceRuntimeActive: vi.fn().mockReturnValue(false),
+    }
+    const { service } = createWorkspaceService(directory, filePath, {
+      runtimeMutationGuard,
+    })
+
+    await expect(
+      service.writeProjectTextFile('/workspace/home/parameters.json', '{}'),
+    ).rejects.toThrow('must be changed through an ECC configuration command')
+    expect(runtimeMutationGuard.isWorkspaceRuntimeActive).not.toHaveBeenCalled()
+  })
 })

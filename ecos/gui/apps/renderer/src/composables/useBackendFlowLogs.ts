@@ -11,6 +11,7 @@ import { readOptionalProjectTextFileChunk } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { useWorkspace } from './useWorkspace'
+import { isObsoleteBackendFlowStep } from './backendFlowProjection'
 
 export interface FlowLogSegment {
   stepName: string
@@ -218,7 +219,7 @@ export function useBackendFlowLogs() {
     const protocolType = backendRuntimeEventKind(event)
     const stepName = backendRuntimeEventStep(event) ?? ''
     const tool = typeof record.tool === 'string' ? record.tool : ''
-    if (!stepName) return
+    if (!stepName || isObsoleteBackendFlowStep(stepName)) return
 
     if (protocolType === 'step.started') {
       const segment = upsertRuntimeSegment({
@@ -305,6 +306,7 @@ export function useBackendFlowLogs() {
         flowLogSegmentsState.value.map((segment) => [segmentKey(segment), segment]),
       )
       const next = index.flow.steps.flatMap((step) => {
+        if (isObsoleteBackendFlowStep(step.name)) return []
         if (['unstart'].includes(step.state.trim().toLowerCase())) return []
         const logPath = step.resources.log.file?.path
         const base: FlowLogSegment = {

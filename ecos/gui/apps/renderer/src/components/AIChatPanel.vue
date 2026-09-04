@@ -192,7 +192,6 @@ import type {
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
   DesktopAgentEvent,
-  DesktopAgentWorkspaceParameterWrite,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
@@ -211,6 +210,10 @@ import {
 import { choiceSelectionText } from './agentChoiceDisplay'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import { groupMessagesIntoTurns } from './chatTurns'
+import {
+  confirmedExecutionToken,
+  executeConfirmedWorkspaceParameterUpdate,
+} from './workspaceParameterUpdateExecution'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
@@ -224,8 +227,10 @@ import {
 } from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
-import { refreshConfigApi, syncConfigApi } from '@/api/flow'
-import { CMDEnum, ResponseEnum } from '@/api/type'
+import {
+  updateWorkspaceConfigurationApi,
+  updateWorkspaceStepConfigurationApi,
+} from '@/api/workspace'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
   registerProjectManagedWorkspace,
@@ -693,6 +698,12 @@ async function startProviderSession(sessionId: string): Promise<void> {
       mode: tab.mode,
       ...(tab.projectRoot ? { projectRoot: tab.projectRoot } : {}),
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
+      ...(tab.workspacePath &&
+      normalizeWorkspaceRoot(currentProject.value?.path ?? '') ===
+        normalizeWorkspaceRoot(tab.workspacePath) &&
+      workspaceLifecycle.session.value.workspaceId
+        ? { workspaceId: workspaceLifecycle.session.value.workspaceId }
+        : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
     agentShell.markTabStarted(sessionId)
@@ -1238,7 +1249,11 @@ const handleSubmit = async (): Promise<void> => {
   await sendAgentMessage(message)
 }
 
-async function sendAgentMessage(message: string, addToHistory = true): Promise<void> {
+async function sendAgentMessage(
+  message: string,
+  addToHistory = true,
+  confirmationToken?: string,
+): Promise<void> {
   const desktopApi = getDesktopApi()
   const agent = desktopApi.agent
   const sessionId = agentSessionId.value
@@ -1251,6 +1266,7 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   isAgentRequestPending.value = true
   try {
     await agent.sendMessage({
+      ...(confirmationToken ? { confirmationToken } : {}),
       message,
       providerId: AGENT_PROVIDER_ID,
       sessionId,
@@ -1329,7 +1345,14 @@ async function submitChoice(
     if (contractSurface === 'parameter')
       activeUi.value.workspaceParameterAnchorTurnId = turnId
   }
-  await sendAgentMessage(option.value, false)
+  const executionContract =
+    contractSurface === 'rerun'
+      ? activeUi.value.workspaceRerunContract
+      : contractSurface === 'parameter'
+        ? activeUi.value.workspaceParameterContract
+        : undefined
+  const confirmationToken = confirmedExecutionToken(option.value, executionContract)
+  await sendAgentMessage(option.value, false, confirmationToken)
 }
 
 function sendSuggestion(suggestion: { label: string; value: string }): void {
@@ -1703,36 +1726,33 @@ async function executeWorkspaceParameterUpdate(
   ui.isWorkspaceParameterPending = true
   messageStore.setActiveSessionId(ownerSessionId)
   try {
-    const workspaceRoot = normalizeWorkspaceRoot(contract.workspace)
-    if (normalizeWorkspaceRoot(currentProject.value?.path ?? '') !== workspaceRoot) {
-      throw new Error('The parameter update targets a workspace that is not open.')
-    }
-    await applyWorkspaceParameterWrites(workspaceRoot, contract.writes)
-    await syncWorkspaceParameterWrites(workspaceRoot, contract.writes)
-    invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])
-    await reportWorkspaceParameterUpdateResult(
-      contract.update_id,
-      'succeeded',
-      '',
-      ownerSessionId,
-    )
-  } catch (error) {
-    const reason = agentErrorMessage(error)
-    messageStore.addAssistantMessage(
-      `Parameter update failed: ${reason}`,
-      'error',
-      ownerSessionId,
-    )
-    try {
-      await reportWorkspaceParameterUpdateResult(
-        contract.update_id,
-        'failed',
-        reason,
-        ownerSessionId,
-      )
-    } catch {
-      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
-    }
+    await executeConfirmedWorkspaceParameterUpdate(contract, {
+      commandId: () => crypto.randomUUID(),
+      currentWorkspace: currentProject.value?.path ?? '',
+      errorMessage: agentErrorMessage,
+      initialRevision: contract.workspace_revision,
+      invalidate: () =>
+        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow']),
+      onFailure: (reason) =>
+        messageStore.addAssistantMessage(
+          `Parameter update failed: ${reason}`,
+          'error',
+          ownerSessionId,
+        ),
+      onReportFailure: (reason) =>
+        messageStore.addAssistantMessage(reason, 'error', ownerSessionId),
+      report: (status, error) =>
+        reportWorkspaceParameterUpdateResult(
+          contract.update_id,
+          status,
+          error,
+          ownerSessionId,
+        ),
+      updateConfiguration: updateWorkspaceConfigurationApi,
+      updateRevision: (revision) => workspaceLifecycle.updateWorkspaceRevision(revision),
+      updateStepConfiguration: updateWorkspaceStepConfigurationApi,
+      workspaceHandle: workspaceLifecycle.session.value.workspaceId,
+    })
   } finally {
     ui.isWorkspaceParameterPending = false
     ui.pendingParameterUpdate = undefined
@@ -1757,114 +1777,6 @@ async function reportWorkspaceParameterUpdateResult(
 
 function normalizeWorkspaceRoot(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '')
-}
-
-/**
- * Applies the Agent's resolved write instructions. The knob-to-location mapping
- * lives in the Agent registry, so an unsupported knob fails loudly here instead
- * of being dropped by a second, out-of-date table.
- */
-async function applyWorkspaceParameterWrites(
-  workspaceRoot: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const desktopApi = getDesktopApi()
-  const byFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
-  for (const write of writes) {
-    const group = byFile.get(write.file)
-    if (group) group.push(write)
-    else byFile.set(write.file, [write])
-  }
-  for (const [file, fileWrites] of byFile) {
-    const path = `${workspaceRoot}/${file}`
-    const raw = await desktopApi.workspace.readProjectTextFile(path)
-    if (!raw.trim()) throw new Error(`${file} is missing or empty in this workspace.`)
-    const document = JSON.parse(raw) as Record<string, unknown>
-    for (const write of fileWrites) {
-      setJsonPathValue(document, write)
-    }
-    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    await desktopApi.workspace.writeProjectTextFile(
-      path,
-      raw.endsWith('\n') ? `${serialized}\n` : serialized,
-    )
-  }
-}
-
-/** Keeps the Agent's formatting identical to whatever already wrote the file. */
-function detectJsonIndent(raw: string): number {
-  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
-}
-
-function setJsonPathValue(
-  document: Record<string, unknown>,
-  write: DesktopAgentWorkspaceParameterWrite,
-): void {
-  const missing = (): never => {
-    throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)
-  }
-  let node: unknown = document
-  for (const key of write.json_path.slice(0, -1)) {
-    node = readJsonPathSegment(node, key) ?? missing()
-  }
-  const last = write.json_path[write.json_path.length - 1]
-  if (readJsonPathSegment(node, last) === undefined) missing()
-  if (typeof last === 'number') (node as unknown[])[last] = write.value
-  else (node as Record<string, unknown>)[last] = write.value
-}
-
-function readJsonPathSegment(node: unknown, key: string | number): unknown {
-  if (typeof key === 'number') {
-    return Array.isArray(node) && key < node.length ? node[key] : undefined
-  }
-  return typeof node === 'object' && node !== null && !Array.isArray(node)
-    ? (node as Record<string, unknown>)[key]
-    : undefined
-}
-
-/**
- * Pushes the edited files back through ECC. Without this the two parameter
- * surfaces drift apart and the change never reaches the next run: a step-config
- * edit must be synced into `parameters.json` before that file is re-expanded.
- */
-async function syncWorkspaceParameterWrites(
-  workspaceRoot: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const workspaceHandle = workspaceLifecycle.session.value.workspaceId
-  const stepConfigFiles = [
-    ...new Set(
-      writes
-        .filter((write) => write.surface === 'step_config')
-        .map((write) => write.file),
-    ),
-  ]
-  for (const configPath of stepConfigFiles) {
-    const syncResult = await syncConfigApi({
-      cmd: CMDEnum.sync_config,
-      data: {
-        config_path: configPath,
-        directory: workspaceRoot,
-        workspaceHandle,
-        workspaceRevision: workspaceLifecycle.session.value.workspaceRevision,
-      },
-    })
-    assertEccSuccess(syncResult, `Failed to sync ${configPath}`)
-    if (typeof syncResult.data.workspaceRevision === 'number') {
-      workspaceLifecycle.updateWorkspaceRevision(syncResult.data.workspaceRevision)
-    }
-  }
-  assertEccSuccess(
-    await refreshConfigApi({
-      cmd: CMDEnum.refresh_config,
-      data: { directory: workspaceRoot, workspaceHandle },
-    }),
-    'Failed to refresh the workspace configuration',
-  )
-}
-
-function assertEccSuccess(result: { response?: string } | null, message: string): void {
-  if (result?.response !== ResponseEnum.success) throw new Error(`${message}.`)
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {

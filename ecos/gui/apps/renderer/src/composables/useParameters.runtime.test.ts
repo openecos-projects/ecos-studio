@@ -261,6 +261,11 @@ describe('useParameters desktop bridge integration', () => {
     })
     readProjectTextFile.mockResolvedValue(parametersJson())
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
+      parameters: JSON.parse(parametersJson()),
+      home: {},
+    })
     const lifecycle = useWorkspaceLifecycle()
     lifecycle.activateSession(lifecycle.currentSessionId.value, {
       projectRoot: '/workspace/demo',
@@ -501,16 +506,13 @@ describe('useParameters desktop bridge integration', () => {
     )
   })
 
-  it('ignores an empty runtime snapshot after harden and reloads parameters.json', async () => {
+  it('loads backend parameters only from the ECC runtime snapshot', async () => {
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
-    fetchSharedHomeData.mockResolvedValue({
-      parameters: '/workspace/demo/home/parameters.json',
-    })
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
-      parameters: {},
-      home: { parameters: '' },
+      parameters: JSON.parse(parametersJson()),
+      home: {},
     })
-    readProjectTextFile.mockResolvedValue(parametersJson())
 
     const parameters = useParameters()
 
@@ -522,9 +524,21 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.config.clock).toBe('clk')
     expect(parameters.config.die.area).toBe(10000)
     expect(getWorkspaceRuntimeSnapshotApi).toHaveBeenCalledWith('workspace-demo')
-    expect(readProjectTextFile).toHaveBeenCalledWith(
-      '/workspace/demo/home/parameters.json',
-    )
+    expect(readProjectTextFile).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back to derived JSON when ECC parameters are unavailable', async () => {
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({ parameters: {}, home: {} })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.error.value).toBe('ECC Workspace Parameters are unavailable.')
+    })
+    expect(readProjectTextFile).not.toHaveBeenCalled()
   })
 
   it('keeps the last parameters snapshot while a flow is running', async () => {

@@ -402,7 +402,7 @@ export interface ProjectRecommendation {
 
 export interface ProjectStepWorkspaceResult {
   workspaceId: string
-  status: ProjectStepStatus | 'missing'
+  status: ProjectStepStatus | 'not_applicable' | 'unavailable'
   metrics: ProjectQorMetricRecord[]
 }
 

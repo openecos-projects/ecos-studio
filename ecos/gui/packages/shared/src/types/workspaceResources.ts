@@ -80,7 +80,9 @@ export interface WorkspaceResourceIndex {
 }
 
 export interface WorkspaceStepInfoRequest {
+  designTool?: 'backend' | 'frontend'
   step: string
+  workspaceHandle?: string
   id:
     | 'views'
     | 'layout'

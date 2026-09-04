@@ -95,9 +95,6 @@ const STAGE_CANONICAL_NAMES: Record<string, string> = {
   floor: 'Floor',
   floorplan_ecc: 'Floor',
   macro_placement: 'Floor',
-  fixfanout: 'Fanout',
-  fixfanout_ecc: 'Fanout',
-  fanout: 'Fanout',
   placement: 'Place',
   place: 'Place',
   place_dreamplace: 'Place',
@@ -763,7 +760,7 @@ export function extractDesignReportData(
   const instCountRes = queryMetric(
     'Physical',
     'Total Instances',
-    ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Fanout', 'Floor', 'Synth'],
+    ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Floor', 'Synth'],
     [
       'Design Statis.num_instances',
       'Instances.total.num',
@@ -830,7 +827,7 @@ export function extractDesignReportData(
   const netCountRes = queryMetric(
     'Physical',
     'Total Nets',
-    ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Fanout', 'Floor', 'Synth'],
+    ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Floor', 'Synth'],
     [
       'Design Statis.num_nets',
       'design.num_wires',
@@ -1254,7 +1251,7 @@ export function extractDesignReportData(
   const fanoutViolRes = queryMetric(
     'Timing',
     'Max Fanout Violations',
-    ['STA', 'Route', 'Fanout', 'CTS', 'Synth'],
+    ['STA', 'Route', 'CTS', 'Synth'],
     [
       'fanout_violations',
       'max_fanout_violations',

@@ -2,15 +2,17 @@ import type { PdkRequirement } from '../contracts/pdkInventory.ts'
 
 export const projectManifestFlowSteps = [
   'Synth',
+  'LEC',
   'Floor',
-  'Fanout',
   'Place',
   'CTS',
   'Legal',
+  'Timing Opt',
   'Route',
   'DRC',
   'LVS',
   'Filler',
+  'Post-route LEC',
   'RCX',
   'STA',
   'Harden',
@@ -213,18 +215,20 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   synth: 'Synth',
   floorplan: 'Floor',
   floor: 'Floor',
-  fixfanout: 'Fanout',
-  fanout: 'Fanout',
+  lec: 'LEC',
   place: 'Place',
   placement: 'Place',
   cts: 'CTS',
   legalization: 'Legal',
   legal: 'Legal',
+  timingoptimization: 'Timing Opt',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  postlec: 'Post-route LEC',
+  postroutelec: 'Post-route LEC',
   rcx: 'RCX',
   sta: 'STA',
   gds: 'Harden',
@@ -305,7 +309,13 @@ export function parseProjectManifestFlowStep(
   if ((projectManifestFlowSteps as readonly string[]).includes(step)) {
     return step as ProjectManifestFlowStep
   }
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
+  return (
+    FLOW_STEP_ALIASES[
+      String(step)
+        .toLowerCase()
+        .replace(/[\s_-]/g, '')
+    ] ?? null
+  )
 }
 
 function normalizeProjectManifestPath(path: string): string {

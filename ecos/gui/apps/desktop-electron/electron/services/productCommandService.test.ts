@@ -26,6 +26,27 @@ describe('executeProductCommand Workspace creation', () => {
     expect(updateWorkspaceConfiguration).toHaveBeenCalledWith(payload)
   })
 
+  it('routes Step Options without exposing a configuration path', async () => {
+    const updateWorkspaceStepConfiguration = vi.fn().mockResolvedValue({
+      workspaceRevision: 2,
+    })
+    const payload = {
+      commandId: 'step-configuration-1',
+      expectedWorkspaceRevision: 1,
+      options: { ifp: { thread_number: 8 } },
+      stepId: 'Floorplan',
+      workspaceHandle: 'handle-1',
+    }
+
+    await expect(
+      executeProductCommand({ command: 'workspace.updateStepConfiguration', payload }, {
+        ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+        runtime: { updateWorkspaceStepConfiguration } as never,
+      } as never),
+    ).resolves.toEqual({ workspaceRevision: 2 })
+    expect(updateWorkspaceStepConfiguration).toHaveBeenCalledWith(payload)
+  })
+
   it('rejects invalid optional Project identity fields at the command boundary', async () => {
     await expect(
       executeProductCommand(
@@ -84,7 +105,7 @@ describe('executeProductCommand Workspace creation', () => {
             retryFinalSnapshot: vi.fn(),
             startFlowOperation: vi.fn(),
             startStepOperation: vi.fn(),
-            syncConfig: vi.fn(),
+            updateWorkspaceStepConfiguration: vi.fn(),
             updateWorkspaceConfiguration: vi.fn(),
             updateWorkspace: vi.fn(),
           },
@@ -128,7 +149,7 @@ describe('executeProductCommand Workspace creation', () => {
           retryFinalSnapshot: vi.fn(),
           startFlowOperation: vi.fn(),
           startStepOperation: vi.fn(),
-          syncConfig: vi.fn(),
+          updateWorkspaceStepConfiguration: vi.fn(),
           updateWorkspaceConfiguration: vi.fn(),
           updateWorkspace: vi.fn(),
         },

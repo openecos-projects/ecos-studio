@@ -19,10 +19,10 @@ export interface HomeLayoutThumbnail {
 const layoutUrls = new Map<string, string>()
 const layoutSteps = new Set([
   'floorplan',
-  'fixfanout',
   'place',
   'cts',
   'legalization',
+  'timing optimization',
   'route',
   'drc',
   'lvs',

@@ -35,7 +35,6 @@ async function writeSourceWorkspace(): Promise<{
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
     steps: [
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
       { name: 'legalization', state: 'Success', tool: 'dreamplace' },
@@ -44,7 +43,6 @@ async function writeSourceWorkspace(): Promise<{
   const artifact = Buffer.from('place-def')
   await mkdir(join(source, 'home'), { recursive: true })
   await mkdir(join(source, 'config'), { recursive: true })
-  await mkdir(join(source, 'fixFanout_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
@@ -53,10 +51,6 @@ async function writeSourceWorkspace(): Promise<{
   await writeFile(
     join(source, 'config', 'dreamplace_ecc.json'),
     '{"density_weight":0.01}\n',
-  )
-  await writeFile(
-    join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'),
-    'checkpoint',
   )
   await writeFile(
     join(source, 'place_dreamplace', 'output', 'gcd_place.def.gz'),
@@ -96,15 +90,8 @@ function contractFor(
     source_workspace: source,
     target_step: 'place',
     target_workspace: `${source}_rerun_place`,
-    writes: [
-      {
-        file: 'home/parameters.json',
-        json_path: ['Target density'],
-        knob_id: 'place.target_density',
-        surface: 'parameters',
-        value: 0.55,
-      },
-    ],
+    step_configurations: [],
+    workspace_parameters: { target_density: 0.55 },
   }
 }
 
@@ -128,7 +115,7 @@ describe('prepareWorkspaceRerun', () => {
     ).resolves.toContain(contract.rerun_id)
     await expect(
       readFile(`${contract.target_workspace}/home/parameters.json`, 'utf8'),
-    ).resolves.toContain('0.55')
+    ).resolves.toContain('0.45')
   })
 
   it('accepts a numbered isolated rerun target', async () => {
@@ -142,18 +129,12 @@ describe('prepareWorkspaceRerun', () => {
     })
   })
 
-  it('preserves the predecessor checkpoint and empties the rerun suffix', async () => {
+  it('empties the target and downstream steps without restoring FixFanout', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
 
     await prepareWorkspaceRerun(contract)
 
-    await expect(
-      readFile(
-        `${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`,
-        'utf8',
-      ),
-    ).resolves.toBe('checkpoint')
     await expect(
       readdir(`${contract.target_workspace}/place_dreamplace`),
     ).resolves.toEqual([])
@@ -166,7 +147,6 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
     expect(targetFlow.steps).toEqual([
-      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
       { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
       { name: 'legalization', state: 'Unstart', tool: 'dreamplace', runtime: '' },
@@ -257,11 +237,9 @@ describe('prepareWorkspaceRerun', () => {
     expect(home.flow).toBe(`${contract.target_workspace}/home/flow.json`)
     expect(home.checklist).toBe(`${contract.target_workspace}/home/checklist.json`)
     expect(home.layout).toBe('')
-    expect(home.metrics).toEqual({
-      'fanout dist.': `${contract.target_workspace}/fixFanout_ecc/output/fanout.png`,
-    })
-    expect(home.monitor.step).toEqual(['fixFanout - analysis'])
-    expect(home.monitor.memory).toEqual(['1'])
+    expect(home.metrics).toEqual({})
+    expect(home.monitor.step).toEqual([])
+    expect(home.monitor.memory).toEqual([])
 
     const checklist = JSON.parse(
       await readFile(`${contract.target_workspace}/home/checklist.json`, 'utf8'),
@@ -270,9 +248,9 @@ describe('prepareWorkspaceRerun', () => {
       summary: { passed: number; blocked: number }
       checklist: Array<{ step: string }>
     }
-    expect(checklist.checklist.map((item) => item.step)).toEqual(['fixFanout'])
+    expect(checklist.checklist).toEqual([])
     expect(checklist.summary).toEqual({
-      passed: 1,
+      passed: 0,
       blocked: 0,
       attention: 0,
       unavailable: 0,
@@ -293,19 +271,28 @@ describe('prepareWorkspaceRerun', () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     const runtime = {
-      refreshConfig: vi.fn().mockResolvedValue({}),
       startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'operation-flow' }),
       startStepOperation: vi.fn().mockResolvedValue({ operationId: 'operation-place' }),
-      syncConfig: vi.fn().mockResolvedValue({}),
+      updateWorkspaceConfiguration: vi.fn().mockResolvedValue({ workspaceRevision: 2 }),
+      updateWorkspaceStepConfiguration: vi
+        .fn()
+        .mockResolvedValue({ workspaceRevision: 3 }),
       waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle', 1)
 
-    expect(runtime.syncConfig).not.toHaveBeenCalled()
-    expect(runtime.refreshConfig).toHaveBeenCalledWith({
-      workspaceHandle: 'target-gui-handle',
-    })
+    expect(runtime.updateWorkspaceConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configuration: {
+          design: {},
+          parameters: { target_density: 0.55 },
+          pdk: {},
+        },
+        expectedWorkspaceRevision: 1,
+        workspaceHandle: 'target-gui-handle',
+      }),
+    )
     expect(runtime.startStepOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         rerun: false,
@@ -319,64 +306,58 @@ describe('prepareWorkspaceRerun', () => {
     })
   })
 
-  it('materializes resolved step-config writes in the isolated workspace', async () => {
+  it('does not materialize Step Options while preparing the isolated workspace', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
-    contract.writes = [
-      {
-        file: 'config/dreamplace_ecc.json',
-        json_path: ['density_weight'],
-        knob_id: 'place.density_weight',
-        surface: 'step_config',
-        value: 0.1,
-      },
+    contract.workspace_parameters = {}
+    contract.step_configurations = [
+      { step_id: 'place', options: { density_weight: 0.1 } },
     ]
 
     await prepareWorkspaceRerun(contract)
 
     await expect(
       readFile(`${contract.target_workspace}/config/dreamplace_ecc.json`, 'utf8'),
-    ).resolves.toContain('0.1')
+    ).resolves.toContain('0.01')
   })
 
-  it('syncs step-config writes and executes every full-flow step in order', async () => {
+  it('updates Step Options and executes every full-flow step in order', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     contract.end_step = 'Harden'
     contract.execution_scope = 'full_flow'
     contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
-    contract.writes = [
-      {
-        file: 'config/dreamplace_ecc.json',
-        json_path: ['density_weight'],
-        knob_id: 'place.density_weight',
-        surface: 'step_config',
-        value: 0.1,
-      },
+    contract.workspace_parameters = {}
+    contract.step_configurations = [
+      { step_id: 'place', options: { density_weight: 0.1 } },
     ]
     const runtime = {
-      refreshConfig: vi.fn().mockResolvedValue({}),
       startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'operation-flow' }),
       startStepOperation: vi
         .fn()
         .mockImplementation(async (request: { step: string }) => ({
           operationId: `operation-${request.step}`,
         })),
-      syncConfig: vi.fn().mockResolvedValue({}),
+      updateWorkspaceConfiguration: vi.fn().mockResolvedValue({ workspaceRevision: 2 }),
+      updateWorkspaceStepConfiguration: vi
+        .fn()
+        .mockResolvedValue({ workspaceRevision: 2 }),
       waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle', 1)
 
-    expect(runtime.syncConfig).toHaveBeenCalledWith({
-      configPath: `${contract.target_workspace}/config/dreamplace_ecc.json`,
+    expect(runtime.updateWorkspaceStepConfiguration).toHaveBeenCalledWith({
+      commandId: expect.any(String),
       expectedWorkspaceRevision: 1,
+      options: { density_weight: 0.1 },
+      stepId: 'place',
       workspaceHandle: 'target-gui-handle',
     })
     expect(runtime.startStepOperation).not.toHaveBeenCalled()
     expect(runtime.startFlowOperation).toHaveBeenCalledWith({
-      expectedWorkspaceRevision: 1,
+      expectedWorkspaceRevision: 2,
       idempotencyKey: expect.any(String),
       rerun: false,
       workspaceHandle: 'target-gui-handle',
@@ -387,20 +368,23 @@ describe('prepareWorkspaceRerun', () => {
     })
   })
 
-  it('rejects a nonempty patch without resolved workspace writes', async () => {
+  it('rejects a nonempty patch without domain updates', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
-    contract.writes = []
+    contract.workspace_parameters = null as never
 
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
       'Workspace rerun contract is invalid',
     )
   })
 
-  it('rejects a resolved write that differs from the confirmed patch', async () => {
+  it('rejects unsafe Step Option keys', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
-    contract.writes![0]!.value = 0.45
+    contract.workspace_parameters = {}
+    contract.step_configurations = [
+      { step_id: 'place', options: JSON.parse('{"__proto__": {"polluted": true}}') },
+    ]
 
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
       'Workspace rerun contract is invalid',
@@ -457,21 +441,19 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string }> }
     expect(targetFlow.steps.map((step) => step.name)).toEqual([
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'lvs',
       'filler',
+      'postRouteLec',
       'RCX',
       'sta',
       'Harden',
     ])
-    expect(targetFlow.steps.find((step) => step.name === 'fixFanout')?.state).toBe(
-      'Success',
-    )
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
     expect(targetFlow.steps.find((step) => step.name === 'Harden')?.state).toBe('Unstart')
   })

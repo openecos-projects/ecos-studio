@@ -95,21 +95,6 @@ export class FrontendRpcRuntimeService {
     return this.runtime.refreshConfig({ workspaceHandle })
   }
 
-  async syncConfig(workspaceHandle: string, configPath: string) {
-    const result = (await this.runtime.syncConfig({
-      configPath,
-      workspaceHandle,
-    })) as unknown as Record<string, unknown>
-    return {
-      configPath: String(result.configPath ?? result.config_path ?? configPath),
-      directory: String(result.directory ?? ''),
-      parametersChanged: Boolean(
-        result.parametersChanged ?? result.parameters_changed ?? false,
-      ),
-      refreshed: Boolean(result.refreshed),
-    }
-  }
-
   resetFlow(workspaceHandle: string) {
     return this.runtime.resetFlow({ workspaceHandle })
   }

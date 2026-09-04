@@ -12,12 +12,6 @@ export const projectManagementWorkspaceStepAnalysisSpecs = [
     hotspotsPath: 'Floorplan_ecc/analysis/qor_hotspots.json',
   },
   {
-    step: 'Fanout',
-    metricsPath: 'fixFanout_ecc/analysis/qor_metrics.json',
-    summaryPath: 'fixFanout_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'fixFanout_ecc/analysis/qor_hotspots.json',
-  },
-  {
     step: 'Place',
     metricsPath: 'place_dreamplace/analysis/qor_metrics.json',
     summaryPath: 'place_dreamplace/analysis/qor_summary.json',
@@ -91,37 +85,8 @@ export const projectManagementWorkspaceSummaryPaths = [
   projectManagementStaTimingIssuesPath,
 ]
 
-/**
- * Workspace step-config files read for the Step Configuration baseline comparison.
- * Mirrors workspaceResourceService config resources, including the legacy filenames
- * that only the active workspace migrates away from.
- */
-export const projectManagementWorkspaceStepConfigPaths = [
-  'config/floorplan_ecc.json',
-  'config/cts_ecc.json',
-  'config/route_ecc.json',
-  'config/drc_ecc.json',
-  'config/fixfanout_ecc.json',
-  'config/filler_ecc.json',
-  'config/rcx_ecc.json',
-  'config/sta_ecc.json',
-  'config/db_ecc.json',
-  'config/dreamplace_ecc.json',
-  'config/fp_default_config.json',
-  'config/cts_default_config.json',
-  'config/rt_default_config.json',
-  'config/drc_default_config.json',
-  'config/no_default_config_fixfanout.json',
-  'config/pl_default_config.json',
-  'config/rcx.json',
-  'config/sta.json',
-  'config/db_default_config.json',
-  'config/dreamplace.json',
-] as const
-
 /** Every workspace-relative path projectManagement.readWorkspaceTexts may serve. */
 export const projectManagementWorkspaceReadablePaths = [
   'home/flow.json',
   ...projectManagementWorkspaceSummaryPaths,
-  ...projectManagementWorkspaceStepConfigPaths,
 ] as const

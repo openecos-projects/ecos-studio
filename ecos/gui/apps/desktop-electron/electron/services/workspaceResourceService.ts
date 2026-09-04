@@ -17,6 +17,10 @@ type StepFileBuckets = WorkspaceStepResource['resources']
 
 const WORKSPACE_INDEX_JSON_MAX_BYTES = 4 * 1024 * 1024
 
+function isObsoleteFlowStep(value: string): boolean {
+  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+}
+
 interface WorkspaceResourceServiceOptions {
   projectScopeProvider: Pick<
     ProjectScopeProvider,
@@ -161,7 +165,10 @@ export class WorkspaceResourceService {
       isRecord(flowData) && Array.isArray(flowData.steps)
         ? flowData.steps
             .map(readFlowStep)
-            .filter((step): step is FlowStepInput => step !== null)
+            .filter(
+              (step): step is FlowStepInput =>
+                step !== null && !isObsoleteFlowStep(step.name),
+            )
         : []
     const flowSteps = await Promise.all(
       steps.map((step) =>
@@ -216,13 +223,9 @@ export class WorkspaceResourceService {
     if (toolKey === 'yosys') {
       addYosysResources(resources, directory, design, step.name)
     } else if (toolKey === 'ecc') {
-      addEccLikeResources(resources, root, directory, design, topModule, step.name)
+      addEccLikeResources(resources, directory, design, topModule, step.name)
     } else if (toolKey === 'dreamplace') {
-      addEccLikeResources(resources, root, directory, design, topModule, step.name)
-      resources.config.dreamplace = createFile(
-        join(root, 'config', 'dreamplace_ecc.json'),
-        'config',
-      )
+      addEccLikeResources(resources, directory, design, topModule, step.name)
     } else if (isFrontendTool(toolKey)) {
       addFrontendResources(resources, directory, design, step.name)
     } else {
@@ -660,7 +663,6 @@ function createEmptyBuckets(): StepFileBuckets {
 
 function addEccLikeResources(
   resources: StepFileBuckets,
-  root: string,
   directory: string,
   design: string,
   topModule: string,
@@ -762,7 +764,6 @@ function addEccLikeResources(
   )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
-  addEccConfigResources(resources, root, stepName)
 }
 
 function addYosysResources(
@@ -823,60 +824,6 @@ function addYosysResources(
   )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
-}
-
-function addEccConfigResources(
-  resources: StepFileBuckets,
-  root: string,
-  stepName: string,
-): void {
-  resources.config.dir = createFile(join(root, 'config'), 'config')
-  resources.config.flow = createFile(join(root, 'config', 'flow_ecc.json'), 'config')
-  resources.config.db = createFile(join(root, 'config', 'db_ecc.json'), 'config')
-  resources.config.cts = createFile(join(root, 'config', 'cts_ecc.json'), 'config')
-  resources.config.drc = createFile(join(root, 'config', 'drc_ecc.json'), 'config')
-  resources.config.floorplan = createFile(
-    join(root, 'config', 'floorplan_ecc.json'),
-    'config',
-  )
-  resources.config.netlist_opt = createFile(
-    join(root, 'config', 'fixfanout_ecc.json'),
-    'config',
-  )
-  resources.config.routing = createFile(join(root, 'config', 'route_ecc.json'), 'config')
-  resources.config.rcx = createFile(join(root, 'config', 'rcx_ecc.json'), 'config')
-  resources.config.sta = createFile(join(root, 'config', 'sta_ecc.json'), 'config')
-  resources.config.filler = createFile(join(root, 'config', 'filler_ecc.json'), 'config')
-  const stepConfig = configResourceForEccStep(resources.config, stepName)
-  if (stepConfig) resources.config.config = stepConfig
-}
-
-function configResourceForEccStep(
-  config: StepFileBuckets['config'],
-  stepName: string,
-): WorkspaceResourceFile | undefined {
-  switch (stepName.toLowerCase()) {
-    case 'floorplan':
-      return config.floorplan
-    case 'cts':
-      return config.cts
-    case 'route':
-      return config.routing
-    case 'drc':
-      return config.drc
-    case 'fixfanout':
-      return config.netlist_opt
-    case 'filler':
-      return config.filler
-    case 'rcx':
-      return config.rcx
-    case 'sta':
-      return config.sta
-    case 'db':
-      return config.db
-    default:
-      return undefined
-  }
 }
 
 function isFrontendTool(tool: string): boolean {
@@ -1059,9 +1006,7 @@ function analysisFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
 
 function buildConfigInfo(step: WorkspaceStepResource): Record<string, unknown> {
   const tool = step.tool.toLowerCase()
-  if (tool === 'yosys') return {}
-  if (tool === 'dreamplace') return { config: step.resources.config.dreamplace?.path }
-  return { config: step.resources.config.config?.path }
+  return isFrontendTool(tool) ? { config: step.resources.config.flow?.path } : {}
 }
 
 function stepInfo(info: Record<string, unknown>): StepInfoBuildResult {
@@ -1074,10 +1019,7 @@ function stripPngExtension(filename: string): string {
 
 function configFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
   const tool = step.tool.toLowerCase()
-  if (tool === 'yosys') return []
-  if (tool === 'dreamplace')
-    return existingResourceRefs([step.resources.config.dreamplace])
-  return existingResourceRefs([step.resources.config.config])
+  return isFrontendTool(tool) ? existingResourceRefs([step.resources.config.flow]) : []
 }
 
 function existingResourceRefs(

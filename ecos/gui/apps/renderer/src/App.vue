@@ -70,7 +70,11 @@
         >
           <p class="workspace-update-backup-eyebrow">Update Workspace</p>
           <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
-          <p>Keep a copy of the current workspace before replacing it.</p>
+          <p>
+            Updating replaces the current Flow state, engineering results, Artifacts,
+            logs, and user files. Keep a complete Project-managed backup for later
+            inspection or recovery, or choose permanent replacement without a backup.
+          </p>
           <div class="workspace-update-backup-actions">
             <button
               type="button"
@@ -254,7 +258,7 @@ import {
   requestOpenStepConfigAfterCreate,
   usePendingOpenStepConfigAfterCreate,
 } from '@/composables/openStepConfigAfterCreate'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
   projectContextFromWorkspaceConfig,
@@ -272,6 +276,7 @@ import {
   consumeWorkspaceManagementReturnRoute,
   useWorkspaceCreation,
 } from '@/utils/workspaceNavigation'
+import { workspaceReconfigureInitialConfig } from '@/utils/workspaceReconfigure'
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -329,6 +334,7 @@ const {
 } = useDesignReportExport({
   currentProject,
   showToast,
+  workspaceSession,
 })
 const desktopApi = getDesktopApi()
 
@@ -691,388 +697,19 @@ async function buildReconfigureWizardInitialConfig(
     projectContext === undefined
       ? await resolveProjectRouteContextForWorkspace(workspacePath)
       : projectContext
-  const [parametersText, pdkText, dbConfigText, flowText] = await Promise.all([
-    readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
-    readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
-    readOptionalProjectTextFile('config/db_ecc.json', {
-      projectPath: workspacePath,
-    }),
-    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
-  ])
-
-  const parametersJson = parseOptionalJson(parametersText)
-  const pdkJson = parseOptionalJson(pdkText)
-  const dbConfigJson = parseOptionalJson(dbConfigText)
-  const flowConfig = normalizeWorkspaceFlowConfig(flowText)
-  const normalizedParameters = normalizeWorkspaceParameters(parametersJson, workspacePath)
-  const dbInput = optionalRecord(dbConfigJson?.INPUT)
-  const pdkConfig = normalizePdkConfig(pdkJson, dbConfigJson)
-  const designName =
-    optionalString(parametersJson?.Design) ||
-    optionalString(parametersJson?.design) ||
-    getPathLeafName(workspacePath)
-  const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
-  const rtlList =
-    flowConfig.start_step === 'Synthesis'
-      ? await existingWorkspaceFiles(workspacePath, [
-          ...originInputs.rtlFiles,
-          `origin/${designName}.v`,
-          `origin/${designName}.v.gz`,
-          `origin/${designName}.sv`,
-          `origin/${designName}.sv.gz`,
-          `origin/${designName}.vhd`,
-          `origin/${designName}.vhdl`,
-          ...stringList(dbInput?.rtl_paths),
-          ...stringList(dbInput?.rtl_list),
-        ])
-      : []
-  const filelist =
-    flowConfig.start_step === 'Synthesis'
-      ? await firstExistingWorkspaceFile(workspacePath, [
-          ...originInputs.filelists,
-          'origin/filelist',
-          optionalString(dbInput?.filelist),
-          optionalString(dbInput?.filelist_path),
-        ])
-      : ''
-  const originDef =
-    flowConfig.start_step === 'Synthesis'
-      ? ''
-      : await firstExistingWorkspaceFile(workspacePath, [
-          ...originInputs.defFiles,
-          `origin/${designName}.def`,
-          `origin/${designName}.def.gz`,
-          optionalString(dbInput?.origin_def),
-          optionalString(dbInput?.def_path),
-        ])
-  const originVerilog =
-    flowConfig.start_step === 'Synthesis'
-      ? ''
-      : await firstExistingWorkspaceFile(workspacePath, [
-          ...originInputs.verilogFiles,
-          `origin/${designName}.v`,
-          `origin/${designName}.v.gz`,
-          `origin/${designName}.sv`,
-          `origin/${designName}.sv.gz`,
-          `origin/${designName}.vg`,
-          `origin/${designName}.vg.gz`,
-          optionalString(dbInput?.origin_verilog),
-          optionalString(dbInput?.verilog_path),
-        ])
-  const sdc =
-    (await firstExistingWorkspaceFile(workspacePath, [
-      ...originInputs.sdcFiles,
-      `origin/${designName}.sdc`,
-      `origin/${designName}.sdc.gz`,
-      optionalString(dbInput?.sdc_path),
-      optionalString(pdkJson?.sdc),
-    ])) || ''
-
-  return {
-    directory: workspacePath,
-    lockWorkspaceDirectory: true,
-    standaloneWorkspace: !resolvedProjectContext,
-    pdk:
-      optionalString(parametersJson?.PDK) ||
-      optionalString(parametersJson?.pdk) ||
-      'ics55',
-    pdk_root:
-      optionalString(parametersJson?.['PDK Root']) ||
-      optionalString(parametersJson?.pdk_root),
-    parameters: normalizedParameters,
-    origin_def: originDef,
-    origin_verilog: originVerilog,
-    rtl_list: rtlList,
-    filelist,
-    design_input_mode: flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
-    sdc,
-    pdk_config_mode: pdkConfig.mode,
-    pdk_config: pdkConfig,
-    pdk_json: pdkText ? `${workspacePath}/home/pdk.json` : '',
-    flow_config: flowConfig,
-    project_context: resolvedProjectContext
-      ? {
-          mode: 'select',
-          project_name:
-            resolvedProjectContext.projectName ||
-            getPathLeafName(resolvedProjectContext.projectRoot),
-          project_root: resolvedProjectContext.projectRoot,
-          project_json_path: `${resolvedProjectContext.projectRoot}/project.json`,
-        }
-      : undefined,
-  }
-}
-
-function parseOptionalJson(content: string | null): Record<string, unknown> | null {
-  if (!content) return null
-  try {
-    return JSON.parse(content) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-function normalizeWorkspaceParameters(
-  parametersJson: Record<string, unknown> | null,
-  workspacePath: string,
-): WorkspaceConfig['parameters'] {
-  const dieArea = optionalRecord(parametersJson?.['Die Area']) ?? {}
-  const die = optionalRecord(parametersJson?.Die) ?? {}
-  const core = optionalRecord(parametersJson?.Core) ?? {}
-  const dieSize = numberList(die.Size)
-  const coreMargin = numberList(core.Margin)
-  const hasDieSize = dieSize.length >= 2
-
-  return {
-    design:
-      optionalString(parametersJson?.Design) ||
-      optionalString(parametersJson?.design) ||
-      getPathLeafName(workspacePath),
-    description: optionalString(parametersJson?.description),
-    top_module:
-      optionalString(parametersJson?.['Top module']) ||
-      optionalString(parametersJson?.top_module),
-    clock: optionalString(parametersJson?.Clock) || optionalString(parametersJson?.clock),
-    frequency_max: optionalNumber(
-      parametersJson?.['Frequency max [MHz]'] ?? parametersJson?.frequency_max,
-      50,
-    ),
-    max_fanout: optionalNumber(
-      parametersJson?.['Max fanout'] ?? parametersJson?.max_fanout,
-      32,
-    ),
-    die_area_mode: normalizeDieAreaMode(
-      dieArea.mode ?? parametersJson?.die_area_mode,
-      hasDieSize ? 'width_height' : 'utilitization_margin',
-    ),
-    die_width: optionalNumber(dieArea.width ?? dieSize[0], 100),
-    die_height: optionalNumber(dieArea.height ?? dieSize[1], 100),
-    utilitization: optionalNumber(
-      dieArea.utilitization ?? core.Utilitization ?? parametersJson?.utilitization,
-      0.6,
-    ),
-    margin: optionalNumber(dieArea.margin ?? coreMargin[0] ?? parametersJson?.margin, 0),
-  }
-}
-
-function normalizeWorkspaceFlowConfig(
-  flowText: string | null,
-): NonNullable<WorkspaceConfig['flow_config']> {
-  const flowJson = parseOptionalJson(flowText)
-  const steps = Array.isArray(flowJson?.steps)
-    ? flowJson.steps
-        .map((step) => {
-          if (typeof step === 'string') return step
-          if (optionalRecord(step)) return optionalString(optionalRecord(step)?.name)
-          return ''
-        })
-        .filter((step): step is string => step.trim() !== '')
-    : []
-  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
-
-  return {
-    start_step: normalizedSteps[0],
-    end_step: normalizedSteps[normalizedSteps.length - 1],
-    steps: normalizedSteps,
-  }
-}
-
-function normalizePdkConfig(
-  pdkJson: Record<string, unknown> | null,
-  dbConfigJson: Record<string, unknown> | null,
-): NonNullable<WorkspaceConfig['pdk_config']> & { mode: 'default' | 'manual' } {
-  const dbInput = optionalRecord(dbConfigJson?.INPUT)
-  const techLef = stringList(
-    pdkJson?.tech_lef ??
-      pdkJson?.tech ??
-      pdkJson?.selected_tech_lef ??
-      dbInput?.tech_lef_path,
+  const workspaceHandle = workspaceSession.value.workspaceId
+  if (!workspaceHandle) throw new Error('ECC Workspace session is unavailable.')
+  const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
+  return workspaceReconfigureInitialConfig(
+    snapshot,
+    workspacePath,
+    resolvedProjectContext,
   )
-  const cellLef = stringList(
-    pdkJson?.cell_lef ?? pdkJson?.lefs ?? pdkJson?.cell_lef_list ?? dbInput?.lef_paths,
-  )
-  const liberty = stringList(
-    pdkJson?.liberty ?? pdkJson?.libs ?? pdkJson?.liberty_list ?? dbInput?.lib_path,
-  )
-  const hasManualResources =
-    techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
-
-  return {
-    mode: hasManualResources ? 'manual' : 'default',
-    tech_lef: techLef,
-    cell_lef: cellLef,
-    liberty,
-  }
-}
-
-async function firstExistingWorkspaceFile(
-  workspacePath: string,
-  candidates: string[],
-): Promise<string> {
-  const files = await existingWorkspaceFiles(workspacePath, candidates)
-  return files[0] ?? ''
-}
-
-interface WorkspaceOriginDesignInputs {
-  rtlFiles: string[]
-  filelists: string[]
-  defFiles: string[]
-  verilogFiles: string[]
-  sdcFiles: string[]
-}
-
-function emptyWorkspaceOriginDesignInputs(): WorkspaceOriginDesignInputs {
-  return {
-    rtlFiles: [],
-    filelists: [],
-    defFiles: [],
-    verilogFiles: [],
-    sdcFiles: [],
-  }
-}
-
-async function scanWorkspaceOriginDesignInputs(
-  workspacePath: string,
-): Promise<WorkspaceOriginDesignInputs> {
-  const inputs = emptyWorkspaceOriginDesignInputs()
-  try {
-    const entries = await desktopApi.workspace.listProjectDirectory(
-      `${workspacePath}/origin`,
-    )
-    for (const entry of entries) {
-      if (entry.type !== 'file') continue
-      const filePath = normalizeLocalPath(entry.path)
-      if (hasAnySuffix(filePath, ['.def', '.def.gz'])) {
-        inputs.defFiles.push(filePath)
-      }
-      if (hasAnySuffix(filePath, ['.v', '.v.gz', '.sv', '.sv.gz', '.vg', '.vg.gz'])) {
-        inputs.rtlFiles.push(filePath)
-        inputs.verilogFiles.push(filePath)
-      }
-      if (hasAnySuffix(filePath, ['.vhd', '.vhd.gz', '.vhdl', '.vhdl.gz'])) {
-        inputs.rtlFiles.push(filePath)
-      }
-      if (hasAnySuffix(filePath, ['.sdc', '.sdc.gz'])) {
-        inputs.sdcFiles.push(filePath)
-      }
-      const fileName = getPathLeafName(filePath).toLowerCase()
-      if (
-        fileName === 'filelist' ||
-        hasAnySuffix(filePath, [
-          '.f',
-          '.f.gz',
-          '.fl',
-          '.fl.gz',
-          '.flist',
-          '.flist.gz',
-          '.filelist',
-          '.filelist.gz',
-          '.lst',
-          '.lst.gz',
-          '.txt',
-          '.txt.gz',
-        ])
-      ) {
-        inputs.filelists.push(filePath)
-      }
-    }
-    return {
-      rtlFiles: uniquePathList(inputs.rtlFiles),
-      filelists: uniquePathList(inputs.filelists),
-      defFiles: uniquePathList(inputs.defFiles),
-      verilogFiles: uniquePathList(inputs.verilogFiles),
-      sdcFiles: uniquePathList(inputs.sdcFiles),
-    }
-  } catch {
-    return inputs
-  }
-}
-
-function hasAnySuffix(filePath: string, suffixes: string[]): boolean {
-  const lowerPath = filePath.toLowerCase()
-  return suffixes.some((suffix) => lowerPath.endsWith(suffix))
-}
-
-function uniquePathList(paths: string[]): string[] {
-  return [...new Set(paths)]
-}
-
-async function existingWorkspaceFiles(
-  workspacePath: string,
-  candidates: string[],
-): Promise<string[]> {
-  const existing: string[] = []
-  const seen = new Set<string>()
-  for (const candidate of candidates) {
-    const relativeOrAbsolute = candidate.trim()
-    if (!relativeOrAbsolute) continue
-    const path = isAbsoluteLocalPath(relativeOrAbsolute)
-      ? normalizeLocalPath(relativeOrAbsolute)
-      : `${workspacePath}/${relativeOrAbsolute.replace(/^\/+/, '')}`
-    if (seen.has(path)) continue
-    seen.add(path)
-    if (await workspaceTextFileExists(path)) {
-      existing.push(path)
-    }
-  }
-  return existing
-}
-
-async function workspaceTextFileExists(path: string): Promise<boolean> {
-  try {
-    return (await readOptionalProjectTextFile(path)) !== null
-  } catch {
-    return false
-  }
-}
-
-function optionalRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
-function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
-}
-
-function optionalNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
-function normalizeDieAreaMode(
-  value: unknown,
-  fallback: NonNullable<WorkspaceConfig['parameters']['die_area_mode']>,
-): NonNullable<WorkspaceConfig['parameters']['die_area_mode']> {
-  return value === 'width_height' || value === 'utilitization_margin' ? value : fallback
-}
-
-function stringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter(
-      (item): item is string => typeof item === 'string' && item.trim() !== '',
-    )
-  }
-  if (typeof value === 'string' && value.trim()) return [value.trim()]
-  return []
-}
-
-function numberList(value: unknown): number[] {
-  if (!Array.isArray(value)) return []
-  return value.map(Number).filter(Number.isFinite)
 }
 
 function normalizeLocalPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized
-}
-
-function getPathLeafName(path: string): string {
-  return normalizeLocalPath(path).split('/').filter(Boolean).pop() || path
-}
-
-function isAbsoluteLocalPath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
 }
 
 const openDocumentation = async () => {

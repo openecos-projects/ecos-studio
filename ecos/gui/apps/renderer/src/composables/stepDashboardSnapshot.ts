@@ -12,6 +12,7 @@ import {
 } from '@/components/flow-insights/flowInsightsData'
 import {
   checklistSummary,
+  lecInsights,
   qorSummary,
   runSummary,
   type StepDashboardBar,
@@ -21,6 +22,7 @@ import {
   type StepDashboardFloorplanInsights,
   type StepDashboardHardenInsights,
   type StepDashboardLvsInsights,
+  type StepDashboardLecInsights,
   type StepDashboardMetric,
   type StepDashboardQor,
   type StepDashboardRcxInsights,
@@ -63,6 +65,7 @@ export interface StepDashboardData {
   floorplanInsights: StepDashboardFloorplanInsights | null
   hardenInsights: StepDashboardHardenInsights | null
   lvsInsights: StepDashboardLvsInsights | null
+  lecInsights: StepDashboardLecInsights | null
   rcxInsights: StepDashboardRcxInsights | null
   staInsights: StepDashboardStaInsights | null
   stepInsights: StepDashboardFloorplanInsights | null
@@ -76,6 +79,7 @@ export interface StepDashboardData {
   designStatis: StepDesignStatis | null
   hasGeometry: boolean
   reports: StepDashboardReport[]
+  staleRevision: number | null
 }
 
 function dashboardMetric(
@@ -235,6 +239,21 @@ function staDashboardInsights(sta: WorkspaceStaInsights | null): {
 export function snapshotStepDashboardData(
   detail: WorkspaceStepDetail,
 ): StepDashboardData {
+  const currentStep = detail.step
+  const staleEvidence =
+    currentStep.state !== 'succeeded' && currentStep.state !== 'skipped'
+      ? detail.staleEvidence
+      : undefined
+  if (staleEvidence) {
+    detail = {
+      ...detail,
+      analysis: staleEvidence.analysis,
+      artifacts: staleEvidence.artifacts,
+      checklist: staleEvidence.checklist,
+      step: currentStep,
+      subflow: staleEvidence.subflow,
+    }
+  }
   const keyMetrics = detail.analysis.metrics.map(dashboardMetric)
   const insightStep = {
     directory: '',
@@ -304,6 +323,12 @@ export function snapshotStepDashboardData(
           }
         : null,
     lvsInsights: detail.analysis.lvs ?? null,
+    lecInsights: lecInsights(
+      detail.analysis.lec,
+      typeof detail.analysis.lec?.freshness_status === 'string'
+        ? detail.analysis.lec.freshness_status
+        : undefined,
+    ),
     rcxInsights:
       normalizedStep === 'rcx'
         ? (detail.analysis.rcx ?? {
@@ -314,14 +339,9 @@ export function snapshotStepDashboardData(
           })
         : null,
     staInsights: sta.insights,
-    stepInsights: [
-      'fixfanout',
-      'place',
-      'cts',
-      'legalization',
-      'route',
-      'filler',
-    ].includes(normalizedStep)
+    stepInsights: ['place', 'cts', 'legalization', 'route', 'filler'].includes(
+      normalizedStep,
+    )
       ? physical
       : null,
     synthesisInsights: normalizedStep === 'synthesis' ? { metrics: values } : null,
@@ -359,6 +379,7 @@ export function snapshotStepDashboardData(
           modifiedAt: null,
         }
       }),
+    staleRevision: staleEvidence?.workspaceRevision ?? null,
   }
 }
 

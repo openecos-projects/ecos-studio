@@ -155,45 +155,41 @@ Agent 的参数更新路径写完 `home/parameters.json` 后**直接上报成功
 | `project.json`、workspace 目录结构 | 不可改动既有结构 | 同上 |
 | 已完成阶段产物 | 永不可写 | 同上，保证可追溯性 |
 | 新建 workspace / project | 可创建 | 走既有合同确认链路 |
-| `home/parameters.json` 全局参数 | 可写 | typed patch + 值域校验 + 合同确认 |
-| step config 参数 | 可写 | 同上，经 ECC `sync_config` |
+| Workspace Parameter | 可写 | typed patch + 合同确认 + ECC `workspace.updateConfiguration` |
+| Step Option | 可写 | Step identity + 合同确认 + ECC `workspace.updateStepConfiguration` |
 | flow 起止阶段 | 可写 | 同上 |
 | 隔离 rerun workspace 内部 | 可写 | 目标为新建目录，不覆盖 source |
 
 关于「工程的建立」：**新建允许**（当前操作 1 与操作 5 的行为，保留），**改动既有结构不允许**——不重命名、不删除、不覆盖 `project.json`、不调整目录布局。
 
-## 5. 参数写入面统一设计
+## 5. 参数领域命令设计
 
-### 5.1 两个参数面
+### 5.1 单一写入所有者
 
-ECOS 存在两套参数存储：
+ECOS Workspace 中仍可观察到两类派生配置：
 
 - `home/parameters.json`：全局设计参数，ICS55 扁平模板。字段如 `Clock`、`Frequency max [MHz]`、`Max fanout`、`Core.Utilitization`、`Core.Margin`、`Die.Size`、`Target density`、`Target overflow`、`Cell padding x`、`Routability opt flag`、`Bottom layer`、`Top layer`。
 - `config/*.json`：每步工具配置，如 `dreamplace_ecc.json`、`cts_ecc.json`、`route_ecc.json`。
 
-ECC 提供双向同步：
-
-- `refresh_config`：parameters → step config（`data_api.refresh_workspace_config`）
-- `sync_config`：step config → parameters，若 parameters 发生变化则再执行一次 refresh（`data_api.sync_workspace_config_to_parameters`）
-
-部分字段在两个面同时存在（`Target density`、`Target overflow`、`Cell padding x`、`Routability opt flag`）。
+这些路径只用于 Agent 读取当前值，不出现在跨进程合同中。Workspace Descriptor 是唯一权威配置；ECC 负责更新 Descriptor、生成派生配置、提升 Revision 并失效旧结果。Studio 和 Agent 不直接写这些文件。
 
 ### 5.2 写入规则
 
-1. 补丁只描述逻辑 knob，不描述文件路径。
-2. 由**单一映射表**决定每个 knob 落在哪个面、哪个 key。该映射表必须是唯一事实来源，Python 与 TypeScript 侧共用同一份定义，不允许两侧各自硬编码。
-3. 落在 `home/parameters.json` 的改动，写入后**必须调用 `refreshConfig`**。
-4. 落在 `config/*.json` 的改动，写入后**必须调用 `syncConfig`**。
-5. 未知 knob 必须**报错**，不得静默跳过。
-6. 写入格式与 GUI 保持一致（4 空格缩进），避免无意义 diff。
-7. 合同展示的「旧值」必须从该 knob 的**实际写入面**读取。
+1. 提案只描述逻辑 knob，不描述文件路径。
+2. Agent 将提案解析为 canonical Workspace Parameters 和带 Step identity 的 Step Options。
+3. Studio 在用户确认后只调用对应 Product Command，不解释 JSON path。
+4. ECC 校验参数/选项、原子提交、生成派生配置、提升 Revision 并计算 stale 范围。
+5. 未知 knob、Workspace Parameter、Step identity 或 Step Option 必须报错，不得静默跳过。
+6. 合同展示的「旧值」来自只读采集面；执行载荷必须展示逻辑参数身份。
 
 ### 5.3 knob 命名空间扩展
 
 现有前缀 `place.` / `cts.` / `legalization.` / `route.` 保留。新增用于全局参数的前缀：
 
-- `design.clock`、`design.frequency_max`、`design.max_fanout`、`design.top_module`
-- `floorplan.utilitization`、`floorplan.margin`、`floorplan.die_width`、`floorplan.die_height`、`floorplan.aspect_ratio`、`floorplan.die_area_mode`
+- `design.frequency_max`
+- `floorplan.utilitization`、`floorplan.die_width`、`floorplan.die_height`、`floorplan.aspect_ratio`
+
+`design.clock`、`design.top_module` 和 Flow/PDK 变化属于结构性 Workspace Update，不作为普通参数建议。
 
 命名需满足 `knob_id` 正则（至少一个点分隔）。
 
@@ -351,10 +347,8 @@ codex app-server -c mcp_servers={} -c tools.web_search=<true|false>
 已解决：
 
 - ✅ 未知协议字段在 0.146.0 下被静默接受（实测 `__bogus_probe_field` 返回成功）
-- ✅ 新增 `design.` / `floorplan.` knob 的写入面为 `home/parameters.json`，路径已在
-  `knob_registry.py` 中登记
-- ✅ `refresh_config` 从 `parameters.json` 重新展开 step config，因此 step-config 类
-  knob 必须先 `sync_config` 再 `refresh_config`——实现已按此顺序，并有测试锁定
+- ✅ `design.` / `floorplan.` knob 解析为 canonical Workspace Parameter，文件路径不进入合同
+- ✅ Step Option 解析为 Step identity + option object，并由 ECC 统一提交和刷新派生配置
 
 仍待验证（需要真实 workspace 与真实 Codex 会话）：
 

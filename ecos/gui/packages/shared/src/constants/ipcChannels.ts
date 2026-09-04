@@ -26,6 +26,8 @@ export const desktopApiIpcChannels = {
   projectManagementReadManifest: 'project-management:read-manifest',
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceTexts: 'project-management:read-workspace-texts',
+  projectManagementReadWorkspaceStepConfiguration:
+    'project-management:read-workspace-step-configuration',
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
   backendWorkspaceGetArtifact: 'backend-workspace:get-artifact',
   backendWorkspaceGetStepDetail: 'backend-workspace:get-step-detail',
@@ -109,7 +111,6 @@ export const desktopApiIpcChannels = {
   designRuntimeWorkspaceHome: 'design-runtime:workspace-home',
   designRuntimeWorkspaceInfo: 'design-runtime:workspace-info',
   designRuntimeWorkspaceRefreshConfig: 'design-runtime:workspace-refresh-config',
-  designRuntimeWorkspaceSyncConfig: 'design-runtime:workspace-sync-config',
   designRuntimeWorkspaceResetFlow: 'design-runtime:workspace-reset-flow',
   designRuntimeFlowRun: 'design-runtime:flow-run',
   designRuntimeFlowRunStep: 'design-runtime:flow-run-step',

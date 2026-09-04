@@ -56,10 +56,11 @@ export function recentProjectSnapshot(
     snapshot.pdk = configuration.data.pdk || undefined
     snapshot.topModule = configuration.data.topModule || undefined
     snapshot.frequencyTarget = configuration.data.frequencyMaxMhz ?? undefined
+    snapshot.coreUtilization = configuration.data.coreUtilization ?? undefined
   }
   const metrics = overview.keyMetrics
   if (metrics.status === 'ready' || metrics.status === 'partial') {
-    snapshot.coreUtilization =
+    snapshot.coreUtilization ??=
       metrics.data.items.find((metric) => metric.id === 'core-utilization')?.value ??
       undefined
   }

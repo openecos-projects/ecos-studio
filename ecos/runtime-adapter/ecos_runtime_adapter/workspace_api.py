@@ -51,7 +51,6 @@ from ecos_runtime_adapter.requests import (
     WorkspaceInfoRequest,
     WorkspaceMutationRequest,
     WorkspaceRecoverInterruptedRequest,
-    WorkspaceSyncConfigRequest,
 )
 from ecos_runtime_adapter.sessions import (
     LayoutEditSession,
@@ -106,6 +105,18 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
 
     def workspace_info(self, request: WorkspaceInfoRequest) -> dict:
         session = self._get_session(request.workspace_id)
+        if request.info_id == "config":
+            from chipcompiler.engine import read_step_configuration
+
+            try:
+                info = read_step_configuration(session.workspace, request.step)
+            except Exception as exc:
+                from chipcompiler.engine import WorkspaceLifecycleError
+
+                if isinstance(exc, WorkspaceLifecycleError):
+                    raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+                raise
+            return {"step": request.step, "id": request.info_id, "info": info}
         workspace_step = _workspace_step_from_flow(session.workspace, request.step)
         if workspace_step is None:
             raise RuntimeApiError("command_failed", f"step not found: {request.step}")
@@ -130,42 +141,6 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
             return {"directory": str(session.directory), "refreshed": True}
 
         return self._with_session_mutation_lock(request.workspace_id, refresh)
-
-    def sync_config(self, request: WorkspaceSyncConfigRequest) -> dict:
-        def sync(session: WorkspaceSession) -> dict:
-            self._validate_workspace_revision(
-                session,
-                request.expected_workspace_revision,
-            )
-            config_path = Path(request.config_path).resolve()
-            config_dir = session.directory / "config"
-            if not path_is_within(config_path, config_dir):
-                raise RuntimeApiError(
-                    "invalid_request",
-                    f"config path outside workspace config directory : {config_path}",
-                )
-
-            import chipcompiler.data as data_api
-
-            parameters_changed = data_api.sync_workspace_config_to_parameters(
-                session.workspace,
-                config_path,
-            )
-            refreshed = False
-            if parameters_changed:
-                self._release_session_db(session)
-                self._refresh_workspace_config(session.workspace)
-                self._commit_workspace_snapshot(session, "workspace.sync_config")
-                refreshed = True
-            return {
-                "directory": str(session.directory),
-                "configPath": str(config_path),
-                "parametersChanged": bool(parameters_changed),
-                "refreshed": refreshed,
-                "workspaceRevision": session.workspace_revision,
-            }
-
-        return self._with_session_mutation_lock(request.workspace_id, sync)
 
     def reset_flow(self, request: WorkspaceMutationRequest) -> dict:
         def reset(session: WorkspaceSession) -> dict:
@@ -239,15 +214,17 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 session,
                 request.expected_workspace_revision,
             )
+            stale_step_ids = self._stale_step_ids(session.workspace)
+            requires_preparation = request.rerun or bool(stale_step_ids)
             should_capture = self._should_capture_session_db(session)
             previous_db = session.db_handle if should_capture else None
-            if request.rerun and should_capture:
+            if requires_preparation and should_capture:
                 self._release_session_db(session)
                 previous_db = None
 
             engine_flow = self._build_flow_for_session(
                 session,
-                attach_session_db=should_capture and not request.rerun,
+                attach_session_db=should_capture and not requires_preparation,
             )
             if request.rerun:
                 affected_steps = list(getattr(engine_flow, "workspace_steps", []))
@@ -255,6 +232,28 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                     session.workspace,
                     engine_flow,
                     preserve_user_inputs=preserve_user_inputs,
+                )
+                reset_revision = self._commit_workspace_snapshot(
+                    session,
+                    "flow.rerun_prepared",
+                )
+                self._notify_rerun_prepared(
+                    observer,
+                    affected_steps,
+                    scope="flow",
+                    workspace_revision=reset_revision,
+                )
+            elif stale_step_ids:
+                affected_steps = [
+                    step
+                    for step in getattr(engine_flow, "workspace_steps", [])
+                    if str(getattr(step, "name", "")) in stale_step_ids
+                ]
+                self._refresh_workspace_config(session.workspace)
+                self._prepare_steps_for_rerun(
+                    session.workspace,
+                    engine_flow,
+                    affected_steps,
                 )
                 reset_revision = self._commit_workspace_snapshot(
                     session,
@@ -309,32 +308,53 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 session,
                 request.expected_workspace_revision,
             )
-            should_capture = self._should_capture_session_db(session)
-            previous_db = session.db_handle if should_capture else None
-            if request.rerun and should_capture:
-                self._release_session_db(session)
-                previous_db = None
-
             engine_flow = self._build_flow_for_session(
                 session,
-                attach_session_db=should_capture and not request.rerun,
+                attach_session_db=False,
             )
-            if request.rerun:
+            workspace_step = engine_flow.get_workspace_step(request.step)
+            if workspace_step is None:
+                raise RuntimeApiError("command_failed", f"step not found: {request.step}")
+            stale_step_ids = self._stale_step_ids(session.workspace)
+            stale_target_index = (
+                stale_step_ids.index(workspace_step.name)
+                if workspace_step.name in stale_step_ids
+                else -1
+            )
+            if stale_target_index > 0:
+                raise RuntimeApiError(
+                    "stale_dependency",
+                    f"rerun {stale_step_ids[0]} before {workspace_step.name}",
+                    {"requiredStep": stale_step_ids[0]},
+                )
+            requires_preparation = request.rerun or stale_target_index == 0
+            should_capture = self._should_capture_session_db(session)
+            previous_db = session.db_handle if should_capture else None
+            if requires_preparation and should_capture:
+                self._release_session_db(session)
+                previous_db = None
+            elif should_capture:
+                engine_flow.engine_db = session.db_handle
+
+            if requires_preparation:
                 if session.layout_edit_session is not None:
                     raise RuntimeApiError(
                         "layout_edit_active",
                         "close the rendered layout before rerunning this step",
                     )
                 self._refresh_workspace_config(session.workspace)
-
-            workspace_step = engine_flow.get_workspace_step(request.step)
-            if workspace_step is None:
-                raise RuntimeApiError("command_failed", f"step not found: {request.step}")
-            if request.rerun:
-                affected_steps = self._rerun_affected_steps(
-                    engine_flow,
-                    workspace_step,
-                    reset_dependents=reset_dependents,
+                affected_steps = (
+                    [
+                        step
+                        for step in getattr(engine_flow, "workspace_steps", [])
+                        if str(getattr(step, "name", "")) in stale_step_ids
+                    ]
+                    if stale_target_index == 0
+                    else self._rerun_affected_steps(
+                        engine_flow,
+                        workspace_step,
+                        reset_dependents=reset_dependents,
+                    )
                 )
                 self._prepare_steps_for_rerun(
                     session.workspace,
@@ -503,8 +523,16 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
 
     def workspace_snapshot(self, request: WorkspaceIdRequest) -> dict:
         session = self._get_session(request.workspace_id)
-        flow_data = getattr(getattr(session.workspace, "flow", None), "data", {})
-        raw_steps = flow_data.get("steps", []) if isinstance(flow_data, dict) else []
+        flow = getattr(session.workspace, "flow", None)
+        loader = getattr(flow, "steps", None)
+        flow_data = getattr(flow, "data", {})
+        raw_steps = (
+            loader()
+            if callable(loader)
+            else flow_data.get("steps", [])
+            if isinstance(flow_data, dict)
+            else []
+        )
         steps = [
             {
                 "name": str(step.get("name", "")),
@@ -536,6 +564,13 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 parameter_path = Path(session.directory) / "home" / "parameters.json"
             home_data["parameters"] = str(parameter_path)
 
+        configuration = None
+        descriptor = Path(session.directory) / "home" / "workspace.toml"
+        if descriptor.is_file():
+            from chipcompiler.engine import read_workspace_configuration
+
+            configuration = read_workspace_configuration(session.workspace)
+
         return {
             **self.operations.workspace_snapshot(request.workspace_id),
             "engineeringSnapshot": self._read_engineering_snapshot(session),
@@ -543,6 +578,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
             "flow": {"steps": steps},
             "home": stringify_paths(home_data),
             "parameters": stringify_paths(deepcopy(parameters_data)),
+            "configuration": stringify_paths(configuration) if configuration else None,
         }
 
     def engineering_snapshot(self, request: WorkspaceIdRequest) -> dict:
@@ -952,6 +988,20 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 "operation_conflict",
                 "Workspace has an active Operation",
             )
+
+    @staticmethod
+    def _stale_step_ids(workspace) -> list[str]:
+        from chipcompiler.engine.snapshot import read_engineering_snapshot
+
+        snapshot = read_engineering_snapshot(workspace)
+        predecessor = snapshot.get("stalePredecessor")
+        if not isinstance(predecessor, dict):
+            return []
+        return [
+            step_id
+            for step_id in predecessor.get("invalidatedStepIds", [])
+            if isinstance(step_id, str) and step_id
+        ]
 
     def _refresh_workspace_config(self, workspace) -> None:
         import chipcompiler.data as data_api

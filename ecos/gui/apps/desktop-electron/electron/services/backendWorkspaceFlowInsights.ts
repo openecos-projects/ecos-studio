@@ -35,10 +35,12 @@ const STEP_ALIASES: Record<string, string> = {
   synth: 'Synth',
   floorplan: 'Floor',
   floor: 'Floor',
-  fixfanout: 'Fanout',
-  fanout: 'Fanout',
+  lec: 'LEC',
   legalization: 'Legal',
   legal: 'Legal',
+  'timing optimization': 'Timing Opt',
+  timingoptimization: 'Timing Opt',
+  postroutelec: 'Post-route LEC',
 }
 
 function record(value: unknown): Record<string, unknown> | null {

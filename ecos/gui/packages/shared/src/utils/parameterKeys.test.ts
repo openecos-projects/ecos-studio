@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest'
+
+import { normalizeParameterKey, normalizeParameterKeys } from './parameterKeys'
+
+describe('normalizeParameterKey', () => {
+  it.each([
+    ['Frequency max [MHz]', 'frequency_max'],
+    ['Max fanout', 'max_fanout'],
+    ['Top module', 'top_module'],
+    ['PDK', 'pdk'],
+    ['PDN', 'pdn'],
+    ['DreamPlace', 'dreamplace'],
+    ['STA max paths', 'sta_max_paths'],
+    ['Cell padding x', 'cell_padding_x'],
+    ['Routability opt flag', 'routability_opt_flag'],
+    ['Bounding box', 'bounding_box'],
+    ['Aspect ratio', 'aspect_ratio'],
+    ['Design Tool', 'design_tool'],
+    ['PDK Root', 'pdk_root'],
+  ])('normalizes display key %s to %s', (input, expected) => {
+    expect(normalizeParameterKey(input)).toBe(expected)
+  })
+
+  it.each([['frequency_max'], ['die'], ['core'], ['pdk_root'], ['sta_max_paths']])(
+    'keeps canonical key %s unchanged',
+    (input) => {
+      expect(normalizeParameterKey(input)).toBe(input)
+    },
+  )
+})
+
+describe('normalizeParameterKeys', () => {
+  it('recurses into nested objects and arrays', () => {
+    const legacy = {
+      'Top module': 'gcd',
+      Die: { Size: [38.6, 39.0], Area: 1505.4 },
+      Core: { 'Bounding box': '(2 , 2) (36.6 , 37.0)', Margin: [2, 2] },
+      Fillers: [{ 'Cell name': 'FILL1' }],
+    }
+    expect(normalizeParameterKeys(legacy)).toEqual({
+      top_module: 'gcd',
+      die: { size: [38.6, 39.0], area: 1505.4 },
+      core: { bounding_box: '(2 , 2) (36.6 , 37.0)', margin: [2, 2] },
+      fillers: [{ cell_name: 'FILL1' }],
+    })
+  })
+
+  it('does not mutate the input', () => {
+    const legacy = { 'Top module': 'gcd' }
+    normalizeParameterKeys(legacy)
+    expect(legacy).toEqual({ 'Top module': 'gcd' })
+  })
+
+  it('is idempotent', () => {
+    const legacy = { 'Frequency max [MHz]': 100, Core: { 'Aspect ratio': 1 } }
+    const once = normalizeParameterKeys(legacy)
+    expect(normalizeParameterKeys(once)).toEqual(once)
+  })
+
+  it('keeps the long-key value when a flat duplicate collides', () => {
+    const payload = { frequency_max: 50, 'Frequency max [MHz]': 100 }
+    expect(normalizeParameterKeys(payload)).toEqual({ frequency_max: 100 })
+  })
+
+  it('drops a flat key that arrives after the long key', () => {
+    const payload = { 'Frequency max [MHz]': 100, frequency_max: 50 }
+    expect(normalizeParameterKeys(payload)).toEqual({ frequency_max: 100 })
+  })
+
+  it('passes through scalars', () => {
+    expect(normalizeParameterKeys('text')).toBe('text')
+    expect(normalizeParameterKeys(42)).toBe(42)
+    expect(normalizeParameterKeys(null)).toBe(null)
+  })
+
+  it('keeps own keys named like inherited Object members', () => {
+    const normalized = normalizeParameterKeys({
+      constructor: 'x',
+      prototype: 'y',
+    }) as Record<string, unknown>
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'constructor')).toBe(true)
+    expect(normalized.constructor).toBe('x')
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'prototype')).toBe(true)
+    expect(normalized.prototype).toBe('y')
+  })
+
+  it('folds __proto__ to a safe own key instead of mutating the prototype', () => {
+    const input = JSON.parse('{"__proto__": "x"}') as Record<string, unknown>
+    const normalized = normalizeParameterKeys(input) as Record<string, unknown>
+    // The mechanical rule trims edge underscores, so __proto__ can never
+    // survive as a key — and the result's prototype stays untouched.
+    expect(normalized.proto).toBe('x')
+    expect(Object.getPrototypeOf(normalized)).toBe(Object.prototype)
+  })
+})
+
+describe('scalar-like objects', () => {
+  it('passes Date instances through untouched (TOML datetimes)', () => {
+    const when = new Date('2026-08-26T00:00:00Z')
+    const input = { 'Release Date': when, nested: { at: when } }
+    const normalized = normalizeParameterKeys(input) as Record<string, unknown>
+    expect(normalized.release_date).toBe(when)
+    expect((normalized.nested as Record<string, unknown>).at).toBe(when)
+  })
+
+  it('passes class instances through untouched', () => {
+    class Box {
+      constructor(public value: number) {}
+    }
+    const box = new Box(7)
+    expect(normalizeParameterKeys({ 'Some Box': box })).toEqual({ some_box: box })
+  })
+})

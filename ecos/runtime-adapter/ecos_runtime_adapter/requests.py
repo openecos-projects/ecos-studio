@@ -84,6 +84,15 @@ class WorkspaceConfigurationUpdateRequest:
 
 
 @dataclass(frozen=True)
+class WorkspaceStepConfigurationUpdateRequest:
+    command_id: str
+    workspace_id: str
+    expected_workspace_revision: int
+    step_id: str
+    options: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class WorkspaceIdRequest:
     workspace_id: str
 
@@ -97,13 +106,6 @@ class WorkspaceRecoverInterruptedRequest:
 @dataclass(frozen=True)
 class WorkspaceCloseRequest:
     workspace_id: str
-
-
-@dataclass(frozen=True)
-class WorkspaceSyncConfigRequest:
-    workspace_id: str
-    config_path: str
-    expected_workspace_revision: int
 
 
 @dataclass(frozen=True)
@@ -245,7 +247,6 @@ FIELD_ALIASES = {
     "expectedWorkspaceRevision": "expected_workspace_revision",
     "idempotencyKey": "idempotency_key",
     "resetDependents": "reset_dependents",
-    "configPath": "config_path",
     "outputPath": "output_path",
     "infoId": "info_id",
     "editSessionId": "edit_session_id",
@@ -260,6 +261,7 @@ FIELD_ALIASES = {
     "targetDirectory": "target_directory",
     "projectId": "project_id",
     "projectRoot": "project_root",
+    "stepId": "step_id",
 }
 
 

@@ -43,11 +43,20 @@ function stepKey(value: string): string {
   return value.trim().toLowerCase()
 }
 
+export function isObsoleteBackendFlowStep(value: string): boolean {
+  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+}
+
 export function projectBackendFlowSteps(
   committed: readonly FlowStepSummary[],
   runtimeEvents: readonly DesignRuntimeEvent[],
 ): FlowStepSummary[] {
-  const steps = committed.map((step) => ({ ...step }))
+  const steps = committed
+    .filter(
+      (step) =>
+        !isObsoleteBackendFlowStep(step.stepId) && !isObsoleteBackendFlowStep(step.name),
+    )
+    .map((step) => ({ ...step }))
 
   for (const event of runtimeEvents) {
     if (event.designTool !== 'backend') continue
@@ -100,6 +109,7 @@ export function projectBackendFlowSteps(
           ? event.step
           : ''
     if (!stepName) continue
+    if (isObsoleteBackendFlowStep(stepName)) continue
     if (started) {
       for (const step of steps) {
         if (step.state === 'running') step.state = 'not-started'

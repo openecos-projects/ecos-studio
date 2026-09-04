@@ -53,6 +53,12 @@ export interface EccWorkspaceConfigurationUpdateRequest extends EccWorkspaceMuta
   pdkRoot?: string
 }
 
+export interface EccWorkspaceStepConfigurationUpdateRequest extends EccWorkspaceMutationRequest {
+  commandId: string
+  options: Record<string, unknown>
+  stepId: string
+}
+
 export interface EccWorkspaceHandleRequest {
   workspaceHandle: string
   expectedWorkspaceRevision?: number
@@ -65,10 +71,6 @@ export interface EccWorkspaceMutationRequest extends EccWorkspaceHandleRequest {
 export interface EccWorkspaceInfoRequest extends EccWorkspaceHandleRequest {
   id: string
   step: string
-}
-
-export interface EccWorkspaceSyncConfigRequest extends EccWorkspaceHandleRequest {
-  configPath: string
 }
 
 export interface SignoffAdditionalFile {
@@ -155,14 +157,6 @@ export interface EccWorkspaceInfoResult {
 export interface EccWorkspaceRefreshConfigResult {
   directory: string
   refreshed: boolean
-}
-
-export interface EccWorkspaceSyncConfigResult {
-  configPath: string
-  directory: string
-  parametersChanged: boolean
-  refreshed: boolean
-  workspaceRevision?: number
 }
 
 export interface EccWorkspaceResetFlowResult {
@@ -371,7 +365,12 @@ export interface EccRuntimeStepSnapshot {
 }
 
 export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
+  configuration?: {
+    workspaceBindings: Record<string, unknown>
+    workspaceSpec: Record<string, unknown>
+  } | null
   directory: string
+  engineeringSnapshot?: EccPersistedEngineeringSnapshot
   flow: { steps: EccRuntimeStepSnapshot[] }
   home: Record<string, unknown>
   lastEventId: string
@@ -435,6 +434,7 @@ export interface EccEngineeringAnalysisFile {
 export interface EccEngineeringAnalysisStep {
   flowState: string
   hotspots: EccEngineeringAnalysisFile
+  lecResult?: EccEngineeringAnalysisFile | null
   metrics: EccEngineeringAnalysisFile
   order: number
   stepId: string
@@ -472,6 +472,10 @@ export interface EccEngineeringSnapshot {
   signoffAssessment: EccWorkspaceInspectSignoffResult
   workspaceId: string
   workspaceRevision: number
+  stalePredecessor?: {
+    invalidatedStepIds: string[]
+    workspaceRevision: number
+  }
 }
 
 export type EccPersistedEngineeringSnapshot = Omit<

@@ -124,18 +124,19 @@ export function useStepDashboardData() {
         return
       }
       const next = snapshotStepDashboardData(detail)
+      const artifactRevision = next.staleRevision ?? revision
       const readArtifact = async (
         artifactId: string,
       ): Promise<BackendWorkspaceArtifactContent | null> => {
         const artifact = await getDesktopApi().backendWorkspace.getArtifact({
           artifactId,
           workspaceContextId: contextId,
-          workspaceRevision: revision,
+          workspaceRevision: artifactRevision,
         })
         if (
           version !== requestVersion ||
           artifact.workspaceContextId !== contextId ||
-          artifact.workspaceRevision !== revision ||
+          artifact.workspaceRevision !== artifactRevision ||
           artifact.artifact.status !== 'ready'
         ) {
           return null

@@ -6,6 +6,7 @@ import {
   type DesignTool,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
+  type EccWorkspaceStepConfigurationUpdateRequest,
   type ProjectManifestMpc,
   type WorkspaceConfig,
 } from '@ecos-studio/shared'
@@ -365,6 +366,15 @@ export function updateWorkspaceConfigurationApi(
 ) {
   return getDesktopApi().productCommands.execute({
     command: 'workspace.updateConfiguration',
+    payload: request,
+  })
+}
+
+export function updateWorkspaceStepConfigurationApi(
+  request: EccWorkspaceStepConfigurationUpdateRequest,
+) {
+  return getDesktopApi().productCommands.execute({
+    command: 'workspace.updateStepConfiguration',
     payload: request,
   })
 }

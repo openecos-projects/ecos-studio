@@ -30,7 +30,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
     WorkspaceSpecValidateRequest,
-    WorkspaceSyncConfigRequest,
+    WorkspaceStepConfigurationUpdateRequest,
     WorkspaceUpdateRequest,
 )
 
@@ -96,6 +96,11 @@ RUNTIME_METHODS: Final[tuple[RuntimeMethodSpec[Any], ...]] = (
         handler_name="update_workspace_configuration",
     ),
     RuntimeMethodSpec(
+        method_name="workspace.step_configuration.update",
+        request_model=WorkspaceStepConfigurationUpdateRequest,
+        handler_name="update_workspace_step_configuration",
+    ),
+    RuntimeMethodSpec(
         method_name="workspace.close",
         request_model=WorkspaceCloseRequest,
         handler_name="close_workspace",
@@ -114,11 +119,6 @@ RUNTIME_METHODS: Final[tuple[RuntimeMethodSpec[Any], ...]] = (
         method_name="workspace.refresh_config",
         request_model=WorkspaceIdRequest,
         handler_name="refresh_config",
-    ),
-    RuntimeMethodSpec(
-        method_name="workspace.sync_config",
-        request_model=WorkspaceSyncConfigRequest,
-        handler_name="sync_config",
     ),
     RuntimeMethodSpec(
         method_name="workspace.reset_flow",

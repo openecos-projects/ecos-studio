@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
   mkdir,
@@ -82,17 +82,22 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
   return { projectRoot, workspaceRoot }
 }
 
-function createReadService(): ProjectManagementReadService {
-  return new ProjectManagementReadService({
-    discover: async () => null,
-    load: async (projectRoot) =>
-      projectManifestForPresentation(
-        JSON.parse(
-          await readFile(join(projectRoot, 'project.json'), 'utf8'),
-        ) as EccProjectManifest,
-        projectRoot,
-      ),
-  })
+function createReadService(
+  readStepConfiguration?: (workspacePath: string, step: string) => Promise<unknown>,
+): ProjectManagementReadService {
+  return new ProjectManagementReadService(
+    {
+      discover: async () => null,
+      load: async (projectRoot) =>
+        projectManifestForPresentation(
+          JSON.parse(
+            await readFile(join(projectRoot, 'project.json'), 'utf8'),
+          ) as EccProjectManifest,
+          projectRoot,
+        ),
+    },
+    readStepConfiguration,
+  )
 }
 
 describe('ProjectManagementReadService', () => {
@@ -228,32 +233,27 @@ describe('ProjectManagementReadService', () => {
     ).rejects.toThrow('outside its workspace')
   })
 
-  it('serves step-config files from a declared workspace but rejects unlisted config paths', async () => {
+  it('reads Step Options through the ECC domain reader and rejects config file paths', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
-    const configDir = join(workspaceRoot, 'config')
-    await mkdir(configDir)
-    await writeFile(join(configDir, 'cts_ecc.json'), '{"cts_buf_list":"BUF"}')
-    const service = createReadService()
+    const readStepConfiguration = vi.fn().mockResolvedValue({ cts_buf_list: 'BUF' })
+    const service = createReadService(readStepConfiguration)
 
     await expect(
-      service.readWorkspaceTexts({
+      service.readWorkspaceStepConfiguration({
         projectRoot,
+        step: 'CTS',
         workspacePath: workspaceRoot,
-        paths: ['home/flow.json', 'config/cts_ecc.json', 'config/rcx.json'],
       }),
     ).resolves.toEqual({
-      texts: {
-        'home/flow.json': '{"steps":[]}',
-        'config/cts_ecc.json': '{"cts_buf_list":"BUF"}',
-        'config/rcx.json': null,
-      },
-      unavailablePaths: [],
+      options: { cts_buf_list: 'BUF' },
+      step: 'CTS',
     })
+    expect(readStepConfiguration).toHaveBeenCalledWith(workspaceRoot, 'CTS')
     await expect(
       service.readWorkspaceTexts({
         projectRoot,
         workspacePath: workspaceRoot,
-        paths: ['config/evil.json'],
+        paths: ['config/cts_ecc.json'],
       }),
     ).rejects.toThrow('not allowed')
   })
@@ -280,6 +280,41 @@ describe('ProjectManagementReadService', () => {
       snapshot: {
         workspaceId: 'engineering-workspace',
         workspaceRevision: 1,
+      },
+    })
+  })
+
+  it('loads the matching stale predecessor without replacing the current Revision', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const stale = engineeringSnapshot()
+    const current = {
+      ...engineeringSnapshot(),
+      workspaceRevision: 2,
+      stalePredecessor: {
+        workspaceRevision: 1,
+        invalidatedStepIds: ['Place', 'CTS'],
+      },
+    }
+    await writeFile(
+      join(workspaceRoot, 'home', 'engineering-snapshot.json'),
+      JSON.stringify(current),
+    )
+    await writeFile(
+      join(workspaceRoot, 'home', 'engineering-snapshot.stale.json'),
+      JSON.stringify(stale),
+    )
+
+    const result = await createReadService().readEngineeringSnapshot({
+      projectRoot,
+      workspacePath: workspaceRoot,
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      snapshot: { workspaceRevision: 2 },
+      staleSnapshot: {
+        ok: true,
+        snapshot: { workspaceRevision: 1 },
       },
     })
   })

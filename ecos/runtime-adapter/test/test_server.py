@@ -47,6 +47,9 @@ class CompleteFakeApi:
     def update_workspace_configuration(self, _request):
         raise AssertionError("unexpected update_workspace_configuration call")
 
+    def update_workspace_step_configuration(self, _request):
+        raise AssertionError("unexpected update_workspace_step_configuration call")
+
     def close_workspace(self, _request):
         raise AssertionError("unexpected close_workspace call")
 
@@ -58,9 +61,6 @@ class CompleteFakeApi:
 
     def refresh_config(self, _request):
         raise AssertionError("unexpected refresh_config call")
-
-    def sync_config(self, _request):
-        raise AssertionError("unexpected sync_config call")
 
     def reset_flow(self, _request):
         raise AssertionError("unexpected reset_flow call")

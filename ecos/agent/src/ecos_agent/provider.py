@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,7 +31,6 @@ from ecos_agent.messages import (
     number_prompt,
     numbered_choice,
     operation_choice,
-    operation_prompt,
     optional_file_choice,
     optional_file_prompt,
     pdk_prompt,
@@ -80,7 +78,7 @@ from ecos_agent.workspace_setup import (
     workspace_search_roots,
     workspace_setup_contract,
 )
-from ecos_agent.knob_registry import resolve_write
+from ecos_agent.knob_registry import KNOB_SPECS
 from ecos_agent.workspace_rerun import (
     BOOLEAN_RERUN_KNOBS,
     GuiWorkspaceRerunContract,
@@ -96,14 +94,11 @@ from ecos_agent.provider_support import (
     _deterministic_operation_choice,
     _extract_create_bootstrap,
     _flow_steps,
-    _gui_workspace_codex_provider,
-    _gui_workspace_request_context,
     _handle_workspace_rerun_result,
     _keyword_operation_choice,
     _number_default,
     _operation_choice,
     _optional_text,
-    _path_was_explicitly_provided,
     _prompt_for_phase,
     _propose_gui_chat_response,
     _propose_gui_workspace_path_discovery,
@@ -123,10 +118,18 @@ from ecos_agent.provider_support import (
 
 
 PROVIDER_ID = "ecos_agent"
-_WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
-_WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
-_RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
-_ChatResponseParser = Callable[[dict[str, Any]], GuiChatResponseProposal | dict[str, Any]]
+_WorkspaceSetupParser = Callable[
+    [dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]
+]
+_WorkspacePathRecommender = Callable[
+    [dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]
+]
+_RerunParameterParser = Callable[
+    [dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]
+]
+_ChatResponseParser = Callable[
+    [dict[str, Any]], GuiChatResponseProposal | dict[str, Any]
+]
 _CHAT_GREETING_PREFIXES = ("hello", "hi", "hey", "你好", "您好", "嗨")
 _CHAT_QUESTION_PREFIXES = (
     "what ",
@@ -176,16 +179,6 @@ def _known_projects(value: object) -> list[tuple[str, str]]:
 
 def _design_id_for_workspace(workspace: str) -> str | None:
     root = Path(workspace)
-    parameters_path = root / "home" / "parameters.json"
-    if parameters_path.is_file():
-        try:
-            payload = json.loads(parameters_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            payload = None
-        if isinstance(payload, dict):
-            design = payload.get("Design")
-            if isinstance(design, str) and design.strip():
-                return design.strip()
     # Prefer known ECC output locations; avoid full-tree rglob on large workspaces.
     for pattern in (
         "place_dreamplace/output/*_place.*",
@@ -218,6 +211,7 @@ class _Session:
     language_locked: bool = False
     project_root: str | None = None
     known_projects: list[tuple[str, str]] = field(default_factory=list)
+    workspace_parameter_values: dict[str, object] = field(default_factory=dict)
     creating_project: bool = False
     design_id: str | None = None
     inherited_design_name: str | None = None
@@ -227,7 +221,9 @@ class _Session:
     rerun_discovery: GuiWorkspaceRerunDiscovery | None = None
     rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)
     workspace_rerun_contract: GuiWorkspaceRerunContract | None = None
-    workspace_setup: GuiWorkspaceSetupProposal = field(default_factory=recommended_workspace_setup)
+    workspace_setup: GuiWorkspaceSetupProposal = field(
+        default_factory=recommended_workspace_setup
+    )
     workspace_inputs: WorkspaceInputs = field(default_factory=WorkspaceInputs)
     path_recommendations: dict[str, str] = field(default_factory=dict)
     workspace_setup_id: str | None = None
@@ -255,9 +251,15 @@ class EcosAgentProvider:
         chat_response_parser: _ChatResponseParser | None = None,
     ) -> None:
         self.emit = emit
-        self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
-        self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
-        self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
+        self.workspace_setup_parser = (
+            workspace_setup_parser or _propose_gui_workspace_setup
+        )
+        self.workspace_path_recommender = (
+            workspace_path_recommender or _propose_gui_workspace_path_discovery
+        )
+        self.rerun_parameter_parser = (
+            rerun_parameter_parser or _propose_gui_workspace_rerun_patch
+        )
         self.knowledge = knowledge or load_default_step_knowledge()
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
         self.sessions: dict[str, _Session] = {}
@@ -282,8 +284,16 @@ class EcosAgentProvider:
         if mode in {"home", "workspace"}:
             session.mode = mode
         session.known_projects = _known_projects(request.get("knownProjects"))
+        values = request.get("workspaceParameterValues")
+        session.workspace_parameter_values = (
+            {str(key): value for key, value in values.items() if str(key) in KNOB_SPECS}
+            if isinstance(values, Mapping)
+            else {}
+        )
         if directory:
-            session.inherited_design_name = _design_id_for_workspace(directory)
+            session.inherited_design_name = _optional_text(
+                request.get("workspaceDesignId")
+            ) or _design_id_for_workspace(directory)
         # Directory alone is only a rerun default; GUI must pass mode explicitly.
         session.phase = "operation" if session.mode == "workspace" else "home_ready"
         self._emit_status(session, "idle")
@@ -336,7 +346,11 @@ class EcosAgentProvider:
             session.running = False
         if not interrupted:
             self._emit_status(session, self._resting_status(session))
-        return {"messageId": turn_id, "sessionId": session.session_id, "turnId": turn_id}
+        return {
+            "messageId": turn_id,
+            "sessionId": session.session_id,
+            "turnId": turn_id,
+        }
 
     def interrupt(self, request: Mapping[str, Any] | None = None) -> None:
         session = self._session(request or {})
@@ -359,7 +373,9 @@ class EcosAgentProvider:
     def set_mode(self, request: Mapping[str, Any]) -> dict[str, str]:
         return self.get_status(request)
 
-    def list_sessions(self, _request: Mapping[str, Any] | None = None) -> dict[str, list[dict[str, str]]]:
+    def list_sessions(
+        self, _request: Mapping[str, Any] | None = None
+    ) -> dict[str, list[dict[str, str]]]:
         return {
             "sessions": [
                 {"sessionId": session.session_id, "title": "ECOS Agent"}
@@ -415,7 +431,9 @@ class EcosAgentProvider:
         }
         handler = handlers.get(session.phase)
         if handler is None:
-            self._emit(session, "error", "The current ECOS Agent session is not actionable.")
+            self._emit(
+                session, "error", "The current ECOS Agent session is not actionable."
+            )
             return
         if session.phase in {"home_ready", "operation"}:
             self._handle_idle_input(session, message)
@@ -455,7 +473,9 @@ class EcosAgentProvider:
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":
-            self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
+            self._begin_home_workspace_create(
+                session, message if message.strip() != "1" else ""
+            )
             return
 
     def _select_operation(self, session: _Session, message: str, choice: str) -> None:
@@ -484,8 +504,11 @@ class EcosAgentProvider:
                 self._begin_create_workspace_in_project(session)
                 return
         elif choice == "1":
-            self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
+            self._begin_home_workspace_create(
+                session, message if message.strip() != "1" else ""
+            )
             return
+
     def _resolve_operation_choice(self, session: _Session, message: str) -> str | None:
         resolve_mode = "home" if session.phase == "home_ready" else session.mode
         allowed_options = _allowed_operation_options(
@@ -512,7 +535,9 @@ class EcosAgentProvider:
         allow_operations: bool,
         knowledge_answer: KnowledgeAnswer | None,
     ) -> None:
-        allowed_options = self._chat_allowed_operations(session) if allow_operations else []
+        allowed_options = (
+            self._chat_allowed_operations(session) if allow_operations else []
+        )
         response = self._parse_chat_response(
             session,
             message,
@@ -523,7 +548,10 @@ class EcosAgentProvider:
         if response is None:
             if knowledge_answer is not None:
                 self._emit(
-                    session, "message", knowledge_answer.text, contract=knowledge_answer.contract
+                    session,
+                    "message",
+                    knowledge_answer.text,
+                    contract=knowledge_answer.contract,
                 )
             return
         if response.operation is None:
@@ -544,7 +572,11 @@ class EcosAgentProvider:
             return
         allowed_ids = {option["id"] for option in allowed_options}
         if response.operation not in allowed_ids:
-            self._emit(session, "error", "The interpreted operation is not available in the current session.")
+            self._emit(
+                session,
+                "error",
+                "The interpreted operation is not available in the current session.",
+            )
             return
         if session.phase == "home_ready":
             self._select_home_ready(session, message, response.operation)
@@ -579,7 +611,9 @@ class EcosAgentProvider:
             "workspace": session.rerun_workspace_path or "",
             "project_root": session.project_root or "",
             "_progress_callback": lambda text: self._progress(session, text),
-            "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+            "_register_interrupt": lambda callback: self._register_interrupt(
+                session, callback
+            ),
         }
         if knowledge_answer is not None:
             context["retrieved_knowledge"] = {
@@ -588,7 +622,9 @@ class EcosAgentProvider:
                 "text": knowledge_answer.text,
             }
         try:
-            response = GuiChatResponseProposal.model_validate(self.chat_response_parser(context))
+            response = GuiChatResponseProposal.model_validate(
+                self.chat_response_parser(context)
+            )
             self._check_interrupted(session)
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
@@ -601,7 +637,9 @@ class EcosAgentProvider:
     def _begin_home_workspace_create(self, session: _Session, message: str) -> None:
         self._reset_workspace_setup(session)
         session.creating_project = False
-        bootstrap = _extract_create_bootstrap(message) if message.strip() else CreateBootstrap()
+        bootstrap = (
+            _extract_create_bootstrap(message) if message.strip() else CreateBootstrap()
+        )
         mode_explicit = bootstrap.creating_project is not None
         if bootstrap.creating_project is True:
             session.creating_project = True
@@ -612,13 +650,18 @@ class EcosAgentProvider:
                 root = normalize_path(
                     bootstrap.project_root, label="Project Root", require_directory=True
                 )
-                if not session.creating_project and not (Path(root) / "project.json").is_file():
+                if (
+                    not session.creating_project
+                    and not (Path(root) / "project.json").is_file()
+                ):
                     raise ValueError("Existing Project Root must contain project.json")
                 session.workspace_inputs.project_root = root
                 session.workspace_inputs.project_name = derive_project_name(root)
                 session.project_root = root
                 pdk_paths = discover_ecos_pdk_paths(root)
-                session.path_recommendations = {"pdk": pdk_paths[0]} if pdk_paths else {}
+                session.path_recommendations = (
+                    {"pdk": pdk_paths[0]} if pdk_paths else {}
+                )
             except ValueError:
                 session.workspace_inputs.project_root = ""
                 session.workspace_inputs.project_name = ""
@@ -636,7 +679,9 @@ class EcosAgentProvider:
             try:
                 self._update_workspace_setup(
                     session,
-                    design_name=normalize_identifier(bootstrap.design_name, label="Design Name"),
+                    design_name=normalize_identifier(
+                        bootstrap.design_name, label="Design Name"
+                    ),
                 )
             except ValueError:
                 pass
@@ -665,7 +710,9 @@ class EcosAgentProvider:
                 self._emit(
                     session,
                     "message",
-                    project_root_prompt(session.language, creating=session.creating_project),
+                    project_root_prompt(
+                        session.language, creating=session.creating_project
+                    ),
                 )
             else:
                 session.phase = "workspace_project_mode"
@@ -674,7 +721,9 @@ class EcosAgentProvider:
             return
         if not session.workspace_setup.workspace_name:
             session.phase = "workspace_name"
-            recommendation = recommended_workspace_name(session.workspace_inputs.project_root)
+            recommendation = recommended_workspace_name(
+                session.workspace_inputs.project_root
+            )
             self._emit(
                 session,
                 "message",
@@ -685,7 +734,9 @@ class EcosAgentProvider:
         if not session.workspace_setup.design_name:
             session.phase = "workspace_design"
             recommendation = (
-                session.inherited_design_name or session.workspace_inputs.project_name or ""
+                session.inherited_design_name
+                or session.workspace_inputs.project_name
+                or ""
             )
             self._emit(
                 session,
@@ -710,7 +761,9 @@ class EcosAgentProvider:
     def _begin_create_workspace_in_project(self, session: _Session) -> None:
         project_root = session.project_root
         if not project_root:
-            self._emit(session, "error", "No Project Root is bound to this Agent session.")
+            self._emit(
+                session, "error", "No Project Root is bound to this Agent session."
+            )
             self._emit_phase_choice(session)
             return
         self._reset_workspace_setup(session)
@@ -739,19 +792,31 @@ class EcosAgentProvider:
                 choice = "1"
             elif any(
                 key in text
-                for key in ("新建 project", "create project", "new project", "创建项目", "新建项目")
+                for key in (
+                    "新建 project",
+                    "create project",
+                    "new project",
+                    "创建项目",
+                    "新建项目",
+                )
             ):
                 choice = "2"
         if choice == "1":
             session.creating_project = False
             session.phase = "workspace_project_root"
-            self._emit(session, "message", project_root_prompt(session.language, creating=False))
+            self._emit(
+                session,
+                "message",
+                project_root_prompt(session.language, creating=False),
+            )
             self._emit_phase_choice(session)
             return
         if choice == "2":
             session.creating_project = True
             session.phase = "workspace_project_root"
-            self._emit(session, "message", project_root_prompt(session.language, creating=True))
+            self._emit(
+                session, "message", project_root_prompt(session.language, creating=True)
+            )
             self._emit_phase_choice(session)
             return
         self._emit(session, "message", unmatched_operation_prompt(session.language))
@@ -761,7 +826,9 @@ class EcosAgentProvider:
     def _begin_workspace_scoped_rerun(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
         if not workspace:
-            self._emit(session, "error", "No open workspace is bound to this Agent session.")
+            self._emit(
+                session, "error", "No open workspace is bound to this Agent session."
+            )
             self._emit_phase_choice(session)
             return
         self._progress(session, "Preparing stage rerun…")
@@ -786,7 +853,9 @@ class EcosAgentProvider:
     def _begin_workspace_continue(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
         if not workspace:
-            self._emit(session, "error", "No open workspace is bound to this Agent session.")
+            self._emit(
+                session, "error", "No open workspace is bound to this Agent session."
+            )
             self._emit_phase_choice(session)
             return
         session.workspace_continue_id = uuid.uuid4().hex
@@ -834,7 +903,9 @@ class EcosAgentProvider:
             },
         )
 
-    def _handle_workspace_continue_result(self, session: _Session, message: str) -> None:
+    def _handle_workspace_continue_result(
+        self, session: _Session, message: str
+    ) -> None:
         if not message.startswith("workspace_continue_result:"):
             self._emit(session, "error", "Continue-flow result is invalid.")
             return
@@ -842,13 +913,17 @@ class EcosAgentProvider:
         if '"status":"succeeded"' in message or '"status": "succeeded"' in message:
             self._emit(session, "message", "Flow continue finished.")
         else:
-            self._emit(session, "message", "Flow continue did not complete successfully.")
+            self._emit(
+                session, "message", "Flow continue did not complete successfully."
+            )
         self._emit_phase_choice(session)
 
     def _begin_workspace_parameter_update(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
         if not workspace:
-            self._emit(session, "error", "No open workspace is bound to this Agent session.")
+            self._emit(
+                session, "error", "No open workspace is bound to this Agent session."
+            )
             self._emit_phase_choice(session)
             return
         session.phase = "workspace_parameter_request"
@@ -858,10 +933,14 @@ class EcosAgentProvider:
             workspace_parameter_request_prompt(session.language),
         )
 
-    def _select_workspace_parameter_request(self, session: _Session, message: str) -> None:
+    def _select_workspace_parameter_request(
+        self, session: _Session, message: str
+    ) -> None:
         workspace = session.rerun_workspace_path
         if not workspace:
-            self._emit(session, "error", "No open workspace is bound to this Agent session.")
+            self._emit(
+                session, "error", "No open workspace is bound to this Agent session."
+            )
             return
         if not message.strip():
             self._emit(
@@ -870,17 +949,27 @@ class EcosAgentProvider:
                 workspace_parameter_request_prompt(session.language),
             )
             return
-        design = _design_id_for_workspace(workspace)
+        design = session.inherited_design_name or _design_id_for_workspace(workspace)
         if design is None:
-            self._emit(session, "error", "Unable to infer the design name for parameter updates.")
+            self._emit(
+                session,
+                "error",
+                "Unable to infer the design name for parameter updates.",
+            )
             session.phase = "operation"
             self._emit_phase_choice(session)
             return
         try:
-            source = Path(normalize_path(workspace, label="Workspace", require_directory=True))
-            parameter_values = _tunable_workspace_parameters(source)
+            source = Path(
+                normalize_path(workspace, label="Workspace", require_directory=True)
+            )
+            parameter_values = _tunable_workspace_parameters(
+                session.workspace_parameter_values
+            )
             if not parameter_values:
-                raise ValueError("No tunable parameters are available in this workspace yet")
+                raise ValueError(
+                    "No tunable parameters are available in this workspace yet"
+                )
             allowed_knobs = [knob_id for knob_id, _ in parameter_values]
             current_values = {knob_id: value for knob_id, value in parameter_values}
             proposal = GuiWorkspaceRerunParameterProposal.model_validate(
@@ -889,9 +978,13 @@ class EcosAgentProvider:
                         "schema_version": "flow-agent.gui_workspace_rerun_parameter_context.v1",
                         "natural_language_request": message,
                         "allowed_knobs": allowed_knobs,
-                        "boolean_knobs": sorted(set(allowed_knobs) & BOOLEAN_RERUN_KNOBS),
+                        "boolean_knobs": sorted(
+                            set(allowed_knobs) & BOOLEAN_RERUN_KNOBS
+                        ),
                         "workspace": str(source),
-                        "_progress_callback": lambda text: self._progress(session, text),
+                        "_progress_callback": lambda text: self._progress(
+                            session, text
+                        ),
                         "_register_interrupt": lambda callback: self._register_interrupt(
                             session, callback
                         ),
@@ -901,11 +994,12 @@ class EcosAgentProvider:
             self._check_interrupted(session)
             patch = [item.model_dump(mode="json") for item in proposal.parameter_patch]
             _validate_workspace_parameter_patch(patch, current_values)
-            writes = [resolve_write(item) for item in proposal.parameter_patch]
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
-            self._emit(session, "error", f"Unable to validate the parameter change: {exc}")
+            self._emit(
+                session, "error", f"Unable to validate the parameter change: {exc}"
+            )
             self._emit(
                 session,
                 "message",
@@ -914,11 +1008,10 @@ class EcosAgentProvider:
             return
         update_id = uuid.uuid4().hex
         session.workspace_parameter_update = {
-            "schema_version": "flow-agent.workspace_parameter_update_contract.v2",
+            "schema_version": "flow-agent.workspace_parameter_update_contract.v3",
             "update_id": update_id,
             "workspace": workspace,
             "parameter_patch": patch,
-            "writes": writes,
         }
         session.phase = "workspace_parameter_confirmation"
         fields = [
@@ -944,11 +1037,16 @@ class EcosAgentProvider:
                 "title": "Save workspace parameter changes",
                 "presentation": "workspace_parameter_update",
                 "fields": fields,
+                "parameter_patch": patch,
+                "update_id": update_id,
+                "workspace": workspace,
             },
         )
         self._emit_phase_choice(session)
 
-    def _confirm_workspace_parameter_update(self, session: _Session, message: str) -> None:
+    def _confirm_workspace_parameter_update(
+        self, session: _Session, message: str
+    ) -> None:
         choice = _operation_choice(message)
         if choice == "2" or message.strip().lower() in {"cancel", "n", "no"}:
             session.workspace_parameter_update = None
@@ -972,12 +1070,23 @@ class EcosAgentProvider:
             workspace_parameter_update=contract,
         )
 
-    def _handle_workspace_parameter_update_result(self, session: _Session, message: str) -> None:
+    def _handle_workspace_parameter_update_result(
+        self, session: _Session, message: str
+    ) -> None:
         if not message.startswith("workspace_parameter_update_result:"):
             self._emit(session, "error", "Parameter update result is invalid.")
             return
+        succeeded = (
+            '"status":"succeeded"' in message or '"status": "succeeded"' in message
+        )
+        if succeeded and session.workspace_parameter_update:
+            for item in session.workspace_parameter_update.get("parameter_patch", []):
+                if isinstance(item, dict) and isinstance(item.get("knob_id"), str):
+                    session.workspace_parameter_values[item["knob_id"]] = item.get(
+                        "value"
+                    )
         self._reset(session)
-        if '"status":"succeeded"' in message or '"status": "succeeded"' in message:
+        if succeeded:
             self._emit(session, "message", "Workspace parameters were saved.")
         else:
             self._emit(session, "message", "Workspace parameter update failed.")
@@ -986,7 +1095,10 @@ class EcosAgentProvider:
     def _select_project_root(self, session: _Session, message: str) -> None:
         try:
             root = normalize_path(message, label="Project Root", require_directory=True)
-            if not session.creating_project and not (Path(root) / "project.json").is_file():
+            if (
+                not session.creating_project
+                and not (Path(root) / "project.json").is_file()
+            ):
                 raise ValueError("Existing Project Root must contain project.json")
             session.workspace_inputs.project_root = root
             session.workspace_inputs.project_name = derive_project_name(root)
@@ -1038,7 +1150,9 @@ class EcosAgentProvider:
             try:
                 self._update_workspace_setup(
                     session,
-                    design_name=normalize_identifier(bootstrap.design_name, label="Design Name"),
+                    design_name=normalize_identifier(
+                        bootstrap.design_name, label="Design Name"
+                    ),
                 )
             except ValueError:
                 pass
@@ -1075,7 +1189,11 @@ class EcosAgentProvider:
             return
         self._update_workspace_setup(session, flow_start="Synthesis", flow_end=end_step)
         session.phase = "workspace_rtl"
-        self._emit(session, "message", rtl_prompt(session.language, _recommended_path(session, "rtl")))
+        self._emit(
+            session,
+            "message",
+            rtl_prompt(session.language, _recommended_path(session, "rtl")),
+        )
         self._emit_phase_choice(session)
 
     def _select_rtl(self, session: _Session, message: str) -> None:
@@ -1088,7 +1206,9 @@ class EcosAgentProvider:
                 session,
                 "RTL path",
                 str(exc),
-                lambda language: rtl_prompt(language, _recommended_path(session, "rtl")),
+                lambda language: rtl_prompt(
+                    language, _recommended_path(session, "rtl")
+                ),
             )
             return
         self._apply_detected_defaults(session)
@@ -1096,14 +1216,21 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            optional_file_prompt(session.language, "filelist", ".f", _recommended_path(session, "filelist")),
+            optional_file_prompt(
+                session.language,
+                "filelist",
+                ".f",
+                _recommended_path(session, "filelist"),
+            ),
         )
         self._emit_phase_choice(session)
 
     def _select_filelist(self, session: _Session, message: str) -> None:
         try:
             session.workspace_inputs.filelist_path = optional_path(
-                resolve_emptyable_answer(message), label="Filelist path", suffixes=(".f",)
+                resolve_emptyable_answer(message),
+                label="Filelist path",
+                suffixes=(".f",),
             )
         except ValueError as exc:
             self._repeat_invalid(
@@ -1119,7 +1246,9 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            optional_file_prompt(session.language, "SDC", ".sdc", _recommended_path(session, "sdc")),
+            optional_file_prompt(
+                session.language, "SDC", ".sdc", _recommended_path(session, "sdc")
+            ),
         )
         self._emit_phase_choice(session)
 
@@ -1140,7 +1269,11 @@ class EcosAgentProvider:
             return
         self._apply_detected_defaults(session)
         session.phase = "workspace_pdk"
-        self._emit(session, "message", pdk_prompt(session.language, _recommended_path(session, "pdk")))
+        self._emit(
+            session,
+            "message",
+            pdk_prompt(session.language, _recommended_path(session, "pdk")),
+        )
         self._emit_phase_choice(session)
 
     def _select_pdk(self, session: _Session, message: str) -> None:
@@ -1148,28 +1281,38 @@ class EcosAgentProvider:
             message = resolve_emptyable_answer(message)
             recommendation = session.path_recommendations.get("pdk")
             if not message and not recommendation:
-                raise ValueError("No local PDK recommendation was found; enter an existing PDK path")
+                raise ValueError(
+                    "No local PDK recommendation was found; enter an existing PDK path"
+                )
             session.workspace_inputs.pdk_root = normalize_path(
-                message or recommendation or "", label="PDK path", require_directory=True
+                message or recommendation or "",
+                label="PDK path",
+                require_directory=True,
             )
         except ValueError as exc:
             self._repeat_invalid(
                 session,
                 "PDK path",
                 str(exc),
-                lambda language: pdk_prompt(language, _recommended_path(session, "pdk")),
+                lambda language: pdk_prompt(
+                    language, _recommended_path(session, "pdk")
+                ),
             )
             return
         session.phase = "workspace_top"
         self._emit(
             session,
             "message",
-            default_value_prompt(session.language, "Top Module Name", session.workspace_setup.top_module),
+            default_value_prompt(
+                session.language, "Top Module Name", session.workspace_setup.top_module
+            ),
         )
         self._emit_phase_choice(session)
 
     def _select_design_name(self, session: _Session, message: str) -> None:
-        recommendation = session.inherited_design_name or session.workspace_inputs.project_name or ""
+        recommendation = (
+            session.inherited_design_name or session.workspace_inputs.project_name or ""
+        )
         answer = resolve_emptyable_answer(message) or recommendation
         try:
             design = normalize_identifier(answer, label="Design Name")
@@ -1203,7 +1346,11 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            default_value_prompt(session.language, "Clock Signal Name", session.workspace_setup.clock_name),
+            default_value_prompt(
+                session.language,
+                "Clock Signal Name",
+                session.workspace_setup.clock_name,
+            ),
         )
         self._emit_phase_choice(session)
 
@@ -1234,7 +1381,9 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _select_frequency(self, session: _Session, message: str) -> None:
-        value = self._number_or_repeat(session, message, "Frequency Max (MHz)", 1, 10_000)
+        value = self._number_or_repeat(
+            session, message, "Frequency Max (MHz)", 1, 10_000
+        )
         if value is None:
             return
         self._update_workspace_setup(session, frequency_mhz=value)
@@ -1242,7 +1391,13 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            number_prompt(session.language, "Max Fanout", session.workspace_setup.max_fanout, 1, 1_000_000),
+            number_prompt(
+                session.language,
+                "Max Fanout",
+                session.workspace_setup.max_fanout,
+                1,
+                1_000_000,
+            ),
         )
         self._emit_phase_choice(session)
 
@@ -1255,12 +1410,20 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            number_prompt(session.language, "Die Area Utilization", session.workspace_setup.utilitization, 0.01, 1),
+            number_prompt(
+                session.language,
+                "Die Area Utilization",
+                session.workspace_setup.utilitization,
+                0.01,
+                1,
+            ),
         )
         self._emit_phase_choice(session)
 
     def _select_utilization(self, session: _Session, message: str) -> None:
-        value = self._number_or_repeat(session, message, "Die Area Utilization", 0.01, 1)
+        value = self._number_or_repeat(
+            session, message, "Die Area Utilization", 0.01, 1
+        )
         if value is None:
             return
         self._update_workspace_setup(session, utilitization=value)
@@ -1268,12 +1431,20 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            number_prompt(session.language, "Placement Target Density", session.workspace_setup.target_density, 0.01, 1),
+            number_prompt(
+                session.language,
+                "Placement Target Density",
+                session.workspace_setup.target_density,
+                0.01,
+                1,
+            ),
         )
         self._emit_phase_choice(session)
 
     def _select_density(self, session: _Session, message: str) -> None:
-        value = self._number_or_repeat(session, message, "Placement Target Density", 0.01, 1)
+        value = self._number_or_repeat(
+            session, message, "Placement Target Density", 0.01, 1
+        )
         if value is None:
             return
         self._update_workspace_setup(session, target_density=value)
@@ -1281,12 +1452,20 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            number_prompt(session.language, "Placement Target Overflow", session.workspace_setup.target_overflow, 0, 1),
+            number_prompt(
+                session.language,
+                "Placement Target Overflow",
+                session.workspace_setup.target_overflow,
+                0,
+                1,
+            ),
         )
         self._emit_phase_choice(session)
 
     def _select_overflow(self, session: _Session, message: str) -> None:
-        value = self._number_or_repeat(session, message, "Placement Target Overflow", 0, 1)
+        value = self._number_or_repeat(
+            session, message, "Placement Target Overflow", 0, 1
+        )
         if value is None:
             return
         self._update_workspace_setup(session, target_overflow=value)
@@ -1296,7 +1475,11 @@ class EcosAgentProvider:
         try:
             design = normalize_identifier(message, label="Design Name")
         except ValueError as exc:
-            self._emit(session, "message", invalid_value(session.language, "Design Name", str(exc)))
+            self._emit(
+                session,
+                "message",
+                invalid_value(session.language, "Design Name", str(exc)),
+            )
             self._emit(session, "message", rerun_design_prompt(session.language))
             return
         session.design_id = design
@@ -1330,7 +1513,9 @@ class EcosAgentProvider:
                 session,
                 "message",
                 invalid_value(
-                    session.language, "Rerun workspace", "an existing workspace path is required"
+                    session.language,
+                    "Rerun workspace",
+                    "an existing workspace path is required",
                 ),
             )
             self._emit(
@@ -1342,9 +1527,14 @@ class EcosAgentProvider:
             return
         try:
             source = Path(
-                normalize_path(workspace_path, label="Rerun workspace", require_directory=True)
+                normalize_path(
+                    workspace_path, label="Rerun workspace", require_directory=True
+                )
             )
-            resolver = GuiWorkspaceRerunResolver(source.parent)
+            resolver = GuiWorkspaceRerunResolver(
+                source.parent,
+                session.workspace_parameter_values,
+            )
             discovery = resolver.discover_workspace(source, design)
         except ValueError as exc:
             self._emit(
@@ -1362,34 +1552,43 @@ class EcosAgentProvider:
         session.rerun_resolver = resolver
         session.rerun_discovery = discovery
         session.phase = "rerun_stage"
-        self._emit(session, "message", rerun_stage_prompt(session.language, discovery.allowed_stages))
+        self._emit(
+            session,
+            "message",
+            rerun_stage_prompt(session.language, discovery.allowed_stages),
+        )
         self._emit_phase_choice(session)
 
     def _select_rerun_stage(self, session: _Session, message: str) -> None:
         resolver = _rerun_resolver(session)
         discovery = session.rerun_discovery
-        stage = None if discovery is None else numbered_choice(message, discovery.allowed_stages)
+        stage = (
+            None
+            if discovery is None
+            else numbered_choice(message, discovery.allowed_stages)
+        )
         if stage is None:
             self._emit(session, "message", invalid_choice(session.language))
             self._emit(
                 session,
                 "message",
-                rerun_stage_prompt(session.language, () if discovery is None else discovery.allowed_stages),
+                rerun_stage_prompt(
+                    session.language,
+                    () if discovery is None else discovery.allowed_stages,
+                ),
             )
             self._emit_phase_choice(session)
             return
         session.rerun_stage = stage
         parameter_values = resolver.parameter_values(discovery.source, stage)
         if not parameter_values:
-            # Stages like fixFanout are rerunnable but have no authorized knobs yet.
+            # Some stages are rerunnable but have no authorized knobs yet.
             session.rerun_parameter_patch = []
             session.phase = "rerun_scope"
             self._emit(
                 session,
                 "message",
-                rerun_no_parameters_prompt(
-                    session.language, catalog_end_step().value
-                ),
+                rerun_no_parameters_prompt(session.language, catalog_end_step().value),
             )
             self._emit_phase_choice(session)
             return
@@ -1414,11 +1613,11 @@ class EcosAgentProvider:
             session.rerun_parameter_patch = []
         else:
             try:
-                parameter_values = resolver.parameter_values(
-                    discovery.source, stage
-                )
+                parameter_values = resolver.parameter_values(discovery.source, stage)
                 if not parameter_values:
-                    raise ValueError("No config-backed parameters are available for this rerun stage")
+                    raise ValueError(
+                        "No config-backed parameters are available for this rerun stage"
+                    )
                 allowed_knobs = [knob_id for knob_id, _ in parameter_values]
                 proposal = GuiWorkspaceRerunParameterProposal.model_validate(
                     self.rerun_parameter_parser(
@@ -1427,21 +1626,32 @@ class EcosAgentProvider:
                             "natural_language_request": message,
                             "target_step": stage,
                             "allowed_knobs": allowed_knobs,
-                            "boolean_knobs": sorted(set(allowed_knobs) & BOOLEAN_RERUN_KNOBS),
+                            "boolean_knobs": sorted(
+                                set(allowed_knobs) & BOOLEAN_RERUN_KNOBS
+                            ),
                             "workspace": str(discovery.source.workspace_path),
-                            "_progress_callback": lambda text: self._progress(session, text),
-                            "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+                            "_progress_callback": lambda text: self._progress(
+                                session, text
+                            ),
+                            "_register_interrupt": lambda callback: self._register_interrupt(
+                                session, callback
+                            ),
                         }
                     )
                 )
                 self._check_interrupted(session)
                 resolver._validate_patch(
-                    stage, [item.model_dump(mode="json") for item in proposal.parameter_patch]
+                    stage,
+                    [item.model_dump(mode="json") for item in proposal.parameter_patch],
                 )
             except (CodexProviderError, ValueError) as exc:
                 self._check_interrupted(session)
                 self._raise_if_interrupted(exc)
-                self._emit(session, "error", f"Unable to validate the rerun parameter change: {exc}")
+                self._emit(
+                    session,
+                    "error",
+                    f"Unable to validate the rerun parameter change: {exc}",
+                )
                 self._emit(
                     session,
                     "message",
@@ -1452,16 +1662,23 @@ class EcosAgentProvider:
                 )
                 self._emit_phase_choice(session)
                 return
-            session.rerun_parameter_patch = [item.model_dump(mode="json") for item in proposal.parameter_patch]
+            session.rerun_parameter_patch = [
+                item.model_dump(mode="json") for item in proposal.parameter_patch
+            ]
             if session.rerun_parameter_patch:
                 effective_values = dict(parameter_values)
                 effective_values.update(
-                    {item["knob_id"]: item["value"] for item in session.rerun_parameter_patch}
+                    {
+                        item["knob_id"]: item["value"]
+                        for item in session.rerun_parameter_patch
+                    }
                 )
                 self._emit(
                     session,
                     "message",
-                    rerun_parameter_prompt(session.language, tuple(sorted(effective_values.items()))),
+                    rerun_parameter_prompt(
+                        session.language, tuple(sorted(effective_values.items()))
+                    ),
                 )
         session.phase = "rerun_scope"
         self._emit(
@@ -1474,7 +1691,11 @@ class EcosAgentProvider:
     def _select_rerun_scope(self, session: _Session, message: str) -> None:
         resolver = _rerun_resolver(session)
         scope = numbered_choice(message, ("single_step", "full_flow"))
-        if scope is None or session.rerun_discovery is None or session.rerun_stage is None:
+        if (
+            scope is None
+            or session.rerun_discovery is None
+            or session.rerun_stage is None
+        ):
             self._emit(session, "message", invalid_choice(session.language))
             self._emit(
                 session,
@@ -1517,14 +1738,28 @@ class EcosAgentProvider:
                 session.workspace_setup_id,
             )
         except ValueError as exc:
-            self._emit(session, "message", invalid_value(session.language, "Workspace specification", str(exc)))
-            session.phase = "workspace_top" if "Top Module" in str(exc) else "workspace_project_root"
             self._emit(
                 session,
                 "message",
-                default_value_prompt(session.language, "Top Module Name", session.workspace_setup.top_module)
+                invalid_value(session.language, "Workspace specification", str(exc)),
+            )
+            session.phase = (
+                "workspace_top"
+                if "Top Module" in str(exc)
+                else "workspace_project_root"
+            )
+            self._emit(
+                session,
+                "message",
+                default_value_prompt(
+                    session.language,
+                    "Top Module Name",
+                    session.workspace_setup.top_module,
+                )
                 if session.phase == "workspace_top"
-                else project_root_prompt(session.language, creating=session.creating_project),
+                else project_root_prompt(
+                    session.language, creating=session.creating_project
+                ),
             )
             self._emit_phase_choice(session)
             return
@@ -1541,7 +1776,9 @@ class EcosAgentProvider:
     def _confirm_workspace_execution(self, session: _Session, message: str) -> None:
         _confirm_workspace_execution(self, session, message)
 
-    def _handle_workspace_creation_result(self, session: _Session, message: str) -> None:
+    def _handle_workspace_creation_result(
+        self, session: _Session, message: str
+    ) -> None:
         result = _workspace_creation_result(message)
         if result is None or result[0] != session.workspace_setup_id:
             self._emit(session, "error", "Workspace creation result is invalid.")
@@ -1549,7 +1786,9 @@ class EcosAgentProvider:
         _, status, error = result
         if status == "succeeded":
             session.mode = "workspace"
-            if session.workspace_contract and isinstance(session.workspace_contract, dict):
+            if session.workspace_contract and isinstance(
+                session.workspace_contract, dict
+            ):
                 directory = session.workspace_contract.get("directory")
                 if isinstance(directory, str) and directory.strip():
                     session.rerun_workspace_path = directory
@@ -1612,7 +1851,9 @@ class EcosAgentProvider:
         current = _number_default(session.workspace_setup, label)
         message = resolve_emptyable_answer(message)
         try:
-            return parse_number(message, label=label, lower=lower, upper=upper, default=current)
+            return parse_number(
+                message, label=label, lower=lower, upper=upper, default=current
+            )
         except ValueError:
             pass
         try:
@@ -1627,11 +1868,23 @@ class EcosAgentProvider:
                         "numeric_bounds": {"lower": lower, "upper": upper},
                         "default_value": current,
                         "natural_language_choice": message,
-                        "recommended_defaults": session.workspace_setup.model_dump(mode="json"),
-                        "workspace_inputs": _workspace_inputs_payload(session.workspace_inputs),
-                        "filesystem_roots": list(workspace_search_roots(session.workspace_inputs.project_root)),
-                        "_progress_callback": lambda text: self._progress(session, text),
-                        "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+                        "recommended_defaults": session.workspace_setup.model_dump(
+                            mode="json"
+                        ),
+                        "workspace_inputs": _workspace_inputs_payload(
+                            session.workspace_inputs
+                        ),
+                        "filesystem_roots": list(
+                            workspace_search_roots(
+                                session.workspace_inputs.project_root
+                            )
+                        ),
+                        "_progress_callback": lambda text: self._progress(
+                            session, text
+                        ),
+                        "_register_interrupt": lambda callback: self._register_interrupt(
+                            session, callback
+                        ),
                     }
                 )
             )
@@ -1639,16 +1892,26 @@ class EcosAgentProvider:
             value = getattr(proposal, field)
             if value is None:
                 raise ValueError("Codex did not provide a value for this field")
-            return parse_number(str(value), label=label, lower=lower, upper=upper, default=current)
+            return parse_number(
+                str(value), label=label, lower=lower, upper=upper, default=current
+            )
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
             self._emit(
                 session,
                 "message",
-                invalid_value(session.language, label, "Unable to interpret a valid in-range value"),
+                invalid_value(
+                    session.language,
+                    label,
+                    "Unable to interpret a valid in-range value",
+                ),
             )
-            self._emit(session, "message", number_prompt(session.language, label, current, lower, upper))
+            self._emit(
+                session,
+                "message",
+                number_prompt(session.language, label, current, lower, upper),
+            )
             self._emit_phase_choice(session)
             return None
 
@@ -1659,10 +1922,16 @@ class EcosAgentProvider:
             "Top Module Name": session.workspace_setup.top_module,
             "Clock Signal Name": session.workspace_setup.clock_name,
         }
-        self._emit(session, "message", default_value_prompt(session.language, label, values[label]))
+        self._emit(
+            session,
+            "message",
+            default_value_prompt(session.language, label, values[label]),
+        )
         self._emit_phase_choice(session)
 
-    def _repeat_invalid(self, session: _Session, label: str, error: str, prompt) -> None:
+    def _repeat_invalid(
+        self, session: _Session, label: str, error: str, prompt
+    ) -> None:
         self._emit(session, "message", invalid_value(session.language, label, error))
         self._emit(session, "message", prompt(session.language))
         self._emit_phase_choice(session)
@@ -1681,17 +1950,30 @@ class EcosAgentProvider:
         setup = merge_workspace_setup(session.workspace_setup, proposal, "spec")
         inputs = merge_workspace_inputs(session.workspace_inputs, proposal)
         _validate_workspace_input_roots(
-            proposal, inputs, workspace_search_roots(session.workspace_inputs.project_root), message
+            proposal,
+            inputs,
+            workspace_search_roots(session.workspace_inputs.project_root),
+            message,
         )
         if proposal.rtl_path is None and proposal.sdc_path is None:
             return setup, inputs
-        defaults = infer_design_defaults(inputs.rtl_path, inputs.sdc_path, setup.design_name or "")
-        updates = {key: value for key, value in defaults.items() if getattr(proposal, key) is None}
-        return GuiWorkspaceSetupProposal.model_validate({**setup.model_dump(mode="json"), **updates}), inputs
+        defaults = infer_design_defaults(
+            inputs.rtl_path, inputs.sdc_path, setup.design_name or ""
+        )
+        updates = {
+            key: value
+            for key, value in defaults.items()
+            if getattr(proposal, key) is None
+        }
+        return GuiWorkspaceSetupProposal.model_validate(
+            {**setup.model_dump(mode="json"), **updates}
+        ), inputs
 
     def _discover_design_paths(self, session: _Session) -> None:
         roots = workspace_search_roots(session.workspace_inputs.project_root)
-        candidates = discover_design_file_candidates(session.workspace_setup.design_name or "", roots)
+        candidates = discover_design_file_candidates(
+            session.workspace_setup.design_name or "", roots
+        )
         try:
             proposal = GuiWorkspaceSetupProposal.model_validate(
                 self.workspace_path_recommender(
@@ -1701,20 +1983,30 @@ class EcosAgentProvider:
                         "project_root": session.workspace_inputs.project_root,
                         "filesystem_roots": list(roots),
                         "discovered_candidates": candidates,
-                        "_progress_callback": lambda text: self._progress(session, text),
-                        "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
+                        "_progress_callback": lambda text: self._progress(
+                            session, text
+                        ),
+                        "_register_interrupt": lambda callback: self._register_interrupt(
+                            session, callback
+                        ),
                     }
                 )
             )
             self._check_interrupted(session)
-            session.path_recommendations.update(_validated_path_recommendations(proposal, roots))
+            session.path_recommendations.update(
+                _validated_path_recommendations(proposal, roots)
+            )
         except (CodexProviderError, ValueError) as exc:
             self._check_interrupted(session)
             self._raise_if_interrupted(exc)
             session.path_recommendations = {
-                field: path for field, path in session.path_recommendations.items() if field == "pdk"
+                field: path
+                for field, path in session.path_recommendations.items()
+                if field == "pdk"
             }
-            self._emit(session, "error", f"Unable to discover local design files: {exc}")
+            self._emit(
+                session, "error", f"Unable to discover local design files: {exc}"
+            )
 
     def _update_workspace_setup(self, session: _Session, **updates: Any) -> None:
         payload = session.workspace_setup.model_dump(mode="json")
@@ -1810,8 +2102,12 @@ class EcosAgentProvider:
                 prompt_id,
                 tuple(session.known_projects),
             )
-        elif session.phase == "workspace_name" and session.workspace_inputs.project_root:
-            recommendation = recommended_workspace_name(session.workspace_inputs.project_root)
+        elif (
+            session.phase == "workspace_name" and session.workspace_inputs.project_root
+        ):
+            recommendation = recommended_workspace_name(
+                session.workspace_inputs.project_root
+            )
             choice = default_value_choice(
                 session.language,
                 prompt_id,
@@ -1822,7 +2118,9 @@ class EcosAgentProvider:
             session.inherited_design_name or session.workspace_inputs.project_name
         ):
             recommendation = (
-                session.inherited_design_name or session.workspace_inputs.project_name or ""
+                session.inherited_design_name
+                or session.workspace_inputs.project_name
+                or ""
             )
             choice = default_value_choice(
                 session.language,
@@ -1932,13 +2230,17 @@ class EcosAgentProvider:
                 session.workspace_setup.target_overflow,
             )
         elif session.phase == "workspace_confirmation":
-            choice = confirmation_choice(session.language, prompt_id, allow_free_text=True)
+            choice = confirmation_choice(
+                session.language, prompt_id, allow_free_text=True
+            )
         elif session.phase in {
             "confirmation",
             "workspace_continue_confirmation",
             "workspace_parameter_confirmation",
         }:
-            choice = confirmation_choice(session.language, prompt_id, allow_free_text=False)
+            choice = confirmation_choice(
+                session.language, prompt_id, allow_free_text=False
+            )
         if choice is not None:
             self._emit(session, "choice", choice["title"], choice=choice)
 
@@ -1953,7 +2255,9 @@ class EcosAgentProvider:
         )
 
     @staticmethod
-    def _register_interrupt(session: _Session, callback: Callable[[], None] | None) -> None:
+    def _register_interrupt(
+        session: _Session, callback: Callable[[], None] | None
+    ) -> None:
         session.active_interrupt = callback
         if callback is not None and session.interrupt_requested:
             callback()
@@ -1961,11 +2265,16 @@ class EcosAgentProvider:
     @staticmethod
     def _check_interrupted(session: _Session) -> None:
         if session.interrupt_requested:
-            raise CodexProviderError("Agent turn interrupted", failure_class="interrupted")
+            raise CodexProviderError(
+                "Agent turn interrupted", failure_class="interrupted"
+            )
 
     @staticmethod
     def _raise_if_interrupted(error: Exception) -> None:
-        if isinstance(error, CodexProviderError) and error.failure_class == "interrupted":
+        if (
+            isinstance(error, CodexProviderError)
+            and error.failure_class == "interrupted"
+        ):
             raise error
 
     @staticmethod
@@ -1981,11 +2290,14 @@ class EcosAgentProvider:
                 else "idle"
             )
         if session.phase == "workspace_name":
-            return "awaiting_choice" if session.workspace_inputs.project_root else "idle"
+            return (
+                "awaiting_choice" if session.workspace_inputs.project_root else "idle"
+            )
         if session.phase == "workspace_design":
             return (
                 "awaiting_choice"
-                if session.inherited_design_name or session.workspace_inputs.project_name
+                if session.inherited_design_name
+                or session.workspace_inputs.project_name
                 else "idle"
             )
         if session.phase == "rerun_workspace":

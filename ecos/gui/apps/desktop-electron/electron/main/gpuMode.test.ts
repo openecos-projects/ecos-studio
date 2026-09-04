@@ -99,4 +99,24 @@ describe('configureGpuMode', () => {
     expect(appDouble.commandLine.appendSwitch).not.toHaveBeenCalled()
     expect(env.LIBGL_ALWAYS_SOFTWARE).toBeUndefined()
   })
+
+  it('does not force software rendering on WSL without virtualization flags', () => {
+    const appDouble = createAppDouble()
+    const env: NodeJS.ProcessEnv = {
+      WSL_DISTRO_NAME: 'Ubuntu',
+    }
+
+    configureGpuMode({
+      app: appDouble,
+      env,
+      hostProductName: 'Precision 5680',
+      hostVendor: 'Dell Inc.',
+      isPackaged: true,
+      platform: 'linux',
+    })
+
+    expect(appDouble.disableHardwareAcceleration).not.toHaveBeenCalled()
+    expect(appDouble.commandLine.appendSwitch).not.toHaveBeenCalled()
+    expect(env.LIBGL_ALWAYS_SOFTWARE).toBeUndefined()
+  })
 })

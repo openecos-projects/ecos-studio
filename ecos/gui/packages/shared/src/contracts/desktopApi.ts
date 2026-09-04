@@ -163,6 +163,17 @@ export interface DesktopProjectManagementWorkspaceTextsResult {
   unavailablePaths: string[]
 }
 
+export interface DesktopProjectManagementWorkspaceStepConfigurationRequest {
+  projectRoot: string
+  step: string
+  workspacePath: string
+}
+
+export interface DesktopProjectManagementWorkspaceStepConfigurationResult {
+  options: Record<string, unknown>
+  step: string
+}
+
 export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
@@ -242,6 +253,9 @@ export interface DesktopApi {
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
+    readWorkspaceStepConfiguration(
+      request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
+    ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>

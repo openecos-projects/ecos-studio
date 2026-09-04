@@ -224,4 +224,28 @@ describe('snapshotStepDashboardData', () => {
     })
     expect(result.layoutAvailability).toBe('missing')
   })
+
+  it('shows invalidated evidence from its stale Revision until rerun succeeds', () => {
+    const source = detail('Place')
+    source.step.state = 'not-started'
+    source.staleEvidence = {
+      ...detail('Place'),
+      analysis: {
+        ...detail('Place').analysis,
+        metrics: [metric('place_hpwl', 1234)],
+      },
+      workspaceRevision: 4,
+    }
+
+    const stale = snapshotStepDashboardData(source)
+
+    expect(stale.keyMetrics).toEqual([
+      expect.objectContaining({ id: 'place_hpwl', value: 1234 }),
+    ])
+    expect(stale.run.state).not.toBe('Success')
+    expect(stale.staleRevision).toBe(4)
+
+    source.step.state = 'succeeded'
+    expect(snapshotStepDashboardData(source).staleRevision).toBeNull()
+  })
 })

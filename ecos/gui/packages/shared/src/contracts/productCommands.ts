@@ -5,12 +5,11 @@ import type {
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
   EccWorkspaceConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceMutationRequest,
   EccWorkspaceResetFlowResult,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
   EccWorkspaceUpdateResult,
 } from './eccRuntime.ts'
 
@@ -33,6 +32,10 @@ export type ProductCommandRequest =
   | {
       command: 'workspace.updateConfiguration'
       payload: EccWorkspaceConfigurationUpdateRequest
+    }
+  | {
+      command: 'workspace.updateStepConfiguration'
+      payload: EccWorkspaceStepConfigurationUpdateRequest
     }
   | {
       command: 'workspace.cancel'
@@ -59,17 +62,12 @@ export type ProductCommandRequest =
       payload: { creationId: string; issue: string }
     }
   | { command: 'workspace.reset'; payload: EccWorkspaceMutationRequest }
-  | {
-      command: 'workspace.syncConfig'
-      payload: EccWorkspaceSyncConfigRequest & EccWorkspaceMutationRequest
-    }
   | { command: 'workspace.exportSignoff'; payload: EccWorkspaceExportSignoffRequest }
 
 export type ProductCommandResult =
   | EccWorkspaceCreateResult
   | EccWorkspaceUpdateResult
   | EccWorkspaceResetFlowResult
-  | EccWorkspaceSyncConfigResult
   | EccWorkspaceExportSignoffResult
   | EccRuntimeOperation
   | { accepted: boolean; operationId: string; state: string }

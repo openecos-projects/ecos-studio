@@ -4,55 +4,34 @@ import { StepEnum } from '@/api/type'
 import { projectManifestForPresentation } from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
-  currentProject: null as Ref<{ path: string } | null> | null,
-  route: { query: {} as Record<string, unknown> },
+  currentProject: null as Ref<{ designTool?: string; path: string } | null> | null,
   readManifest: vi.fn(),
-  readWorkspaceTexts: vi.fn(),
-  resolveProjectRouteContextForWorkspace: vi.fn(),
+  readWorkspaceStepConfiguration: vi.fn(),
+  route: { query: { projectRoot: '/projects/gcd' } as Record<string, unknown> },
 }))
 
 vi.mock('./useWorkspace', () => ({
-  useWorkspace: () => ({
-    currentProject: testState.currentProject,
-  }),
+  useWorkspace: () => ({ currentProject: testState.currentProject }),
 }))
-
-vi.mock('vue-router', () => ({
-  useRoute: () => testState.route,
-}))
-
+vi.mock('vue-router', () => ({ useRoute: () => testState.route }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     projectManagement: {
       readManifest: testState.readManifest,
+      readWorkspaceStepConfiguration: testState.readWorkspaceStepConfiguration,
     },
   }),
 }))
-
-vi.mock('@/utils/projectManagementRead', () => ({
-  readProjectManagementWorkspaceTexts: testState.readWorkspaceTexts,
-}))
-
 vi.mock('@/utils/projectManifestRegistration', () => ({
-  resolveProjectRouteContextForWorkspace:
-    testState.resolveProjectRouteContextForWorkspace,
+  resolveProjectRouteContextForWorkspace: vi.fn().mockResolvedValue(null),
 }))
 
 import {
   clearBaselineStepConfigCache,
   useBaselineStepConfig,
 } from './useBaselineStepConfig'
-import { baselineStepConfigReadPaths } from '@/utils/stepConfigResourceMap'
 
 function projectManifest() {
-  return manifestWithWorkspaces(['ws_0001', 'ws_0004'], 'ws_0001')
-}
-
-function singleWorkspaceManifest() {
-  return manifestWithWorkspaces(['ws_0004'], 'ws_0004')
-}
-
-function manifestWithWorkspaces(workspaceIds: string[], baselineId: string) {
   const now = '2026-08-04T00:00:00.000Z'
   return projectManifestForPresentation(
     {
@@ -64,65 +43,21 @@ function manifestWithWorkspaces(workspaceIds: string[], baselineId: string) {
       created_at: now,
       updated_at: now,
       objectives: {},
-      workspaces: workspaceIds.map((workspaceId) => ({
+      workspaces: ['ws_0001', 'ws_0004'].map((workspaceId) => ({
         workspace_id: workspaceId,
         name: workspaceId,
         workspace_path: workspaceId,
         source_workspace_id: null,
-        lifecycle: 'active',
+        lifecycle: 'active' as const,
         created_at: now,
         updated_at: now,
       })),
       mpc: null,
       best_workspace: null,
-      qor_baseline: { workspace_id: baselineId, reason: 'selected' },
+      qor_baseline: { workspace_id: 'ws_0001', reason: 'selected' },
     },
     '/projects/gcd',
   )
-}
-
-const BASELINE_FLOW = {
-  steps: [
-    {
-      name: 'Synthesis',
-      tool: 'yosys',
-      state: 'done',
-      runtime: '',
-      'peak memory (mb)': 0,
-      info: {},
-    },
-    {
-      name: 'Floorplan',
-      tool: 'ecc',
-      state: 'done',
-      runtime: '',
-      'peak memory (mb)': 0,
-      info: {},
-    },
-    {
-      name: 'CTS',
-      tool: 'ecc',
-      state: 'done',
-      runtime: '',
-      'peak memory (mb)': 0,
-      info: {},
-    },
-    {
-      name: 'place',
-      tool: 'dreamplace',
-      state: 'done',
-      runtime: '',
-      'peak memory (mb)': 0,
-      info: {},
-    },
-  ],
-}
-
-/** Backing store served by the mocked readWorkspaceTexts. */
-let workspaceTexts: Record<string, Record<string, string | null>>
-
-function mockWorkspaceTexts(texts: Record<string, string | null>): void {
-  workspaceTexts = { '/projects/gcd/ws_0001': texts }
 }
 
 describe('useBaselineStepConfig', () => {
@@ -132,29 +67,16 @@ describe('useBaselineStepConfig', () => {
   beforeEach(() => {
     clearBaselineStepConfigCache()
     scope = effectScope()
-    step = ref<StepEnum | undefined>(StepEnum.CTS)
-    testState.currentProject = ref({ path: '/projects/gcd/ws_0004' })
-    testState.route.query = { projectRoot: '/projects/gcd' }
-    testState.readManifest.mockReset()
-    testState.readWorkspaceTexts.mockReset()
-    testState.resolveProjectRouteContextForWorkspace.mockReset()
-    testState.resolveProjectRouteContextForWorkspace.mockResolvedValue(null)
-    testState.readManifest.mockResolvedValue(projectManifest())
-    mockWorkspaceTexts({
-      'home/flow.json': JSON.stringify(BASELINE_FLOW),
-      'config/cts_ecc.json': '{"cts_buf_list":"BUF"}',
-      'config/floorplan_ecc.json': '{"ifp":{"utilization":0.6}}',
-      'config/dreamplace_ecc.json': '{"place":{"enable":true}}',
+    step = ref(StepEnum.CTS)
+    testState.currentProject = ref({
+      designTool: 'backend',
+      path: '/projects/gcd/ws_0004',
     })
-    testState.readWorkspaceTexts.mockImplementation(
-      async (_projectRoot: string, workspacePath: string, paths: string[]) => {
-        const texts = workspaceTexts[workspacePath] ?? {}
-        return {
-          texts: Object.fromEntries(paths.map((path) => [path, texts[path] ?? null])),
-          unavailablePaths: [],
-        }
-      },
-    )
+    testState.readManifest.mockReset().mockResolvedValue(projectManifest())
+    testState.readWorkspaceStepConfiguration.mockReset().mockResolvedValue({
+      options: { cts_buf_list: 'BUF' },
+      step: 'CTS',
+    })
   })
 
   afterEach(() => {
@@ -162,172 +84,35 @@ describe('useBaselineStepConfig', () => {
     clearBaselineStepConfigCache()
   })
 
-  function create() {
-    return scope.run(() => useBaselineStepConfig(step))!
-  }
+  it('reads baseline options through the ECC domain API', async () => {
+    const baseline = scope.run(() => useBaselineStepConfig(step))!
 
-  it('reports no-project without an open workspace', async () => {
+    await vi.waitFor(() => expect(baseline.status.value).toBe('available'))
+
+    expect(testState.readWorkspaceStepConfiguration).toHaveBeenCalledWith({
+      projectRoot: '/projects/gcd',
+      step: 'CTS',
+      workspacePath: '/projects/gcd/ws_0001',
+    })
+    expect(baseline.parsed.value).toEqual({ cts_buf_list: 'BUF' })
+  })
+
+  it('does not request ECC options for a frontend workspace', async () => {
+    testState.currentProject = ref({
+      designTool: 'frontend',
+      path: '/projects/gcd/ws_0004',
+    })
+    const baseline = scope.run(() => useBaselineStepConfig(step))!
+
+    await vi.waitFor(() => expect(baseline.status.value).toBe('no-config-for-step'))
+    expect(baseline.noConfigReason.value).toBe('frontend')
+    expect(testState.readWorkspaceStepConfiguration).not.toHaveBeenCalled()
+  })
+
+  it('reports no project without an open workspace', async () => {
     testState.currentProject = ref(null)
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('no-project')
-    })
-  })
+    const baseline = scope.run(() => useBaselineStepConfig(step))!
 
-  it('reports no-baseline when the workspace is not part of a routed project', async () => {
-    testState.route.query = {}
-    testState.resolveProjectRouteContextForWorkspace.mockResolvedValue(null)
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('no-baseline')
-    })
-  })
-
-  it('reports self-baseline when the current workspace is the only workspace', async () => {
-    testState.readManifest.mockResolvedValue(singleWorkspaceManifest())
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('self-baseline')
-    })
-  })
-
-  it('loads the baseline config for the selected step with a private view draft', async () => {
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('available')
-    })
-    expect(baseline.configRelativePath.value).toBe('config/cts_ecc.json')
-    expect(baseline.configFileName.value).toBe('cts_ecc.json')
-    expect(baseline.baselineWorkspaceName.value).toBeTruthy()
-    expect(baseline.baselineSource.value).toBe('selected')
-    expect(baseline.parsed.value).toEqual({ cts_buf_list: 'BUF' })
-    expect(baseline.viewDraft.value).toEqual({ cts_buf_list: 'BUF' })
-
-    const draft = baseline.viewDraft.value!
-    draft.cts_buf_list = 'MUTATED'
-    expect(baseline.parsed.value).toEqual({ cts_buf_list: 'BUF' })
-  })
-
-  it('falls back to legacy config filenames for pre-migration baselines', async () => {
-    mockWorkspaceTexts({
-      'home/flow.json': JSON.stringify(BASELINE_FLOW),
-      'config/cts_default_config.json': '{"cts_buf_list":"LEGACY"}',
-    })
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('available')
-    })
-    expect(baseline.configRelativePath.value).toBe('config/cts_default_config.json')
-    expect(baseline.parsed.value).toEqual({ cts_buf_list: 'LEGACY' })
-  })
-
-  it('uses the baseline flow step tool so tool drift resolves the right file', async () => {
-    step.value = StepEnum.PLACEMENT
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('available')
-    })
-    expect(baseline.configRelativePath.value).toBe('config/dreamplace_ecc.json')
-  })
-
-  it('reports file-missing when the baseline workspace lacks the config file', async () => {
-    mockWorkspaceTexts({
-      'home/flow.json': JSON.stringify(BASELINE_FLOW),
-    })
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('no-config-for-step')
-    })
-    expect(baseline.noConfigReason.value).toBe('file-missing')
-  })
-
-  it('reports step-absent for steps missing from the baseline flow', async () => {
-    step.value = StepEnum.ROUTING
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('no-config-for-step')
-    })
-    expect(baseline.noConfigReason.value).toBe('step-absent')
-  })
-
-  it('reports no-config-file for steps without an editable config (yosys)', async () => {
-    step.value = StepEnum.SYNTHESIS
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('no-config-for-step')
-    })
-    expect(baseline.noConfigReason.value).toBe('no-config-file')
-  })
-
-  it('flags invalid baseline JSON while staying available', async () => {
-    mockWorkspaceTexts({
-      'home/flow.json': JSON.stringify(BASELINE_FLOW),
-      'config/cts_ecc.json': '{not json',
-    })
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('available')
-    })
-    expect(baseline.jsonInvalid.value).toBe(true)
-    expect(baseline.parsed.value).toBeNull()
-    expect(baseline.viewDraft.value).toBeNull()
-  })
-
-  it('treats an empty baseline config file as available with no view draft', async () => {
-    mockWorkspaceTexts({
-      'home/flow.json': JSON.stringify(BASELINE_FLOW),
-      'config/cts_ecc.json': '   ',
-    })
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('available')
-    })
-    expect(baseline.viewDraft.value).toBeNull()
-  })
-
-  it('reuses the snapshot cache across instances and re-reads on force', async () => {
-    const first = create()
-    await vi.waitFor(() => {
-      expect(first.status.value).toBe('available')
-    })
-    expect(testState.readWorkspaceTexts).toHaveBeenCalledTimes(1)
-    expect(testState.readWorkspaceTexts).toHaveBeenCalledWith(
-      '/projects/gcd',
-      '/projects/gcd/ws_0001',
-      expect.arrayContaining([...baselineStepConfigReadPaths]),
-    )
-
-    const secondScope = effectScope()
-    const second = secondScope.run(() => useBaselineStepConfig(step))!
-    await vi.waitFor(() => {
-      expect(second.status.value).toBe('available')
-    })
-    expect(testState.readWorkspaceTexts).toHaveBeenCalledTimes(1)
-
-    await second.refresh(true)
-    expect(testState.readWorkspaceTexts).toHaveBeenCalledTimes(2)
-    secondScope.stop()
-  })
-
-  it('re-resolves when the step changes', async () => {
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('available')
-    })
-    expect(baseline.configRelativePath.value).toBe('config/cts_ecc.json')
-
-    step.value = StepEnum.FLOORPLAN
-    await vi.waitFor(() => {
-      expect(baseline.configRelativePath.value).toBe('config/floorplan_ecc.json')
-    })
-  })
-
-  it('reports unavailable when the baseline read fails', async () => {
-    testState.readWorkspaceTexts.mockRejectedValue(new Error('disk exploded'))
-    const baseline = create()
-    await vi.waitFor(() => {
-      expect(baseline.status.value).toBe('unavailable')
-    })
-    expect(baseline.error.value).toContain('disk exploded')
+    await vi.waitFor(() => expect(baseline.status.value).toBe('no-project'))
   })
 })

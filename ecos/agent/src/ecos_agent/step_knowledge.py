@@ -27,7 +27,6 @@ class StepKnowledgeSpec:
 STEP_KNOWLEDGE_SPECS = (
     StepKnowledgeSpec("synthesis", "Synthesis"),
     StepKnowledgeSpec("floorplan", "Floorplan"),
-    StepKnowledgeSpec("fixfanout", "fixFanout"),
     StepKnowledgeSpec("place", "place", "ecos-place-manifest.v1", "ecos-place-catalog.v2"),
     StepKnowledgeSpec("cts", "CTS"),
     StepKnowledgeSpec("legalization", "legalization"),

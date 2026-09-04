@@ -115,6 +115,7 @@ function registerHandlers(
       readManifest: vi.fn(),
       listProjectEntries: vi.fn(),
       readWorkspaceTexts: vi.fn(),
+      readWorkspaceStepConfiguration: vi.fn(),
     },
     backendWorkspaceService: {
       clearWindow: vi.fn(),
@@ -252,6 +253,7 @@ function registerHandlers(
       startStepOperation: vi.fn(),
       syncConfig: vi.fn(),
       updateWorkspaceConfiguration: vi.fn(),
+      updateWorkspaceStepConfiguration: vi.fn(),
       updateWorkspace: vi.fn(),
       validateWorkspaceSpec: vi.fn(),
       workspaceHome: vi.fn(),
@@ -711,6 +713,76 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.openWorkspace).not.toHaveBeenCalled()
   })
 
+  it('hydrates Workspace Agent knobs from ECC domain APIs', async () => {
+    const agentRuntimeService = {
+      interrupt: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+      configuration: {
+        workspaceSpec: {
+          design: { name: 'gcd' },
+          parameters: { target_density: 0.4 },
+        },
+      },
+      directory: '/runs/gcd',
+      engineeringSnapshot: { workspaceRevision: 4 },
+    })
+    services.eccRuntimeService.workspaceInfo.mockImplementation(({ step }) =>
+      Promise.resolve({
+        id: 'config',
+        info: { options: step === 'CTS' ? { skew_bound: 0.08 } : {} },
+        step,
+      }),
+    )
+    const sender = {
+      id: 42,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+    }
+
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender },
+      {
+        directory: '/runs/gcd',
+        mode: 'workspace',
+        providerId: 'ecos_agent',
+        sessionId: 'session-1',
+        workspaceId: 'workspace-1',
+      },
+    )
+
+    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceDesignId: 'gcd',
+        workspaceRevision: 4,
+        workspaceParameterValues: expect.objectContaining({
+          'place.target_density': 0.4,
+          'cts.skew_bound': 0.08,
+        }),
+      }),
+    )
+
+    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+      engineeringSnapshot: { workspaceRevision: 5 },
+    })
+    await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
+      { sender },
+      {
+        message: 'lower target density',
+        providerId: 'ecos_agent',
+        sessionId: 'session-1',
+      },
+    )
+    expect(agentRuntimeService?.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceRevision: 5 }),
+    )
+  })
+
   it('binds rerun tokens to the agent window and its source workspace', async () => {
     let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
     const agentRuntimeService = {
@@ -1127,6 +1199,18 @@ describe('registerIpc', () => {
     expect(agentRuntimeService?.sendMessage).toHaveBeenCalledWith({
       ...session,
       message: '',
+    })
+
+    const confirmationToken = '00000000-0000-4000-8000-000000000001'
+    await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(event, {
+      ...session,
+      confirmationToken,
+      message: '1',
+    })
+    expect(agentRuntimeService?.sendMessage).toHaveBeenLastCalledWith({
+      ...session,
+      confirmationToken,
+      message: '1',
     })
     expect(agentRuntimeService?.interrupt).toHaveBeenCalledWith(session)
   })
@@ -2213,6 +2297,38 @@ describe('registerIpc', () => {
       step: 'route',
       id: 'layout',
     })
+  })
+
+  it('reads Backend Step Options from the owned ECC Workspace Session', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 42 } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-1',
+    })
+    services.eccRuntimeService.workspaceInfo.mockResolvedValue({
+      id: 'config',
+      info: { options: { skew_bound: 0.08 } },
+      step: 'CTS',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceResourcesResolveStepInfo)?.(event, {
+        designTool: 'backend',
+        id: 'config',
+        step: 'CTS',
+        workspaceHandle: 'workspace-1',
+      }),
+    ).resolves.toEqual({
+      id: 'config',
+      info: { options: { skew_bound: 0.08 }, stepId: 'CTS' },
+      message: [],
+      missing: [],
+      response: 'available',
+      step: 'CTS',
+    })
+    expect(services.workspaceResourceService.resolveStepInfo).not.toHaveBeenCalled()
   })
 
   it('delegates Backend Workspace queries to the scenario service', async () => {

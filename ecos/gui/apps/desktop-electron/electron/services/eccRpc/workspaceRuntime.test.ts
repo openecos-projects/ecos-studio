@@ -160,6 +160,40 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
   })
 
+  it('updates Step Options by identity without a file path', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 2,
+    })
+
+    await service.updateWorkspaceStepConfiguration({
+      commandId: 'step-configuration-1',
+      expectedWorkspaceRevision: 1,
+      options: { ifp: { thread_number: 8 } },
+      stepId: 'Floorplan',
+      workspaceHandle: opened.workspaceHandle,
+    })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.step_configuration.update',
+      params: {
+        commandId: 'step-configuration-1',
+        expectedWorkspaceRevision: 1,
+        options: { ifp: { thread_number: 8 } },
+        stepId: 'Floorplan',
+        workspaceId: 'workspace-1',
+      },
+    })
+  })
+
   it('creates a workspace from a runtime-specific payload', async () => {
     const { client, service } = createService('/work/frontend')
     client.responses.push({ directory: '/work/frontend', workspaceId: 'frontend-1' })
@@ -235,7 +269,6 @@ describe('EccWorkspaceRuntime', () => {
           steps: [
             { name: 'Synthesis', runtime: '0:0:10', state: 'Success', tool: 'yosys' },
             { name: 'Floorplan', runtime: '0:0:05', state: 'Incomplete', tool: 'ecc' },
-            { name: 'fixFanout', runtime: '', state: 'Unstart', tool: 'ecc' },
           ],
         },
         home: {},
@@ -255,7 +288,6 @@ describe('EccWorkspaceRuntime', () => {
     expect(snapshot.flow.steps.map((step) => step.name)).toEqual([
       'Synthesis',
       'Floorplan',
-      'fixFanout',
     ])
     expect(
       client.calls.filter((call) => call.method === 'workspace.snapshot'),

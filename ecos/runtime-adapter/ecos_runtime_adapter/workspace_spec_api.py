@@ -16,6 +16,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
     WorkspaceSpecValidateRequest,
+    WorkspaceStepConfigurationUpdateRequest,
     WorkspaceUpdateRequest,
 )
 from ecos_runtime_adapter.sessions import (
@@ -346,6 +347,41 @@ class WorkspaceSpecRuntimeMixin:
             session.workspace_revision = snapshot["workspaceRevision"]
             session.workspace_bindings = request.workspace_bindings
             session.execution_readiness = {"ready": True}
+            return _workspace_session_result(session)
+
+    def update_workspace_step_configuration(
+        self, request: WorkspaceStepConfigurationUpdateRequest
+    ) -> dict:
+        from chipcompiler.engine import (
+            WorkspaceLifecycleError,
+            update_workspace_step_configuration,
+        )
+
+        session = self._get_session(request.workspace_id)
+        with session.mutation_lock:
+            self._validate_workspace_revision(
+                session,
+                request.expected_workspace_revision,
+            )
+            if self.operations.has_active_workspace(session.workspace_id):
+                raise RuntimeApiError(
+                    "operation_conflict",
+                    "Workspace has an active Operation",
+                )
+            self._release_session_db(session)
+            try:
+                workspace = update_workspace_step_configuration(
+                    session.directory,
+                    request.expected_workspace_revision,
+                    request.step_id,
+                    request.options,
+                    request.command_id,
+                )
+            except WorkspaceLifecycleError as exc:
+                raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+            snapshot = self._read_engineering_snapshot(workspace)
+            session.workspace = workspace
+            session.workspace_revision = snapshot["workspaceRevision"]
             return _workspace_session_result(session)
 
     def _load_workspace(self, directory: str):

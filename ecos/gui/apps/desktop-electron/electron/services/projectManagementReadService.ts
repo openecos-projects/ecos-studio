@@ -9,6 +9,8 @@ import {
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
   DesktopProjectManagementWorkspaceTextsResult,
+  DesktopProjectManagementWorkspaceStepConfigurationRequest,
+  DesktopProjectManagementWorkspaceStepConfigurationResult,
   EngineeringSnapshotValidationResult,
   ProjectManifest,
 } from '@ecos-studio/shared'
@@ -28,8 +30,13 @@ const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(
 
 class ProjectManagementWorkspacePathError extends Error {}
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export type ProjectEngineeringSnapshotReadResult = EngineeringSnapshotValidationResult & {
   readBytes: number
+  staleSnapshot?: Extract<EngineeringSnapshotValidationResult, { ok: true }>
 }
 
 export type VerifiedProjectArtifactsReadResult =
@@ -96,7 +103,13 @@ async function readOptionalBoundedTextFile(
 }
 
 export class ProjectManagementReadService {
-  constructor(private readonly projectManifestReader: ProjectManifestReader) {}
+  constructor(
+    private readonly projectManifestReader: ProjectManifestReader,
+    private readonly readStepConfiguration?: (
+      workspacePath: string,
+      step: string,
+    ) => Promise<unknown>,
+  ) {}
 
   async readManifest(projectRoot: string): Promise<ProjectManifest | null> {
     const root = await canonicalizeExistingDirectory(projectRoot)
@@ -166,6 +179,27 @@ export class ProjectManagementReadService {
     }
   }
 
+  async readWorkspaceStepConfiguration(
+    request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
+  ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult> {
+    if (
+      !this.readStepConfiguration ||
+      !/^[A-Za-z0-9][A-Za-z0-9 _-]{0,127}$/.test(request.step)
+    ) {
+      throw new Error('Workspace Step Configuration request is invalid.')
+    }
+    const project = await this.loadProject(request.projectRoot)
+    if (!project.manifest) throw new Error('Project manifest does not exist.')
+    const workspacePath = await this.resolveDeclaredWorkspace(
+      project.root,
+      project.manifest.workspaces.map((workspace) => workspace.workspace_path),
+      request.workspacePath,
+    )
+    const result = await this.readStepConfiguration(workspacePath, request.step)
+    if (!isRecord(result)) throw new Error('ECC Step Configuration is unavailable.')
+    return { options: result, step: request.step }
+  }
+
   async readEngineeringSnapshot(request: {
     projectRoot: string
     workspacePath: string
@@ -214,6 +248,30 @@ export class ProjectManagementReadService {
         }
       }
       const validated = parseEngineeringSnapshotJson(file.bytes)
+      if (!validated.ok || !validated.snapshot.stalePredecessor) {
+        return { ...validated, readBytes }
+      }
+      try {
+        const stalePath = await realpath(
+          join(workspaceRoot, 'home', 'engineering-snapshot.stale.json'),
+        )
+        if (!isPathWithinRoot(stalePath, workspaceRoot)) {
+          return { ...validated, readBytes }
+        }
+        const staleFile = await readBoundedSnapshot(stalePath)
+        if (!staleFile.bytes) return { ...validated, readBytes }
+        const staleSnapshot = parseEngineeringSnapshotJson(staleFile.bytes)
+        if (
+          staleSnapshot.ok &&
+          staleSnapshot.snapshot.workspaceId === validated.snapshot.workspaceId &&
+          staleSnapshot.snapshot.workspaceRevision ===
+            validated.snapshot.stalePredecessor.workspaceRevision
+        ) {
+          return { ...validated, readBytes, staleSnapshot }
+        }
+      } catch {
+        // A missing or invalid predecessor must not hide the current Revision.
+      }
       return { ...validated, readBytes }
     } catch {
       return snapshotFailure('ENGINEERING_SNAPSHOT_READ_FAILED', readBytes)

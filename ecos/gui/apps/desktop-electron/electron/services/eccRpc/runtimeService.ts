@@ -35,8 +35,7 @@ import type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceRuntimeSnapshot,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -314,6 +313,14 @@ export class EccRpcRuntimeService {
     )
   }
 
+  updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    return this.runtimeForHandle(
+      request.workspaceHandle,
+    ).updateWorkspaceStepConfiguration(request)
+  }
+
   async openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     const requestKey = normalizeWorkspacePath(request.directory)
     const runtime = this.getOrCreateRuntime(request.directory)
@@ -400,12 +407,6 @@ export class EccRpcRuntimeService {
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     return this.runtimeForHandle(request.workspaceHandle).refreshConfig(request)
-  }
-
-  async syncConfig(
-    request: EccWorkspaceSyncConfigRequest,
-  ): Promise<EccWorkspaceSyncConfigResult> {
-    return this.runtimeForHandle(request.workspaceHandle).syncConfig(request)
   }
 
   async resetFlow(

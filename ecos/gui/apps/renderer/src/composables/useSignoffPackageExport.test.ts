@@ -135,6 +135,11 @@ function createApi() {
   const getVersions = vi.fn().mockResolvedValue({})
   const writeProjectTextFile = vi.fn().mockResolvedValue(undefined)
   const readEngineeringSnapshot = vi.fn().mockResolvedValue(engineeringSnapshot())
+  const runtimeSnapshot = vi.fn(async () => ({
+    parameters: await readParameters(),
+    flow: await readFlow(),
+    home: await readHome(),
+  }))
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
     outputPath: request.outputPath,
@@ -144,7 +149,12 @@ function createApi() {
     workspace: { writeProjectTextFile },
     workspaceResources: { readFlow, readParameters, readHome },
     dialog: { saveFile },
-    ecc: { runtime: { engineeringSnapshot: readEngineeringSnapshot } },
+    ecc: {
+      runtime: {
+        engineeringSnapshot: readEngineeringSnapshot,
+        snapshot: runtimeSnapshot,
+      },
+    },
     productCommands: {
       execute: (request: { payload: { outputPath: string } }) =>
         exportSignoff(request.payload),
@@ -158,6 +168,7 @@ function createApi() {
     readFlow,
     readHome,
     readParameters,
+    runtimeSnapshot,
     saveFile,
     writeProjectTextFile,
   }
@@ -403,6 +414,21 @@ describe('useSignoffPackageExport export action', () => {
       expect.objectContaining({
         severity: 'success',
         detail: expect.stringContaining('/tmp/rocket package.tar.gz'),
+      }),
+    )
+  })
+
+  it('uses the canonical TOML design key for the default archive name', async () => {
+    const api = createApi()
+    api.readParameters.mockResolvedValueOnce({ design: 'rocket_core' })
+    const mounted = mountComposable(ref({ path: '/workspaces/active path' }))
+    scope = mounted.scope
+
+    await openReviewAndConfirm(mounted)
+
+    expect(api.saveFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: '/workspaces/signoff/rocket_core_signoff_package.tar.gz',
       }),
     )
   })

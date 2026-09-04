@@ -15,6 +15,8 @@ import {
   type DesktopProjectDirectoryEntry,
   type DesktopProjectManagementWorkspaceTextsRequest,
   type DesktopProjectManagementWorkspaceTextsResult,
+  type DesktopProjectManagementWorkspaceStepConfigurationRequest,
+  type DesktopProjectManagementWorkspaceStepConfigurationResult,
   type DesignRuntimeCancelRequest,
   type DesignRuntimeFlowRunRequest,
   type DesignRuntimeFlowRunStepRequest,
@@ -23,7 +25,6 @@ import {
   type DesignRuntimeWorkspaceHandleRequest,
   type DesignRuntimeWorkspaceInfoRequest,
   type DesignRuntimeWorkspaceOpenRequest,
-  type DesignRuntimeWorkspaceSyncConfigRequest,
   type DesignTool,
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
@@ -42,7 +43,7 @@ import {
   type EccWorkspaceInfoRequest,
   type EccWorkspaceOpenRequest,
   type EccWorkspaceOpenResult,
-  type EccWorkspaceSyncConfigRequest,
+  type EccWorkspaceStepConfigurationUpdateRequest,
   type EccWorkspaceSpecValidationRequest,
   type EccWorkspaceUpdateRequest,
   type DesktopFileDialogOptions,
@@ -91,6 +92,10 @@ import {
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
+import {
+  agentWorkspaceStepIds,
+  readAgentWorkspaceParameterValues,
+} from '../services/agent/agentWorkspaceParameterUpdates'
 import {
   closeWindow,
   isWindowMaximized,
@@ -143,8 +148,8 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
     'workspace.runStep',
     'workspace.update',
     'workspace.updateConfiguration',
+    'workspace.updateStepConfiguration',
     'workspace.reset',
-    'workspace.syncConfig',
     'workspace.exportSignoff',
     'workspace.continueCreation',
     'workspace.abandonCreation',
@@ -206,6 +211,9 @@ export interface DesktopBridgeServices {
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
+    readWorkspaceStepConfiguration(
+      request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
+    ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>
   }
   backendWorkspaceService: {
     clearWindow(windowId: number): void
@@ -390,7 +398,6 @@ export interface DesktopBridgeServices {
       workspaceHandle: string,
       payload: Record<string, unknown> & { step: string },
     ): Promise<unknown>
-    syncConfig(workspaceHandle: string, configPath: string): Promise<unknown>
     validateConfig(payload: Record<string, unknown>): Promise<Record<string, unknown>>
     workspaceHome(workspaceHandle: string): Promise<unknown>
     workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
@@ -431,10 +438,12 @@ export interface DesktopBridgeServices {
     runStep(request: EccFlowRunStepRequest): Promise<unknown>
     startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
     startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
-    syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
     updateWorkspaceConfiguration(
       request: EccWorkspaceConfigurationUpdateRequest,
-    ): Promise<unknown>
+    ): Promise<{ workspaceRevision: number }>
+    updateWorkspaceStepConfiguration(
+      request: EccWorkspaceStepConfigurationUpdateRequest,
+    ): Promise<{ workspaceRevision: number }>
     updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
     validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -832,6 +841,7 @@ export function registerIpc(
     {
       sender: IpcMainInvokeEvent['sender']
       onDestroyed: () => void
+      workspaceId?: string
     }
   >()
   const pendingWorkspaceReruns = new Map<
@@ -964,7 +974,11 @@ export function registerIpc(
     const onDestroyed = (): void => {
       agentSessionSubscriptions.delete(key)
     }
-    agentSessionSubscriptions.set(key, { sender, onDestroyed })
+    agentSessionSubscriptions.set(key, {
+      sender,
+      onDestroyed,
+      ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+    })
     if (typeof sender.once === 'function') sender.once('destroyed', onDestroyed)
     if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) onDestroyed()
   }
@@ -972,7 +986,7 @@ export function registerIpc(
   const requireAgentSessionOwner = (
     sender: IpcMainInvokeEvent['sender'],
     request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
-  ): void => {
+  ) => {
     const providerId = readAgentProviderId(request)
     const subscription = agentSessionSubscriptions.get(
       agentSessionKey(providerId, request.sessionId),
@@ -980,6 +994,7 @@ export function registerIpc(
     if (!subscription || subscription.sender !== sender) {
       throw new Error('Unknown agent session for this window.')
     }
+    return subscription
   }
 
   const deliverDirectoryScopedEvent = (
@@ -1644,6 +1659,26 @@ export function registerIpc(
     },
   )
 
+  handle(
+    desktopApiIpcChannels.projectManagementReadWorkspaceStepConfiguration,
+    async (_event, request) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (
+        !isRecord(request) ||
+        typeof request.projectRoot !== 'string' ||
+        typeof request.workspacePath !== 'string' ||
+        typeof request.step !== 'string'
+      ) {
+        throw new Error('Project management Step Configuration request is invalid.')
+      }
+      return await services.projectManagementReadService.readWorkspaceStepConfiguration(
+        request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest,
+      )
+    },
+  )
+
   handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
     return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
   })
@@ -1971,10 +2006,46 @@ export function registerIpc(
 
   handle(
     desktopApiIpcChannels.workspaceResourcesResolveStepInfo,
-    async (_event, request) => {
-      return await services.workspaceResourceService.resolveStepInfo(
-        request as WorkspaceStepInfoRequest,
-      )
+    async (event, request) => {
+      const resourceRequest = request as WorkspaceStepInfoRequest
+      if (
+        (resourceRequest.designTool ?? 'backend') === 'backend' &&
+        resourceRequest.id === 'config'
+      ) {
+        const workspaceHandle = resourceRequest.workspaceHandle
+        const subscription = workspaceHandle
+          ? workspaceHandleSubscriptions.get(workspaceHandle)
+          : undefined
+        if (
+          !workspaceHandle ||
+          !subscription ||
+          subscription.sender !== event.sender ||
+          subscription.designTool !== 'backend'
+        ) {
+          throw new Error(
+            'Backend Step Configuration requires an owned Workspace Session.',
+          )
+        }
+        const result = await services.eccRuntimeService.workspaceInfo({
+          id: 'config',
+          step: resourceRequest.step,
+          workspaceHandle,
+        })
+        if (!isRecord(result) || typeof result.step !== 'string') {
+          throw new Error('ECC Step Configuration response is invalid.')
+        }
+        const info = isRecord(result.info) ? result.info : {}
+        const options = isRecord(info.options) ? info.options : null
+        return {
+          id: 'config',
+          info: options ? { options, stepId: result.step } : {},
+          message: [],
+          missing: [],
+          response: options ? 'available' : 'missing',
+          step: result.step,
+        } satisfies WorkspaceStepInfoResult
+      }
+      return await services.workspaceResourceService.resolveStepInfo(resourceRequest)
     },
   )
 
@@ -2366,20 +2437,6 @@ export function registerIpc(
   )
 
   handle(
-    desktopApiIpcChannels.designRuntimeWorkspaceSyncConfig,
-    async (_event, request) => {
-      const runtimeRequest = request as DesignRuntimeWorkspaceSyncConfigRequest
-      if (requireDesignTool(runtimeRequest.designTool) !== 'frontend') {
-        throw new Error('Backend configuration sync requires a Product Command')
-      }
-      return await services.frontendRpcRuntimeService.syncConfig(
-        runtimeRequest.workspaceHandle,
-        runtimeRequest.configPath,
-      )
-    },
-  )
-
-  handle(
     desktopApiIpcChannels.designRuntimeWorkspaceResetFlow,
     async (_event, request) => {
       const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
@@ -2489,13 +2546,83 @@ export function registerIpc(
     if (!agentRequest.directory && windowDirectory) {
       agentRequest.directory = windowDirectory
     }
+    if (agentRequest.workspaceId && agentRequest.directory) {
+      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+        workspaceHandle: agentRequest.workspaceId,
+      })
+      if (
+        !isRecord(snapshot) ||
+        typeof snapshot.directory !== 'string' ||
+        normalizeWorkspacePath(snapshot.directory) !==
+          normalizeWorkspacePath(agentRequest.directory)
+      ) {
+        throw new Error('Agent Workspace context does not match its ECC session.')
+      }
+      const configuration = isRecord(snapshot.configuration)
+        ? snapshot.configuration
+        : null
+      const workspaceSpec = isRecord(configuration?.workspaceSpec)
+        ? configuration.workspaceSpec
+        : null
+      if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
+      const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
+        ? snapshot.engineeringSnapshot
+        : null
+      const workspaceRevision = engineeringSnapshot?.workspaceRevision
+      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
+        throw new Error('ECC Workspace Revision is unavailable.')
+      }
+      agentRequest.workspaceRevision = Number(workspaceRevision)
+      const stepConfigurations = Object.fromEntries(
+        (
+          await Promise.all(
+            agentWorkspaceStepIds.map(async (step) => {
+              try {
+                const result = await services.eccRuntimeService.workspaceInfo({
+                  id: 'config',
+                  step,
+                  workspaceHandle: agentRequest.workspaceId!,
+                })
+                const info = isRecord(result) ? result.info : null
+                const options = isRecord(info) ? info.options : null
+                return isRecord(options) ? ([step, options] as const) : null
+              } catch {
+                return null
+              }
+            }),
+          )
+        ).filter((entry): entry is readonly [string, Record<string, unknown>] => !!entry),
+      )
+      agentRequest.workspaceParameterValues = readAgentWorkspaceParameterValues(
+        workspaceSpec,
+        stepConfigurations,
+      )
+      const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
+      if (typeof design?.name === 'string' && design.name) {
+        agentRequest.workspaceDesignId = design.name
+      }
+    }
     trackAgentSession(event.sender, agentRequest)
     return await requireAgentRuntime(services).startSession(agentRequest)
   })
 
   handle(desktopApiIpcChannels.agentSendMessage, async (event, request) => {
     const agentRequest = readAgentSendMessageRequest(request)
-    requireAgentSessionOwner(event.sender, agentRequest)
+    const subscription = requireAgentSessionOwner(event.sender, agentRequest)
+    if (!agentRequest.confirmationToken && subscription.workspaceId) {
+      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+        workspaceHandle: subscription.workspaceId,
+      })
+      const engineeringSnapshot =
+        isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
+          ? snapshot.engineeringSnapshot
+          : null
+      const workspaceRevision = engineeringSnapshot?.workspaceRevision
+      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
+        throw new Error('ECC Workspace Revision is unavailable.')
+      }
+      agentRequest.workspaceRevision = Number(workspaceRevision)
+    }
     return await requireAgentRuntime(services).sendMessage(agentRequest)
   })
 
@@ -2625,6 +2752,11 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
       ? record.directory.trim()
       : undefined
   const knownProjects = readAgentKnownProjects(record.knownProjects)
+  const workspaceId =
+    typeof record.workspaceId === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(record.workspaceId)
+      ? record.workspaceId.trim()
+      : undefined
   return {
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
@@ -2632,6 +2764,7 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
     ...(directory ? { directory } : {}),
     ...(projectRoot ? { projectRoot } : {}),
     ...(knownProjects ? { knownProjects } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
   }
 }
 
@@ -2661,7 +2794,16 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
   if (typeof message !== 'string' || message.length > 4096) {
     throw new Error('Agent message must be a string of at most 4096 characters.')
   }
+  const confirmationToken =
+    typeof record.confirmationToken === 'string' &&
+    /^[a-f0-9-]{36}$/.test(record.confirmationToken)
+      ? record.confirmationToken
+      : undefined
+  if (record.confirmationToken !== undefined && !confirmationToken) {
+    throw new Error('Agent execution confirmation token is invalid.')
+  }
   return {
+    ...(confirmationToken ? { confirmationToken } : {}),
     message,
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),

@@ -26,6 +26,7 @@ export interface WorkspaceConfigurationSummary {
   design: string
   topModule: string
   dieArea: number | null
+  coreUtilization: number | null
   maxFanout: number | null
   clock: string
   frequencyMaxMhz: number | null
@@ -387,6 +388,10 @@ export interface WorkspaceOverviewCore {
 }
 
 export interface WorkspaceCommittedRevision {
+  stalePredecessor?: {
+    invalidatedStepIds: string[]
+    workspaceRevision: number
+  }
   workspaceId: string
   workspaceRevision: number
 }
@@ -404,6 +409,7 @@ export interface WorkspaceStepAnalysis {
   metrics: EccEngineeringMetric[]
   summary: Record<string, unknown> | null
   hotspots: Array<Record<string, unknown>>
+  lec?: Record<string, unknown> | null
   drc: WorkspaceDrcInsights
   sta: WorkspaceStaInsights | null
   congestion: WorkspaceCongestionStatistic[]
@@ -418,6 +424,14 @@ export interface WorkspaceStepDetail {
   checklist: WorkspaceChecklistSummary
   step: FlowStepSummary
   subflow: EccEngineeringSubflowSummary
+  staleEvidence?: WorkspaceStaleStepEvidence
+}
+
+export interface WorkspaceStaleStepEvidence extends Omit<
+  WorkspaceStepDetail,
+  'staleEvidence'
+> {
+  workspaceRevision: number
 }
 
 export interface BackendWorkspaceStepDetailRequest {

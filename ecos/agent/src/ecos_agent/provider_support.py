@@ -40,7 +40,6 @@ from ecos_agent.messages import (
     workspace_name_prompt,
     workspace_parameter_request_prompt,
 )
-from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.knob_registry import KNOB_SPECS
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
@@ -67,7 +66,11 @@ _WORKSPACE_CREATE_RESULT_PREFIX = "workspace_create_result:"
 _WORKSPACE_RERUN_RESULT_PREFIX = "workspace_rerun_result:"
 _PATH_FIELD_HINTS: tuple[tuple[tuple[str, ...], str, str], ...] = (
     (("pdk", "工艺库", "工艺"), "pdk_root", "directory"),
-    (("project root", "project_root", "项目根", "project"), "project_root", "directory"),
+    (
+        ("project root", "project_root", "项目根", "project"),
+        "project_root",
+        "directory",
+    ),
     (("rtl", "verilog", ".v", "网表"), "rtl_path", "rtl"),
     (("filelist", "文件列表", ".f"), "filelist_path", "filelist"),
     (("sdc", "约束"), "sdc_path", "sdc"),
@@ -116,13 +119,21 @@ def _confirm_workspace_execution(provider: Any, session: Any, message: str) -> N
                         "schema_version": "flow-agent.gui_workspace_setup_context.v2",
                         "natural_language_choice": message,
                         "stage": "spec",
-                        "recommended_defaults": session.workspace_setup.model_dump(mode="json"),
-                        "workspace_inputs": _workspace_inputs_payload(session.workspace_inputs),
+                        "recommended_defaults": session.workspace_setup.model_dump(
+                            mode="json"
+                        ),
+                        "workspace_inputs": _workspace_inputs_payload(
+                            session.workspace_inputs
+                        ),
                         "filesystem_roots": list(
-                            workspace_search_roots(session.workspace_inputs.project_root)
+                            workspace_search_roots(
+                                session.workspace_inputs.project_root
+                            )
                         ),
                         "explicit_paths": _explicit_path_tokens(message),
-                        "_progress_callback": lambda text: provider._progress(session, text),
+                        "_progress_callback": lambda text: provider._progress(
+                            session, text
+                        ),
                         "_register_interrupt": lambda callback: provider._register_interrupt(
                             session, callback
                         ),
@@ -142,8 +153,12 @@ def _confirm_workspace_execution(provider: Any, session: Any, message: str) -> N
     except (CodexProviderError, ValueError) as exc:
         provider._check_interrupted(session)
         provider._raise_if_interrupted(exc)
-        provider._emit(session, "error", f"Unable to correct the workspace specification: {exc}")
-        provider._emit(session, "message", workspace_confirmation_prompt(session.language))
+        provider._emit(
+            session, "error", f"Unable to correct the workspace specification: {exc}"
+        )
+        provider._emit(
+            session, "message", workspace_confirmation_prompt(session.language)
+        )
         provider._emit_phase_choice(session)
         return
     session.workspace_setup = corrected_setup
@@ -161,7 +176,11 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
         provider._emit(session, "error", "Workspace rerun contract is missing.")
         return
     if result[0] != contract.rerun_id:
-        provider._emit(session, "error", "Workspace rerun result does not match the pending contract.")
+        provider._emit(
+            session,
+            "error",
+            "Workspace rerun result does not match the pending contract.",
+        )
         return
     _, status, error = result
     if status == "succeeded":
@@ -181,21 +200,14 @@ def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
     return session.rerun_resolver
 
 
-def _tunable_workspace_parameters(workspace_path: Path) -> tuple[tuple[str, object], ...]:
-    """Every readable knob in the workspace.
-
-    Rerun needs completed-stage evidence; changing a parameter does not, so this
-    spans all steps rather than only the ones that have already run.
-    """
-    merged: dict[str, object] = {}
-    for step in ECCStepName:
-        try:
-            values = GuiWorkspaceRerunResolver.stage_parameter_values(workspace_path, step.value)
-        except ValueError:
-            continue
-        for knob_id, value in values:
-            merged.setdefault(knob_id, value)
-    return tuple(merged.items())
+def _tunable_workspace_parameters(
+    current_values: Mapping[str, object],
+) -> tuple[tuple[str, object], ...]:
+    return tuple(
+        (knob_id, value)
+        for knob_id, value in current_values.items()
+        if knob_id in KNOB_SPECS
+    )
 
 
 def _validate_workspace_parameter_patch(
@@ -217,22 +229,32 @@ def _validate_workspace_parameter_patch(
 
 
 def _propose_gui_workspace_setup(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
-    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
+    progress_callback, register_interrupt, request_context = (
+        _gui_workspace_request_context(context)
+    )
     provider = _gui_workspace_codex_provider(request_context, progress_callback)
     register_interrupt(provider.interrupt)
     try:
-        return GuiWorkspaceSetupProposal.model_validate(provider.propose_gui_workspace_setup(request_context))
+        return GuiWorkspaceSetupProposal.model_validate(
+            provider.propose_gui_workspace_setup(request_context)
+        )
     finally:
         register_interrupt(None)
         provider.close()
 
 
-def _propose_gui_workspace_path_discovery(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
-    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
+def _propose_gui_workspace_path_discovery(
+    context: dict[str, Any],
+) -> GuiWorkspaceSetupProposal:
+    progress_callback, register_interrupt, request_context = (
+        _gui_workspace_request_context(context)
+    )
     provider = _gui_workspace_codex_provider(request_context, progress_callback)
     register_interrupt(provider.interrupt)
     try:
-        return GuiWorkspaceSetupProposal.model_validate(provider.propose_gui_workspace_path_discovery(request_context))
+        return GuiWorkspaceSetupProposal.model_validate(
+            provider.propose_gui_workspace_path_discovery(request_context)
+        )
     finally:
         register_interrupt(None)
         provider.close()
@@ -241,13 +263,19 @@ def _propose_gui_workspace_path_discovery(context: dict[str, Any]) -> GuiWorkspa
 def _propose_gui_workspace_rerun_patch(
     context: dict[str, Any],
 ) -> GuiWorkspaceRerunParameterProposal:
-    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
+    progress_callback, register_interrupt, request_context = (
+        _gui_workspace_request_context(context)
+    )
     workspace = request_context.get("workspace")
     if not isinstance(workspace, str) or not workspace:
-        raise CodexProviderError("GUI rerun workspace is missing", failure_class="missing_input")
+        raise CodexProviderError(
+            "GUI rerun workspace is missing", failure_class="missing_input"
+        )
     source = Path(workspace).resolve()
     if not source.is_dir():
-        raise CodexProviderError("GUI rerun workspace is unavailable", failure_class="missing_input")
+        raise CodexProviderError(
+            "GUI rerun workspace is unavailable", failure_class="missing_input"
+        )
     provider = create_required_codex_provider(
         cwd=source,
         runtime_workspace_roots=(source,),
@@ -265,7 +293,11 @@ def _propose_gui_workspace_rerun_patch(
 
 def _gui_workspace_request_context(
     context: Mapping[str, Any],
-) -> tuple[Callable[[str], None] | None, Callable[[Callable[[], None] | None], None], dict[str, Any]]:
+) -> tuple[
+    Callable[[str], None] | None,
+    Callable[[Callable[[], None] | None], None],
+    dict[str, Any],
+]:
     callback = context.get("_progress_callback")
     register_interrupt = context.get("_register_interrupt")
     return (
@@ -285,10 +317,14 @@ def _gui_workspace_codex_provider(
         else context.get("project_root")
     )
     if not isinstance(project_root, str):
-        raise CodexProviderError("GUI workspace filesystem roots are missing", failure_class="missing_input")
+        raise CodexProviderError(
+            "GUI workspace filesystem roots are missing", failure_class="missing_input"
+        )
     roots = workspace_search_roots(project_root)
     return create_required_codex_provider(
-        cwd=Path(roots[0]), runtime_workspace_roots=roots, progress_callback=progress_callback
+        cwd=Path(roots[0]),
+        runtime_workspace_roots=roots,
+        progress_callback=progress_callback,
     )
 
 
@@ -306,9 +342,15 @@ def _validated_path_recommendations(
     proposal: GuiWorkspaceSetupProposal, roots: tuple[str, ...]
 ) -> dict[str, str]:
     recommendations = {
-        "rtl": _validated_recommendation(proposal.rtl_path, "RTL path", (".v", ".sv"), roots),
-        "filelist": _validated_recommendation(proposal.filelist_path, "Filelist path", (".f",), roots),
-        "sdc": _validated_recommendation(proposal.sdc_path, "SDC path", (".sdc",), roots),
+        "rtl": _validated_recommendation(
+            proposal.rtl_path, "RTL path", (".v", ".sv"), roots
+        ),
+        "filelist": _validated_recommendation(
+            proposal.filelist_path, "Filelist path", (".f",), roots
+        ),
+        "sdc": _validated_recommendation(
+            proposal.sdc_path, "SDC path", (".sdc",), roots
+        ),
     }
     return {field: path for field, path in recommendations.items() if path is not None}
 
@@ -321,12 +363,17 @@ def _validated_recommendation(
     path = normalize_path(value, label=label, suffixes=suffixes, require_file=True)
     resolved = Path(path)
     if not any(resolved.is_relative_to(Path(root)) for root in roots):
-        raise ValueError(f"{label} recommendation is outside the authorized filesystem roots")
+        raise ValueError(
+            f"{label} recommendation is outside the authorized filesystem roots"
+        )
     return path
 
 
 def _validate_workspace_input_roots(
-    proposal: GuiWorkspaceSetupProposal, inputs: WorkspaceInputs, roots: tuple[str, ...], message: str
+    proposal: GuiWorkspaceSetupProposal,
+    inputs: WorkspaceInputs,
+    roots: tuple[str, ...],
+    message: str,
 ) -> None:
     path_updates = {
         "project_root": inputs.project_root,
@@ -336,9 +383,11 @@ def _validate_workspace_input_roots(
         "pdk_root": inputs.pdk_root,
     }
     for field, path in path_updates.items():
-        if getattr(proposal, field) is not None and not any(
-            Path(path).is_relative_to(Path(root)) for root in roots
-        ) and not _path_was_explicitly_provided(message, path):
+        if (
+            getattr(proposal, field) is not None
+            and not any(Path(path).is_relative_to(Path(root)) for root in roots)
+            and not _path_was_explicitly_provided(message, path)
+        ):
             raise ValueError(f"{field} is outside the authorized filesystem roots")
 
 
@@ -395,7 +444,8 @@ def _message_has_hint(text: str, hint: str) -> bool:
         return False
     if hint.isascii() and hint.isalpha() and len(hint) <= 4:
         return (
-            re.search(rf"(?<![a-z0-9_]){re.escape(hint)}(?![a-z0-9_])", text) is not None
+            re.search(rf"(?<![a-z0-9_]){re.escape(hint)}(?![a-z0-9_])", text)
+            is not None
         )
     return hint in text
 
@@ -450,11 +500,23 @@ def _deterministic_path_field_updates(text: str, message: str) -> dict[str, str]
                 continue
             if kind == "directory" and candidate.is_dir():
                 token_matches.append((field, resolved))
-            elif kind == "rtl" and candidate.is_file() and resolved.lower().endswith((".v", ".sv")):
+            elif (
+                kind == "rtl"
+                and candidate.is_file()
+                and resolved.lower().endswith((".v", ".sv"))
+            ):
                 token_matches.append((field, resolved))
-            elif kind == "filelist" and candidate.is_file() and resolved.lower().endswith(".f"):
+            elif (
+                kind == "filelist"
+                and candidate.is_file()
+                and resolved.lower().endswith(".f")
+            ):
                 token_matches.append((field, resolved))
-            elif kind == "sdc" and candidate.is_file() and resolved.lower().endswith(".sdc"):
+            elif (
+                kind == "sdc"
+                and candidate.is_file()
+                and resolved.lower().endswith(".sdc")
+            ):
                 token_matches.append((field, resolved))
         unique_for_token = list(dict.fromkeys(token_matches))
         if len(unique_for_token) > 1:
@@ -468,7 +530,9 @@ def _deterministic_path_field_updates(text: str, message: str) -> dict[str, str]
     return by_field
 
 
-def _deterministic_number_field_updates(text: str, message: str) -> dict[str, float] | None:
+def _deterministic_number_field_updates(
+    text: str, message: str
+) -> dict[str, float] | None:
     """Return number updates, or None when a number is ambiguous across fields."""
     numbers = [float(match.group(1)) for match in _NUMBER_TOKEN.finditer(message)]
     if not numbers:
@@ -525,7 +589,9 @@ def _workspace_rerun_execution_contract(
     parameter_values: tuple[tuple[str, object], ...],
 ) -> dict[str, Any]:
     effective_values = dict(parameter_values)
-    effective_values.update({item.knob_id: item.value for item in contract.parameter_patch})
+    effective_values.update(
+        {item.knob_id: item.value for item in contract.parameter_patch}
+    )
     parameter_fields = [
         {"label": knob_id, "value": str(value)}
         for knob_id, value in sorted(effective_values.items())
@@ -541,10 +607,7 @@ def _workspace_rerun_execution_contract(
         scope = (
             "只重跑所选阶段，然后停止"
             if contract.execution_scope == "single_step"
-            else (
-                f"从所选阶段重跑，并继续到标准流程终点"
-                f"（{contract.end_step.value}）"
-            )
+            else (f"从所选阶段重跑，并继续到标准流程终点（{contract.end_step.value}）")
         )
         fields = [
             {"label": "Design", "value": contract.design_id},
@@ -582,6 +645,7 @@ def _workspace_rerun_execution_contract(
         "schema_version": "flow-agent.resolved_execution_contract.v1",
         "title": title,
         "fields": fields,
+        "workspace_rerun": contract.model_dump(mode="json"),
     }
 
 
@@ -605,7 +669,9 @@ def _prompt_for_phase(session: Any) -> str:
         ),
         "rerun_stage": rerun_stage_prompt(
             session.language,
-            () if session.rerun_discovery is None else session.rerun_discovery.allowed_stages,
+            ()
+            if session.rerun_discovery is None
+            else session.rerun_discovery.allowed_stages,
         ),
         "rerun_parameter": rerun_parameter_prompt(
             session.language,
@@ -615,9 +681,7 @@ def _prompt_for_phase(session: Any) -> str:
                 session.rerun_discovery.source, session.rerun_stage
             ),
         ),
-        "rerun_scope": rerun_scope_prompt(
-            session.language, catalog_end_step().value
-        ),
+        "rerun_scope": rerun_scope_prompt(session.language, catalog_end_step().value),
         "workspace_project_mode": project_mode_prompt(session.language),
         "workspace_project_root": project_root_prompt(
             session.language, creating=session.creating_project
@@ -630,26 +694,68 @@ def _prompt_for_phase(session: Any) -> str:
         ),
         "workspace_design": design_name_prompt(
             session.language,
-            session.inherited_design_name or session.workspace_inputs.project_name or "",
+            session.inherited_design_name
+            or session.workspace_inputs.project_name
+            or "",
         ),
         "workspace_flow_end": flow_end_prompt(session.language),
-        "workspace_rtl": rtl_prompt(session.language, _recommended_path(session, "rtl")),
+        "workspace_rtl": rtl_prompt(
+            session.language, _recommended_path(session, "rtl")
+        ),
         "workspace_filelist": optional_file_prompt(
             session.language, "filelist", ".f", _recommended_path(session, "filelist")
         ),
         "workspace_sdc": optional_file_prompt(
             session.language, "SDC", ".sdc", _recommended_path(session, "sdc")
         ),
-        "workspace_pdk": pdk_prompt(session.language, _recommended_path(session, "pdk")),
-        "workspace_top": default_value_prompt(session.language, "Top Module Name", session.workspace_setup.top_module),
-        "workspace_clock": default_value_prompt(session.language, "Clock Signal Name", session.workspace_setup.clock_name),
-        "workspace_frequency": number_prompt(session.language, "Frequency Max (MHz)", session.workspace_setup.frequency_mhz, 1, 10_000),
-        "workspace_max_fanout": number_prompt(session.language, "Max Fanout", session.workspace_setup.max_fanout, 1, 1_000_000),
-        "workspace_utilization": number_prompt(session.language, "Die Area Utilization", session.workspace_setup.utilitization, 0.01, 1),
-        "workspace_density": number_prompt(session.language, "Placement Target Density", session.workspace_setup.target_density, 0.01, 1),
-        "workspace_overflow": number_prompt(session.language, "Placement Target Overflow", session.workspace_setup.target_overflow, 0, 1),
+        "workspace_pdk": pdk_prompt(
+            session.language, _recommended_path(session, "pdk")
+        ),
+        "workspace_top": default_value_prompt(
+            session.language, "Top Module Name", session.workspace_setup.top_module
+        ),
+        "workspace_clock": default_value_prompt(
+            session.language, "Clock Signal Name", session.workspace_setup.clock_name
+        ),
+        "workspace_frequency": number_prompt(
+            session.language,
+            "Frequency Max (MHz)",
+            session.workspace_setup.frequency_mhz,
+            1,
+            10_000,
+        ),
+        "workspace_max_fanout": number_prompt(
+            session.language,
+            "Max Fanout",
+            session.workspace_setup.max_fanout,
+            1,
+            1_000_000,
+        ),
+        "workspace_utilization": number_prompt(
+            session.language,
+            "Die Area Utilization",
+            session.workspace_setup.utilitization,
+            0.01,
+            1,
+        ),
+        "workspace_density": number_prompt(
+            session.language,
+            "Placement Target Density",
+            session.workspace_setup.target_density,
+            0.01,
+            1,
+        ),
+        "workspace_overflow": number_prompt(
+            session.language,
+            "Placement Target Overflow",
+            session.workspace_setup.target_overflow,
+            0,
+            1,
+        ),
         "workspace_confirmation": workspace_confirmation_prompt(session.language),
-        "workspace_parameter_request": workspace_parameter_request_prompt(session.language),
+        "workspace_parameter_request": workspace_parameter_request_prompt(
+            session.language
+        ),
         "confirmation": confirmation_menu(session.language),
     }
     return prompts.get(session.phase, operation_prompt(session.language))
@@ -669,7 +775,7 @@ def _number_default(proposal: GuiWorkspaceSetupProposal, label: str) -> float:
     return value
 
 
-def _recommended_path(session: _Session, field: str) -> str:
+def _recommended_path(session: Any, field: str) -> str:
     recommendation = session.path_recommendations.get(field, "")
     return display_path(recommendation) if recommendation else ""
 
@@ -763,7 +869,13 @@ def _extract_create_bootstrap(message: str) -> CreateBootstrap:
     creating: bool | None = None
     if any(
         key in text
-        for key in ("新建 project", "create project", "new project", "创建项目", "新建项目")
+        for key in (
+            "新建 project",
+            "create project",
+            "new project",
+            "创建项目",
+            "新建项目",
+        )
     ):
         creating = True
     elif any(
@@ -780,9 +892,13 @@ def _extract_create_bootstrap(message: str) -> CreateBootstrap:
         has_manifest = (candidate / "project.json").is_file()
         if creating is False and not has_manifest:
             continue
-        if creating is True or has_manifest or any(
-            _message_has_hint(text, hint)
-            for hint in ("project root", "project_root", "项目根", "project")
+        if (
+            creating is True
+            or has_manifest
+            or any(
+                _message_has_hint(text, hint)
+                for hint in ("project root", "project_root", "项目根", "project")
+            )
         ):
             project_root = str(candidate)
             if creating is None and has_manifest:
@@ -841,9 +957,15 @@ def _allowed_operation_options(
 
 
 def _propose_gui_chat_response(context: dict[str, Any]) -> GuiChatResponseProposal:
-    progress_callback, register_interrupt, request_context = _gui_workspace_request_context(context)
+    progress_callback, register_interrupt, request_context = (
+        _gui_workspace_request_context(context)
+    )
     cwd_value = request_context.get("workspace") or request_context.get("project_root")
-    cwd = Path(cwd_value).expanduser().resolve() if isinstance(cwd_value, str) and cwd_value else Path.cwd()
+    cwd = (
+        Path(cwd_value).expanduser().resolve()
+        if isinstance(cwd_value, str) and cwd_value
+        else Path.cwd()
+    )
     if not cwd.is_dir():
         cwd = Path.cwd()
     provider = create_required_codex_provider(
@@ -899,7 +1021,11 @@ def _workspace_rerun_result(message: str) -> tuple[str, str, str] | None:
         return None
     if not isinstance(payload, dict) or set(payload) != {"rerun_id", "status", "error"}:
         return None
-    rerun_id, status, error = payload.get("rerun_id"), payload.get("status"), payload.get("error")
+    rerun_id, status, error = (
+        payload.get("rerun_id"),
+        payload.get("status"),
+        payload.get("error"),
+    )
     if (
         not isinstance(rerun_id, str)
         or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", rerun_id)

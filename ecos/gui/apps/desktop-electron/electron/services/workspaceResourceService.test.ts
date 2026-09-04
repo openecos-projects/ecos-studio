@@ -400,7 +400,6 @@ describe('WorkspaceResourceService', () => {
 
   it.each([
     ['Floorplan', 'ecc'],
-    ['fixFanout', 'ecc'],
     ['place', 'dreamplace'],
     ['CTS', 'ecc'],
     ['legalization', 'dreamplace'],
@@ -486,41 +485,6 @@ describe('WorkspaceResourceService', () => {
     expect(result.info.path).toBeUndefined()
     expect(result.info.config).toBeUndefined()
   })
-
-  it.each([
-    ['Floorplan', 'floorplan_ecc.json'],
-    ['fixFanout', 'fixfanout_ecc.json'],
-    ['CTS', 'cts_ecc.json'],
-    ['route', 'route_ecc.json'],
-    ['drc', 'drc_ecc.json'],
-    ['filler', 'filler_ecc.json'],
-    ['RCX', 'rcx_ecc.json'],
-    ['sta', 'sta_ecc.json'],
-    ['db', 'db_ecc.json'],
-  ])(
-    'maps ECC %s config to the workspace config directory',
-    async (stepName, configFile) => {
-      const root = await tempWorkspace()
-      await writeWorkspace(root, [{ name: stepName, tool: 'ecc' }])
-      await mkdir(join(root, 'config'), { recursive: true })
-      await writeFile(join(root, 'config', configFile), '{}', 'utf8')
-
-      const service = new WorkspaceResourceService({
-        projectScopeProvider: provider(root),
-      })
-      const result = await service.resolveStepInfo({
-        step: stepName.toLowerCase(),
-        id: 'config',
-      })
-
-      expect(result).toMatchObject({
-        step: stepName,
-        response: 'available',
-        info: { config: join(root, 'config', configFile) },
-        missing: [],
-      })
-    },
-  )
 
   it.each([
     ['Timing optimization', []],

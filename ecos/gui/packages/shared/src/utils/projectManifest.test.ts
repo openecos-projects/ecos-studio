@@ -10,21 +10,28 @@ describe('project manifest presentation', () => {
   it('keeps the canonical flow order and legacy display aliases', () => {
     expect(projectManifestFlowSteps).toEqual([
       'Synth',
+      'LEC',
       'Floor',
-      'Fanout',
       'Place',
       'CTS',
       'Legal',
+      'Timing Opt',
       'Route',
       'DRC',
       'LVS',
       'Filler',
+      'Post-route LEC',
       'RCX',
       'STA',
       'Harden',
     ])
     expect(normalizeProjectManifestFlowStep('lvs')).toBe('LVS')
     expect(parseProjectManifestFlowStep('routing')).toBe('Route')
+    expect(parseProjectManifestFlowStep('lec')).toBe('LEC')
+    expect(parseProjectManifestFlowStep('postRouteLec')).toBe('Post-route LEC')
+    expect(parseProjectManifestFlowStep('post_route_lec')).toBe('Post-route LEC')
+    expect(parseProjectManifestFlowStep('timing-optimization')).toBe('Timing Opt')
+    expect(parseProjectManifestFlowStep('fixFanout')).toBeNull()
     expect(parseProjectManifestFlowStep('future-step')).toBeNull()
   })
 

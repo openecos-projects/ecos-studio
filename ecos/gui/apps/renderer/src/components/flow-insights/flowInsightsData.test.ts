@@ -50,7 +50,6 @@ function insightSteps(
 
 describe('flow insights data', () => {
   it('normalizes step keys and parses runtime / memory fallbacks', () => {
-    expect(canonicalStepKey('fixFanout')).toBe('Fanout')
     expect(canonicalStepKey('sta_ecc')).toBe('STA')
     expect(parseRuntimeSeconds('0:3:35')).toBe(215)
     expect(parseRuntimeSeconds('0:1:6')).toBe(66)
@@ -71,7 +70,6 @@ describe('flow insights data', () => {
     const names = [
       'Synthesis',
       'Floorplan',
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
@@ -82,8 +80,8 @@ describe('flow insights data', () => {
       'STA',
       'Harden',
     ]
-    const runtimes = [22.8, 2.3, 2.1, 66.7, 30.7, 3.0, 11.1, 4.1, 3.5, 8.2, 215.479, 12.8]
-    const memories = [1706, 73, 101, 865, 2024, 148, 166, 213, 120, 831, 11482.379, 831]
+    const runtimes = [22.8, 2.3, 66.7, 30.7, 3.0, 11.1, 4.1, 3.5, 8.2, 215.479, 12.8]
+    const memories = [1706, 73, 865, 2024, 148, 166, 213, 120, 831, 11482.379, 831]
     const steps = insightSteps(
       names,
       names.map((_, index) => ({
@@ -96,17 +94,16 @@ describe('flow insights data', () => {
     }))
     const model = buildStepResourcesModel(steps)
     expect(model.steps[model.runtimeBottleneckIndex]?.key).toBe('STA')
-    expect(model.rows[0]?.values[10]).toBe(215.479)
+    expect(model.rows[0]?.values[9]).toBe(215.479)
     expect(model.peakMemoryMb).toBeCloseTo(11482.379)
     expect(model.steps[model.memoryBottleneckIndex]?.key).toBe('STA')
-    expect(model.totalRuntimeSeconds).toBeCloseTo(382.779, 2)
+    expect(model.totalRuntimeSeconds).toBeCloseTo(380.679, 2)
   })
 
   it('maps synthesis cell_count and treats the filler instance jump as structural', () => {
     const names = [
       'Synthesis',
       'Floorplan',
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
@@ -116,9 +113,7 @@ describe('flow insights data', () => {
       'RCX',
       'STA',
     ]
-    const instanceCounts = [
-      1699, 2161, 2189, 2189, 2206, 2206, 2206, 2206, 5879, 5879, 5879,
-    ]
+    const instanceCounts = [1699, 2161, 2189, 2206, 2206, 2206, 2206, 5879, 5879, 5879]
     const dbJsonByStep = new Map(
       names.slice(1).map((name, index) => [
         name,

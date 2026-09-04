@@ -25,8 +25,7 @@ import type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -228,6 +227,27 @@ export class WorkspaceRuntimeCommands {
     return result
   }
 
+  async updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.workspaceCall<EccWorkspaceUpdateResult>(
+      'workspace.step_configuration.update',
+      request,
+      (workspaceId) => ({
+        commandId: request.commandId,
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        options: request.options,
+        stepId: request.stepId,
+        workspaceId,
+      }),
+    )
+    this.context.sessions.updateRevision(
+      request.workspaceHandle,
+      result.workspaceRevision,
+    )
+    return result
+  }
+
   closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
     return this.context.enqueue('workspace.close', request.workspaceHandle, async () => {
       try {
@@ -278,27 +298,6 @@ export class WorkspaceRuntimeCommands {
     return this.workspaceCall('workspace.refresh_config', request, (workspaceId) => ({
       workspaceId,
     }))
-  }
-
-  async syncConfig(
-    request: EccWorkspaceSyncConfigRequest,
-  ): Promise<EccWorkspaceSyncConfigResult> {
-    const result = await this.workspaceCall<EccWorkspaceSyncConfigResult>(
-      'workspace.sync_config',
-      request,
-      (workspaceId) => ({
-        configPath: request.configPath,
-        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
-        workspaceId,
-      }),
-    )
-    if (typeof result.workspaceRevision === 'number') {
-      this.context.sessions.updateRevision(
-        request.workspaceHandle,
-        result.workspaceRevision,
-      )
-    }
-    return result
   }
 
   async resetFlow(

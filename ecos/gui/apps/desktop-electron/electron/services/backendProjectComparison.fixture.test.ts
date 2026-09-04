@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  projectManagementWorkspaceStepAnalysisSpecs,
   projectManifestFlowSteps,
   validateEngineeringSnapshot,
 } from '@ecos-studio/shared'
@@ -20,10 +21,10 @@ describe('representativeProjectComparisonFixture', () => {
       expect(snapshot.flow).toEqual({
         steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
       })
-      expect(snapshot.metrics).toHaveLength(181)
-      expect(snapshot.analysis.steps).toHaveLength(13)
+      expect(snapshot.metrics).toHaveLength(209)
+      expect(snapshot.analysis.steps).toHaveLength(12)
       expect(snapshot.analysis.steps.map((step) => step.stepId)).toEqual(
-        projectManifestFlowSteps,
+        projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step),
       )
       expect(snapshot.metrics[0]).toMatchObject({
         analysis_group: expect.any(String),
@@ -36,7 +37,7 @@ describe('representativeProjectComparisonFixture', () => {
         source: { kind: 'feature', path: expect.any(String) },
         step_role: expect.any(String),
       })
-      expect(snapshot.artifacts).toHaveLength(40)
+      expect(snapshot.artifacts).toHaveLength(37)
       expect(snapshot.signoffAssessment.status).toBe('ready')
       expect(snapshot.qorAssessment).toMatchObject({
         score: { gate: 'pass', threshold: 60, value: expect.any(Number) },

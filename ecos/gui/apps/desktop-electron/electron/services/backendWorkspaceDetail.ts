@@ -12,8 +12,9 @@ import type {
   WorkspaceStepDetail,
 } from '@ecos-studio/shared'
 import type { ProjectEngineeringSnapshotReadResult } from './projectManagementReadService'
+import { checklistSection, flowSection } from './backendWorkspaceOverviewProjection'
 
-type ValidSnapshot = Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>
+type ValidSnapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnapshot']>
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -262,46 +263,70 @@ export function workspaceStepDetail(
   flow: ReadSection<WorkspaceFlowSummary>,
   checklist: ReadSection<WorkspaceChecklistSummary>,
   insights: WorkspaceFlowInsightsSummary | null,
+  staleSnapshot?: ValidSnapshot,
 ): ReadSection<WorkspaceStepDetail> {
   const analysis = snapshot.sections.qor
-  if (
-    analysis.status !== 'ready' ||
-    (flow.status !== 'ready' && flow.status !== 'partial')
-  ) {
+  if (flow.status !== 'ready' && flow.status !== 'partial') {
     return {
       status: 'unavailable',
       issues: [{ code: 'WORKSPACE_STEP_DETAIL_UNAVAILABLE' }],
     }
   }
-  const analysisStep = analysis.data.analysis.steps.find((step) =>
-    sameStep(step.stepId, stepId),
-  )
+  const analysisStep =
+    analysis.status === 'ready'
+      ? analysis.data.analysis.steps.find((step) => sameStep(step.stepId, stepId))
+      : undefined
   const flowStep = flow.data.steps.find((step) => sameStep(step.stepId, stepId))
-  if (!analysisStep || !flowStep) {
+  if (!flowStep) {
     return { status: 'unavailable', issues: [{ code: 'WORKSPACE_STEP_NOT_FOUND' }] }
   }
   const artifacts = snapshot.sections.artifacts
+  const invalidated = snapshot.snapshot.stalePredecessor?.invalidatedStepIds ?? []
+  let staleEvidence: WorkspaceStepDetail['staleEvidence']
+  if (staleSnapshot && invalidated.some((candidate) => sameStep(candidate, stepId))) {
+    const staleFlow = flowSection(staleSnapshot)
+    const staleDetail = workspaceStepDetail(
+      staleSnapshot,
+      stepId,
+      staleFlow,
+      checklistSection(staleSnapshot, staleFlow),
+      null,
+    )
+    if (staleDetail.status === 'ready' || staleDetail.status === 'partial') {
+      staleEvidence = {
+        ...staleDetail.data,
+        workspaceRevision: staleSnapshot.snapshot.workspaceRevision,
+      }
+    }
+  }
+  if (!analysisStep && !staleEvidence) {
+    return {
+      status: 'unavailable',
+      issues: [{ code: 'WORKSPACE_STEP_DETAIL_UNAVAILABLE' }],
+    }
+  }
   return {
     status: 'ready',
     data: {
       analysis: {
-        metrics: analysisMetrics(analysisStep.metrics.data),
-        summary: analysisStep.summary.data,
-        hotspots: analysisHotspots(analysisStep.hotspots.data),
+        metrics: analysisMetrics(analysisStep?.metrics.data ?? null),
+        summary: analysisStep?.summary.data ?? null,
+        hotspots: analysisHotspots(analysisStep?.hotspots.data ?? null),
+        lec: analysisStep?.lecResult?.data ?? null,
         drc:
-          analysisStep.stepId.trim().toLowerCase() === 'drc' && insights
+          analysisStep?.stepId.trim().toLowerCase() === 'drc' && insights
             ? insights.drc
             : { totalCount: null, hotspots: [], reportedCount: 0, truncated: false },
         sta:
-          analysisStep.stepId.trim().toLowerCase() === 'sta'
+          analysisStep?.stepId.trim().toLowerCase() === 'sta'
             ? (insights?.sta ?? null)
             : null,
         congestion: (insights?.congestion ?? []).filter((statistic) =>
-          sameStep(statistic.stepId, analysisStep.stepId),
+          sameStep(statistic.stepId, analysisStep?.stepId ?? stepId),
         ),
-        database: databaseFacts(analysisStep.metrics.data),
-        lvs: lvsInsights(analysisStep.metrics.data),
-        rcx: rcxInsights(analysisStep.metrics.data),
+        database: databaseFacts(analysisStep?.metrics.data ?? null),
+        lvs: lvsInsights(analysisStep?.metrics.data ?? null),
+        rcx: rcxInsights(analysisStep?.metrics.data ?? null),
       },
       artifacts:
         artifacts.status === 'ready'
@@ -318,7 +343,8 @@ export function workspaceStepDetail(
             }
           : { findings: [] },
       step: flowStep,
-      subflow: analysisStep.subflow ?? { status: 'missing', steps: [] },
+      subflow: analysisStep?.subflow ?? { status: 'missing', steps: [] },
+      ...(staleEvidence ? { staleEvidence } : {}),
     },
     issues: [],
   }

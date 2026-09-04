@@ -350,8 +350,8 @@ describe('BackendProjectComparisonService', () => {
         signoff: workspace.signoffReadiness.status,
       })),
     ).toEqual([
-      { id: 'ws_0001', score: 72, status: 'Green', metrics: 181, signoff: 'pass' },
-      { id: 'ws_0002', score: 84, status: 'Green', metrics: 181, signoff: 'pass' },
+      { id: 'ws_0001', score: 72, status: 'Green', metrics: 168, signoff: 'pass' },
+      { id: 'ws_0002', score: 84, status: 'Green', metrics: 168, signoff: 'pass' },
     ])
     expect(first.ok && first.data.recommendation).toMatchObject({
       status: 'ready',
@@ -374,7 +374,9 @@ describe('BackendProjectComparisonService', () => {
         ],
       },
     })
-    expect(first.data.stepComparisons.data.steps).toHaveLength(13)
+    expect(first.data.stepComparisons.data.steps).toHaveLength(
+      projectManifestFlowSteps.length,
+    )
     expect(first.data.workspaceSnapshots.data.items[1]?.steps.Route).toMatchObject({
       flowStatus: 'success',
       metrics: expect.any(Array),
@@ -560,7 +562,7 @@ describe('BackendProjectComparisonService', () => {
 
     expect(route?.workspaces).toEqual([
       expect.objectContaining({ workspaceId: 'ws_1' }),
-      { workspaceId: 'ws_2', status: 'success', metrics: [] },
+      { workspaceId: 'ws_2', status: 'unavailable', metrics: [] },
     ])
     expect(
       result.data.trend.data.workspaces.map((workspace) => workspace.workspaceId),

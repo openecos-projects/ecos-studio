@@ -24,7 +24,12 @@ export interface EngineeringSnapshotSections {
 
 export type EngineeringSnapshotEnvelope = Pick<
   EccEngineeringSnapshot,
-  'checklist' | 'parameters' | 'schemaVersion' | 'workspaceId' | 'workspaceRevision'
+  | 'checklist'
+  | 'parameters'
+  | 'schemaVersion'
+  | 'stalePredecessor'
+  | 'workspaceId'
+  | 'workspaceRevision'
 >
 
 type EngineeringSnapshotQor = Pick<
@@ -93,6 +98,15 @@ export function validateEngineeringSnapshot(
   if (expectedWorkspaceId && value.workspaceId !== expectedWorkspaceId) {
     return { ok: false, issue: { code: 'ENGINEERING_WORKSPACE_ID_MISMATCH' } }
   }
+  if (
+    value.stalePredecessor !== undefined &&
+    (!record(value.stalePredecessor) ||
+      !positiveInteger(value.stalePredecessor.workspaceRevision) ||
+      !Array.isArray(value.stalePredecessor.invalidatedStepIds) ||
+      !value.stalePredecessor.invalidatedStepIds.every(nonEmptyString))
+  ) {
+    return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
+  }
 
   return {
     ok: true,
@@ -100,6 +114,13 @@ export function validateEngineeringSnapshot(
       checklist: value.checklist,
       parameters: value.parameters,
       schemaVersion: value.schemaVersion,
+      ...(value.stalePredecessor
+        ? {
+            stalePredecessor: value.stalePredecessor as NonNullable<
+              EccEngineeringSnapshot['stalePredecessor']
+            >,
+          }
+        : {}),
       workspaceId: value.workspaceId,
       workspaceRevision: value.workspaceRevision,
     },
@@ -229,8 +250,22 @@ function validAnalysis(
       validMetricFile(step.metrics) &&
       validSummaryFile(step.summary) &&
       validAnalysisFile(step.hotspots, 3, 'hotspots') &&
+      (step.lecResult === undefined ||
+        step.lecResult === null ||
+        validLecResultFile(step.lecResult)) &&
       (step.timingIssues === null || validTimingFile(step.timingIssues)) &&
       (schemaVersion === 1 || validSubflow(step.subflow)),
+  )
+}
+
+function validLecResultFile(value: unknown): boolean {
+  return (
+    record(value) &&
+    nonEmptyString(value.artifactId) &&
+    ['available', 'missing', 'invalid', 'unsupported', 'unsafe'].includes(
+      String(value.status),
+    ) &&
+    (value.data === null || record(value.data))
   )
 }
 

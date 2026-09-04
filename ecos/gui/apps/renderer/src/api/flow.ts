@@ -12,7 +12,6 @@ import type {
   EccRuntimeOperation,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
-  EccWorkspaceSyncConfigResult,
   DesignTool,
 } from '@ecos-studio/shared'
 
@@ -220,55 +219,6 @@ export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
     .then((result) =>
       success(CMDEnum.refresh_config, result as RefreshConfigResponse),
     ) as Promise<ResponseData<RefreshConfigResponse>>
-}
-
-export interface SyncConfigRequest {
-  designTool?: DesignTool
-  directory: string
-  config_path: string
-  workspaceHandle?: string
-  workspace_handle?: string
-  workspaceRevision?: number
-}
-
-export interface SyncConfigResponse {
-  directory: string
-  config_path: string
-  parameters_changed: boolean
-  refreshed: boolean
-  workspaceRevision: number
-}
-
-export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
-  const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
-  const runtimeRequest = {
-    configPath: String(data.config_path ?? data.configPath ?? ''),
-    workspaceHandle: workspaceHandleFromData(data),
-  }
-  const result = (
-    designToolFromData(data) === 'backend'
-      ? getDesktopApi().productCommands.execute({
-          command: 'workspace.syncConfig',
-          payload: {
-            ...runtimeRequest,
-            expectedWorkspaceRevision: workspaceRevisionFromData(data),
-          },
-        })
-      : getDesktopApi().runtime.workspace.syncConfig({
-          ...runtimeRequest,
-          designTool: 'frontend',
-        })
-  ) as Promise<EccWorkspaceSyncConfigResult>
-  return result.then(
-    (result) =>
-      success(CMDEnum.sync_config, {
-        config_path: result.configPath,
-        directory: result.directory,
-        parameters_changed: result.parametersChanged,
-        refreshed: result.refreshed,
-        workspaceRevision: result.workspaceRevision,
-      }) as ResponseData<SyncConfigResponse>,
-  )
 }
 
 export interface ResetFlowRequest {

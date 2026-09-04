@@ -14,9 +14,6 @@ from ecos_agent.ecc_contracts import ECCParameterPatch, ECCParameterPatchItem, E
 from ecos_agent.hashing import file_sha256
 from ecos_agent.knob_registry import (
     BOOLEAN_KNOBS,
-    KnobTarget,
-    knob_spec,
-    resolve_write,
     validate_value,
 )
 from ecos_agent.parameter_authorization import assert_authorized_parameter_patch
@@ -71,7 +68,6 @@ class GuiWorkspaceRerunContract(BaseModel):
     source_stage_artifact: str
     source_stage_artifact_sha256: str
     parameter_patch: list[ECCParameterPatchItem] = Field(default_factory=list, max_length=16)
-    writes: list[dict[str, object]] = Field(default_factory=list, max_length=16)
     requires_gui_review: Literal[True] = True
 
     @field_validator("source_workspace", "target_workspace")
@@ -132,8 +128,13 @@ class GuiWorkspaceRerunParameterProposal(BaseModel):
 class GuiWorkspaceRerunResolver:
     """Derive GUI rerun contracts from completed ECOS workspace evidence."""
 
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        current_parameter_values: dict[str, object] | None = None,
+    ) -> None:
         self.workspace_root = workspace_root.resolve()
+        self.current_parameter_values = current_parameter_values or {}
 
     def discover(self, design_id: str) -> GuiWorkspaceRerunDiscovery:
         source = self._find_workspace(design_id)
@@ -201,14 +202,14 @@ class GuiWorkspaceRerunResolver:
             source_stage_artifact=source.stage_artifact_ref[target_step],
             source_stage_artifact_sha256=source.stage_artifact_sha256[target_step],
             parameter_patch=[] if patch is None else patch.items,
-            writes=[] if patch is None else [resolve_write(item) for item in patch.items],
         )
 
     @staticmethod
     def _next_rerun_target(source_workspace: Path, target_step: str) -> Path:
-        base = source_workspace.with_name(
-            f"{source_workspace.name}_rerun_{target_step.lower()}"
-        )
+        # Step names may contain spaces, but rerun ids must stay path-safe for
+        # the Electron-side contract validation.
+        step_slug = "_".join(target_step.lower().split())
+        base = source_workspace.with_name(f"{source_workspace.name}_rerun_{step_slug}")
         for index in range(10_000):
             target = base if index == 0 else base.with_name(f"{base.name}_{index:04d}")
             if not target.exists():
@@ -220,12 +221,9 @@ class GuiWorkspaceRerunResolver:
     ) -> tuple[tuple[str, object], ...]:
         if target_step not in source.allowed_stages:
             raise ValueError("rerun stage is invalid")
-        return self.stage_parameter_values(source.workspace_path, target_step)
+        return self.stage_parameter_values(target_step)
 
-    @staticmethod
-    def stage_parameter_values(
-        workspace_path: Path, target_step: str
-    ) -> tuple[tuple[str, object], ...]:
+    def stage_parameter_values(self, target_step: str) -> tuple[tuple[str, object], ...]:
         """Readable knobs for a step, independent of whether that step has run.
 
         Rerun requires completed-stage evidence; changing a parameter does not.
@@ -235,7 +233,7 @@ class GuiWorkspaceRerunResolver:
             raise ValueError("rerun stage is invalid")
         values = []
         for knob_id in _authorized_knobs_for_step(step):
-            value = _current_parameter_value(workspace_path, knob_id)
+            value = self.current_parameter_values.get(knob_id, _MISSING)
             if value is not _MISSING:
                 values.append((knob_id, value))
         return tuple(values)
@@ -289,13 +287,22 @@ class GuiWorkspaceRerunResolver:
     def _stage_output(source: Path, design_id: str, step: str, tool: str) -> Path:
         if not _TOOL_NAME.fullmatch(tool):
             raise ValueError(f"completed stage {step} has an invalid tool")
-        output_dir = source / f"{step}_{tool}" / "output"
+        # Sizer publishes underscored lowercase directory and file stems.
+        stem = "_".join(step.split()).lower() if tool == "sizer" else step
+        stage_dir = f"{stem}_sizer" if tool == "sizer" else f"{step}_{tool}"
+        output_dir = source / stage_dir / "output"
         try:
             output_dir.resolve().relative_to(source)
         except ValueError as exc:
             raise ValueError(f"completed stage {step} output escapes workspace") from exc
+        if tool == "yosys_lec":
+            # LEC stages publish an equivalence result JSON instead of layout outputs.
+            result = output_dir / f"{design_id}_{stem}_result.json"
+            if result.is_file() and not result.is_symlink():
+                return result
+            raise ValueError(f"completed stage {step} has no matching output artifact")
         for suffix in _STAGE_OUTPUT_SUFFIXES:
-            output = output_dir / f"{design_id}_{step}{suffix}"
+            output = output_dir / f"{design_id}_{stem}{suffix}"
             if output.is_file() and not output.is_symlink():
                 return output
         raise ValueError(f"completed stage {step} has no matching output artifact")
@@ -324,41 +331,6 @@ def _authorized_knobs_for_step(step: ECCStepName) -> tuple[str, ...]:
     from ecos_agent.parameter_authorization import _AUTHORIZED_KNOBS
 
     return tuple(sorted(_AUTHORIZED_KNOBS.get(step, ())))
-
-
-def _current_parameter_value(workspace: Path, knob_id: str) -> object:
-    """Read a knob so contracts can show a real old value.
-
-    Prefers the ECC-canonical step config, falling back to parameters.json: step
-    configs are only generated once a flow has run, but a knob is tunable before
-    that.
-    """
-    spec = knob_spec(knob_id)
-    for target in (spec.read_target, spec.write_target):
-        value = _read_target_value(workspace, target)
-        if value is not _MISSING:
-            return value
-    return _MISSING
-
-
-def _read_target_value(workspace: Path, target: KnobTarget) -> object:
-    config_path = workspace / target.file
-    try:
-        config_path.resolve().relative_to(workspace)
-        if config_path.is_symlink() or not config_path.is_file():
-            return _MISSING
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return _MISSING
-    current: object = config
-    for key in target.json_path:
-        if isinstance(key, int):
-            if not isinstance(current, list) or not 0 <= key < len(current):
-                return _MISSING
-        elif not isinstance(current, dict) or key not in current:
-            return _MISSING
-        current = current[key]
-    return current
 
 
 def _validate_value(item: ECCParameterPatchItem) -> None:

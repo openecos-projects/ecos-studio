@@ -32,9 +32,8 @@ import type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceRuntimeSnapshot,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -361,6 +360,14 @@ export class EccWorkspaceRuntime {
     return result
   }
 
+  async updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.commands.updateWorkspaceStepConfiguration(request)
+    this.cachedSnapshot = null
+    return result
+  }
+
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.commands.openWorkspace(request)
   }
@@ -392,14 +399,6 @@ export class EccWorkspaceRuntime {
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const result = await this.commands.refreshConfig(request)
-    this.cachedSnapshot = null
-    return result
-  }
-
-  async syncConfig(
-    request: EccWorkspaceSyncConfigRequest,
-  ): Promise<EccWorkspaceSyncConfigResult> {
-    const result = await this.commands.syncConfig(request)
     this.cachedSnapshot = null
     return result
   }

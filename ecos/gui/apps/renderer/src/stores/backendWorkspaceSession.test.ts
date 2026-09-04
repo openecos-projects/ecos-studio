@@ -38,6 +38,7 @@ function result(
       configuration: {
         data: {
           clock: 'clk',
+          coreUtilization: null,
           design: 'gcd',
           dieArea: 100,
           frequencyMaxMhz: 200,

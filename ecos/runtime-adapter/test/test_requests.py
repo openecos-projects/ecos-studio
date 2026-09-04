@@ -26,7 +26,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceMutationRequest,
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
-    WorkspaceSyncConfigRequest,
+    WorkspaceStepConfigurationUpdateRequest,
     parse_request_model,
 )
 
@@ -107,6 +107,23 @@ def test_workspace_configuration_update_maps_canonical_payload():
     assert request.configuration["parameters"] == {"frequency_max": 200}
 
 
+def test_workspace_step_configuration_update_maps_canonical_payload():
+    request = _parse_runtime_request(
+        "workspace.step_configuration.update",
+        {
+            "commandId": "step-configuration-1",
+            "workspaceId": "workspace-1",
+            "expectedWorkspaceRevision": 3,
+            "stepId": "Floorplan",
+            "options": {"ifp": {"thread_number": 8}},
+        },
+    )
+
+    assert isinstance(request, WorkspaceStepConfigurationUpdateRequest)
+    assert request.step_id == "Floorplan"
+    assert request.options == {"ifp": {"thread_number": 8}}
+
+
 @pytest.mark.parametrize(
     ("method", "params", "request_type"),
     [
@@ -123,15 +140,6 @@ def test_workspace_configuration_update_maps_canonical_payload():
             "workspace.export_signoff",
             {"workspaceId": "ws-1", "outputPath": "/exports/custom.tar.gz"},
             WorkspaceExportSignoffRequest,
-        ),
-        (
-            "workspace.sync_config",
-            {
-                "workspaceId": "ws-1",
-                "configPath": "/work/ws/config/route.json",
-                "expectedWorkspaceRevision": 7,
-            },
-            WorkspaceSyncConfigRequest,
         ),
         (
             "workspace.info",

@@ -102,6 +102,9 @@ describe('useBackendFlowStages runtime projection', () => {
 
   it('lets a real step-start event replace the optimistic first step', () => {
     const flow = useBackendFlowStages()
+    expect(flow.dynamicFlowStages.value.map((step) => step.label)).not.toContain(
+      'fixFanout',
+    )
     flow.setFirstRunStepOngoing()
     expect(
       flow.dynamicFlowStages.value.filter((step) => step.state === 'Ongoing'),

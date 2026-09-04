@@ -24,7 +24,12 @@ describe('recentProjectSnapshot', () => {
       configuration: {
         status: 'ready',
         issues: [],
-        data: { pdk: 'ics55', topModule: 'gcd', frequencyMaxMhz: 200 },
+        data: {
+          pdk: 'ics55',
+          topModule: 'gcd',
+          frequencyMaxMhz: 200,
+          coreUtilization: 0.64,
+        },
       },
       keyMetrics: {
         status: 'ready',
@@ -49,7 +54,7 @@ describe('recentProjectSnapshot', () => {
       pdk: 'ics55',
       topModule: 'gcd',
       frequencyTarget: 200,
-      coreUtilization: 0.65,
+      coreUtilization: 0.64,
       committedWorkspaceId: 'engineering-a',
       committedRevision: 9,
       committedVerifiedAt: '2026-09-03T00:00:00.000Z',
