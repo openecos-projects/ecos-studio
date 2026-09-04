@@ -2,8 +2,8 @@ import { ref, shallowReactive } from 'vue'
 
 export const flowExecutionActive = ref(false)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
-const knownBackendWorkspaces = new Set<string>()
-const activeBackendWorkspaces = new Set<string>()
+const knownBackendWorkspaces = shallowReactive(new Set<string>())
+const activeBackendWorkspaces = shallowReactive(new Set<string>())
 
 function normalizeWorkspacePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/')

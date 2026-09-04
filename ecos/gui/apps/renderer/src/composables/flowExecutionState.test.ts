@@ -1,3 +1,4 @@
+import { computed } from 'vue'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   clearFlowExecutionActiveForWorkspace,
@@ -26,5 +27,16 @@ describe('flowExecutionState compatibility projection', () => {
     updateAuthoritativeBackendFlowState([], [])
 
     expect(isFlowExecutionActiveForWorkspace('/work/backend')).toBe(false)
+  })
+
+  it('updates an existing Dashboard computed when a backend Flow finishes', () => {
+    const isRunning = computed(() => isFlowExecutionActiveForWorkspace('/work/backend'))
+    markFlowExecutionActiveForWorkspace('/work/backend')
+    updateAuthoritativeBackendFlowState(['/work/backend'], ['/work/backend'])
+    expect(isRunning.value).toBe(true)
+
+    updateAuthoritativeBackendFlowState(['/work/backend'], [])
+
+    expect(isRunning.value).toBe(false)
   })
 })
