@@ -276,44 +276,6 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     ] == [("place", "1")]
 
 
-def test_rerun_skips_empty_parameter_table_for_fixfanout(tmp_path: Path) -> None:
-    workspace = tmp_path / "source-workspace"
-    flow = workspace / "home" / "flow.json"
-    flow.parent.mkdir(parents=True)
-    flow.write_text(
-        '{"steps": [{"name": "fixFanout", "tool": "ecc", "state": "Success"}]}',
-        encoding="utf-8",
-    )
-    output = workspace / "fixFanout_ecc" / "output"
-    output.mkdir(parents=True)
-    (output / "gcd_fixFanout.def.gz").write_bytes(b"def")
-    (workspace / "home" / "parameters.json").write_text(
-        '{"Design": "gcd"}', encoding="utf-8"
-    )
-    events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
-    session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
-    )["sessionId"]
-
-    for message in ("2", "1", "1"):
-        _send(provider, session_id, message)
-
-    session = provider.sessions[session_id]
-    assert session.phase == "rerun_scope"
-    assert session.rerun_stage == "fixFanout"
-    assert session.rerun_parameter_patch == []
-    assert any(
-        event["type"] == "message"
-        and "no tunable rerun parameters" in str(event["text"]).lower()
-        for event in events
-    )
-    assert not any(
-        event["type"] == "message" and "| Parameter | Current value |" in str(event["text"])
-        for event in events
-    )
-
-
 def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
@@ -699,7 +661,7 @@ def test_workspace_continue_uses_compact_confirm_without_command_table(
     assert "Continue the unfinished flow in the current workspace" in str(contract["text"])
 
 
-def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
+def _workspace_with_place(tmp_path: Path) -> Path:
     workspace = tmp_path / "gcd"
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
@@ -707,17 +669,13 @@ def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "steps": [
-                    {"name": "fixFanout", "tool": "ecc", "state": "Success"},
                     {"name": "place", "tool": "dreamplace", "state": "Success"},
                 ]
             }
         ),
         encoding="utf-8",
     )
-    for step, tool, suffix in (
-        ("fixFanout", "ecc", ".def.gz"),
-        ("place", "dreamplace", ".def.gz"),
-    ):
+    for step, tool, suffix in (("place", "dreamplace", ".def.gz"),):
         output = workspace / f"{step}_{tool}" / "output"
         output.mkdir(parents=True)
         (output / f"gcd_{step}{suffix}").write_bytes(b"def")
@@ -735,7 +693,7 @@ def _workspace_with_fixfanout_and_place(tmp_path: Path) -> Path:
 
 
 def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
     parser_contexts: list[dict[str, object]] = []
 
@@ -768,7 +726,7 @@ def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -
 
 
 def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
 
     def empty_patch(_context: dict[str, object]) -> dict[str, object]:
@@ -822,6 +780,79 @@ def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Pat
 
     assert contract.target_workspace == str(tmp_path / "gcd_rerun_place_0001")
     assert contract.rerun_id == "gcd_rerun_place_0001"
+
+
+def test_rerun_discovers_post_route_lec_stage_from_result_json(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    flow = workspace / "home" / "flow.json"
+    flow.parent.mkdir(parents=True)
+    flow.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {"name": "place", "tool": "dreamplace", "state": "Success"},
+                    {"name": "postRouteLec", "tool": "yosys_lec", "state": "Success"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    place_output = workspace / "place_dreamplace" / "output"
+    place_output.mkdir(parents=True)
+    (place_output / "gcd_place.def.gz").write_bytes(b"def")
+    lec_output = workspace / "postRouteLec_yosys_lec" / "output"
+    lec_output.mkdir(parents=True)
+    (lec_output / "gcd_postRouteLec_result.json").write_text(
+        '{"status": "proven"}\n', encoding="utf-8"
+    )
+
+    resolver = GuiWorkspaceRerunResolver(tmp_path)
+    discovery = resolver.discover_workspace(workspace, "gcd")
+
+    assert "postRouteLec" in discovery.allowed_stages
+    assert discovery.source.stage_artifact_ref["postRouteLec"] == (
+        "postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json"
+    )
+
+    contract = resolver.freeze(discovery.source, "postRouteLec", [], "single_step")
+    assert contract.source_stage_artifact == (
+        "postRouteLec_yosys_lec/output/gcd_postRouteLec_result.json"
+    )
+
+
+def test_rerun_discovers_timing_opt_stage_with_sanitized_target(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    flow = workspace / "home" / "flow.json"
+    flow.parent.mkdir(parents=True)
+    flow.write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "name": "Timing optimization",
+                        "tool": "sizer",
+                        "state": "Success",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    sizer_output = workspace / "timing_optimization_sizer" / "output"
+    sizer_output.mkdir(parents=True)
+    (sizer_output / "gcd_timing_optimization.def.gz").write_bytes(b"def")
+
+    resolver = GuiWorkspaceRerunResolver(tmp_path)
+    discovery = resolver.discover_workspace(workspace, "gcd")
+
+    assert discovery.allowed_stages == ("Timing optimization",)
+    assert discovery.source.stage_artifact_ref["Timing optimization"] == (
+        "timing_optimization_sizer/output/gcd_timing_optimization.def.gz"
+    )
+
+    contract = resolver.freeze(discovery.source, "Timing optimization", [], "single_step")
+    assert contract.rerun_id == "gcd_rerun_timing_optimization"
+    assert contract.target_workspace == str(tmp_path / "gcd_rerun_timing_optimization")
 
 
 def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
@@ -1167,11 +1198,11 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     assert [option["label"] for option in flow_end_choice["options"][1:4]] == [
         "Synthesis",
         "Floorplan",
-        "fixFanout",
+        "place",
     ]
     assert flow_end_choice["options"][-1]["label"] == "Harden"
 
-    _send(provider, session_id, "4")
+    _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "workspace_rtl"
     assert provider.sessions[session_id].workspace_setup.flow_end == "place"
 
@@ -1318,7 +1349,7 @@ def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(tmp_path: Path
 
 
 def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
     parser_contexts: list[dict[str, object]] = []
     operation_contexts: list[dict[str, object]] = []
@@ -1354,7 +1385,7 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
 
 
 def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
     chat_contexts: list[dict[str, object]] = []
 
@@ -1386,7 +1417,7 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
 
 
 def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
 
     def unavailable_codex(_context: dict[str, object]) -> dict[str, object]:
@@ -1428,7 +1459,7 @@ def test_operation_question_codex_fallback_disallows_operations(tmp_path: Path) 
 
 
 def test_operation_codex_fallback_maps_nl_to_rerun(tmp_path: Path) -> None:
-    workspace = _workspace_with_fixfanout_and_place(tmp_path)
+    workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
     operation_contexts: list[dict[str, object]] = []
 

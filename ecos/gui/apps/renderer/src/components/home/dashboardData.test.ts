@@ -55,7 +55,7 @@ describe('dashboard data presentation', () => {
     expect(maxFanoutFromParameters({ 'Max fanout': '42' })).toBeNull()
   })
 
-  it('promotes stale flow-complete items once flow.json reports success', () => {
+  it('promotes stale flow-complete items and excludes LVS artifacts', () => {
     expect(
       reconcileFlowChecklistItems(
         [
@@ -72,6 +72,13 @@ describe('dashboard data presentation', () => {
             state: 'failed',
             blocked: true,
             summary: 'Required file is missing.',
+          },
+          {
+            category: 'artifact',
+            step: 'lvs',
+            state: 'pass',
+            blocked: false,
+            summary: 'Current output is present and non-empty.',
           },
         ],
         [{ label: 'Harden', path: 'Harden', state: 'Success' }],
@@ -160,16 +167,31 @@ describe('dashboard data presentation', () => {
     const metrics = dashboardMetrics(
       new Map([
         ['die_area', 100],
+        ['core_area', 80],
         ['core_utilization', 0.4],
         ['io_pin_count', 12],
         ['instance_count', 88],
         ['sta_setup_wns', 0.125],
+        ['drc_count', 1],
+        ['lvs_count', 2],
       ]),
     )
     expect(metrics.find((metric) => metric.id === 'die-area')?.value).toBe(100)
+    expect(metrics.find((metric) => metric.id === 'core-area')).toMatchObject({
+      label: 'Core Area',
+      value: 80,
+    })
     expect(metrics.find((metric) => metric.id === 'io-pins')?.label).toBe('IO Pin')
     expect(metrics.find((metric) => metric.id === 'instances')?.value).toBe(88)
     expect(metrics.find((metric) => metric.id === 'nets')?.value).toBeNull()
+    expect(metrics.find((metric) => metric.id === 'drc')).toMatchObject({
+      label: 'DRC Violation Number',
+      value: 1,
+    })
+    expect(metrics.find((metric) => metric.id === 'lvs')).toMatchObject({
+      label: 'LVS Violation Number',
+      value: 2,
+    })
     expect(
       formatDashboardMetric(metrics.find((metric) => metric.id === 'core-utilization')!),
     ).toBe('40.0%')

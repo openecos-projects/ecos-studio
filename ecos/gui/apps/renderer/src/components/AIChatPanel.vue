@@ -188,13 +188,13 @@ import {
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
-  DesktopAgentEvent,
-  DesktopAgentWorkspaceParameterWrite,
-  DesktopCodexDependencyStatus,
-  DesktopCodexInstallProgressEvent,
+import {
+  type DesktopAgentChoice,
+  type DesktopAgentChoiceOption,
+  type DesktopAgentEvent,
+  type DesktopAgentWorkspaceParameterWrite,
+  type DesktopCodexDependencyStatus,
+  type DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
@@ -1762,7 +1762,9 @@ function normalizeWorkspaceRoot(value: string): string {
 /**
  * Applies the Agent's resolved write instructions. The knob-to-location mapping
  * lives in the Agent registry, so an unsupported knob fails loudly here instead
- * of being dropped by a second, out-of-date table.
+ * of being dropped by a second, out-of-date table. The main process commits
+ * every file through the serialized atomic parameter queue and rolls back
+ * only the revision this operation produced.
  */
 async function applyWorkspaceParameterWrites(
   workspaceRoot: string,
@@ -1770,57 +1772,7 @@ async function applyWorkspaceParameterWrites(
 ): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   if (!desktopApi) throw new Error('Desktop API is unavailable.')
-  const byFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
-  for (const write of writes) {
-    const group = byFile.get(write.file)
-    if (group) group.push(write)
-    else byFile.set(write.file, [write])
-  }
-  for (const [file, fileWrites] of byFile) {
-    const path = `${workspaceRoot}/${file}`
-    const raw = await desktopApi.workspace.readProjectTextFile(path)
-    if (!raw.trim()) throw new Error(`${file} is missing or empty in this workspace.`)
-    const document = JSON.parse(raw) as Record<string, unknown>
-    for (const write of fileWrites) {
-      setJsonPathValue(document, write)
-    }
-    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    await desktopApi.workspace.writeProjectTextFile(
-      path,
-      raw.endsWith('\n') ? `${serialized}\n` : serialized,
-    )
-  }
-}
-
-/** Keeps the Agent's formatting identical to whatever already wrote the file. */
-function detectJsonIndent(raw: string): number {
-  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 4
-}
-
-function setJsonPathValue(
-  document: Record<string, unknown>,
-  write: DesktopAgentWorkspaceParameterWrite,
-): void {
-  const missing = (): never => {
-    throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)
-  }
-  let node: unknown = document
-  for (const key of write.json_path.slice(0, -1)) {
-    node = readJsonPathSegment(node, key) ?? missing()
-  }
-  const last = write.json_path[write.json_path.length - 1]
-  if (readJsonPathSegment(node, last) === undefined) missing()
-  if (typeof last === 'number') (node as unknown[])[last] = write.value
-  else (node as Record<string, unknown>)[last] = write.value
-}
-
-function readJsonPathSegment(node: unknown, key: string | number): unknown {
-  if (typeof key === 'number') {
-    return Array.isArray(node) && key < node.length ? node[key] : undefined
-  }
-  return typeof node === 'object' && node !== null && !Array.isArray(node)
-    ? (node as Record<string, unknown>)[key]
-    : undefined
+  await desktopApi.workspace.applyWorkspaceParameterWrites(workspaceRoot, writes)
 }
 
 /**

@@ -32,12 +32,13 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('delete nextQuery.openWorkspace')
   })
 
-  it('passes signoff eligibility to the visible top bar menu', () => {
-    expect(appSource).toContain(
-      ':signoff-package-export-enabled="signoffPackageExportEnabled"',
-    )
+  it('restricts signoff export actions to the workspace route', () => {
+    expect(appSource).not.toContain('signoff-package-export-enabled')
     expect(appSource).toContain('exportSignoffPackage,')
-    expect(appSource).toContain('signoffPackageExportEnabled,')
+    expect(appSource).toContain('appMenuActionIds.exportSignoffPackage')
+    expect(appSource).toContain(
+      'if (isWorkspaceRoute.value) return exportSignoffPackage()',
+    )
   })
 
   it('opens the shared workspace wizard with current workspace data from the File menu', () => {
@@ -141,6 +142,64 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('@close="handleWizardClose"')
     expect(appSource).toContain('function handleWizardClose()')
     expect(appSource).toContain('resetWorkspaceWizard()')
+  })
+
+  it('routes prefill number conversion through the lossless bigint guard', () => {
+    expect(appSource).toContain("from '@/utils/numbers'")
+    const optionalNumberStart = appSource.indexOf('function optionalNumber')
+    const optionalNumberEnd = appSource.indexOf(
+      'function normalizeDieAreaMode',
+      optionalNumberStart,
+    )
+    expect(appSource.slice(optionalNumberStart, optionalNumberEnd)).toContain(
+      'losslessOptionalNumber(',
+    )
+    const numberListStart = appSource.indexOf('function numberList')
+    const numberListEnd = appSource.indexOf(
+      'function normalizeLocalPath',
+      numberListStart,
+    )
+    expect(appSource.slice(numberListStart, numberListEnd)).toContain(
+      'losslessNumberList(',
+    )
+  })
+
+  it('falls back to flat die_width/die_height keys when prefilling reconfigure defaults', () => {
+    const normalizeStart = appSource.indexOf('function normalizeWorkspaceParameters')
+    const normalizeEnd = appSource.indexOf(
+      'function normalizeWorkspaceFlowConfig',
+      normalizeStart,
+    )
+    const normalizeSource = appSource.slice(normalizeStart, normalizeEnd)
+
+    const widthLine = normalizeSource.indexOf('die_width: optionalNumber(')
+    const heightLine = normalizeSource.indexOf('die_height: optionalNumber(')
+    expect(widthLine).toBeGreaterThan(-1)
+    expect(heightLine).toBeGreaterThan(-1)
+    expect(normalizeSource.indexOf('dieSize[0]', widthLine)).toBeLessThan(
+      normalizeSource.indexOf('parametersJson?.die_width', widthLine),
+    )
+    expect(normalizeSource.indexOf('dieSize[1]', heightLine)).toBeLessThan(
+      normalizeSource.indexOf('parametersJson?.die_height', heightLine),
+    )
+    expect(normalizeSource).toContain('parametersJson?.die_area')
+    expect(normalizeSource).toContain('hasCanonicalDieSize')
+    expect(normalizeSource).toContain(
+      "hasCanonicalDieSize || hasDieSize ? 'width_height'",
+    )
+    expect(normalizeSource).toContain('scalarMarginFromCore(coreMargin')
+  })
+
+  it('prefers canonical die_area dimensions when inferring reconfigure die_area_mode', () => {
+    const normalizeStart = appSource.indexOf('function normalizeWorkspaceParameters')
+    const normalizeEnd = appSource.indexOf(
+      'function normalizeWorkspaceFlowConfig',
+      normalizeStart,
+    )
+    const normalizeSource = appSource.slice(normalizeStart, normalizeEnd)
+    expect(normalizeSource).toContain(
+      "hasCanonicalDieSize || hasDieSize ? 'width_height'",
+    )
   })
 
   it('records project-managed workspaces into project.json after wizard create and reconfigure', () => {

@@ -39,13 +39,14 @@ export enum StepEnum {
   INIT = 'Init',
   SYNTHESIS = 'Synthesis',
   FLOORPLAN = 'Floorplan',
-  NETLIST_OPT = 'fixFanout',
   PLACEMENT = 'place',
   CTS = 'CTS',
   TIMING_OPT = 'Timing optimization',
   LEGALIZATION = 'legalization',
   ROUTING = 'route',
   FILLER = 'filler',
+  LEC = 'lec',
+  POST_ROUTE_LEC = 'postRouteLec',
   GDS = 'GDS',
   SIGNOFF = 'Signoff',
   HARDEN = 'Harden',
@@ -110,13 +111,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: true,
     group: 'run',
   },
-  [StepEnum.NETLIST_OPT.toLowerCase()]: {
-    label: 'FixFanout',
-    icon: 'ri-share-line',
-    path: StepEnum.NETLIST_OPT,
-    showInSidebar: false,
-    group: 'run',
-  },
   [StepEnum.PLACEMENT.toLowerCase()]: {
     label: 'Place',
     icon: 'ri-focus-2-line',
@@ -128,6 +122,13 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'CTS',
     icon: 'ri-git-merge-line',
     path: StepEnum.CTS,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.TIMING_OPT.toLowerCase()]: {
+    label: 'Timing Opt',
+    icon: 'ri-timer-flash-line',
+    path: StepEnum.TIMING_OPT,
     showInSidebar: true,
     group: 'run',
   },
@@ -163,6 +164,20 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'Filler',
     icon: 'ri-grid-fill',
     path: StepEnum.FILLER,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.POST_ROUTE_LEC.toLowerCase()]: {
+    label: 'Post-Route LEC',
+    icon: 'ri-equal-line',
+    path: StepEnum.POST_ROUTE_LEC,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.LEC.toLowerCase()]: {
+    label: 'LEC',
+    icon: 'ri-equal-line',
+    path: StepEnum.LEC,
     showInSidebar: true,
     group: 'run',
   },
@@ -247,17 +262,37 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
 
 /**
  * 根据步骤名称获取元数据
- * @param stepName flow.json 中的 step.name
+ * @param stepName flow.json 中的 step.name、路由 path，或侧栏显示 label
  */
 export function getStepMetadata(stepName: string): StepMetadata | undefined {
-  return STEP_METADATA[stepName.toLowerCase()]
+  const key = stepName.trim().toLowerCase()
+  if (!key) return undefined
+  return (
+    STEP_METADATA[key] ??
+    Object.values(STEP_METADATA).find(
+      (meta) => meta.label.toLowerCase() === key || meta.path.toLowerCase() === key,
+    )
+  )
+}
+
+/** True when both names refer to the same flow step, including display labels. */
+export function sameFlowStepName(left: string, right: string): boolean {
+  const a = left.trim().toLowerCase()
+  const b = right.trim().toLowerCase()
+  if (!a || !b) return false
+  if (a === b) return true
+  const leftMeta = getStepMetadata(left)
+  const rightMeta = getStepMetadata(right)
+  return Boolean(leftMeta && rightMeta && leftMeta.path === rightMeta.path)
 }
 
 const STEP_TOOL_LABELS: Record<string, string> = {
   ecc: 'ECC',
   dreamplace: 'DreamPlace',
   yosys: 'Yosys',
+  yosys_lec: 'Yosys LEC',
   klayout: 'KLayout',
+  sizer: 'Sizer',
 }
 
 /** Display name for a flow step tool from flow.json. */

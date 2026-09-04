@@ -12,12 +12,6 @@ export const projectManagementWorkspaceStepAnalysisSpecs = [
     hotspotsPath: 'Floorplan_ecc/analysis/qor_hotspots.json',
   },
   {
-    step: 'Fanout',
-    metricsPath: 'fixFanout_ecc/analysis/qor_metrics.json',
-    summaryPath: 'fixFanout_ecc/analysis/qor_summary.json',
-    hotspotsPath: 'fixFanout_ecc/analysis/qor_hotspots.json',
-  },
-  {
     step: 'Place',
     metricsPath: 'place_dreamplace/analysis/qor_metrics.json',
     summaryPath: 'place_dreamplace/analysis/qor_summary.json',
@@ -158,7 +152,6 @@ export const projectManagementWorkspaceStepConfigPaths = [
   'config/cts_ecc.json',
   'config/route_ecc.json',
   'config/drc_ecc.json',
-  'config/fixfanout_ecc.json',
   'config/filler_ecc.json',
   'config/rcx_ecc.json',
   'config/sta_ecc.json',
@@ -168,7 +161,6 @@ export const projectManagementWorkspaceStepConfigPaths = [
   'config/cts_default_config.json',
   'config/rt_default_config.json',
   'config/drc_default_config.json',
-  'config/no_default_config_fixfanout.json',
   'config/pl_default_config.json',
   'config/rcx.json',
   'config/sta.json',

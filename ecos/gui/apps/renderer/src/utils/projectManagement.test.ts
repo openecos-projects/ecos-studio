@@ -164,11 +164,6 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
         metric('instance_count', 612),
         metric('net_count', 376),
       ]),
-      Fanout: metricsArtifact('fixFanout', [
-        metric('fanout_max', 12),
-        metric('instance_count', 618),
-        metric('net_count', 381),
-      ]),
       Place: metricsArtifact('place', [
         metric('place_congestion_egr_overflow_max', 9),
         metric('place_congestion_egr_overflow_total', 37),
@@ -365,7 +360,6 @@ describe('project management V3 model', () => {
     expect(FLOW_STEPS).toEqual([
       'Synth',
       'Floor',
-      'Fanout',
       'Place',
       'CTS',
       'Legal',
@@ -551,11 +545,6 @@ describe('project management V3 model', () => {
     ])
     expect(
       model.stepCompareSummaries
-        .find((item) => item.step === 'Fanout')
-        ?.metrics.map((metric) => metric.id),
-    ).toEqual(['fanout_max', 'instance_count', 'net_count'])
-    expect(
-      model.stepCompareSummaries
         .find((item) => item.step === 'Place')
         ?.metrics.map((metric) => metric.id),
     ).toEqual([
@@ -704,6 +693,76 @@ describe('project management V3 model', () => {
         }),
       ),
     ).toEqual({ Route: 'running', LVS: 'success', STA: 'success', Floor: 'reused' })
+  })
+
+  it('maps Timing Opt and post-route LEC states onto the preceding coarse step', () => {
+    // A pending gate is more urgent than the completed predecessor: the
+    // workspace stays in_progress instead of claiming success.
+    const lecPending = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'filler', state: 'Success' },
+          { name: 'postRouteLec', state: 'Unstart' },
+        ],
+      }),
+    )
+    expect(lecPending).toEqual({ Filler: 'unstart' })
+    expect(workspaceStatusFromFlow('success', lecPending)).toBe('in_progress')
+
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'filler', state: 'Success' },
+            { name: 'postRouteLec', state: 'Incomplete' },
+          ],
+        }),
+      ),
+    ).toEqual({ Filler: 'failed' })
+
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'legalization', state: 'Success' },
+            { name: 'Timing optimization', state: 'Success' },
+            { name: 'route', state: 'running' },
+          ],
+        }),
+      ),
+    ).toEqual({ Legal: 'success', Route: 'running' })
+
+    const lecFailed = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'filler', state: 'Success' },
+          { name: 'postRouteLec', state: 'Incomplete' },
+        ],
+      }),
+    )
+    expect(workspaceStatusFromFlow('in_progress', lecFailed)).toBe('failed')
+
+    const lecRunning = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'filler', state: 'Success' },
+          { name: 'postRouteLec', state: 'Ongoing' },
+        ],
+      }),
+    )
+    expect(lecRunning).toEqual({ Filler: 'running' })
+    expect(workspaceStatusFromFlow('success', lecRunning)).toBe('running')
+
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'filler', state: 'Invalid' },
+            { name: 'postRouteLec', state: 'Ongoing' },
+          ],
+        }),
+      ),
+    ).toEqual({ Filler: 'failed' })
   })
 
   it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   parametersHaveChipIdentity,
   parseParametersData,
+  parseParametersRecord,
   transformConfigToParameters,
   transformParametersToConfig,
   type ConfigData,
@@ -196,6 +197,92 @@ describe('useParameters helpers', () => {
     expect(parameters['Bottom layer']).toBe('MET2')
     expect(parameters['Top layer']).toBe('MET5')
   })
+  it('reads canonical die_area geometry when Die/Core tables are absent', () => {
+    const parsed = parseParametersRecord({
+      pdk: 'ics55',
+      design: 'demo',
+      die_area: { width: 120, height: 80, utilitization: 0.5, margin: 3 },
+    })
+    expect(parsed.Die.Size).toEqual([120, 80])
+    expect(parsed.Core.Utilitization).toBe(0.5)
+    expect(parsed.Core.Margin).toEqual([3, 3])
+  })
+
+  it('prefers canonical die_area over retained legacy die/core geometry', () => {
+    const parsed = parseParametersRecord({
+      pdk: 'ics55',
+      design: 'demo',
+      die: { size: [10, 20], area: 200 },
+      core: { utilitization: 0.2, margin: [2, 2] },
+      die_area: { width: 120, height: 80, utilitization: 0.5, margin: 3 },
+    })
+    expect(parsed.Die.Size).toEqual([120, 80])
+    expect(parsed.Die.Area).toBe(200)
+    expect(parsed.Core.Utilitization).toBe(0.5)
+    expect(parsed.Core.Margin).toEqual([2, 2])
+  })
+
+  it('rejects bigint parameters instead of rounding them silently', () => {
+    expect(() =>
+      parseParametersRecord({
+        pdk: 'ics55',
+        design: 'demo',
+        max_fanout: 9007199254740993n,
+      }),
+    ).toThrow(/safe integer range/)
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', die: { size: [100n, 200] } }),
+    ).toThrow(/safe integer range/)
+  })
+
+  it('rejects non-finite parameter values instead of propagating them', () => {
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', target_density: Infinity }),
+    ).toThrow(/not a finite number/)
+    expect(() =>
+      parseParametersRecord({
+        pdk: 'ics55',
+        design: 'demo',
+        core: { utilitization: NaN },
+      }),
+    ).toThrow(/not a finite number/)
+  })
+
+  it('rejects TOML date values in GUI-known fields instead of corrupting them', () => {
+    const when = new Date('2026-08-27T00:00:00Z')
+    expect(() => parseParametersRecord({ pdk: 'ics55', design: when })).toThrow(
+      /TOML date/,
+    )
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', top_module: when }),
+    ).toThrow(/TOML date/)
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', max_fanout: when }),
+    ).toThrow(/TOML date/)
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', die: { size: when } }),
+    ).toThrow(/table or array was expected/)
+  })
+
+  it('rejects tables and arrays in GUI-known scalar fields instead of stringifying them', () => {
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: { extra: 'keep-me' } }),
+    ).toThrow(/must be a scalar, not a table/)
+    expect(() => parseParametersRecord({ pdk: 'ics55', design: ['gcd'] })).toThrow(
+      /must be a scalar, not an array/,
+    )
+    expect(() =>
+      parseParametersRecord({ pdk: 'ics55', design: 'demo', clock: { port: 'clk' } }),
+    ).toThrow(/must be a scalar, not a table/)
+    expect(() =>
+      parseParametersRecord({
+        pdk: 'ics55',
+        design: 'demo',
+        sim_program_names: [{ name: 'cpu-tests' }],
+      }),
+    ).toThrow(/must be a scalar, not a table/)
+  })
+
   it('treats empty snapshots as missing chip identity', () => {
     expect(parametersHaveChipIdentity({})).toBe(false)
     expect(parametersHaveChipIdentity({ Die: { Size: [], Area: 0 } })).toBe(false)

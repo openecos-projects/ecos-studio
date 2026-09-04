@@ -31,6 +31,7 @@ import {
   drcInsights,
   floorplanInsights,
   hardenOutputInsights,
+  lecInsights,
   lvsInsights,
   mapHighlights,
   POST_SYNTHESIS_TIMING_CORNER,
@@ -52,6 +53,7 @@ import {
   type StepDashboardFloorplanInsights,
   type StepDesignStatis,
   type StepDashboardHardenInsights,
+  type StepDashboardLecInsights,
   type StepDashboardLvsInsights,
   type StepDashboardMetric,
   type StepDashboardQor,
@@ -86,6 +88,7 @@ export interface StepDashboardData {
   drcInsights: StepDashboardDrcInsights | null
   floorplanInsights: StepDashboardFloorplanInsights | null
   hardenInsights: StepDashboardHardenInsights | null
+  lecInsights: StepDashboardLecInsights | null
   lvsInsights: StepDashboardLvsInsights | null
   rcxInsights: StepDashboardRcxInsights | null
   staInsights: StepDashboardStaInsights | null
@@ -179,10 +182,10 @@ function siblingAnalysisPath(metricsPath: string, filename: string): string {
 
 const stepDashboardCache = new Map<string, StepDashboardData>()
 const floorplanStyleInsightSteps = new Set([
-  'fixfanout',
   'place',
   'cts',
   'legalization',
+  'timing optimization',
   'route',
   'filler',
 ])
@@ -361,6 +364,12 @@ export function useStepDashboardData() {
       const isDrc = resourceStep.name.trim().toLowerCase() === 'drc'
       const isLvs = resourceStep.name.trim().toLowerCase() === 'lvs'
       const isSta = resourceStep.name.trim().toLowerCase() === 'sta'
+      const isLec = ['lec', 'postroutelec'].includes(
+        resourceStep.name.trim().toLowerCase(),
+      )
+      const lecBackendStatus = isLec
+        ? stringInfo(analysisResponse.info, 'lec status')
+        : ''
       const isFloorplanStyleStep = usesFloorplanStyleInsights(resourceStep.name)
       const stepPath =
         stringInfo(analysisResponse.info, 'step feature') ||
@@ -380,6 +389,11 @@ export function useStepDashboardData() {
       const drcStatisticsPath = isDrc
         ? `${resourceStep.directory}/analysis/drc_statis.csv`
         : ''
+      const lecResultFile = resourceStep.resources.output.result
+      const lecResultPath =
+        isLec && resourceFile(lecResultFile) && lecResultFile.exists
+          ? lecResultFile.path
+          : ''
       const featureMapPath = resourceStep.resources.feature.map?.exists
         ? resourceStep.resources.feature.map.path
         : isPlace
@@ -408,6 +422,7 @@ export function useStepDashboardData() {
         synthesisTimingSummaryJson,
         synthesisTimingPathsJson,
         drcStatisticsText,
+        lecResultJson,
       ] = await Promise.all([
         readJson(stepPath),
         readJson(dbPath),
@@ -422,6 +437,7 @@ export function useStepDashboardData() {
         readJson(synthesisTimingSummaryPath),
         readJson(synthesisTimingPathsPath),
         readText(drcStatisticsPath),
+        readJson(lecResultPath),
       ])
       if (version !== requestVersion) return
 
@@ -498,6 +514,7 @@ export function useStepDashboardData() {
         hardenInsights: isHarden
           ? hardenOutputInsights(resourceStep.resources.output)
           : null,
+        lecInsights: isLec ? lecInsights(lecResultJson, lecBackendStatus) : null,
         lvsInsights: isLvs ? lvsInsights(stepJson) : null,
         rcxInsights: isRcx ? rcxInsights(stepJson) : null,
         staInsights: isSta ? staInsights(stepJson) : null,

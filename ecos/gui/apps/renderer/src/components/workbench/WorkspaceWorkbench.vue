@@ -40,6 +40,7 @@ import {
   runningFlowNodeId,
   type FlowStatusNode,
 } from './flowStatus'
+import { sameFlowStepName } from '@/api/type'
 
 const props = withDefaults(
   defineProps<{
@@ -82,10 +83,10 @@ watch(
   () => props.logRerunAffectedSteps,
   (affectedSteps) => {
     if (!logSelectionPinned.value || !selectedLogNode.value) return
-    const affectedLabels = new Set(
-      (affectedSteps ?? []).map((step) => step.trim().toLowerCase()).filter(Boolean),
-    )
-    if (!affectedLabels.has(selectedLogNode.value.label.trim().toLowerCase())) return
+    const affected = (affectedSteps ?? []).map((step) => step.trim()).filter(Boolean)
+    if (!affected.some((step) => sameFlowStepName(step, selectedLogNode.value!.label))) {
+      return
+    }
 
     logSelectionPinned.value = false
     selectedLogNode.value = selectedFlowNode.value

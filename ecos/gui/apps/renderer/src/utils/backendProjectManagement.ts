@@ -23,7 +23,6 @@ import {
 export const FLOW_STEPS = [
   'Synth',
   'Floor',
-  'Fanout',
   'Place',
   'CTS',
   'Legal',
@@ -331,18 +330,24 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   synth: 'Synth',
   floorplan: 'Floor',
   floor: 'Floor',
-  fixfanout: 'Fanout',
-  fanout: 'Fanout',
   place: 'Place',
   placement: 'Place',
   cts: 'CTS',
   legalization: 'Legal',
   legal: 'Legal',
+  // Timing Opt runs between Legal and Route; report it under the preceding
+  // coarse step. parseWorkspaceFlowStateMap merges duplicate coarse entries
+  // failure-first so a failed Timing Opt still fails the workspace.
+  timingopt: 'Legal',
+  timingoptimization: 'Legal',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  // postRouteLec runs between Filler and RCX; same failure-first rationale.
+  postlec: 'Filler',
+  postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
   gds: 'Harden',
@@ -359,7 +364,6 @@ const RUNTIME_STEP_ARTIFACTS: Record<
 > = {
   Synth: { directory: 'Synthesis_yosys', outputName: 'Synthesis' },
   Floor: { directory: 'Floorplan_ecc', outputName: 'Floorplan' },
-  Fanout: { directory: 'fixFanout_ecc', outputName: 'fixFanout' },
   Place: { directory: 'place_dreamplace', outputName: 'place' },
   CTS: { directory: 'CTS_ecc', outputName: 'CTS' },
   Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
@@ -928,9 +932,30 @@ export function parseWorkspaceFlowStateMap(
     const flowStep = knownFlowStep(name)
     if (!flowStep || !status) return stateMap
 
-    stateMap[flowStep] = status
+    // Timing Opt and postRouteLec alias onto the preceding coarse step; the
+    // aliased gate's state wins whenever it is more urgent than the
+    // predecessor's, so a pending or failed gate keeps the workspace out of
+    // success and blocks branching past it.
+    const existing = stateMap[flowStep]
+    if (existing === undefined || statusUrgency(status) > statusUrgency(existing)) {
+      stateMap[flowStep] = status
+    }
     return stateMap
   }, {})
+}
+
+/** Project-step status severity for merging aliased gates: failed > running > unstart. */
+function statusUrgency(status: ProjectStepStatus): number {
+  switch (status) {
+    case 'failed':
+      return 3
+    case 'running':
+      return 2
+    case 'unstart':
+      return 1
+    default:
+      return 0
+  }
 }
 
 export function nextWorkspaceId(
@@ -1478,7 +1503,6 @@ const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
     'synthesis_wire_count',
   ],
   Floor: ['die_area', 'core_area', 'core_utilization', 'instance_count', 'net_count'],
-  Fanout: ['fanout_max', 'instance_count', 'net_count'],
   Place: [
     'place_congestion_egr_overflow_max',
     'place_congestion_egr_overflow_total',
@@ -1567,8 +1591,7 @@ function stepMetricFromSummary(
 function detailHintForStep(step: FlowStep): string {
   const hints: Record<FlowStep, string> = {
     Synth: 'Open workspace Synthesis for cell type and netlist details.',
-    Floor: 'Open workspace Floorplan for geometry, pin and fanout details.',
-    Fanout: 'Open workspace Fanout for high-fanout net details.',
+    Floor: 'Open workspace Floorplan for geometry and pin details.',
     Place: 'Open workspace Place for density and congestion maps.',
     CTS: 'Open workspace CTS for clock tree and post-CTS congestion.',
     Legal: 'Open workspace Legalization for placement cleanup details.',
@@ -1697,7 +1720,13 @@ function normalizeFlowStep(step: FlowStep | string): FlowStep {
 
 function knownFlowStep(step: FlowStep | string): FlowStep | null {
   if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
+  return (
+    FLOW_STEP_ALIASES[
+      String(step)
+        .toLowerCase()
+        .replace(/[_\-\s]+/g, '')
+    ] ?? null
+  )
 }
 
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {

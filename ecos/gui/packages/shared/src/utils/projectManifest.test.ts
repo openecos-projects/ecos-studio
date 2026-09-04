@@ -4,7 +4,9 @@ import {
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
   nextProjectManifestStage,
+  normalizeProjectManifestFlowStep,
   parseProjectManifest,
+  projectManifestFlowSteps,
   projectManifestProfileFor,
   registerWorkspaceInManifest,
   setQorBaselineInManifest,
@@ -32,6 +34,40 @@ describe('project manifest parsing', () => {
         JSON.stringify({ ...legacy, project_type: 'unsupported-project-type' }),
       ),
     ).toThrow('project_type must be backend or frontend')
+  })
+
+  it('places LVS after DRC and resolves lvs aliases to that catalog step', () => {
+    expect(projectManifestFlowSteps).toEqual([
+      'Synth',
+      'Floor',
+      'Place',
+      'CTS',
+      'Legal',
+      'Route',
+      'DRC',
+      'LVS',
+      'Filler',
+      'RCX',
+      'STA',
+      'Harden',
+    ])
+    expect(normalizeProjectManifestFlowStep('lvs')).toBe('LVS')
+    expect(normalizeProjectManifestFlowStep('LVS')).toBe('LVS')
+    expect(normalizeProjectManifestFlowStep('DRC')).toBe('DRC')
+    const afterDrc = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/work/gcd/ws_from_drc',
+        sourceWorkspaceId: 'ws_0001',
+        sourceStep: 'DRC',
+      },
+    )
+    expect(afterDrc.workspaces[0]?.start_step).toBe('LVS')
   })
 
   it('uses frontend stages and keeps backend-only QoR state disabled', () => {
@@ -85,6 +121,44 @@ describe('project manifest parsing', () => {
         baseDesign: { rtl_list: ['/work/cpu/rtl/cpu_top.sv'] },
       }),
     ).toThrow('QoR baselines are only available for backend projects')
+  })
+
+  it('maps Timing Opt and post-route LEC boundaries to the preceding catalog step', () => {
+    expect(normalizeProjectManifestFlowStep('Timing optimization')).toBe('Legal')
+    expect(normalizeProjectManifestFlowStep('timing-opt')).toBe('Legal')
+    expect(normalizeProjectManifestFlowStep('postRouteLec')).toBe('Filler')
+    expect(normalizeProjectManifestFlowStep('post_route_lec')).toBe('Filler')
+    expect(normalizeProjectManifestFlowStep('Post-LEC')).toBe('Filler')
+
+    const draft = createProjectManifestDraft({
+      rootPath: '/work/gcd',
+      name: 'gcd',
+      designName: 'gcd',
+    })
+    const afterLec = registerWorkspaceInManifest(draft, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_from_lec',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'postRouteLec',
+    })
+    expect(afterLec.workspaces[0]?.branch_from?.source_step).toBe('Filler')
+    expect(afterLec.workspaces[0]?.start_step).toBe('RCX')
+
+    const afterTimingOpt = registerWorkspaceInManifest(afterLec, {
+      projectRoot: '/work/gcd',
+      workspacePath: '/work/gcd/ws_from_timing_opt',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'Timing optimization',
+    })
+    expect(afterTimingOpt.workspaces[1]?.branch_from?.source_step).toBe('Legal')
+    expect(afterTimingOpt.workspaces[1]?.start_step).toBe('Route')
+  })
+
+  it('maps removed Fanout boundaries to Floor without restoring the catalog step', () => {
+    expect(projectManifestFlowSteps).not.toContain('Fanout')
+    expect(normalizeProjectManifestFlowStep('Fanout')).toBe('Floor')
+    expect(normalizeProjectManifestFlowStep('fixFanout')).toBe('Floor')
+    expect(nextProjectManifestStage('backend', 'fixFanout')).toBe('Place')
   })
 
   it('records an optional MPC association with the canonical spec path', () => {

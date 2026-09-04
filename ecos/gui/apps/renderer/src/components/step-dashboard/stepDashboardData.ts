@@ -150,6 +150,14 @@ export interface StepDashboardLvsInsights {
   violations: StepDashboardLvsViolation[]
 }
 
+export type StepDashboardLecStatus = 'proven' | 'incomplete' | 'stale' | 'unavailable'
+
+export interface StepDashboardLecInsights {
+  status: StepDashboardLecStatus
+  tone: StepDashboardTone
+  metrics: StepDashboardSynthesisValue[]
+}
+
 export interface StepDashboardStaCorner {
   id: string
   staCorner: string
@@ -390,7 +398,6 @@ function stepSection(
     rcx: 'rcx',
     harden: 'harden',
     filler: 'filler',
-    fixfanout: 'fixFanout',
   }
   const directKey = keyByStep[canonical]
   if (directKey) return record(value[directKey])
@@ -844,6 +851,98 @@ export function lvsInsights(value: unknown): StepDashboardLvsInsights | null {
   })
   if (!entities.length && !connections.length && !violations.length) return null
   return { entities, connections, violations }
+}
+
+function formatByteSize(value: number): string {
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${value} B`
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/
+
+function isNetlistSize(value: number | null): value is number {
+  return value !== null && Number.isInteger(value) && value >= 0
+}
+
+/**
+ * Parses the yosys_lec result JSON (`output/<design>_<step>_result.json`).
+ * `backendStatus` is the Electron-computed ECC-equivalent status
+ * (missing/incomplete/stale/proven, rehashed against the current netlists) and
+ * wins over the recorded status whenever present.
+ */
+export function lecInsights(
+  value: unknown,
+  backendStatus?: string,
+): StepDashboardLecInsights | null {
+  const source = record(value)
+  if (!source) return null
+  const goldenVerilog = textValue(source.golden_verilog, '')
+  const gateVerilog = textValue(source.gate_verilog, '')
+  const goldenSha256 = textValue(source.golden_sha256, '')
+  const gateSha256 = textValue(source.gate_sha256, '')
+  const goldenSizeBytes = finiteNumber(source.golden_size_bytes)
+  const gateSizeBytes = finiteNumber(source.gate_size_bytes)
+
+  // ECC only treats a proven result as valid with complete netlist paths,
+  // real SHA-256 digests, and non-negative integer sizes; a partial or
+  // malformed payload must not render as a proof.
+  const complete =
+    Boolean(goldenVerilog && gateVerilog) &&
+    SHA256_HEX.test(goldenSha256) &&
+    SHA256_HEX.test(gateSha256) &&
+    isNetlistSize(goldenSizeBytes) &&
+    isNetlistSize(gateSizeBytes)
+  const rawStatus =
+    (backendStatus ?? '').trim().toLowerCase() ||
+    textValue(source.status, '').trim().toLowerCase()
+  const status: StepDashboardLecStatus =
+    rawStatus === 'stale'
+      ? 'stale'
+      : rawStatus === 'proven' && complete
+        ? 'proven'
+        : rawStatus === 'incomplete'
+          ? 'incomplete'
+          : 'unavailable'
+  const tone: StepDashboardTone =
+    status === 'proven'
+      ? 'good'
+      : status === 'incomplete'
+        ? 'bad'
+        : status === 'stale'
+          ? 'warn'
+          : 'neutral'
+
+  const metrics: StepDashboardSynthesisValue[] = []
+  if (goldenVerilog)
+    metrics.push({
+      id: 'lec-golden-netlist',
+      label: 'Golden netlist',
+      value: goldenVerilog,
+    })
+  if (gateVerilog)
+    metrics.push({ id: 'lec-gate-netlist', label: 'Gate netlist', value: gateVerilog })
+  if (goldenSha256)
+    metrics.push({
+      id: 'lec-golden-sha256',
+      label: 'Golden SHA-256',
+      value: goldenSha256,
+    })
+  if (gateSha256)
+    metrics.push({ id: 'lec-gate-sha256', label: 'Gate SHA-256', value: gateSha256 })
+  if (goldenSizeBytes !== null)
+    metrics.push({
+      id: 'lec-golden-size',
+      label: 'Golden size',
+      value: formatByteSize(goldenSizeBytes),
+    })
+  if (gateSizeBytes !== null)
+    metrics.push({
+      id: 'lec-gate-size',
+      label: 'Gate size',
+      value: formatByteSize(gateSizeBytes),
+    })
+  return { status, tone, metrics }
 }
 
 export function rcxInsights(value: unknown): StepDashboardRcxInsights | null {
@@ -1407,9 +1506,9 @@ export function stepFeatureInsights(
   const metrics =
     normalizedStep === 'place'
       ? placeMetrics(mapValue)
-      : normalizedStep === 'fixfanout' ||
-          normalizedStep === 'legalization' ||
-          normalizedStep === 'filler'
+      : normalizedStep === 'legalization' ||
+          normalizedStep === 'filler' ||
+          normalizedStep === 'timing optimization'
         ? floorplanMetrics(databaseValue)
         : stepFeatureMetrics(stepValue)
   const snapshots = floorplanSnapshots(databaseValue)

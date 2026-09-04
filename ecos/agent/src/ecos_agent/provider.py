@@ -1381,7 +1381,7 @@ class EcosAgentProvider:
         session.rerun_stage = stage
         parameter_values = resolver.parameter_values(discovery.source, stage)
         if not parameter_values:
-            # Stages like fixFanout are rerunnable but have no authorized knobs yet.
+            # Some stages are rerunnable but have no authorized knobs yet.
             session.rerun_parameter_patch = []
             session.phase = "rerun_scope"
             self._emit(

@@ -13,7 +13,7 @@ import {
 
 describe('projectManagementWorkspaceSummaryPaths', () => {
   it('is the unique bounded summary allowlist derived from every analysis step', () => {
-    expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(13)
+    expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(12)
     expect(projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)).toEqual(
       expect.arrayContaining(['DRC', 'LVS', 'Filler']),
     )
@@ -77,7 +77,6 @@ describe('projectManagementWorkspaceStepConfigPaths', () => {
       'config/cts_ecc.json',
       'config/route_ecc.json',
       'config/drc_ecc.json',
-      'config/fixfanout_ecc.json',
       'config/filler_ecc.json',
       'config/rcx_ecc.json',
       'config/sta_ecc.json',
@@ -87,7 +86,6 @@ describe('projectManagementWorkspaceStepConfigPaths', () => {
       'config/cts_default_config.json',
       'config/rt_default_config.json',
       'config/drc_default_config.json',
-      'config/no_default_config_fixfanout.json',
       'config/pl_default_config.json',
       'config/rcx.json',
       'config/sta.json',

@@ -126,7 +126,7 @@ Project Management can create a new workspace from an existing workspace step ou
 In this derived flow:
 
 - **New Workspace** shows where the workspace comes from: project, source workspace, and source step.
-- **Flow Setup** starts from the next runnable step. For a `Floorplan` source, the new workspace starts at `fixFanout`; `Synthesis` and `Floorplan` are shown as reused and cannot be selected, and the Start Step stays pinned to the source output step.
+- **Flow Setup** starts from the next runnable step. For a `Floorplan` source, the new workspace starts at `place`; `Synthesis` and `Floorplan` are shown as reused and cannot be selected, and the Start Step stays pinned to the source output step.
 - **Design Files** reuses the source workspace data. `DEF` comes from the selected step output, while Verilog and `SDC` default to the source workspace configuration.
 - **PDK Config** defaults to the source workspace PDK selection, including tech LEF, cell LEF, Liberty, or ECC default PDK configuration.
 - **Spec Setting** defaults to the source workspace parameters.

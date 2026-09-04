@@ -57,6 +57,7 @@ import {
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
   type DesktopAgentInterruptRequest,
+  type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
@@ -176,6 +177,18 @@ export interface DesktopBridgeServices {
     isProjectDirectory(path: string): Promise<boolean>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     readOptionalProjectTextFile(path: string): Promise<string | null>
+    readWorkspaceParameters(
+      workspacePath: string,
+    ): Promise<Record<string, unknown> | null>
+    hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean>
+    editWorkspaceParameters(
+      workspacePath: string,
+      edits: { json_path: (string | number)[]; value: unknown }[],
+    ): Promise<{ format: 'toml' | 'json'; path: string }>
+    applyWorkspaceParameterWrites(
+      workspacePath: string,
+      writes: DesktopAgentWorkspaceParameterWrite[],
+    ): Promise<void>
     readProjectTextFile(path: string): Promise<string>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail(
@@ -244,6 +257,10 @@ export interface DesktopBridgeServices {
     readHome(): Promise<Record<string, unknown> | null>
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
+    writeParameters(request: {
+      parameters: Record<string, unknown>
+      workspace: string
+    }): Promise<{ format: 'toml' | 'json'; path: string }>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }
   resourceManagerService: {
@@ -1476,6 +1493,50 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.workspaceReadWorkspaceParameters,
+    async (_event, workspacePath) => {
+      return await services.workspaceService.readWorkspaceParameters(
+        workspacePath as string,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceHasConfigShadow,
+    async (_event, workspacePath) => {
+      return await services.workspaceService.hasWorkspaceConfigShadow(
+        workspacePath as string,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceEditWorkspaceParameters,
+    async (_event, workspacePath, edits) => {
+      return await services.workspaceService.editWorkspaceParameters(
+        workspacePath as string,
+        edits as { json_path: (string | number)[]; value: unknown }[],
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceApplyWorkspaceParameterWrites,
+    async (_event, workspacePath, writes) => {
+      if (typeof workspacePath !== 'string') {
+        throw new Error('Workspace path must be a string')
+      }
+      if (!Array.isArray(writes)) {
+        throw new Error('Workspace parameter writes must be an array')
+      }
+      await services.workspaceService.applyWorkspaceParameterWrites(
+        workspacePath,
+        writes as DesktopAgentWorkspaceParameterWrite[],
+      )
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.workspaceReadProjectTextFileTail,
     async (_event, path, maxChars) => {
       return await services.workspaceService.readProjectTextFileTail(
@@ -1725,6 +1786,26 @@ export function registerIpc(
   handle(desktopApiIpcChannels.workspaceResourcesReadParameters, async () => {
     return await services.workspaceResourceService.readParameters()
   })
+
+  handle(
+    desktopApiIpcChannels.workspaceResourcesWriteParameters,
+    async (_event, request) => {
+      if (
+        !isRecord(request) ||
+        !isRecord(request.parameters) ||
+        typeof request.workspace !== 'string' ||
+        request.workspace.trim() === ''
+      ) {
+        throw new Error(
+          'Workspace parameters write requires a parameters object and workspace path',
+        )
+      }
+      return await services.workspaceResourceService.writeParameters({
+        parameters: request.parameters,
+        workspace: request.workspace,
+      })
+    },
+  )
 
   handle(
     desktopApiIpcChannels.workspaceResourcesResolveStepInfo,

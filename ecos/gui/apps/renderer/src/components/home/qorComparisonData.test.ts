@@ -92,7 +92,6 @@ describe('Home QoR comparison data', () => {
   it('maps dashboard step labels to project QoR steps', () => {
     expect(homeQorFlowStepForLabel('Synthesis')).toBe('Synth')
     expect(homeQorFlowStepForLabel('Floorplan')).toBe('Floor')
-    expect(homeQorFlowStepForLabel('fixFanout')).toBe('Fanout')
     expect(homeQorFlowStepForLabel('LVS')).toBe('LVS')
     expect(homeQorFlowStepForLabel('lvs')).toBe('LVS')
     expect(homeQorFlowStepForLabel('unknown')).toBeNull()

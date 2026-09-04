@@ -35,6 +35,10 @@ export const desktopApiIpcChannels = {
   workspaceOpenWaveformExternal: 'workspace:open-waveform-external',
   workspaceReadProjectTextFile: 'workspace:read-project-text-file',
   workspaceReadOptionalProjectTextFile: 'workspace:read-optional-project-text-file',
+  workspaceReadWorkspaceParameters: 'workspace:read-workspace-parameters',
+  workspaceHasConfigShadow: 'workspace:has-config-shadow',
+  workspaceEditWorkspaceParameters: 'workspace:edit-workspace-parameters',
+  workspaceApplyWorkspaceParameterWrites: 'workspace:apply-workspace-parameter-writes',
   workspaceReadProjectTextFileTail: 'workspace:read-project-text-file-tail',
   workspaceReadOptionalProjectTextFileTail:
     'workspace:read-optional-project-text-file-tail',
@@ -68,6 +72,7 @@ export const desktopApiIpcChannels = {
   workspaceResourcesReadHome: 'workspace-resources:read-home',
   workspaceResourcesReadFlow: 'workspace-resources:read-flow',
   workspaceResourcesReadParameters: 'workspace-resources:read-parameters',
+  workspaceResourcesWriteParameters: 'workspace-resources:write-parameters',
   workspaceResourcesResolveStepInfo: 'workspace-resources:resolve-step-info',
   resourcesList: 'resources:list',
   resourcesGet: 'resources:get',

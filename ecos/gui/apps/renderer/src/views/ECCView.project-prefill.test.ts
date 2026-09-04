@@ -12,23 +12,24 @@ describe('ECCView project management handoff', () => {
     expect(source).not.toContain('sourceIteration')
   })
 
-  it('keeps optional source workspace defaults from blocking the wizard', () => {
+  it('aborts source prefill on guard failures instead of falling back to defaults', () => {
+    const loaderStart = source.indexOf('async function loadSourceWorkspaceInitialConfig')
+    const loaderEnd = source.indexOf('function mergeBranchInitialConfig', loaderStart)
+    const loaderSource = source.slice(loaderStart, loaderEnd)
+    // Missing files are tolerated as null reads; parse and lossless-conversion
+    // failures propagate and abort the prefill instead of becoming wizard defaults.
+    expect(loaderSource).not.toContain('catch (error)')
+
     const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
     const prefillEnd = source.indexOf(
-      'async function loadSourceWorkspaceInitialConfig',
+      'function projectManagedWizardInitialConfig',
       prefillStart,
     )
     const prefillSource = source.slice(prefillStart, prefillEnd)
-    const catchIndex = prefillSource.indexOf('catch (error)')
-    const showWizardIndex = prefillSource.lastIndexOf('showWizard.value = true')
-
-    expect(prefillSource).toContain('let sourceWorkspaceConfig')
-    expect(prefillSource).toMatch(
-      /sourceWorkspaceConfig\s*=\s*await loadSourceWorkspaceInitialConfig/,
+    expect(prefillSource).toContain('must abort the prefill')
+    expect(prefillSource.indexOf('await loadSourceWorkspaceInitialConfig')).toBeLessThan(
+      prefillSource.indexOf('showWizard.value = true'),
     )
-    expect(catchIndex).toBeGreaterThan(-1)
-    expect(prefillSource).toContain('Failed to load source workspace defaults')
-    expect(showWizardIndex).toBeGreaterThan(catchIndex)
   })
 
   it('prefills branch artifact origins from project management query parameters', () => {
@@ -55,7 +56,7 @@ describe('ECCView project management handoff', () => {
   it('reuses only source workspace config files when creating a branch workspace', () => {
     expect(source).toContain('loadSourceWorkspaceInitialConfig')
     expect(source).toContain('sourceWorkspacePath')
-    expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
+    expect(source).toContain('readWorkspaceParametersFile(sourceWorkspacePath)')
     expect(source).not.toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
     expect(source).toContain("readOptionalProjectTextFile('config/db_ecc.json'")
@@ -71,28 +72,6 @@ describe('ECCView project management handoff', () => {
     const loaderSource = source.slice(loaderStart, loaderEnd)
     expect(loaderSource).not.toContain('origin_verilog:')
     expect(loaderSource).not.toContain('origin_def:')
-  })
-
-  it('still opens the workspace wizard when source workspace prefill cannot be read', () => {
-    const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
-    const prefillEnd = source.indexOf(
-      'function projectManagedWizardInitialConfig',
-      prefillStart,
-    )
-    const prefillSource = source.slice(prefillStart, prefillEnd)
-    const loaderStart = source.indexOf('async function loadSourceWorkspaceInitialConfig')
-    const loaderEnd = source.indexOf('function mergeBranchInitialConfig', loaderStart)
-    const loaderSource = source.slice(loaderStart, loaderEnd)
-
-    expect(loaderSource).toContain('try {')
-    expect(loaderSource).toContain('catch (error)')
-    expect(loaderSource).toContain(
-      "console.warn('Failed to load source workspace config for wizard prefill.', error)",
-    )
-    expect(loaderSource).toContain('return undefined')
-    expect(prefillSource.indexOf('await loadSourceWorkspaceInitialConfig')).toBeLessThan(
-      prefillSource.indexOf('showWizard.value = true'),
-    )
   })
 
   it('records project managed workspaces into project.json after the existing wizard creates them', () => {
@@ -243,5 +222,26 @@ describe('ECCView project management handoff', () => {
     const openRecentSource = source.slice(openRecentStart, openRecentEnd)
     expect(openProjectSource).not.toContain('requestOpenStepConfigAfterCreate')
     expect(openRecentSource).not.toContain('requestOpenStepConfigAfterCreate')
+  })
+})
+
+describe('branch prefill canonical parameters', () => {
+  it('reads canonical nested die size and core margin from params.toml workspaces', () => {
+    const normalizeStart = source.indexOf('function normalizeSourceParameters')
+    const normalizeEnd = source.indexOf(
+      'function normalizeSourcePdkConfig',
+      normalizeStart,
+    )
+    const normalizeSource = source.slice(normalizeStart, normalizeEnd)
+    expect(normalizeSource).toContain('die.size')
+    expect(normalizeSource).toContain('die_area')
+    expect(normalizeSource).toContain('core.margin')
+    expect(normalizeSource).toContain('dieSize[0]')
+    expect(normalizeSource).toContain('dieSize[1]')
+    expect(normalizeSource).toContain('hasCanonicalDieSize')
+    expect(normalizeSource).toContain(
+      "hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height'",
+    )
+    expect(normalizeSource).toContain('scalarMarginFromCore(coreMargin')
   })
 })

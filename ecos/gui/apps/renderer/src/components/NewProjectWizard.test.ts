@@ -253,14 +253,15 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     for (const step of [
       'Synthesis',
       'Floorplan',
-      'fixFanout',
       'place',
       'CTS',
       'legalization',
+      'Timing optimization',
       'route',
       'drc',
       'lvs',
       'filler',
+      'postRouteLec',
       'RCX',
       'sta',
       'Harden',
@@ -270,6 +271,28 @@ describe('NewProjectWizard workspace wizard redesign', () => {
 
     expect(source).toContain('selectedFlowSteps')
     expect(source).toContain('setFlowBoundary')
+  })
+
+  it('normalizes flow step aliases case- and separator-insensitively like ECC', () => {
+    expect(source).toContain("postlec: 'postRouteLec'")
+    expect(source).toContain("postroutelec: 'postRouteLec'")
+    expect(source).toContain('candidate.toLowerCase().replace(/[_\\-\\s]+/g,')
+  })
+
+  it('disallows postRouteLec as a fresh-workspace start step on every entry path', () => {
+    expect(source).toContain(
+      "FLOW_START_DISABLED_STEPS: ReadonlySet<FlowStepName> = new Set(['postRouteLec'])",
+    )
+    expect(source).toContain('function isFlowStepStartDisabled')
+    expect(source).toContain(':disabled="isFlowStepStartDisabled(step.name)"')
+    expect(source).toContain('function normalizeFlowStartStep')
+    expect(source).toContain('if (FLOW_START_DISABLED_STEPS.has(stepName)) return')
+    const initStart = source.indexOf('const flowStartStep = ref<FlowStepName>(')
+    const initEnd = source.indexOf('const flowEndStep = ref<FlowStepName>(')
+    expect(source.slice(initStart, initEnd)).toContain('normalizeFlowStartStep(')
+    const prefillStart = source.indexOf('function applyProjectFlowDefaults')
+    const prefillEnd = source.indexOf('function applyProjectDesignFileDefaults')
+    expect(source.slice(prefillStart, prefillEnd)).toContain('normalizeFlowStartStep(')
   })
 
   it('uses neutral connector lines between flow setup step cards', () => {
@@ -449,7 +472,6 @@ describe('NewProjectWizard workspace wizard redesign', () => {
       'Clock Signal Name',
       'Die Area',
       'Origin Core Utilization',
-      'Core Margin',
       'Frequency max [MHz]',
       'Max Fanout',
     ]) {
@@ -457,6 +479,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     }
 
     expect(source).toContain('dieAreaMode')
+    expect(source).not.toContain('Core Margin')
     expect(source).not.toContain('Floorplan mode')
     expect(source).not.toContain('Placement Defaults')
     expect(source).not.toContain('Target Density')
