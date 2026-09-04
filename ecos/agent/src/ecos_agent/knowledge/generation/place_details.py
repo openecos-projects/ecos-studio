@@ -10,6 +10,9 @@ PLACE_SOURCE_PATHS = {
     "ecos.params": "ecc/chipcompiler/cli/project/params.py",
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",
     "dreamplace.module": "ecc/chipcompiler/tools/ecc_dreamplace/module.py",
+    "dreamplace.parameter_runtime_report": (
+        "ecc/chipcompiler/tools/ecc_dreamplace/parameter_runtime_report.py"
+    ),
     "dreamplace.placer": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/Placer.py",
     "dreamplace.basic": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/BasicPlace.py",
     "dreamplace.database": "ecc/chipcompiler/thirdparty/ecc-dreamplace/dreamplace/macroPlaceDB.py",
@@ -185,7 +188,9 @@ def _add_parameters(entries: list[dict[str, object]], documents: dict[str, list[
             "routability_opt_flag": ("dreamplace.objective", "dreamplace.nonlinear"),
             "density_weight": ("dreamplace.objective", "dreamplace.nonlinear"),
         }
-        evidence += consumer_evidence.get(name, ())
+        consumer_sources = consumer_evidence.get(name, ())
+        if consumer_sources:
+            evidence += ("dreamplace.parameter_runtime_report", *consumer_sources)
         aliases = (name, name.replace("_", " "), f"DreamPlace {name}")
         if name == "stop_overflow":
             aliases += ("target overflow", "placement target overflow", "placer target overflow")
