@@ -16,7 +16,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { writeJsonAtomic } from './pdkInventoryMigration'
 import { ResourceManagerService } from './resourceManagerService'
@@ -7868,6 +7868,7 @@ describe('ResourceManagerService external bundle download', () => {
     root: string,
     archive: { path: string; sha256: string; size: number },
     registryOverrides: Record<string, unknown> = {},
+    onArchiveFetch?: () => Promise<void>,
   ): ResourceManagerService {
     const registry = {
       schema_version: 2,
@@ -7903,6 +7904,7 @@ describe('ResourceManagerService external bundle download', () => {
         if (String(url).startsWith('https://registry.example/')) {
           return new Response(JSON.stringify(registry))
         }
+        await onArchiveFetch?.()
         return new Response(await readFile(archive.path))
       }),
       resourcesDir: join(root, 'state', 'resources'),
@@ -7993,5 +7995,63 @@ describe('ResourceManagerService external bundle download', () => {
     unsubscribe()
     await service.installResource('tool:ecc')
     expect(manifestChange).toHaveBeenCalledTimes(2)
+  })
+
+  it('publishes a cancelled event when the download signal aborts', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const service = createDownloadService(root, archive)
+    const events: Array<Record<string, unknown>> = []
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      service.downloadRegistryAssetToDirectory({
+        resourceId: 'tool:ecc',
+        version: '0.1.0-alpha.11',
+        destinationDir: join(root, 'bundle-home', 'binaries-root'),
+        listener: (event) => events.push({ ...event }),
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/Cancelled download/)
+
+    expect(events.at(-1)).toMatchObject({ phase: 'cancelled' })
+  })
+
+  it('serializes concurrent downloads so their staging never interleaves', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    let inFlight = 0
+    let maxInFlight = 0
+    const service = createDownloadService(root, archive, {}, async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      inFlight -= 1
+    })
+    const destinations = [
+      join(root, 'bundle-home', 'one'),
+      join(root, 'bundle-home', 'two'),
+    ]
+
+    await Promise.all(
+      destinations.map((destinationDir) =>
+        service.downloadRegistryAssetToDirectory({
+          resourceId: 'tool:ecc',
+          version: '0.1.0-alpha.11',
+          destinationDir,
+        }),
+      ),
+    )
+
+    expect(maxInFlight).toBe(1)
+    for (const destinationDir of destinations) {
+      await expect(readFile(join(destinationDir, 'bin', 'ecc'), 'utf8')).resolves.toBe(
+        '#!/bin/sh\n',
+      )
+    }
+    // No staging archives are left behind next to the destinations.
+    const siblings = await readdir(dirname(destinations[0]))
+    expect(siblings.filter((entry) => entry.includes('.archive-'))).toEqual([])
   })
 })

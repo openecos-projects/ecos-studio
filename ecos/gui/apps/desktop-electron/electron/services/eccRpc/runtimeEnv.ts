@@ -73,7 +73,7 @@ function resolvePackagedResourcesPath(options: EccRuntimeEnvOptions): string {
 /** Host data home shared with the Resource Manager and the CLI installer. */
 export function resolveDataHome(options: EccRuntimeEnvOptions): string {
   return (
-    options.dataHome ?? options.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')
+    options.dataHome || options.env.XDG_DATA_HOME || join(homedir(), '.local', 'share')
   )
 }
 

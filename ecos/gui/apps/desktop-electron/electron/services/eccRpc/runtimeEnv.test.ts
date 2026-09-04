@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createEccRuntimeEnv, resolveEccExecutable } from './runtimeEnv'
+import { createEccRuntimeEnv, resolveDataHome, resolveEccExecutable } from './runtimeEnv'
 
 function createRepoFixture(): {
   appPath: string
@@ -562,5 +562,34 @@ describe('bundle home resolution', () => {
       `${join(binariesDir, '_internal', 'ecc_tools_bin', 'lib')}:/existing/libs`,
     )
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+  })
+})
+
+describe('resolveDataHome', () => {
+  it('treats an empty XDG_DATA_HOME as unset', () => {
+    expect(
+      resolveDataHome({
+        appPath: '/app',
+        cwd: '/app',
+        env: { XDG_DATA_HOME: '' },
+        isPackaged: true,
+        platform: 'linux',
+        userDataPath: '/user-data',
+      }),
+    ).toBe(join(homedir(), '.local', 'share'))
+  })
+
+  it('prefers the explicit dataHome option', () => {
+    expect(
+      resolveDataHome({
+        appPath: '/app',
+        cwd: '/app',
+        env: { XDG_DATA_HOME: '/env-data' },
+        isPackaged: true,
+        platform: 'linux',
+        userDataPath: '/user-data',
+        dataHome: '/option-data',
+      }),
+    ).toBe('/option-data')
   })
 })
