@@ -109,6 +109,7 @@ export class CliInstallerService {
   private readonly resolveNow: () => Date
 
   private ensurePromise: Promise<string> | null = null
+  private shimInstallPromise: Promise<void> | null = null
   private uninstalling = false
   private lastFailure: string | null = null
   private lastShimFailure: string | null = null
@@ -338,6 +339,20 @@ export class CliInstallerService {
     if (this.platform !== 'linux') {
       throw new Error('The ecos-ecc shim currently supports Linux only')
     }
+    if (this.uninstalling) {
+      throw new Error('An uninstall is in progress; retry the install afterwards')
+    }
+    if (this.shimInstallPromise) {
+      return await this.shimInstallPromise
+    }
+    const task = this.runInstallShim()
+    this.shimInstallPromise = task.finally(() => {
+      this.shimInstallPromise = null
+    })
+    return await this.shimInstallPromise
+  }
+
+  private async runInstallShim(): Promise<void> {
     if (!this.isPackaged) {
       // Ensure the repository wrapper shim (runtime-bin/ecc) and the shared
       // env file exist before the shim references them.
@@ -390,7 +405,7 @@ export class CliInstallerService {
     if (this.platform !== 'linux') {
       throw new Error('The ECC bundle installer currently supports Linux only')
     }
-    if (this.ensurePromise) {
+    if (this.ensurePromise || this.shimInstallPromise) {
       throw new Error(
         'An install is in progress; wait for it to finish before uninstalling',
       )

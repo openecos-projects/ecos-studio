@@ -521,7 +521,6 @@ describe('CliInstallerService', () => {
       spawnResult: { code: 0, output: 'ecc 1.0' },
     })
     const dataDir = fixture.dataDir
-    const binDir = fixture.binDir
 
     // A plain (drift-style) install is in flight while a second caller asks
     // for the shim to be installed as part of its deduplicated request.
@@ -530,7 +529,7 @@ describe('CliInstallerService', () => {
     releaseDownload!()
     await Promise.all([firstInstall, secondInstall])
 
-    expect(existsSync(join(binDir, 'ecos-ecc'))).toBe(true)
+    expect(existsSync(join(fixture.binDir, 'ecos-ecc'))).toBe(true)
     expect(existsSync(join(dataDir, 'current', 'binaries', 'ecc'))).toBe(true)
   })
 
@@ -556,9 +555,6 @@ describe('CliInstallerService', () => {
       resourceManager: resourceManagerWithGate,
       spawnResult: { code: 0, output: 'ecc 1.0' },
     })
-    const dataDir = fixture.dataDir
-    const binDir = fixture.binDir
-
     const firstInstall = fixture.service.ensureBundle()
     const secondInstall = fixture.service.ensureBundle({ installShim: true })
     const uninstallAttempt = fixture.service.uninstall().catch((error: Error) => error)
@@ -568,10 +564,9 @@ describe('CliInstallerService', () => {
     expect(uninstallError.message).toContain('An install is in progress')
 
     // The tracked install completes and leaves a usable CLI.
-    expect(existsSync(join(binDir, 'ecos-ecc'))).toBe(true)
+    expect(existsSync(join(fixture.binDir, 'ecos-ecc'))).toBe(true)
     const status = await fixture.service.status()
     expect(status.status).toBe('ready')
-    void dataDir
   })
 
   it('records the shim failure remediation when the shim cannot be written', async () => {

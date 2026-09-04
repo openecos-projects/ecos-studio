@@ -194,12 +194,22 @@ function getDesktopServices() {
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         // Re-resolve the executable on every start so a bundle downloaded by
-        // the CLI installer (or refreshed by drift sync) is picked up
-        // without an app restart.
-        resolveLaunch: async () => ({
-          command: resolveEccExecutable(eccRuntimeOptions) ?? 'ecc',
-          args: ['rpc', 'serve', '--stdio', '--persistent-db'],
-        }),
+        // the CLI installer (or refreshed by drift sync) is picked up without
+        // an app restart. While first-use acquisition is still running there
+        // is deliberately no PATH fallback: launching a wrong/unavailable
+        // binary would be harder to diagnose than a clear error.
+        resolveLaunch: async () => {
+          const executable = resolveEccExecutable(eccRuntimeOptions)
+          if (!executable) {
+            throw new Error(
+              'The ECC core component is not ready yet. Wait for the first-use download to finish (see Command line tools) and try again.',
+            )
+          }
+          return {
+            command: executable,
+            args: ['rpc', 'serve', '--stdio', '--persistent-db'],
+          }
+        },
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),

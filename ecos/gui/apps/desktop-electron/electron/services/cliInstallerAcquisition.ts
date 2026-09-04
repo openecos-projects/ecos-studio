@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, constants as fsConstants, existsSync } from 'node:fs'
+import {
+  createReadStream,
+  constants as fsConstants,
+  existsSync,
+  lstatSync,
+} from 'node:fs'
 import {
   access,
   cp,
@@ -13,7 +18,11 @@ import {
 } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CliBundleInstallRecord } from './cliInstallerArtifacts'
-import { executableNameFor, readInstallRecord } from './cliInstallerArtifacts'
+import {
+  executableNameFor,
+  readInstallRecord,
+  resolveContainedSymlinkDir,
+} from './cliInstallerArtifacts'
 import { runSelfCheck, type CliSpawnLike } from './cliSelfCheck'
 import { electronLogger } from './logger'
 
@@ -122,17 +131,27 @@ export async function acquireAndActivateBundle(ctx: AcquisitionContext): Promise
   })
   await rm(stagingDir, { force: true, recursive: true })
   await mkdir(stagingDir, { recursive: true })
+  let placedDir: string | null = null
   try {
     const versionDirName = await acquireBundleInto(ctx, stagingDir)
     // finalize owns staging placement; the single switchCurrent here is the
     // only activation point, and superseded directories are deleted after it.
-    const { name, staleDir } = await finalizeStagedBundle(ctx, stagingDir, versionDirName)
+    const { name, staleDir, placedPath } = await finalizeStagedBundle(
+      ctx,
+      stagingDir,
+      versionDirName,
+    )
+    placedDir = placedPath
     await switchCurrent(ctx.dataDir, name)
     if (staleDir) {
       await rm(staleDir, { force: true, recursive: true }).catch(() => undefined)
     }
   } catch (error) {
     await rm(stagingDir, { force: true, recursive: true }).catch(() => undefined)
+    // A placed-but-unactivated directory would otherwise leak on every retry.
+    if (placedDir) {
+      await rm(placedDir, { force: true, recursive: true }).catch(() => undefined)
+    }
     throw error
   }
   const activeTarget = await readlink(join(ctx.dataDir, 'current')).catch(() => null)
@@ -247,10 +266,24 @@ async function finalizeStagedBundle(
   ctx: AcquisitionContext,
   stagingDir: string,
   versionDirName: string,
-): Promise<{ name: string; staleDir: string | null }> {
+): Promise<{ name: string; staleDir: string | null; placedPath: string | null }> {
   const versionDir = join(ctx.dataDir, versionDirName)
-  if (existsSync(versionDir)) {
-    const existing = await readInstallRecord(versionDir, ctx.platform)
+  // Only treat an existing entry as a keepable install when it physically
+  // resolves inside the bundle home (a symlinked version path must not
+  // redirect env writes outside it).
+  let entryExists = false
+  try {
+    lstatSync(versionDir)
+    entryExists = true
+  } catch {
+    entryExists = false
+  }
+  let containedVersionDir: string | null = null
+  if (entryExists) {
+    containedVersionDir = resolveContainedSymlinkDir(versionDir, ctx.dataDir)
+  }
+  if (containedVersionDir) {
+    const existing = await readInstallRecord(containedVersionDir, ctx.platform)
     if ('record' in existing && existing.record.selfCheck.ok) {
       await rm(stagingDir, { force: true, recursive: true })
       await ctx.writeEnvFile(versionDir, join(versionDir, 'binaries'))
@@ -263,7 +296,7 @@ async function finalizeStagedBundle(
         progress: 0.95,
         message: 'Activating the ECC bundle...',
       })
-      return { name: versionDirName, staleDir: null }
+      return { name: versionDirName, staleDir: null, placedPath: null }
     }
     electronLogger.info(
       '[cli-installer] Replacing %s: %s',
@@ -284,7 +317,11 @@ async function finalizeStagedBundle(
       progress: 0.95,
       message: 'Activating the repaired ECC bundle...',
     })
-    return { name: repairedName, staleDir: versionDir }
+    return {
+      name: repairedName,
+      staleDir: versionDir,
+      placedPath: join(ctx.dataDir, repairedName),
+    }
   }
   await ctx.writeEnvFile(
     stagingDir,
@@ -298,5 +335,9 @@ async function finalizeStagedBundle(
     progress: 0.95,
     message: 'Activating the ECC bundle...',
   })
-  return { name: versionDirName, staleDir: null }
+  return {
+    name: versionDirName,
+    staleDir: null,
+    placedPath: join(ctx.dataDir, versionDirName),
+  }
 }
