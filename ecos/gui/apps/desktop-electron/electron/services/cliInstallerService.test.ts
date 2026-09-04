@@ -177,10 +177,12 @@ describe('CliInstallerService', () => {
     expect(record.selfCheck.ok).toBe(true)
 
     const envFile = readFileSync(join(versionDir, 'env'), 'utf8')
-    expect(envFile).toMatch(/^PATH="[^"]+:\$PATH"$/m)
+    // Directories are single-quoted; the caller's own value stays expanded
+    // outside the quotes.
+    expect(envFile).toMatch(/^PATH='[^']+':\$PATH$/m)
     expect(envFile).toMatch(
       new RegExp(
-        `^LD_LIBRARY_PATH="${join(versionDir, 'binaries', '_internal', 'ecc_tools_bin', 'lib')}:\\$LD_LIBRARY_PATH"$`,
+        `^LD_LIBRARY_PATH='${join(versionDir, 'binaries', '_internal', 'ecc_tools_bin', 'lib')}':\\$LD_LIBRARY_PATH$`,
         'm',
       ),
     )
@@ -396,5 +398,87 @@ describe('CliInstallerService', () => {
     const status = await service.status()
     expect(status.status).toBe('dev-wrapper')
     expect(status.shimPath).toBe(join(binDir, 'ecos-ecc'))
+  })
+
+  it('re-acquires from the embedded bundle when a fat package replaces a slim install', async () => {
+    const root = createTempDir('ecos-cli-installer-transition-')
+    const bundle = createFakeEccBundle(root)
+    // First: a slim package installs from the registry.
+    const slim = createService({ resourcesPath: '' })
+    await slim.service.ensureBundle()
+    expect(currentVersionDirName(slim.dataDir)).toBe(`1.0.0-${'d'.repeat(8)}`)
+
+    // Then: the running package embeds a different bundle.
+    const fat = new CliInstallerService({
+      resourceManager: slim.resourceManager,
+      env: { PATH: '/usr/bin' },
+      platform: 'linux',
+      isPackaged: true,
+      appPath: join(root, 'app'),
+      resourcesPath: bundle.resourcesPath,
+      userDataPath: join(root, 'user-data'),
+      dataDir: slim.dataDir,
+      binDir: slim.binDir,
+      spawn: spawnLike(createSpawnDouble({ code: 0, output: 'ecc bundled' })),
+      expectedVersion: STUB_VERSION,
+    })
+    await fat.checkSyncOnStartup()
+
+    expect(currentVersionDirName(slim.dataDir)).toBe(`1.0.0-${bundle.sha256.slice(0, 8)}`)
+    const record = JSON.parse(
+      readFileSync(
+        join(slim.dataDir, currentVersionDirName(slim.dataDir), 'install.json'),
+        'utf8',
+      ),
+    )
+    expect(record.source).toBe('bundled')
+  })
+
+  it('replaces a same-identity install whose recorded self-check failed', async () => {
+    const root = createTempDir('ecos-cli-installer-repair-')
+    const bundle = createFakeEccBundle(root)
+    const first = createService({
+      resourcesPath: bundle.resourcesPath,
+      spawnResult: { code: 1, output: 'cannot open shared object file' },
+    })
+    const brokenDir = await first.service.ensureBundle()
+    expect(currentVersionDirName(first.dataDir)).toBe(basename(brokenDir))
+
+    // A fresh reinstall with a passing self-check must repair the directory
+    // (startup drift sync does not retry environmental self-check failures).
+    const second = new CliInstallerService({
+      resourceManager: first.resourceManager,
+      env: { PATH: '/usr/bin' },
+      platform: 'linux',
+      isPackaged: true,
+      appPath: join(root, 'app'),
+      resourcesPath: bundle.resourcesPath,
+      userDataPath: join(root, 'user-data'),
+      dataDir: first.dataDir,
+      binDir: first.binDir,
+      spawn: spawnLike(createSpawnDouble({ code: 0, output: 'ecc ok' })),
+      expectedVersion: STUB_VERSION,
+    })
+    await second.ensureBundle()
+
+    const record = JSON.parse(readFileSync(join(brokenDir, 'install.json'), 'utf8'))
+    expect(record.selfCheck.ok).toBe(true)
+    const status = await second.status()
+    expect(status.status).toBe('ready')
+  })
+
+  it('reports an incomplete active install as failed instead of ready', async () => {
+    const root = createTempDir('ecos-cli-installer-incomplete-')
+    const bundle = createFakeEccBundle(root)
+    const { dataDir, service } = createService({
+      resourcesPath: bundle.resourcesPath,
+    })
+    const versionDir = await service.ensureBundle()
+    rmSync(join(versionDir, 'binaries', '_internal'), { recursive: true })
+
+    const status = await service.status()
+    expect(status.status).toBe('failed')
+    expect(status.error).toContain('incomplete')
+    void dataDir
   })
 })

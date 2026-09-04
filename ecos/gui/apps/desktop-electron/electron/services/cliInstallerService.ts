@@ -117,19 +117,25 @@ function pathSeparator(platform: NodeJS.Platform): string {
 }
 
 /**
- * ECC-relevant allowlist for the generated env file. Session-specific
- * variables (HOME, USER, DISPLAY, XDG_* , SHELL, ...) are inherited from the
- * invoking terminal instead; ECOS_ELECTRON_* variables describe the GUI
- * process (e.g. ephemeral AppImage mounts) and are excluded.
+ * Finite allowlist of ECC runtime variables for the generated env file.
+ * Session-specific variables (HOME, USER, DISPLAY, XDG_*, SHELL, ...) are
+ * inherited from the invoking terminal instead; ECOS_ELECTRON_* variables
+ * describe the GUI process (e.g. ephemeral AppImage mounts) and are excluded.
  */
-function isEccRuntimeEnvKey(key: string): boolean {
-  if (key.startsWith('ECOS_')) return !key.startsWith('ECOS_ELECTRON_')
-  return (
-    key.startsWith('RISCV') ||
-    key === 'VERILATOR_ROOT' ||
-    key === 'CHIPCOMPILER_OSS_CAD_DIR'
-  )
-}
+const ECC_RUNTIME_ENV_KEYS = new Set([
+  'CHIPCOMPILER_OSS_CAD_DIR',
+  'ECOS_FE_CLI',
+  'ECOS_FE_COMPILER_ROOT',
+  'ECOS_FE_RESOURCE_ROOTS',
+  'ECOS_FE_SOC_ROOT',
+  'ECOS_SLANG',
+  'ECOS_SURFER_ASSETS_PATH',
+  'ECOS_VERILATOR',
+  'RISCV',
+  'RISCV_PREFIX',
+  'RISCV_TOOLCHAIN',
+  'VERILATOR_ROOT',
+])
 
 function executableNameFor(platform: NodeJS.Platform): string {
   return platform === 'win32' ? 'ecc.cmd' : 'ecc'
@@ -246,6 +252,20 @@ export class CliInstallerService {
     const shimPath = join(this.binDir, SHIM_NAME)
     const install = await this.readActiveInstall()
     if (!install) {
+      const linkPath = join(this.dataDir, 'current')
+      if (existsSync(linkPath)) {
+        const versionDir = await this.resolveCurrentVersionDir()
+        let problem = "the 'current' link is dangling"
+        if (versionDir) {
+          const loaded = await this.readInstallRecord(versionDir)
+          if ('error' in loaded) problem = loaded.error
+        }
+        return {
+          ...base,
+          status: 'failed',
+          error: `The active ECC install is incomplete (${problem}); reinstall to repair it.`,
+        }
+      }
       return {
         ...base,
         status: this.lastFailure ? 'failed' : 'not-installed',
@@ -304,20 +324,35 @@ export class CliInstallerService {
 
   /** Write the `ecos-ecc` shim into the host bin directory. */
   async installShim(): Promise<void> {
-    if (this.platform === 'win32') {
-      throw new Error('The ecos-ecc shim is not supported on Windows yet')
+    if (this.platform !== 'linux') {
+      throw new Error('The ecos-ecc shim currently supports Linux only')
     }
     if (!this.isPackaged) {
       // Ensure the repository wrapper shim (runtime-bin/ecc) and the shared
       // env file exist before the shim references them.
-      createEccRuntimeEnv(this.eccRuntimeOptions())
+      const runtimeBinDir = resolveEccRuntimeBinDir(this.eccRuntimeOptions())
+      if (!runtimeBinDir) {
+        throw new Error(
+          'Development mode requires a repository checkout with ecos/scripts/ecc-wrapper.sh',
+        )
+      }
       await this.regenerateEnvFile()
     }
     const shimPath = join(this.binDir, SHIM_NAME)
     const content = this.shimContent()
     try {
       await mkdir(this.binDir, { recursive: true })
-      await writeFile(shimPath, content, { mode: 0o755 })
+      // Write to a temp file and rename atomically so a partial write can
+      // never damage a previously working shim; mode is set explicitly
+      // because rename preserves the temp file's mode.
+      const tempShimPath = join(this.binDir, `.${SHIM_NAME}.tmp-${process.pid}`)
+      await writeFile(tempShimPath, content, { mode: 0o755 })
+      try {
+        await rename(tempShimPath, shimPath)
+      } catch (error) {
+        await rm(tempShimPath, { force: true }).catch(() => undefined)
+        throw error
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(
@@ -350,21 +385,27 @@ export class CliInstallerService {
     if (this.platform !== 'linux' || !this.isPackaged) return
     await this.cleanupTempInstalls()
     const install = await this.readActiveInstall()
-    if (!install) return
+    if (!install) {
+      if (existsSync(join(this.dataDir, 'current'))) {
+        await this.reinstallOnDrift('active install is incomplete or unreadable')
+      }
+      return
+    }
     if (install.version !== this.expectedVersion) {
       await this.reinstallOnDrift(`version ${install.version} != ${this.expectedVersion}`)
       return
     }
+    // Compare against the identity of the source the running package
+    // actually provides, so slim<->fat upgrades re-acquire from the source
+    // the GUI resolution prefers.
     try {
-      if (install.source === 'bundled') {
-        const packagedDir = this.resolvePackagedBinariesDir()
-        if (!packagedDir) {
-          await this.reinstallOnDrift('packaged binaries are no longer embedded')
-          return
-        }
+      const packagedDir = this.resolvePackagedBinariesDir()
+      if (packagedDir) {
         const hash = await sha256File(join(packagedDir, executableNameFor(this.platform)))
-        if (hash !== install.sha256) {
-          await this.reinstallOnDrift('packaged bundle hash changed')
+        if (install.source !== 'bundled' || install.sha256 !== hash) {
+          await this.reinstallOnDrift(
+            'the embedded bundle differs from the active install',
+          )
         }
         return
       }
@@ -372,8 +413,8 @@ export class CliInstallerService {
         ECC_BUNDLE_RESOURCE_ID,
         this.expectedVersion,
       )
-      if (asset.sha256 !== install.sha256) {
-        await this.reinstallOnDrift('registry bundle hash changed')
+      if (install.source !== 'downloaded' || install.sha256 !== asset.sha256) {
+        await this.reinstallOnDrift('the registry bundle differs from the active install')
       }
     } catch (error) {
       electronLogger.info(
@@ -540,8 +581,63 @@ export class CliInstallerService {
   }
 
   /**
+   * Load the receipt of an installed version directory and validate its
+   * layout. Returns the parsed record even when the recorded self-check
+   * failed (callers decide whether that counts as usable), or an error
+   * message when the directory is not a complete install.
+   */
+  private async readInstallRecord(
+    versionDir: string,
+  ): Promise<{ record: CliBundleInstallRecord } | { error: string }> {
+    const binariesDir = join(versionDir, 'binaries')
+    try {
+      await access(join(binariesDir, executableNameFor(this.platform)), fsConstants.X_OK)
+    } catch {
+      return { error: 'the ECC executable is missing or not executable' }
+    }
+    if (!existsSync(join(binariesDir, '_internal'))) {
+      return { error: 'the bundle _internal directory is missing' }
+    }
+    try {
+      const parsed: unknown = JSON.parse(
+        await readFile(join(versionDir, 'install.json'), 'utf8'),
+      )
+      const record = parsed as Partial<CliBundleInstallRecord>
+      if (
+        !record ||
+        typeof record !== 'object' ||
+        typeof record.version !== 'string' ||
+        typeof record.sha256 !== 'string' ||
+        (record.source !== 'bundled' && record.source !== 'downloaded') ||
+        !record.selfCheck ||
+        typeof record.selfCheck.ok !== 'boolean'
+      ) {
+        return { error: 'install.json is missing or unreadable' }
+      }
+      return {
+        record: {
+          version: record.version,
+          sha256: record.sha256,
+          source: record.source,
+          installedAt: typeof record.installedAt === 'string' ? record.installedAt : '',
+          selfCheck: {
+            ok: record.selfCheck.ok,
+            detail:
+              typeof record.selfCheck.detail === 'string'
+                ? record.selfCheck.detail
+                : null,
+          },
+        },
+      }
+    } catch {
+      return { error: 'install.json is missing or unreadable' }
+    }
+  }
+
+  /**
    * Move a fully staged bundle into its content-addressed version directory
-   * and return its directory name. An identical existing install is kept.
+   * and return its directory name. A valid identical install is kept; a
+   * damaged or self-check-failed one is replaced by the fresh copy.
    */
   private async finalizeStagedBundle(
     stagingDir: string,
@@ -550,11 +646,29 @@ export class CliInstallerService {
   ): Promise<string> {
     const versionDir = join(this.dataDir, versionDirName)
     if (existsSync(versionDir)) {
-      await rm(stagingDir, { force: true, recursive: true })
-      electronLogger.info(
-        '[cli-installer] ECC bundle %s already installed; keeping it',
-        versionDirName,
-      )
+      const existing = await this.readInstallRecord(versionDir)
+      if ('record' in existing && existing.record.selfCheck.ok) {
+        await rm(stagingDir, { force: true, recursive: true })
+        electronLogger.info(
+          '[cli-installer] ECC bundle %s already installed; keeping it',
+          versionDirName,
+        )
+      } else {
+        electronLogger.info(
+          '[cli-installer] Replacing %s: %s',
+          versionDirName,
+          'record' in existing ? existing.record.selfCheck.ok : existing.error,
+        )
+        const backupDir = join(this.dataDir, `.old-${versionDirName}-${randomUUID()}`)
+        await rename(versionDir, backupDir)
+        try {
+          await rename(stagingDir, versionDir)
+        } catch (error) {
+          await rename(backupDir, versionDir).catch(() => undefined)
+          throw error
+        }
+        await rm(backupDir, { force: true, recursive: true }).catch(() => undefined)
+      }
     } else {
       await rename(stagingDir, versionDir)
     }
@@ -603,8 +717,13 @@ export class CliInstallerService {
       return
     }
     for (const entry of entries) {
-      if (!entry.startsWith('.tmp-')) continue
-      electronLogger.info('[cli-installer] Removing stale staging dir %s', entry)
+      if (
+        !entry.startsWith('.tmp-') &&
+        !entry.startsWith('.current-') &&
+        !entry.startsWith('.old-')
+      )
+        continue
+      electronLogger.info('[cli-installer] Removing stale temp entry %s', entry)
       await rm(join(this.dataDir, entry), { force: true, recursive: true }).catch(
         () => undefined,
       )
@@ -614,35 +733,11 @@ export class CliInstallerService {
   private async readActiveInstall(): Promise<CliBundleInstallRecord | null> {
     const versionDir = await this.resolveCurrentVersionDir()
     if (!versionDir) return null
-    try {
-      const parsed: unknown = JSON.parse(
-        await readFile(join(versionDir, 'install.json'), 'utf8'),
-      )
-      if (!parsed || typeof parsed !== 'object') return null
-      const record = parsed as Partial<CliBundleInstallRecord>
-      if (
-        typeof record.version !== 'string' ||
-        typeof record.sha256 !== 'string' ||
-        (record.source !== 'bundled' && record.source !== 'downloaded') ||
-        !record.selfCheck ||
-        typeof record.selfCheck.ok !== 'boolean'
-      ) {
-        return null
-      }
-      return {
-        version: record.version,
-        sha256: record.sha256,
-        source: record.source,
-        installedAt: typeof record.installedAt === 'string' ? record.installedAt : '',
-        selfCheck: {
-          ok: record.selfCheck.ok,
-          detail:
-            typeof record.selfCheck.detail === 'string' ? record.selfCheck.detail : null,
-        },
-      }
-    } catch {
-      return null
-    }
+    // Only a complete install counts as active; damaged directories are
+    // re-acquired by the drift check. A passing recorded self-check is not
+    // required here so status() can surface self-check failures.
+    const loaded = await this.readInstallRecord(versionDir)
+    return 'record' in loaded ? loaded.record : null
   }
 
   private async resolveCurrentVersionDir(): Promise<string | null> {
@@ -732,18 +827,20 @@ export class CliInstallerService {
 
     const lines: string[] = [
       '# Generated by ECOS Studio. Regenerated on installs; do not edit.',
-      `PATH="${pathDirs.join(separator)}:$PATH"`,
+      // The directories are single-quoted so arbitrary paths stay literal,
+      // while the caller's own value (outside the quotes) is still expanded.
+      `PATH=${shellQuote(pathDirs.join(separator))}:$PATH`,
     ]
     if (eccBinDir) {
       const libDir = join(eccBinDir, '_internal', 'ecc_tools_bin', 'lib')
       if (this.platform === 'linux' && existsSync(libDirProbe ?? libDir)) {
-        lines.push(`LD_LIBRARY_PATH="${libDir}:$LD_LIBRARY_PATH"`)
+        lines.push(`LD_LIBRARY_PATH=${shellQuote(libDir)}:$LD_LIBRARY_PATH`)
       }
     }
     for (const [key, value] of Object.entries(runtimeEnv)) {
       if (typeof value !== 'string' || value === '') continue
       if (key === 'PATH' || key === 'LD_LIBRARY_PATH') continue
-      if (!isEccRuntimeEnvKey(key)) continue
+      if (!ECC_RUNTIME_ENV_KEYS.has(key)) continue
       lines.push(`${key}=${shellQuote(value)}`)
     }
     return `${lines.join('\n')}\n`
