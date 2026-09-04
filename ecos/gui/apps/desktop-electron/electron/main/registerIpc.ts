@@ -145,6 +145,15 @@ export interface DesktopBridgeServices {
     resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
   }
+  cliInstallerService?: {
+    status(): Promise<import('@ecos-studio/shared').CliInstallState>
+    ensureBundle(): Promise<string>
+    installShim(): Promise<void>
+    uninstall(): Promise<void>
+    onProgress(
+      listener: (event: import('@ecos-studio/shared').CliInstallerProgressEvent) => void,
+    ): () => void
+  }
   appInfoService: {
     getVersions(): Promise<VersionInfo>
   }
@@ -2337,6 +2346,34 @@ export function registerIpc(
     return status
   })
 
+  handle(desktopApiIpcChannels.cliInstallerGetStatus, async () => {
+    return await requireCliInstallerService(services).status()
+  })
+
+  handle(desktopApiIpcChannels.cliInstallerInstall, async (event) => {
+    const sender = event.sender
+    const installer = requireCliInstallerService(services)
+    const unsubscribe = installer.onProgress((payload) => {
+      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+      if (typeof sender.send === 'function') {
+        sender.send(desktopApiEventChannels.cliInstallerProgress, payload)
+      }
+    })
+    try {
+      await installer.ensureBundle()
+      await installer.installShim().catch(() => undefined)
+      return await installer.status()
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  handle(desktopApiIpcChannels.cliInstallerUninstall, async () => {
+    const installer = requireCliInstallerService(services)
+    await installer.uninstall()
+    return await installer.status()
+  })
+
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -2443,6 +2480,15 @@ function requireCodexDependencyService(
     throw new Error('Codex dependency service is unavailable.')
   }
   return services.codexDependencyService
+}
+
+function requireCliInstallerService(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['cliInstallerService']> {
+  if (!services.cliInstallerService) {
+    throw new Error('CLI installer service is unavailable.')
+  }
+  return services.cliInstallerService
 }
 
 async function applyCodexBinEnv(

@@ -5,10 +5,12 @@ import {
   createReadStream,
   constants as fsConstants,
   existsSync,
+  lstatSync,
   realpathSync,
 } from 'node:fs'
 import {
   access,
+  chmod,
   cp,
   mkdir,
   readFile,
@@ -252,8 +254,9 @@ export class CliInstallerService {
     const shimPath = join(this.binDir, SHIM_NAME)
     const install = await this.readActiveInstall()
     if (!install) {
-      const linkPath = join(this.dataDir, 'current')
-      if (existsSync(linkPath)) {
+      // lstat: existsSync is false for a dangling link, which must still be
+      // reported (and repaired) rather than silently reading as absent.
+      if (this.currentLinkExists()) {
         const versionDir = await this.resolveCurrentVersionDir()
         let problem = "the 'current' link is dangling"
         if (versionDir) {
@@ -342,12 +345,16 @@ export class CliInstallerService {
     const content = this.shimContent()
     try {
       await mkdir(this.binDir, { recursive: true })
-      // Write to a temp file and rename atomically so a partial write can
-      // never damage a previously working shim; mode is set explicitly
-      // because rename preserves the temp file's mode.
-      const tempShimPath = join(this.binDir, `.${SHIM_NAME}.tmp-${process.pid}`)
-      await writeFile(tempShimPath, content, { mode: 0o755 })
+      // Write to a unique temp file, chmod explicitly (writeFile's mode only
+      // applies on creation), and rename atomically so a partial write can
+      // never damage a previously working shim.
+      const tempShimPath = join(
+        this.binDir,
+        `.${SHIM_NAME}.tmp-${randomUUID().slice(0, 8)}`,
+      )
+      await writeFile(tempShimPath, content)
       try {
+        await chmod(tempShimPath, 0o755)
         await rename(tempShimPath, shimPath)
       } catch (error) {
         await rm(tempShimPath, { force: true }).catch(() => undefined)
@@ -386,7 +393,7 @@ export class CliInstallerService {
     await this.cleanupTempInstalls()
     const install = await this.readActiveInstall()
     if (!install) {
-      if (existsSync(join(this.dataDir, 'current'))) {
+      if (this.currentLinkExists()) {
         await this.reinstallOnDrift('active install is incomplete or unreadable')
       }
       return
@@ -455,8 +462,14 @@ export class CliInstallerService {
     await mkdir(stagingDir, { recursive: true })
     try {
       const versionDirName = await this.acquireBundleInto(stagingDir, options)
-      await this.finalizeStagedBundle(stagingDir, versionDirName, options)
-      await this.switchCurrent(versionDirName)
+      // finalizeStagedBundle owns switching `current` (the repair path may
+      // activate a unique sibling directory instead of the canonical name).
+      const activeName = await this.finalizeStagedBundle(
+        stagingDir,
+        versionDirName,
+        options,
+      )
+      await this.switchCurrent(activeName)
     } catch (error) {
       await rm(stagingDir, { force: true, recursive: true }).catch(() => undefined)
       throw error
@@ -598,6 +611,9 @@ export class CliInstallerService {
     if (!existsSync(join(binariesDir, '_internal'))) {
       return { error: 'the bundle _internal directory is missing' }
     }
+    if (!existsSync(join(versionDir, 'env'))) {
+      return { error: 'the generated env file is missing' }
+    }
     try {
       const parsed: unknown = JSON.parse(
         await readFile(join(versionDir, 'install.json'), 'utf8'),
@@ -636,8 +652,10 @@ export class CliInstallerService {
 
   /**
    * Move a fully staged bundle into its content-addressed version directory
-   * and return its directory name. A valid identical install is kept; a
-   * damaged or self-check-failed one is replaced by the fresh copy.
+   * and return the directory name to activate. A valid identical install is
+   * kept; a damaged or self-check-failed one stays in place while the fresh
+   * copy installs under a unique sibling name, and is deleted only after
+   * `current` no longer references it — so `current` never dangles.
    */
   private async finalizeStagedBundle(
     stagingDir: string,
@@ -653,25 +671,25 @@ export class CliInstallerService {
           '[cli-installer] ECC bundle %s already installed; keeping it',
           versionDirName,
         )
-      } else {
-        electronLogger.info(
-          '[cli-installer] Replacing %s: %s',
-          versionDirName,
-          'record' in existing ? existing.record.selfCheck.ok : existing.error,
-        )
-        const backupDir = join(this.dataDir, `.old-${versionDirName}-${randomUUID()}`)
-        await rename(versionDir, backupDir)
-        try {
-          await rename(stagingDir, versionDir)
-        } catch (error) {
-          await rename(backupDir, versionDir).catch(() => undefined)
-          throw error
-        }
-        await rm(backupDir, { force: true, recursive: true }).catch(() => undefined)
+        return versionDirName
       }
-    } else {
-      await rename(stagingDir, versionDir)
+      electronLogger.info(
+        '[cli-installer] Replacing %s: %s',
+        versionDirName,
+        'record' in existing ? 'recorded self-check failed' : existing.error,
+      )
+      const repairedName = `${versionDirName}-${randomUUID().slice(0, 8)}`
+      await rename(stagingDir, join(this.dataDir, repairedName))
+      this.publishProgress(options, {
+        phase: 'switching',
+        progress: 0.95,
+        message: 'Activating the repaired ECC bundle...',
+      })
+      await this.switchCurrent(repairedName)
+      await rm(versionDir, { force: true, recursive: true }).catch(() => undefined)
+      return repairedName
     }
+    await rename(stagingDir, versionDir)
 
     this.publishProgress(options, {
       phase: 'switching',
@@ -717,12 +735,7 @@ export class CliInstallerService {
       return
     }
     for (const entry of entries) {
-      if (
-        !entry.startsWith('.tmp-') &&
-        !entry.startsWith('.current-') &&
-        !entry.startsWith('.old-')
-      )
-        continue
+      if (!entry.startsWith('.tmp-') && !entry.startsWith('.current-')) continue
       electronLogger.info('[cli-installer] Removing stale temp entry %s', entry)
       await rm(join(this.dataDir, entry), { force: true, recursive: true }).catch(
         () => undefined,
@@ -747,6 +760,19 @@ export class CliInstallerService {
       return join(this.dataDir, target)
     } catch {
       return null
+    }
+  }
+
+  /**
+   * Whether the `current` symlink exists at all — including dangling links,
+   * which existsSync reports as absent.
+   */
+  private currentLinkExists(): boolean {
+    try {
+      lstatSync(join(this.dataDir, 'current'))
+      return true
+    } catch {
+      return false
     }
   }
 

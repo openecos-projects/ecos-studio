@@ -272,6 +272,25 @@ const desktopBridge = {
       workspaceStepDirectory: '/tmp/Floorplan_ecc',
     }),
   },
+  cliInstaller: {
+    getStatus: async () => ({
+      status: 'not-installed',
+      expectedVersion: '',
+      installedVersion: null,
+      source: null,
+      versionDir: null,
+      shimPath: null,
+      selfCheck: null,
+      error: null,
+    }),
+    install: async () => {
+      throw new Error('not implemented')
+    },
+    uninstall: async () => {
+      throw new Error('not implemented')
+    },
+    onProgress: () => () => {},
+  },
 } satisfies DesktopApi
 
 describe('useDesktopRuntime desktop bridge guard', () => {

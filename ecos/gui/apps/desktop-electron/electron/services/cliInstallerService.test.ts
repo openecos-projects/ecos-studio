@@ -461,7 +461,14 @@ describe('CliInstallerService', () => {
     })
     await second.ensureBundle()
 
-    const record = JSON.parse(readFileSync(join(brokenDir, 'install.json'), 'utf8'))
+    // The active directory is a fresh repaired copy (unique sibling name),
+    // and the broken one was removed only after 'current' moved off it.
+    const activeDir = join(first.dataDir, currentVersionDirName(first.dataDir))
+    expect(basename(activeDir)).toMatch(
+      new RegExp(`^1\\.0\\.0-${bundle.sha256.slice(0, 8)}-[0-9a-f]{8}$`),
+    )
+    expect(existsSync(brokenDir)).toBe(false)
+    const record = JSON.parse(readFileSync(join(activeDir, 'install.json'), 'utf8'))
     expect(record.selfCheck.ok).toBe(true)
     const status = await second.status()
     expect(status.status).toBe('ready')

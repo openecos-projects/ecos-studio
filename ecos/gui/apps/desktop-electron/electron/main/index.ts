@@ -24,6 +24,7 @@ import {
 } from '../services/frontendRpcRuntime'
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
+import { CliInstallerService } from '../services/cliInstallerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -71,6 +72,7 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
+  cliInstallerService: CliInstallerService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
@@ -168,6 +170,15 @@ function getDesktopServices() {
   })
   const resourceManagerService = new ResourceManagerService()
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
+  const cliInstallerService = new CliInstallerService({
+    resourceManager: resourceManagerService,
+    env: process.env,
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    userDataPath: app.getPath('userData'),
+  })
   const runtimeEnvProvider = () =>
     resourceManagerService.createRuntimeEnv(runtimeEnv, {
       platform: process.platform,
@@ -175,7 +186,13 @@ function getDesktopServices() {
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
-        command: eccExecutable ?? 'ecc',
+        // Re-resolve the executable on every start so a bundle downloaded by
+        // the CLI installer (or refreshed by drift sync) is picked up
+        // without an app restart.
+        resolveLaunch: async () => ({
+          command: resolveEccExecutable(eccRuntimeOptions) ?? 'ecc',
+          args: ['rpc', 'serve', '--stdio', '--persistent-db'],
+        }),
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
@@ -265,6 +282,7 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
+    cliInstallerService,
     frontendRpcRuntimeService,
     chipViewerService,
     codexDependencyService,
@@ -305,6 +323,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      cliInstallerService: desktopServices.cliInstallerService,
       codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
         await launchWindow({
@@ -369,21 +388,59 @@ function cliEccRuntimeOptions(): EccRuntimeEnvOptions {
   }
 }
 
+/**
+ * Startup maintenance for the host CLI: refresh the bundle on drift in the
+ * background, and acquire the bundle on first use when the package does not
+ * embed it (slim packages).
+ */
+function startCliInstallerStartupTasks(): void {
+  const cliInstaller = getDesktopServices().cliInstallerService
+  if (!cliInstaller) return
+  void cliInstaller.checkSyncOnStartup()
+  if (!resolveEccExecutable(cliEccRuntimeOptions())) {
+    electronLogger.info('[cli-installer] No ECC bundle resolved; acquiring on first use')
+    void cliInstaller
+      .ensureBundle()
+      .then((versionDir) => {
+        electronLogger.info(
+          '[cli-installer] First-use acquisition installed %s',
+          versionDir,
+        )
+      })
+      .catch((error: unknown) => {
+        electronLogger.warn(
+          '[cli-installer] First-use acquisition failed: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      })
+  }
+}
+
 if (cliInvocation) {
-  void app.whenReady().then(async () => {
-    const resourceManager = new ResourceManagerService()
-    const exitCode = await runCliCommand(cliInvocation, {
-      env: process.env,
-      platform: process.platform,
-      resolveExecutable: () => resolveEccExecutable(cliEccRuntimeOptions()),
-      buildRuntimeEnv: async () =>
-        await resourceManager.createRuntimeEnv(
-          createEccRuntimeEnv(cliEccRuntimeOptions()),
-          { platform: process.platform },
-        ),
+  void app
+    .whenReady()
+    .then(async () => {
+      const resourceManager = new ResourceManagerService()
+      const exitCode = await runCliCommand(cliInvocation, {
+        env: process.env,
+        platform: process.platform,
+        resolveExecutable: () => resolveEccExecutable(cliEccRuntimeOptions()),
+        buildRuntimeEnv: async () =>
+          await resourceManager.createRuntimeEnv(
+            createEccRuntimeEnv(cliEccRuntimeOptions()),
+            { platform: process.platform },
+          ),
+      })
+      app.exit(exitCode)
     })
-    app.exit(exitCode)
-  })
+    .catch((error: unknown) => {
+      electronLogger.error(
+        '[cli] %s failed: %s',
+        cliInvocation.command,
+        error instanceof Error ? error.message : String(error),
+      )
+      app.exit(1)
+    })
 }
 
 if (!cliInvocation && gotSingleInstanceLock) {
@@ -417,6 +474,8 @@ if (!cliInvocation && gotSingleInstanceLock) {
         void launchWindow().catch(handleLaunchError)
       },
     })
+
+    startCliInstallerStartupTasks()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

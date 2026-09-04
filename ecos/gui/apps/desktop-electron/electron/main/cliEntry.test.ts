@@ -43,7 +43,7 @@ describe('parseCliInvocation', () => {
     ).toEqual({ command: 'ecc', args: ['run', '--project', 'gcd'] })
   })
 
-  it('parses --cli when Electron prefixes both executable and app path', () => {
+  it('skips the electron default-app entry script prefix', () => {
     expect(
       parseCliInvocation([
         '/usr/bin/electron',
@@ -53,12 +53,27 @@ describe('parseCliInvocation', () => {
         '--version',
       ]),
     ).toEqual({ command: 'ecc', args: ['--version'] })
+    expect(parseCliInvocation(['/usr/bin/electron', '.', '--cli', 'ecc'])).toEqual({
+      command: 'ecc',
+      args: [],
+    })
   })
 
-  it('returns null for GUI launches and bare --cli', () => {
+  it('returns null for GUI launches, workspace paths, and non-entry prefixes', () => {
     expect(parseCliInvocation(['/opt/AppImage'])).toBeNull()
     expect(parseCliInvocation(['/opt/AppImage', '--project', 'gcd'])).toBeNull()
-    expect(parseCliInvocation(['/opt/AppImage', '--cli'])).toBeNull()
+    // A workspace path at argv[1] is not a default-app prefix, so a later
+    // --cli belongs to some other tool.
+    expect(
+      parseCliInvocation(['/opt/AppImage', '/home/user/proj', '--cli', 'ecc']),
+    ).toBeNull()
+  })
+
+  it('treats bare --cli as an invalid empty command for usage handling', () => {
+    expect(parseCliInvocation(['/opt/AppImage', '--cli'])).toEqual({
+      command: '',
+      args: [],
+    })
   })
 })
 

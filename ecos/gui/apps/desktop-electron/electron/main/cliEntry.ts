@@ -15,19 +15,24 @@ export interface CliCommand {
 }
 
 /**
- * Recognize a `--cli` invocation. `--cli` must be the first user argument
- * (Electron prefixes argv with the executable and often the app path).
- * Returns null when this launch is not a CLI invocation.
+ * Recognize a `--cli` invocation. `--cli` must be the first user argument;
+ * unpackaged (electron default-app) launches prefix argv with the entry
+ * script ('.', '*.js', '*.asar'), which is skipped. Anything else in that
+ * position (e.g. a workspace path) means this is not a CLI launch.
+ *
+ * Returns null when the launch is not a CLI invocation, and a command with
+ * an empty `command` when `--cli` was given without a command (treated as
+ * invalid by runCliCommand).
  */
 export function parseCliInvocation(argv: readonly string[]): CliCommand | null {
-  for (let index = 1; index <= 2; index += 1) {
-    if (argv[index] === '--cli') {
-      const [command = '', ...args] = argv.slice(index + 1)
-      if (command === '') return null
-      return { command, args }
-    }
-  }
-  return null
+  const hasDefaultAppPrefix =
+    argv.length > 2 &&
+    (argv[1] === '.' ||
+      (typeof argv[1] === 'string' && /\.(js|mjs|cjs|asar)$/.test(argv[1])))
+  const cliIndex = hasDefaultAppPrefix ? 2 : 1
+  if (argv[cliIndex] !== '--cli') return null
+  const [command = '', ...args] = argv.slice(cliIndex + 1)
+  return { command, args }
 }
 
 /**
