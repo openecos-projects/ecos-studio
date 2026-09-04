@@ -1,4 +1,4 @@
-import type { ProjectManifestMpc } from '../utils/projectManifest'
+import type { ProjectManifestMpc, ProjectManifestType } from '../utils/projectManifest'
 import type { PdkRequirement } from '../contracts/pdkInventory'
 
 export type WorkspaceStatus =
@@ -8,7 +8,7 @@ export type WorkspaceStatus =
   | 'in_progress'
   | 'not_started'
 
-export type DesignTool = 'backend' | 'frontend'
+export type DesignTool = ProjectManifestType
 
 export interface WorkspaceSummary {
   id: string

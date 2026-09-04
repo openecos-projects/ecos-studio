@@ -274,4 +274,52 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.stepFiveBlockedReason).toContain('Tech LEF, Cell LEF, Liberty')
     wrapper.unmount()
   })
+
+  it('stores manual PDK requirements relative to the selected PDK root', () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          pdk: 'vendor-pdk',
+          pdk_root: '/pdks/vendor',
+          pdk_requirement: {
+            familyId: 'vendor-pdk',
+            version: null,
+            manualConfig: null,
+          },
+        },
+      },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      config: {
+        pdk_requirement: {
+          manualConfig: {
+            techLef: string
+            cellLefs: string[]
+            liberty: string[]
+          } | null
+        }
+      }
+      pdkConfigMode: 'default' | 'manual'
+      pdkSelections: Record<'tech_lef' | 'cell_lef' | 'liberty', string[]>
+      syncWorkspaceConfig(): void
+    }
+
+    wizard.pdkConfigMode = 'manual'
+    wizard.pdkSelections = {
+      tech_lef: ['/pdks/vendor/tech/technology.lef'],
+      cell_lef: ['/pdks/vendor/lef/cells.lef'],
+      liberty: ['/pdks/vendor/lib/stdcells.lib'],
+    }
+    wizard.syncWorkspaceConfig()
+
+    expect(wizard.config.pdk_requirement.manualConfig).toEqual({
+      techLef: 'tech/technology.lef',
+      cellLefs: ['lef/cells.lef'],
+      liberty: ['lib/stdcells.lib'],
+    })
+    wrapper.unmount()
+  })
 })

@@ -204,6 +204,7 @@ function registerHandlers(
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
+      replayPendingRecoveryEvents: vi.fn(),
       resetFlow: vi.fn(),
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
@@ -225,6 +226,7 @@ function registerHandlers(
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
+      replayPendingRecoveryEvents: vi.fn(),
       resetFlow: vi.fn(),
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
@@ -2249,6 +2251,48 @@ describe('registerIpc', () => {
     )
     expect(otherSend).not.toHaveBeenCalled()
     expect(getAllWindows).not.toHaveBeenCalled()
+  })
+
+  it('replays pending frontend recovery events only for the subscribed window', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    const otherSender = Object.assign(new EventEmitter(), {
+      id: 22,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.frontendRpcRuntimeService.openWorkspace.mockResolvedValueOnce({
+      directory: '/work/frontend',
+      workspaceHandle: 'workspace-frontend-1',
+    })
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(
+      { sender: ownerSender },
+      { designTool: 'frontend', directory: '/work/frontend' },
+    )
+
+    await handlers.get(desktopApiIpcChannels.designRuntimeEventsReplay)?.(
+      { sender: ownerSender },
+      { designTool: 'frontend', workspaceHandle: 'workspace-frontend-1' },
+    )
+
+    expect(
+      services.frontendRpcRuntimeService.replayPendingRecoveryEvents,
+    ).toHaveBeenCalledWith('workspace-frontend-1')
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeEventsReplay)?.(
+        { sender: otherSender },
+        { designTool: 'frontend', workspaceHandle: 'workspace-frontend-1' },
+      ),
+    ).resolves.toEqual({
+      error: expect.objectContaining({
+        message: 'Unknown workspace runtime subscription for this window.',
+      }),
+      ok: false,
+    })
   })
 
   it('streams frontend subflow progress to its subscribed workspace window', async () => {

@@ -296,7 +296,7 @@
 }
 
 .project-workspace-tree.selected {
-  padding: 8px 8px 12px;
+  padding: 8px 0 12px;
   overflow: visible;
   border: 0;
   border-radius: 10px;
@@ -1501,6 +1501,59 @@
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 750;
+}
+
+.project-type-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.project-type-field legend {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.project-type-segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 58%, transparent);
+}
+
+.project-type-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.project-type-option:hover {
+  color: var(--text-primary);
+}
+
+.project-type-option[aria-pressed='true'] {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
 }
 
 .form-field input,

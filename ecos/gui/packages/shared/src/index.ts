@@ -244,11 +244,15 @@ export {
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
+  projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,
+  projectManagementWorkspaceReadablePathsFor,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceSummaryPathsFor,
 } from './utils/projectManagementSummary.ts'
 export { validateMpcSpec } from './utils/mpcSpec.ts'
 export type { ValidatedMpcSpec, ValidatedMpcSpecDesign } from './utils/mpcSpec.ts'
@@ -258,12 +262,19 @@ export {
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
   ensureProjectQorBaseline,
+  isProjectManifestType,
+  nextProjectManifestStage,
+  normalizeProjectManifestStage,
   parseProjectManifest,
+  projectManifestFrontendFlowSteps,
   projectIdFromName,
   projectManifestFlowSteps,
+  projectManifestProfileFor,
+  projectManifestTypes,
   recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
   serializeProjectManifest,
+  setQorBaselineInManifest,
   synchronizeProjectBaseline,
 } from './utils/projectManifest.ts'
 export type {
@@ -271,6 +282,7 @@ export type {
   ProjectManifestBaseDesign,
   ProjectManifestBaselineSyncInput,
   ProjectManifestDraftInput,
+  ProjectManifestFrontendFlowStep,
   ProjectManifestFlowStep,
   ProjectManifestMetricSummary,
   ProjectManifestMpc,
@@ -278,8 +290,11 @@ export type {
   ProjectManifestMutation,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
+  ProjectManifestProfile,
   ProjectManifestReplacementBackupInput,
   ProjectManifestResolvedReplacementBackupInput,
+  ProjectManifestStage,
+  ProjectManifestType,
   ProjectManifestWorkspace,
   ProjectManifestWorkspaceRegistrationInput,
   ProjectManifestWorkspaceStatus,

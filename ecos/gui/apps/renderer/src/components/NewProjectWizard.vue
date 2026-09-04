@@ -1571,18 +1571,16 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
-import {
-  parseProjectManifest,
-  type ProjectManifest,
-  type ProjectManifestMpc,
-} from '@/utils/projectManagement'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import {
   isHdlFilePath,
+  parseProjectManifest,
   projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
   type PickedRtlSources,
+  type ProjectManifest,
+  type ProjectManifestMpc,
 } from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
@@ -2483,6 +2481,26 @@ function resolvePdkFile(file: string) {
   return root ? joinPath(root, file) : file
 }
 
+function pdkRequirementPath(file: string) {
+  const normalizedFile = normalizePath(file)
+  if (
+    !normalizedFile ||
+    (!normalizedFile.startsWith('/') && !/^[A-Za-z]:\//.test(normalizedFile))
+  ) {
+    return normalizedFile.replace(/^\.\//, '')
+  }
+
+  const normalizedRoot = normalizePath(getCurrentPdkRoot())
+  if (!normalizedRoot) return normalizedFile
+  const rootPrefix = `${normalizedRoot}/`
+  const caseInsensitive = /^[A-Za-z]:\//.test(normalizedRoot)
+  const comparableFile = caseInsensitive ? normalizedFile.toLowerCase() : normalizedFile
+  const comparablePrefix = caseInsensitive ? rootPrefix.toLowerCase() : rootPrefix
+  return comparableFile.startsWith(comparablePrefix)
+    ? normalizedFile.slice(rootPrefix.length)
+    : normalizedFile
+}
+
 function getCurrentPdkRoot() {
   return selectedPdk.value?.path || config.value.pdk_root || ''
 }
@@ -3381,9 +3399,9 @@ function syncWorkspaceConfig() {
       manualConfig:
         pdkConfigMode.value === 'manual'
           ? {
-              techLef: pdkSelections.value.tech_lef[0] ?? '',
-              cellLefs: [...pdkSelections.value.cell_lef],
-              liberty: [...pdkSelections.value.liberty],
+              techLef: pdkRequirementPath(pdkSelections.value.tech_lef[0] ?? ''),
+              cellLefs: pdkSelections.value.cell_lef.map(pdkRequirementPath),
+              liberty: pdkSelections.value.liberty.map(pdkRequirementPath),
             }
           : null,
     }

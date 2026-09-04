@@ -189,6 +189,9 @@ export class ProjectManifestService {
     >,
   ): Promise<ProjectManifest> {
     if (!currentManifest) throw new Error('Project manifest does not exist.')
+    if (currentManifest.project_type !== 'backend') {
+      throw new Error('QoR baselines are only available for backend projects.')
+    }
     const workspace = currentManifest.workspaces.find(
       (candidate) =>
         candidate.workspace_id === mutation.workspaceId &&
@@ -291,6 +294,13 @@ function validateProjectManifestMutation(
     case 'create':
       requireString(mutation.name, 'Project manifest create mutation name')
       requireString(mutation.designName, 'Project manifest create mutation designName')
+      if (
+        mutation.projectType !== undefined &&
+        mutation.projectType !== 'backend' &&
+        mutation.projectType !== 'frontend'
+      ) {
+        throw new Error('Project manifest create mutation projectType is invalid')
+      }
       validateProjectManifestMpc(mutation.mpc)
       return
     case 'register-workspace': {

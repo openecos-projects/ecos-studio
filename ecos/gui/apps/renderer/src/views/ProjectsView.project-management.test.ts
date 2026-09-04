@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from 'vitest'
 import source from './ProjectsView.vue?raw'
 import analysisSource from './project-management/ProjectAnalysisPanel.vue?raw'
+import analysisFrameSource from './project-management/ProjectAnalysisFrame.vue?raw'
 import presentationSource from './project-management/projectAnalysisPresentation.ts?raw'
 import analysisDataSource from './project-management/projectWorkspaceAnalysisData.ts?raw'
 
@@ -19,7 +20,7 @@ const analysisStyles = readFileSync(
   'utf8',
 )
 const projectSurfaceSource = `${source}\n${projectStyles}`
-const analysisSurfaceSource = `${analysisSource}\n${analysisStyles}`
+const analysisSurfaceSource = `${analysisFrameSource}\n${analysisSource}\n${analysisStyles}`
 
 describe('ProjectsView project management surface', () => {
   it('applies route focus so Back to Project Management selects the current workspace', () => {
@@ -31,16 +32,19 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('data-workspace-id')
     expect(source).toContain('scrollIntoView')
     expect(source).toContain('selectWorkspace(')
+    expect(source).toContain(
+      '`[data-project-id="${cssEscape(focus.projectId)}"][data-workspace-id="${cssEscape(focus.workspaceId)}"]`',
+    )
   })
 
   it('renders the project tree and project analysis surface instead of the old flow matrix', () => {
     expect(source).toContain('ProjectAnalysisPanel')
-    expect(analysisSource).toContain('aria-label="Analysis"')
-    expect(analysisSource).toContain('analysis-subtitle')
+    expect(analysisFrameSource).toContain('aria-label="Analysis"')
+    expect(analysisFrameSource).toContain('analysis-subtitle')
     expect(analysisSource).not.toContain('>Analysis</h3>')
     expect(analysisSource).not.toContain('Key Metric Snapshot')
-    expect(analysisSource).toContain('Dashboard')
-    expect(analysisSource).toContain('Step Analysis')
+    expect(analysisFrameSource).toContain('Dashboard')
+    expect(analysisFrameSource).toContain('Step Analysis')
     expect(source).toContain('class="project-workspace-tree"')
     expect(source).toContain('class="workspace-tree-list"')
     expect(source).toContain('workspace-flow-popover')
@@ -80,12 +84,12 @@ describe('ProjectsView project management surface', () => {
     expect(projectSurfaceSource).toContain('.workspace-flow-popover::before')
     expect(projectSurfaceSource).toContain('left: calc(100% + 14px);')
     expect(source).toContain('class="resource-row project-tree-row mockup-project-row"')
-    expect(analysisSource).toContain('class="analysis-panel mockup-analysis-panel"')
+    expect(analysisFrameSource).toContain('class="analysis-panel mockup-analysis-panel"')
     expect(analysisStyles).toContain('position: sticky;')
     expect(analysisStyles).not.toContain('.compare-best')
     expect(projectStyles).toContain('.workspace-tree-row.selected')
-    expect(source).toContain(
-      ':class="{ selected: workspace.id === selectedWorkspaceId }"',
+    expect(normalizedSource).toContain(
+      'selected: project.model.id === selectedProjectId && workspace.id === selectedWorkspaceId',
     )
   })
 
@@ -194,7 +198,7 @@ describe('ProjectsView project management surface', () => {
     expect(projectStyles).not.toContain('.project-tree-row:hover .row-action-secondary')
   })
 
-  it('lets the selected project collapse its workspace list without hiding its summary', () => {
+  it('lets every project expand its workspace list independently', () => {
     expect(source).toContain('class="circle-action project-collapse-toggle"')
     expect(source).toContain('projectWorkspaceListExpanded(project.model.id)')
     expect(source).toContain('toggleProjectWorkspaceList(project.model.id)')
@@ -203,7 +207,9 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('Expand workspaces')
     expect(source).toContain('ri-arrow-down-s-line')
     expect(source).toContain('ri-arrow-right-s-line')
-    expect(source).toContain('const collapsedProjectIds = ref<Set<string>>(new Set())')
+    expect(source).toContain('const expandedProjectIds = ref<Set<string>>(new Set())')
+    expect(source).toContain('return expandedProjectIds.value.has(projectId)')
+    expect(source).not.toContain('projectId === selectedProjectId.value')
     expect(source).toContain('expandProjectWorkspaceList(projectId)')
     expect(projectStyles).toContain('.project-workspace-tree.selected.collapsed')
     expect(projectStyles).toContain(".project-collapse-toggle[aria-expanded='true']")
@@ -218,6 +224,78 @@ describe('ProjectsView project management surface', () => {
     expect(disclosureStart).toBeGreaterThan(treeShellStart)
     expect(disclosureStart).toBeLessThan(projectRowStart)
     expect(projectStyles).toContain('grid-template-columns: 24px minmax(0, 1fr) auto;')
+  })
+
+  it('keeps selected and unselected project rows on the same horizontal baseline', () => {
+    const selectedTreeStart = projectStyles.indexOf('.project-workspace-tree.selected {')
+    const selectedTreeEnd = projectStyles.indexOf('}', selectedTreeStart)
+    const selectedTreeStyles = projectStyles.slice(selectedTreeStart, selectedTreeEnd)
+
+    expect(selectedTreeStyles).toContain('padding: 8px 0 12px;')
+    expect(selectedTreeStyles).not.toContain('padding: 8px 8px 12px;')
+  })
+
+  it('binds workspace selection and actions to the owning expanded project', () => {
+    expect(source).toContain(':data-project-id="project.model.id"')
+    expect(source).toContain('selectWorkspace(project.model.id, workspace.id)')
+    expect(source).toContain('pendingProjectWorkspaceTarget')
+    expect(source).toContain('selectProject(projectId, workspaceId)')
+    expect(source).toContain('requestedWorkspaceId')
+    expect(source).toContain('openWorkspace(project.model, workspace)')
+    expect(source).toContain('toggleWorkspaceActionMenu(project.model.id, workspace.id)')
+    expect(source).toContain('toggleWorkspaceFlowPopover(project.model.id, workspace.id)')
+    expect(source).toContain('requestDeleteWorkspace(project.model.id, workspace.id)')
+    expect(source).toContain(
+      'type WorkspaceTarget = { projectId: string; workspaceId: string }',
+    )
+    expect(source).toContain('workspaceTargetMatches(')
+
+    const deleteStart = source.indexOf('async function deleteWorkspace')
+    const deleteEnd = source.indexOf(
+      'async function nextAvailableWorkspaceId',
+      deleteStart,
+    )
+    const deleteSource = source.slice(deleteStart, deleteEnd)
+    expect(deleteSource).toContain('workspaceTargetProject(target)')
+    expect(deleteSource).toContain('mutateProjectManifest(project.path')
+    expect(deleteSource).toContain('workspaceId: target.workspaceId')
+    expect(deleteSource).not.toContain('selectedProject.value.path')
+  })
+
+  it('expands projects selected by non-row project workflows', () => {
+    const importProjectStart = source.indexOf('async function importProject')
+    const importProjectEnd = source.indexOf(
+      'async function importWorkspaceIntoProject',
+      importProjectStart,
+    )
+    const importProjectSource = source.slice(importProjectStart, importProjectEnd)
+    expect(importProjectSource).toContain('selectProject(project.id)')
+    expect(importProjectSource).not.toContain('selectedProjectId.value = project.id')
+
+    const importWorkspaceStart = importProjectEnd
+    const importWorkspaceEnd = source.indexOf(
+      'async function createWorkspaceForProject',
+      importWorkspaceStart,
+    )
+    const importWorkspaceSource = source.slice(importWorkspaceStart, importWorkspaceEnd)
+    expect(importWorkspaceSource).toContain('selectProject(project.id)')
+    expect(importWorkspaceSource).not.toContain('selectedProjectId.value = project.id')
+
+    const removeProjectStart = source.indexOf('async function removeProjectFromHistory')
+    const removeProjectEnd = source.indexOf(
+      'function openNewProjectDialog',
+      removeProjectStart,
+    )
+    const removeProjectSource = source.slice(removeProjectStart, removeProjectEnd)
+    expect(removeProjectSource).toContain('selectProject(nextProjectId)')
+
+    const createProjectStart = source.indexOf('async function createProjectFolderDraft')
+    const createProjectEnd = source.indexOf('const goBack =', createProjectStart)
+    const createProjectSource = source.slice(createProjectStart, createProjectEnd)
+    expect(createProjectSource).toContain('selectProject(manifest.root_path)')
+    expect(createProjectSource).not.toContain(
+      'selectedProjectId.value = manifest.root_path',
+    )
   })
 
   it('keeps explicit Import and New Project commands in the Projects list header', () => {
@@ -255,13 +333,17 @@ describe('ProjectsView project management surface', () => {
     expect(rowSource).toContain('Create from output')
     expect(rowSource).toContain('Delete workspace')
     expect(rowSource).toContain('class="workspace-tree-row-shell"')
-    expect(rowSource).toContain(':aria-pressed="workspace.id === selectedWorkspaceId"')
-    expect(rowSource).toContain('@click="selectWorkspace(workspace.id)"')
-    expect(rowSource).toContain('@click="openWorkspace(workspace)"')
-    expect(rowSource).toContain('@click="toggleWorkspaceFlowPopover(workspace.id)"')
-    expect(rowSource).toContain('@click="requestDeleteWorkspace(workspace.id)"')
+    expect(rowSource).toContain('project.model.id === selectedProjectId')
+    expect(rowSource).toContain('selectWorkspace(project.model.id, workspace.id)')
+    expect(rowSource).toContain('openWorkspace(project.model, workspace)')
+    expect(rowSource).toContain(
+      'toggleWorkspaceFlowPopover(project.model.id, workspace.id)',
+    )
+    expect(rowSource).toContain('requestDeleteWorkspace(project.model.id, workspace.id)')
     expect(rowSource).toContain('circle-action')
-    expect(rowSource).toContain('toggleWorkspaceActionMenu(workspace.id)')
+    expect(rowSource).toContain(
+      'toggleWorkspaceActionMenu(project.model.id, workspace.id)',
+    )
     expect(rowSource).toContain('class="row-action-menu-item workspace-flow-trigger"')
     expect(rowSource).not.toContain('file-action-button')
     expect(projectStyles).toContain('.workspace-tree-row-shell')
@@ -295,7 +377,7 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('workspaceConfiguredSteps(selectedPopoverWorkspace)')
     expect(source).toContain('cell.canCreateWorkspace')
     expect(source).toMatch(
-      /startWorkspaceFromPopoverStep\(\s*selectedPopoverWorkspace\.id,\s*cell\.step,\s*\)/,
+      /startWorkspaceFromPopoverStep\(\s*project\.model,\s*selectedPopoverWorkspace\.id,\s*cell\.step,\s*\)/,
     )
     expect(source).toContain('Workspace Flow Steps')
   })
@@ -319,7 +401,7 @@ describe('ProjectsView project management surface', () => {
       "window.removeEventListener('scroll', updateWorkspaceFlowPopoverPosition, true)",
     )
     expect(source).toContain(
-      '`[data-workspace-id="${cssEscape(popoverWorkspaceId.value)}"]`',
+      '`[data-project-id="${cssEscape(target.projectId)}"][data-workspace-id="${cssEscape(target.workspaceId)}"]`',
     )
   })
 
@@ -382,7 +464,12 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('keeps mounted analysis panels and exposes comparison grids semantically', () => {
-    expect(analysisSource).toContain('v-if="hasProjectData"')
+    expect(analysisSource).toContain(
+      'v-if="hasProjectData && project.projectType === \'backend\'"',
+    )
+    expect(analysisSource).toContain(
+      "project.projectType === 'frontend' && project.frontendAnalysis",
+    )
     expect(analysisSource).toContain('v-show="selectedAnalysisTab === \'dashboard\'"')
     expect(analysisSource).toContain('v-show="selectedAnalysisTab === \'step\'"')
     expect(analysisSource).toContain('role="grid"')
@@ -420,6 +507,9 @@ describe('ProjectsView project management surface', () => {
 
   it('lets New Project create a root manifest with an optional managed MPC association', () => {
     expect(source).toContain('Project Storage Location')
+    expect(source).toContain('Project Type')
+    expect(source).toContain("projectRootDraft.projectType === 'backend'")
+    expect(source).toContain("projectRootDraft.projectType === 'frontend'")
     expect(source).toContain('Managed MPC')
     expect(source).toContain('listResourcesApi')
     expect(source).toContain('projectMpcOptionFromResource')
@@ -438,10 +528,25 @@ describe('ProjectsView project management surface', () => {
     expect(createSource).not.toContain("path: '/ecc'")
     expect(createSource).not.toContain('workspacePath')
     expect(createSource).not.toContain("workspaces', 'ws_0001'")
+    expect(createSource).toContain('projectType: projectRootDraft.value.projectType')
     expect(createSource).toContain('mpc: selectedProjectMpc.value')
     expect(createSource).toContain(
       'Select a valid MPC design before creating the project.',
     )
+  })
+
+  it('routes new and existing workspaces through the owning project type', () => {
+    const createStart = source.indexOf('async function createWorkspaceForProject')
+    const createEnd = source.indexOf('function requestDeleteWorkspace', createStart)
+    const createSource = source.slice(createStart, createEnd)
+    const openStart = source.indexOf('async function openWorkspace')
+    const openEnd = source.indexOf('function refreshProjectManifests', openStart)
+    const openSource = source.slice(openStart, openEnd)
+
+    expect(createSource).toContain("project.projectType === 'frontend' ? '/fe' : '/ecc'")
+    expect(openSource).toContain('designTool: project.projectType')
+    expect(openSource).toContain('workspaceRouteQuery(project,')
+    expect(source).toContain('projectType: manifest.project_type')
   })
 
   it('renders an empty state instead of generated demo workspace data', () => {
@@ -471,7 +576,7 @@ describe('ProjectsView project management surface', () => {
     expect(analysisDataSource).toContain('readProjectManagementWorkspaceTexts')
     expect(analysisDataSource).toContain('parseWorkspaceFlowStateMap')
     expect(source).toContain('workspaceAnalysisInputs')
-    expect(source).toContain('readProjectManagementWorkspaceData')
+    expect(source).toContain('readProjectWorkspaceData')
     expect(source).toContain('ProjectWorkspaceAnalysisInputsById')
     expect(analysisDataSource).toContain('projectManagementWorkspaceStepAnalysisSpecs')
     expect(analysisDataSource).toContain('WORKSPACE_STEP_ANALYSIS_SPECS')
@@ -513,23 +618,26 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('handleAnalysisTabSelection')
     expect(source).toContain('setQorBaseline')
     expect(source).toContain('function openStepAnalysis()')
-    expect(source).toContain("selectedStep.value = 'Synth'")
+    expect(source).toContain(
+      "selectedStep.value = selectedProject.value.flowSteps[0] ?? 'Synth'",
+    )
     expect(source).toContain('hasOpenedStepAnalysis.value = true')
     expect(source).not.toContain('selectedStepComparePoints')
   })
 
   it('keeps only Dashboard and Step Analysis tabs on the right side of the project analysis header', () => {
-    const analysisStart = analysisSource.indexOf('class="analysis-heading"')
-    const analysisEnd = analysisSource.indexOf(
+    const analysisStart = analysisFrameSource.indexOf('class="analysis-heading"')
+    const analysisEnd = analysisFrameSource.indexOf(
       '</div>',
-      analysisSource.indexOf('class="analysis-tabs"', analysisStart),
+      analysisFrameSource.indexOf('class="analysis-tabs"', analysisStart),
     )
-    const analysisHeaderSource = analysisSource.slice(analysisStart, analysisEnd + 6)
+    const analysisHeaderSource = analysisFrameSource.slice(analysisStart, analysisEnd + 6)
 
     expect(analysisHeaderSource).toContain('class="analysis-subtitle"')
     expect(analysisHeaderSource).toContain('class="analysis-tabs"')
-    expect(analysisHeaderSource).toContain('Dashboard')
-    expect(analysisHeaderSource).toContain('Step Analysis')
+    expect(analysisHeaderSource).toContain('{{ tab.label }}')
+    expect(analysisFrameSource).toContain("{ id: 'dashboard', label: 'Dashboard' }")
+    expect(analysisFrameSource).toContain("{ id: 'step', label: 'Step Analysis' }")
     expect(analysisHeaderSource).not.toContain('Backend Design')
     expect(analysisHeaderSource).not.toContain('toolbar-action')
     expect(source).not.toContain('openBackendDesign')
@@ -540,17 +648,18 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('connects analysis tabs to their panels and supports keyboard tab movement', () => {
-    expect(analysisSource).toContain('id="analysis-tab-dashboard"')
-    expect(analysisSource).toContain('aria-controls="analysis-dashboard-panel"')
+    expect(analysisFrameSource).toContain(':id="`analysis-tab-${tab.id}`"')
+    expect(analysisFrameSource).toContain(':aria-controls="`analysis-${tab.id}-panel`"')
     expect(analysisSource).toContain('id="analysis-dashboard-panel"')
     expect(analysisSource).toContain('role="tabpanel"')
-    expect(analysisSource).toContain('handleAnalysisTabKeydown')
-    expect(analysisSource).toContain('analysis-context')
+    expect(analysisFrameSource).toContain('handleTabKeydown')
+    expect(analysisFrameSource).toContain('analysis-context')
   })
 
   it('keeps the workspace flow popover inside the project manager bounds', () => {
-    expect(source).toContain('workspacePopoverPlacementClass(workspace.id)')
-    expect(source).toContain(':class="workspacePopoverPlacementClass(workspace.id)"')
+    expect(source).toContain(
+      'workspacePopoverPlacementClass(project.model.id, workspace.id)',
+    )
     expect(source).not.toContain('workspace-popover-flip')
     expect(projectSurfaceSource).toContain('max-width: min(322px, calc(100vw - 80px));')
     expect(projectSurfaceSource).toContain('left: calc(100% + 14px);')
@@ -569,7 +678,7 @@ describe('ProjectsView project management surface', () => {
 
   it('uses the dedicated read-only Project Management API for historical projects', () => {
     expect(source).toContain('readProjectManagementManifest')
-    expect(source).toContain('readProjectManagementWorkspaceData')
+    expect(source).toContain('readProjectWorkspaceData')
     expect(source).toContain('listProjectManagementEntries')
     expect(source).not.toContain('registerProjectRootForProjectManagement')
     expect(source).not.toContain('registerProjectReadRootForProjectManagement')

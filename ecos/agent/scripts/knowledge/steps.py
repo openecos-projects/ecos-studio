@@ -156,7 +156,7 @@ SOURCE_PATHS = {
     "ecc.builder": "ecc/chipcompiler/tools/ecc/builder.py",
     "ecc.subflow": "ecc/chipcompiler/tools/ecc/subflow.py",
     "ecc.flow": "ecc/chipcompiler/rtl2gds/builder.py",
-    "gui.step_metrics": "ecos/gui/apps/renderer/src/utils/projectManagement.ts",
+    "gui.step_metrics": "ecos/gui/apps/renderer/src/utils/backendProjectManagement.ts",
     "yosys.runner": "ecc/chipcompiler/tools/yosys/runner.py",
     "yosys.metrics": "ecc/chipcompiler/tools/yosys/metrics.py",
     "dreamplace.runner": "ecc/chipcompiler/tools/ecc_dreamplace/runner.py",

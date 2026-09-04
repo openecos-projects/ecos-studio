@@ -3,7 +3,7 @@ import type { WorkspaceConfig } from '@/types'
 import {
   createProjectManifestDraft,
   registerWorkspaceInManifest,
-} from '@/utils/projectManagement'
+} from '@ecos-studio/shared'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,

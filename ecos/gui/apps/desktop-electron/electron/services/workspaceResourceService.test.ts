@@ -904,10 +904,27 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
-  it('returns a completed frontend detail snapshot without runtime RPC', async () => {
+  it('hydrates a completed frontend detail snapshot with local QoR artifacts', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'review', tool: 'fe', state: 'Ongoing' }])
+    await mkdir(join(root, 'review_fe', 'analysis'), { recursive: true })
     await mkdir(join(root, 'review_fe', 'report'), { recursive: true })
+    const qor = {
+      metrics: { generation: 'review-1', metrics: [], schema_version: 3 },
+      summary: {
+        analysis_status: 'valid',
+        gates: [],
+        generation: 'review-1',
+        quality_status: 'pass',
+        schema_version: 4,
+      },
+      hotspots: { generation: 'review-1', hotspots: [], schema_version: 3 },
+    }
+    await Promise.all([
+      writeJson(join(root, 'review_fe', 'analysis', 'qor_metrics.json'), qor.metrics),
+      writeJson(join(root, 'review_fe', 'analysis', 'qor_summary.json'), qor.summary),
+      writeJson(join(root, 'review_fe', 'analysis', 'qor_hotspots.json'), qor.hotspots),
+    ])
     const snapshot = {
       artifacts: [],
       logs: [],
@@ -922,6 +939,51 @@ describe('WorkspaceResourceService', () => {
       tool: 'fe',
     }
     await writeJson(join(root, 'review_fe', 'report', 'frontend_detail.json'), snapshot)
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({
+      step: 'review',
+      id: 'frontend_detail',
+    })
+
+    expect(result).toMatchObject({
+      response: 'available',
+      info: { ...snapshot, qor },
+    })
+  })
+
+  it('preserves QoR embedded in a completed frontend detail snapshot', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'review', tool: 'fe' }])
+    await mkdir(join(root, 'review_fe', 'analysis'), { recursive: true })
+    await mkdir(join(root, 'review_fe', 'report'), { recursive: true })
+    const embeddedQor = {
+      metrics: { generation: 'embedded-1', metrics: [], schema_version: 3 },
+      summary: {
+        analysis_status: 'valid',
+        gates: [],
+        generation: 'embedded-1',
+        quality_status: 'pass',
+        schema_version: 4,
+      },
+      hotspots: { generation: 'embedded-1', hotspots: [], schema_version: 3 },
+    }
+    const snapshot = {
+      artifacts: [],
+      logs: [],
+      qor: embeddedQor,
+      reports: [],
+      state: 'Success',
+      step: 'review',
+      summary: { status: 'Success' },
+      tool: 'fe',
+    }
+    await writeJson(join(root, 'review_fe', 'report', 'frontend_detail.json'), snapshot)
+    await writeFile(
+      join(root, 'review_fe', 'analysis', 'qor_metrics.json'),
+      'invalid JSON',
+      'utf8',
+    )
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.resolveStepInfo({

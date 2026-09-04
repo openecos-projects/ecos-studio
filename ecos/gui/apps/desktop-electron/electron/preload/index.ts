@@ -381,6 +381,8 @@ const desktopApi: DesktopApi = {
             listener(payload as DesignRuntimeEvent)
           },
         ),
+      replay: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeEventsReplay, request),
     },
     flow: {
       run: (request) =>
