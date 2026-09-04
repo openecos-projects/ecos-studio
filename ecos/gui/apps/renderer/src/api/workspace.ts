@@ -4,6 +4,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import {
   projectIdFromName,
   type DesignTool,
+  type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
   type ProjectManifestMpc,
   type WorkspaceConfig,
@@ -178,29 +179,25 @@ export function backendWorkspaceOptions(
           }
         : {}),
       parameters: {
-        ...Object.fromEntries(
-          Object.entries(parameters).filter(([key]) => key.includes('.')),
-        ),
-        'design.frequency_mhz': numberValue(parameters.frequency_max, 100),
-        'floorplan.mode': fixedDie ? 'width_height' : 'utilization',
-        'floorplan.core_util': numberValue(
+        frequency_max: numberValue(parameters.frequency_max, 100),
+        core_utilization: numberValue(
           parameters.utilitization ?? parameters.core_utilization,
           fixedDie ? 0.5 : 0.6,
         ),
         ...(fixedDie
           ? {
-              'floorplan.die_width': numberValue(parameters.die_width, 100),
-              'floorplan.die_height': numberValue(parameters.die_height, 100),
+              die_width: numberValue(parameters.die_width, 100),
+              die_height: numberValue(parameters.die_height, 100),
             }
           : {
-              'floorplan.core_margin': [
+              core_margin: [
                 numberValue(parameters.margin, 0),
                 numberValue(parameters.margin, 0),
               ],
             }),
-        'synth.max_fanout': numberValue(parameters.max_fanout, 20),
-        'place.target_density': numberValue(parameters.target_density, 0.2),
-        'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
+        max_fanout: numberValue(parameters.max_fanout, 20),
+        target_density: numberValue(parameters.target_density, 0.2),
+        target_overflow: numberValue(parameters.target_overflow, 0.1),
       },
     },
     workspaceBindings: {
@@ -360,5 +357,14 @@ export function updateWorkspaceApi(
       expectedWorkspaceRevision,
       workspaceHandle,
     },
+  })
+}
+
+export function updateWorkspaceConfigurationApi(
+  request: EccWorkspaceConfigurationUpdateRequest,
+) {
+  return getDesktopApi().productCommands.execute({
+    command: 'workspace.updateConfiguration',
+    payload: request,
   })
 }

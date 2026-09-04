@@ -33,6 +33,7 @@ import type {
   PdkResolveBindingRequest,
 } from './pdkInventory.ts'
 import type {
+  ProjectManifest,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
 } from '../utils/projectManifest.ts'
@@ -235,7 +236,8 @@ export interface DesktopApi {
   backendWorkspace: BackendWorkspaceApi
   backendProjectComparison: BackendProjectComparisonApi
   projectManagement?: {
-    readManifest(projectRoot: string): Promise<string | null>
+    discoverProject(directory: string): Promise<ProjectManifest | null>
+    readManifest(projectRoot: string): Promise<ProjectManifest | null>
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,

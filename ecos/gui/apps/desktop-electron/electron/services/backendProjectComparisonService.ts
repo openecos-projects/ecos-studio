@@ -3,7 +3,6 @@ import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
-  parseProjectManifest,
   type BackendProjectComparison,
   type BackendProjectComparisonInvalidatedEvent,
   type BackendProjectComparisonQueryResult,
@@ -47,7 +46,7 @@ import {
 
 interface ProjectComparisonReader {
   resolveProjectRoot?(projectRoot: string): Promise<string>
-  readManifest(projectRoot: string): Promise<string | null>
+  readManifest(projectRoot: string): Promise<ProjectManifest | null>
   readEngineeringSnapshot(request: {
     projectRoot: string
     workspacePath: string
@@ -390,9 +389,8 @@ export class BackendProjectComparisonService {
   }
 
   private async readManifest(projectRoot: string): Promise<ProjectManifest> {
-    const content = await this.reader.readManifest(projectRoot)
-    if (!content) throw new Error('Project manifest does not exist.')
-    const manifest = parseProjectManifest(content)
+    const manifest = await this.reader.readManifest(projectRoot)
+    if (!manifest) throw new Error('Project manifest does not exist.')
     const manifestRoot = await (this.reader.resolveProjectRoot ?? realpath)(
       manifest.root_path,
     )

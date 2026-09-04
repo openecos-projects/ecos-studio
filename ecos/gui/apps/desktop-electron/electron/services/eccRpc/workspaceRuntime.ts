@@ -19,6 +19,7 @@ import type {
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceCloseResult,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
@@ -350,6 +351,14 @@ export class EccWorkspaceRuntime {
 
   updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<EccWorkspaceUpdateResult> {
     return this.commands.updateWorkspace(request)
+  }
+
+  async updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.commands.updateWorkspaceConfiguration(request)
+    this.cachedSnapshot = null
+    return result
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {

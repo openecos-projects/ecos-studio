@@ -23,14 +23,29 @@ class CompleteFakeApi:
     def validate_workspace_spec(self, _request):
         raise AssertionError("unexpected validate_workspace_spec call")
 
+    def discover_project(self, _request):
+        raise AssertionError("unexpected discover_project call")
+
+    def load_project_manifest(self, _request):
+        raise AssertionError("unexpected load_project_manifest call")
+
+    def mutate_project_manifest(self, _request):
+        raise AssertionError("unexpected mutate_project_manifest call")
+
     def create_workspace(self, _request):
         raise AssertionError("unexpected create_workspace call")
 
     def open_workspace(self, _request):
         raise AssertionError("unexpected open_workspace call")
 
+    def workspace_binding_requirement(self, _request):
+        raise AssertionError("unexpected workspace_binding_requirement call")
+
     def update_workspace(self, _request):
         raise AssertionError("unexpected update_workspace call")
+
+    def update_workspace_configuration(self, _request):
+        raise AssertionError("unexpected update_workspace_configuration call")
 
     def close_workspace(self, _request):
         raise AssertionError("unexpected close_workspace call")
@@ -263,7 +278,9 @@ def test_persistent_db_methods_dispatch_typed_requests_to_runtime_api():
     )
     release_response = _dispatch(
         server,
-        ('{"jsonrpc":"2.0","method":"db.release","params":{"workspaceId":"workspace-1"},"id":9}'),
+        (
+            '{"jsonrpc":"2.0","method":"db.release","params":{"workspaceId":"workspace-1"},"id":9}'
+        ),
     )
 
     assert ensure_response["result"] == {
@@ -285,7 +302,9 @@ def test_persistent_db_methods_are_not_registered_by_default():
 
     response = _dispatch(
         server,
-        ('{"jsonrpc":"2.0","method":"db.ensure","params":{"workspaceId":"workspace-1"},"id":10}'),
+        (
+            '{"jsonrpc":"2.0","method":"db.ensure","params":{"workspaceId":"workspace-1"},"id":10}'
+        ),
     )
 
     assert response["id"] == 10

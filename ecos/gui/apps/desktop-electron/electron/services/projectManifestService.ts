@@ -1,23 +1,14 @@
-import { randomUUID } from 'node:crypto'
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
-import {
-  applyProjectManifestMutation,
-  parseProjectManifest,
-  recordReplacementBackupInManifest,
-  serializeProjectManifest,
-  synchronizeProjectBaseline,
-  type ProjectManifest,
-  type ProjectManifestMutationRequest,
-  type ProjectManifestMutationResult,
-  type WorkspaceDirectoryReplacement,
+import { basename, isAbsolute, resolve } from 'node:path'
+import { projectManifestForPresentation } from '@ecos-studio/shared'
+import type {
+  EccProjectManifest,
+  ProjectManifest,
+  ProjectManifestMutation,
+  ProjectManifestMutationRequest,
+  ProjectManifestMutationResult,
+  WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
-import {
-  WorkspaceSnapshotLoader,
-  type WorkspaceBaselineSnapshot,
-} from './eccRpc/workspaceSnapshotLoader'
 import { isPathWithinRoot } from './pathScope'
-import { baselineBaseDesign } from './projectManifestBaseline'
 import { validateProjectManifestMutation } from './projectManifestMutationValidation'
 
 export interface ProjectManifestScopeProvider {
@@ -44,8 +35,12 @@ export interface ProjectManifestReplacementProvider {
   ): Promise<void>
 }
 
-export interface ProjectManifestBaselineSnapshotProvider {
-  loadBaselineSnapshot(directory: string): Promise<WorkspaceBaselineSnapshot>
+export interface ProjectManifestRuntime {
+  callRuntime<T>(
+    method: string,
+    params?: Record<string, unknown>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>
 }
 
 export interface WorkspaceRegistrationEvidence {
@@ -60,96 +55,48 @@ export class ProjectManifestService {
 
   constructor(
     private readonly projectScopeProvider: ProjectManifestScopeProvider,
-    private readonly replacementProvider?: ProjectManifestReplacementProvider,
-    private readonly baselineSnapshotProvider: ProjectManifestBaselineSnapshotProvider = new WorkspaceSnapshotLoader(),
+    private readonly replacementProvider: ProjectManifestReplacementProvider | undefined,
+    private readonly runtime: ProjectManifestRuntime,
   ) {}
 
   async mutate(
     request: ProjectManifestMutationRequest,
   ): Promise<ProjectManifestMutationResult> {
-    if (
-      !request ||
-      typeof request.projectRoot !== 'string' ||
-      !request.projectRoot.trim()
-    ) {
+    if (!request?.projectRoot?.trim()) {
       throw new Error('Project manifest mutation requires a project root')
     }
     validateProjectManifestMutation(request.mutation)
-
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
       request.projectRoot,
     )
-    return await this.enqueue(projectRoot, async () => {
-      const manifestPath = join(projectRoot, 'project.json')
-      const currentManifest = await this.readManifest(projectRoot)
-      if (request.mutation.type === 'create' && currentManifest) {
-        throw new Error('Project manifest already exists.')
-      }
-      const manifest =
-        request.mutation.type === 'record-replacement-backup'
-          ? this.applyReplacementBackupMutation(
-              currentManifest,
-              projectRoot,
-              request.mutation,
-            )
-          : request.mutation.type === 'select-qor-baseline'
-            ? await this.applyQorBaselineMutation(currentManifest, request.mutation)
-            : applyProjectManifestMutation(currentManifest, projectRoot, request.mutation)
-      const directoryReplacement =
-        request.mutation.type === 'delete-workspace' && request.mutation.deleteDirectory
-          ? await this.prepareManagedWorkspaceDeletion(
-              currentManifest,
-              projectRoot,
-              request.mutation.workspaceId,
-            )
-          : null
-      const content = serializeProjectManifest(manifest)
-      try {
-        if (request.mutation.type === 'record-replacement-backup') {
-          await this.setReplacementRecoveryMode(
-            request.mutation.input.replacementId,
-            projectRoot,
-            'retain',
-          )
-        }
-        if (directoryReplacement) {
-          await this.setReplacementRecoveryMode(
-            directoryReplacement.id,
-            projectRoot,
-            'delete',
-          )
-        }
-        await writeTextFileAtomically(manifestPath, content)
-      } catch (error) {
-        if (directoryReplacement) {
-          await this.replacementProvider!.restoreProjectDirectoryReplacement(
-            directoryReplacement.id,
-          ).catch(() => undefined)
-        }
-        throw error
-      }
-      let cleanupPending = false
-      if (request.mutation.type === 'record-replacement-backup') {
-        try {
-          await this.replacementProvider!.retainProjectDirectoryReplacement(
-            request.mutation.input.replacementId,
-          )
-        } catch {
-          // The manifest now references the backup and recovery mode is retain.
-          cleanupPending = true
-        }
-      }
-      if (directoryReplacement) {
-        try {
-          await this.replacementProvider!.finalizeProjectDirectoryReplacement(
-            directoryReplacement.id,
-          )
-        } catch {
-          cleanupPending = true
-        }
-      }
-      return { content, ...(cleanupPending ? { cleanupPending } : {}) }
-    })
+    return await this.enqueue(projectRoot, () =>
+      this.mutateThroughRuntime(projectRoot, request.mutation),
+    )
+  }
+
+  async load(requestedProjectRoot: string): Promise<ProjectManifest> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    return projectManifestForPresentation(
+      await this.loadManifest(projectRoot),
+      projectRoot,
+    )
+  }
+
+  async discover(directory: string): Promise<ProjectManifest | null> {
+    const discovered = await this.runtime.callRuntime<{
+      projectId: string
+      projectRoot: string
+    } | null>('project.discover', { directory })
+    if (!discovered) return null
+    const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
+      discovered.projectRoot,
+    )
+    const manifest = await this.loadManifest(projectRoot)
+    if (manifest.project_id !== discovered.projectId) {
+      throw new Error('Discovered Project identity changed while loading its Manifest.')
+    }
+    return projectManifestForPresentation(manifest, projectRoot)
   }
 
   async inspectWorkspaceRegistration(
@@ -160,10 +107,9 @@ export class ProjectManifestService {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
     return await this.enqueue(projectRoot, async () => {
-      const manifest = await this.readManifest(projectRoot)
-      if (!manifest) throw new Error('Project manifest does not exist.')
+      const manifest = await this.loadManifest(projectRoot)
       requireProjectIdentity(manifest, expectedProjectId)
-      return workspaceRegistrationEvidence(manifest, workspacePath)
+      return workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
     })
   }
 
@@ -175,21 +121,15 @@ export class ProjectManifestService {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
     return await this.enqueue(projectRoot, async () => {
-      const manifest = await this.readManifest(projectRoot)
-      if (!manifest) throw new Error('Project manifest does not exist.')
+      const manifest = await this.loadManifest(projectRoot)
       requireProjectIdentity(manifest, expectedProjectId)
-      const existing = workspaceRegistrationEvidence(manifest, workspacePath)
+      const existing = workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
       if (existing) return existing
-
-      const updated = applyProjectManifestMutation(manifest, projectRoot, {
+      const updated = await this.mutateManifest(projectRoot, {
         type: 'register-workspace',
         input: { projectRoot, workspacePath },
       })
-      await writeTextFileAtomically(
-        join(projectRoot, 'project.json'),
-        serializeProjectManifest(updated),
-      )
-      return workspaceRegistrationEvidence(updated, workspacePath)!
+      return workspaceRegistrationEvidence(updated, workspacePath, projectRoot)!
     })
   }
 
@@ -200,90 +140,124 @@ export class ProjectManifestService {
     const projectRoot =
       await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
     await this.enqueue(projectRoot, async () => {
-      const manifest = await this.readManifest(projectRoot)
-      if (!manifest) throw new Error('Project manifest does not exist.')
-      const current = workspaceRegistrationEvidence(manifest, evidence.workspacePath)
+      const manifest = await this.loadManifest(projectRoot)
+      const current = workspaceRegistrationEvidence(
+        manifest,
+        evidence.workspacePath,
+        projectRoot,
+      )
       if (!current || current.fingerprint !== evidence.fingerprint) {
         throw new Error(
           'Project manifest registration changed after Workspace creation; registration was preserved.',
         )
       }
-      const updated = applyProjectManifestMutation(manifest, projectRoot, {
+      await this.mutateManifest(projectRoot, {
         type: 'delete-workspace',
         workspaceId: evidence.workspaceId,
       })
-      await writeTextFileAtomically(
-        join(projectRoot, 'project.json'),
-        serializeProjectManifest(updated),
-      )
     })
   }
 
-  private async readManifest(projectRoot: string): Promise<ProjectManifest | null> {
-    const content = await readOptionalTextFile(join(projectRoot, 'project.json'))
-    if (content === null) return null
-    const manifest = parseProjectManifest(content)
-    const manifestRoot = await this.projectScopeProvider.resolveProjectRoot(
-      manifest.root_path,
-    )
-    if (manifestRoot !== projectRoot) {
-      throw new Error(
-        'Project manifest root_path does not match its containing directory.',
-      )
-    }
-    return manifest
-  }
-
-  private applyReplacementBackupMutation(
-    currentManifest: ReturnType<typeof parseProjectManifest> | null,
+  private async mutateThroughRuntime(
     projectRoot: string,
-    mutation: Extract<
-      ProjectManifestMutationRequest['mutation'],
-      { type: 'record-replacement-backup' }
-    >,
-  ) {
-    if (!currentManifest) throw new Error('Project manifest does not exist.')
-    if (!this.replacementProvider) {
-      throw new Error('Workspace replacement support is unavailable.')
-    }
-    const replacement = this.requireProjectReplacement(
-      mutation.input.replacementId,
-      projectRoot,
-    )
-    return recordReplacementBackupInManifest(currentManifest, {
-      backupPath: replacement.backupPath,
-      targetPath: replacement.targetPath,
-      fallbackStartStep: mutation.input.fallbackStartStep,
-      fallbackEndStep: mutation.input.fallbackEndStep,
-    })
-  }
-
-  private async applyQorBaselineMutation(
-    currentManifest: ProjectManifest | null,
-    mutation: Extract<
-      ProjectManifestMutationRequest['mutation'],
-      { type: 'select-qor-baseline' }
-    >,
-  ): Promise<ProjectManifest> {
-    if (!currentManifest) throw new Error('Project manifest does not exist.')
-    const workspace = currentManifest.workspaces.find(
-      (candidate) =>
-        candidate.workspace_id === mutation.workspaceId &&
-        candidate.status !== 'archived',
-    )
-    if (!workspace) {
-      throw new Error(
-        `Workspace ${mutation.workspaceId} is not available for the project QoR baseline.`,
+    requestedMutation: ProjectManifestMutation,
+  ): Promise<ProjectManifestMutationResult> {
+    let mutation: ProjectManifestMutation | Record<string, unknown> = requestedMutation
+    let directoryReplacement: WorkspaceDirectoryReplacement | null = null
+    if (requestedMutation.type === 'record-replacement-backup') {
+      const replacement = this.requireProjectReplacement(
+        requestedMutation.input.replacementId,
+        projectRoot,
+      )
+      mutation = {
+        type: 'register-workspace',
+        input: {
+          lifecycle: 'archived',
+          name: `${basename(replacement.targetPath)} backup`,
+          workspacePath: replacement.backupPath,
+        },
+      }
+      await this.setReplacementRecoveryMode(
+        requestedMutation.input.replacementId,
+        projectRoot,
+        'retain',
       )
     }
+    if (
+      requestedMutation.type === 'delete-workspace' &&
+      requestedMutation.deleteDirectory
+    ) {
+      const manifest = await this.loadManifest(projectRoot)
+      const workspace = manifest.workspaces.find(
+        (candidate) => candidate.workspace_id === requestedMutation.workspaceId,
+      )
+      if (workspace) {
+        if (!this.replacementProvider) {
+          throw new Error('Workspace replacement support is unavailable.')
+        }
+        directoryReplacement =
+          await this.replacementProvider.prepareManagedProjectWorkspaceDirectoryReplacement(
+            projectRoot,
+            requestedMutation.workspaceId,
+            absoluteWorkspacePath(projectRoot, workspace.workspace_path),
+          )
+        if (directoryReplacement) {
+          await this.setReplacementRecoveryMode(
+            directoryReplacement.id,
+            projectRoot,
+            'delete',
+          )
+        }
+      }
+    }
 
-    const snapshot = await this.baselineSnapshotProvider.loadBaselineSnapshot(
-      workspace.workspace_path,
-    )
-    return synchronizeProjectBaseline(currentManifest, {
-      workspaceId: workspace.workspace_id,
-      reason: mutation.reason,
-      baseDesign: baselineBaseDesign(currentManifest.base_design, snapshot),
+    let manifest: EccProjectManifest
+    try {
+      manifest = await this.mutateManifest(projectRoot, mutation)
+    } catch (error) {
+      if (directoryReplacement) {
+        await this.replacementProvider!.restoreProjectDirectoryReplacement(
+          directoryReplacement.id,
+        ).catch(() => undefined)
+      }
+      throw error
+    }
+
+    let cleanupPending = false
+    const replacementId =
+      requestedMutation.type === 'record-replacement-backup'
+        ? requestedMutation.input.replacementId
+        : directoryReplacement?.id
+    if (replacementId) {
+      try {
+        if (requestedMutation.type === 'record-replacement-backup') {
+          await this.replacementProvider!.retainProjectDirectoryReplacement(replacementId)
+        } else {
+          await this.replacementProvider!.finalizeProjectDirectoryReplacement(
+            replacementId,
+          )
+        }
+      } catch {
+        cleanupPending = true
+      }
+    }
+    return {
+      manifest: projectManifestForPresentation(manifest, projectRoot),
+      ...(cleanupPending ? { cleanupPending } : {}),
+    }
+  }
+
+  private loadManifest(projectRoot: string): Promise<EccProjectManifest> {
+    return this.runtime.callRuntime('project.manifest.load', { projectRoot })
+  }
+
+  private mutateManifest(
+    projectRoot: string,
+    mutation: ProjectManifestMutation | Record<string, unknown>,
+  ): Promise<EccProjectManifest> {
+    return this.runtime.callRuntime('project.manifest.mutate', {
+      projectRoot,
+      mutation,
     })
   }
 
@@ -292,33 +266,10 @@ export class ProjectManifestService {
     projectRoot: string,
     recoveryMode: 'delete' | 'retain',
   ): Promise<void> {
-    if (!this.replacementProvider) {
-      throw new Error('Workspace replacement support is unavailable.')
-    }
     this.requireProjectReplacement(replacementId, projectRoot)
-    await this.replacementProvider.setProjectDirectoryReplacementRecoveryMode(
+    await this.replacementProvider!.setProjectDirectoryReplacementRecoveryMode(
       replacementId,
       recoveryMode,
-    )
-  }
-
-  private async prepareManagedWorkspaceDeletion(
-    currentManifest: ReturnType<typeof parseProjectManifest> | null,
-    projectRoot: string,
-    workspaceId: string,
-  ): Promise<WorkspaceDirectoryReplacement | null> {
-    if (!currentManifest) return null
-    const workspace = currentManifest.workspaces.find(
-      (candidate) => candidate.workspace_id === workspaceId,
-    )
-    if (!workspace) return null
-    if (!this.replacementProvider) {
-      throw new Error('Workspace replacement support is unavailable.')
-    }
-    return await this.replacementProvider.prepareManagedProjectWorkspaceDirectoryReplacement(
-      projectRoot,
-      workspaceId,
-      workspace.workspace_path,
     )
   }
 
@@ -346,45 +297,49 @@ export class ProjectManifestService {
       () => undefined,
     )
     this.queues.set(projectRoot, queued)
-
     try {
       return await next
     } finally {
-      if (this.queues.get(projectRoot) === queued) {
-        this.queues.delete(projectRoot)
-      }
+      if (this.queues.get(projectRoot) === queued) this.queues.delete(projectRoot)
     }
   }
 }
 
 function workspaceRegistrationEvidence(
-  manifest: ProjectManifest,
+  manifest: EccProjectManifest,
   workspacePath: string,
+  projectRoot: string,
 ): WorkspaceRegistrationEvidence | null {
   const normalizedPath = normalizePath(workspacePath)
   const workspaceId = basename(normalizedPath)
   const candidates = manifest.workspaces.filter(
     (workspace) =>
       workspace.workspace_id === workspaceId ||
-      normalizePath(workspace.workspace_path) === normalizedPath,
+      absoluteWorkspacePath(projectRoot, workspace.workspace_path) === normalizedPath,
   )
   if (candidates.length === 0) return null
-  const workspace = candidates.find(
+  const matchingPaths = candidates.filter(
     (candidate) =>
-      candidate.workspace_id === workspaceId &&
-      normalizePath(candidate.workspace_path) === normalizedPath,
+      absoluteWorkspacePath(projectRoot, candidate.workspace_path) === normalizedPath,
   )
-  if (!workspace || candidates.length !== 1) {
+  if (matchingPaths.length !== 1 || candidates.length !== 1) {
     throw new Error(
       'Project manifest has a conflicting Workspace identity or path; registration was preserved.',
     )
   }
+  const workspace = matchingPaths[0]!
   return {
     fingerprint: JSON.stringify(workspace),
     projectId: manifest.project_id,
-    workspaceId,
+    workspaceId: workspace.workspace_id,
     workspacePath: normalizedPath,
   }
+}
+
+function absoluteWorkspacePath(projectRoot: string, workspacePath: string): string {
+  return normalizePath(
+    isAbsolute(workspacePath) ? workspacePath : resolve(projectRoot, workspacePath),
+  )
 }
 
 function normalizePath(path: string): string {
@@ -393,7 +348,7 @@ function normalizePath(path: string): string {
 }
 
 function requireProjectIdentity(
-  manifest: ProjectManifest,
+  manifest: EccProjectManifest,
   expectedProjectId?: string,
 ): void {
   if (expectedProjectId && manifest.project_id !== expectedProjectId) {
@@ -401,30 +356,4 @@ function requireProjectIdentity(
       'Project manifest identity changed after Workspace creation; registration was preserved.',
     )
   }
-}
-
-async function readOptionalTextFile(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8')
-  } catch (error) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) return null
-    throw error
-  }
-}
-
-async function writeTextFileAtomically(path: string, content: string): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporaryPath, content, 'utf8')
-    await rename(temporaryPath, path)
-  } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => undefined)
-    throw error
-  }
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'code' in error && error.code === code
-  )
 }

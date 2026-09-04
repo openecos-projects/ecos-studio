@@ -22,6 +22,7 @@ export const desktopApiIpcChannels = {
   settingsSet: 'settings:set',
   settingsDelete: 'settings:delete',
   projectManifestMutate: 'project-manifest:mutate',
+  projectManagementDiscoverProject: 'project-management:discover-project',
   projectManagementReadManifest: 'project-management:read-manifest',
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceTexts: 'project-management:read-workspace-texts',

@@ -40,11 +40,29 @@ class WorkspaceSpecValidateRequest:
 
 
 @dataclass(frozen=True)
+class ProjectManifestLoadRequest:
+    project_root: str
+
+
+@dataclass(frozen=True)
+class ProjectManifestDiscoverRequest:
+    directory: str
+
+
+@dataclass(frozen=True)
+class ProjectManifestMutationRequest:
+    project_root: str
+    mutation: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class WorkspaceSpecCreateRequest:
     command_id: str
     target_directory: str
     workspace_spec: dict[str, Any]
     workspace_bindings: dict[str, Any]
+    project_id: str = ""
+    project_root: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,6 +71,15 @@ class WorkspaceUpdateRequest:
     workspace_id: str
     expected_workspace_revision: int
     workspace_spec: dict[str, Any]
+    workspace_bindings: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class WorkspaceConfigurationUpdateRequest:
+    command_id: str
+    workspace_id: str
+    expected_workspace_revision: int
+    configuration: dict[str, Any]
     workspace_bindings: dict[str, Any]
 
 
@@ -231,6 +258,8 @@ FIELD_ALIASES = {
     "workspaceSpec": "workspace_spec",
     "workspaceBindings": "workspace_bindings",
     "targetDirectory": "target_directory",
+    "projectId": "project_id",
+    "projectRoot": "project_root",
 }
 
 
@@ -260,7 +289,9 @@ def parse_request_model(model: type, params: object):
         if required and _is_missing(values[field.name]):
             raise RequestValidationError(f"missing required field: {field.name}")
 
-        if field.name in {"rerun", "reset_dependents"} and not isinstance(values[field.name], bool):
+        if field.name in {"rerun", "reset_dependents"} and not isinstance(
+            values[field.name], bool
+        ):
             raise RequestValidationError(f"{field.name} must be a boolean")
 
     return model(**values)

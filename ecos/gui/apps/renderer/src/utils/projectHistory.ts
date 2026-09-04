@@ -1,4 +1,4 @@
-import { parseProjectManifest, type DesktopSettingsValue } from '@ecos-studio/shared'
+import type { DesktopSettingsValue, ProjectManifest } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import type { Project, ProjectStatus } from '@/types'
 import { readProjectManagementManifest } from './projectManagementRead'
@@ -96,9 +96,8 @@ async function migrateLegacyWorkspaceHistory(values: unknown[]): Promise<Project
     LEGACY_PROJECT_ROOT_READ_CONCURRENCY,
     async ({ projectRoot, workspace }) => {
       try {
-        const manifestText = await readProjectManagementManifest(projectRoot)
-        if (!manifestText) return null
-        const manifest = parseProjectManifest(manifestText)
+        const manifest = await readProjectManagementManifest(projectRoot)
+        if (!manifest) return null
         return projectFromLegacyWorkspace(manifest, workspace)
       } catch {
         // A stale workspace history entry is expected during migration.
@@ -134,7 +133,7 @@ function parentLocalPath(path: string): string {
 }
 
 function projectFromLegacyWorkspace(
-  manifest: ReturnType<typeof parseProjectManifest>,
+  manifest: ProjectManifest,
   workspace: Project,
 ): Project {
   const path = normalizePath(manifest.root_path)

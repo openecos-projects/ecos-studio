@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { resolve } from 'node:path'
 import {
-  parseProjectManifest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceOpenRequest,
   type PdkBindRequest,
@@ -10,6 +8,7 @@ import {
   type PdkRequirement,
   type PdkResolveBindingRequest,
   type PdkWorkspaceValidationRequest,
+  validateMpcSpec,
 } from '@ecos-studio/shared'
 
 export interface WorkspacePdkBindingDependencies {
@@ -20,8 +19,12 @@ export interface WorkspacePdkBindingDependencies {
       request: PdkWorkspaceValidationRequest,
     ): Promise<PdkInstallationSnapshot>
   }
-  projectManagementReadService?: {
-    readManifest(projectRoot: string): Promise<string | null>
+  eccRuntimeService?: {
+    callRuntime?<T>(method: string, params: Record<string, unknown>): Promise<T>
+  }
+  resourceManagerService?: {
+    getResource(resourceId: string): Promise<unknown>
+    readMpcSpec(resourceId: string): Promise<unknown>
   }
 }
 
@@ -34,12 +37,8 @@ export async function prepareWorkspaceCreateBinding(
   }
 
   const projectRoot = request.projectRoot ?? ''
-  const { projectId, requirement } = await resolveProjectRequirement(
-    dependencies,
-    request.projectId ?? '',
-    projectRoot,
-    request.pdkRequirement,
-  )
+  const projectId = request.projectId ?? ''
+  const requirement = request.pdkRequirement
   const binding = await dependencies.pdkInventoryService.resolveBinding({
     projectId,
     projectRoot,
@@ -64,8 +63,6 @@ export async function prepareWorkspaceCreateBinding(
   const {
     pdkInstallationId: _pdkInstallationId,
     pdkRequirement: _pdkRequirement,
-    projectId: _projectId,
-    projectRoot: _projectRoot,
     ...runtimeRequest
   } = request
   const specPdk = isRecord(request.workspaceSpec.pdk) ? request.workspaceSpec.pdk : {}
@@ -80,7 +77,7 @@ export async function prepareWorkspaceCreateBinding(
         ...bindingPdk,
         root: installation.root,
         ...(requirement.version ? { version: requirement.version } : {}),
-        ...manualPdkFiles(specPdk, requirement),
+        ...manualPdkFiles(specPdk, requirement, installation.root),
       },
     },
     workspaceSpec: {
@@ -98,36 +95,44 @@ export async function prepareWorkspaceOpenBinding(
   dependencies: WorkspacePdkBindingDependencies,
   directory: string,
 ): Promise<EccWorkspaceOpenRequest> {
-  const spec = await readWorkspaceSpec(directory)
-  const pdk = isRecord(spec?.pdk) ? spec.pdk : null
+  const bindingRequirement = await dependencies.eccRuntimeService
+    ?.callRuntime?.<Record<string, unknown>>('workspace.binding_requirement', {
+      directory,
+    })
+    .catch(() => null)
+  const pdk = bindingRequirement
   if (!pdk || typeof pdk.familyId !== 'string') return { directory }
 
-  const projectRoot = dirname(directory)
-  const { projectId, requirement } = await resolveProjectRequirement(
-    dependencies,
-    '',
-    projectRoot,
-    {
-      familyId: pdk.familyId,
-      version: typeof pdk.version === 'string' ? pdk.version : null,
-      manualConfig: null,
-    },
-  )
+  const project = await dependencies.eccRuntimeService
+    ?.callRuntime?.<{ projectId: string; projectRoot: string } | null>(
+      'project.discover',
+      { directory },
+    )
+    .catch(() => null)
+  if (!project) return { directory }
+  const { projectId, projectRoot } = project
+  const pdkRequirement = {
+    familyId: pdk.familyId,
+    version: typeof pdk.version === 'string' ? pdk.version : null,
+    manualConfig: manualPdkConfig(pdk),
+  }
   try {
     const installation = await dependencies.pdkInventoryService.validateWorkspace({
       projectId,
       projectRoot,
-      requirement,
+      requirement: pdkRequirement,
     })
+    const mpcBinding = await resolveMpcBinding(dependencies, bindingRequirement?.mpc)
     return {
       directory,
       workspaceBindings: {
         inputs: {},
         pdk: {
           root: installation.root,
-          ...(requirement.version ? { version: requirement.version } : {}),
-          ...manualPdkFiles(pdk, requirement),
+          ...(pdkRequirement.version ? { version: pdkRequirement.version } : {}),
+          ...manualPdkFiles(pdk, pdkRequirement, installation.root),
         },
+        ...(mpcBinding ? { mpc: mpcBinding } : {}),
       },
     }
   } catch {
@@ -135,32 +140,59 @@ export async function prepareWorkspaceOpenBinding(
   }
 }
 
-async function resolveProjectRequirement(
-  dependencies: WorkspacePdkBindingDependencies,
-  requestedProjectId: string,
-  projectRoot: string,
-  requested: PdkRequirement,
-): Promise<{ projectId: string; requirement: PdkRequirement }> {
-  if (!projectRoot || !dependencies.projectManagementReadService) {
-    return { projectId: requestedProjectId, requirement: requested }
-  }
-  const manifestText =
-    await dependencies.projectManagementReadService.readManifest(projectRoot)
-  if (!manifestText) return { projectId: requestedProjectId, requirement: requested }
-  const manifest = parseProjectManifest(manifestText)
-  return {
-    projectId: manifest.project_id,
-    requirement: manifest.base_design.pdk_requirement ?? requested,
-  }
+function manualPdkConfig(pdk: Record<string, unknown>): PdkRequirement['manualConfig'] {
+  const files = pdk.files
+  if (pdk.mode !== 'manual' || !Array.isArray(files)) return null
+  const byRole = (role: string) =>
+    files.flatMap((value) => {
+      if (
+        !isRecord(value) ||
+        value.role !== role ||
+        typeof value.reference !== 'string'
+      ) {
+        return []
+      }
+      return [value.reference]
+    })
+  const tech = byRole('tech')[0]
+  const cellLefs = byRole('lef')
+  const liberty = byRole('liberty')
+  return tech && cellLefs.length && liberty.length
+    ? { techLef: tech, cellLefs, liberty }
+    : null
 }
 
-async function readWorkspaceSpec(
-  directory: string,
-): Promise<Record<string, unknown> | null> {
+async function resolveMpcBinding(
+  dependencies: WorkspacePdkBindingDependencies,
+  value: unknown,
+): Promise<{ template: Record<string, unknown> } | null> {
+  if (!isRecord(value) || !dependencies.resourceManagerService) return null
+  const resourceId = value.resourceId
+  const version = value.version
+  const designId = value.designId
+  if (
+    typeof resourceId !== 'string' ||
+    typeof version !== 'string' ||
+    typeof designId !== 'string'
+  ) {
+    return null
+  }
   try {
-    return JSON.parse(
-      await readFile(join(directory, 'home', 'workspace-spec.json'), 'utf8'),
-    ) as Record<string, unknown>
+    const resource = await dependencies.resourceManagerService.getResource(resourceId)
+    if (
+      !isRecord(resource) ||
+      resource.installed_version !== version ||
+      (resource.status !== 'installed' && resource.status !== 'update_available')
+    ) {
+      return null
+    }
+    const spec = validateMpcSpec(
+      await dependencies.resourceManagerService.readMpcSpec(resourceId),
+    )
+    const design = spec.designs.find(
+      (candidate) => candidate.design.design_name === designId,
+    )
+    return design ? { template: design.coreTemplate } : null
   } catch {
     return null
   }
@@ -169,6 +201,7 @@ async function readWorkspaceSpec(
 function manualPdkFiles(
   pdk: Record<string, unknown>,
   requirement: PdkRequirement,
+  root: string,
 ): { files?: Record<string, string> } {
   if (pdk.mode !== 'manual' || !Array.isArray(pdk.files) || !requirement.manualConfig) {
     return {}
@@ -178,12 +211,20 @@ function manualPdkFiles(
   let libertyIndex = 0
   for (const value of pdk.files) {
     if (!isRecord(value) || typeof value.fileId !== 'string') continue
-    if (value.role === 'tech') files[value.fileId] = requirement.manualConfig.techLef
+    if (value.role === 'tech') {
+      files[value.fileId] = resolve(root, requirement.manualConfig.techLef)
+    }
     if (value.role === 'lef') {
-      files[value.fileId] = requirement.manualConfig.cellLefs[lefIndex++] ?? ''
+      files[value.fileId] = resolve(
+        root,
+        requirement.manualConfig.cellLefs[lefIndex++] ?? '',
+      )
     }
     if (value.role === 'liberty') {
-      files[value.fileId] = requirement.manualConfig.liberty[libertyIndex++] ?? ''
+      files[value.fileId] = resolve(
+        root,
+        requirement.manualConfig.liberty[libertyIndex++] ?? '',
+      )
     }
   }
   return Object.keys(files).length ? { files } : {}

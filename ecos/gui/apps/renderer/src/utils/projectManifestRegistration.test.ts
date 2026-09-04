@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceConfig } from '@/types'
 import {
-  createProjectManifestDraft,
-  registerWorkspaceInManifest,
-} from '@ecos-studio/shared'
-import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
   resolveManagedProjectContext,
@@ -15,7 +11,7 @@ import {
 const registerProjectRoot = vi.fn()
 const registerProjectReadRoot = vi.fn()
 const mutateProjectManifest = vi.fn()
-const readProjectManagementManifest = vi.fn()
+const discoverProjectForWorkspace = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: vi.fn(() => ({
@@ -31,8 +27,8 @@ vi.mock('@/api/projectManifest', () => ({
 }))
 
 vi.mock('@/utils/projectManagementRead', () => ({
-  readProjectManagementManifest: (...args: unknown[]) =>
-    readProjectManagementManifest(...args),
+  discoverProjectForWorkspace: (...args: unknown[]) =>
+    discoverProjectForWorkspace(...args),
 }))
 
 describe('projectManifestRegistration', () => {
@@ -40,10 +36,10 @@ describe('projectManifestRegistration', () => {
     registerProjectRoot.mockReset()
     registerProjectReadRoot.mockReset()
     mutateProjectManifest.mockReset()
-    readProjectManagementManifest.mockReset()
+    discoverProjectForWorkspace.mockReset()
     registerProjectRoot.mockImplementation(async (path: string) => path)
     mutateProjectManifest.mockResolvedValue(undefined)
-    readProjectManagementManifest.mockResolvedValue(null)
+    discoverProjectForWorkspace.mockResolvedValue(null)
   })
 
   it('derives project context from wizard project_context payload', () => {
@@ -136,34 +132,45 @@ describe('projectManifestRegistration', () => {
   })
 
   it('resolves project route context from a parent project.json that lists the workspace', async () => {
-    const manifest = registerWorkspaceInManifest(
-      createProjectManifestDraft({
-        rootPath: '/projects/gcd',
-        name: 'gcd',
-        designName: 'gcd',
-        now: '2026-08-04T00:00:00.000Z',
-      }),
-      {
-        projectRoot: '/projects/gcd',
-        workspacePath: '/projects/gcd/ws_0036',
-        now: '2026-08-04T00:00:00.000Z',
-      },
-    )
-    readProjectManagementManifest.mockResolvedValue(JSON.stringify(manifest))
+    const manifest = {
+      schema_version: 1,
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      root_path: '/projects/gcd',
+      created_at: '2026-08-04T00:00:00.000Z',
+      updated_at: '2026-08-04T00:00:00.000Z',
+      objectives: {},
+      workspaces: [
+        {
+          workspace_id: 'ws_0036',
+          name: 'ws_0036',
+          workspace_path: '/projects/gcd/runs/ws_0036',
+          source_workspace_id: null,
+          lifecycle: 'active',
+          created_at: '2026-08-04T00:00:00.000Z',
+          updated_at: '2026-08-04T00:00:00.000Z',
+        },
+      ],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: null,
+    }
+    discoverProjectForWorkspace.mockResolvedValue(manifest)
 
     await expect(
-      resolveProjectRouteContextForWorkspace('/projects/gcd/ws_0036'),
+      resolveProjectRouteContextForWorkspace('/projects/gcd/runs/ws_0036'),
     ).resolves.toEqual({
       projectRoot: '/projects/gcd',
       projectName: 'gcd',
     })
 
     expect(registerProjectRoot).not.toHaveBeenCalled()
-    expect(readProjectManagementManifest).toHaveBeenCalledWith('/projects/gcd')
+    expect(discoverProjectForWorkspace).toHaveBeenCalledWith('/projects/gcd/runs/ws_0036')
   })
 
   it('returns null when the parent directory is not a managed project for the workspace', async () => {
-    readProjectManagementManifest.mockResolvedValue(null)
+    discoverProjectForWorkspace.mockResolvedValue(null)
 
     await expect(
       resolveProjectRouteContextForWorkspace('/workspaces/orphan/ws_0001'),
@@ -184,13 +191,15 @@ describe('projectManifestRegistration', () => {
       projectRoot: '/projects/gcd',
       projectName: 'gcd',
     })
-    expect(readProjectManagementManifest).not.toHaveBeenCalled()
+    expect(discoverProjectForWorkspace).not.toHaveBeenCalled()
   })
 
   it('falls back to a parent directory that already has project.json', async () => {
-    readProjectManagementManifest.mockResolvedValue(
-      JSON.stringify({ name: 'gcd-project', workspaces: [] }),
-    )
+    discoverProjectForWorkspace.mockResolvedValue({
+      name: 'gcd-project',
+      root_path: '/projects/gcd',
+      workspaces: [{ workspace_path: '/projects/gcd/ws_0030' }],
+    })
 
     await expect(
       resolveManagedProjectContext({
@@ -201,7 +210,7 @@ describe('projectManifestRegistration', () => {
       projectName: 'gcd-project',
     })
     expect(registerProjectRoot).not.toHaveBeenCalled()
-    expect(readProjectManagementManifest).toHaveBeenCalledWith('/projects/gcd')
+    expect(discoverProjectForWorkspace).toHaveBeenCalledWith('/projects/gcd/ws_0030')
   })
 
   it('does not invent a project when the parent has no project.json', async () => {

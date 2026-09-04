@@ -66,7 +66,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       delete: async () => undefined,
     },
     projectManifest: {
-      mutate: async () => ({ content: '' }),
+      mutate: async () => ({ manifest: {} as never }),
     },
     backendWorkspace: {} as DesktopApi['backendWorkspace'],
     backendProjectComparison: {} as DesktopApi['backendProjectComparison'],

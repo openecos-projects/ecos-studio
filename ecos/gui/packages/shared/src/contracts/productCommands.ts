@@ -4,6 +4,7 @@ import type {
   EccRuntimeStartStepRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceMutationRequest,
@@ -28,6 +29,10 @@ export type ProductCommandRequest =
         expectedWorkspaceRevision: number
         workspaceHandle: string
       }
+    }
+  | {
+      command: 'workspace.updateConfiguration'
+      payload: EccWorkspaceConfigurationUpdateRequest
     }
   | {
       command: 'workspace.cancel'

@@ -43,6 +43,16 @@ export interface EccWorkspaceUpdateResult {
   workspaceRevision: number
 }
 
+export interface EccWorkspaceConfigurationUpdateRequest extends EccWorkspaceMutationRequest {
+  commandId: string
+  configuration: {
+    design: Partial<{ name: string; topModule: string; clockPort: string }>
+    parameters: Record<string, unknown>
+    pdk: Partial<{ familyId: string }>
+  }
+  pdkRoot?: string
+}
+
 export interface EccWorkspaceHandleRequest {
   workspaceHandle: string
   expectedWorkspaceRevision?: number

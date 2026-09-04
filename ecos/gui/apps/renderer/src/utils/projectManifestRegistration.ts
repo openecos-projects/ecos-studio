@@ -1,8 +1,7 @@
 import type { WorkspaceConfig } from '@/types'
 import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
-import { readProjectManagementManifest } from '@/utils/projectManagementRead'
-import { parseProjectManifest } from '@ecos-studio/shared'
+import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
 
 export interface ProjectRouteContext {
   projectRoot: string
@@ -64,14 +63,10 @@ export async function resolveProjectRouteContextForWorkspace(
   const normalizedWorkspace = normalizePath(workspacePath)
   if (!normalizedWorkspace) return null
 
-  const projectRoot = parentPath(normalizedWorkspace)
-  if (!projectRoot || projectRoot === normalizedWorkspace) return null
-
   try {
-    const manifestText = await readProjectManagementManifest(projectRoot)
-    if (!manifestText) return null
-
-    const manifest = parseProjectManifest(manifestText)
+    const manifest = await discoverProjectForWorkspace(normalizedWorkspace)
+    if (!manifest) return null
+    const projectRoot = normalizePath(manifest.root_path)
     const listed = manifest.workspaces.some(
       (workspace) => normalizePath(workspace.workspace_path) === normalizedWorkspace,
     )
@@ -107,25 +102,7 @@ export async function resolveManagedProjectContext(options: {
     }
   }
 
-  const workspacePath = normalizePath(options.workspacePath)
-  if (!workspacePath) return null
-  const projectRoot = parentPath(workspacePath)
-  if (!projectRoot || projectRoot === workspacePath) return null
-
-  const manifestText = await readProjectManagementManifest(projectRoot)
-  if (!manifestText) return null
-
-  let projectName = basenamePath(projectRoot) || undefined
-  try {
-    const manifest = JSON.parse(manifestText) as { name?: unknown }
-    if (typeof manifest.name === 'string' && manifest.name.trim()) {
-      projectName = manifest.name.trim()
-    }
-  } catch {
-    // Keep directory basename when the manifest is not JSON-parsable.
-  }
-
-  return { projectRoot, projectName }
+  return await resolveProjectRouteContextForWorkspace(options.workspacePath)
 }
 
 export async function registerProjectManagedWorkspace(
@@ -216,14 +193,6 @@ function optionalString(value: unknown): string {
 
 function basenamePath(path: string): string {
   return normalizePath(path).split('/').filter(Boolean).pop() ?? ''
-}
-
-function parentPath(path: string): string {
-  const normalized = normalizePath(path)
-  const parts = normalized.split('/').filter(Boolean)
-  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
-  const parent = parts.slice(0, -1).join('/')
-  return normalized.startsWith('/') ? `/${parent}` : parent
 }
 
 function normalizePath(path: string): string {

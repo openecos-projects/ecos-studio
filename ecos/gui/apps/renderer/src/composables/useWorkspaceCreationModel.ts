@@ -3,12 +3,11 @@ import { getDesktopApi } from '@/platform/desktop'
 import type { DesignTool, WorkspaceCreationModel } from '@ecos-studio/shared'
 
 const WIZARD_PARAMETER_IDS = new Set([
-  'design.frequency_mhz',
-  'floorplan.mode',
-  'floorplan.die_width',
-  'floorplan.die_height',
-  'floorplan.core_util',
-  'synth.max_fanout',
+  'frequency_max',
+  'die_width',
+  'die_height',
+  'core_utilization',
+  'max_fanout',
 ])
 
 export function useWorkspaceCreationModel(options: {

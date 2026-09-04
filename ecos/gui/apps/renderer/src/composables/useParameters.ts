@@ -7,6 +7,7 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 import { refreshConfigApi } from '@/api/flow'
 import { CMDEnum, ResponseEnum } from '@/api/type'
+import { updateManagedWorkspaceConfiguration } from './workspaceConfigurationUpdate'
 
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
@@ -726,6 +727,8 @@ export function useParameters() {
       const savedConfigSnapshot = JSON.stringify(config)
       const parametersData = transformConfigToParameters(config)
       const fileContent = JSON.stringify(parametersData, null, 4)
+      const isBackendWorkspace = currentProject.value.designTool === 'backend'
+      let updatedWorkspaceRevision: number | undefined
       let writeSucceeded = false
 
       const writeTask = saveWriteQueue.then(async () => {
@@ -743,13 +746,25 @@ export function useParameters() {
         if (blockSaveWhileFlowRunning(saveProjectPath)) {
           return
         }
-        console.log('Saving parameters to:', saveParametersPath)
-        const resolvedPath = await resolveProjectPathAccess(saveParametersPath)
-        if (!resolvedPath) {
-          return
+        if (isBackendWorkspace) {
+          const workspaceHandle = workspaceLifecycle.session.value.workspaceId
+          const expectedWorkspaceRevision =
+            workspaceLifecycle.session.value.workspaceRevision
+          if (!workspaceHandle || !Number.isInteger(expectedWorkspaceRevision)) {
+            throw new Error('The current Workspace revision is unavailable.')
+          }
+          updatedWorkspaceRevision = await updateManagedWorkspaceConfiguration({
+            config,
+            original: JSON.parse(originalConfig) as ConfigData,
+            workspaceHandle,
+            workspaceRevision: expectedWorkspaceRevision!,
+          })
+        } else {
+          console.log('Saving parameters to:', saveParametersPath)
+          const resolvedPath = await resolveProjectPathAccess(saveParametersPath)
+          if (!resolvedPath) return
+          await writeProjectTextFile(resolvedPath, fileContent)
         }
-
-        await writeProjectTextFile(resolvedPath, fileContent)
         writeSucceeded = true
       })
       saveWriteQueue = writeTask.catch(() => {})
@@ -774,6 +789,18 @@ export function useParameters() {
         hasChanges.value = false
       } else {
         hasChanges.value = true
+      }
+
+      if (isBackendWorkspace && updatedWorkspaceRevision !== undefined) {
+        workspaceLifecycle.updateWorkspaceRevision(
+          updatedWorkspaceRevision,
+          saveSessionId,
+        )
+        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], {
+          sessionId: saveSessionId,
+        })
+        console.log('Workspace configuration updated successfully')
+        return true
       }
 
       const refreshResult = await workspaceLifecycle.runForSession(saveSessionId, () =>

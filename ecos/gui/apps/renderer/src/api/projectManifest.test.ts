@@ -15,7 +15,7 @@ describe('mutateProjectManifest', () => {
   beforeEach(() => {
     mutate.mockReset()
     mutate.mockResolvedValue({
-      content: JSON.stringify({
+      manifest: {
         schema_version: 1,
         project_id: 'proj_demo',
         name: 'demo',
@@ -27,7 +27,7 @@ describe('mutateProjectManifest', () => {
         objectives: { primary: 'timing', directions: {} },
         workspaces: [],
         best_workspace: null,
-      }),
+      },
     })
   })
 

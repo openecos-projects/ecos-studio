@@ -15,8 +15,11 @@ from ecos_runtime_adapter.requests import (
     LayoutEditDiscardRequest,
     LayoutEditSaveRequest,
     OperationStartStepRequest,
+    ProjectManifestDiscoverRequest,
+    ProjectManifestMutationRequest,
     RequestValidationError,
     WorkspaceCloseRequest,
+    WorkspaceConfigurationUpdateRequest,
     WorkspaceExportSignoffRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
@@ -42,6 +45,8 @@ def test_workspace_create_maps_workspace_spec_camel_case_fields():
         {
             "commandId": "create-1",
             "targetDirectory": "/work/ws",
+            "projectId": "proj_demo",
+            "projectRoot": "/work",
             "workspaceSpec": workspace_spec,
             "workspaceBindings": workspace_bindings,
         },
@@ -51,8 +56,55 @@ def test_workspace_create_maps_workspace_spec_camel_case_fields():
     assert is_dataclass(request)
     assert request.command_id == "create-1"
     assert request.target_directory == "/work/ws"
+    assert request.project_id == "proj_demo"
+    assert request.project_root == "/work"
     assert request.workspace_spec == workspace_spec
     assert request.workspace_bindings == workspace_bindings
+
+
+def test_project_manifest_mutation_maps_project_root():
+    request = _parse_runtime_request(
+        "project.manifest.mutate",
+        {
+            "projectRoot": "/work/project",
+            "mutation": {"type": "archive-workspace", "workspaceId": "ws-1"},
+        },
+    )
+
+    assert isinstance(request, ProjectManifestMutationRequest)
+    assert request.project_root == "/work/project"
+    assert request.mutation == {"type": "archive-workspace", "workspaceId": "ws-1"}
+
+
+def test_project_discovery_maps_directory():
+    request = _parse_runtime_request(
+        "project.discover", {"directory": "/work/project/runs/ws-1"}
+    )
+
+    assert request == ProjectManifestDiscoverRequest(
+        directory="/work/project/runs/ws-1"
+    )
+
+
+def test_workspace_configuration_update_maps_canonical_payload():
+    request = _parse_runtime_request(
+        "workspace.configuration.update",
+        {
+            "commandId": "configuration-1",
+            "workspaceId": "workspace-1",
+            "expectedWorkspaceRevision": 3,
+            "configuration": {
+                "design": {"name": "gcd"},
+                "parameters": {"frequency_max": 200},
+            },
+            "workspaceBindings": {"pdk": {"root": "/pdk"}},
+        },
+    )
+
+    assert isinstance(request, WorkspaceConfigurationUpdateRequest)
+    assert request.command_id == "configuration-1"
+    assert request.expected_workspace_revision == 3
+    assert request.configuration["parameters"] == {"frequency_max": 200}
 
 
 @pytest.mark.parametrize(
@@ -113,7 +165,9 @@ def test_workspace_create_maps_workspace_spec_camel_case_fields():
         ),
     ],
 )
-def test_first_slice_payloads_parse_to_typed_request_models(method, params, request_type):
+def test_first_slice_payloads_parse_to_typed_request_models(
+    method, params, request_type
+):
     request = _parse_runtime_request(method, params)
 
     assert isinstance(request, request_type)
@@ -181,7 +235,9 @@ def test_first_slice_payloads_parse_to_typed_request_models(method, params, requ
         ),
     ],
 )
-def test_persistent_db_payloads_parse_to_typed_request_models(method, params, request_type):
+def test_persistent_db_payloads_parse_to_typed_request_models(
+    method, params, request_type
+):
     request = _parse_runtime_request(method, params, persistent_db_enabled=True)
 
     assert isinstance(request, request_type)
@@ -227,7 +283,9 @@ def test_missing_required_field_reports_field_name():
 
 def test_unknown_fields_are_rejected():
     with pytest.raises(RequestValidationError) as exc_info:
-        _parse_runtime_request("workspace.open", {"directory": "/work/ws", "extra": True})
+        _parse_runtime_request(
+            "workspace.open", {"directory": "/work/ws", "extra": True}
+        )
 
     assert exc_info.value.reason == "unknown field: extra"
 

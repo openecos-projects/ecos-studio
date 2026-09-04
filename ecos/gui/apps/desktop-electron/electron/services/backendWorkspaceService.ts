@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
-  parseProjectManifest,
   type BackendWorkspaceOverviewResult,
   type BackendWorkspaceArtifactRequest,
   type BackendWorkspaceArtifactResult,
@@ -49,7 +48,7 @@ interface BackendWorkspaceServiceOptions {
     getProjectRoot(): Promise<string>
   }
   projectManagementReadService: {
-    readManifest(projectRoot: string): Promise<string | null>
+    readManifest(projectRoot: string): Promise<ProjectManifest | null>
     readEngineeringSnapshot(request: {
       projectRoot: string
       workspacePath: string
@@ -428,10 +427,9 @@ export class BackendWorkspaceService {
 
   private async readManifest(workspaceRoot: string): Promise<ProjectManifest | null> {
     try {
-      const content = await this.options.projectManagementReadService.readManifest(
+      return await this.options.projectManagementReadService.readManifest(
         dirname(workspaceRoot),
       )
-      return content ? parseProjectManifest(content) : null
     } catch {
       return null
     }

@@ -13,12 +13,17 @@ from ecos_runtime_adapter.requests import (
     FlowRunStepRequest,
     OperationIdRequest,
     OperationStartFlowRequest,
+    ProjectManifestDiscoverRequest,
+    ProjectManifestLoadRequest,
+    ProjectManifestMutationRequest,
     WorkspaceCreateRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
     WorkspaceMutationRequest,
     WorkspaceOpenRequest,
     WorkspaceRecoverInterruptedRequest,
+    WorkspaceSpecCreateRequest,
+    WorkspaceSpecOpenRequest,
     WorkspaceSyncConfigRequest,
 )
 from ecos_runtime_adapter.sessions import WorkspaceSessionRegistry
@@ -118,10 +123,16 @@ class DummyFlow:
         return self.engine_db.create_db_engine(workspace_step)
 
     def run_step(self, workspace_step, *, rerun=False):
-        name = workspace_step if isinstance(workspace_step, str) else workspace_step.name
+        name = (
+            workspace_step if isinstance(workspace_step, str) else workspace_step.name
+        )
         self.run_calls.append((name, rerun))
         self.call_order.append(("run_step", name, rerun))
-        state = DummyFlow.next_run_states.pop(0) if DummyFlow.next_run_states else StateEnum.Success
+        state = (
+            DummyFlow.next_run_states.pop(0)
+            if DummyFlow.next_run_states
+            else StateEnum.Success
+        )
         if state == StateEnum.Success:
             self.completed_steps.add(name)
             workspace_step_object = self.get_workspace_step(name)
@@ -201,9 +212,12 @@ def _install_runtime_mocks(monkeypatch, tmp_path, *, create_workspace_files=True
 
     monkeypatch.setattr("chipcompiler.data.create_workspace", fake_create_workspace)
     monkeypatch.setattr("chipcompiler.data.load_workspace", fake_load_workspace)
-    monkeypatch.setattr("chipcompiler.data.refresh_workspace_config", lambda workspace: None)
     monkeypatch.setattr(
-        "chipcompiler.data.prepare_workspace_for_rerun", lambda ws, flow, **_kwargs: None
+        "chipcompiler.data.refresh_workspace_config", lambda workspace: None
+    )
+    monkeypatch.setattr(
+        "chipcompiler.data.prepare_workspace_for_rerun",
+        lambda ws, flow, **_kwargs: None,
     )
     monkeypatch.setattr("chipcompiler.engine.EngineFlow", DummyFlow)
     monkeypatch.setattr(
@@ -245,7 +259,9 @@ def _assert_call_waits_for_session_lock(api, workspace_id, call, entered):
     return payload
 
 
-def test_create_workspace_returns_plain_runtime_result_and_session(monkeypatch, tmp_path):
+def test_create_workspace_returns_plain_runtime_result_and_session(
+    monkeypatch, tmp_path
+):
     capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
 
@@ -269,6 +285,120 @@ def test_create_workspace_returns_plain_runtime_result_and_session(monkeypatch, 
     assert capture["create_kwargs"]["sdc"] == "/constraints/top.sdc"
     assert DummyFlow.instances[0].created
     assert api.sessions.get_session(result["workspaceId"]).directory == ws.resolve()
+
+
+def test_managed_create_uses_shared_project_workspace_interface(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    target = project / "workspace"
+    workspace = _workspace(target)
+    captured = {}
+
+    def create_project_workspace(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return workspace
+
+    monkeypatch.setattr(
+        "chipcompiler.project.create_project_workspace", create_project_workspace
+    )
+    api = WorkspaceRuntimeApi()
+    monkeypatch.setattr(
+        api,
+        "_read_engineering_snapshot",
+        lambda _workspace: {"workspaceId": "workspace-1", "workspaceRevision": 1},
+    )
+    request = WorkspaceSpecCreateRequest(
+        command_id="create-1",
+        target_directory=str(target),
+        workspace_spec={"schemaVersion": 1},
+        workspace_bindings={"inputs": {}, "pdk": {}},
+        project_id="proj_demo",
+        project_root=str(project),
+    )
+
+    result = api.create_workspace(request)
+
+    assert captured == {
+        "args": (
+            str(project),
+            str(target),
+            request.workspace_spec,
+            request.workspace_bindings,
+        ),
+        "kwargs": {"command_id": "create-1", "expected_project_id": "proj_demo"},
+    }
+    assert result["workspaceId"] == "workspace-1"
+
+
+def test_project_manifest_mutation_translates_product_command(monkeypatch):
+    captured = {}
+
+    def mutate(project_root, mutation):
+        captured["project_root"] = project_root
+        captured["mutation"] = mutation
+        return {"schema_version": 1, "workspaces": []}
+
+    monkeypatch.setattr("chipcompiler.project.mutate_project_manifest", mutate)
+
+    result = WorkspaceRuntimeApi().mutate_project_manifest(
+        ProjectManifestMutationRequest(
+            project_root="/work/project",
+            mutation={
+                "type": "archive-workspace",
+                "workspaceId": "ws-1",
+                "now": "2026-01-01T00:00:00Z",
+            },
+        )
+    )
+
+    assert result == {"schema_version": 1, "workspaces": []}
+    assert captured == {
+        "project_root": "/work/project",
+        "mutation": {
+            "type": "archive_workspace",
+            "workspace_id": "ws-1",
+            "updated_at": "2026-01-01T00:00:00Z",
+        },
+    }
+
+
+def test_project_discovery_returns_runtime_identity(monkeypatch):
+    monkeypatch.setattr(
+        "chipcompiler.project.discover_project_manifest",
+        lambda _directory: (
+            Path("/work/project"),
+            {"project_id": "proj_demo"},
+        ),
+    )
+
+    assert WorkspaceRuntimeApi().discover_project(
+        ProjectManifestDiscoverRequest(directory="/work/project/runs/ws-1")
+    ) == {
+        "projectRoot": "/work/project",
+        "projectId": "proj_demo",
+    }
+
+
+def test_project_and_descriptor_errors_keep_domain_error_codes(monkeypatch):
+    def fail(*_args):
+        raise ValueError("invalid persisted contract")
+
+    monkeypatch.setattr("chipcompiler.project.load_project_manifest", fail)
+    monkeypatch.setattr(
+        "chipcompiler.engine.describe_workspace_binding_requirement",
+        fail,
+    )
+    api = WorkspaceRuntimeApi()
+
+    with pytest.raises(RuntimeApiError) as manifest_error:
+        api.load_project_manifest(ProjectManifestLoadRequest(project_root="/project"))
+    with pytest.raises(RuntimeApiError) as descriptor_error:
+        api.workspace_binding_requirement(
+            WorkspaceSpecOpenRequest(directory="/workspace")
+        )
+
+    assert manifest_error.value.code == "project_manifest_invalid"
+    assert descriptor_error.value.code == "workspace_descriptor_invalid"
 
 
 def test_create_workspace_forwards_dynamic_flow_config(monkeypatch, tmp_path):
@@ -317,7 +447,9 @@ def test_create_workspace_writes_rtl_list_filelist_outside_workspace(
     assert not (ws / "filelist").exists()
 
 
-def test_create_workspace_materializes_inline_pdk_json_before_data_api(monkeypatch, tmp_path):
+def test_create_workspace_materializes_inline_pdk_json_before_data_api(
+    monkeypatch, tmp_path
+):
     pdk_json = {"name": "ics55", "lef": ["tech.lef"]}
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     seen = {}
@@ -341,7 +473,9 @@ def test_create_workspace_materializes_inline_pdk_json_before_data_api(monkeypat
     assert seen["pdk_json"] == pdk_json
 
 
-def test_create_workspace_with_inline_pdk_json_uses_real_data_api(monkeypatch, tmp_path):
+def test_create_workspace_with_inline_pdk_json_uses_real_data_api(
+    monkeypatch, tmp_path
+):
     pdk_root = tmp_path / "pdk"
     tech = pdk_root / "tech.lef"
     lef = pdk_root / "stdcell.lef"
@@ -380,14 +514,12 @@ def test_create_workspace_with_inline_pdk_json_uses_real_data_api(monkeypatch, t
     pdk_config_path = workspace_dir / "home" / "pdk.json"
     assert pdk_config_path.is_file()
     parameters = json.loads((workspace_dir / "home" / "parameters.json").read_text())
-    assert parameters["PDK Config"] == str(pdk_config_path.resolve())
-    fixfanout = json.loads((workspace_dir / "config" / "fixfanout_ecc.json").read_text())
+    assert parameters["pdk_config"] == str(pdk_config_path.resolve())
     session = api.sessions.get_session(result["workspaceId"])
     assert session.workspace.pdk.tech == tech
     assert session.workspace.pdk.lefs == [lef]
     assert session.workspace.pdk.libs == [liberty]
     assert session.workspace.pdk.buffers
-    assert fixfanout["insert_buffer"] == session.workspace.pdk.buffers[0]
     assert session.directory == workspace_dir.resolve()
 
 
@@ -411,7 +543,9 @@ def test_open_workspace_persists_identity_across_restart_and_directory_move(
     tmp_path,
 ):
     _capture, workspace_dir = _install_runtime_mocks(monkeypatch, tmp_path)
-    first = WorkspaceRuntimeApi().open_workspace(WorkspaceOpenRequest(directory=str(workspace_dir)))
+    first = WorkspaceRuntimeApi().open_workspace(
+        WorkspaceOpenRequest(directory=str(workspace_dir))
+    )
 
     moved_dir = tmp_path / "moved-workspace"
     workspace_dir.rename(moved_dir)
@@ -465,7 +599,9 @@ def test_engineering_snapshot_recovers_committed_step_without_runtime_events(
         )
     )
     for _ in range(100):
-        status = api.operation_status(OperationIdRequest(operation_id=started["operationId"]))
+        status = api.operation_status(
+            OperationIdRequest(operation_id=started["operationId"])
+        )
         if status["state"] == "succeeded":
             break
         threading.Event().wait(0.01)
@@ -473,7 +609,9 @@ def test_engineering_snapshot_recovers_committed_step_without_runtime_events(
     published_events.clear()
     snapshot = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
     assert snapshot["workspaceRevision"] == 2
-    assert snapshot["flow"]["steps"] == [{"name": "Synthesis", "tool": "yosys", "state": "Success"}]
+    assert snapshot["flow"]["steps"] == [
+        {"name": "Synthesis", "tool": "yosys", "state": "Success"}
+    ]
     assert status["workspaceRevision"] == 2
 
     duplicate = api.start_flow_operation(
@@ -487,10 +625,14 @@ def test_engineering_snapshot_recovers_committed_step_without_runtime_events(
     assert duplicate["deduplicated"] is True
 
     reopened_api = WorkspaceRuntimeApi()
-    reopened = reopened_api.open_workspace(WorkspaceOpenRequest(directory=str(workspace_dir)))
+    reopened = reopened_api.open_workspace(
+        WorkspaceOpenRequest(directory=str(workspace_dir))
+    )
     assert reopened["workspaceRevision"] == 2
     assert (
-        reopened_api.engineering_snapshot(WorkspaceIdRequest(workspace_id=reopened["workspaceId"]))
+        reopened_api.engineering_snapshot(
+            WorkspaceIdRequest(workspace_id=reopened["workspaceId"])
+        )
         == snapshot
     )
 
@@ -517,7 +659,9 @@ def test_stale_revision_rejects_run_before_creating_operation(monkeypatch, tmp_p
 def test_recover_interrupted_is_marker_scoped_and_idempotent(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     session = api.sessions.get_session(workspace_id)
     session.workspace.flow.data = {
         "steps": [
@@ -603,7 +747,9 @@ def test_recover_interrupted_is_marker_scoped_and_idempotent(monkeypatch, tmp_pa
             }
         ]
     }
-    assert session.workspace.flow.data["steps"][0]["state"] == StateEnum.Imcomplete.value
+    assert (
+        session.workspace.flow.data["steps"][0]["state"] == StateEnum.Imcomplete.value
+    )
     assert session.workspace.flow.data["steps"][0]["info"] == {}
     assert session.workspace.flow.data["steps"][1]["state"] == "Ongoing"
     assert session.workspace.flow.data["steps"][2]["state"] == "Success"
@@ -625,13 +771,17 @@ def test_recover_interrupted_is_marker_scoped_and_idempotent(monkeypatch, tmp_pa
     }
     assert session.workspace.flow.data["steps"][3]["state"] == "Ongoing"
     assert session.workspace.flow.data["steps"][4]["state"] == "Ongoing"
-    assert session.workspace.flow.data["steps"][5]["state"] == StateEnum.Imcomplete.value
+    assert (
+        session.workspace.flow.data["steps"][5]["state"] == StateEnum.Imcomplete.value
+    )
     assert api.recover_interrupted(
         WorkspaceRecoverInterruptedRequest(workspace_id, "operation-1")
     ) == {"recovered": []}
 
 
-def test_create_workspace_replaces_existing_same_directory_session(monkeypatch, tmp_path):
+def test_create_workspace_replaces_existing_same_directory_session(
+    monkeypatch, tmp_path
+):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
 
@@ -657,7 +807,10 @@ def test_open_workspace_reuses_existing_same_directory_session(monkeypatch, tmp_
     second = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))
 
     assert second["workspaceId"] == first["workspaceId"]
-    assert api.sessions.get_session(second["workspaceId"]).workspace is first_session.workspace
+    assert (
+        api.sessions.get_session(second["workspaceId"]).workspace
+        is first_session.workspace
+    )
 
 
 def test_workspace_home_and_info_use_session_id(monkeypatch, tmp_path):
@@ -672,7 +825,9 @@ def test_workspace_home_and_info_use_session_id(monkeypatch, tmp_path):
 
     home = api.workspace_home(WorkspaceIdRequest(workspace_id=workspace_id))
     info = api.workspace_info(
-        WorkspaceInfoRequest(workspace_id=workspace_id, step="Synthesis", info_id="layout")
+        WorkspaceInfoRequest(
+            workspace_id=workspace_id, step="Synthesis", info_id="layout"
+        )
     )
 
     assert home == {"path": str(ws.resolve() / "home" / "home.json")}
@@ -706,7 +861,9 @@ def test_refresh_sync_and_reset_flow_use_session(monkeypatch, tmp_path):
     config_path = config_dir / "route.json"
     config_path.write_text("{}")
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     refresh = api.refresh_config(WorkspaceIdRequest(workspace_id=workspace_id))
     sync = api.sync_config(
@@ -740,7 +897,9 @@ def test_refresh_sync_and_reset_flow_use_session(monkeypatch, tmp_path):
 def test_refresh_config_releases_active_session_db(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -767,7 +926,9 @@ def test_sync_config_releases_active_session_db_only_when_parameters_change(
         lambda _workspace, _path: changed.pop(0),
     )
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -816,7 +977,9 @@ def test_reset_flow_releases_active_session_db_before_prepare(monkeypatch, tmp_p
 
     monkeypatch.setattr("chipcompiler.data.prepare_workspace_for_rerun", prepare)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -835,7 +998,9 @@ def test_reset_flow_releases_active_session_db_before_prepare(monkeypatch, tmp_p
 def test_refresh_config_waits_for_session_mutation_lock(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     entered = threading.Event()
 
     def refresh_config(_workspace):
@@ -858,14 +1023,18 @@ def test_sync_config_waits_for_session_mutation_lock(monkeypatch, tmp_path):
     config_path = config_dir / "route.json"
     config_path.write_text("{}")
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     entered = threading.Event()
 
     def sync_config(_workspace, _path):
         entered.set()
         return False
 
-    monkeypatch.setattr("chipcompiler.data.sync_workspace_config_to_parameters", sync_config)
+    monkeypatch.setattr(
+        "chipcompiler.data.sync_workspace_config_to_parameters", sync_config
+    )
 
     _assert_call_waits_for_session_lock(
         api=api,
@@ -884,16 +1053,21 @@ def test_sync_config_waits_for_session_mutation_lock(monkeypatch, tmp_path):
 def test_reset_flow_waits_for_session_mutation_lock(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     entered = threading.Event()
 
     def build_flow(_workspace):
         entered.set()
         return SimpleNamespace()
 
-    monkeypatch.setattr("ecos_runtime_adapter.workspace_api.build_flow_for_workspace", build_flow)
     monkeypatch.setattr(
-        "chipcompiler.data.prepare_workspace_for_rerun", lambda _ws, _flow, **_kwargs: None
+        "ecos_runtime_adapter.workspace_api.build_flow_for_workspace", build_flow
+    )
+    monkeypatch.setattr(
+        "chipcompiler.data.prepare_workspace_for_rerun",
+        lambda _ws, _flow, **_kwargs: None,
     )
 
     _assert_call_waits_for_session_lock(
@@ -921,7 +1095,9 @@ def test_unknown_session_returns_structured_runtime_error():
 def test_db_ensure_rejects_disabled_runtime_api(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     with pytest.raises(RuntimeApiError) as exc_info:
         api.db_ensure(DbEnsureRequest(workspace_id=workspace_id))
@@ -930,10 +1106,14 @@ def test_db_ensure_rejects_disabled_runtime_api(monkeypatch, tmp_path):
     assert exc_info.value.message == "persistent_db_disabled"
 
 
-def test_db_ensure_initializes_requested_step_and_stores_session_db(monkeypatch, tmp_path):
+def test_db_ensure_initializes_requested_step_and_stores_session_db(
+    monkeypatch, tmp_path
+):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
 
@@ -954,7 +1134,9 @@ def test_db_ensure_initializes_requested_step_and_stores_session_db(monkeypatch,
 def test_db_ensure_without_step_uses_flow_selection_rule(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.db_ensure(DbEnsureRequest(workspace_id=workspace_id))
 
@@ -974,7 +1156,9 @@ def test_db_ensure_without_step_uses_flow_selection_rule(monkeypatch, tmp_path):
 def test_db_ensure_reuses_initialized_session_db(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     first = api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -994,7 +1178,9 @@ def test_db_ensure_reuses_initialized_session_db(monkeypatch, tmp_path):
 def test_db_ensure_unknown_step_returns_runtime_error(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     with pytest.raises(RuntimeApiError) as exc_info:
         api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Missing"))
@@ -1008,7 +1194,9 @@ def test_db_ensure_does_not_store_uninitialized_db(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     DummyFlow.next_init_success = False
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
 
@@ -1025,7 +1213,9 @@ def test_db_ensure_does_not_store_uninitialized_db(monkeypatch, tmp_path):
 def test_db_release_closes_and_clears_active_session_db(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -1039,7 +1229,9 @@ def test_db_release_closes_and_clears_active_session_db(monkeypatch, tmp_path):
 def test_db_release_is_idempotent_when_no_db_is_active(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.db_release(DbReleaseRequest(workspace_id=workspace_id))
 
@@ -1052,7 +1244,9 @@ def test_db_release_closes_db_with_injected_session_registry(monkeypatch, tmp_pa
         sessions=WorkspaceSessionRegistry(),
         persistent_db_enabled=True,
     )
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -1075,10 +1269,14 @@ def test_flow_run_uses_run_steps_and_prepare_on_rerun(monkeypatch, tmp_path):
     prepared = []
     monkeypatch.setattr(
         "chipcompiler.data.prepare_workspace_for_rerun",
-        lambda workspace, flow, **kwargs: prepared.append((workspace.directory, flow, kwargs)),
+        lambda workspace, flow, **kwargs: prepared.append(
+            (workspace.directory, flow, kwargs)
+        ),
     )
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.flow_run(FlowRunRequest(workspace_id=workspace_id, rerun=True))
 
@@ -1091,7 +1289,9 @@ def test_flow_run_uses_run_steps_and_prepare_on_rerun(monkeypatch, tmp_path):
     assert snapshot["cause"] == "flow.rerun_prepared"
 
 
-def test_failed_rerun_keeps_the_reset_revision_as_committed_truth(monkeypatch, tmp_path):
+def test_failed_rerun_keeps_the_reset_revision_as_committed_truth(
+    monkeypatch, tmp_path
+):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
 
     def prepare(workspace, _flow, **_kwargs):
@@ -1102,7 +1302,9 @@ def test_failed_rerun_keeps_the_reset_revision_as_committed_truth(monkeypatch, t
     monkeypatch.setattr("chipcompiler.data.prepare_workspace_for_rerun", prepare)
     DummyFlow.next_run_states = [StateEnum.Imcomplete]
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     with pytest.raises(RuntimeApiError):
         api.flow_run(FlowRunRequest(workspace_id=workspace_id, rerun=True))
@@ -1130,7 +1332,9 @@ def test_cancelled_rerun_keeps_the_reset_revision_before_the_first_step(
 
     monkeypatch.setattr("chipcompiler.engine.execute", execute)
     api = WorkspaceRuntimeApi(event_publisher=events.append)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     started = api.start_flow_operation(
         OperationStartFlowRequest(
             workspace_id=workspace_id,
@@ -1143,7 +1347,9 @@ def test_cancelled_rerun_keeps_the_reset_revision_before_the_first_step(
     api.cancel_operation(OperationIdRequest(operation_id=started["operationId"]))
     continue_execution.set()
     for _ in range(100):
-        status = api.operation_status(OperationIdRequest(operation_id=started["operationId"]))
+        status = api.operation_status(
+            OperationIdRequest(operation_id=started["operationId"])
+        )
         if status["state"] == "cancelled":
             break
         threading.Event().wait(0.01)
@@ -1152,9 +1358,12 @@ def test_cancelled_rerun_keeps_the_reset_revision_before_the_first_step(
     assert status["state"] == "cancelled"
     assert snapshot["workspaceRevision"] == 2
     assert snapshot["cause"] == "flow.rerun_prepared"
-    assert next(event for event in events if event["type"] == "operation.rerun_prepared")[
-        "payload"
-    ]["workspaceRevision"] == 2
+    assert (
+        next(event for event in events if event["type"] == "operation.rerun_prepared")[
+            "payload"
+        ]["workspaceRevision"]
+        == 2
+    )
 
 
 def test_rerun_snapshot_commit_failure_fails_the_operation(monkeypatch, tmp_path):
@@ -1163,7 +1372,9 @@ def test_rerun_snapshot_commit_failure_fails_the_operation(monkeypatch, tmp_path
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     events = []
     api = WorkspaceRuntimeApi(event_publisher=events.append)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     def fail_commit(*_args, **_kwargs):
         raise EngineeringSnapshotError("snapshot disk full")
@@ -1181,7 +1392,9 @@ def test_rerun_snapshot_commit_failure_fails_the_operation(monkeypatch, tmp_path
     )
 
     for _ in range(100):
-        status = api.operation_status(OperationIdRequest(operation_id=started["operationId"]))
+        status = api.operation_status(
+            OperationIdRequest(operation_id=started["operationId"])
+        )
         if status["state"] == "failed":
             break
         threading.Event().wait(0.01)
@@ -1196,7 +1409,9 @@ def test_non_rerun_failure_preserves_the_previous_snapshot(monkeypatch, tmp_path
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     DummyFlow.next_run_states = [StateEnum.Imcomplete]
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     before = api.engineering_snapshot(WorkspaceIdRequest(workspace_id=workspace_id))
 
     with pytest.raises(RuntimeApiError):
@@ -1209,7 +1424,9 @@ def test_non_rerun_failure_preserves_the_previous_snapshot(monkeypatch, tmp_path
 def test_gui_flow_operation_rerun_preserves_current_user_inputs(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     captured = {}
 
     def fake_flow_run(request, *, observer=None, preserve_user_inputs=False):
@@ -1248,7 +1465,9 @@ def test_flow_run_without_active_session_db_closes_transient_db(
 ):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.flow_run(FlowRunRequest(workspace_id=workspace_id, rerun=False))
 
@@ -1265,7 +1484,9 @@ def test_flow_run_with_active_session_db_injects_and_captures_final_db(
 ):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -1288,7 +1509,9 @@ def test_flow_run_rerun_releases_stale_db_and_captures_new_db(monkeypatch, tmp_p
 
     monkeypatch.setattr("chipcompiler.data.prepare_workspace_for_rerun", prepare)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     stale_db = api.sessions.get_session(workspace_id).db_handle
 
@@ -1324,7 +1547,9 @@ def test_flow_run_sizer_boundary_captures_post_sizer_db(monkeypatch, tmp_path):
         },
     )
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     pre_sizer_db = api.sessions.get_session(workspace_id).db_handle
 
@@ -1370,7 +1595,9 @@ def test_flow_run_sizer_boundary_failure_captures_post_sizer_db(
         StateEnum.Imcomplete,
     ]
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     pre_sizer_db = api.sessions.get_session(workspace_id).db_handle
 
@@ -1407,7 +1634,9 @@ def test_flow_run_sizer_boundary_exception_captures_post_sizer_db(
 
     monkeypatch.setattr(DummyFlow, "run_steps", run_steps_raises_after_post_sizer_db)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     pre_sizer_db = api.sessions.get_session(workspace_id).db_handle
 
@@ -1425,7 +1654,9 @@ def test_flow_run_sizer_boundary_exception_captures_post_sizer_db(
 def test_flow_run_step_initializes_db_before_direct_step(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.flow_run_step(
         FlowRunStepRequest(workspace_id=workspace_id, step="Synthesis", rerun=False)
@@ -1450,7 +1681,9 @@ def test_flow_run_step_with_active_session_db_injects_and_captures_final_db(
 ):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     db_handle = api.sessions.get_session(workspace_id).db_handle
 
@@ -1475,7 +1708,9 @@ def test_flow_run_step_successful_sizer_releases_active_session_db(
         {"name": "Timing optimization", "tool": "sizer"},
     )
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     pre_sizer_db = api.sessions.get_session(workspace_id).db_handle
 
@@ -1512,7 +1747,9 @@ def test_flow_run_step_sizer_exception_clears_closed_session_db(
 
     monkeypatch.setattr(DummyFlow, "run_step", run_step_raises_after_sizer_boundary)
     api = WorkspaceRuntimeApi(persistent_db_enabled=True)
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.db_ensure(DbEnsureRequest(workspace_id=workspace_id, step="Floorplan"))
     pre_sizer_db = api.sessions.get_session(workspace_id).db_handle
 
@@ -1535,11 +1772,15 @@ def test_flow_run_step_rerun_refreshes_before_db_init(monkeypatch, tmp_path):
 
     def refresh_config(workspace):
         refreshed.append(workspace.directory)
-        DummyFlow.instances[-1].call_order.append(("refresh_config", workspace.directory))
+        DummyFlow.instances[-1].call_order.append(
+            ("refresh_config", workspace.directory)
+        )
 
     monkeypatch.setattr("chipcompiler.data.refresh_workspace_config", refresh_config)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.flow_run_step(
         FlowRunStepRequest(workspace_id=workspace_id, step="Floorplan", rerun=True)
@@ -1555,7 +1796,9 @@ def test_flow_run_step_rerun_refreshes_before_db_init(monkeypatch, tmp_path):
     ]
 
 
-def test_flow_run_step_rerun_clears_step_artifacts_and_resets_step_state(monkeypatch, tmp_path):
+def test_flow_run_step_rerun_clears_step_artifacts_and_resets_step_state(
+    monkeypatch, tmp_path
+):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     step_dir = ws / "Floorplan_ecc"
     artifact_dirs = [
@@ -1614,7 +1857,9 @@ def test_flow_run_step_rerun_clears_step_artifacts_and_resets_step_state(monkeyp
         },
     )
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     session = api.sessions.get_session(workspace_id)
     session.workspace.flow.data = {
         "steps": [
@@ -1683,10 +1928,14 @@ def test_flow_run_step_rerun_clears_step_artifacts_and_resets_step_state(monkeyp
     )
     assert snapshot["metrics"] == []
     assert snapshot["qorAssessment"]["metrics"] == []
-    assert all(artifact["availability"] == "missing" for artifact in snapshot["artifacts"])
+    assert all(
+        artifact["availability"] == "missing" for artifact in snapshot["artifacts"]
+    )
 
 
-def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(monkeypatch, tmp_path):
+def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(
+    monkeypatch, tmp_path
+):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
 
     def step_spec(name, tool):
@@ -1733,7 +1982,9 @@ def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(monkeypat
     route = step_spec("route", "ecc")
     DummyFlow.workspace_step_specs = (synthesis, floorplan, route)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     session = api.sessions.get_session(workspace_id)
     session.workspace.flow.data = {
         "steps": [
@@ -1759,7 +2010,9 @@ def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(monkeypat
     )
 
     assert result == {"step": "Floorplan", "state": "Success"}
-    assert (ws / "Synthesis_yosys" / "output" / "nested" / "stale").read_text() == "Synthesis"
+    assert (
+        ws / "Synthesis_yosys" / "output" / "nested" / "stale"
+    ).read_text() == "Synthesis"
     for spec in (floorplan, route):
         assert list(spec["output"]["dir"].iterdir()) == []
         checklist = json.loads(spec["checklist"].path.read_text())
@@ -1783,7 +2036,9 @@ def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(monkeypat
             for step in reset_subflow["steps"]
         )
 
-    records = {record["name"]: record for record in session.workspace.flow.data["steps"]}
+    records = {
+        record["name"]: record for record in session.workspace.flow.data["steps"]
+    }
     assert any(
         record["name"] == "Synthesis" and record["state"] == "Success"
         for record in session.workspace.flow.data["steps"]
@@ -1802,7 +2057,9 @@ def test_flow_run_step_gui_rerun_resets_target_and_downstream_subflows(monkeypat
 def test_flow_run_step_rerun_rejects_an_open_layout_edit(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
     api.sessions.get_session(workspace_id).layout_edit_session = object()
 
     with pytest.raises(RuntimeApiError) as exc_info:
@@ -1819,7 +2076,9 @@ def test_flow_run_step_skips_successful_step_without_db_init(monkeypatch, tmp_pa
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     DummyFlow.successful_steps = {"Synthesis"}
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     result = api.flow_run_step(
         FlowRunStepRequest(workspace_id=workspace_id, step="Synthesis", rerun=False)
@@ -1834,7 +2093,9 @@ def test_flow_run_step_skips_successful_step_without_db_init(monkeypatch, tmp_pa
 def test_flow_run_step_unknown_step_returns_runtime_error(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))["workspaceId"]
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
 
     with pytest.raises(RuntimeApiError) as exc_info:
         api.flow_run_step(

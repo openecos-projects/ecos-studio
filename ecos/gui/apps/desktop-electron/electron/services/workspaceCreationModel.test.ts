@@ -8,8 +8,8 @@ describe('buildWorkspaceCreationModel', () => {
       {
         flowDefinitions: [{ flowId: 'synth', stepIds: ['Synthesis'] }],
         parameterCatalog: [
-          { id: 'design.frequency_mhz', default: 100, appliesTo: 'synthesis' },
-          { id: 'route.top_layer', default: 'MET5', appliesTo: 'routing' },
+          { id: 'frequency_max', default: 100, appliesTo: 'synthesis' },
+          { id: 'top_layer', default: 'MET5', appliesTo: 'routing' },
         ],
       },
       [],
@@ -39,20 +39,20 @@ describe('buildWorkspaceCreationModel', () => {
     const model = buildWorkspaceCreationModel(
       {
         parameterCatalog: [
-          { default: 100, id: 'design.frequency_mhz', type: 'float' },
-          { default: 0.6, id: 'floorplan.core_util', type: 'float' },
+          { default: 100, id: 'frequency_max', type: 'float' },
+          { default: 0.6, id: 'core_utilization', type: 'float' },
         ],
       },
       [],
       {
-        explicitParameters: { 'floorplan.core_util': 0.72 },
+        explicitParameters: { core_utilization: 0.72 },
         flowId: 'harden',
         inputMode: 'rtl',
         mpc,
         pdk: { familyId: 'ics55', mode: 'default', version: '1.10.100' },
         projectPresetParameters: {
-          'design.frequency_mhz': 200,
-          'floorplan.core_util': 0.65,
+          frequency_max: 200,
+          core_utilization: 0.65,
         },
       },
     )

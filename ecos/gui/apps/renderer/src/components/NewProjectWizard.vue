@@ -1580,7 +1580,6 @@ import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import {
   isHdlFilePath,
-  parseProjectManifest,
   projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
@@ -2039,9 +2038,7 @@ async function readProjectManifestForProject(
 ): Promise<ProjectManifest | null> {
   const root = normalizePath(projectRoot)
   if (!root) return null
-  const manifestText = await readProjectManagementManifest(root)
-  if (!manifestText) return null
-  return parseProjectManifest(manifestText)
+  return await readProjectManagementManifest(root)
 }
 
 const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {

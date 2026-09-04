@@ -1,8 +1,4 @@
-import {
-  parseProjectManifest,
-  type ProjectManifest,
-  type ProjectManifestMutation,
-} from '@ecos-studio/shared'
+import { type ProjectManifest, type ProjectManifestMutation } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 
 export async function mutateProjectManifest(
@@ -14,7 +10,7 @@ export async function mutateProjectManifest(
     mutation: cloneForDesktopIpc(mutation),
     projectRoot,
   })
-  return parseProjectManifest(result.content)
+  return result.manifest
 }
 
 function cloneForDesktopIpc<T>(value: T): T {

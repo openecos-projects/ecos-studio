@@ -169,7 +169,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       execute: vi.fn(async () => ({ completed: false })),
     },
     projectManifest: {
-      mutate: vi.fn(async () => ({ content: '' })),
+      mutate: vi.fn(async () => ({ manifest: {} as never })),
     },
     backendWorkspace: {
       getArtifact: vi.fn(),
@@ -2939,7 +2939,7 @@ describe('useWorkspace openProject', () => {
       desktopApi.workspace.prepareProjectDirectoryReplacement,
     ).mockResolvedValueOnce(replacement)
     vi.mocked(desktopApi.projectManifest.mutate).mockResolvedValueOnce({
-      content: JSON.stringify({
+      manifest: {
         schema_version: 1,
         project_id: 'proj_work',
         name: 'work',
@@ -2951,8 +2951,10 @@ describe('useWorkspace openProject', () => {
         base_design: { parameters: {}, rtl_list: [] },
         objectives: { primary: 'timing', directions: {} },
         workspaces: [],
+        mpc: null,
         best_workspace: null,
-      }),
+        qor_baseline: null,
+      },
     })
     createWorkspaceApiMock.mockResolvedValueOnce({
       response: 'success',

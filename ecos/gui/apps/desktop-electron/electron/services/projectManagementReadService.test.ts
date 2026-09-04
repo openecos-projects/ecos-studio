@@ -13,9 +13,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
-  createProjectManifestDraft,
+  projectManifestForPresentation,
   projectManagementWorkspaceSummaryPaths,
-  registerWorkspaceInManifest,
+  type EccProjectManifest,
   type EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
 import {
@@ -52,21 +52,47 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
   const workspaceRoot = join(projectRoot, 'ws_0001')
   await mkdir(join(workspaceRoot, 'home'), { recursive: true })
 
-  const manifest = registerWorkspaceInManifest(
-    createProjectManifestDraft({
-      rootPath: projectRoot,
-      name: 'gcd',
-      designName: 'gcd',
-    }),
-    {
-      projectRoot,
-      workspacePath: workspaceRoot,
-      now: '2026-08-09T00:00:00.000Z',
-    },
-  )
+  const now = '2026-08-09T00:00:00.000Z'
+  const manifest = {
+    schema_version: 1,
+    project_id: 'proj_gcd',
+    name: 'gcd',
+    design_name: 'gcd',
+    root_path: projectRoot,
+    created_at: now,
+    updated_at: now,
+    objectives: {},
+    workspaces: [
+      {
+        workspace_id: 'ws_0001',
+        name: 'ws_0001',
+        workspace_path: 'ws_0001',
+        source_workspace_id: null,
+        lifecycle: 'active',
+        created_at: now,
+        updated_at: now,
+      },
+    ],
+    mpc: null,
+    best_workspace: null,
+    qor_baseline: null,
+  }
   await writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest))
   await writeFile(join(workspaceRoot, 'home', 'flow.json'), '{"steps":[]}')
   return { projectRoot, workspaceRoot }
+}
+
+function createReadService(): ProjectManagementReadService {
+  return new ProjectManagementReadService({
+    discover: async () => null,
+    load: async (projectRoot) =>
+      projectManifestForPresentation(
+        JSON.parse(
+          await readFile(join(projectRoot, 'project.json'), 'utf8'),
+        ) as EccProjectManifest,
+        projectRoot,
+      ),
+  })
 }
 
 describe('ProjectManagementReadService', () => {
@@ -80,11 +106,12 @@ describe('ProjectManagementReadService', () => {
 
   it('reads a historical project and its declared workspace without an active workspace scope', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
-    await expect(service.readManifest(projectRoot)).resolves.toContain(
-      '"workspace_id":"ws_0001"',
-    )
+    await expect(service.readManifest(projectRoot)).resolves.toMatchObject({
+      project_id: 'proj_gcd',
+      workspaces: [{ workspace_id: 'ws_0001' }],
+    })
     await expect(service.listProjectEntries(projectRoot)).resolves.toEqual([
       'project.json',
       'ws_0001',
@@ -116,7 +143,7 @@ describe('ProjectManagementReadService', () => {
     expect(summaries.texts).not.toHaveProperty('home/flow.json')
   })
 
-  it('returns project.json text even when root_path does not match the selected directory', async () => {
+  it('derives the project root from the selected manifest directory', async () => {
     const { projectRoot } = await createProject()
     const manifest = JSON.parse(
       await readFile(join(projectRoot, 'project.json'), 'utf8'),
@@ -126,16 +153,16 @@ describe('ProjectManagementReadService', () => {
     manifest.root_path = '/old/location/gcd'
     await writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest))
 
-    await expect(
-      new ProjectManagementReadService().readManifest(projectRoot),
-    ).resolves.toContain('"root_path":"/old/location/gcd"')
+    await expect(createReadService().readManifest(projectRoot)).resolves.toMatchObject({
+      root_path: projectRoot,
+    })
   })
 
   it('rejects undeclared workspaces and files outside the summary allowlist', async () => {
     const { projectRoot } = await createProject()
     const undeclaredWorkspace = join(projectRoot, 'ws_0002')
     await mkdir(undeclaredWorkspace)
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
     await expect(
       service.readWorkspaceTexts({
@@ -156,7 +183,7 @@ describe('ProjectManagementReadService', () => {
   it('requires a valid manifest before listing project root entries', async () => {
     const emptyRoot = await mkdtemp(join(tmpdir(), 'ecos-project-management-empty-'))
     temporaryDirectories.push(emptyRoot)
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
     await expect(service.listProjectEntries(emptyRoot)).rejects.toThrow(
       'Project manifest does not exist.',
@@ -168,7 +195,7 @@ describe('ProjectManagementReadService', () => {
     const metricsPath = join(workspaceRoot, 'sta_ecc', 'analysis', 'qor_metrics.json')
     await mkdir(join(workspaceRoot, 'sta_ecc', 'analysis'), { recursive: true })
     await writeFile(metricsPath, 'x'.repeat(256 * 1024 + 1))
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
     await expect(
       service.readWorkspaceTexts({
@@ -190,7 +217,7 @@ describe('ProjectManagementReadService', () => {
     const flowPath = join(workspaceRoot, 'home', 'flow.json')
     await unlink(flowPath)
     await symlink(join(projectRoot, 'project.json'), flowPath)
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
     await expect(
       service.readWorkspaceTexts({
@@ -206,7 +233,7 @@ describe('ProjectManagementReadService', () => {
     const configDir = join(workspaceRoot, 'config')
     await mkdir(configDir)
     await writeFile(join(configDir, 'cts_ecc.json'), '{"cts_buf_list":"BUF"}')
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
     await expect(
       service.readWorkspaceTexts({
@@ -236,7 +263,7 @@ describe('ProjectManagementReadService', () => {
     const text = JSON.stringify(engineeringSnapshot())
     await writeFile(join(workspaceRoot, 'home', 'engineering-snapshot.json'), text)
 
-    const result = await new ProjectManagementReadService().readEngineeringSnapshot({
+    const result = await createReadService().readEngineeringSnapshot({
       projectRoot,
       workspacePath: workspaceRoot,
     })
@@ -261,7 +288,7 @@ describe('ProjectManagementReadService', () => {
     const { projectRoot, workspaceRoot } = await createProject()
 
     await expect(
-      new ProjectManagementReadService().readEngineeringSnapshot({
+      createReadService().readEngineeringSnapshot({
         projectRoot,
         workspacePath: workspaceRoot,
       }),
@@ -280,7 +307,7 @@ describe('ProjectManagementReadService', () => {
     )
 
     await expect(
-      new ProjectManagementReadService().readEngineeringSnapshot({
+      createReadService().readEngineeringSnapshot({
         projectRoot,
         workspacePath: workspaceRoot,
       }),
@@ -303,7 +330,7 @@ describe('ProjectManagementReadService', () => {
     await symlink(outside, workspaceRoot, 'dir')
 
     await expect(
-      new ProjectManagementReadService().readEngineeringSnapshot({
+      createReadService().readEngineeringSnapshot({
         projectRoot,
         workspacePath: workspaceRoot,
       }),
@@ -322,7 +349,7 @@ describe('ProjectManagementReadService', () => {
     )
 
     await expect(
-      new ProjectManagementReadService().readEngineeringSnapshot({
+      createReadService().readEngineeringSnapshot({
         projectRoot,
         workspacePath: workspaceRoot,
       }),
@@ -360,7 +387,7 @@ describe('ProjectManagementReadService', () => {
       JSON.stringify(snapshot),
     )
 
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
     const result = await service.readEngineeringSnapshot({
       projectRoot,
       workspacePath: workspaceRoot,
@@ -395,7 +422,7 @@ describe('ProjectManagementReadService', () => {
       projectRoot,
       workspacePath: workspaceRoot,
     })
-    const service = new ProjectManagementReadService()
+    const service = createReadService()
 
     await expect(
       service.readVerifiedArtifacts(

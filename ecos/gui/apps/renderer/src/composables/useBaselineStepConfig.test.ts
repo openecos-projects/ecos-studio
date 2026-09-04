@@ -1,11 +1,7 @@
 import { effectScope, ref, type EffectScope, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StepEnum } from '@/api/type'
-import {
-  createProjectManifestDraft,
-  registerWorkspaceInManifest,
-  synchronizeProjectBaseline,
-} from '@ecos-studio/shared'
+import { projectManifestForPresentation } from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
@@ -49,41 +45,39 @@ import {
 import { baselineStepConfigReadPaths } from '@/utils/stepConfigResourceMap'
 
 function projectManifest() {
-  const draft = createProjectManifestDraft({
-    rootPath: '/projects/gcd',
-    name: 'gcd',
-    designName: 'gcd',
-    now: '2026-08-04T00:00:00.000Z',
-  })
-  const baseline = registerWorkspaceInManifest(draft, {
-    projectRoot: '/projects/gcd',
-    workspacePath: '/projects/gcd/ws_0001',
-    now: '2026-08-04T00:00:00.000Z',
-  })
-  const withCurrent = registerWorkspaceInManifest(baseline, {
-    projectRoot: '/projects/gcd',
-    workspacePath: '/projects/gcd/ws_0004',
-    now: '2026-08-04T01:00:00.000Z',
-  })
-  return synchronizeProjectBaseline(withCurrent, {
-    workspaceId: 'ws_0001',
-    baseDesign: withCurrent.base_design,
-  })
+  return manifestWithWorkspaces(['ws_0001', 'ws_0004'], 'ws_0001')
 }
 
 function singleWorkspaceManifest() {
-  return registerWorkspaceInManifest(
-    createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      designName: 'gcd',
-      now: '2026-08-04T00:00:00.000Z',
-    }),
+  return manifestWithWorkspaces(['ws_0004'], 'ws_0004')
+}
+
+function manifestWithWorkspaces(workspaceIds: string[], baselineId: string) {
+  const now = '2026-08-04T00:00:00.000Z'
+  return projectManifestForPresentation(
     {
-      projectRoot: '/projects/gcd',
-      workspacePath: '/projects/gcd/ws_0004',
-      now: '2026-08-04T00:00:00.000Z',
+      schema_version: 1,
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      description: '',
+      created_at: now,
+      updated_at: now,
+      objectives: {},
+      workspaces: workspaceIds.map((workspaceId) => ({
+        workspace_id: workspaceId,
+        name: workspaceId,
+        workspace_path: workspaceId,
+        source_workspace_id: null,
+        lifecycle: 'active',
+        created_at: now,
+        updated_at: now,
+      })),
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: { workspace_id: baselineId, reason: 'selected' },
     },
+    '/projects/gcd',
   )
 }
 
@@ -145,7 +139,7 @@ describe('useBaselineStepConfig', () => {
     testState.readWorkspaceTexts.mockReset()
     testState.resolveProjectRouteContextForWorkspace.mockReset()
     testState.resolveProjectRouteContextForWorkspace.mockResolvedValue(null)
-    testState.readManifest.mockResolvedValue(JSON.stringify(projectManifest()))
+    testState.readManifest.mockResolvedValue(projectManifest())
     mockWorkspaceTexts({
       'home/flow.json': JSON.stringify(BASELINE_FLOW),
       'config/cts_ecc.json': '{"cts_buf_list":"BUF"}',
@@ -190,7 +184,7 @@ describe('useBaselineStepConfig', () => {
   })
 
   it('reports self-baseline when the current workspace is the only workspace', async () => {
-    testState.readManifest.mockResolvedValue(JSON.stringify(singleWorkspaceManifest()))
+    testState.readManifest.mockResolvedValue(singleWorkspaceManifest())
     const baseline = create()
     await vi.waitFor(() => {
       expect(baseline.status.value).toBe('self-baseline')

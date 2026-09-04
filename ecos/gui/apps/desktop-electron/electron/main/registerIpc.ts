@@ -35,6 +35,7 @@ import {
   type EccRuntimeOperationRequest,
   type EccRuntimeStartFlowRequest,
   type EccRuntimeStartStepRequest,
+  type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
@@ -49,6 +50,7 @@ import {
   type DesktopSaveFileDialogOptions,
   type DesktopRtlSourceDialogOptions,
   type PickedRtlSources,
+  type ProjectManifest,
   type ProjectManifestMutationRequest,
   type ProjectManifestMutationResult,
   type WorkspaceCreationModelRequest,
@@ -140,6 +142,7 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
     'workspace.run',
     'workspace.runStep',
     'workspace.update',
+    'workspace.updateConfiguration',
     'workspace.reset',
     'workspace.syncConfig',
     'workspace.exportSignoff',
@@ -197,7 +200,8 @@ export interface DesktopBridgeServices {
     ): Promise<ProjectManifestMutationResult>
   }
   projectManagementReadService?: {
-    readManifest(projectRoot: string): Promise<string | null>
+    discoverProject(directory: string): Promise<ProjectManifest | null>
+    readManifest(projectRoot: string): Promise<ProjectManifest | null>
     listProjectEntries(projectRoot: string): Promise<string[]>
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
@@ -392,6 +396,11 @@ export interface DesktopBridgeServices {
     workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
   }
   eccRuntimeService: {
+    callRuntime?<T>(
+      method: string,
+      params?: Record<string, unknown>,
+      options?: { timeoutMs?: number },
+    ): Promise<T>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
     cancelOperationLegacy(
       operationId?: string,
@@ -423,6 +432,9 @@ export interface DesktopBridgeServices {
     startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
     startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
+    updateWorkspaceConfiguration(
+      request: EccWorkspaceConfigurationUpdateRequest,
+    ): Promise<unknown>
     updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
     validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -1564,6 +1576,23 @@ export function registerIpc(
       return await services.backendProjectComparisonService.refreshComparison(
         event.sender.id,
         request.projectComparisonContextId,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementDiscoverProject,
+    async (_event, directory) => {
+      if (!services.projectManagementReadService) {
+        throw new Error('Project management reads are unavailable.')
+      }
+      if (typeof directory !== 'string') {
+        throw new Error('Project management directory must be a string.')
+      }
+      const authorizedDirectory =
+        await services.workspaceService.requestProjectPathAccess(directory)
+      return await services.projectManagementReadService.discoverProject(
+        authorizedDirectory,
       )
     },
   )

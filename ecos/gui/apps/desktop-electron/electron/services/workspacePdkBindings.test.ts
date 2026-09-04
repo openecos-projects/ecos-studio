@@ -1,0 +1,93 @@
+import { describe, expect, it, vi } from 'vitest'
+import { prepareWorkspaceOpenBinding } from './workspacePdkBindings'
+
+function createDependencies() {
+  const callRuntime = vi
+    .fn()
+    .mockResolvedValueOnce({
+      familyId: 'ics55',
+      version: '1.0.0',
+      mode: 'manual',
+      files: [
+        { fileId: 'tech', role: 'tech', reference: 'tech.lef' },
+        { fileId: 'lef', role: 'lef', reference: 'cells.lef' },
+        { fileId: 'lib', role: 'liberty', reference: 'typ.lib' },
+      ],
+      mpc: {
+        resourceId: 'mpc:frame',
+        version: '2.0.0',
+        designId: 'gcd',
+        sourceHash: 'hash',
+      },
+    })
+    .mockResolvedValueOnce({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+    })
+  return {
+    callRuntime,
+    dependencies: {
+      eccRuntimeService: { callRuntime },
+      pdkInventoryService: {
+        bindInstallation: vi.fn(),
+        resolveBinding: vi.fn(),
+        validateWorkspace: vi.fn().mockResolvedValue({ root: '/pdks/ics55' }),
+      },
+      resourceManagerService: {
+        getResource: vi.fn().mockResolvedValue({
+          installed_version: '2.0.0',
+          status: 'installed',
+        }),
+        readMpcSpec: vi.fn().mockResolvedValue({
+          designs: [
+            {
+              design_name: 'gcd',
+              core_template: { name: 'frame', minimum_area: 100 },
+            },
+          ],
+        }),
+      },
+    },
+  }
+}
+
+describe('prepareWorkspaceOpenBinding', () => {
+  it('resolves portable PDK and MPC requirements on the current machine', async () => {
+    const { dependencies } = createDependencies()
+
+    await expect(
+      prepareWorkspaceOpenBinding(dependencies, '/projects/demo/runs/workspace'),
+    ).resolves.toEqual({
+      directory: '/projects/demo/runs/workspace',
+      workspaceBindings: {
+        inputs: {},
+        pdk: {
+          root: '/pdks/ics55',
+          version: '1.0.0',
+          files: {
+            tech: '/pdks/ics55/tech.lef',
+            lef: '/pdks/ics55/cells.lef',
+            lib: '/pdks/ics55/typ.lib',
+          },
+        },
+        mpc: { template: { name: 'frame', minimum_area: 100 } },
+      },
+    })
+    expect(dependencies.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement: expect.objectContaining({ familyId: 'ics55', version: '1.0.0' }),
+    })
+  })
+
+  it('keeps inspection available when local bindings are unavailable', async () => {
+    const { dependencies } = createDependencies()
+    dependencies.pdkInventoryService.validateWorkspace.mockRejectedValue(
+      new Error('not installed'),
+    )
+
+    await expect(
+      prepareWorkspaceOpenBinding(dependencies, '/projects/demo/runs/workspace'),
+    ).resolves.toEqual({ directory: '/projects/demo/runs/workspace' })
+  })
+})

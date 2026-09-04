@@ -111,6 +111,7 @@ function registerHandlers(
       mutate: vi.fn(),
     },
     projectManagementReadService: {
+      discoverProject: vi.fn(),
       readManifest: vi.fn(),
       listProjectEntries: vi.fn(),
       readWorkspaceTexts: vi.fn(),
@@ -250,6 +251,7 @@ function registerHandlers(
       startFlowOperation: vi.fn(),
       startStepOperation: vi.fn(),
       syncConfig: vi.fn(),
+      updateWorkspaceConfiguration: vi.fn(),
       updateWorkspace: vi.fn(),
       validateWorkspaceSpec: vi.fn(),
       workspaceHome: vi.fn(),
@@ -1346,19 +1348,24 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
-  it('uses the persisted Project Requirement for workspace creation', async () => {
+  it('uses the requested Project Requirement for workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
+    const persistedRequirement = {
+      familyId: 'ics55',
+      version: null,
+      manualConfig: {
+        techLef: 'tech.lef',
+        cellLefs: ['cells.lef'],
+        liberty: ['typ.lib'],
+      },
+    }
     const payload = workspaceCreateRequest({
       commandId: 'workspace-create-persisted-requirement',
       pdkInstallationId: 'pdk-installation:ics55',
       projectId: 'proj_demo',
       projectRoot: '/tmp/project',
-      pdkRequirement: {
-        familyId: 'ics55',
-        version: null,
-        manualConfig: null,
-      },
+      pdkRequirement: persistedRequirement,
       workspaceSpec: {
         pdk: {
           familyId: 'ics55',
@@ -1372,30 +1379,6 @@ describe('registerIpc', () => {
       },
     })
     const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
-    const persistedRequirement = {
-      familyId: 'ics55',
-      version: null,
-      manualConfig: {
-        techLef: 'tech.lef',
-        cellLefs: ['cells.lef'],
-        liberty: ['typ.lib'],
-      },
-    }
-    services.projectManagementReadService.readManifest.mockResolvedValue(
-      JSON.stringify({
-        schema_version: 1,
-        project_id: payload.projectId,
-        name: 'demo',
-        design_name: 'demo',
-        root_path: payload.projectRoot,
-        created_at: '2026-08-25T00:00:00.000Z',
-        updated_at: '2026-08-25T00:00:00.000Z',
-        base_design: { pdk_requirement: persistedRequirement, rtl_list: [] },
-        objectives: { primary: 'timing', directions: {} },
-        workspaces: [],
-        best_workspace: null,
-      }),
-    )
     services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
     services.pdkInventoryService.bindInstallation.mockResolvedValue({
       installationId: payload.pdkInstallationId,
@@ -1444,9 +1427,9 @@ describe('registerIpc', () => {
           inputs: {},
           pdk: {
             files: {
-              tech: 'tech.lef',
-              'lef-1': 'cells.lef',
-              'liberty-1': 'typ.lib',
+              tech: '/canonical/pdk/tech.lef',
+              'lef-1': '/canonical/pdk/cells.lef',
+              'liberty-1': '/canonical/pdk/typ.lib',
             },
             root: '/canonical/pdk',
           },
@@ -1776,7 +1759,10 @@ describe('registerIpc', () => {
     )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
     services.workspaceService.registerProjectReadRoot.mockResolvedValue('/tmp/project')
-    services.projectManagementReadService.readManifest.mockResolvedValue('{"name":"gcd"}')
+    services.projectManagementReadService.discoverProject.mockResolvedValue({
+      name: 'gcd',
+    })
+    services.projectManagementReadService.readManifest.mockResolvedValue({ name: 'gcd' })
     services.projectManagementReadService.listProjectEntries.mockResolvedValue([
       'project.json',
       'ws_0001',
@@ -1858,11 +1844,17 @@ describe('registerIpc', () => {
       ),
     ).resolves.toBe('/tmp/project')
     await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementDiscoverProject)?.(
+        event,
+        '/tmp/project/ws_0001',
+      ),
+    ).resolves.toEqual({ name: 'gcd' })
+    await expect(
       handlers.get(desktopApiIpcChannels.projectManagementReadManifest)?.(
         event,
         '/tmp/project',
       ),
-    ).resolves.toBe('{"name":"gcd"}')
+    ).resolves.toEqual({ name: 'gcd' })
     await expect(
       handlers.get(desktopApiIpcChannels.projectManagementListEntries)?.(
         event,

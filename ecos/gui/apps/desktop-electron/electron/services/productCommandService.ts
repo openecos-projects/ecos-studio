@@ -2,6 +2,7 @@ import type {
   EccRuntimeOperationRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceHandleRequest,
@@ -20,6 +21,9 @@ interface ProductCommandRuntime {
   startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<unknown>
   startStepOperation(request: EccRuntimeStartStepRequest): Promise<unknown>
   syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
+  updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<unknown>
   updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
 }
 
@@ -135,6 +139,8 @@ export async function executeProductCommand(
         workspaceSpec: draft.workspaceSpec,
       })
     }
+    case 'workspace.updateConfiguration':
+      return await context.runtime.updateWorkspaceConfiguration(request.payload)
     case 'workspace.cancel':
       return await context.runtime.cancelOperation(request.payload)
     case 'workspace.retrySnapshot':
@@ -181,6 +187,12 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       if (!isRecord(payload.draft)) throw new Error('Workspace update requires a draft')
       requireRecord(payload.draft, 'workspaceBindings')
       requireRecord(payload.draft, 'workspaceSpec')
+      validateRevision(payload.expectedWorkspaceRevision)
+      break
+    case 'workspace.updateConfiguration':
+      requireString(payload, 'commandId')
+      requireString(payload, 'workspaceHandle')
+      requireRecord(payload, 'configuration')
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.cancel':

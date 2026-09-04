@@ -1,7 +1,5 @@
 import {
-  createProjectManifestDraft,
-  registerWorkspaceInManifest,
-  synchronizeProjectBaseline,
+  projectManifestForPresentation,
   validateEngineeringSnapshot,
   type EccEngineeringMetric,
   type EccEngineeringSnapshot,
@@ -129,7 +127,7 @@ function persistedReadService(
 ) {
   return {
     readEngineeringSnapshot: vi.fn().mockResolvedValue(persistedSnapshotResult(snapshot)),
-    readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifest)),
+    readManifest: vi.fn().mockResolvedValue(manifest),
   }
 }
 
@@ -138,32 +136,43 @@ function workspaceRootProvider() {
 }
 
 function manifestForWorkspace() {
-  return registerWorkspaceInManifest(
-    createProjectManifestDraft({
-      rootPath: '/project',
-      name: 'demo-project',
-      designName: 'gcd',
-      now: '2026-08-30T00:00:00.000Z',
-    }),
-    {
-      projectRoot: '/project',
-      workspacePath: '/project/ws-a',
-      now: '2026-08-30T00:00:00.000Z',
-    },
-  )
+  return manifestForWorkspaces(['ws-a'], 'ws-a')
 }
 
 function manifestWithBaseline() {
-  const manifest = registerWorkspaceInManifest(manifestForWorkspace(), {
-    projectRoot: '/project',
-    workspacePath: '/project/ws-base',
-    now: '2026-08-30T00:00:00.000Z',
-  })
-  return synchronizeProjectBaseline(manifest, {
-    baseDesign: manifest.base_design,
-    reason: 'selected',
-    workspaceId: 'ws-base',
-  })
+  return manifestForWorkspaces(['ws-a', 'ws-base'], 'ws-base')
+}
+
+function manifestForWorkspaces(workspaceIds: string[], baselineId: string) {
+  const now = '2026-08-30T00:00:00.000Z'
+  return {
+    ...projectManifestForPresentation(
+      {
+        schema_version: 1,
+        project_id: 'proj_demo_project',
+        name: 'demo-project',
+        design_name: 'gcd',
+        description: '',
+        created_at: now,
+        updated_at: now,
+        objectives: {},
+        workspaces: workspaceIds.map((workspaceId) => ({
+          workspace_id: workspaceId,
+          name: workspaceId,
+          workspace_path: workspaceId,
+          source_workspace_id: null,
+          lifecycle: 'active',
+          created_at: now,
+          updated_at: now,
+        })),
+        mpc: null,
+        best_workspace: null,
+        qor_baseline: { workspace_id: baselineId, reason: 'selected' },
+      },
+      '/project',
+    ),
+    base_design: { pdk: 'ics55', top_module: 'gcd_top', parameters: {} },
+  }
 }
 
 describe('BackendWorkspaceService', () => {
@@ -186,40 +195,38 @@ describe('BackendWorkspaceService', () => {
   })
 
   it('returns window-scoped identity and configuration from committed facts', async () => {
-    const readManifest = vi.fn().mockResolvedValue(
-      JSON.stringify({
-        base_design: {},
-        best_workspace: null,
-        created_at: '2026-08-30T00:00:00.000Z',
-        description: '',
-        design_name: 'gcd',
-        mpc: null,
-        name: 'demo-project',
-        objectives: { directions: {}, primary: 'timing' },
-        project_id: 'project-demo',
-        qor_baseline: { reason: 'selected', workspace_id: 'ws-base' },
-        root_path: '/project',
-        schema_version: 1,
-        updated_at: '2026-08-30T00:00:00.000Z',
-        workspaces: [
-          {
-            branch_from: null,
-            created_at: '2026-08-30T00:00:00.000Z',
-            end_step: 'Harden',
-            metrics_summary: {},
-            name: 'Workspace A',
-            parameter_patch: {},
-            source_workspace_id: null,
-            start_step: 'Synth',
-            status: 'not_started',
-            step_metrics: {},
-            updated_at: '2026-08-30T00:00:00.000Z',
-            workspace_id: 'ws-a',
-            workspace_path: '/project/ws-a',
-          },
-        ],
-      }),
-    )
+    const readManifest = vi.fn().mockResolvedValue({
+      base_design: {},
+      best_workspace: null,
+      created_at: '2026-08-30T00:00:00.000Z',
+      description: '',
+      design_name: 'gcd',
+      mpc: null,
+      name: 'demo-project',
+      objectives: { directions: {}, primary: 'timing' },
+      project_id: 'project-demo',
+      qor_baseline: { reason: 'selected', workspace_id: 'ws-base' },
+      root_path: '/project',
+      schema_version: 1,
+      updated_at: '2026-08-30T00:00:00.000Z',
+      workspaces: [
+        {
+          branch_from: null,
+          created_at: '2026-08-30T00:00:00.000Z',
+          end_step: 'Harden',
+          metrics_summary: {},
+          name: 'Workspace A',
+          parameter_patch: {},
+          source_workspace_id: null,
+          start_step: 'Synth',
+          status: 'not_started',
+          step_metrics: {},
+          updated_at: '2026-08-30T00:00:00.000Z',
+          workspace_id: 'ws-a',
+          workspace_path: '/project/ws-a',
+        },
+      ],
+    })
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi
@@ -582,7 +589,7 @@ describe('BackendWorkspaceService', () => {
       .mockResolvedValueOnce(persistedSnapshotResult(second))
     const projectManagementReadService = {
       readEngineeringSnapshot,
-      readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifestForWorkspace())),
+      readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
     }
     const service = new BackendWorkspaceService({
       projectManagementReadService,
@@ -625,7 +632,7 @@ describe('BackendWorkspaceService', () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot,
-        readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifestWithBaseline())),
+        readManifest: vi.fn().mockResolvedValue(manifestWithBaseline()),
       },
       workspaceRootProvider: workspaceRootProvider(),
     })
@@ -649,7 +656,7 @@ describe('BackendWorkspaceService', () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot,
-        readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifestForWorkspace())),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
       },
       workspaceRootProvider: {
         getProjectRoot: vi.fn().mockResolvedValue('/project/ws-a'),
@@ -1257,7 +1264,7 @@ describe('BackendWorkspaceService', () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot,
-        readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifestForWorkspace())),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
       },
       workspaceRootProvider: workspaceRootProvider(),
     })
@@ -1286,7 +1293,7 @@ describe('BackendWorkspaceService', () => {
           .mockResolvedValue(persistedSnapshotResult(snapshot)),
         readManifest: vi
           .fn()
-          .mockResolvedValueOnce(JSON.stringify(manifestForWorkspace()))
+          .mockResolvedValueOnce(manifestForWorkspace())
           .mockResolvedValueOnce(null),
       },
       workspaceRootProvider: workspaceRootProvider(),
@@ -1322,7 +1329,7 @@ describe('BackendWorkspaceService', () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot,
-        readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifestForWorkspace())),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
       },
       workspaceRootProvider: workspaceRootProvider(),
     })
@@ -1360,7 +1367,7 @@ describe('BackendWorkspaceService', () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot,
-        readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifestForWorkspace())),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
       },
       workspaceRootProvider: workspaceRootProvider(),
     })
@@ -1391,7 +1398,7 @@ describe('BackendWorkspaceService', () => {
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot,
-        readManifest: vi.fn().mockResolvedValue(JSON.stringify(manifest)),
+        readManifest: vi.fn().mockResolvedValue(manifest),
       },
       workspaceRootProvider: workspaceRootProvider(),
     })

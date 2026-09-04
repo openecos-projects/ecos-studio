@@ -40,29 +40,27 @@ vi.mock('@/utils/projectHistory', () => ({
 }))
 vi.mock('@/utils/projectManagementRead', () => ({
   listProjectManagementEntries: vi.fn(async () => []),
-  readProjectManagementManifest: vi.fn(async () =>
-    JSON.stringify({
-      schema_version: 1,
-      project_id: 'project-demo',
-      name: 'demo',
-      design_name: 'gcd',
-      description: '',
-      root_path: '/projects/demo',
-      created_at: '2026-09-04T00:00:00.000Z',
-      updated_at: '2026-09-04T00:00:00.000Z',
-      base_design: { parameters: {}, rtl_list: [] },
-      objectives: { primary: 'timing', directions: {} },
-      workspaces: [
-        {
-          workspace_id: 'ws_0001',
-          name: 'ws_0001',
-          workspace_path: '/projects/demo/ws_0001',
-          status: 'active',
-        },
-      ],
-      best_workspace: null,
-    }),
-  ),
+  readProjectManagementManifest: vi.fn(async () => ({
+    schema_version: 1,
+    project_id: 'project-demo',
+    name: 'demo',
+    design_name: 'gcd',
+    description: '',
+    root_path: '/projects/demo',
+    created_at: '2026-09-04T00:00:00.000Z',
+    updated_at: '2026-09-04T00:00:00.000Z',
+    base_design: { parameters: {}, rtl_list: [] },
+    objectives: { primary: 'timing', directions: {} },
+    workspaces: [
+      {
+        workspace_id: 'ws_0001',
+        name: 'ws_0001',
+        workspace_path: '/projects/demo/ws_0001',
+        status: 'active',
+      },
+    ],
+    best_workspace: null,
+  })),
 }))
 vi.mock('@/stores/backendProjectComparisonSession', () => ({
   useBackendProjectComparisonSession: () => ({

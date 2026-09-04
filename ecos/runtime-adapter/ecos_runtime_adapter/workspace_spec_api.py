@@ -1,11 +1,16 @@
 import json
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from ecos_runtime_adapter.errors import RuntimeApiError
 from ecos_runtime_adapter.requests import (
+    ProjectManifestDiscoverRequest,
+    ProjectManifestLoadRequest,
+    ProjectManifestMutationRequest,
+    WorkspaceConfigurationUpdateRequest,
     WorkspaceCreateRequest,
     WorkspaceOpenRequest,
     WorkspaceSpecCreateRequest,
@@ -28,7 +33,101 @@ class WorkspaceSpecRuntimeMixin:
     def validate_workspace_spec(self, request: WorkspaceSpecValidateRequest) -> dict:
         from chipcompiler.engine import validate_workspace_spec
 
-        return validate_workspace_spec(request.workspace_spec, request.workspace_bindings)
+        return validate_workspace_spec(
+            request.workspace_spec, request.workspace_bindings
+        )
+
+    def workspace_binding_requirement(self, request: WorkspaceSpecOpenRequest) -> dict:
+        from chipcompiler.engine import describe_workspace_binding_requirement
+
+        try:
+            return describe_workspace_binding_requirement(request.directory)
+        except (OSError, ValueError) as exc:
+            raise RuntimeApiError("workspace_descriptor_invalid", str(exc)) from exc
+
+    def discover_project(self, request: ProjectManifestDiscoverRequest) -> dict | None:
+        from chipcompiler.project import discover_project_manifest
+
+        try:
+            discovered = discover_project_manifest(request.directory)
+        except (OSError, ValueError) as exc:
+            raise RuntimeApiError("project_manifest_invalid", str(exc)) from exc
+        if discovered is None:
+            return None
+        project_root, manifest = discovered
+        return {
+            "projectRoot": str(project_root),
+            "projectId": manifest["project_id"],
+        }
+
+    def load_project_manifest(self, request: ProjectManifestLoadRequest) -> dict:
+        from chipcompiler.project import load_project_manifest
+
+        try:
+            return load_project_manifest(request.project_root)
+        except (OSError, ValueError) as exc:
+            raise RuntimeApiError("project_manifest_invalid", str(exc)) from exc
+
+    def mutate_project_manifest(self, request: ProjectManifestMutationRequest) -> dict:
+        from chipcompiler.project import (
+            create_project_manifest,
+            mutate_project_manifest,
+        )
+
+        mutation = request.mutation
+        kind = mutation.get("type")
+        if kind == "create":
+            try:
+                return create_project_manifest(
+                    request.project_root,
+                    str(mutation.get("name") or "project"),
+                    str(mutation.get("designName") or ""),
+                    mpc=(
+                        mutation.get("mpc")
+                        if isinstance(mutation.get("mpc"), dict)
+                        else None
+                    ),
+                )
+            except (OSError, ValueError) as exc:
+                raise RuntimeApiError("project_manifest_invalid", str(exc)) from exc
+        now = str(mutation.get("now") or datetime.now(UTC).isoformat())
+        source = (
+            mutation.get("input")
+            if isinstance(mutation.get("input"), dict)
+            else mutation
+        )
+        translated = {
+            "type": str(kind).replace("-", "_"),
+            **{
+                target: source[key]
+                for key, target in (
+                    ("workspaceId", "workspace_id"),
+                    ("workspacePath", "workspace_path"),
+                    ("sourceWorkspaceId", "source_workspace_id"),
+                    ("lifecycle", "lifecycle"),
+                    ("name", "name"),
+                    ("reason", "reason"),
+                )
+                if key in source
+            },
+            "updated_at": now,
+        }
+        if translated["type"] == "register_workspace":
+            workspace_path = str(translated.get("workspace_path") or "")
+            workspace_id = str(
+                translated.get("workspace_id") or Path(workspace_path).name
+            )
+            translated.update(
+                {
+                    "workspace_id": workspace_id,
+                    "name": str(translated.get("name") or workspace_id),
+                    "created_at": now,
+                }
+            )
+        try:
+            return mutate_project_manifest(request.project_root, translated)
+        except (OSError, ValueError) as exc:
+            raise RuntimeApiError("project_manifest_invalid", str(exc)) from exc
 
     def create_workspace(
         self,
@@ -37,14 +136,18 @@ class WorkspaceSpecRuntimeMixin:
         if isinstance(request, WorkspaceSpecCreateRequest):
             return self._create_workspace_from_spec(request)
         if not request.directory:
-            raise RuntimeApiError("invalid_request", "missing required field: directory")
+            raise RuntimeApiError(
+                "invalid_request", "missing required field: directory"
+            )
 
         temp_filelist_dir = None
         input_filelist = request.filelist
         if not input_filelist:
             rtl_paths = _normalize_rtl_list(request.rtl_list or [])
             if rtl_paths:
-                temp_filelist_dir = tempfile.TemporaryDirectory(prefix="ecc-workspace-filelist-")
+                temp_filelist_dir = tempfile.TemporaryDirectory(
+                    prefix="ecc-workspace-filelist-"
+                )
                 input_filelist = _write_filelist(temp_filelist_dir.name, rtl_paths)
 
         import chipcompiler.data as data_api
@@ -74,6 +177,12 @@ class WorkspaceSpecRuntimeMixin:
                 f"create workspace failed : {os.path.abspath(request.directory)}",
             )
 
+        if getattr(workspace, "parameters", None) is not None:
+            from chipcompiler.data.workspace_descriptor import load_workspace_descriptor
+
+            load_workspace_descriptor(workspace.directory)
+            workspace = data_api.load_workspace(workspace.directory) or workspace
+
         from chipcompiler.engine.workspace_flow import build_flow_for_workspace
 
         build_flow_for_workspace(workspace)
@@ -87,17 +196,34 @@ class WorkspaceSpecRuntimeMixin:
         return _workspace_session_result(session)
 
     def _create_workspace_from_spec(self, request: WorkspaceSpecCreateRequest) -> dict:
-        from chipcompiler.engine import WorkspaceLifecycleError, create_workspace_from_spec
+        from chipcompiler.engine import (
+            WorkspaceLifecycleError,
+            create_workspace_from_spec,
+        )
 
         try:
-            workspace = create_workspace_from_spec(
-                request.target_directory,
-                request.workspace_spec,
-                request.workspace_bindings,
-                request.command_id,
-            )
+            if request.project_root:
+                from chipcompiler.project import create_project_workspace
+
+                workspace = create_project_workspace(
+                    request.project_root,
+                    request.target_directory,
+                    request.workspace_spec,
+                    request.workspace_bindings,
+                    command_id=request.command_id,
+                    expected_project_id=request.project_id or None,
+                )
+            else:
+                workspace = create_workspace_from_spec(
+                    request.target_directory,
+                    request.workspace_spec,
+                    request.workspace_bindings,
+                    request.command_id,
+                )
         except WorkspaceLifecycleError as exc:
             raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+        except (OSError, ValueError) as exc:
+            raise RuntimeApiError("project_manifest_invalid", str(exc)) from exc
         snapshot = self._read_engineering_snapshot(workspace)
         session = self.sessions.create_session(
             workspace.directory,
@@ -116,7 +242,9 @@ class WorkspaceSpecRuntimeMixin:
         workspace = self._load_workspace(request.directory)
         snapshot = self._ensure_engineering_snapshot(workspace)
         bindings = (
-            request.workspace_bindings if isinstance(request, WorkspaceSpecOpenRequest) else None
+            request.workspace_bindings
+            if isinstance(request, WorkspaceSpecOpenRequest)
+            else None
         )
         if isinstance(request, WorkspaceSpecOpenRequest):
             from chipcompiler.engine import assess_execution_readiness
@@ -149,7 +277,10 @@ class WorkspaceSpecRuntimeMixin:
         return _workspace_session_result(session)
 
     def update_workspace(self, request: WorkspaceUpdateRequest) -> dict:
-        from chipcompiler.engine import WorkspaceLifecycleError, update_workspace_from_spec
+        from chipcompiler.engine import (
+            WorkspaceLifecycleError,
+            update_workspace_from_spec,
+        )
 
         session = self._get_session(request.workspace_id)
         with session.mutation_lock:
@@ -180,10 +311,49 @@ class WorkspaceSpecRuntimeMixin:
             session.execution_readiness = {"ready": True}
             return _workspace_session_result(session)
 
+    def update_workspace_configuration(
+        self, request: WorkspaceConfigurationUpdateRequest
+    ) -> dict:
+        from chipcompiler.engine import (
+            WorkspaceLifecycleError,
+            update_workspace_configuration,
+        )
+
+        session = self._get_session(request.workspace_id)
+        with session.mutation_lock:
+            self._validate_workspace_revision(
+                session,
+                request.expected_workspace_revision,
+            )
+            if self.operations.has_active_workspace(session.workspace_id):
+                raise RuntimeApiError(
+                    "operation_conflict",
+                    "Workspace has an active Operation",
+                )
+            self._release_session_db(session)
+            try:
+                workspace = update_workspace_configuration(
+                    session.directory,
+                    request.expected_workspace_revision,
+                    request.configuration,
+                    request.workspace_bindings,
+                    request.command_id,
+                )
+            except WorkspaceLifecycleError as exc:
+                raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+            snapshot = self._read_engineering_snapshot(workspace)
+            session.workspace = workspace
+            session.workspace_revision = snapshot["workspaceRevision"]
+            session.workspace_bindings = request.workspace_bindings
+            session.execution_readiness = {"ready": True}
+            return _workspace_session_result(session)
+
     def _load_workspace(self, directory: str):
         if not directory:
-            raise RuntimeApiError("invalid_request", "missing required field: directory")
-        if not _looks_like_old_workspace(directory):
+            raise RuntimeApiError(
+                "invalid_request", "missing required field: directory"
+            )
+        if not os.path.isdir(directory):
             raise RuntimeApiError(
                 "invalid_request",
                 f"invalid workspace directory: {directory}",
@@ -254,7 +424,9 @@ class WorkspaceSpecRuntimeMixin:
         try:
             return create_engineering_snapshot(workspace)
         except EngineeringSnapshotError as exc:
-            raise RuntimeApiError("engineering_snapshot_commit_failed", str(exc)) from exc
+            raise RuntimeApiError(
+                "engineering_snapshot_commit_failed", str(exc)
+            ) from exc
 
     @staticmethod
     def _read_engineering_snapshot(owner) -> dict:
@@ -305,7 +477,9 @@ class WorkspaceSpecRuntimeMixin:
                 cause=cause,
             )
         except EngineeringSnapshotError as exc:
-            raise RuntimeApiError("engineering_snapshot_commit_failed", str(exc)) from exc
+            raise RuntimeApiError(
+                "engineering_snapshot_commit_failed", str(exc)
+            ) from exc
         session.workspace_revision = snapshot["workspaceRevision"]
         return session.workspace_revision
 
@@ -341,7 +515,9 @@ def _write_filelist(directory: str, rtl_paths: list[str]) -> str:
     filelist_path = os.path.join(directory, "filelist")
     with open(filelist_path, "w", encoding="utf-8") as filelist:
         for path in rtl_paths:
-            filelist.write(f'"{path}"\n' if any(ch.isspace() for ch in path) else f"{path}\n")
+            filelist.write(
+                f'"{path}"\n' if any(ch.isspace() for ch in path) else f"{path}\n"
+            )
     return filelist_path
 
 
@@ -357,13 +533,3 @@ def _materialize_inline_pdk_json(pdk_json: Any) -> tuple[Any, Path | None]:
     ) as pdk_file:
         json.dump(pdk_json, pdk_file)
         return pdk_file.name, Path(pdk_file.name)
-
-
-def _looks_like_old_workspace(directory: str) -> bool:
-    if not os.path.isdir(directory):
-        return False
-    home = os.path.join(directory, "home")
-    return all(
-        os.path.isfile(os.path.join(home, filename))
-        for filename in ("parameters.json", "home.json")
-    )

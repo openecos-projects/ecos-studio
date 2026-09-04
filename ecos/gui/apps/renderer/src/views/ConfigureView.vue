@@ -142,6 +142,7 @@ const resetConfig = () => {
               <label>Area</label>
               <InputNumber
                 v-model="config.die.area"
+                disabled
                 size="small"
                 suffix=" μm²"
                 :minFractionDigits="0"
@@ -217,17 +218,28 @@ const resetConfig = () => {
             <div class="field-row">
               <div class="field">
                 <label>Width</label>
-                <InputNumber v-model="config.core.Size[0]" size="small" suffix=" μm" />
+                <InputNumber
+                  v-model="config.core.Size[0]"
+                  disabled
+                  size="small"
+                  suffix=" μm"
+                />
               </div>
               <div class="field">
                 <label>Height</label>
-                <InputNumber v-model="config.core.Size[1]" size="small" suffix=" μm" />
+                <InputNumber
+                  v-model="config.core.Size[1]"
+                  disabled
+                  size="small"
+                  suffix=" μm"
+                />
               </div>
             </div>
             <div class="field">
               <label>Area</label>
               <InputNumber
                 v-model="config.core.area"
+                disabled
                 size="small"
                 suffix=" μm²"
                 :minFractionDigits="0"
@@ -238,6 +250,7 @@ const resetConfig = () => {
               <label>Bounding Box</label>
               <InputText
                 v-model="config.core.boundingBox"
+                disabled
                 size="small"
                 placeholder="(x1 , y1) (x2 , y2)"
               />

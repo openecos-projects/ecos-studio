@@ -17,7 +17,11 @@ from ecos_runtime_adapter.requests import (
     OperationIdRequest,
     OperationStartFlowRequest,
     OperationStartStepRequest,
+    ProjectManifestDiscoverRequest,
+    ProjectManifestLoadRequest,
+    ProjectManifestMutationRequest,
     WorkspaceCloseRequest,
+    WorkspaceConfigurationUpdateRequest,
     WorkspaceExportSignoffRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
@@ -52,6 +56,21 @@ RUNTIME_METHODS: Final[tuple[RuntimeMethodSpec[Any], ...]] = (
         handler_name="validate_workspace_spec",
     ),
     RuntimeMethodSpec(
+        method_name="project.discover",
+        request_model=ProjectManifestDiscoverRequest,
+        handler_name="discover_project",
+    ),
+    RuntimeMethodSpec(
+        method_name="project.manifest.load",
+        request_model=ProjectManifestLoadRequest,
+        handler_name="load_project_manifest",
+    ),
+    RuntimeMethodSpec(
+        method_name="project.manifest.mutate",
+        request_model=ProjectManifestMutationRequest,
+        handler_name="mutate_project_manifest",
+    ),
+    RuntimeMethodSpec(
         method_name="workspace.create",
         request_model=WorkspaceSpecCreateRequest,
         handler_name="create_workspace",
@@ -62,9 +81,19 @@ RUNTIME_METHODS: Final[tuple[RuntimeMethodSpec[Any], ...]] = (
         handler_name="open_workspace",
     ),
     RuntimeMethodSpec(
+        method_name="workspace.binding_requirement",
+        request_model=WorkspaceSpecOpenRequest,
+        handler_name="workspace_binding_requirement",
+    ),
+    RuntimeMethodSpec(
         method_name="workspace.update",
         request_model=WorkspaceUpdateRequest,
         handler_name="update_workspace",
+    ),
+    RuntimeMethodSpec(
+        method_name="workspace.configuration.update",
+        request_model=WorkspaceConfigurationUpdateRequest,
+        handler_name="update_workspace_configuration",
     ),
     RuntimeMethodSpec(
         method_name="workspace.close",
@@ -198,7 +227,9 @@ PERSISTENT_DB_METHODS: Final[tuple[RuntimeMethodSpec[Any], ...]] = (
 )
 
 
-def runtime_methods(*, persistent_db_enabled: bool = False) -> tuple[RuntimeMethodSpec[Any], ...]:
+def runtime_methods(
+    *, persistent_db_enabled: bool = False
+) -> tuple[RuntimeMethodSpec[Any], ...]:
     if persistent_db_enabled:
         return (*RUNTIME_METHODS, *PERSISTENT_DB_METHODS)
     return RUNTIME_METHODS
@@ -206,7 +237,8 @@ def runtime_methods(*, persistent_db_enabled: bool = False) -> tuple[RuntimeMeth
 
 def runtime_method_names(*, persistent_db_enabled: bool = False) -> tuple[str, ...]:
     return tuple(
-        spec.method_name for spec in runtime_methods(persistent_db_enabled=persistent_db_enabled)
+        spec.method_name
+        for spec in runtime_methods(persistent_db_enabled=persistent_db_enabled)
     )
 
 

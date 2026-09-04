@@ -1,8 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
-
 const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024
 
 export interface WorkspaceBaselineSnapshot {
@@ -32,7 +30,6 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
 export class WorkspaceSnapshotLoader {
   /** Reads only the persisted configuration needed to refresh a project baseline. */
   async loadBaselineSnapshot(directory: string): Promise<WorkspaceBaselineSnapshot> {
-    await migrateWorkspaceConfigFilenames(directory)
     const [parameters, pdk, db] = await Promise.all([
       readJsonObject(join(directory, 'home', 'parameters.json')),
       readJsonObject(join(directory, 'home', 'pdk.json')),

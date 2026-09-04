@@ -1,12 +1,5 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -117,6 +110,56 @@ function createService(
 }
 
 describe('EccWorkspaceRuntime', () => {
+  it('updates canonical configuration with the current machine bindings', async () => {
+    const { client, service } = createService()
+    const workspaceBindings = {
+      mpc: { template: { design: 'gcd' } },
+      pdk: { root: '/pdks/old' },
+    }
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
+    const opened = await service.openWorkspace({
+      directory: '/work/demo',
+      workspaceBindings,
+    })
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 2,
+    })
+
+    await expect(
+      service.updateWorkspaceConfiguration({
+        commandId: 'configuration-1',
+        configuration: {
+          design: { name: 'gcd', topModule: 'gcd', clockPort: 'clk' },
+          parameters: { frequency_max: 200 },
+          pdk: { familyId: 'ics55' },
+        },
+        expectedWorkspaceRevision: 1,
+        pdkRoot: '/pdks/current',
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ workspaceRevision: 2 })
+
+    expect(client.calls.at(-1)).toMatchObject({
+      method: 'workspace.configuration.update',
+      params: {
+        commandId: 'configuration-1',
+        expectedWorkspaceRevision: 1,
+        workspaceBindings: {
+          mpc: { template: { design: 'gcd' } },
+          pdk: { root: '/pdks/current' },
+        },
+        workspaceId: 'workspace-1',
+      },
+    })
+    expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
+  })
+
   it('creates a workspace from a runtime-specific payload', async () => {
     const { client, service } = createService('/work/frontend')
     client.responses.push({ directory: '/work/frontend', workspaceId: 'frontend-1' })
@@ -140,7 +183,7 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
-  it('migrates legacy configs before a lazy workspace open returns', async () => {
+  it('leaves legacy config migration to ECC during a lazy open', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'ecos-workspace-runtime-open-'))
     const configDirectory = join(directory, 'config')
     mkdirSync(configDirectory)
@@ -158,15 +201,10 @@ describe('EccWorkspaceRuntime', () => {
       const { service, sidecar } = createService(directory, { lazyWorkspaceOpen: true })
       await service.openWorkspace({ directory })
 
-      expect(existsSync(join(configDirectory, 'flow_config.json'))).toBe(false)
-      expect(existsSync(join(configDirectory, 'db_default_config.json'))).toBe(false)
-      expect(existsSync(join(configDirectory, 'flow_ecc.json'))).toBe(true)
-      expect(existsSync(join(configDirectory, 'db_ecc.json'))).toBe(true)
-      expect(
-        JSON.parse(readFileSync(join(configDirectory, 'flow_ecc.json'), 'utf8')),
-      ).toMatchObject({
-        ConfigPath: { idb_path: join(configDirectory, 'db_ecc.json') },
-      })
+      expect(existsSync(join(configDirectory, 'flow_config.json'))).toBe(true)
+      expect(existsSync(join(configDirectory, 'db_default_config.json'))).toBe(true)
+      expect(existsSync(join(configDirectory, 'flow_ecc.json'))).toBe(false)
+      expect(existsSync(join(configDirectory, 'db_ecc.json'))).toBe(false)
       expect(sidecar.startCount).toBe(0)
     } finally {
       rmSync(directory, { force: true, recursive: true })

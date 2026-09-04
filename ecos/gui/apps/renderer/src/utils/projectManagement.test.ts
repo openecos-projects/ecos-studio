@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  createProjectManifestDraft,
-  recordReplacementBackupInManifest,
-  registerWorkspaceInManifest,
+  projectManifestForPresentation,
   type BackendProjectComparison,
   type ReadSection,
   type ResourceInfo,
@@ -58,20 +56,37 @@ function managedMpc(overrides: Partial<ResourceInfo> = {}): ResourceInfo {
 }
 
 function manifestWithWorkspace(workspaceId = 'ws_0004') {
-  return registerWorkspaceInManifest(
-    createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      designName: 'gcd',
-      now: '2026-07-20T00:00:00.000Z',
-    }),
+  return manifestWithWorkspaces([workspaceId])
+}
+
+function manifestWithWorkspaces(workspaceIds: string[]) {
+  const now = '2026-07-20T00:00:00.000Z'
+  return projectManifestForPresentation(
     {
-      projectRoot: '/projects/gcd',
-      workspacePath: `/projects/gcd/${workspaceId}`,
-      startStep: 'Synth',
-      endStep: 'Harden',
-      now: '2026-07-20T00:00:00.000Z',
+      schema_version: 1,
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      description: '',
+      created_at: now,
+      updated_at: now,
+      objectives: {},
+      workspaces: workspaceIds.map((workspaceId) => ({
+        workspace_id: workspaceId,
+        name: workspaceId,
+        workspace_path: workspaceId,
+        source_workspace_id: null,
+        lifecycle: 'active',
+        created_at: now,
+        updated_at: now,
+      })),
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: workspaceIds[0]
+        ? { workspace_id: workspaceIds[0], reason: 'Default project QoR baseline' }
+        : null,
     },
+    '/projects/gcd',
   )
 }
 
@@ -227,10 +242,20 @@ describe('project management V3 model', () => {
 
   it('keeps committed flow state for an archived replacement backup', () => {
     const backupId = '.ws_0014.replace-backup-1'
-    const manifest = recordReplacementBackupInManifest(manifestWithWorkspace('ws_0014'), {
-      backupPath: `/projects/gcd/${backupId}`,
-      targetPath: '/projects/gcd/ws_0014',
-    })
+    const source = manifestWithWorkspace('ws_0014')
+    const manifest = {
+      ...source,
+      workspaces: [
+        ...source.workspaces,
+        {
+          ...source.workspaces[0]!,
+          workspace_id: backupId,
+          name: 'ws_0014 backup',
+          workspace_path: `/projects/gcd/${backupId}`,
+          status: 'archived' as const,
+        },
+      ],
+    }
 
     const model = buildProjectManagementProject(project, manifest, {
       [backupId]: { Synth: 'success', Harden: 'success' },
@@ -244,12 +269,7 @@ describe('project management V3 model', () => {
   })
 
   it('resolves and persists the project-local default QoR baseline rule', () => {
-    const first = manifestWithWorkspace('ws_0001')
-    const manifest = registerWorkspaceInManifest(first, {
-      projectRoot: '/projects/gcd',
-      workspacePath: '/projects/gcd/ws_0004',
-      now: '2026-08-04T00:00:00.000Z',
-    })
+    const manifest = manifestWithWorkspaces(['ws_0001', 'ws_0004'])
     const legacyManifest = { ...manifest, qor_baseline: null }
 
     expect(resolveProjectQorBaselineWorkspace(legacyManifest, 'ws_0004')).toEqual({

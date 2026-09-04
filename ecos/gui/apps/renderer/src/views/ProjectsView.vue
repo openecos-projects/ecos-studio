@@ -809,11 +809,7 @@ import { mapWithConcurrency } from './project-management/asyncConcurrency'
 import { getDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
-import {
-  parseProjectManifest,
-  type ProjectManifest,
-  type ProjectManifestMpc,
-} from '@ecos-studio/shared'
+import { type ProjectManifest, type ProjectManifestMpc } from '@ecos-studio/shared'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
@@ -1624,8 +1620,8 @@ async function refreshProjectManifestsNow() {
     PROJECT_MANIFEST_READ_CONCURRENCY,
     async (project): Promise<readonly [string, ProjectManifest] | null> => {
       try {
-        const manifestText = await readProjectManagementManifest(project.path)
-        return manifestText ? [project.path, parseProjectManifest(manifestText)] : null
+        const manifest = await readProjectManagementManifest(project.path)
+        return manifest ? [project.path, manifest] : null
       } catch (error) {
         console.warn(`Failed to load project manifest: ${project.path}`, error)
         return null
@@ -2072,9 +2068,9 @@ async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
 }
 
 async function readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
-  const manifestText = await readProjectManagementManifest(projectRoot)
-  if (!manifestText) throw new Error('Project manifest does not exist.')
-  return parseProjectManifest(manifestText)
+  const manifest = await readProjectManagementManifest(projectRoot)
+  if (!manifest) throw new Error('Project manifest does not exist.')
+  return manifest
 }
 
 async function applyProjectManifestForProject(

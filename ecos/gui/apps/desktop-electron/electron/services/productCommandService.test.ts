@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from 'vitest'
 import { executeProductCommand } from './productCommandService'
 
 describe('executeProductCommand Workspace creation', () => {
+  it('routes an owned canonical configuration update to the Runtime', async () => {
+    const updateWorkspaceConfiguration = vi.fn().mockResolvedValue({
+      workspaceRevision: 2,
+    })
+    const payload = {
+      commandId: 'configuration-1',
+      configuration: {
+        design: { name: 'gcd', topModule: 'gcd', clockPort: 'clk' },
+        parameters: { frequency_max: 200 },
+        pdk: { familyId: 'ics55' },
+      },
+      expectedWorkspaceRevision: 1,
+      workspaceHandle: 'handle-1',
+    }
+
+    await expect(
+      executeProductCommand({ command: 'workspace.updateConfiguration', payload }, {
+        ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+        runtime: { updateWorkspaceConfiguration } as never,
+      } as never),
+    ).resolves.toEqual({ workspaceRevision: 2 })
+    expect(updateWorkspaceConfiguration).toHaveBeenCalledWith(payload)
+  })
+
   it('rejects invalid optional Project identity fields at the command boundary', async () => {
     await expect(
       executeProductCommand(
@@ -61,6 +85,7 @@ describe('executeProductCommand Workspace creation', () => {
             startFlowOperation: vi.fn(),
             startStepOperation: vi.fn(),
             syncConfig: vi.fn(),
+            updateWorkspaceConfiguration: vi.fn(),
             updateWorkspace: vi.fn(),
           },
           trackCreateResult: vi.fn(),
@@ -104,6 +129,7 @@ describe('executeProductCommand Workspace creation', () => {
           startFlowOperation: vi.fn(),
           startStepOperation: vi.fn(),
           syncConfig: vi.fn(),
+          updateWorkspaceConfiguration: vi.fn(),
           updateWorkspace: vi.fn(),
         },
         trackCreateResult: vi.fn(),

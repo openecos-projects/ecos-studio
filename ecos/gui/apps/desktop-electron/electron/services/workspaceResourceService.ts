@@ -10,7 +10,6 @@ import type {
   WorkspaceTechResources,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
-import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
 
 type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
@@ -58,19 +57,16 @@ export class WorkspaceResourceService {
 
   async readHome(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     return await this.readJsonOrNull(join(root, 'home', 'home.json'))
   }
 
   async readFlow(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     return await this.readJsonOrNull(join(root, 'home', 'flow.json'))
   }
 
   async readParameters(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     return await this.readJsonOrNull(join(root, 'home', 'parameters.json'))
   }
 
@@ -136,7 +132,6 @@ export class WorkspaceResourceService {
 
   private async buildIndex(): Promise<IndexBuildResult> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     const messages: string[] = []
     const statErrors: string[] = []
     const homePath = join(root, 'home', 'home.json')

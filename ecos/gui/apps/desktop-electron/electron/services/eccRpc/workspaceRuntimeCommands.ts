@@ -12,6 +12,7 @@ import type {
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
   EccWorkspaceCloseResult,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
@@ -33,7 +34,6 @@ import type {
 } from '@ecos-studio/shared'
 
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
-import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 
 export interface EccWorkspaceSessionResult {
@@ -92,7 +92,6 @@ export class WorkspaceRuntimeCommands {
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.context.enqueue('workspace.open', undefined, async () => {
-      await migrateWorkspaceConfigFilenames(request.directory)
       const existing = this.context.sessions.findByDirectory(request.directory)
       if (existing && this.context.hasActiveOperations()) {
         if (request.workspaceBindings) {
@@ -194,6 +193,38 @@ export class WorkspaceRuntimeCommands {
       request.workspaceHandle,
       request.workspaceBindings,
     )
+    return result
+  }
+
+  async updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const session = this.context.sessions.require(request.workspaceHandle)
+    const currentBindings = session.workspaceBindings ?? {}
+    const currentPdk = currentBindings.pdk
+    const workspaceBindings = {
+      ...currentBindings,
+      pdk: {
+        ...(typeof currentPdk === 'object' && currentPdk !== null ? currentPdk : {}),
+        ...(request.pdkRoot ? { root: request.pdkRoot } : {}),
+      },
+    }
+    const result = await this.workspaceCall<EccWorkspaceUpdateResult>(
+      'workspace.configuration.update',
+      request,
+      (workspaceId) => ({
+        commandId: request.commandId,
+        configuration: request.configuration,
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        workspaceBindings,
+        workspaceId,
+      }),
+    )
+    this.context.sessions.updateRevision(
+      request.workspaceHandle,
+      result.workspaceRevision,
+    )
+    this.context.sessions.updateBindings(request.workspaceHandle, workspaceBindings)
     return result
   }
 

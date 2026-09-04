@@ -162,7 +162,7 @@ function appendSnapshotStepMetric(
 function serviceFixture() {
   const watchers = watcherHarness()
   const project = manifest()
-  const readManifest = vi.fn().mockResolvedValue(JSON.stringify(project))
+  const readManifest = vi.fn().mockResolvedValue(project)
   const readEngineeringSnapshot = vi
     .fn()
     .mockImplementation(async ({ workspacePath }) =>
@@ -292,7 +292,7 @@ describe('BackendProjectComparisonService', () => {
 
   it('freezes representative Project Comparison behavior and deterministic read costs', async () => {
     const fixture = representativeProjectComparisonFixture()
-    const readManifest = vi.fn().mockResolvedValue(JSON.stringify(fixture.manifest))
+    const readManifest = vi.fn().mockResolvedValue(fixture.manifest)
     const readEngineeringSnapshot = vi
       .fn()
       .mockImplementation(async ({ workspacePath }) => {
@@ -451,7 +451,7 @@ describe('BackendProjectComparisonService', () => {
       {
         readEngineeringSnapshot: async ({ workspacePath }) =>
           snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
-        readManifest: async () => JSON.stringify(fixture.manifest),
+        readManifest: async () => fixture.manifest,
         resolveProjectRoot: async (path) => path,
       },
       watcherHarness().create,
@@ -698,13 +698,11 @@ describe('BackendProjectComparisonService', () => {
     })
     if (!selected.ok) throw new Error('selection failed')
     await service.getComparison(11, selected.projectComparisonContextId)
-    readManifest.mockResolvedValue(
-      JSON.stringify({
-        ...project,
-        updated_at: '2026-01-03T00:00:00Z',
-        workspaces: project.workspaces.slice(0, 1),
-      }),
-    )
+    readManifest.mockResolvedValue({
+      ...project,
+      updated_at: '2026-01-03T00:00:00Z',
+      workspaces: project.workspaces.slice(0, 1),
+    })
     const invalidated = vi.fn()
     service.onInvalidated(invalidated)
 
@@ -815,7 +813,7 @@ describe('BackendProjectComparisonService', () => {
 
   it('rejects a manifest that redirects the selected Project root', async () => {
     const { service, readManifest } = serviceFixture()
-    readManifest.mockResolvedValue(JSON.stringify(manifest('/projects/other')))
+    readManifest.mockResolvedValue(manifest('/projects/other'))
 
     await expect(
       service.selectProject(11, { projectRootLocator: '/projects/demo' }),
@@ -845,12 +843,10 @@ describe('BackendProjectComparisonService', () => {
 
   it('reports the configured baseline when it is unavailable', async () => {
     const { service, project, readManifest } = serviceFixture()
-    readManifest.mockResolvedValue(
-      JSON.stringify({
-        ...project,
-        qor_baseline: { workspace_id: 'ws_missing', reason: 'configured' },
-      }),
-    )
+    readManifest.mockResolvedValue({
+      ...project,
+      qor_baseline: { workspace_id: 'ws_missing', reason: 'configured' },
+    })
     const selected = await service.selectProject(11, {
       projectRootLocator: '/projects/demo',
     })
@@ -867,8 +863,8 @@ describe('BackendProjectComparisonService', () => {
     const first = serviceFixture()
     const secondProject = manifest('/projects/other')
     first.readManifest
-      .mockResolvedValueOnce(JSON.stringify(first.project))
-      .mockResolvedValueOnce(JSON.stringify(secondProject))
+      .mockResolvedValueOnce(first.project)
+      .mockResolvedValueOnce(secondProject)
     const events: Array<{ windowId: number; generation: number }> = []
     first.service.onInvalidated((windowId, event) => {
       events.push({ windowId, generation: event.generation })
@@ -887,7 +883,7 @@ describe('BackendProjectComparisonService', () => {
       {
         readEngineeringSnapshot: async ({ workspacePath }) =>
           snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
-        readManifest: async () => JSON.stringify(fixture.manifest),
+        readManifest: async () => fixture.manifest,
         readVerifiedArtifacts,
         resolveProjectRoot: async (path) => path,
       },
@@ -982,7 +978,7 @@ describe('BackendProjectComparisonService', () => {
       {
         readEngineeringSnapshot: async ({ workspacePath }) =>
           snapshotResult(fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!),
-        readManifest: async () => JSON.stringify(fixture.manifest),
+        readManifest: async () => fixture.manifest,
         readVerifiedArtifacts,
         resolveProjectRoot: async (path) => path,
       },
@@ -1050,7 +1046,7 @@ describe('BackendProjectComparisonService', () => {
             snapshotResult(
               fixture.engineeringSnapshots[workspacePath.split('/').at(-1)!]!,
             ),
-          readManifest: async () => JSON.stringify(fixture.manifest),
+          readManifest: async () => fixture.manifest,
           readVerifiedArtifacts,
           resolveProjectRoot: async (path) => path,
         },

@@ -13,7 +13,7 @@ const settingsSet = vi.fn(async (key: string, value: unknown) => {
 })
 const readManifest = vi.fn(async (projectRoot: string) => {
   if (projectRoot !== '/projects/gcd') return null
-  return JSON.stringify({
+  return {
     schema_version: 1,
     project_id: 'proj_gcd',
     name: 'gcd',
@@ -27,7 +27,7 @@ const readManifest = vi.fn(async (projectRoot: string) => {
     mpc: null,
     best_workspace: null,
     qor_baseline: null,
-  })
+  }
 })
 
 vi.mock('@/platform/desktop', () => ({

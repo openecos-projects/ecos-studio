@@ -201,6 +201,8 @@ const desktopApi: DesktopApi = {
       ),
   },
   projectManagement: {
+    discoverProject: (directory) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementDiscoverProject, directory),
     readManifest: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),
     listProjectEntries: (projectRoot) =>

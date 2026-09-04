@@ -4,13 +4,13 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   parseEngineeringSnapshotJson,
-  parseProjectManifest,
   projectManagementWorkspaceReadablePaths,
 } from '@ecos-studio/shared'
 import type {
   DesktopProjectManagementWorkspaceTextsRequest,
   DesktopProjectManagementWorkspaceTextsResult,
   EngineeringSnapshotValidationResult,
+  ProjectManifest,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
 import { mapWithConcurrency } from './boundedConcurrency'
@@ -49,6 +49,11 @@ export type VerifiedProjectArtifactsReadResult =
 export type VerifiedProjectArtifactReadResult =
   | { ok: true; bytes: Uint8Array }
   | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
+
+export interface ProjectManifestReader {
+  discover(directory: string): Promise<ProjectManifest | null>
+  load(projectRoot: string): Promise<ProjectManifest>
+}
 
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
@@ -91,11 +96,20 @@ async function readOptionalBoundedTextFile(
 }
 
 export class ProjectManagementReadService {
-  async readManifest(projectRoot: string): Promise<string | null> {
+  constructor(private readonly projectManifestReader: ProjectManifestReader) {}
+
+  async readManifest(projectRoot: string): Promise<ProjectManifest | null> {
     const root = await canonicalizeExistingDirectory(projectRoot)
-    return await readOptionalBoundedTextFile(
+    const content = await readOptionalBoundedTextFile(
       join(root, 'project.json'),
       PROJECT_MANIFEST_MAX_BYTES,
+    )
+    return content ? await this.projectManifestReader.load(root) : null
+  }
+
+  async discoverProject(directory: string): Promise<ProjectManifest | null> {
+    return await this.projectManifestReader.discover(
+      await canonicalizeExistingDirectory(directory),
     )
   }
 
@@ -288,9 +302,9 @@ export class ProjectManagementReadService {
       join(root, 'project.json'),
       PROJECT_MANIFEST_MAX_BYTES,
     )
-    if (!content) return { content: null, manifest: null, root }
+    if (!content) return { manifest: null, root }
 
-    const manifest = parseProjectManifest(content)
+    const manifest = await this.projectManifestReader.load(root)
     const manifestRoot = await canonicalizeExistingDirectory(manifest.root_path)
     if (!pathsEqual(root, manifestRoot)) {
       throw new Error(
@@ -303,7 +317,7 @@ export class ProjectManagementReadService {
         throw new Error('Project manifest contains a workspace outside the project root.')
       }
     }
-    return { content, manifest, root }
+    return { manifest, root }
   }
 
   private async resolveDeclaredWorkspace(

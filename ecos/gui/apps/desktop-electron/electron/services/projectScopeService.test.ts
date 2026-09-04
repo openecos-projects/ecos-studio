@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ProjectScopeService } from './projectScopeService'
 import { runWithWindowScope } from './windowScopeContext'
+import type { ProjectManifest } from '@ecos-studio/shared'
 
 const tempDirectories: string[] = []
 
@@ -31,6 +32,32 @@ async function writeProjectManifest(
   )
 }
 
+function projectScopeWithManifest(): ProjectScopeService {
+  return new ProjectScopeService({
+    loadProjectManifest: async (projectRoot) => {
+      const source = JSON.parse(
+        await readFile(join(projectRoot, 'project.json'), 'utf8'),
+      ) as { design_name: string; workspaces: ProjectManifest['workspaces'] }
+      return {
+        schema_version: 1,
+        project_id: 'proj_gcd',
+        name: 'gcd',
+        design_name: source.design_name,
+        description: '',
+        root_path: projectRoot,
+        created_at: '',
+        updated_at: '',
+        base_design: { parameters: {}, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: source.workspaces,
+        mpc: null,
+        best_workspace: null,
+        qor_baseline: null,
+      }
+    },
+  })
+}
+
 describe('ProjectScopeService', () => {
   afterEach(async () => {
     await Promise.all(
@@ -47,7 +74,7 @@ describe('ProjectScopeService', () => {
     await mkdir(nested, { recursive: true })
     await writeFile(file, '{}')
 
-    const service = new ProjectScopeService()
+    const service = projectScopeWithManifest()
 
     await runWithWindowScope(1, async () => {
       const registeredRoot = await service.registerProjectRoot(root)
@@ -69,7 +96,7 @@ describe('ProjectScopeService', () => {
   it('canonicalizes a manifest project root without changing the active workspace root', async () => {
     const activeRoot = await createTempDir('ecos-active-project-root-')
     const manifestRoot = await createTempDir('ecos-manifest-project-root-')
-    const service = new ProjectScopeService()
+    const service = projectScopeWithManifest()
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(activeRoot)
 
@@ -83,7 +110,7 @@ describe('ProjectScopeService', () => {
     const outside = await createTempDir('ecos-creation-outside-')
     const linkedTarget = join(projectRoot, 'ws_link')
     await symlink(outside, linkedTarget)
-    const service = new ProjectScopeService()
+    const service = projectScopeWithManifest()
 
     await expect(
       service.canonicalizeProjectTarget(projectRoot, join(projectRoot, 'ws_new')),
@@ -98,8 +125,8 @@ describe('ProjectScopeService', () => {
 
   it('adds the workspace parent as a read root without replacing the active root', async () => {
     const projectRoot = await createTempDir('ecos-parent-project-root-')
-    const workspaceRoot = join(projectRoot, 'ws_0004')
-    const siblingWorkspace = join(projectRoot, 'ws_0001')
+    const workspaceRoot = join(projectRoot, 'runs', 'ws_0004')
+    const siblingWorkspace = join(projectRoot, 'runs', 'ws_0001')
     const manifestPath = join(projectRoot, 'project.json')
     const siblingFlowPath = join(siblingWorkspace, 'home', 'flow.json')
     const unrelatedFile = join(projectRoot, 'unrelated.txt')
@@ -109,7 +136,7 @@ describe('ProjectScopeService', () => {
     await writeFile(siblingFlowPath, '{"steps":[]}')
     await writeFile(unrelatedFile, 'not a workspace artifact')
 
-    const service = new ProjectScopeService()
+    const service = projectScopeWithManifest()
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(workspaceRoot)
       await expect(service.registerProjectReadRoot(projectRoot)).resolves.toBe(
@@ -147,7 +174,7 @@ describe('ProjectScopeService', () => {
     await writeProjectManifest(projectRoot, [workspaceRoot, backupWorkspace])
     await writeFile(backupFlowPath, '{"steps":[]}')
 
-    const service = new ProjectScopeService()
+    const service = projectScopeWithManifest()
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(workspaceRoot)
       await service.registerProjectReadRoot(projectRoot)
@@ -166,7 +193,7 @@ describe('ProjectScopeService', () => {
     await mkdir(join(siblingWorkspace, 'home'), { recursive: true })
     await writeProjectManifest(projectRoot, [siblingWorkspace])
 
-    const service = new ProjectScopeService()
+    const service = projectScopeWithManifest()
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(workspaceRoot)
 
@@ -187,7 +214,7 @@ describe('ProjectScopeService', () => {
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(workspaceRoot)
       await expect(service.registerProjectReadRoot(unrelatedRoot)).rejects.toThrow(
-        'Project read root must be the active workspace root or its parent directory',
+        'Project read root must contain the active workspace root',
       )
     })
   })

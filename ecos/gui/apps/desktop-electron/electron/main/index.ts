@@ -1,4 +1,8 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import {
+  projectManifestForPresentation,
+  type EccProjectManifest,
+} from '@ecos-studio/shared'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
@@ -133,9 +137,6 @@ function getDesktopServices() {
   const projectReadGrantStore = new ProjectReadGrantStore({
     filePath: join(app.getPath('userData'), 'project-read-grants.json'),
   })
-  projectScopeService = new ProjectScopeService({
-    readGrantProvider: projectReadGrantStore,
-  })
   const eccRuntimeOptions = {
     appPath: app.getAppPath(),
     cwd: process.cwd(),
@@ -163,9 +164,6 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
-  const workspaceResourceService = new WorkspaceResourceService({
-    projectScopeProvider: projectScopeService,
-  })
   const resourceManagerService = new ResourceManagerService()
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
   const runtimeEnvProvider = () =>
@@ -183,6 +181,19 @@ function getDesktopServices() {
         onNotification,
       }),
     lazyWorkspaceOpen: false,
+  })
+  projectScopeService = new ProjectScopeService({
+    loadProjectManifest: async (projectRoot) =>
+      projectManifestForPresentation(
+        await eccRuntimeService.callRuntime<EccProjectManifest>('project.manifest.load', {
+          projectRoot,
+        }),
+        projectRoot,
+      ),
+    readGrantProvider: projectReadGrantStore,
+  })
+  const workspaceResourceService = new WorkspaceResourceService({
+    projectScopeProvider: projectScopeService,
   })
   const frontendRpcCore = new EccRpcRuntimeService({
     adapterManagementRpc: true,
@@ -223,6 +234,7 @@ function getDesktopServices() {
   const projectManifestService = new ProjectManifestService(
     projectScopeService,
     workspaceService,
+    eccRuntimeService,
   )
   const creationProjectScope = projectScopeService
   const workspaceCreationJournal = new WorkspaceCreationJournal({
@@ -238,7 +250,9 @@ function getDesktopServices() {
     eccRuntimeService,
     workspaceCreationJournal,
   )
-  const projectManagementReadService = new ProjectManagementReadService()
+  const projectManagementReadService = new ProjectManagementReadService(
+    projectManifestService,
+  )
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
     undefined,

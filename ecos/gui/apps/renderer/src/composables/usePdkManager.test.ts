@@ -150,7 +150,7 @@ const desktopBridge = {
     delete: settingsDelete,
   },
   projectManifest: {
-    mutate: async () => ({ content: '' }),
+    mutate: async () => ({ manifest: {} as never }),
   },
   backendWorkspace: {} as DesktopApi['backendWorkspace'],
   backendProjectComparison: {} as DesktopApi['backendProjectComparison'],

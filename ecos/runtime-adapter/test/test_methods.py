@@ -17,9 +17,14 @@ def test_runtime_method_registry_contains_current_methods_once():
     expected_methods = (
         "workspace_spec.describe",
         "workspace_spec.validate",
+        "project.discover",
+        "project.manifest.load",
+        "project.manifest.mutate",
         "workspace.create",
         "workspace.open",
+        "workspace.binding_requirement",
         "workspace.update",
+        "workspace.configuration.update",
         "workspace.close",
         "workspace.home",
         "workspace.info",
@@ -107,13 +112,19 @@ def test_persistent_db_method_lookup_requires_persistent_db():
     assert release_spec is not None
     assert release_spec.request_model is DbReleaseRequest
     assert release_spec.handler_name == "db_release"
-    inspect_spec = runtime_method_by_name("floorplan.edit.inspect", persistent_db_enabled=True)
+    inspect_spec = runtime_method_by_name(
+        "floorplan.edit.inspect", persistent_db_enabled=True
+    )
     assert inspect_spec is not None
     assert inspect_spec.request_model is FloorplanEditInspectRequest
-    auto_spec = runtime_method_by_name("floorplan.edit.run_auto", persistent_db_enabled=True)
+    auto_spec = runtime_method_by_name(
+        "floorplan.edit.run_auto", persistent_db_enabled=True
+    )
     assert auto_spec is not None
     assert auto_spec.request_model is FloorplanEditRunAutoRequest
-    validate_spec = runtime_method_by_name("floorplan.edit.validate", persistent_db_enabled=True)
+    validate_spec = runtime_method_by_name(
+        "floorplan.edit.validate", persistent_db_enabled=True
+    )
     assert validate_spec is not None
     assert validate_spec.request_model is FloorplanEditValidateRequest
 

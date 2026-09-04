@@ -21,6 +21,7 @@ import type {
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceCloseResult,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
@@ -303,6 +304,14 @@ export class EccRpcRuntimeService {
 
   updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<EccWorkspaceUpdateResult> {
     return this.runtimeForHandle(request.workspaceHandle).updateWorkspace(request)
+  }
+
+  updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    return this.runtimeForHandle(request.workspaceHandle).updateWorkspaceConfiguration(
+      request,
+    )
   }
 
   async openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {

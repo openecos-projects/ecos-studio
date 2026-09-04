@@ -101,7 +101,7 @@ describe('workspace desktop bridge', () => {
               throughStepId: 'Harden',
             },
             parameters: expect.objectContaining({
-              'design.frequency_mhz': 100,
+              frequency_max: 100,
             }),
           }),
         }),

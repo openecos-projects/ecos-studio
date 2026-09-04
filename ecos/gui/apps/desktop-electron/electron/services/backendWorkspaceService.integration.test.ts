@@ -2,10 +2,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  createProjectManifestDraft,
-  registerWorkspaceInManifest,
-  synchronizeProjectBaseline,
+  projectManifestForPresentation,
   type EccEngineeringMetric,
+  type EccProjectManifest,
   type EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -141,27 +140,40 @@ describe('BackendWorkspaceService persisted integration', () => {
         mkdir(join(root, 'home'), { recursive: true }),
       ),
     )
-    let manifest = createProjectManifestDraft({
-      rootPath: projectRoot,
+    const now = '2026-09-03T00:00:00.000Z'
+    const manifest: EccProjectManifest = {
+      schema_version: 1,
+      project_id: 'proj_gcd',
       name: 'gcd',
-      designName: 'gcd',
-      now: '2026-09-03T00:00:00.000Z',
-    })
-    manifest = registerWorkspaceInManifest(manifest, {
-      projectRoot,
-      workspacePath: currentRoot,
-      now: '2026-09-03T00:00:00.000Z',
-    })
-    manifest = registerWorkspaceInManifest(manifest, {
-      projectRoot,
-      workspacePath: baselineRoot,
-      now: '2026-09-03T00:00:00.000Z',
-    })
-    manifest = synchronizeProjectBaseline(manifest, {
-      baseDesign: manifest.base_design,
-      reason: 'selected',
-      workspaceId: 'ws_baseline',
-    })
+      design_name: 'gcd',
+      description: '',
+      created_at: now,
+      updated_at: now,
+      objectives: {},
+      workspaces: [
+        {
+          workspace_id: 'ws_current',
+          name: 'ws_current',
+          workspace_path: 'ws_current',
+          source_workspace_id: null,
+          lifecycle: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          workspace_id: 'ws_baseline',
+          name: 'ws_baseline',
+          workspace_path: 'ws_baseline',
+          source_workspace_id: null,
+          lifecycle: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: { workspace_id: 'ws_baseline', reason: 'selected' },
+    }
     await Promise.all([
       writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest)),
       writeFile(
@@ -174,7 +186,10 @@ describe('BackendWorkspaceService persisted integration', () => {
       ),
     ])
     const service = new BackendWorkspaceService({
-      projectManagementReadService: new ProjectManagementReadService(),
+      projectManagementReadService: new ProjectManagementReadService({
+        discover: async () => null,
+        load: async (root) => projectManifestForPresentation(manifest, root),
+      }),
       workspaceRootProvider: { getProjectRoot: async () => currentRoot },
     })
 

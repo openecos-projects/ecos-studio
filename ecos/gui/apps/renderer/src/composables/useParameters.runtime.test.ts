@@ -3,6 +3,7 @@ import { effectScope } from 'vue'
 
 const {
   currentProject,
+  executeProductCommand,
   fetchSharedHomeData,
   getWorkspaceRuntimeSnapshotApi,
   invalidateWorkspaceResources,
@@ -15,8 +16,12 @@ const {
   resolveProjectPathAccess,
 } = vi.hoisted(() => ({
   currentProject: {
-    value: { path: '/workspace/demo' } as { path: string } | null,
+    value: { path: '/workspace/demo' } as {
+      path: string
+      designTool?: 'backend' | 'frontend'
+    } | null,
   },
+  executeProductCommand: vi.fn(),
   workspaceSession: {
     value: null as { workspaceId: string } | null,
   },
@@ -80,6 +85,10 @@ vi.mock('@/api/flow', () => ({
 
 vi.mock('@/api/workspaceResources', () => ({
   getWorkspaceRuntimeSnapshotApi,
+}))
+
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => ({ productCommands: { execute: executeProductCommand } }),
 }))
 
 import { useParameters } from './useParameters'
@@ -162,6 +171,8 @@ describe('useParameters desktop bridge integration', () => {
     }
     workspaceSession.value = null
     getWorkspaceRuntimeSnapshotApi.mockReset()
+    executeProductCommand.mockReset()
+    executeProductCommand.mockResolvedValue({ workspaceRevision: 2 })
     fetchSharedHomeData.mockReset()
     invalidateWorkspaceResources.mockClear()
     readProjectTextFile.mockReset()
@@ -242,6 +253,42 @@ describe('useParameters desktop bridge integration', () => {
         workspaceHandle: 'workspace-demo',
       },
     })
+  })
+
+  it('updates a managed backend Workspace through ECC without writing derived parameters', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    const lifecycle = useWorkspaceLifecycle()
+    lifecycle.activateSession(lifecycle.currentSessionId.value, {
+      projectRoot: '/workspace/demo',
+      workspaceId: 'workspace-demo',
+      workspaceRevision: 1,
+    })
+    const parameters = useParameters()
+    await vi.waitFor(() => expect(parameters.config.design).toBe('demo'))
+
+    parameters.config.frequencyMax = 250
+    await expect(parameters.saveParameters()).resolves.toBe(true)
+
+    expect(executeProductCommand).toHaveBeenCalledWith({
+      command: 'workspace.updateConfiguration',
+      payload: {
+        commandId: expect.any(String),
+        configuration: {
+          design: {},
+          parameters: { frequency_max: 250 },
+          pdk: {},
+        },
+        expectedWorkspaceRevision: 1,
+        workspaceHandle: 'workspace-demo',
+      },
+    })
+    expect(writeProjectTextFile).not.toHaveBeenCalled()
+    expect(refreshConfigApi).not.toHaveBeenCalled()
+    expect(lifecycle.session.value.workspaceRevision).toBe(2)
   })
 
   it('keeps displayed parameters unchanged when rerun reset is requested before parameters.json changes', async () => {
