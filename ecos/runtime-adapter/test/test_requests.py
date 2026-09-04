@@ -17,12 +17,12 @@ from ecos_runtime_adapter.requests import (
     OperationStartStepRequest,
     RequestValidationError,
     WorkspaceCloseRequest,
-    WorkspaceCreateV1Request,
     WorkspaceExportSignoffRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
     WorkspaceMutationRequest,
-    WorkspaceOpenV1Request,
+    WorkspaceSpecCreateRequest,
+    WorkspaceSpecOpenRequest,
     WorkspaceSyncConfigRequest,
     parse_request_model,
 )
@@ -34,7 +34,7 @@ def _parse_runtime_request(method: str, params: object, *, persistent_db_enabled
     return parse_request_model(spec.request_model, params)
 
 
-def test_workspace_create_maps_workspace_spec_v1_camel_case_fields():
+def test_workspace_create_maps_workspace_spec_camel_case_fields():
     workspace_spec = {"schemaVersion": 1}
     workspace_bindings = {"inputs": {}, "pdk": {}}
     request = _parse_runtime_request(
@@ -47,7 +47,7 @@ def test_workspace_create_maps_workspace_spec_v1_camel_case_fields():
         },
     )
 
-    assert isinstance(request, WorkspaceCreateV1Request)
+    assert isinstance(request, WorkspaceSpecCreateRequest)
     assert is_dataclass(request)
     assert request.command_id == "create-1"
     assert request.target_directory == "/work/ws"
@@ -58,7 +58,7 @@ def test_workspace_create_maps_workspace_spec_v1_camel_case_fields():
 @pytest.mark.parametrize(
     ("method", "params", "request_type"),
     [
-        ("workspace.open", {"directory": "/work/ws"}, WorkspaceOpenV1Request),
+        ("workspace.open", {"directory": "/work/ws"}, WorkspaceSpecOpenRequest),
         ("workspace.close", {"workspaceId": "ws-1"}, WorkspaceCloseRequest),
         ("workspace.home", {"workspaceId": "ws-1"}, WorkspaceIdRequest),
         ("workspace.refresh_config", {"workspaceId": "ws-1"}, WorkspaceIdRequest),

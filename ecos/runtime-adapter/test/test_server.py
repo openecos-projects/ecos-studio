@@ -6,7 +6,7 @@ from ecos_runtime_adapter.requests import (
     DbEnsureRequest,
     DbReleaseRequest,
     WorkspaceExportSignoffRequest,
-    WorkspaceOpenV1Request,
+    WorkspaceSpecOpenRequest,
 )
 from ecos_runtime_adapter.server import RuntimeServer, _project_runtime_event
 from ecos_runtime_adapter.workspace_api import RuntimeApiError
@@ -108,7 +108,7 @@ class CompleteFakeApi:
         raise AssertionError("unexpected floorplan_edit_validate call")
 
 
-def test_runtime_events_are_projected_to_the_four_v1_event_types():
+def test_runtime_events_are_projected_to_the_supported_event_types():
     server = RuntimeServer()
     events = []
     server.set_notification_sink(lambda _method, event: events.append(event))
@@ -191,7 +191,7 @@ def test_unknown_method_keeps_request_id():
 def test_workspace_method_dispatches_typed_request_to_runtime_api():
     class FakeApi(CompleteFakeApi):
         def open_workspace(self, request):
-            assert isinstance(request, WorkspaceOpenV1Request)
+            assert isinstance(request, WorkspaceSpecOpenRequest)
             return {"workspaceId": "workspace-1", "directory": request.directory}
 
     server = RuntimeServer(api=FakeApi())
@@ -373,7 +373,7 @@ def test_runtime_server_fails_when_registered_api_handler_is_missing(monkeypatch
 
     missing_spec = methods.RuntimeMethodSpec(
         method_name="workspace.missing_handler",
-        request_model=WorkspaceOpenV1Request,
+        request_model=WorkspaceSpecOpenRequest,
         handler_name="missing_handler",
     )
     monkeypatch.setattr(methods, "RUNTIME_METHODS", (missing_spec,))
@@ -390,7 +390,7 @@ def test_runtime_server_fails_when_registered_api_handler_is_not_callable(monkey
 
     spec = methods.RuntimeMethodSpec(
         method_name="workspace.open",
-        request_model=WorkspaceOpenV1Request,
+        request_model=WorkspaceSpecOpenRequest,
         handler_name="open_workspace",
     )
     monkeypatch.setattr(methods, "RUNTIME_METHODS", (spec,))

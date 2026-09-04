@@ -28,7 +28,7 @@ class WorkspaceOpenRequest:
 
 
 @dataclass(frozen=True)
-class WorkspaceOpenV1Request:
+class WorkspaceSpecOpenRequest:
     directory: str
     workspace_bindings: dict[str, Any] | None = None
 
@@ -40,7 +40,7 @@ class WorkspaceSpecValidateRequest:
 
 
 @dataclass(frozen=True)
-class WorkspaceCreateV1Request:
+class WorkspaceSpecCreateRequest:
     command_id: str
     target_directory: str
     workspace_spec: dict[str, Any]

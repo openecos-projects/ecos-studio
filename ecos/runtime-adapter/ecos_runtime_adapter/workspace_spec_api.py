@@ -7,9 +7,9 @@ from typing import Any
 from ecos_runtime_adapter.errors import RuntimeApiError
 from ecos_runtime_adapter.requests import (
     WorkspaceCreateRequest,
-    WorkspaceCreateV1Request,
     WorkspaceOpenRequest,
-    WorkspaceOpenV1Request,
+    WorkspaceSpecCreateRequest,
+    WorkspaceSpecOpenRequest,
     WorkspaceSpecValidateRequest,
     WorkspaceUpdateRequest,
 )
@@ -32,10 +32,10 @@ class WorkspaceSpecRuntimeMixin:
 
     def create_workspace(
         self,
-        request: WorkspaceCreateRequest | WorkspaceCreateV1Request,
+        request: WorkspaceCreateRequest | WorkspaceSpecCreateRequest,
     ) -> dict:
-        if isinstance(request, WorkspaceCreateV1Request):
-            return self._create_workspace_v1(request)
+        if isinstance(request, WorkspaceSpecCreateRequest):
+            return self._create_workspace_from_spec(request)
         if not request.directory:
             raise RuntimeApiError("invalid_request", "missing required field: directory")
 
@@ -86,7 +86,7 @@ class WorkspaceSpecRuntimeMixin:
         )
         return _workspace_session_result(session)
 
-    def _create_workspace_v1(self, request: WorkspaceCreateV1Request) -> dict:
+    def _create_workspace_from_spec(self, request: WorkspaceSpecCreateRequest) -> dict:
         from chipcompiler.engine import WorkspaceLifecycleError, create_workspace_from_spec
 
         try:
@@ -111,14 +111,14 @@ class WorkspaceSpecRuntimeMixin:
 
     def open_workspace(
         self,
-        request: WorkspaceOpenRequest | WorkspaceOpenV1Request,
+        request: WorkspaceOpenRequest | WorkspaceSpecOpenRequest,
     ) -> dict:
         workspace = self._load_workspace(request.directory)
         snapshot = self._ensure_engineering_snapshot(workspace)
         bindings = (
-            request.workspace_bindings if isinstance(request, WorkspaceOpenV1Request) else None
+            request.workspace_bindings if isinstance(request, WorkspaceSpecOpenRequest) else None
         )
-        if isinstance(request, WorkspaceOpenV1Request):
+        if isinstance(request, WorkspaceSpecOpenRequest):
             from chipcompiler.engine import assess_execution_readiness
 
             readiness = assess_execution_readiness(workspace.directory, bindings)

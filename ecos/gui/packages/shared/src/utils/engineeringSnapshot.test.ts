@@ -213,7 +213,7 @@ describe('Engineering Snapshot validation', () => {
     })
   })
 
-  it('requires normalized committed Subflow data in schema v2', () => {
+  it('requires normalized committed Subflow data in the current schema', () => {
     const current = snapshot()
     current.schemaVersion = 2
     current.analysis.steps[0]!.subflow = {

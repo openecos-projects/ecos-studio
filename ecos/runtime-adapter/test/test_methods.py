@@ -7,7 +7,7 @@ from ecos_runtime_adapter.requests import (
     FloorplanEditInspectRequest,
     FloorplanEditRunAutoRequest,
     FloorplanEditValidateRequest,
-    WorkspaceOpenV1Request,
+    WorkspaceSpecOpenRequest,
 )
 
 
@@ -85,7 +85,7 @@ def test_runtime_method_lookup_returns_spec():
     spec = runtime_method_by_name("workspace.open")
 
     assert spec is not None
-    assert spec.request_model is WorkspaceOpenV1Request
+    assert spec.request_model is WorkspaceSpecOpenRequest
     assert spec.handler_name == "open_workspace"
     export_spec = runtime_method_by_name("workspace.export_signoff")
     assert export_spec is not None
