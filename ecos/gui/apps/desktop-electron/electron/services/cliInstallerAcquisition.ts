@@ -4,7 +4,6 @@ import {
   access,
   cp,
   mkdir,
-  readFile,
   readlink,
   readdir,
   rename,
@@ -14,7 +13,7 @@ import {
 } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CliBundleInstallRecord } from './cliInstallerArtifacts'
-import { executableNameFor } from './cliInstallerArtifacts'
+import { executableNameFor, readInstallRecord } from './cliInstallerArtifacts'
 import { runSelfCheck, type CliSpawnLike } from './cliSelfCheck'
 import { electronLogger } from './logger'
 
@@ -125,10 +124,13 @@ export async function acquireAndActivateBundle(ctx: AcquisitionContext): Promise
   await mkdir(stagingDir, { recursive: true })
   try {
     const versionDirName = await acquireBundleInto(ctx, stagingDir)
-    // finalize owns switching `current` (the repair path may activate a
-    // unique sibling directory instead of the canonical name).
-    const activeName = await finalizeStagedBundle(ctx, stagingDir, versionDirName)
-    await switchCurrent(ctx.dataDir, activeName)
+    // finalize owns staging placement; the single switchCurrent here is the
+    // only activation point, and superseded directories are deleted after it.
+    const { name, staleDir } = await finalizeStagedBundle(ctx, stagingDir, versionDirName)
+    await switchCurrent(ctx.dataDir, name)
+    if (staleDir) {
+      await rm(staleDir, { force: true, recursive: true }).catch(() => undefined)
+    }
   } catch (error) {
     await rm(stagingDir, { force: true, recursive: true }).catch(() => undefined)
     throw error
@@ -233,18 +235,19 @@ async function acquireBundleInto(
 
 /**
  * Move a fully staged bundle into its content-addressed version directory
- * and return the directory name to activate. A valid identical install is
- * kept (its env file is refreshed); a damaged or self-check-failed one
- * stays in place while the fresh copy installs under a unique sibling name,
- * and is deleted only after `current` no longer references it — so `current`
- * never dangles. The env file is written here against the final directory so
- * it always references its own binaries.
+ * and return the name to activate plus (on repair) the superseded directory
+ * to delete after activation. A valid identical install is kept (its env
+ * file is refreshed); a damaged or self-check-failed one stays in place
+ * while the fresh copy installs under a unique sibling name, and is deleted
+ * only after the caller has switched `current` — so `current` never dangles.
+ * The env file is written here against the final directory so it always
+ * references its own binaries.
  */
 async function finalizeStagedBundle(
   ctx: AcquisitionContext,
   stagingDir: string,
   versionDirName: string,
-): Promise<string> {
+): Promise<{ name: string; staleDir: string | null }> {
   const versionDir = join(ctx.dataDir, versionDirName)
   if (existsSync(versionDir)) {
     const existing = await readInstallRecord(versionDir, ctx.platform)
@@ -260,7 +263,7 @@ async function finalizeStagedBundle(
         progress: 0.95,
         message: 'Activating the ECC bundle...',
       })
-      return versionDirName
+      return { name: versionDirName, staleDir: null }
     }
     electronLogger.info(
       '[cli-installer] Replacing %s: %s',
@@ -281,9 +284,7 @@ async function finalizeStagedBundle(
       progress: 0.95,
       message: 'Activating the repaired ECC bundle...',
     })
-    await switchCurrent(ctx.dataDir, repairedName)
-    await rm(versionDir, { force: true, recursive: true }).catch(() => undefined)
-    return repairedName
+    return { name: repairedName, staleDir: versionDir }
   }
   await ctx.writeEnvFile(
     stagingDir,
@@ -297,62 +298,5 @@ async function finalizeStagedBundle(
     progress: 0.95,
     message: 'Activating the ECC bundle...',
   })
-  return versionDirName
-}
-
-/**
- * Load the receipt of an installed version directory and validate its
- * layout. Returns the parsed record even when the recorded self-check
- * failed (callers decide whether that counts as usable), or an error
- * message when the directory is not a complete install.
- */
-async function readInstallRecord(
-  versionDir: string,
-  platform: NodeJS.Platform,
-): Promise<{ record: CliBundleInstallRecord } | { error: string }> {
-  const binariesDir = join(versionDir, 'binaries')
-  try {
-    await access(join(binariesDir, executableNameFor(platform)), fsConstants.X_OK)
-  } catch {
-    return { error: 'the ECC executable is missing or not executable' }
-  }
-  if (!existsSync(join(binariesDir, '_internal'))) {
-    return { error: 'the bundle _internal directory is missing' }
-  }
-  if (!existsSync(join(versionDir, 'env'))) {
-    return { error: 'the generated env file is missing' }
-  }
-  try {
-    const parsed: unknown = JSON.parse(
-      await readFile(join(versionDir, 'install.json'), 'utf8'),
-    )
-    if (!parsed || typeof parsed !== 'object') {
-      return { error: 'install.json is missing or unreadable' }
-    }
-    const record = parsed as Partial<CliBundleInstallRecord>
-    if (
-      typeof record.version !== 'string' ||
-      typeof record.sha256 !== 'string' ||
-      (record.source !== 'bundled' && record.source !== 'downloaded') ||
-      !record.selfCheck ||
-      typeof record.selfCheck.ok !== 'boolean'
-    ) {
-      return { error: 'install.json is missing or unreadable' }
-    }
-    return {
-      record: {
-        version: record.version,
-        sha256: record.sha256,
-        source: record.source,
-        installedAt: typeof record.installedAt === 'string' ? record.installedAt : '',
-        selfCheck: {
-          ok: record.selfCheck.ok,
-          detail:
-            typeof record.selfCheck.detail === 'string' ? record.selfCheck.detail : null,
-        },
-      },
-    }
-  } catch {
-    return { error: 'install.json is missing or unreadable' }
-  }
+  return { name: versionDirName, staleDir: null }
 }

@@ -160,10 +160,9 @@ describe('CliInstallerService', () => {
     const events: CliInstallerProgressEvent[] = []
 
     const versionDir = await service.ensureBundle({
+      installShim: true,
       onProgress: (event: CliInstallerProgressEvent) => events.push(event),
     })
-    // The shim is a separate step so background drift never rewrites it.
-    await service.installShim()
 
     expect(versionDir).toBe(join(dataDir, `1.0.0-${bundle.sha256.slice(0, 8)}`))
     expect(existsSync(join(versionDir, 'binaries', 'ecc'))).toBe(true)
@@ -270,10 +269,7 @@ describe('CliInstallerService', () => {
       spawnResult: { code: 1, output: 'error while loading shared libraries' },
     })
 
-    await service.ensureBundle()
-    // Install the shim so the missing-shim failure doesn't mask the
-    // self-check state under test.
-    await service.installShim()
+    await service.ensureBundle({ installShim: true })
 
     const versionDir = join(dataDir, currentVersionDirName(dataDir))
     const record = JSON.parse(readFileSync(join(versionDir, 'install.json'), 'utf8'))
@@ -470,8 +466,7 @@ describe('CliInstallerService', () => {
       spawn: spawnLike(createSpawnDouble({ code: 0, output: 'ecc ok' })),
       expectedVersion: STUB_VERSION,
     })
-    await second.ensureBundle()
-    await second.installShim()
+    await second.ensureBundle({ installShim: true })
 
     // The active directory is a fresh repaired copy (unique sibling name),
     // and the broken one was removed only after 'current' moved off it.

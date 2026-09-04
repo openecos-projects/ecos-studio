@@ -211,6 +211,49 @@ describe('CliInstallerCard', () => {
     expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
   })
 
+  it('disables actions while a background drift install is in flight', async () => {
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Ready')
+
+    // A background first-use/drift install starts in the main process.
+    mocks.emitProgress({
+      id: 'job-5',
+      resource_id: 'tool:ecc',
+      action: 'install',
+      phase: 'downloading',
+      progress: 0.4,
+      message: 'Downloading ecc v0.1.0-alpha.11...',
+      error: null,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(true)
+    expect(
+      wrapper
+        .findAll('button')
+        .every((button) => button.attributes('disabled') !== undefined),
+    ).toBe(true)
+
+    // Completion clears the progress and re-enables the actions.
+    mocks.emitProgress({
+      id: 'job-6',
+      resource_id: 'tool:ecc',
+      action: 'install',
+      phase: 'done',
+      progress: 1,
+      message: 'ECC bundle installed successfully',
+      error: null,
+    })
+    await flushPromises()
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
+    expect(
+      wrapper
+        .findAll('button')
+        .some((button) => button.attributes('disabled') !== undefined),
+    ).toBe(false)
+  })
+
   it('unsubscribes from progress events on unmount', async () => {
     const wrapper = mount(CliInstallerCard)
     await flushPromises()

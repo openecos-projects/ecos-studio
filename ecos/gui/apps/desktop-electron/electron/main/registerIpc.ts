@@ -147,7 +147,7 @@ export interface DesktopBridgeServices {
   }
   cliInstallerService?: {
     status(): Promise<import('@ecos-studio/shared').CliInstallState>
-    ensureBundle(): Promise<string>
+    ensureBundle(options?: { installShim?: boolean }): Promise<string>
     installShim(): Promise<void>
     uninstall(): Promise<void>
     onProgress(
@@ -2358,21 +2358,10 @@ export function registerIpc(
       await installer.installShim()
       return await installer.status()
     }
-    await installer.ensureBundle()
-    let shimError: string | null = null
-    try {
-      await installer.installShim()
-    } catch (error) {
-      // The bundle itself is fine; surface the shim failure (including the
-      // manual-shim remediation) instead of reporting success.
-      shimError = error instanceof Error ? error.message : String(error)
-    }
-    const status = await installer.status()
-    // Progress is broadcast to all windows by the startup wiring, so no
-    // per-request forwarding is needed here.
-    return shimError && status.status === 'ready'
-      ? { ...status, error: shimError }
-      : status
+    // A shim failure (including the manual-shim remediation) is published as
+    // a terminal error event and reflected on the returned failed status.
+    await installer.ensureBundle({ installShim: true }).catch(() => undefined)
+    return await installer.status()
   })
 
   handle(desktopApiIpcChannels.cliInstallerUninstall, async () => {

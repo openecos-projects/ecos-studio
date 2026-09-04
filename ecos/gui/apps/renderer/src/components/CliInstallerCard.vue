@@ -187,8 +187,10 @@ const progressPercent = computed(() =>
 
 const progressText = computed(() => activeJob.value?.message ?? 'Working...')
 
-/** Buttons stay disabled for externally observed installs too. */
-const actionsDisabled = computed(() => busy.value || state.value?.status === 'installing')
+/** Buttons stay disabled while any install (including background drift) runs. */
+const actionsDisabled = computed(
+  () => busy.value || state.value?.status === 'installing' || activeJob.value !== null,
+)
 
 async function refreshStatus(): Promise<void> {
   try {

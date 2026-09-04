@@ -36,6 +36,12 @@ export type { CliBundleInstallRecord } from './cliInstallerArtifacts'
 
 interface EnsureBundleOptions {
   onProgress?: (event: CliInstallerProgressEvent) => void
+  /**
+   * Also (re)install the `ecos-ecc` shim as part of this install. Used for
+   * user-initiated installs and first-use setup; background drift refreshes
+   * deliberately leave the shim untouched.
+   */
+  installShim?: boolean
 }
 
 /** The subset of ResourceManagerService the installer consumes. */
@@ -104,6 +110,7 @@ export class CliInstallerService {
   private ensurePromise: Promise<string> | null = null
   private uninstalling = false
   private lastFailure: string | null = null
+  private lastShimFailure: string | null = null
   private readonly progressListeners = new Set<
     (event: CliInstallerProgressEvent) => void
   >()
@@ -214,7 +221,8 @@ export class CliInstallerService {
     const shimPath = this.installedShimPath()
     if (!shimPath) {
       // Without the shim the host command does not exist, so this is not a
-      // ready install even though the bundle itself is intact.
+      // ready install even though the bundle itself is intact. Surface the
+      // recorded shim failure (with manual remediation) when present.
       return {
         expectedVersion: this.expectedVersion,
         installedVersion: install.version,
@@ -224,6 +232,7 @@ export class CliInstallerService {
         selfCheck: install.selfCheck,
         status: 'failed',
         error:
+          this.lastShimFailure ??
           'The ECC bundle is installed but the ecos-ecc shim is missing; reinstall to recreate it.',
       }
     }
@@ -330,6 +339,7 @@ export class CliInstallerService {
       )
     }
     electronLogger.info('[cli-installer] Installed shim %s', shimPath)
+    this.lastShimFailure = null
   }
 
   async uninstall(): Promise<void> {
@@ -442,6 +452,16 @@ export class CliInstallerService {
       now: this.resolveNow,
       publish: (event) => this.publishProgress(options, event),
     })
+    // The terminal 'done' event is published only after the shim is in place
+    // (when requested), so a completed install always means a usable CLI.
+    if (options.installShim) {
+      try {
+        await this.installShim()
+      } catch (error) {
+        this.lastShimFailure = error instanceof Error ? error.message : String(error)
+        throw error
+      }
+    }
     this.publishProgress(options, {
       phase: 'done',
       progress: 1,
