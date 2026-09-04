@@ -343,6 +343,16 @@ function loadECOSViewComponent(vue: VueRuntime) {
         }),
       }
     }
+    if (id === '@/components/CliInstallerCard.vue') {
+      // Guidance card is irrelevant to the home layout assertions.
+      return {
+        default: {
+          name: 'CliInstallerCard',
+          props: ['showOnlyWhenActionNeeded'],
+          render: () => null,
+        },
+      }
+    }
     if (id === '../composables/useWorkspace') {
       return {
         useWorkspace: () => ({
