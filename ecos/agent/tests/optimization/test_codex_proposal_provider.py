@@ -732,6 +732,15 @@ def test_optimization_objective_parser_sends_only_bounded_request(
         "core_area",
         "synthesis_cell_area",
         "sta_standard_cell_area",
+        "sta_setup_wns",
+        "sta_setup_tns",
+        "sta_hold_wns",
+        "sta_hold_tns",
+        "sta_typical_dynamic_power",
+        "sta_typical_leakage_power",
+        "sta_worst_dynamic_power",
+        "sta_worst_leakage_power",
+        "gui_overall_qor_score",
     } <= set(objective_metrics)
 
 

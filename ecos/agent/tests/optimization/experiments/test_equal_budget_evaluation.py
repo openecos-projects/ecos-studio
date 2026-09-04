@@ -345,6 +345,35 @@ def test_candidate_trace_uses_area_objective_utility() -> None:
     assert trace.reference_utility == -15.0
 
 
+def test_candidate_trace_uses_higher_is_better_objective_utility() -> None:
+    terminal = _terminal_observation()
+    reference = terminal.model_copy(
+        update={
+            "observation_id": "reference",
+            "timing_guardrail": {
+                **terminal.timing_guardrail,
+                TimingMetric.STA_SETUP_WNS: -0.1,
+            },
+        }
+    )
+
+    trace = build_candidate_trace(
+        design_id="gcd",
+        candidate_id="episode-1.intervention-1",
+        planning_mode="receipt-aware",
+        outcome=OptimizationOutcomeKind.IMPROVED,
+        receipt=None,
+        terminal_observation=terminal,
+        reference_observation=reference,
+        objective_metric=ObjectiveMetric.STA_SETUP_WNS,
+        runtime_seconds=12.0,
+        peak_memory_mb=64.0,
+    )
+
+    assert trace.terminal_utility == 0.0
+    assert trace.reference_utility == -0.1
+
+
 def test_infeasible_is_not_a_terminal_success() -> None:
     terminal = _terminal_observation()
 

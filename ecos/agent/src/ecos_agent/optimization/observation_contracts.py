@@ -18,6 +18,8 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.contracts import (
     AREA_OBJECTIVE_ORDER,
+    POWER_OBJECTIVE_ORDER,
+    TIMING_OBJECTIVE_ORDER,
     _ContractModel,
     _ID,
     _METRIC_ID,
@@ -261,16 +263,43 @@ class TerminalObservation(_ContractModel):
     @property
     def objective_metrics(self) -> dict[ObjectiveMetric, float]:
         values = dict(self.metrics)
-        for metric_id in AREA_OBJECTIVE_ORDER:
+        values.update(
+            {
+                metric_id: self.timing_guardrail[TimingMetric(metric_id.value)]
+                for metric_id in TIMING_OBJECTIVE_ORDER
+            }
+        )
+        specifications = (
+            *(
+                (metric, "um^2", EvaluationMetricCategory.PPA, True)
+                for metric in AREA_OBJECTIVE_ORDER
+            ),
+            *(
+                (metric, "uW", EvaluationMetricCategory.PPA, False)
+                for metric in POWER_OBJECTIVE_ORDER
+            ),
+            (
+                ObjectiveMetric.GUI_OVERALL_QOR_SCORE,
+                "score",
+                EvaluationMetricCategory.QOR,
+                True,
+            ),
+        )
+        for metric_id, unit, category, unscoped in specifications:
+            direction = (
+                EvaluationMetricDirection.HIGHER_IS_BETTER
+                if metric_id == ObjectiveMetric.GUI_OVERALL_QOR_SCORE
+                else EvaluationMetricDirection.LOWER_IS_BETTER
+            )
             matches = [
                 item
                 for item in self.evaluation_metrics
                 if item.metric_id == metric_id.value
-                and item.corner is None
-                and item.unit == "um^2"
-                and item.category == EvaluationMetricCategory.PPA
+                and (item.corner is None or not unscoped)
+                and item.unit == unit
+                and item.category == category
                 and item.role == EvaluationMetricRole.REPORT
-                and item.direction == EvaluationMetricDirection.LOWER_IS_BETTER
+                and item.direction == direction
             ]
             if len(matches) == 1:
                 values[metric_id] = matches[0].value

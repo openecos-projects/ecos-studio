@@ -139,6 +139,7 @@ def create_optimization_runner(
     )
     baseline_eligibility_exempt = runtime.baseline_eligibility_exempt
     terminal_observation = build_terminal_observation(workspace)
+    _require_objective_metrics(terminal_observation, objective)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
     design_id = _design_id(workspace)
@@ -362,6 +363,18 @@ def _recover_controller(
             "optimization treatment does not match the recovered episode"
         )
     return controller
+
+
+def _require_objective_metrics(
+    observation: TerminalObservation, objective: OptimizationObjectiveContract
+) -> None:
+    available = observation.objective_metrics
+    selected = (*objective.preserve_metrics, objective.primary_metric)
+    missing = [metric.value for metric in selected if metric not in available]
+    if missing:
+        raise OptimizationRuntimeError(
+            f"baseline objective metric is unavailable: {', '.join(missing)}"
+        )
 
 
 def _assemble_runner(

@@ -77,6 +77,14 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
         ObjectiveMetric.CORE_AREA: 2500.0,
         ObjectiveMetric.SYNTHESIS_CELL_AREA: 1200.0,
         ObjectiveMetric.STA_STANDARD_CELL_AREA: 1140.0,
+        ObjectiveMetric.STA_SETUP_WNS: 0.2,
+        ObjectiveMetric.STA_SETUP_TNS: 0.0,
+        ObjectiveMetric.STA_HOLD_WNS: 0.1,
+        ObjectiveMetric.STA_HOLD_TNS: 0.0,
+        ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER: 66.8,
+        ObjectiveMetric.STA_TYPICAL_LEAKAGE_POWER: 0.267,
+        ObjectiveMetric.STA_WORST_DYNAMIC_POWER: 105.2,
+        ObjectiveMetric.STA_WORST_LEAKAGE_POWER: 89.1,
     }
     assert by_id[("ppa", "sta_typical_dynamic_power", "TYP_25/TYPICAL")].value == 66.8
     assert by_id[("ppa", "sta_typical_leakage_power", "TYP_25/TYPICAL")].value == 0.267
@@ -191,6 +199,117 @@ def test_terminal_manifest_binds_corner_power_evidence(frozen_workspace: Path) -
     after = build_terminal_observation(frozen_workspace)
 
     assert after.evidence_manifest_sha256 != before.evidence_manifest_sha256
+
+
+def test_timing_metric_can_be_the_primary_objective(frozen_workspace: Path) -> None:
+    incumbent = build_terminal_observation(frozen_workspace)
+    path = frozen_workspace / "sta_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    next(item for item in payload["metrics"] if item["id"] == "sta_setup_wns")[
+        "value"
+    ] = 0.3
+    _write_json(path, payload)
+    candidate = build_terminal_observation(frozen_workspace)
+    metric = ObjectiveMetric.STA_SETUP_WNS
+    semantic = freeze_optimization_objective(
+        "improve setup timing",
+        OptimizationObjectiveProposal(
+            primary_metric=metric,
+            rationale_summary="Increase terminal setup WNS.",
+        ),
+    )
+
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == metric
+
+
+def test_power_metric_can_be_the_primary_objective(frozen_workspace: Path) -> None:
+    incumbent = build_terminal_observation(frozen_workspace)
+    path = frozen_workspace / "sta_ecc/feature/TYP_25/TYPICAL/power_summary.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["dynamic_uw"] = 60.0
+    _write_json(path, payload)
+    candidate = build_terminal_observation(frozen_workspace)
+    metric = ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER
+    semantic = freeze_optimization_objective(
+        "reduce dynamic power",
+        OptimizationObjectiveProposal(
+            primary_metric=metric,
+            rationale_summary="Reduce typical-corner dynamic power.",
+        ),
+    )
+
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == metric
+
+
+def test_gui_overall_qor_score_can_be_the_primary_objective(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "route_ecc/analysis/qor_metrics.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for item in payload["metrics"]:
+        item.update(
+            category="routability_physical",
+            direction="lower_is_better",
+            scope="final_route",
+            corner=None,
+            project_role="final",
+            step_role="primary",
+            analysis_group="route_metrics",
+            rating={
+                "gate": False,
+                "score": item["id"] == "route_wirelength",
+                "trend": True,
+            },
+            source={
+                "kind": "feature",
+                "path": "feature/route_summary.json",
+                "selector": f"/{item['id']}",
+            },
+        )
+    payload["schema_version"] = 3
+    _write_json(path, payload)
+    incumbent = build_terminal_observation(frozen_workspace)
+    next(item for item in payload["metrics"] if item["id"] == "route_wirelength")[
+        "value"
+    ] = 5000.0
+    _write_json(path, payload)
+    candidate = build_terminal_observation(frozen_workspace)
+    metric = ObjectiveMetric.GUI_OVERALL_QOR_SCORE
+    semantic = freeze_optimization_objective(
+        "improve overall QoR",
+        OptimizationObjectiveProposal(
+            primary_metric=metric,
+            rationale_summary="Increase the GUI overall QoR score.",
+        ),
+    )
+
+    assert incumbent.objective_metrics[metric] == 2.5
+    assert candidate.objective_metrics[metric] == 3.3
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == metric
 
 
 @pytest.mark.parametrize(

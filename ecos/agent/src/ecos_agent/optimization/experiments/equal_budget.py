@@ -15,6 +15,7 @@ from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     TerminalObservation,
     TimingMetric,
+    objective_metric_utility,
 )
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
@@ -55,7 +56,7 @@ class CandidateTrace:
     started: bool
     terminal_success: bool
     planning_mode: Mode | None = None
-    # Higher-is-better negated frozen objective, not an aggregate QoR score.
+    # Higher-is-better frozen objective utility.
     terminal_utility: float | None = None
     reference_utility: float | None = None
     ppa: float | None = None
@@ -165,12 +166,16 @@ def build_candidate_trace(
         terminal_success=terminal_success,
         planning_mode=planning_mode,
         terminal_utility=(
-            -float(terminal_observation.objective_metrics[objective_metric])
+            objective_metric_utility(
+                objective_metric,
+                float(terminal_observation.objective_metrics[objective_metric]),
+            )
             if terminal_success and terminal_observation is not None
             else None
         ),
-        reference_utility=-float(
-            reference_observation.objective_metrics[objective_metric]
+        reference_utility=objective_metric_utility(
+            objective_metric,
+            float(reference_observation.objective_metrics[objective_metric]),
         ),
         area=_evaluation_value(evaluation, "sta_standard_cell_area"),
         dynamic_power=_evaluation_value(evaluation, "sta_typical_dynamic_power"),

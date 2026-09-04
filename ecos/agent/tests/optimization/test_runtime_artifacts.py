@@ -113,6 +113,32 @@ def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -
         _optimization_rerun_runtime_seconds(tmp_path)
 
 
+def test_optimization_runtime_rejects_missing_primary_metric(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    objective = freeze_optimization_objective(
+        "improve overall QoR",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.GUI_OVERALL_QOR_SCORE,
+            rationale_summary="Increase the GUI overall QoR score.",
+        ),
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization.runtime.build_terminal_observation",
+        lambda _path: _terminal(),
+    )
+
+    with pytest.raises(OptimizationRuntimeError, match="objective metric is unavailable"):
+        create_optimization_runner(
+            {
+                "workspace": str(tmp_path),
+                "episode_id": "episode-missing-objective",
+                "objective": objective.model_dump(mode="json"),
+            },
+            planner=object(),
+        )
+
+
 def test_design_id_comes_from_workspace_parameters_and_fails_closed(
     tmp_path: Path,
 ) -> None:

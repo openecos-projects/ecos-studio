@@ -28,6 +28,7 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
     TimingGuardrailContract,
     TimingReference,
+    objective_metric_utility,
 )
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
@@ -363,8 +364,10 @@ def compare_incumbent(
         for metric_id in semantic_objective.preserve_metrics:
             incumbent_value = incumbent_objectives[metric_id]
             candidate_value = candidate_objectives[metric_id]
-            if candidate_value > incumbent_value and _meaningful_metric_change(
-                incumbent_value, candidate_value
+            if (
+                objective_metric_utility(metric_id, candidate_value)
+                < objective_metric_utility(metric_id, incumbent_value)
+                and _meaningful_metric_change(incumbent_value, candidate_value)
             ):
                 return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     metric_order = (
@@ -375,9 +378,11 @@ def compare_incumbent(
     for metric_id in metric_order:
         incumbent_value = incumbent_objectives[metric_id]
         candidate_value = candidate_objectives[metric_id]
-        if candidate_value < incumbent_value:
+        incumbent_utility = objective_metric_utility(metric_id, incumbent_value)
+        candidate_utility = objective_metric_utility(metric_id, candidate_value)
+        if candidate_utility > incumbent_utility:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
-        if candidate_value > incumbent_value:
+        if candidate_utility < incumbent_utility:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     incumbent_evaluation = {
         metric.metric_id: metric.value for metric in incumbent.evaluation_metrics

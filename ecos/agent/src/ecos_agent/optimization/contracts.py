@@ -52,6 +52,15 @@ class ObjectiveMetric(StrEnum):
     CORE_AREA = "core_area"
     SYNTHESIS_CELL_AREA = "synthesis_cell_area"
     STA_STANDARD_CELL_AREA = "sta_standard_cell_area"
+    STA_SETUP_WNS = "sta_setup_wns"
+    STA_SETUP_TNS = "sta_setup_tns"
+    STA_HOLD_WNS = "sta_hold_wns"
+    STA_HOLD_TNS = "sta_hold_tns"
+    STA_TYPICAL_DYNAMIC_POWER = "sta_typical_dynamic_power"
+    STA_TYPICAL_LEAKAGE_POWER = "sta_typical_leakage_power"
+    STA_WORST_DYNAMIC_POWER = "sta_worst_dynamic_power"
+    STA_WORST_LEAKAGE_POWER = "sta_worst_leakage_power"
+    GUI_OVERALL_QOR_SCORE = "gui_overall_qor_score"
 
 
 class PowerMetric(StrEnum):
@@ -81,6 +90,18 @@ AREA_OBJECTIVE_ORDER = (
     ObjectiveMetric.STA_STANDARD_CELL_AREA,
 )
 
+TIMING_OBJECTIVE_ORDER = tuple(
+    ObjectiveMetric(metric.value) for metric in TimingMetric
+)
+
+POWER_OBJECTIVE_ORDER = tuple(
+    ObjectiveMetric(metric.value) for metric in PowerMetric
+)
+
+HIGHER_IS_BETTER_OBJECTIVES = frozenset(
+    (*TIMING_OBJECTIVE_ORDER, ObjectiveMetric.GUI_OVERALL_QOR_SCORE)
+)
+
 POWER_SELECTION_ORDER = tuple(PowerMetric)
 
 REQUIRED_SIGNOFF_GATES = (
@@ -94,6 +115,10 @@ REQUIRED_SIGNOFF_GATES = (
 
 TIMING_GUARDRAIL_ORDER = tuple(TimingMetric)
 SelectionMetric = ObjectiveMetric | TimingMetric | PowerMetric
+
+
+def objective_metric_utility(metric: ObjectiveMetric, value: float) -> float:
+    return value if metric in HIGHER_IS_BETTER_OBJECTIVES else -value
 
 
 class OptimizationDecision(StrEnum):

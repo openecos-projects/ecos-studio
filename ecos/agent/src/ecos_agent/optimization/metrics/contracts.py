@@ -17,6 +17,7 @@ class EvaluationMetricCategory(StrEnum):
     ROUTING_DIAGNOSTIC = "routing_diagnostic"
     COST = "cost"
     CORNER_ROBUSTNESS = "corner_robustness"
+    QOR = "qor"
 
 
 class EvaluationMetricRole(StrEnum):

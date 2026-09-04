@@ -33,6 +33,7 @@ from ecos_agent.optimization.metrics.extraction import (
     build_area_metrics,
     build_cost_metrics,
     build_eligibility_metrics,
+    build_gui_overall_qor_metric,
     build_routing_diagnostics,
     metric_record,
     required_nonnegative_metric,
@@ -84,6 +85,10 @@ _TERMINAL_FLOW_STEPS = (
 _TERMINAL_QOR_FILES = tuple(
     f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
     for stage in _TERMINAL_FLOW_STEPS
+)
+_ALL_TERMINAL_QOR_FILES = tuple(
+    f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
+    for stage in (*_AREA_EVIDENCE_STEPS, *_TERMINAL_FLOW_STEPS)
 )
 _REQUIRED_TERMINAL_QOR_FILES = tuple(
     f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
@@ -222,12 +227,15 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     flow = files["home/flow.json"]
     for stage in (*_AREA_EVIDENCE_STEPS, *_TERMINAL_FLOW_STEPS):
         _require_successful_stage(flow, stage)
+    qor_payloads = {path: files[path] for path in _REQUIRED_TERMINAL_QOR_FILES}
     metrics_by_path = {
-        path: _qor_metrics(files[path]) for path in _REQUIRED_TERMINAL_QOR_FILES
+        path: _qor_metrics(payload) for path, payload in qor_payloads.items()
     }
     for path in _TERMINAL_QOR_FILES:
         if path not in metrics_by_path and _is_file(root, path):
-            metrics_by_path[path] = _qor_metrics(_read_json(root, path))
+            payload = _read_json(root, path)
+            qor_payloads[path] = payload
+            metrics_by_path[path] = _qor_metrics(payload)
     route_metrics = metrics_by_path["route_ecc/analysis/qor_metrics.json"]
     terminal_metrics = {
         metric: _required_metric(route_metrics, metric.value) for metric in _TERMINAL_METRICS
@@ -244,7 +252,10 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     missing_artifacts = harden_metrics.get("harden_artifact_missing_count")
     harden_complete = complete_outputs and missing_artifacts == 0
     evaluation, corner_ids, corner_paths, evaluation_complete = _evaluation_metrics(
-        root, metrics_by_path, files["sta_ecc/feature/sta.step.json"]
+        root,
+        metrics_by_path,
+        qor_payloads,
+        files["sta_ecc/feature/sta.step.json"],
     )
     manifest_paths = (
         *_TERMINAL_FILES,
@@ -366,6 +377,7 @@ def build_candidate_terminal_observation(
 def _evaluation_metrics(
     root: Path,
     metrics_by_path: dict[str, dict[str, float]],
+    qor_payloads: dict[str, dict[str, object]],
     sta_step: dict[str, Any],
 ) -> tuple[tuple[TerminalEvaluationMetric, ...], tuple[str, ...], tuple[str, ...], bool]:
     corner_metrics, ppa_metrics, corner_ids, corner_paths, complete = _sta_corner_metrics(
@@ -383,6 +395,7 @@ def _evaluation_metrics(
         *area_metrics,
         *ppa_metrics,
         *corner_metrics,
+        *build_gui_overall_qor_metric(qor_payloads, _ALL_TERMINAL_QOR_FILES),
     )
     return tuple(metrics), corner_ids, corner_paths, complete and routing_complete and cost_complete
 

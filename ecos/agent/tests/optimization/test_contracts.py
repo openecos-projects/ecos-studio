@@ -171,9 +171,18 @@ def test_natural_language_objective_is_frozen_with_required_signoff_gates() -> N
         ObjectiveMetric.CORE_AREA,
         ObjectiveMetric.SYNTHESIS_CELL_AREA,
         ObjectiveMetric.STA_STANDARD_CELL_AREA,
+        ObjectiveMetric.STA_SETUP_WNS,
+        ObjectiveMetric.STA_SETUP_TNS,
+        ObjectiveMetric.STA_HOLD_WNS,
+        ObjectiveMetric.STA_HOLD_TNS,
+        ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER,
+        ObjectiveMetric.STA_TYPICAL_LEAKAGE_POWER,
+        ObjectiveMetric.STA_WORST_DYNAMIC_POWER,
+        ObjectiveMetric.STA_WORST_LEAKAGE_POWER,
+        ObjectiveMetric.GUI_OVERALL_QOR_SCORE,
     ],
 )
-def test_area_metrics_are_allowed_objectives(metric: ObjectiveMetric) -> None:
+def test_terminal_metrics_are_allowed_objectives(metric: ObjectiveMetric) -> None:
     proposal = OptimizationObjectiveProposal(
         primary_metric=metric,
         rationale_summary=f"Reduce {metric.value}.",
