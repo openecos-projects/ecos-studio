@@ -160,9 +160,13 @@ from ecos_agent.gui.support import (
 from ecos_agent.gui.workspace_flow import WorkspaceFlow
 from ecos_agent.optimization.contracts import (
     OptimizationEpisodeState,
-    OptimizationObjectiveProposal,
+    OptimizationObjectiveContract,
 )
-from ecos_agent.optimization.rules import freeze_optimization_objective
+from ecos_agent.optimization.observations import build_terminal_observation
+from ecos_agent.optimization.objective_alignment import (
+    build_active_objective,
+    build_objective_alignment,
+)
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.gui.session import ProviderSession
 
@@ -215,6 +219,8 @@ class ProviderOptimizationMixin:
         session.optimization_objective = None
         session.optimization_objective_sha256 = None
         session.optimization_primary_metric = None
+        session.optimization_objective_alignment = None
+        session.optimization_active_objective = None
         self._emit(session, "message", optimization_objective_prompt(session.language))
 
     def _begin_optimization_authorization(self, session: _Session) -> None:
@@ -226,14 +232,41 @@ class ProviderOptimizationMixin:
         session.phase = "optimization_authorization"
         session.optimization_phase = "awaiting_confirmation"
         session.optimization_episode_id = f"episode-{uuid.uuid4().hex}"
+        active = session.optimization_active_objective
+        alignment = session.optimization_objective_alignment
+        if active is None or alignment is None or session.optimization_objective is None:
+            raise ValueError("Optimization objective alignment is incomplete.")
+        counts = {
+            key: int(active[key])
+            for key in (
+                "drc_count",
+                "sta_setup_violation_count",
+                "sta_hold_violation_count",
+            )
+        }
         self._emit(
             session,
             "message",
-            optimization_authorization_prompt(session.language, workspace),
+            optimization_authorization_prompt(
+                session.language,
+                workspace,
+                original_primary_metric=str(active["original_primary_metric"]),
+                active_primary_metric=str(active["active_primary_metric"]),
+                recovery_stage=str(active["recovery_stage"]),
+                violation_counts=counts,
+            ),
             optimization={
-                "schema_version": "ecos.optimization_authorization.v1",
+                "schema_version": "ecos.optimization_authorization.v2",
                 "episode_id": session.optimization_episode_id,
                 "workspace": workspace,
+                "original_objective": session.optimization_objective,
+                "objective_sha256": session.optimization_objective_sha256,
+                "alignment_sha256": alignment["alignment_contract_sha256"],
+                "original_primary_metric": active["original_primary_metric"],
+                "active_primary_metric": active["active_primary_metric"],
+                "active_preserve_metrics": active["active_preserve_metrics"],
+                "violation_counts": counts,
+                "recovery_stage": active["recovery_stage"],
                 "requires_confirmation": True,
                 "execution": "fixed candidate.rerun only",
             },
@@ -293,6 +326,23 @@ class ProviderOptimizationMixin:
         session.optimization_objective = contract
         session.optimization_objective_sha256 = _objective_sha256(contract)
         session.optimization_primary_metric = _objective_primary_metric(contract)
+        try:
+            objective = OptimizationObjectiveContract.model_validate(contract)
+            baseline = build_terminal_observation(Path(workspace))
+            alignment = build_objective_alignment(objective, baseline)
+            active = build_active_objective(alignment, objective, baseline)
+        except Exception as exc:
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
+            session.optimization_phase = "unavailable"
+            self._emit(
+                session,
+                "error",
+                f"Unable to align optimization objective with baseline: {exc}",
+            )
+            self._emit_phase_choice(session)
+            return
+        session.optimization_objective_alignment = alignment.model_dump(mode="json")
+        session.optimization_active_objective = active.model_dump(mode="json")
         self._emit(
             session,
             "message",
@@ -349,7 +399,7 @@ class ProviderOptimizationMixin:
                     "episode_id": session.optimization_episode_id,
                     "workspace": workspace,
                     "objective": session.optimization_objective,
-                    "baseline_eligibility_exempt": True,
+                    "objective_alignment": session.optimization_objective_alignment,
                 },
                 provider,
             )
@@ -397,18 +447,55 @@ class ProviderOptimizationMixin:
                     break
                 turn = runner.run_turn()
                 session.optimization_turn_count += 1
+                active_before = getattr(turn, "active_objective_before", None)
+                active_after = getattr(turn, "active_objective_after", None)
+                if active_after is not None:
+                    session.optimization_active_objective = active_after.model_dump(
+                        mode="json"
+                    )
+                active = session.optimization_active_objective or {}
+                counts = {
+                    key: active.get(key)
+                    for key in (
+                        "drc_count",
+                        "sta_setup_violation_count",
+                        "sta_hold_violation_count",
+                    )
+                }
+                transition = (
+                    f"{active_before.recovery_stage}_to_{active_after.recovery_stage}"
+                    if active_before is not None
+                    and active_after is not None
+                    and active_before.recovery_stage != active_after.recovery_stage
+                    else None
+                )
                 self._emit(
                     session,
                     "optimization",
                     (
                         f"Optimization turn {session.optimization_turn_count} finished for "
-                        f"primary objective {session.optimization_primary_metric}."
+                        f"active objective {active.get('active_primary_metric', session.optimization_primary_metric)}."
                     ),
                     optimization={
-                        "schema_version": "ecos.optimization_progress.v1",
+                        "schema_version": "ecos.optimization_progress.v2",
                         "episode_id": runner.episode_id,
                         "objective_sha256": session.optimization_objective_sha256,
                         "primary_metric": session.optimization_primary_metric,
+                        "original_objective": session.optimization_objective,
+                        "original_primary_metric": session.optimization_primary_metric,
+                        "alignment_sha256": (
+                            session.optimization_objective_alignment or {}
+                        ).get("alignment_contract_sha256"),
+                        "active_primary_metric": active.get("active_primary_metric"),
+                        "active_preserve_metrics": active.get(
+                            "active_preserve_metrics", []
+                        ),
+                        "violation_counts": counts,
+                        "recovery_stage": active.get("recovery_stage"),
+                        "recovery_transition": transition,
+                        "recovery_incomplete": getattr(
+                            runner, "recovery_incomplete", False
+                        ),
                         "state": runner.state.value,
                         "turn": session.optimization_turn_count,
                         "planning_state": turn.planning.state.value,

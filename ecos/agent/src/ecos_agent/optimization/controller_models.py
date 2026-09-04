@@ -87,6 +87,11 @@ from ecos_agent.optimization.ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
+from ecos_agent.optimization.objective_alignment import (
+    ActiveOptimizationObjective,
+    OptimizationObjectiveAlignment,
+    build_active_objective,
+)
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
     OptimizationPlannerTurn,
@@ -125,12 +130,13 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v6.json"
+_STATE_FILE = "optimization-episode-state.v7.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
+    "optimization-episode-state.v6.json",
 )
 
 class OptimizationEpisodeControllerError(ValueError):
@@ -155,8 +161,8 @@ class OptimizationControlResult:
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["ecos.optimization_episode_state.v6"] = (
-        "ecos.optimization_episode_state.v6"
+    schema_version: Literal["ecos.optimization_episode_state.v7"] = (
+        "ecos.optimization_episode_state.v7"
     )
     episode_id: str
     checkpoint_id: str
@@ -172,6 +178,8 @@ class _PersistedEpisodeState(BaseModel):
     started_at: float
     incumbent: TerminalObservation | None = None
     objective: OptimizationObjectiveContract | None = None
+    objective_alignment: OptimizationObjectiveAlignment | None = None
+    active_objective: ActiveOptimizationObjective | None = None
     parent_manifest_sha256: str | None = None
     ledger_event_count: int = Field(ge=0)
     ledger_chain_head_sha256: str | None = None
@@ -227,6 +235,20 @@ class _PersistedEpisodeState(BaseModel):
             raise ValueError("task memory scope hash is invalid")
         if not _SHA256.fullmatch(self.execution_context_sha256):
             raise ValueError("execution context hash is invalid")
+        if self.objective_alignment is not None:
+            if self.objective is None or self.incumbent is None:
+                raise ValueError("objective alignment requires an objective and incumbent")
+            if (
+                self.objective_alignment.objective_contract_sha256
+                != self.objective.contract_sha256
+                or self.active_objective
+                != build_active_objective(
+                    self.objective_alignment, self.objective, self.incumbent
+                )
+            ):
+                raise ValueError("active objective does not match episode alignment")
+        elif self.active_objective is not None:
+            raise ValueError("active objective requires objective alignment")
         if self.state_sha256 != canonical_sha256(
             self.model_dump(mode="json", exclude={"state_sha256"})
         ):

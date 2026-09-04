@@ -83,6 +83,10 @@ from ecos_agent.optimization.ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
+from ecos_agent.optimization.objective_alignment import (
+    ObjectiveAlignmentError,
+    recovery_violation_counts,
+)
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
     OptimizationPlannerTurn,
@@ -121,12 +125,13 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v6.json"
+_STATE_FILE = "optimization-episode-state.v7.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
+    "optimization-episode-state.v6.json",
 )
 
 
@@ -209,6 +214,21 @@ class ControllerContextMixin:
             observation_id=observation.observation_id,
             sha256=canonical_sha256(observation.model_dump(mode="json")),
         )
+        active_objective = self.active_objective
+        active_primary_metric = (
+            active_objective.active_primary_metric
+            if active_objective is not None
+            else self._objective.primary_metric
+            if self._objective is not None
+            else None
+        )
+        active_preserve_metrics = (
+            active_objective.active_preserve_metrics
+            if active_objective is not None
+            else self._objective.preserve_metrics
+            if self._objective is not None
+            else ()
+        )
         if self.mode == OptimizationAgentMode.LLM_NO_KNOWLEDGE:
             knowledge_refs: tuple[KnowledgeReference, ...] = ()
             knowledge_chunks: tuple[str, ...] = ()
@@ -228,16 +248,8 @@ class ControllerContextMixin:
                     retrieval_request_sha256=retrieval.request_sha256,
                     observation=observation,
                     current_values=current_values,
-                    primary_metric=(
-                        self._objective.primary_metric
-                        if self._objective is not None
-                        else None
-                    ),
-                    preserve_metrics=(
-                        self._objective.preserve_metrics
-                        if self._objective is not None
-                        else ()
-                    ),
+                    primary_metric=active_primary_metric,
+                    preserve_metrics=active_preserve_metrics,
                     incumbent=self._incumbent,
                     historical_metrics=tuple(
                         {
@@ -337,6 +349,16 @@ class ControllerContextMixin:
                         if self._objective is not None
                         else None
                     ),
+                    "objective_alignment": (
+                        self._objective_alignment.model_dump(mode="json")
+                        if self._objective_alignment is not None
+                        else None
+                    ),
+                    "active_objective": (
+                        active_objective.model_dump(mode="json")
+                        if active_objective is not None
+                        else None
+                    ),
                     "budget": self._budget.model_dump(mode="json"),
                     "current_values": dict(sorted(active_values.items())),
                     "legal_actions": [
@@ -378,6 +400,8 @@ class ControllerContextMixin:
             supported_action_view,
             empirical_cases,
             empirical_case_audit,
+            self._objective_alignment,
+            active_objective,
         )
 
     def _design_id(self) -> str | None:
@@ -502,11 +526,25 @@ class ControllerContextMixin:
         for root in sorted(roots):
             for outcome in OptimizationLedger(root).replay().terminal_outcomes:
                 terminal = outcome.terminal_observation
+                aligned_current_recovery = False
+                if (
+                    promoted_only
+                    and root == self.ledger.root
+                    and terminal is not None
+                    and self._objective_alignment is not None
+                    and outcome.objective_alignment_sha256
+                    == self._objective_alignment.alignment_contract_sha256
+                ):
+                    try:
+                        recovery_violation_counts(terminal)
+                        aligned_current_recovery = True
+                    except ObjectiveAlignmentError:
+                        pass
                 if (
                     outcome.outcome in reusable_outcomes
                     and terminal is not None
                     and terminal.schema_version == "ecos.terminal_observation.v3"
-                    and terminal.eligible_for_incumbent
+                    and (terminal.eligible_for_incumbent or aligned_current_recovery)
                     and outcome.parameter_application_receipt is not None
                     and native_receipt_is_effective(
                         outcome.parameter_application_receipt

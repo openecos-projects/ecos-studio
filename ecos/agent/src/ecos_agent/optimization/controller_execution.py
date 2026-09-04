@@ -83,6 +83,7 @@ from ecos_agent.optimization.ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
+from ecos_agent.optimization.objective_alignment import build_active_objective
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
     OptimizationPlannerTurn,
@@ -121,12 +122,13 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v6.json"
+_STATE_FILE = "optimization-episode-state.v7.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
+    "optimization-episode-state.v6.json",
 )
 
 
@@ -154,7 +156,9 @@ class ControllerExecutionMixin:
             self._pending_v2_proposal = None
             self._requested = None
             self._persist()
-            return self._result("budget_exhausted")
+            return self._result(
+                "recovery_incomplete" if self.recovery_incomplete else "budget_exhausted"
+            )
 
         intervention_id = self._next_intervention_id()
         planning_entries = self._planning_audit.replay().entries
@@ -319,6 +323,16 @@ class ControllerExecutionMixin:
                     if self._objective is not None
                     else None
                 ),
+                "objective_alignment_sha256": (
+                    self._objective_alignment.alignment_contract_sha256
+                    if self._objective_alignment is not None
+                    else None
+                ),
+                "active_objective": (
+                    self.active_objective.model_dump(mode="json")
+                    if self.active_objective is not None
+                    else None
+                ),
                 "requested": request.requested.model_dump(mode="json"),
                 "context_sha256": request.context_sha256,
                 "parent_candidate_root_ref": request.parent_candidate_root_ref,
@@ -357,6 +371,12 @@ class ControllerExecutionMixin:
             objective_contract_sha256=(
                 self._objective.contract_sha256 if self._objective is not None else None
             ),
+            objective_alignment_sha256=(
+                self._objective_alignment.alignment_contract_sha256
+                if self._objective_alignment is not None
+                else None
+            ),
+            active_objective=self.active_objective,
             proposal_action=request.proposal.action,
             requested=request.requested,
             target_step=target_step,
@@ -405,6 +425,35 @@ class ControllerExecutionMixin:
                 raise OptimizationEpisodeControllerError(
                     "terminal candidate evidence execution contract does not match"
                 )
+        comparison = (
+            IncumbentDecision(incumbent_decision)
+            if incumbent_decision is not None
+            else None
+        )
+        promote = terminal_candidate_is_promotable(
+            execution_outcome=receipt.outcome,
+            candidate=terminal_observation,
+            comparison=(
+                None
+                if comparison is None
+                else IncumbentComparison(comparison, decisive_metric)
+            ),
+            requested=self._requested,
+            parameter_receipt=receipt.parameter_application_receipt,
+            objective_alignment=self._objective_alignment,
+            recovery_active=self.recovery_incomplete,
+        )
+        active_objective = self.active_objective
+        next_active_objective = active_objective
+        if (
+            promote
+            and terminal_observation is not None
+            and self._objective_alignment is not None
+            and self._objective is not None
+        ):
+            next_active_objective = build_active_objective(
+                self._objective_alignment, self._objective, terminal_observation
+            )
         details = {
             "execution_id": receipt.execution_id,
             "started": receipt.started,
@@ -431,6 +480,14 @@ class ControllerExecutionMixin:
             details["incumbent_decision"] = incumbent_decision
         if decisive_metric is not None:
             details["decisive_metric"] = decisive_metric.value
+        if self._objective_alignment is not None:
+            details["objective_alignment_sha256"] = (
+                self._objective_alignment.alignment_contract_sha256
+            )
+            details["active_objective"] = active_objective.model_dump(mode="json")
+            details["next_active_objective"] = next_active_objective.model_dump(
+                mode="json"
+            )
         terminal_outcome = OptimizationTerminalOutcome(
             intervention_id=self._pending_intervention_id,
             outcome=outcome,
@@ -479,6 +536,21 @@ class ControllerExecutionMixin:
             ),
             incumbent_decision=incumbent_decision,
             decisive_metric=decisive_metric,
+            objective_alignment_sha256=(
+                self._objective_alignment.alignment_contract_sha256
+                if self._objective_alignment is not None
+                else None
+            ),
+            active_objective=active_objective,
+            next_active_objective=next_active_objective,
+            recovery_transition=(
+                f"{active_objective.recovery_stage}_to_{next_active_objective.recovery_stage}"
+                if active_objective is not None
+                and next_active_objective is not None
+                and active_objective.recovery_stage
+                != next_active_objective.recovery_stage
+                else None
+            ),
             outcome_details_sha256=canonical_sha256(details),
             target_step=candidate_target_step(self._requested.knob_id)
             if self._requested
@@ -493,22 +565,7 @@ class ControllerExecutionMixin:
                 receipt.parameter_application_receipt,
                 terminal_observation,
             )
-        comparison = (
-            IncumbentDecision(incumbent_decision)
-            if incumbent_decision is not None
-            else None
-        )
-        if terminal_candidate_is_promotable(
-            execution_outcome=receipt.outcome,
-            candidate=terminal_observation,
-            comparison=(
-                None
-                if comparison is None
-                else IncumbentComparison(comparison, decisive_metric)
-            ),
-            requested=self._requested,
-            parameter_receipt=receipt.parameter_application_receipt,
-        ):
+        if promote:
             assert terminal_observation is not None
             self._set_incumbent(terminal_observation, receipt.evidence)
         self._pending_intervention_id = None

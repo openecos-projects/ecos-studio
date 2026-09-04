@@ -108,13 +108,37 @@ def operation_choice(
     )
 
 
-def optimization_authorization_prompt(language: str, workspace: str) -> str:
+def optimization_authorization_prompt(
+    language: str,
+    workspace: str,
+    *,
+    original_primary_metric: str,
+    active_primary_metric: str,
+    recovery_stage: str,
+    violation_counts: dict[str, int],
+) -> str:
+    recovery = recovery_stage != "original"
+    counts = ", ".join(f"{key}={value}" for key, value in violation_counts.items())
+    chinese_alignment = (
+        f"基线与原目标 {original_primary_metric} 不一致：{counts}。将先按 DRC → setup → hold 恢复，"
+        f"当前目标为 {active_primary_metric}；三类违例清零后自动切回原目标。\n"
+        if recovery
+        else f"基线三类违例均为零，将直接优化原目标 {original_primary_metric}。\n"
+    )
+    english_alignment = (
+        f"The baseline conflicts with the original objective {original_primary_metric}: {counts}. "
+        f"Recovery will follow DRC -> setup -> hold, starting with {active_primary_metric}, "
+        "then automatically return to the original objective.\n"
+        if recovery
+        else f"All three baseline violation counts are zero; the episode will optimize "
+        f"{original_primary_metric} directly.\n"
+    )
     return _prompt(
         language,
-        f"将对当前 workspace 启动有预算、可暂停、可回放的优化 episode：{workspace}\n"
+        f"将对当前 workspace 启动有预算、可暂停、可回放的优化 episode：{workspace}\n{chinese_alignment}"
         "Codex 只能提出一个类型化 knob 方向；本地 controller 和固定 ECC RPC 才能执行。"
         "请确认开始，或取消。",
-        f"Start a bounded, pausable, replayable optimization episode for this workspace: {workspace}\n"
+        f"Start a bounded, pausable, replayable optimization episode for this workspace: {workspace}\n{english_alignment}"
         "Codex may propose only one typed knob direction; the local controller and fixed ECC RPC own execution. "
         "Confirm to start, or cancel.",
     )

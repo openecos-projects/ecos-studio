@@ -45,6 +45,9 @@ class OptimizationKnob(StrEnum):
 
 
 class ObjectiveMetric(StrEnum):
+    DRC_COUNT = "drc_count"
+    STA_SETUP_VIOLATION_COUNT = "sta_setup_violation_count"
+    STA_HOLD_VIOLATION_COUNT = "sta_hold_violation_count"
     ROUTE_DR_TOTAL_VIOLATION_COUNT = "route_dr_total_violation_count"
     ROUTE_LA_TOTAL_OVERFLOW = "route_la_total_overflow"
     ROUTE_WIRELENGTH = "route_wirelength"

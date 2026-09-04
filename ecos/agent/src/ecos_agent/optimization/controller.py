@@ -87,6 +87,12 @@ from ecos_agent.optimization.ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
+from ecos_agent.optimization.objective_alignment import (
+    ActiveOptimizationObjective,
+    OptimizationObjectiveAlignment,
+    build_active_objective,
+    validate_objective_alignment,
+)
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
     OptimizationPlannerTurn,
@@ -108,6 +114,7 @@ from ecos_agent.optimization.rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
     IncumbentComparison,
     IncumbentDecision,
+    compare_recovery_incumbent,
     legal_actions,
     native_receipt_is_effective,
     select_requested_value,
@@ -125,12 +132,13 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v6.json"
+_STATE_FILE = "optimization-episode-state.v7.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
+    "optimization-episode-state.v6.json",
 )
 
 from ecos_agent.optimization.controller_context import ControllerContextMixin
@@ -166,6 +174,7 @@ class OptimizationEpisodeController(
         incumbent: TerminalObservation | None = None,
         parent_manifest_sha256: str | None = None,
         objective: OptimizationObjectiveContract | None = None,
+        objective_alignment: OptimizationObjectiveAlignment | None = None,
         task_memory_scope_sha256: str | None = None,
         task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot]
         | None = None,
@@ -221,6 +230,18 @@ class OptimizationEpisodeController(
         self._budget = budget
         self._incumbent = incumbent
         self._objective = objective
+        if objective_alignment is not None:
+            if objective is None or incumbent is None:
+                raise OptimizationEpisodeControllerError(
+                    "objective alignment requires an objective and incumbent"
+                )
+            try:
+                validate_objective_alignment(objective_alignment, objective, incumbent)
+            except ValueError as exc:
+                raise OptimizationEpisodeControllerError(
+                    "objective alignment does not match the episode baseline"
+                ) from exc
+        self._objective_alignment = objective_alignment
         self._incumbent_candidate_root_ref: str | None = None
         self._incumbent_candidate_manifest_ref: str | None = None
         self._incumbent_candidate_manifest_sha256: str | None = None
@@ -266,6 +287,27 @@ class OptimizationEpisodeController(
         return self._objective
 
     @property
+    def objective_alignment(self) -> OptimizationObjectiveAlignment | None:
+        return self._objective_alignment
+
+    @property
+    def active_objective(self) -> ActiveOptimizationObjective | None:
+        if (
+            self._objective_alignment is None
+            or self._objective is None
+            or self._incumbent is None
+        ):
+            return None
+        return build_active_objective(
+            self._objective_alignment, self._objective, self._incumbent
+        )
+
+    @property
+    def recovery_incomplete(self) -> bool:
+        active = self.active_objective
+        return active is not None and active.recovery_stage != "original"
+
+    @property
     def incumbent_candidate_root_ref(self) -> str | None:
         return self._incumbent_candidate_root_ref
 
@@ -274,7 +316,18 @@ class OptimizationEpisodeController(
         candidate: TerminalObservation,
         evidence: CandidateExecutionEvidence | None = None,
     ) -> None:
-        if not candidate.eligible_for_incumbent:
+        recovery_promotion = bool(
+            self._objective_alignment is not None
+            and self._incumbent is not None
+            and self.recovery_incomplete
+            and compare_recovery_incumbent(
+                incumbent=self._incumbent,
+                candidate=candidate,
+                alignment=self._objective_alignment,
+            ).decision
+            == IncumbentDecision.CANDIDATE_BETTER
+        )
+        if not candidate.eligible_for_incumbent and not recovery_promotion:
             raise OptimizationEpisodeControllerError(
                 "candidate terminal observation is not eligible"
             )
@@ -394,6 +447,7 @@ class OptimizationEpisodeController(
         controller._budget = snapshot.budget
         controller._incumbent = snapshot.incumbent
         controller._objective = snapshot.objective
+        controller._objective_alignment = snapshot.objective_alignment
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._task_memory_scope_sha256 = snapshot.task_memory_scope_sha256
         controller._task_memory_supplier = task_memory_supplier
@@ -511,7 +565,7 @@ class OptimizationEpisodeController(
         decision_audit = self._decision_audit.replay()
         case_audit = self._case_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v6",
+            "schema_version": "ecos.optimization_episode_state.v7",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
@@ -523,6 +577,16 @@ class OptimizationEpisodeController(
             "objective": self._objective.model_dump(mode="json")
             if self._objective
             else None,
+            "objective_alignment": (
+                self._objective_alignment.model_dump(mode="json")
+                if self._objective_alignment is not None
+                else None
+            ),
+            "active_objective": (
+                self.active_objective.model_dump(mode="json")
+                if self.active_objective is not None
+                else None
+            ),
             "parent_manifest_sha256": self._parent_manifest_sha256,
             "started_at": self._started_at,
             "ledger_event_count": len(replay.entries),
@@ -654,6 +718,19 @@ class OptimizationEpisodeController(
         ):
             raise OptimizationEpisodeControllerError(
                 "outcome ledger does not match the frozen objective"
+            )
+        alignment_sha256 = (
+            snapshot.objective_alignment.alignment_contract_sha256
+            if snapshot.objective_alignment is not None
+            else None
+        )
+        if any(
+            getattr(entry.payload, "objective_alignment_sha256", None)
+            != alignment_sha256
+            for entry in replay.entries
+        ):
+            raise OptimizationEpisodeControllerError(
+                "outcome ledger does not match the objective alignment"
             )
         if any(
             entry.objective_contract_sha256 != objective_sha256

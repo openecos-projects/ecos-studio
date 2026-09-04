@@ -304,7 +304,7 @@ def export_episode_traces(
 
 
 def _verified_episode_state(episode_root: Path) -> dict[str, object]:
-    path = episode_root / "optimization-episode-state.v6.json"
+    path = episode_root / "optimization-episode-state.v7.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         state_hash = payload.pop("state_sha256")

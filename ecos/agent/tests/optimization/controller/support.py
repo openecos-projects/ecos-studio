@@ -266,7 +266,9 @@ def _controller(
     mode: OptimizationAgentMode = OptimizationAgentMode.FULL_AGENT,
     budget: BudgetSnapshot | None = None,
     clock: _Clock | None = None,
+    incumbent: TerminalObservation | None = None,
     objective: OptimizationObjectiveContract | None = None,
+    objective_alignment=None,
     task_memory=None,
     receipt_aware_planning: bool = True,
     knowledge_case_shots: int = 0,
@@ -281,7 +283,9 @@ def _controller(
         executor=ecc,
         ledger=OptimizationLedger(tmp_path / "episode"),
         clock=clock or _Clock(),
+        incumbent=incumbent,
         objective=objective,
+        objective_alignment=objective_alignment,
         task_memory_scope_sha256=(
             task_memory.scope.scope_sha256 if task_memory is not None else None
         ),

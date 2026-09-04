@@ -39,6 +39,7 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     load_experiment_manifest,
 )
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
+from ecos_agent.optimization.objective_alignment import build_objective_alignment
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import create_optimization_runner
 
@@ -434,16 +435,19 @@ def _run_treatment(
         ephemeral=True,
     )
     provider.select_model(model)
+    objective = _objective()
     runtime_context = {
         "workspace": str(workspace),
         "episode_id": episode_id,
-        "objective": _objective().model_dump(mode="json"),
+        "objective": objective.model_dump(mode="json"),
+        "objective_alignment": build_objective_alignment(
+            objective, reference
+        ).model_dump(mode="json"),
         "seed": seed,
         "reference_runtime_seconds": reference_runtime,
         "receipt_aware_planning": treatment.receipt_aware_planning,
         "agent_mode": treatment.agent_mode,
         "knowledge_case_shots": treatment.knowledge_case_shots,
-        "baseline_eligibility_exempt": True,
     }
     if treatment.knowledge_case_shots and knowledge_case_pool_root is not None:
         runtime_context["knowledge_case_pool_root"] = str(knowledge_case_pool_root)
@@ -558,7 +562,7 @@ def _snapshot_case_pool(source: Path, destination: Path) -> tuple[Path, dict[str
 
 def _episode_evidence(workspace: Path, episode_root: Path) -> dict[str, object]:
     state = _verified_episode_state(episode_root)
-    state_path = episode_root / "optimization-episode-state.v6.json"
+    state_path = episode_root / "optimization-episode-state.v7.json"
     chain_names = (
         "ledger",
         "planning_audit",

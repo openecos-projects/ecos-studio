@@ -121,12 +121,13 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v6.json"
+_STATE_FILE = "optimization-episode-state.v7.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
     "optimization-episode-state.v4.json",
     "optimization-episode-state.v5.json",
+    "optimization-episode-state.v6.json",
 )
 
 
@@ -158,7 +159,9 @@ class ControllerPlanningMixin:
             self._pending_v2_proposal = None
             self._requested = None
             self._persist()
-            return self._result("budget_exhausted")
+            return self._result(
+                "recovery_incomplete" if self.recovery_incomplete else "budget_exhausted"
+            )
 
         self._state = OptimizationEpisodeState.PLANNING
         self._budget = self._consume(planning_calls=1)
@@ -317,7 +320,7 @@ class ControllerPlanningMixin:
                     planning_entry,
                     proposal,
                     "accepted",
-                    None,
+                    "recovery_incomplete" if self.recovery_incomplete else None,
                     planner_source=planner_source,
                 )
             reason = (
@@ -503,7 +506,11 @@ class ControllerPlanningMixin:
                 direction=action.direction,
                 expected_effects=(
                     ExpectedEffect(
-                        metric_id=ObjectiveMetric.ROUTE_WIRELENGTH,
+                        metric_id=(
+                            context.active_objective.active_primary_metric
+                            if context.active_objective is not None
+                            else ObjectiveMetric.ROUTE_WIRELENGTH
+                        ),
                         direction=ExpectedEffectDirection.UNKNOWN,
                     ),
                 ),

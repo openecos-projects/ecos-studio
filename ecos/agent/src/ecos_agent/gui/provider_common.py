@@ -353,6 +353,8 @@ _INTERACTION_UNDO_FIELDS = (
     "optimization_objective",
     "optimization_objective_sha256",
     "optimization_primary_metric",
+    "optimization_objective_alignment",
+    "optimization_active_objective",
     "pending_interaction",
     "interaction_history",
 )

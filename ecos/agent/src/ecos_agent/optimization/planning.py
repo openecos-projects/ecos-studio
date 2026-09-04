@@ -34,6 +34,10 @@ from ecos_agent.optimization.knowledge.cases import (
 )
 from ecos_agent.optimization.knowledge.compiler import SupportedActionView
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
+from ecos_agent.optimization.objective_alignment import (
+    ActiveOptimizationObjective,
+    OptimizationObjectiveAlignment,
+)
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
@@ -61,6 +65,8 @@ class OptimizationPlanningContext:
     supported_action_view: SupportedActionView | None = None
     empirical_cases: tuple[TerminalEmpiricalCase, ...] = ()
     empirical_case_audit: EmpiricalCaseAudit | None = None
+    objective_alignment: OptimizationObjectiveAlignment | None = None
+    active_objective: ActiveOptimizationObjective | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +131,16 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         "objective": (
             context.objective.model_dump(mode="json")
             if context.objective is not None
+            else None
+        ),
+        "objective_alignment": (
+            context.objective_alignment.model_dump(mode="json")
+            if context.objective_alignment is not None
+            else None
+        ),
+        "active_objective": (
+            context.active_objective.model_dump(mode="json")
+            if context.active_objective is not None
             else None
         ),
     }

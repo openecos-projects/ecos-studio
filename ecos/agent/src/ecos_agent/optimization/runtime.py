@@ -55,6 +55,10 @@ from ecos_agent.optimization.observations import (
     build_stage_observation,
     build_terminal_observation,
 )
+from ecos_agent.optimization.objective_alignment import (
+    OptimizationObjectiveAlignment,
+    validate_objective_alignment,
+)
 from ecos_agent.optimization.knowledge.retrieval import (
     OptimizationKnowledgeRetriever,
     build_optimization_retrieval_request,
@@ -91,12 +95,12 @@ class OptimizationRuntimeContext(BaseModel):
     episode_id: str
     workspace: str
     objective: OptimizationObjectiveContract
+    objective_alignment: OptimizationObjectiveAlignment
     reference_runtime_seconds: float | int | None = None
     agent_mode: OptimizationAgentMode = OptimizationAgentMode.FULL_AGENT
     knowledge_case_shots: Literal[0, 3] = 0
     knowledge_case_pool_root: str | None = None
     receipt_aware_planning: StrictBool = True
-    baseline_eligibility_exempt: StrictBool = False
     seed: StrictInt = 0
 
     @field_validator("session_id", "episode_id", "workspace")
@@ -137,15 +141,22 @@ def create_optimization_runner(
     knowledge_case_pool_root = _knowledge_case_pool_root(
         runtime.knowledge_case_pool_root
     )
-    baseline_eligibility_exempt = runtime.baseline_eligibility_exempt
     terminal_observation = build_terminal_observation(workspace)
+    try:
+        validate_objective_alignment(
+            runtime.objective_alignment, objective, terminal_observation
+        )
+    except ValueError as exc:
+        raise OptimizationRuntimeError(
+            "authorized objective alignment does not match the current baseline"
+        ) from exc
     _require_objective_metrics(terminal_observation, objective)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
     design_id = _design_id(workspace)
     routability_objective = freeze_routability_objective(
         terminal_observation,
-        allow_ineligible_baseline=baseline_eligibility_exempt,
+        objective_alignment=runtime.objective_alignment,
     )
     reference_runtime = runtime.reference_runtime_seconds
     if reference_runtime is None:
@@ -276,10 +287,10 @@ def _recover_or_create_controller(
     execution_context: Mapping[str, object],
     knowledge_case_pool_root: Path | None,
 ) -> OptimizationEpisodeController:
-    state_path = ledger_root / "optimization-episode-state.v6.json"
+    state_path = ledger_root / "optimization-episode-state.v7.json"
     legacy_state_paths = tuple(
         ledger_root / f"optimization-episode-state.v{version}.json"
-        for version in range(2, 6)
+        for version in range(2, 7)
     )
     if state_path.is_file():
         return _recover_controller(
@@ -313,6 +324,7 @@ def _recover_or_create_controller(
         incumbent=terminal_observation,
         parent_manifest_sha256=parent_manifest,
         objective=runtime.objective,
+        objective_alignment=runtime.objective_alignment,
         task_memory_scope_sha256=memory_scope.scope_sha256,
         task_memory_supplier=memory_store.snapshot,
         execution_context=execution_context,
@@ -350,6 +362,10 @@ def _recover_controller(
     if controller.objective != runtime.objective:
         raise OptimizationRuntimeError(
             "optimization objective does not match the recovered episode"
+        )
+    if controller.objective_alignment != runtime.objective_alignment:
+        raise OptimizationRuntimeError(
+            "objective alignment does not match the recovered episode"
         )
     if controller.parent_manifest_sha256 != parent_manifest:
         raise OptimizationRuntimeError(
@@ -397,12 +413,21 @@ def _assemble_runner(
         return build_stage_observation(workspace, "place", budget=current_budget)
 
     def retrieval_supplier(observation, previous: OptimizationOutcomeKind | None):
+        active = controller.active_objective
         request = build_optimization_retrieval_request(
             task_id=runtime.episode_id,
             observation=observation,
             previous_intervention_outcome=previous,
-            primary_metric=runtime.objective.primary_metric,
-            preserve_metrics=runtime.objective.preserve_metrics,
+            primary_metric=(
+                active.active_primary_metric
+                if active is not None
+                else runtime.objective.primary_metric
+            ),
+            preserve_metrics=(
+                active.active_preserve_metrics
+                if active is not None
+                else runtime.objective.preserve_metrics
+            ),
         )
         return retrieval.retrieve(request)
 
@@ -432,7 +457,6 @@ def _assemble_runner(
         terminal_waiter=terminal_waiter,
         terminal_observation_supplier=terminal_observation_supplier,
         objective=routability_objective,
-        baseline_eligibility_exempt=runtime.baseline_eligibility_exempt,
         stop_event=stop_event,
         site_width_dbu=site_width_dbu,
     )

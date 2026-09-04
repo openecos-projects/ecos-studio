@@ -22,6 +22,7 @@ from ecos_agent.optimization.controller import (
 from ecos_agent.optimization.execution import CandidateExecutionReceipt
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.knowledge.retrieval import OptimizationRetrievalResult
+from ecos_agent.optimization.objective_alignment import ActiveOptimizationObjective
 from ecos_agent.optimization.rules import (
     IncumbentComparison,
     classify_terminal_candidate,
@@ -41,6 +42,8 @@ class OptimizationEpisodeTurn:
     execution: OptimizationControlResult | None
     terminal_observation: TerminalObservation | None = None
     incumbent_comparison: IncumbentComparison | None = None
+    active_objective_before: ActiveOptimizationObjective | None = None
+    active_objective_after: ActiveOptimizationObjective | None = None
 
 
 class OptimizationEpisodeRunner:
@@ -61,14 +64,11 @@ class OptimizationEpisodeRunner:
         ]
         | None = None,
         objective: RoutabilityObjectiveContract | None = None,
-        baseline_eligibility_exempt: bool = False,
         stop_event: threading.Event | None = None,
         site_width_dbu: int = 1,
     ) -> None:
         if type(site_width_dbu) is not int or site_width_dbu <= 0:
             raise OptimizationEpisodeRunnerError("site width is invalid")
-        if type(baseline_eligibility_exempt) is not bool:
-            raise OptimizationEpisodeRunnerError("baseline eligibility exemption is invalid")
         self._controller = controller
         self._observation_supplier = observation_supplier
         self._retrieval_supplier = retrieval_supplier
@@ -76,7 +76,6 @@ class OptimizationEpisodeRunner:
         self._terminal_waiter = terminal_waiter
         self._terminal_observation_supplier = terminal_observation_supplier
         self._objective = objective
-        self._baseline_eligibility_exempt = baseline_eligibility_exempt
         self._stop_event = stop_event or threading.Event()
         self._site_width_dbu = site_width_dbu
 
@@ -99,6 +98,14 @@ class OptimizationEpisodeRunner:
     @property
     def incumbent_candidate_root_ref(self) -> str | None:
         return self._controller.incumbent_candidate_root_ref
+
+    @property
+    def active_objective(self) -> ActiveOptimizationObjective | None:
+        return self._controller.active_objective
+
+    @property
+    def recovery_incomplete(self) -> bool:
+        return self._controller.recovery_incomplete
 
     def close(self) -> None:
         ledger = getattr(self._controller, "ledger", None)
@@ -154,13 +161,14 @@ class OptimizationEpisodeRunner:
             )
         except Exception:
             return self._indeterminate_turn(observation, retrieval, planning, execution)
+        active_before = self._controller.active_objective
         classification = classify_terminal_candidate(
             execution_outcome=receipt.outcome,
             candidate=terminal_observation,
             incumbent=self._controller.incumbent,
             objective=self._objective,
             semantic_objective=self._controller.objective,
-            baseline_eligibility_exempt=self._baseline_eligibility_exempt,
+            objective_alignment=self._controller.objective_alignment,
             requested=planning.requested,
             parameter_receipt=receipt.parameter_application_receipt,
         )
@@ -180,6 +188,8 @@ class OptimizationEpisodeRunner:
             completed,
             terminal_observation,
             comparison,
+            active_before,
+            self._controller.active_objective,
         )
 
     def _previous_outcome(self) -> OptimizationOutcomeKind | None:

@@ -129,6 +129,8 @@ class ProviderSession:
     optimization_objective: dict[str, Any] | None = None
     optimization_objective_sha256: str | None = None
     optimization_primary_metric: str | None = None
+    optimization_objective_alignment: dict[str, Any] | None = None
+    optimization_active_objective: dict[str, Any] | None = None
     codex_provider: CodexAppServerProposalProvider | None = None
     pending_interaction: dict[str, Any] | None = None
     interaction_retry: dict[str, Any] | None = None

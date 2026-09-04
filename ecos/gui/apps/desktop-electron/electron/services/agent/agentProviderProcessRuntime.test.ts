@@ -314,6 +314,122 @@ describe('AgentProviderProcessRuntime', () => {
     )
   })
 
+  it('forwards validated objective-alignment progress', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    const objectiveHash = `sha256:${'a'.repeat(64)}`
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          optimization: {
+            active_preserve_metrics: [
+              'sta_setup_violation_count',
+              'sta_hold_violation_count',
+            ],
+            active_primary_metric: 'drc_count',
+            alignment_sha256: `sha256:${'b'.repeat(64)}`,
+            episode_id: 'episode-1',
+            objective_sha256: objectiveHash,
+            original_objective: { contract_sha256: objectiveHash },
+            original_primary_metric: 'route_wirelength',
+            recovery_incomplete: true,
+            recovery_stage: 'drc',
+            recovery_transition: null,
+            schema_version: 'ecos.optimization_progress.v2',
+            violation_counts: {
+              drc_count: 4,
+              sta_hold_violation_count: 0,
+              sta_setup_violation_count: 2,
+            },
+          },
+          type: 'optimization',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optimization: expect.objectContaining({
+          active_primary_metric: 'drc_count',
+          alignment_sha256: `sha256:${'b'.repeat(64)}`,
+          recovery_incomplete: true,
+          recovery_stage: 'drc',
+          violation_counts: {
+            drc_count: 4,
+            sta_hold_violation_count: 0,
+            sta_setup_violation_count: 2,
+          },
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    { active_preserve_metrics: ['drc_count', 'setup', 'hold'] },
+    {
+      violation_counts: {
+        drc_count: -1,
+        sta_hold_violation_count: 0,
+        sta_setup_violation_count: 0,
+      },
+    },
+  ])('drops malformed objective-alignment progress', (override) => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    const objectiveHash = `sha256:${'a'.repeat(64)}`
+    const payload = {
+      active_preserve_metrics: ['sta_setup_violation_count', 'sta_hold_violation_count'],
+      active_primary_metric: 'drc_count',
+      alignment_sha256: `sha256:${'b'.repeat(64)}`,
+      episode_id: 'episode-1',
+      objective_sha256: objectiveHash,
+      original_objective: { contract_sha256: objectiveHash },
+      original_primary_metric: 'route_wirelength',
+      recovery_stage: 'drc',
+      schema_version: 'ecos.optimization_progress.v2',
+      violation_counts: {
+        drc_count: 4,
+        sta_hold_violation_count: 0,
+        sta_setup_violation_count: 2,
+      },
+      ...override,
+    }
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({ event: { optimization: payload, type: 'optimization' }, type: 'event' })}\n`,
+    )
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('forwards structured interactions, status, and streaming fields', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

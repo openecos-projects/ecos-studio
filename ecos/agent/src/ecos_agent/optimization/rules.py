@@ -31,6 +31,12 @@ from ecos_agent.optimization.contracts import (
     objective_metric_utility,
 )
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
+from ecos_agent.optimization.objective_alignment import (
+    ObjectiveAlignmentError,
+    OptimizationObjectiveAlignment,
+    build_active_objective,
+    recovery_violation_counts,
+)
 
 _DENSITY_VALUES = tuple(round(0.1 + 0.05 * i, 2) for i in range(14)) + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95)
 _PADDING_VALUES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
@@ -171,12 +177,21 @@ def terminal_candidate_is_promotable(
     comparison: IncumbentComparison | None,
     requested: RequestedKnobValue | None,
     parameter_receipt: ParameterApplicationReceipt | None,
+    objective_alignment: OptimizationObjectiveAlignment | None = None,
+    recovery_active: bool = False,
 ) -> bool:
+    recovery_eligible = False
+    if recovery_active and candidate is not None and objective_alignment is not None:
+        try:
+            recovery_violation_counts(candidate)
+            recovery_eligible = True
+        except ObjectiveAlignmentError:
+            recovery_eligible = False
     return bool(
         candidate is not None
         and execution_outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
         and candidate.schema_version == "ecos.terminal_observation.v3"
-        and candidate.eligible_for_incumbent
+        and (candidate.eligible_for_incumbent or recovery_eligible)
         and comparison is not None
         and comparison.decision
         in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
@@ -193,19 +208,33 @@ def classify_terminal_candidate(
     incumbent: TerminalObservation | None,
     objective: RoutabilityObjectiveContract | None,
     semantic_objective: OptimizationObjectiveContract | None,
-    baseline_eligibility_exempt: bool,
+    objective_alignment: OptimizationObjectiveAlignment | None = None,
     requested: RequestedKnobValue | None,
     parameter_receipt: ParameterApplicationReceipt | None,
 ) -> TerminalCandidateClassification:
     comparison: IncumbentComparison | None = None
+    recovering = bool(
+        objective_alignment is not None
+        and incumbent is not None
+        and semantic_objective is not None
+        and build_active_objective(
+            objective_alignment, semantic_objective, incumbent
+        ).recovery_stage
+        != "original"
+    )
     if candidate is not None and objective is not None:
-        if not candidate.eligible_for_incumbent:
+        if recovering:
+            assert objective_alignment is not None and incumbent is not None
+            comparison = compare_recovery_incumbent(
+                incumbent=incumbent,
+                candidate=candidate,
+                alignment=objective_alignment,
+            )
+        elif not candidate.eligible_for_incumbent:
             comparison = IncumbentComparison(
                 IncumbentDecision.CANDIDATE_INELIGIBLE, None
             )
-        elif incumbent is None or (
-            baseline_eligibility_exempt and not incumbent.eligible_for_incumbent
-        ):
+        elif incumbent is None:
             comparison = IncumbentComparison(IncumbentDecision.INITIALIZED, None)
         else:
             comparison = compare_incumbent(
@@ -237,6 +266,8 @@ def classify_terminal_candidate(
             comparison=comparison,
             requested=requested,
             parameter_receipt=parameter_receipt,
+            objective_alignment=objective_alignment,
+            recovery_active=recovering,
         ),
     )
 
@@ -307,9 +338,13 @@ def _effective_preserve_metrics(
 def freeze_routability_objective(
     baseline: TerminalObservation,
     *,
-    allow_ineligible_baseline: bool = False,
+    objective_alignment: OptimizationObjectiveAlignment | None = None,
 ) -> RoutabilityObjectiveContract:
-    if not allow_ineligible_baseline and not baseline.eligible_for_incumbent:
+    if not baseline.eligible_for_incumbent and (
+        objective_alignment is None
+        or objective_alignment.baseline_terminal_observation_sha256
+        != canonical_sha256(baseline.model_dump(mode="json"))
+    ):
         raise ValueError("baseline terminal observation is not eligible")
     return RoutabilityObjectiveContract(
         references=tuple(
@@ -406,6 +441,34 @@ def compare_incumbent(
         )
         return IncumbentComparison(decision, metric_id)
     return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
+
+
+def compare_recovery_incumbent(
+    *,
+    incumbent: TerminalObservation,
+    candidate: TerminalObservation,
+    alignment: OptimizationObjectiveAlignment,
+) -> IncumbentComparison:
+    try:
+        incumbent_counts = recovery_violation_counts(incumbent)
+        candidate_counts = recovery_violation_counts(candidate)
+    except ObjectiveAlignmentError:
+        return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
+    active = next(
+        (metric for metric in alignment.recovery_order if incumbent_counts[metric]),
+        None,
+    )
+    if active is None:
+        raise ValueError("incumbent has no active recovery metric")
+    for metric in alignment.recovery_order:
+        if metric != active and candidate_counts[metric] > incumbent_counts[metric]:
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric)
+    decision = (
+        IncumbentDecision.CANDIDATE_BETTER
+        if candidate_counts[active] < incumbent_counts[active]
+        else IncumbentDecision.INCUMBENT_RETAINED
+    )
+    return IncumbentComparison(decision, active)
 
 
 def _meaningful_metric_change(reference: float, candidate: float) -> bool:

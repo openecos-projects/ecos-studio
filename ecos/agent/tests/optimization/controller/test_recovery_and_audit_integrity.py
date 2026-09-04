@@ -12,12 +12,15 @@ from .support import (
     _FakeEcc,
     _controller,
     _execution_context,
+    _eligible_terminal,
+    _objective,
     _observation,
     _proposal,
     _retrieval,
     _started,
 )
 
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationEpisodeState
 from ecos_agent.optimization.controller import (
     OptimizationEpisodeController,
@@ -27,6 +30,7 @@ from ecos_agent.optimization.decision_audit import (
     OptimizationDecisionAudit,
     OptimizationDecisionAuditIntegrityError,
 )
+from ecos_agent.optimization.objective_alignment import build_objective_alignment
 
 
 def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(
@@ -89,7 +93,7 @@ def test_recovery_rejects_execution_context_drift_before_approved_execution(
         )
 
 
-@pytest.mark.parametrize("version", ("v2", "v5"))
+@pytest.mark.parametrize("version", ("v2", "v5", "v6"))
 def test_recovery_rejects_a_pre_policy_episode(tmp_path: Path, version: str) -> None:
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
     controller.state_path.rename(
@@ -102,6 +106,47 @@ def test_recovery_rejects_a_pre_policy_episode(tmp_path: Path, version: str) -> 
             executor=_FakeEcc(),
             ledger=controller.ledger,
             clock=_Clock(),
+        )
+
+
+def test_recovery_preserves_alignment_and_rejects_alignment_tampering(
+    tmp_path: Path,
+) -> None:
+    baseline = _eligible_terminal("terminal-baseline")
+    objective = _objective()
+    alignment = build_objective_alignment(objective, baseline)
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(_proposal),
+        _FakeEcc(),
+        incumbent=baseline,
+        objective=objective,
+        objective_alignment=alignment,
+    )
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    assert recovered.objective_alignment == alignment
+
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    state["objective_alignment"]["drc_count"] = 1
+    state["state_sha256"] = canonical_sha256(
+        {key: value for key, value in state.items() if key != "state_sha256"}
+    )
+    controller.state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(OptimizationEpisodeControllerError, match="state hash"):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context=_execution_context(),
         )
 
 

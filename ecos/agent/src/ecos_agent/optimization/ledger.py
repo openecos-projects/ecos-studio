@@ -36,6 +36,7 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
+from ecos_agent.optimization.objective_alignment import ActiveOptimizationObjective
 from ecos_agent.optimization.rules import IncumbentDecision
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
@@ -128,6 +129,12 @@ class OptimizationInterventionStart(_LedgerModel):
     objective_contract_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    objective_alignment_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    active_objective: ActiveOptimizationObjective | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     proposal_action: ProposalAction | None = None
     requested: RequestedKnobValue | None = None
     target_step: str = "place"
@@ -151,6 +158,7 @@ class OptimizationInterventionStart(_LedgerModel):
         "parent_manifest_sha256",
         "environment_sha256",
         "objective_contract_sha256",
+        "objective_alignment_sha256",
     )
     @classmethod
     def validate_hash(cls, value: str | None) -> str | None:
@@ -169,6 +177,14 @@ class OptimizationInterventionStart(_LedgerModel):
         if self.proposal_action is not None and self.requested is not None:
             if self.proposal_action.knob_id != self.requested.knob_id:
                 raise ValueError("ledger proposal action and requested knob must match")
+        if (self.objective_alignment_sha256 is None) != (self.active_objective is None):
+            raise ValueError("ledger objective alignment and active objective must be paired")
+        if (
+            self.active_objective is not None
+            and self.active_objective.alignment_contract_sha256
+            != self.objective_alignment_sha256
+        ):
+            raise ValueError("ledger active objective alignment does not match")
         if (
             not self.target_step
             or self.end_step != "Harden"
@@ -195,6 +211,18 @@ class OptimizationTerminalOutcome(_LedgerModel):
     parameter_application_receipt_id: str | None = None
     incumbent_decision: IncumbentDecision | None = None
     decisive_metric: SelectionMetric | None = None
+    objective_alignment_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    active_objective: ActiveOptimizationObjective | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    next_active_objective: ActiveOptimizationObjective | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    recovery_transition: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     outcome_details_sha256: str
     target_step: str = "place"
     end_step: str = "Harden"
@@ -210,6 +238,26 @@ class OptimizationTerminalOutcome(_LedgerModel):
                 raise ValueError("terminal observation hash is invalid")
         if self.incumbent_decision is None and self.decisive_metric is not None:
             raise ValueError("decisive metric requires an incumbent decision")
+        aligned = (self.active_objective, self.next_active_objective)
+        if self.objective_alignment_sha256 is None:
+            if any(item is not None for item in aligned) or self.recovery_transition is not None:
+                raise ValueError("terminal active objective requires objective alignment")
+        elif any(
+            item is None
+            or item.alignment_contract_sha256 != self.objective_alignment_sha256
+            for item in aligned
+        ):
+            raise ValueError("terminal active objective alignment does not match")
+        expected_transition = (
+            f"{self.active_objective.recovery_stage}_to_{self.next_active_objective.recovery_stage}"
+            if self.active_objective is not None
+            and self.next_active_objective is not None
+            and self.active_objective.recovery_stage
+            != self.next_active_objective.recovery_stage
+            else None
+        )
+        if self.recovery_transition != expected_transition:
+            raise ValueError("terminal recovery transition does not match")
         allowed_decisions = {
             OptimizationOutcomeKind.EXECUTION_SUCCEEDED: {
                 IncumbentDecision.INITIALIZED
@@ -301,6 +349,7 @@ class OptimizationTerminalOutcome(_LedgerModel):
         "outcome_details_sha256",
         "parameter_card_sha256",
         "materialization_receipt_sha256",
+        "objective_alignment_sha256",
     )
     @classmethod
     def validate_hash(cls, value: str | None) -> str | None:

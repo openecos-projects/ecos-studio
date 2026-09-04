@@ -12,6 +12,7 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
+    OptimizationObjectiveContract,
     OptimizationObjectiveProposal,
     SignoffGates,
     TerminalObservation,
@@ -19,6 +20,7 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.controller import CandidateExecutionReceipt
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.objective_alignment import build_objective_alignment
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import (
     OptimizationRuntimeContext,
@@ -33,6 +35,7 @@ from ecos_agent.optimization.runtime import (
     _wait_for_terminal_receipt,
     create_optimization_runner,
 )
+from tests.optimization.controller.support import _eligible_terminal
 
 _STAGES = (
     "Floorplan",
@@ -71,19 +74,7 @@ def _write_flow(tmp_path: Path, *, states: dict[str, str] | None = None) -> None
 
 
 def _terminal() -> TerminalObservation:
-    return TerminalObservation(
-        observation_id="terminal-Harden",
-        evidence_manifest_sha256=_HASH,
-        evidence_valid=True,
-        harden_artifacts_complete=True,
-        signoff_gates=SignoffGates.all(GateResult.PASS),
-        metrics={
-            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 0,
-            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 0,
-            ObjectiveMetric.ROUTE_WIRELENGTH: 100,
-        },
-        timing_guardrail={metric: 0 for metric in TimingMetric},
-    )
+    return _eligible_terminal("terminal-Harden")
 
 
 def _semantic_objective() -> dict[str, object]:
@@ -97,6 +88,16 @@ def _semantic_objective() -> dict[str, object]:
             ),
             rationale_summary="Keep routing constraints while reducing wirelength.",
         ),
+    ).model_dump(mode="json")
+
+
+def _alignment(
+    objective: OptimizationObjectiveContract | dict[str, object],
+    baseline: TerminalObservation | None = None,
+) -> dict[str, object]:
+    contract = OptimizationObjectiveContract.model_validate(objective)
+    return build_objective_alignment(
+        contract, baseline or _terminal()
     ).model_dump(mode="json")
 
 
@@ -134,6 +135,31 @@ def test_optimization_runtime_rejects_missing_primary_metric(
                 "workspace": str(tmp_path),
                 "episode_id": "episode-missing-objective",
                 "objective": objective.model_dump(mode="json"),
+                "objective_alignment": _alignment(objective),
+            },
+            planner=object(),
+        )
+
+
+def test_runtime_rejects_baseline_drift_after_authorization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    objective = OptimizationObjectiveContract.model_validate(_semantic_objective())
+    approved = _terminal()
+    changed_metrics = dict(approved.metrics)
+    changed_metrics[ObjectiveMetric.ROUTE_WIRELENGTH] = 99
+    monkeypatch.setattr(
+        "ecos_agent.optimization.runtime.build_terminal_observation",
+        lambda _path: approved.model_copy(update={"metrics": changed_metrics}),
+    )
+
+    with pytest.raises(OptimizationRuntimeError, match="current baseline"):
+        create_optimization_runner(
+            {
+                "workspace": str(tmp_path),
+                "episode_id": "episode-drifted",
+                "objective": objective.model_dump(mode="json"),
+                "objective_alignment": _alignment(objective, approved),
             },
             planner=object(),
         )
@@ -302,6 +328,7 @@ def test_runtime_context_rejects_unknown_and_coerced_fields(tmp_path: Path) -> N
         "episode_id": "episode-1",
         "objective": _semantic_objective(),
     }
+    payload["objective_alignment"] = _alignment(payload["objective"])
 
     context = OptimizationRuntimeContext.model_validate(payload)
 
@@ -435,6 +462,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
             "workspace": str(workspace),
             "episode_id": "episode-new",
             "objective": _semantic_objective(),
+            "objective_alignment": _alignment(_semantic_objective()),
             "reference_runtime_seconds": 12.0,
             "agent_mode": "llm_no_knowledge",
             "knowledge_case_shots": 0,
@@ -447,7 +475,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     episode_root = workspace / ".agent" / "optimization" / "episode-new"
     assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()
     state = json.loads(
-        (episode_root / "optimization-episode-state.v6.json").read_text(
+        (episode_root / "optimization-episode-state.v7.json").read_text(
             encoding="utf-8"
         )
     )

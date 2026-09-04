@@ -69,7 +69,9 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
         provider_factory=FakeProvider,
     )
 
-    assert captured["baseline_eligibility_exempt"] is True
+    assert captured["objective_alignment"]["alignment_contract_sha256"].startswith(
+        "sha256:"
+    )
     assert captured["receipt_aware_planning"] is True
     assert captured["agent_mode"] == "llm_no_knowledge"
     assert captured["knowledge_case_shots"] == 0

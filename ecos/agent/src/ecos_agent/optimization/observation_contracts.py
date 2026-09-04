@@ -303,6 +303,23 @@ class TerminalObservation(_ContractModel):
             ]
             if len(matches) == 1:
                 values[metric_id] = matches[0].value
+        for metric_id in (
+            ObjectiveMetric.DRC_COUNT,
+            ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
+            ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
+        ):
+            matches = [
+                item
+                for item in self.evaluation_metrics
+                if item.metric_id == metric_id.value
+                and item.corner is None
+                and item.unit == "count"
+                and item.category == EvaluationMetricCategory.ELIGIBILITY
+                and item.role == EvaluationMetricRole.GATE
+                and item.direction == EvaluationMetricDirection.EXACT
+            ]
+            if len(matches) == 1:
+                values[metric_id] = matches[0].value
         return values
 
     @property

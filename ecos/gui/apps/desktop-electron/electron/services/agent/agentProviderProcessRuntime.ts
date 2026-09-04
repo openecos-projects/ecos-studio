@@ -765,6 +765,58 @@ function readOptimizationPayload(
   }
   const action = readOptimizationAction(record.action)
   const requested = readOptimizationRequested(record.requested)
+  const originalObjective =
+    record.original_objective &&
+    typeof record.original_objective === 'object' &&
+    !Array.isArray(record.original_objective)
+      ? (record.original_objective as Record<string, unknown>)
+      : null
+  const activePreserveMetrics =
+    Array.isArray(record.active_preserve_metrics) &&
+    record.active_preserve_metrics.length <= 2 &&
+    record.active_preserve_metrics.every(
+      (item) => typeof item === 'string' && item.length > 0 && item.length <= 128,
+    ) &&
+    new Set(record.active_preserve_metrics).size === record.active_preserve_metrics.length
+      ? (record.active_preserve_metrics as string[])
+      : null
+  const counts = readRecord(record.violation_counts)
+  const violationCounts =
+    counts &&
+    typeof counts.drc_count === 'number' &&
+    Number.isSafeInteger(counts.drc_count) &&
+    counts.drc_count >= 0 &&
+    typeof counts.sta_setup_violation_count === 'number' &&
+    Number.isSafeInteger(counts.sta_setup_violation_count) &&
+    counts.sta_setup_violation_count >= 0 &&
+    typeof counts.sta_hold_violation_count === 'number' &&
+    Number.isSafeInteger(counts.sta_hold_violation_count) &&
+    counts.sta_hold_violation_count >= 0
+      ? {
+          drc_count: counts.drc_count,
+          sta_setup_violation_count: counts.sta_setup_violation_count,
+          sta_hold_violation_count: counts.sta_hold_violation_count,
+        }
+      : null
+  const isV2 =
+    record.schema_version === 'ecos.optimization_authorization.v2' ||
+    record.schema_version === 'ecos.optimization_progress.v2'
+  const hashPattern = /^sha256:[a-f0-9]{64}$/
+  const recoveryStages = new Set(['drc', 'setup', 'hold', 'original'])
+  if (
+    isV2 &&
+    (!hashPattern.test(String(record.objective_sha256)) ||
+      !hashPattern.test(String(record.alignment_sha256)) ||
+      !originalObjective ||
+      originalObjective.contract_sha256 !== record.objective_sha256 ||
+      typeof record.original_primary_metric !== 'string' ||
+      typeof record.active_primary_metric !== 'string' ||
+      !activePreserveMetrics ||
+      !violationCounts ||
+      !recoveryStages.has(String(record.recovery_stage)))
+  ) {
+    return null
+  }
   return {
     schema_version: record.schema_version,
     episode_id: record.episode_id,
@@ -772,6 +824,28 @@ function readOptimizationPayload(
     ...(typeof record.state === 'string' ? { state: record.state } : {}),
     ...(typeof record.objective_sha256 === 'string'
       ? { objective_sha256: record.objective_sha256 }
+      : {}),
+    ...(typeof record.alignment_sha256 === 'string'
+      ? { alignment_sha256: record.alignment_sha256 }
+      : {}),
+    ...(originalObjective ? { original_objective: originalObjective } : {}),
+    ...(typeof record.original_primary_metric === 'string'
+      ? { original_primary_metric: record.original_primary_metric }
+      : {}),
+    ...(typeof record.active_primary_metric === 'string'
+      ? { active_primary_metric: record.active_primary_metric }
+      : {}),
+    ...(activePreserveMetrics ? { active_preserve_metrics: activePreserveMetrics } : {}),
+    ...(violationCounts ? { violation_counts: violationCounts } : {}),
+    ...(typeof record.recovery_stage === 'string'
+      ? { recovery_stage: record.recovery_stage }
+      : {}),
+    ...(typeof record.recovery_transition === 'string' ||
+    record.recovery_transition === null
+      ? { recovery_transition: record.recovery_transition as string | null }
+      : {}),
+    ...(typeof record.recovery_incomplete === 'boolean'
+      ? { recovery_incomplete: record.recovery_incomplete }
       : {}),
     ...(typeof record.primary_metric === 'string'
       ? { primary_metric: record.primary_metric }

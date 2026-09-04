@@ -5,9 +5,43 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from ecos_agent.optimization.contracts import OptimizationEpisodeState
+import pytest
+
+from ecos_agent.optimization.contracts import GateResult, OptimizationEpisodeState
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.gui.provider import EcosAgentProvider
+from tests.optimization.controller.support import _eligible_terminal
+
+
+def _baseline(*, drc: int = 0, setup: int = 0, hold: int = 0):
+    terminal = _eligible_terminal("terminal-Harden")
+    counts = {
+        "drc_count": drc,
+        "sta_setup_violation_count": setup,
+        "sta_hold_violation_count": hold,
+    }
+    evaluation = tuple(
+        item.model_copy(update={"value": counts.get(item.metric_id, item.value)})
+        for item in terminal.evaluation_metrics
+    )
+    gates = terminal.signoff_gates.model_copy(
+        update={
+            "drc_clean": GateResult.PASS if drc == 0 else GateResult.FAIL,
+            "sta_setup_closed": GateResult.PASS if setup == 0 else GateResult.FAIL,
+            "sta_hold_closed": GateResult.PASS if hold == 0 else GateResult.FAIL,
+        }
+    )
+    return terminal.model_copy(
+        update={"evaluation_metrics": evaluation, "signoff_gates": gates}
+    )
+
+
+@pytest.fixture(autouse=True)
+def _terminal_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ecos_agent.gui.provider_optimization.build_terminal_observation",
+        lambda _workspace: _baseline(),
+    )
 
 
 def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
@@ -440,10 +474,103 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
         time.sleep(0.01)
 
     assert runner_contexts[0]["objective"] == session.optimization_objective
-    assert runner_contexts[0]["baseline_eligibility_exempt"] is True
+    assert runner_contexts[0]["objective_alignment"] == (
+        session.optimization_objective_alignment
+    )
     progress = next(event["optimization"] for event in events if event["type"] == "optimization")
     assert progress["objective_sha256"] == session.optimization_objective_sha256
     assert progress["primary_metric"] == "route_wirelength"
+
+
+def test_gui_authorizes_recovery_then_original_objective_with_one_confirmation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "ecos_agent.gui.provider_optimization.build_terminal_observation",
+        lambda _workspace: _baseline(drc=4, setup=2),
+    )
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda context, _planner: (
+            contexts.append(context) or _CompletedRunner()
+        ),
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+
+    authorization = next(
+        event["optimization"]
+        for event in events
+        if event.get("optimization", {}).get("schema_version")
+        == "ecos.optimization_authorization.v2"
+    )
+    assert authorization["original_primary_metric"] == "route_wirelength"
+    assert authorization["active_primary_metric"] == "drc_count"
+    assert authorization["recovery_stage"] == "drc"
+    assert authorization["violation_counts"] == {
+        "drc_count": 4,
+        "sta_setup_violation_count": 2,
+        "sta_hold_violation_count": 0,
+    }
+
+    _send(provider, session_id, "1")
+    deadline = time.monotonic() + 2
+    while (
+        provider.sessions[session_id].optimization_thread is not None
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+
+    assert len(contexts) == 1
+    assert contexts[0]["objective_alignment"]["alignment_contract_sha256"] == (
+        authorization["alignment_sha256"]
+    )
+
+
+def test_gui_blocks_authorization_when_baseline_evidence_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "ecos_agent.gui.provider_optimization.build_terminal_observation",
+        lambda _workspace: _baseline().model_copy(
+            update={"evaluation_metrics_complete": False}
+        ),
+    )
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: _CompletedRunner(),
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+
+    assert provider.sessions[session_id].optimization_phase == "unavailable"
+    assert not any(
+        event.get("optimization", {}).get("schema_version")
+        == "ecos.optimization_authorization.v2"
+        for event in events
+    )
+    assert any(
+        event["type"] == "error"
+        and "Unable to align optimization objective with baseline" in str(event["text"])
+        for event in events
+    )
 
 
 def test_gui_optimization_objective_parse_failure_returns_to_operation(tmp_path: Path) -> None:

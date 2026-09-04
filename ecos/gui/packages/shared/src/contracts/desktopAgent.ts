@@ -430,24 +430,37 @@ export type DesktopAgentRunStatus =
   | 'error'
 
 export interface DesktopAgentOptimizationPayload {
+  active_preserve_metrics?: string[]
+  active_primary_metric?: string
   action?: { direction: string; knob_id: string } | null
+  alignment_sha256?: string
   decisive_metric?: string | null
   episode_id: string
   execution_state?: string | null
   incumbent_candidate_root_ref?: string | null
   incumbent_decision?: string | null
   objective_sha256?: string
+  original_objective?: Record<string, unknown>
+  original_primary_metric?: string
   planning_state?: string | null
   primary_metric?: string
   proposal_decision?: string | null
   proposal_reason?: string | null
   rejection_reason?: string | null
   requested?: { knob_id: string; value: boolean | number } | null
+  recovery_incomplete?: boolean
+  recovery_stage?: string
+  recovery_transition?: string | null
   schema_version: string
   state?: string
   turn_count?: number
   turn?: number
   workspace?: string
+  violation_counts?: {
+    drc_count: number
+    sta_hold_violation_count: number
+    sta_setup_violation_count: number
+  }
 }
 
 export type DesktopAgentActivityStatus =

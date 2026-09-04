@@ -55,7 +55,7 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _STORE_FILE = "task-memory.v1.jsonl"
 _SCOPE_FILE = "optimization-task-memory-scope.v1.json"
-_STATE_FILE = "optimization-episode-state.v6.json"
+_STATE_FILE = "optimization-episode-state.v7.json"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MAX_RECORDS = 6
@@ -542,13 +542,16 @@ def _verified_state(path: Path) -> dict[str, object]:
 def _verify_source_trace(scope, state, ledger, decisions) -> None:
     objective = state.get("objective")
     if (
-        state.get("schema_version") != "ecos.optimization_episode_state.v6"
+        state.get("schema_version") != "ecos.optimization_episode_state.v7"
         or state.get("episode_id") != scope.episode_id
         or state.get("checkpoint_id") != scope.checkpoint_id
         or state.get("parent_manifest_sha256") != scope.workspace_manifest_sha256
         or state.get("task_memory_scope_sha256") != scope.scope_sha256
         or not isinstance(objective, dict)
         or objective.get("contract_sha256") != scope.objective_contract_sha256
+        or not isinstance(state.get("objective_alignment"), dict)
+        or state["objective_alignment"].get("objective_contract_sha256")
+        != scope.objective_contract_sha256
         or state.get("ledger_event_count") != len(ledger.entries)
         or state.get("ledger_chain_head_sha256") != ledger.chain_head_sha256
         or state.get("decision_audit_event_count") != len(decisions.entries)
