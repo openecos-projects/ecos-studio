@@ -970,7 +970,11 @@ struct CanvasGpu3dResources {
 }
 
 impl CanvasGpu3dResources {
-    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Option<Self> {
+        if device.limits().max_storage_buffers_per_shader_stage < 1 {
+            log::warn!("GPU device lacks storage buffers; 3D GPU canvas disabled");
+            return None;
+        }
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Canvas 3D Uniform Buffer"),
             size: std::mem::size_of::<CanvasUniform3d>() as u64,
@@ -1287,7 +1291,7 @@ impl CanvasGpu3dResources {
             anisotropy_clamp: 16,
             ..Default::default()
         });
-        Self {
+        Some(Self {
             scene_pipeline,
             grid_pipeline,
             grid_vertex_buffer,
@@ -1306,7 +1310,7 @@ impl CanvasGpu3dResources {
             instance_count: 0,
             offscreen: None,
             bake_target: None,
-        }
+        })
     }
 
     fn ensure_offscreen(&mut self, device: &wgpu::Device, width: u32, height: u32) {
@@ -1472,10 +1476,17 @@ impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
         egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if callback_resources.get::<CanvasGpu3dResources>().is_none() {
-            callback_resources.insert(CanvasGpu3dResources::new(device, self.target_format));
+        if device.limits().max_storage_buffers_per_shader_stage < 1 {
+            return Vec::new();
         }
-        let resources: &mut CanvasGpu3dResources = callback_resources.get_mut().unwrap();
+        if callback_resources.get::<CanvasGpu3dResources>().is_none() {
+            if let Some(res) = CanvasGpu3dResources::new(device, self.target_format) {
+                callback_resources.insert(res);
+            }
+        }
+        let Some(resources) = callback_resources.get_mut::<CanvasGpu3dResources>() else {
+            return Vec::new();
+        };
         let width = self.target_pixels[0].max(1);
         let height = self.target_pixels[1].max(1);
         resources.ensure_offscreen(device, width, height);
@@ -1536,7 +1547,9 @@ impl egui_wgpu::CallbackTrait for CanvasGpu3dCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        let resources: &CanvasGpu3dResources = callback_resources.get().unwrap();
+        let Some(resources) = callback_resources.get::<CanvasGpu3dResources>() else {
+            return;
+        };
         let Some(offscreen) = resources.offscreen.as_ref() else {
             return;
         };
@@ -1930,7 +1943,11 @@ mod tests {
         let Ok((device, queue)) = device_result else {
             return;
         };
-        let mut resources = CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb);
+        let Some(mut resources) =
+            CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
+        else {
+            return;
+        };
         resources.ensure_offscreen(&device, 800, 600);
         let instances = vec![
             GpuShapeInstance3d {
@@ -2031,7 +2048,11 @@ mod tests {
         let Ok((device, queue)) = device_result else {
             return;
         };
-        let mut resources = CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb);
+        let Some(mut resources) =
+            CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
+        else {
+            return;
+        };
         resources.ensure_bake_target(&device);
         let bake_target = resources.bake_target.as_ref().unwrap();
         assert_eq!(bake_target.size, 2048);
@@ -2057,7 +2078,11 @@ mod tests {
         let Ok((device, _queue)) = device_result else {
             return;
         };
-        let resources = CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb);
+        let Some(resources) =
+            CanvasGpu3dResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb)
+        else {
+            return;
+        };
         assert_eq!(resources.grid_vertex_count, 404);
     }
 }
