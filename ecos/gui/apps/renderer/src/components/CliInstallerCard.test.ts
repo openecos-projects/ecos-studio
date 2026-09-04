@@ -136,7 +136,126 @@ describe('CliInstallerCard', () => {
     const bar = wrapper.find('[role="progressbar"]')
     expect(bar.exists()).toBe(true)
     expect(bar.attributes('aria-valuenow')).toBe('42')
+    expect(bar.attributes('aria-label')).toBe('ECC CLI install progress')
     expect(wrapper.text()).toContain('Downloading ecc')
+  })
+
+  it('shows progress for user-initiated installs and disables the buttons', async () => {
+    mocks.fetchStatus.mockResolvedValue(
+      baseState({
+        status: 'not-installed',
+        installedVersion: null,
+        source: null,
+        versionDir: null,
+        shimPath: null,
+        selfCheck: null,
+      }),
+    )
+    let releaseInstall: (() => void) | null = null
+    mocks.installCli.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseInstall = () => resolve(readyState())
+        }),
+    )
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+
+    const installButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Install')!
+    await installButton.trigger('click')
+
+    mocks.emitProgress({
+      id: 'job-2',
+      resource_id: 'tool:ecc',
+      action: 'install',
+      phase: 'downloading',
+      progress: 0.3,
+      message: 'Downloading ecc v0.1.0-alpha.11...',
+      error: null,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(true)
+    expect(
+      wrapper
+        .findAll('button')
+        .every((button) => button.attributes('disabled') !== undefined),
+    ).toBe(true)
+
+    releaseInstall!()
+    // The card refreshes from the service, which now reports the finished install.
+    mocks.fetchStatus.mockResolvedValue(readyState())
+    await flushPromises()
+    expect(wrapper.text()).toContain('Ready')
+  })
+
+  it('refreshes status when a terminal progress event arrives', async () => {
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+    expect(mocks.fetchStatus).toHaveBeenCalledTimes(1)
+
+    mocks.emitProgress({
+      id: 'job-3',
+      resource_id: 'tool:ecc',
+      action: 'install',
+      phase: 'done',
+      progress: 1,
+      message: 'installed',
+      error: null,
+    })
+    await flushPromises()
+
+    expect(mocks.fetchStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
+  })
+
+  it('unsubscribes from progress events on unmount', async () => {
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+    wrapper.unmount()
+
+    const callsBefore = mocks.fetchStatus.mock.calls.length
+    mocks.emitProgress({
+      id: 'job-4',
+      resource_id: 'tool:ecc',
+      action: 'install',
+      phase: 'downloading',
+      progress: 0.5,
+      message: 'late event',
+      error: null,
+    })
+    await flushPromises()
+    expect(mocks.fetchStatus.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('offers the shim install in development mode only while it is missing', async () => {
+    mocks.fetchStatus.mockResolvedValue(
+      baseState({
+        status: 'dev-wrapper',
+        source: null,
+        versionDir: null,
+        shimPath: null,
+        selfCheck: null,
+      }),
+    )
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Install')
+    expect(
+      wrapper.findAll('button').some((button) => button.text() === 'Uninstall'),
+    ).toBe(false)
+
+    mocks.fetchStatus.mockResolvedValue(baseState({ status: 'dev-wrapper' }))
+    const installed = mount(CliInstallerCard)
+    await flushPromises()
+    expect(
+      installed.findAll('button').some((button) => button.text() === 'Uninstall'),
+    ).toBe(true)
+    expect(
+      installed.findAll('button').some((button) => button.text() === 'Reinstall'),
+    ).toBe(false)
   })
 
   it('surfaces failures with a retry action', async () => {

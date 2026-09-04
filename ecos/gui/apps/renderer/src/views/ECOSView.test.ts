@@ -344,13 +344,13 @@ function loadECOSViewComponent(vue: VueRuntime) {
       }
     }
     if (id === '@/components/CliInstallerCard.vue') {
-      // Guidance card is irrelevant to the home layout assertions.
+      // Guidance card is irrelevant to the home layout assertions. The
+      // transpiled import applies CJS interop itself, so return the
+      // component (not a nested default export).
       return {
-        default: {
-          name: 'CliInstallerCard',
-          props: ['showOnlyWhenActionNeeded'],
-          render: () => null,
-        },
+        name: 'CliInstallerCard',
+        props: ['showOnlyWhenActionNeeded'],
+        render: () => null,
       }
     }
     if (id === '../composables/useWorkspace') {

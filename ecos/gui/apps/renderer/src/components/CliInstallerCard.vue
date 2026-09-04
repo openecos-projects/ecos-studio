@@ -29,9 +29,10 @@
     </dl>
 
     <div
-      v-if="showProgress"
+      v-if="activeJob"
       class="cli-installer__progress"
       role="progressbar"
+      aria-label="ECC CLI install progress"
       :aria-valuenow="progressPercent"
       aria-valuemin="0"
       aria-valuemax="100"
@@ -55,7 +56,7 @@
         v-if="showInstall"
         type="button"
         class="cli-installer__action cli-installer__action--primary"
-        :disabled="busy"
+        :disabled="actionsDisabled"
         @click="runInstall"
       >
         {{ installLabel }}
@@ -64,7 +65,7 @@
         v-if="showUninstall"
         type="button"
         class="cli-installer__action"
-        :disabled="busy"
+        :disabled="actionsDisabled"
         @click="runUninstall"
       >
         Uninstall
@@ -74,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   fetchCliInstallerStatus,
   installEccCli,
@@ -92,8 +93,10 @@ const props = defineProps<{
 }>()
 
 const state = ref<CliInstallState | null>(null)
-const progress = ref<CliInstallerProgressEvent | null>(null)
+/** Latest non-terminal progress event; cleared on done/error/cancelled. */
+const activeJob = ref<CliInstallerProgressEvent | null>(null)
 const busy = ref(false)
+let unsubscribe: (() => void) | null = null
 
 const terminalPhases = new Set(['done', 'error', 'cancelled'])
 
@@ -127,7 +130,7 @@ const message = computed(() => {
     case 'not-installed':
       return 'Install the ecos-ecc host command to run ECC from any external terminal.'
     case 'installing':
-      return progress.value?.message ?? 'Installing the ECC bundle...'
+      return activeJob.value?.message ?? 'Installing the ECC bundle...'
     case 'ready':
       return 'ecos-ecc is available from any external terminal.'
     case 'self-check-failed':
@@ -142,11 +145,13 @@ const message = computed(() => {
 const visible = computed(() => {
   if (!props.showOnlyWhenActionNeeded) return true
   const status = state.value?.status
+  const needsShim = status === 'dev-wrapper' && !state.value?.shimPath
   return (
     status === 'not-installed' ||
     status === 'installing' ||
     status === 'failed' ||
-    status === 'self-check-failed'
+    status === 'self-check-failed' ||
+    needsShim
   )
 })
 
@@ -161,7 +166,8 @@ const showInstall = computed(() => {
     status === 'failed' ||
     status === 'installing' ||
     status === 'self-check-failed' ||
-    status === 'ready'
+    status === 'ready' ||
+    (status === 'dev-wrapper' && !state.value?.shimPath)
   )
 })
 
@@ -171,31 +177,33 @@ const installLabel = computed(() =>
 
 const showUninstall = computed(() => {
   const status = state.value?.status
-  return status === 'ready' || status === 'self-check-failed' || status === 'dev-wrapper'
+  if (status === 'dev-wrapper') return Boolean(state.value?.shimPath)
+  return status === 'ready' || status === 'self-check-failed'
 })
 
-const showProgress = computed(
-  () => state.value?.status === 'installing' && progress.value !== null,
-)
-
 const progressPercent = computed(() =>
-  Math.min(100, Math.max(0, Math.round((progress.value?.progress ?? 0) * 100))),
+  Math.min(100, Math.max(0, Math.round((activeJob.value?.progress ?? 0) * 100))),
 )
 
-const progressText = computed(() => progress.value?.message ?? 'Working...')
+const progressText = computed(() => activeJob.value?.message ?? 'Working...')
+
+/** Buttons stay disabled for externally observed installs too. */
+const actionsDisabled = computed(() => busy.value || state.value?.status === 'installing')
 
 async function refreshStatus(): Promise<void> {
   try {
-    state.value = await fetchCliInstallerStatus()
+    const next = await fetchCliInstallerStatus()
+    if (next) state.value = next
   } catch {
-    // Bridge unavailable (e.g. tests or web preview); leave state unset so
-    // the card stays hidden.
-    state.value = null
+    // Bridge unavailable; keep the last known state instead of flickering.
   }
 }
 
 async function runInstall(): Promise<void> {
   busy.value = true
+  if (state.value) {
+    state.value = { ...state.value, status: 'installing', error: null }
+  }
   try {
     state.value = await installEccCli()
   } catch (error) {
@@ -216,6 +224,13 @@ async function runUninstall(): Promise<void> {
   busy.value = true
   try {
     state.value = await uninstallEccCli()
+  } catch (error) {
+    if (state.value) {
+      state.value = {
+        ...state.value,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
   } finally {
     busy.value = false
     await refreshStatus()
@@ -224,13 +239,38 @@ async function runUninstall(): Promise<void> {
 
 onMounted(() => {
   void refreshStatus()
-  subscribeCliInstallerProgress((event) => {
-    progress.value = event
+  unsubscribe = subscribeCliInstallerProgress((event) => {
     if (terminalPhases.has(event.phase)) {
+      activeJob.value = null
       void refreshStatus()
+      return
+    }
+    // Startup acquisition (or another window) may be installing without any
+    // local action: reflect it immediately.
+    activeJob.value = event
+    if (state.value?.status !== 'ready') {
+      state.value = { ...(state.value ?? emptyState()), status: 'installing' }
     }
   })
 })
+
+onUnmounted(() => {
+  unsubscribe?.()
+  unsubscribe = null
+})
+
+function emptyState(): CliInstallState {
+  return {
+    status: 'installing',
+    expectedVersion: '',
+    installedVersion: null,
+    source: null,
+    versionDir: null,
+    shimPath: null,
+    selfCheck: null,
+    error: null,
+  }
+}
 </script>
 
 <style scoped>

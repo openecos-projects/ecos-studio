@@ -2361,8 +2361,18 @@ export function registerIpc(
     })
     try {
       await installer.ensureBundle()
-      await installer.installShim().catch(() => undefined)
-      return await installer.status()
+      let shimError: string | null = null
+      try {
+        await installer.installShim()
+      } catch (error) {
+        // The bundle itself is fine; surface the shim failure (including the
+        // manual-shim remediation) instead of reporting success.
+        shimError = error instanceof Error ? error.message : String(error)
+      }
+      const status = await installer.status()
+      return shimError && status.status === 'ready'
+        ? { ...status, error: shimError }
+        : status
     } finally {
       unsubscribe()
     }
