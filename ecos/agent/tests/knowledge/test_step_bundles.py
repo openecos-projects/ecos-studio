@@ -9,8 +9,6 @@ import pytest
 
 from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, RetrievalConfig
 from ecos_agent.gui.provider import EcosAgentProvider
-from ecos_agent.optimization.contracts import OptimizationKnob
-from ecos_agent.optimization.parameters.semantics import load_parameter_cards
 from ecos_agent.knowledge.step import (
     STEP_KNOWLEDGE_SPECS,
     StepKnowledge,
@@ -67,24 +65,6 @@ def test_sizer_knowledge_describes_only_verified_wrapper_orchestration() -> None
     for entity in catalog["entities"]:
         if entity["kind"] == "algorithm":
             assert {item["source_id"] for item in entity["evidence"]} <= allowed_sources
-
-
-def test_cts_max_fanout_card_keeps_unobserved_activation_unknown() -> None:
-    card = load_parameter_cards()[OptimizationKnob.CTS_MAX_FANOUT]
-
-    assert card.stage == "CTS"
-    assert card.surface.file == "config/cts_ecc.json"
-    assert card.runtime_semantics is not None
-    assert [rule.model_dump(mode="json") for rule in card.runtime_semantics.invalidation_rules] == [
-        {
-            "kind": "no_consumer_observation",
-            "result": "unknown",
-            "source_span_ids": ["icts.max_fanout.runtime_report"],
-        }
-    ]
-    assert "without a native consumer observation, activation remains unknown" in (
-        card.runtime_semantics.mechanism
-    )
 
 
 def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path: Path) -> None:

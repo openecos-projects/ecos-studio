@@ -22,7 +22,6 @@ CANDIDATE_EXECUTION_SCOPE = "full_flow"
 _CANDIDATE_TARGET_STEPS = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",
-    OptimizationKnob.CTS_MAX_FANOUT: "CTS",
     OptimizationKnob.TARGET_DENSITY: "place",
     OptimizationKnob.TARGET_OVERFLOW: "place",
     OptimizationKnob.CELL_PADDING_X: "place",

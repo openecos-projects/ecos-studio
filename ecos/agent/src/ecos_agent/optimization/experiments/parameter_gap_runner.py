@@ -1,4 +1,4 @@
-"""Run the preregistered eight-knob requested/effective/activation gap screen."""
+"""Run the preregistered seven-knob requested/effective/activation gap screen."""
 
 from __future__ import annotations
 

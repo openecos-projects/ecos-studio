@@ -541,7 +541,6 @@ def test_pilot_context_uses_complete_domain_fingerprint(
     current_values = {
         "floorplan.core_util": 0.5,
         "floorplan.aspect_ratio": 1.0,
-        "cts.max_fanout": 24,
         "place.target_density": 0.6,
         "place.target_overflow": 0.1,
         "place.cell_padding_x": 1,

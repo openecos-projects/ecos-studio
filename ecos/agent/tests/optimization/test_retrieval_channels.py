@@ -65,7 +65,6 @@ def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels
     assert tuple(stage.value for stage in request.action_stages) == (
         "Floorplan",
         "place",
-        "CTS",
     )
     assert request.allowed_knobs == tuple(OptimizationKnob)
     assert request.observed_metric_ids == tuple(sorted(observation.metrics))
@@ -80,7 +79,7 @@ def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels
         for channel in result.channels
         if channel.enabled
     )
-    assert tool.calls[0][1] == ("floorplan", "place", "cts")
+    assert tool.calls[0][1] == ("floorplan", "place")
     assert general.calls[0][1] == ("floorplan", "place")
     assert "0.88" not in tool.calls[0][0]
     assert "5243" not in general.calls[0][0]

@@ -178,7 +178,7 @@ def test_design_id_comes_from_workspace_parameters_and_fails_closed(
         _design_id(tmp_path)
 
 
-def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> None:
+def test_current_values_read_the_seven_runtime_knob_surfaces(tmp_path: Path) -> None:
     (tmp_path / "home").mkdir()
     (tmp_path / "config").mkdir()
     (tmp_path / "home" / "parameters.json").write_text(
@@ -201,9 +201,6 @@ def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> 
         ),
         encoding="utf-8",
     )
-    (tmp_path / "config" / "cts_ecc.json").write_text(
-        json.dumps({"max_fanout": 24}), encoding="utf-8"
-    )
     place_log = tmp_path / "place_dreamplace/log/place.log"
     place_log.parent.mkdir(parents=True)
     place_log.write_text(
@@ -222,7 +219,6 @@ def test_current_values_read_the_eight_runtime_knob_surfaces(tmp_path: Path) -> 
         "place.density_weight": 0.001,
         "floorplan.core_util": 0.6,
         "floorplan.aspect_ratio": 1.33,
-        "cts.max_fanout": 24,
     }
 
 

@@ -85,7 +85,7 @@ def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
     )
 
 
-def test_cards_are_exactly_the_frozen_eight() -> None:
+def test_cards_are_exactly_the_frozen_seven() -> None:
     cards = load_parameter_cards()
     assert {knob.value for knob in cards} == {item.value for item in OptimizationKnob}
     assert [len(card.requested_domain.values) for card in cards.values()] == [
@@ -96,7 +96,6 @@ def test_cards_are_exactly_the_frozen_eight() -> None:
         2,
         21,
         23,
-        16,
     ]
 
 
@@ -138,7 +137,7 @@ def test_non_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -
         card for card in cards.values() if card.tool.name != "DREAMPlace"
     ]
 
-    assert len(native_cards) == 3
+    assert len(native_cards) == 2
     for card in native_cards:
         assert card.runtime_semantics is not None
         assert card.runtime_semantics.mechanism
@@ -273,7 +272,7 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
         [
             sys.executable,
             "-c",
-            "from ecos_agent.optimization.parameters.semantics import load_parameter_cards; assert len(load_parameter_cards()) == 8",
+            "from ecos_agent.optimization.parameters.semantics import load_parameter_cards; assert len(load_parameter_cards()) == 7",
         ],
         cwd=tmp_path,
         env=env,

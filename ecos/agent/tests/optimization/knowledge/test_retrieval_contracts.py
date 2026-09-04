@@ -68,7 +68,7 @@ def test_retrieval_request_carries_frozen_objective_metrics() -> None:
 
 def test_fixed_objective_query_reaches_tool_and_general_channels() -> None:
     tool = _FakeRetriever(
-        "tool.place.objective.v1", ("floorplan", "place", "cts")
+        "tool.place.objective.v1", ("floorplan", "place")
     )
     general = _FakeRetriever("general.objective.v1", ("floorplan", "place"))
     retriever = OptimizationKnowledgeRetriever(tool_retriever=tool, general_retriever=general)
@@ -94,7 +94,7 @@ def test_fixed_objective_query_reaches_tool_and_general_channels() -> None:
 def test_full_agent_candidates_scan_catalog_while_raw_retrieval_stays_top_three() -> None:
     tool = _FakeRetriever(
         tuple(f"tool.place.{index}.v1" for index in range(1, 5)),
-        ("floorplan", "place", "cts"),
+        ("floorplan", "place"),
     )
     general = _FakeRetriever(
         tuple(f"general.place.{index}.v1" for index in range(1, 5)),
@@ -136,7 +136,7 @@ def test_full_agent_candidates_scan_catalog_while_raw_retrieval_stays_top_three(
 def test_disabled_general_channel_has_no_structured_candidates() -> None:
     retriever = OptimizationKnowledgeRetriever(
         tool_retriever=_FakeRetriever(
-            "tool.place.v1", ("floorplan", "place", "cts")
+            "tool.place.v1", ("floorplan", "place")
         ),
         general_retriever=_FakeRetriever("general.place.v1", ("floorplan", "place")),
         support_catalog=support_catalog(

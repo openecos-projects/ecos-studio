@@ -59,7 +59,6 @@ class OptimizationRetrievalRequest(BaseModel):
     action_stages: tuple[ECCStepName, ...] = (
         ECCStepName.FLOORPLAN,
         ECCStepName.PLACEMENT,
-        ECCStepName.CTS,
     )
     observed_metric_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
     observation_status: Literal["success"] = "success"
@@ -89,7 +88,6 @@ class OptimizationRetrievalRequest(BaseModel):
         if self.action_stages != (
             ECCStepName.FLOORPLAN,
             ECCStepName.PLACEMENT,
-            ECCStepName.CTS,
         ):
             raise ValueError("retrieval action stages are not frozen")
         if self.allowed_knobs != tuple(OptimizationKnob):
@@ -213,11 +211,7 @@ class OptimizationKnowledgeRetriever:
                 )
                 continue
             query = _fixed_query(request, channel)
-            stages = tuple(
-                stage.value.casefold()
-                for stage in request.action_stages
-                if channel == KnowledgeChannel.TOOL or stage != ECCStepName.CTS
-            )
+            stages = tuple(stage.value.casefold() for stage in request.action_stages)
             answer = retriever.reply_for_stages(query, stages)
             channel_results.append(_channel_result(channel, query, answer, seen_entity_ids))
         references = tuple(ref for item in channel_results for ref in item.knowledge_refs)

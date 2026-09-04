@@ -213,9 +213,9 @@ def test_gap_requires_two_of_three_terminal_closed_repeats() -> None:
 
 
 def test_missing_terminal_or_failed_probe_makes_negative_result_indeterminate() -> None:
-    direct = _receipt("cts.max_fanout", 32)
+    direct = _receipt("floorplan.aspect_ratio", 1.0)
     report = summarize_knob(
-        OptimizationKnob.CTS_MAX_FANOUT,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
         (
             _result("ok", direct),
             _result("missing-terminal", direct, terminal_closed=False),
@@ -310,14 +310,14 @@ def test_resume_readiness_rejects_source_config_hash_drift(monkeypatch, tmp_path
 
 
 def test_overall_verdict_has_only_preregistered_outcomes() -> None:
-    direct = _receipt("cts.max_fanout", 32)
+    direct = _receipt("floorplan.aspect_ratio", 1.0)
     no_gap = summarize_knob(
-        OptimizationKnob.CTS_MAX_FANOUT,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
         (_result("ok", direct),),
         lattice_complete=True,
     )
     uncertain = summarize_knob(
-        OptimizationKnob.CTS_MAX_FANOUT,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
         (_result("ok", direct),),
     )
     gap_receipt = _receipt(

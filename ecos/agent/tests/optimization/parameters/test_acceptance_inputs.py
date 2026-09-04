@@ -43,7 +43,7 @@ def test_acceptance_requires_explicit_episode_roots_and_candidate_mapping(
         )
 
 
-def test_acceptance_cli_requires_exactly_eight_unique_candidate_bindings() -> None:
+def test_acceptance_cli_requires_exactly_seven_unique_candidate_bindings() -> None:
     specs = [
         f"{knob.value}=candidate-{index}"
         for index, knob in enumerate(OptimizationKnob)
@@ -53,5 +53,6 @@ def test_acceptance_cli_requires_exactly_eight_unique_candidate_bindings() -> No
         knob.value: f"candidate-{index}"
         for index, knob in enumerate(OptimizationKnob)
     }
-    with pytest.raises(ValueError, match="eight unique"):
+    assert acceptance.IGNORED_KNOBS == ("cts.max_fanout",)
+    with pytest.raises(ValueError, match="seven unique"):
         acceptance._parse_candidates(specs[:-1])

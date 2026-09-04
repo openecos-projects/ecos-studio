@@ -39,7 +39,6 @@ _CURRENT_VALUES = {
     "place.density_weight": 0.00085,
     "floorplan.core_util": 0.6,
     "floorplan.aspect_ratio": 1.0,
-    "cts.max_fanout": 32,
 }
 _TIMING_GUARDRAIL = {metric: 0.0 for metric in TimingMetric}
 

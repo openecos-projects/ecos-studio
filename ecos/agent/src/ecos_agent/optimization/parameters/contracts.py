@@ -247,7 +247,7 @@ class CardManifest(_Model):
         "ecos.parameter_semantics_manifest.v1"
     )
     lattice_version: str
-    cards: tuple[dict[str, str], ...] = Field(min_length=8, max_length=8)
+    cards: tuple[dict[str, str], ...] = Field(min_length=7, max_length=7)
     manifest_sha256: str
 
     @field_validator("cards")

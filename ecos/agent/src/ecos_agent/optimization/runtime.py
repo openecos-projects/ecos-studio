@@ -684,9 +684,6 @@ def _current_values(
         dreamplace = json.loads(
             (workspace / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
         )
-        cts = json.loads(
-            (workspace / "config" / "cts_ecc.json").read_text(encoding="utf-8")
-        )
         values = {
             "place.target_density": dreamplace["target_density"],
             "place.target_overflow": dreamplace["stop_overflow"],
@@ -695,7 +692,6 @@ def _current_values(
             "place.density_weight": dreamplace["density_weight"],
             "floorplan.core_util": parameters["Core"]["Utilitization"],
             "floorplan.aspect_ratio": parameters["Core"]["Aspect ratio"],
-            "cts.max_fanout": cts["max_fanout"],
         }
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise OptimizationRuntimeError("optimization parameters are invalid") from exc

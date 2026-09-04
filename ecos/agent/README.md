@@ -224,7 +224,7 @@ Workspace 设置/路径发现只有这两类调用启用 `read_only_workspace` t
 
 ## 当前实现与证据边界
 
-- **Parameter Engineering Implementation Complete**：8 个冻结的单参数 knob 已接入
+- **Parameter Engineering Implementation Complete**：7 个冻结的单参数 knob 已接入
   effective-domain exact-value 提案；L0-L3 证据链包含原生参数回执、终态观测、ledger
   和确定性回放。
 - **Knowledge Engineering Implementation Partial**：state-conditioned 双层知识、

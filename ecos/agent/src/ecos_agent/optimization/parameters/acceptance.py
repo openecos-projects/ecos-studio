@@ -42,7 +42,7 @@ from ecos_agent.optimization.parameters.semantics import (
     validate_application_receipt,
 )
 
-IGNORED_KNOBS: tuple[str, ...] = ()
+IGNORED_KNOBS = ("cts.max_fanout",)
 _CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$")
 _SUCCESSFUL_TRACE_OUTCOMES = frozenset(
     {
@@ -782,7 +782,7 @@ def _parse_candidates(specs: list[str]) -> dict[str, str]:
         candidates[knob_id] = candidate_id
     expected = {knob.value for knob in OptimizationKnob}
     if set(candidates) != expected or len(set(candidates.values())) != len(candidates):
-        raise ValueError("exactly eight unique candidate bindings are required")
+        raise ValueError("exactly seven unique candidate bindings are required")
     return candidates
 
 

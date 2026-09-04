@@ -285,7 +285,7 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
 
     assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
     context = codex.contexts[0]
-    assert len(context.effective_domains) == 8
+    assert len(context.effective_domains) == 7
     assert {item.knob_id.value for item in context.effective_domains} == set(
         CURRENT_VALUES
     )
@@ -304,7 +304,7 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
     )
     payload = planning_context_payload(context)
     assert payload["supported_action_view"] == context.supported_action_view.planner_payload()
-    assert len(payload["effective_domains"]) == 8
+    assert len(payload["effective_domains"]) == 7
     assert (
         payload["effective_domains"][0]["snapshot_sha256"]
         == context.effective_domains[0].snapshot_sha256
@@ -479,7 +479,7 @@ def test_raw_rag_mode_exposes_retrieval_without_state_conditioned_support(
     codex = _FakeCodex(
         lambda context: _proposal(
             context,
-            knob_id="cts.max_fanout",
+            knob_id="floorplan.core_util",
             direction=StrategyDirection.DECREASE,
         )
     )

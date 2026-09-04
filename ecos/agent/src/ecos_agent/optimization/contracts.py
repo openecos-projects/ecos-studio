@@ -41,7 +41,6 @@ class OptimizationKnob(StrEnum):
     DENSITY_WEIGHT = "place.density_weight"
     FLOORPLAN_CORE_UTIL = "floorplan.core_util"
     FLOORPLAN_ASPECT_RATIO = "floorplan.aspect_ratio"
-    CTS_MAX_FANOUT = "cts.max_fanout"
 
 
 class ObjectiveMetric(StrEnum):
@@ -541,39 +540,11 @@ class RequestedKnobValue(_ContractModel):
         if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
             if type(self.value) is not bool:
                 raise ValueError("routability optimization must be a boolean")
-        elif self.knob_id in {
-            OptimizationKnob.CELL_PADDING_X,
-            OptimizationKnob.CTS_MAX_FANOUT,
-        }:
-            lattice = (
-                (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
-                if self.knob_id == OptimizationKnob.CELL_PADDING_X
-                else (
-                    8,
-                    12,
-                    16,
-                    18,
-                    20,
-                    22,
-                    24,
-                    26,
-                    28,
-                    30,
-                    32,
-                    36,
-                    40,
-                    48,
-                    56,
-                    64,
-                )
-            )
-            label = (
-                "cell padding"
-                if self.knob_id == OptimizationKnob.CELL_PADDING_X
-                else "max fanout"
-            )
-            if type(self.value) is not int or self.value not in lattice:
-                raise ValueError(f"{label} is outside the frozen lattice")
+        elif self.knob_id == OptimizationKnob.CELL_PADDING_X:
+            if type(self.value) is not int or self.value not in (
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16
+            ):
+                raise ValueError("cell padding is outside the frozen lattice")
         else:
             valid = type(self.value) in {int, float} and not isinstance(
                 self.value, bool
@@ -595,14 +566,8 @@ class AppliedKnobValue(_ContractModel):
             if type(self.value) is not bool:
                 raise ValueError("effective routability optimization must be a boolean")
             return self
-        if self.knob_id in {
-            OptimizationKnob.CELL_PADDING_X,
-            OptimizationKnob.CTS_MAX_FANOUT,
-        }:
-            minimum = 0 if self.knob_id == OptimizationKnob.CELL_PADDING_X else 1
+        if self.knob_id == OptimizationKnob.CELL_PADDING_X:
             if type(self.value) is not int or self.value < 0:
-                raise ValueError("effective integer knob value is invalid")
-            if self.value < minimum:
                 raise ValueError("effective integer knob value is invalid")
             return self
         valid = type(self.value) in {int, float} and not isinstance(self.value, bool)

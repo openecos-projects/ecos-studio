@@ -133,7 +133,6 @@ def test_adapter_rejects_ecc_revision_drift_before_candidate_execution() -> None
     [
         ("floorplan.core_util", 0.6, StrategyDirection.INCREASE, "Floorplan"),
         ("floorplan.aspect_ratio", 1.33, StrategyDirection.INCREASE, "Floorplan"),
-        ("cts.max_fanout", 24, StrategyDirection.DECREASE, "CTS"),
         ("place.target_overflow", 0.08, StrategyDirection.DECREASE, "place"),
         ("place.density_weight", 0.001, StrategyDirection.INCREASE, "place"),
     ],

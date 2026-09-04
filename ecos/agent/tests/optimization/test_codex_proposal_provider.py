@@ -377,7 +377,6 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "place.density_weight",
         "floorplan.core_util",
         "floorplan.aspect_ratio",
-        "cts.max_fanout",
     ]
 
 
