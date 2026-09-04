@@ -1,7 +1,7 @@
 import type { WorkspaceConfig } from '@/types'
 import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { parseProjectManifest } from '@ecos-studio/shared'
 
 export interface ProjectRouteContext {
@@ -38,6 +38,21 @@ export function projectContextFromWorkspaceConfig(
   }
 }
 
+export function workspaceRouteQueryFromProjectContext(
+  workspacePath: string,
+  projectContext: ProjectRouteContext | null,
+): Record<string, string> {
+  const projectRoot = normalizePath(projectContext?.projectRoot ?? '')
+  if (!projectRoot) return {}
+  const projectName = projectContext?.projectName?.trim() ?? ''
+  const workspaceId = basenamePath(workspacePath)
+  return {
+    projectRoot,
+    ...(projectName ? { projectName } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
+  }
+}
+
 /**
  * Infers the parent project for a workspace opened outside Project Management
  * (for example Backend Design recent workspaces) when the parent directory has a
@@ -53,12 +68,7 @@ export async function resolveProjectRouteContextForWorkspace(
   if (!projectRoot || projectRoot === normalizedWorkspace) return null
 
   try {
-    const registeredProjectRoot = await registerLocalProjectRoot(projectRoot)
-    if (!registeredProjectRoot) return null
-
-    const manifestText = await readOptionalProjectTextFile('project.json', {
-      projectPath: registeredProjectRoot,
-    })
+    const manifestText = await readProjectManagementManifest(projectRoot)
     if (!manifestText) return null
 
     const manifest = parseProjectManifest(manifestText)
@@ -68,14 +78,12 @@ export async function resolveProjectRouteContextForWorkspace(
     if (!listed) return null
 
     return {
-      projectRoot: registeredProjectRoot,
-      projectName: manifest.name || basenamePath(registeredProjectRoot) || undefined,
+      projectRoot,
+      projectName: manifest.name || basenamePath(projectRoot) || undefined,
     }
   } catch (error) {
     console.warn('Failed to resolve project context for workspace.', error)
     return null
-  } finally {
-    await registerLocalProjectRoot(normalizedWorkspace)
   }
 }
 
@@ -104,15 +112,10 @@ export async function resolveManagedProjectContext(options: {
   const projectRoot = parentPath(workspacePath)
   if (!projectRoot || projectRoot === workspacePath) return null
 
-  const registeredRoot = await registerLocalProjectRoot(projectRoot)
-  if (!registeredRoot) return null
-
-  const manifestText = await readOptionalProjectTextFile(
-    joinPath(registeredRoot, 'project.json'),
-  )
+  const manifestText = await readProjectManagementManifest(projectRoot)
   if (!manifestText) return null
 
-  let projectName = basenamePath(registeredRoot) || undefined
+  let projectName = basenamePath(projectRoot) || undefined
   try {
     const manifest = JSON.parse(manifestText) as { name?: unknown }
     if (typeof manifest.name === 'string' && manifest.name.trim()) {
@@ -122,7 +125,7 @@ export async function resolveManagedProjectContext(options: {
     // Keep directory basename when the manifest is not JSON-parsable.
   }
 
-  return { projectRoot: registeredRoot, projectName }
+  return { projectRoot, projectName }
 }
 
 export async function registerProjectManagedWorkspace(
@@ -221,10 +224,6 @@ function parentPath(path: string): string {
   if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
   const parent = parts.slice(0, -1).join('/')
   return normalized.startsWith('/') ? `/${parent}` : parent
-}
-
-function joinPath(root: string, child: string): string {
-  return `${normalizePath(root)}/${child.replace(/^\/+/, '')}`
 }
 
 function normalizePath(path: string): string {

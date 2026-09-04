@@ -260,6 +260,7 @@ import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
   resolveProjectRouteContextForWorkspace,
+  workspaceRouteQueryFromProjectContext,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
 import {
@@ -569,10 +570,17 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
       return
     }
 
+    const projectContext = projectContextFromWorkspaceConfig(config)
     await syncProjectManagedWorkspace(config, config.directory)
     if (route.fullPath === creationOriginFullPath) {
       requestOpenStepConfigAfterCreate()
-      await router.push('/workspace/home')
+      await router.push({
+        path: '/workspace/home',
+        query: workspaceRouteQueryFromProjectContext(
+          currentProject.value?.path ?? config.directory,
+          projectContext,
+        ),
+      })
     }
   } finally {
     finishWorkspaceCreation(creationToken)
