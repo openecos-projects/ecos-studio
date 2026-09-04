@@ -1,7 +1,8 @@
-"""Context-bound effective-domain compilation and exact-value validation."""
+"""Context-bound dynamic allowlist compilation and exact-value validation."""
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Iterable, Mapping
 
@@ -65,7 +66,7 @@ class DomainThreshold(_Model):
 
 
 class EffectiveDomainSnapshot(_Model):
-    schema_version: str = "ecos.effective_domain.v1"
+    schema_version: str = "ecos.effective_domain.v2"
     knob_id: OptimizationKnob
     context_sha256: str
     current_coordinate: dict[str, Any] | None = None
@@ -94,7 +95,7 @@ class EffectiveDomainSnapshot(_Model):
         if any(
             value not in self.surface_values for value in self.allowed_requested_values
         ):
-            raise ValueError("effective domain contains a value outside the lattice")
+            raise ValueError("effective domain contains an unbound candidate value")
         if set(self.allowed_requested_values) & set(self.excluded_aliases):
             raise ValueError("effective domain aliases are still allowed")
         return self
@@ -171,6 +172,125 @@ def response_signature(receipt: ParameterApplicationReceipt) -> str:
     )
 
 
+_CANDIDATES_PER_DIRECTION = 3
+_LOG_SCALE_KNOBS = frozenset({OptimizationKnob.DENSITY_WEIGHT})
+
+
+def _stable_float(value: float) -> float:
+    return float(f"{value:.12g}")
+
+
+def _gap_midpoint(
+    knob_id: OptimizationKnob,
+    lower: float,
+    upper: float,
+    anchor: float,
+    excluded: set[bool | int | float],
+) -> int | float | None:
+    points = sorted(
+        {
+            lower,
+            upper,
+            *(float(value) for value in excluded if lower < value < upper),
+        }
+    )
+    if len(points) < 2 or lower >= upper:
+        return None
+    log_scale = knob_id in _LOG_SCALE_KNOBS
+    transform = math.log10 if log_scale else lambda value: value
+    left, right = max(
+        zip(points, points[1:]),
+        key=lambda pair: (
+            transform(pair[1]) - transform(pair[0]),
+            -min(abs(anchor - pair[0]), abs(anchor - pair[1])),
+        ),
+    )
+    if knob_id == OptimizationKnob.CELL_PADDING_X:
+        midpoint = int((left + right) // 2)
+        return midpoint if left < midpoint < right else None
+    midpoint = (
+        10 ** ((transform(left) + transform(right)) / 2)
+        if log_scale
+        else (left + right) / 2
+    )
+    return _stable_float(midpoint)
+
+
+def _direction_candidates(
+    knob_id: OptimizationKnob,
+    references: tuple[bool | int | float, ...],
+    anchor: float,
+    boundary: float,
+    excluded: set[bool | int | float],
+    floor: float | None,
+) -> tuple[int | float, ...]:
+    lower, upper = sorted((anchor, boundary))
+    if floor is not None:
+        lower = max(lower, floor)
+    if lower >= upper:
+        return ()
+    decreasing = boundary < anchor
+    reference_lower = float(min(references))
+    reference_upper = float(max(references))
+
+    def available(value: bool | int | float) -> bool:
+        numeric = float(value)
+        return (
+            type(value) is not bool
+            and value not in excluded
+            and reference_lower <= numeric <= reference_upper
+            and lower <= numeric <= upper
+            and (floor is None or numeric > floor)
+            and ((numeric < anchor) if decreasing else (numeric > anchor))
+        )
+
+    ordered_references = sorted(
+        (value for value in references if available(value)),
+        key=lambda value: (abs(float(value) - anchor), float(value)),
+    )
+    candidates: list[int | float] = []
+    for value in (
+        ordered_references[0] if ordered_references else None,
+        _gap_midpoint(knob_id, lower, upper, anchor, excluded),
+        int(boundary) if knob_id == OptimizationKnob.CELL_PADDING_X else boundary,
+        *ordered_references[1:],
+    ):
+        if value is not None and available(value) and value not in candidates:
+            candidates.append(value)
+        if len(candidates) == _CANDIDATES_PER_DIRECTION:
+            break
+    return tuple(candidates)
+
+
+def _dynamic_requested_values(
+    card: ParameterSemanticsCard,
+    anchor: bool | int | float,
+    excluded: set[bool | int | float],
+    thresholds: Iterable[DomainThreshold],
+) -> tuple[bool | int | float, ...]:
+    references = tuple(card.requested_domain.values)
+    if type(anchor) is bool:
+        return tuple(
+            value
+            for value in references
+            if type(value) is bool and value not in excluded
+        )
+    floor = max(
+        (item.value for item in thresholds if item.kind == "admission_floor"),
+        default=None,
+    )
+    lower, upper = float(min(references)), float(max(references))
+    candidates = (
+        *_direction_candidates(
+            card.knob_id, references, float(anchor), lower, excluded, floor
+        ),
+        *_direction_candidates(
+            card.knob_id, references, float(anchor), upper, excluded, floor
+        ),
+    )
+    return tuple(sorted(dict.fromkeys(candidates), key=float))
+
+
 def compile_effective_domain(
     card: ParameterSemanticsCard,
     *,
@@ -180,6 +300,7 @@ def compile_effective_domain(
     attempted: Iterable[RequestedKnobValue] = (),
     baseline_surface_value: bool | int | float | None = None,
 ) -> EffectiveDomainSnapshot:
+    attempted = tuple(attempted)
     bound_context = dict(context)
     card_bindings = {
         "parameter_card_sha256": card_hash(card),
@@ -282,7 +403,6 @@ def compile_effective_domain(
         if not matched_rule and requested != effective:
             aliases.add(requested)
     aliases.update(item.value for item in attempted if item.knob_id == card.knob_id)
-    allowed = tuple(value for value in lattice if value not in aliases)
     coordinate = None
     if current_matching:
         latest = current_matching[-1]
@@ -295,12 +415,24 @@ def compile_effective_domain(
         }
     elif baseline_surface_value is not None:
         coordinate = {"surface_value": baseline_surface_value, "effective_anchor": None}
+    if coordinate is None:
+        anchor = current_value
+    else:
+        anchor = coordinate.get("effective_anchor")
+        if anchor is None:
+            anchor = coordinate.get("surface_value")
+    if type(anchor) not in {bool, int, float}:
+        raise EffectiveDomainError("effective domain current coordinate is invalid")
+    allowed = _dynamic_requested_values(card, anchor, aliases, thresholds)
+    surface_values = tuple(
+        dict.fromkeys((*lattice, *sorted(aliases, key=str), *allowed))
+    )
     payload = {
-        "schema_version": "ecos.effective_domain.v1",
+        "schema_version": "ecos.effective_domain.v2",
         "knob_id": card.knob_id,
         "context_sha256": context_sha,
         "current_coordinate": coordinate,
-        "surface_values": lattice,
+        "surface_values": surface_values,
         "excluded_aliases": tuple(sorted(aliases, key=str)),
         "allowed_requested_values": allowed,
         "thresholds": [item.model_dump(mode="json") for item in thresholds],

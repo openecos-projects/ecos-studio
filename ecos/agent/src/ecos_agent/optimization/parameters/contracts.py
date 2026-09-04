@@ -520,7 +520,7 @@ class ParameterApplicationReceipt(_Model):
 
             RequestedKnobValue(knob_id=knob, value=self.requested.get("value"))
         except (TypeError, ValueError):
-            raise ValueError("receipt requested value is outside the frozen lattice")
+            raise ValueError("receipt requested value is outside the bounded domain")
         if not isinstance(self.requested.get("unit"), str) or not self.requested.get(
             "unit"
         ):

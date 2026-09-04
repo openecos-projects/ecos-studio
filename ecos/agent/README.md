@@ -180,9 +180,11 @@ binding 和当轮 legal actions 求交，再只把 `ecos.supported_action_view.v
 缺观测、anti-condition、stale binding 或 unsupported action 均 fail closed。
 
 默认 `ecos.optimization_proposal.v2` 从 compiled view 支持的 knob/direction 及匹配的
-effective-domain allowlist 中选择 exact value；validator 同时检查知识支持关系、domain hash、
-方向和 frozen lattice。兼容的 v1 lane 仍由本地 controller 选择数值。两个 lane 的执行权都
-保留在 controller，知识模块只消费 Parameter Effectiveness 的公开合同，不复制其能力。
+dynamic effective-domain allowlist 中选择 exact value。现有人工离散值仅作为参考锚点；
+controller 根据当前值、已尝试值和 receipt 阈值，确定性生成每个方向最多 3 个候选。
+validator 同时检查知识支持关系、domain hash、方向和有界搜索域。兼容的 v1 lane 仍由本地
+controller 在参考值中选择。两个 lane 的执行权都保留在 controller，知识模块只消费
+Parameter Effectiveness 的公开合同，不复制其能力。
 
 ### 如何阅读参数和结果证据
 

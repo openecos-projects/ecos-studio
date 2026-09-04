@@ -536,23 +536,25 @@ class RequestedKnobValue(_ContractModel):
     value: KnobScalar
 
     @model_validator(mode="after")
-    def validate_lattice_value(self) -> "RequestedKnobValue":
+    def validate_domain_value(self) -> "RequestedKnobValue":
         if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
             if type(self.value) is not bool:
                 raise ValueError("routability optimization must be a boolean")
         elif self.knob_id == OptimizationKnob.CELL_PADDING_X:
-            if type(self.value) is not int or self.value not in (
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16
+            if type(self.value) is not int or not _is_requested_domain_value(
+                self.knob_id, float(self.value)
             ):
-                raise ValueError("cell padding is outside the frozen lattice")
+                raise ValueError("cell padding is outside the bounded search domain")
         else:
             valid = type(self.value) in {int, float} and not isinstance(
                 self.value, bool
             )
-            if not valid or not _is_requested_lattice_value(
+            if not valid or not _is_requested_domain_value(
                 self.knob_id, float(self.value)
             ):
-                raise ValueError(f"{self.knob_id.value} is outside the frozen lattice")
+                raise ValueError(
+                    f"{self.knob_id.value} is outside the bounded search domain"
+                )
         return self
 
 
@@ -710,6 +712,8 @@ _REQUESTED_LATTICES = {
         0.75,
         1.0,
     ),
+    OptimizationKnob.CELL_PADDING_X: (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16),
+    OptimizationKnob.ROUTABILITY_OPT: (False, True),
     OptimizationKnob.DENSITY_WEIGHT: (
         0.00001,
         0.000025,
@@ -751,11 +755,19 @@ _REQUESTED_LATTICES = {
 }
 
 
-def _is_requested_lattice_value(knob_id: OptimizationKnob, value: float) -> bool:
-    return any(
-        math.isclose(value, item, abs_tol=1e-12)
-        for item in _REQUESTED_LATTICES[knob_id]
+def _is_requested_domain_value(knob_id: OptimizationKnob, value: float) -> bool:
+    references = _REQUESTED_LATTICES[knob_id]
+    return math.isfinite(value) and (
+        min(references) <= value <= max(references)
+        or math.isclose(value, min(references), abs_tol=1e-12)
+        or math.isclose(value, max(references), abs_tol=1e-12)
     )
+
+
+def requested_reference_values(
+    knob_id: OptimizationKnob,
+) -> tuple[bool | int | float, ...]:
+    return _REQUESTED_LATTICES[knob_id]
 
 from ecos_agent.optimization.observation_contracts import (  # noqa: E402
     MetricReference,

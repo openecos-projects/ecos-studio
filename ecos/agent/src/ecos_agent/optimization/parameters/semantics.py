@@ -8,7 +8,11 @@ from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.workspace.knob_registry import knob_spec
-from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobValue
+from ecos_agent.optimization.contracts import (
+    OptimizationKnob,
+    RequestedKnobValue,
+    requested_reference_values,
+)
 from ecos_agent.optimization.parameters.contracts import CardManifest, ParameterSemanticsCard
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
@@ -122,6 +126,7 @@ def load_parameter_cards(
             raise ParameterSemanticsError("parameter card lattice is invalid") from exc
         if (
             len(expected_values) != EXPECTED_LATTICE_COUNTS[card.knob_id]
+            or expected_values != requested_reference_values(card.knob_id)
             or tuple(card.requested_domain.values) != expected_values
         ):
             raise ParameterSemanticsError(

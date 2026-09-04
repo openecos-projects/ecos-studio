@@ -39,7 +39,7 @@ def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
         action=NumericProposalActionV2(
             knob_id=card.knob_id,
             direction="increase",
-            requested_value=0.85,
+            requested_value=0.875,
             effective_domain_sha256=domain.snapshot_sha256,
             expected_effects=(
                 {"metric_id": "route_wirelength", "direction": "decrease"},
@@ -109,7 +109,7 @@ def test_v2_validator_binds_action_to_compiled_knowledge_support() -> None:
             "binding_sha256": "sha256:" + "c" * 64,
             "knob_id": card.knob_id.value,
             "direction": "increase",
-            "requested_value": 0.85,
+            "requested_value": 0.575,
             "effective_domain_sha256": domain.snapshot_sha256,
             "expected_effects": [
                 {"metric_id": "route_wirelength", "direction": "decrease"}
@@ -150,7 +150,7 @@ def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
         action=NumericProposalActionV2(
             knob_id=card.knob_id,
             direction="increase",
-            requested_value=0.85,
+            requested_value=0.575,
             effective_domain_sha256=domain.snapshot_sha256,
             expected_effects=(
                 {"metric_id": "route_wirelength", "direction": "decrease"},
@@ -159,7 +159,7 @@ def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
     )
     validate_numeric_proposal(proposal, domain)
     invalid = proposal.model_copy(
-        update={"action": proposal.action.model_copy(update={"requested_value": 0.1})}
+        update={"action": proposal.action.model_copy(update={"requested_value": 0.85})}
     )
     try:
         validate_numeric_proposal(invalid, domain)

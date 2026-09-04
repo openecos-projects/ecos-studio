@@ -216,7 +216,7 @@ def test_natural_language_objective_rejects_primary_preserve_overlap() -> None:
         )
 
 
-def test_requested_lattice_uses_logical_padding_sites() -> None:
+def test_requested_domain_accepts_dynamic_values_within_reference_bounds() -> None:
     assert RequestedKnobValue(knob_id="place.target_density", value=0.15).value == 0.15
     assert RequestedKnobValue(knob_id="place.target_overflow", value=0.08).value == 0.08
     assert RequestedKnobValue(knob_id="place.cell_padding_x", value=3).value == 3
@@ -225,19 +225,26 @@ def test_requested_lattice_uses_logical_padding_sites() -> None:
     assert RequestedKnobValue(knob_id="floorplan.core_util", value=0.6).value == 0.6
     assert RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.33).value == 1.33
 
+    assert RequestedKnobValue(knob_id="place.target_density", value=0.725).value == 0.725
+    assert RequestedKnobValue(knob_id="place.target_overflow", value=0.0875).value == 0.0875
+    assert RequestedKnobValue(knob_id="place.cell_padding_x", value=9).value == 9
+    assert RequestedKnobValue(knob_id="place.density_weight", value=0.0008).value == 0.0008
+    assert RequestedKnobValue(knob_id="floorplan.core_util", value=0.475).value == 0.475
+    assert RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.25).value == 1.25
+
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="place.target_density", value=0.12)
+        RequestedKnobValue(knob_id="place.target_density", value=0.09)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="place.cell_padding_x", value=9)
+        RequestedKnobValue(knob_id="place.cell_padding_x", value=17)
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="place.routability_opt", value="true")
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="place.target_overflow", value=0.111)
+        RequestedKnobValue(knob_id="place.target_overflow", value=1.01)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="place.density_weight", value=0.0008)
+        RequestedKnobValue(knob_id="place.density_weight", value=0.02)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="floorplan.core_util", value=0.475)
+        RequestedKnobValue(knob_id="floorplan.core_util", value=0.19)
     with pytest.raises(ValidationError):
-        RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=1.25)
+        RequestedKnobValue(knob_id="floorplan.aspect_ratio", value=5.1)
     with pytest.raises(ValidationError):
         RequestedKnobValue(knob_id="cts.max_fanout", value=32)
