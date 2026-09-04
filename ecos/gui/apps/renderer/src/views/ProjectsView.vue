@@ -68,6 +68,7 @@
                 <button
                   type="button"
                   class="project-toolbar-action primary"
+                  :disabled="mutationsDisabled"
                   @click="openNewProjectDialog"
                 >
                   <i class="ri-add-line" aria-hidden="true"></i>
@@ -148,6 +149,7 @@
                     <button
                       type="button"
                       class="row-primary-action"
+                      :disabled="mutationsDisabled"
                       :aria-label="`New workspace in ${project.model.name}`"
                       @click="createWorkspaceForProject(project.model)"
                     >
@@ -173,6 +175,7 @@
                       <button
                         type="button"
                         class="row-action-menu-item"
+                        :disabled="mutationsDisabled"
                         @click="importWorkspaceIntoProject(project.model)"
                       >
                         <i class="ri-file-add-line" aria-hidden="true"></i>
@@ -287,6 +290,7 @@
                           <button
                             type="button"
                             class="row-action-menu-item danger"
+                            :disabled="mutationsDisabled"
                             @click="requestDeleteWorkspace(workspace.id)"
                           >
                             <i class="ri-delete-bin-line" aria-hidden="true"></i>
@@ -377,6 +381,7 @@
                     <button
                       type="button"
                       class="empty-state-action primary"
+                      :disabled="mutationsDisabled"
                       @click="createWorkspaceForProject(project.model)"
                     >
                       New workspace
@@ -384,6 +389,7 @@
                     <button
                       type="button"
                       class="empty-state-action"
+                      :disabled="mutationsDisabled"
                       @click="importWorkspaceIntoProject(project.model)"
                     >
                       Import workspace
@@ -449,6 +455,7 @@
                     <button
                       type="button"
                       class="empty-state-action"
+                      :disabled="mutationsDisabled"
                       @click="openNewProjectDialog"
                     >
                       New Project
@@ -468,6 +475,13 @@
               "
               :refreshing="projectComparisonSession.projection.status === 'refreshing'"
               @refresh="projectComparisonSession.refresh()"
+            />
+            <ProjectCreationRecoveryPanel />
+            <ProjectBackgroundOperationPanel
+              v-if="selectedWorkspace"
+              :operation-ids="selectedWorkspaceOperationIds"
+              :workspace-path="selectedWorkspace.workspacePath"
+              @open-workspace="openWorkspace(selectedWorkspace)"
             />
             <ProjectAnalysisPanel
               :findings="projectComparisonSession.findings"
@@ -715,6 +729,7 @@
           <button
             type="button"
             class="secondary-button danger"
+            :disabled="mutationsDisabled"
             @click="confirmDeleteWorkspace"
           >
             <i class="ri-delete-bin-line"></i>
@@ -761,6 +776,7 @@
           <button
             type="button"
             class="secondary-button danger"
+            :disabled="mutationsDisabled"
             @click="confirmDeleteProject"
           >
             <i class="ri-subtract-line"></i>
@@ -784,6 +800,8 @@ import {
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import ProjectComparisonRefreshStatus from './project-management/ProjectComparisonRefreshStatus.vue'
 import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
+import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
+import ProjectCreationRecoveryPanel from './project-management/ProjectCreationRecoveryPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
@@ -814,6 +832,10 @@ import {
 } from '@/utils/projectManagement'
 import { useBackendProjectComparisonSession } from '@/stores/backendProjectComparisonSession'
 import {
+  isShutdownInProgress,
+  useBackgroundOperationStore,
+} from '@/stores/backgroundOperationStore'
+import {
   createProjectManifestMpcSnapshot,
   parseMpcSpecDesigns,
   type MpcSpecDesign,
@@ -840,6 +862,10 @@ const route = useRoute()
 const router = useRouter()
 const { openProject, showToast, currentProject } = useWorkspace()
 const projectComparisonSession = useBackendProjectComparisonSession()
+const backgroundOperations = useBackgroundOperationStore()
+const mutationsDisabled = computed(() =>
+  isShutdownInProgress(backgroundOperations.shutdownStatus.state),
+)
 
 const searchQuery = ref('')
 const selectedProjectId = ref<string | null>(null)
@@ -908,7 +934,12 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [route.query.projectRoot, route.query.workspaceId] as const,
+  () =>
+    [
+      route.query.projectRoot,
+      route.query.workspaceId,
+      route.query.workspacePath,
+    ] as const,
   () => {
     void applyRouteProjectFocus()
   },
@@ -1054,6 +1085,14 @@ const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
     null
   )
 })
+const selectedWorkspaceOperationIds = computed(() =>
+  selectedWorkspace.value
+    ? projectExecutionOperations(
+        selectedProject.value.path,
+        selectedWorkspace.value.id,
+      ).map((operation) => operation.operationId)
+    : [],
+)
 
 const selectedPopoverWorkspace = computed<ProjectWorkspace | null>(() => {
   return (
@@ -1224,10 +1263,14 @@ async function applyRouteProjectFocus(): Promise<boolean> {
   const focus = resolveProjectManagementRouteFocus({
     projectRoot: queryString(route.query.projectRoot),
     workspaceId: queryString(route.query.workspaceId),
+    workspacePath: queryString(route.query.workspacePath),
     projects: projectCards.value.map((project) => ({
       id: project.model.id,
       path: project.model.path,
-      workspaces: project.model.workspaces.map((workspace) => ({ id: workspace.id })),
+      workspaces: project.model.workspaces.map((workspace) => ({
+        id: workspace.id,
+        path: workspace.workspacePath,
+      })),
     })),
   })
   if (!focus) return false

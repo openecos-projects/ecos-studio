@@ -14,6 +14,7 @@ export interface WorkspaceResponse {
   response: string
   data: {
     directory: string
+    creationId?: string
     designTool?: DesignTool
     reused?: boolean
     workspace_handle?: string
@@ -333,6 +334,7 @@ export function createWorkspaceApi(
     .then((result) => ({
       cmd: CMDEnum.create_workspace,
       data: {
+        creationId: 'creationId' in result ? result.creationId : undefined,
         directory: 'directory' in result ? result.directory : '',
         workspace_handle: 'workspaceHandle' in result ? result.workspaceHandle : '',
         workspaceHandle: 'workspaceHandle' in result ? result.workspaceHandle : '',

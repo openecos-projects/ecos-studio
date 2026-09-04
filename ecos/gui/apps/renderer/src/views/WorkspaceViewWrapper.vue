@@ -35,7 +35,7 @@ watch(
     if (path !== previousPath) {
       backendWorkspaceSession.clear()
       if (path && currentProject.value?.designTool !== 'frontend') {
-        void backendWorkspaceSession.start()
+        void backendWorkspaceSession.start(path)
       }
     }
     if (!path || !previousPath || path === previousPath) return
@@ -50,7 +50,7 @@ onMounted(() => {
   agentShell.setMode('workspace')
   agentShell.closeHomeAgent()
   if (currentProject.value?.designTool !== 'frontend') {
-    void backendWorkspaceSession.start()
+    void backendWorkspaceSession.start(currentProject.value?.path)
   }
 })
 

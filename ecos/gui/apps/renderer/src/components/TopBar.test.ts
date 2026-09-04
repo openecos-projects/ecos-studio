@@ -32,6 +32,9 @@ vi.mock('@/platform/desktop', () => ({
 vi.mock('@/components/NotificationCenter.vue', () => ({
   default: { template: '<div />' },
 }))
+vi.mock('@/components/BackgroundTasksButton.vue', () => ({
+  default: { template: '<div />' },
+}))
 
 import TopBar from './TopBar.vue'
 
@@ -83,5 +86,21 @@ describe('TopBar signoff export menu', () => {
       query: { projectRoot: '/work/demo', workspaceId: 'ws_0001' },
     })
     wrapper.unmount()
+  })
+
+  it('disables Workspace mutations while shutdown is draining', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, mutationsDisabled: true },
+    })
+
+    await wrapper.get('button.menu-btn').trigger('click')
+    const items = wrapper.findAll('button.dropdown-item')
+    const newWorkspace = items.find((item) => item.text().includes('New Workspace'))
+    const updateWorkspace = items.find((item) => item.text().includes('Update Workspace'))
+
+    expect(newWorkspace).toBeDefined()
+    expect(updateWorkspace).toBeDefined()
+    expect((newWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
+    expect((updateWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
   })
 })

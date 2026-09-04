@@ -75,4 +75,7 @@ The waits removed from normal navigation are the implicit `workspace.close` chai
 - Late or duplicate runtime events cannot overwrite a newer Workspace request.
 - Shutdown prompts, the 30-second force-quit fallback, and unfinished-creation recovery follow the rules above.
 
-Implementation status (2026-09-03): decision accepted; code and regression tests are pending.
+Implementation status (2026-09-04): implemented with global background Operation
+projection, route-independent task surfaces, safe shutdown/Force quit coordination, and
+durable unfinished-creation recovery. Regression tests cover the cross-route,
+cross-window, finalization, creation-recovery, and shutdown boundaries.

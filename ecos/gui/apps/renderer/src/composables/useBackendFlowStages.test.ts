@@ -1,15 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref, type Ref } from 'vue'
-import type { DesignRuntimeEvent } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent, EccBackgroundOperation } from '@ecos-studio/shared'
 
 const state = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
   backendRuntimeEvents: null as Ref<DesignRuntimeEvent[]> | null,
+  operation: null as EccBackgroundOperation | null,
   session: {
     clear: vi.fn(),
     load: vi.fn(),
     projection: {
       data: {
+        revision: {
+          status: 'ready' as const,
+          issues: [],
+          data: {
+            workspaceId: 'engineering-workspace',
+            workspaceRevision: 1,
+          },
+        },
         flow: {
           status: 'ready' as const,
           issues: [],
@@ -48,6 +57,12 @@ vi.mock('@/stores/backendWorkspaceSession', () => ({
   useBackendWorkspaceSession: () => state.session,
 }))
 
+vi.mock('@/stores/backgroundOperationStore', () => ({
+  useBackgroundOperationStore: () => ({
+    operationForWorkspace: () => state.operation ?? undefined,
+  }),
+}))
+
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: state.currentProject,
@@ -82,6 +97,7 @@ describe('useBackendFlowStages runtime projection', () => {
   beforeEach(() => {
     state.currentProject = ref({ path: '/project/ws-a' })
     state.backendRuntimeEvents = ref([])
+    state.operation = null
   })
 
   it('lets a real step-start event replace the optimistic first step', () => {
@@ -113,5 +129,33 @@ describe('useBackendFlowStages runtime projection', () => {
       state: 'Incomplete',
     })
     expect(flow.hasOngoingRunStage.value).toBe(false)
+  })
+
+  it('uses the global Operation projection when route-local events are absent', () => {
+    state.operation = {
+      cancelRequested: false,
+      createdAt: 1,
+      currentStep: 'place',
+      currentTool: 'openroad',
+      error: null,
+      kind: 'flow',
+      operationId: 'operation-background',
+      origin: 'gui',
+      rerun: false,
+      result: null,
+      state: 'running',
+      step: 'place',
+      updatedAt: 2,
+      workspaceDirectory: '/project/ws-a',
+      workspaceHandle: 'handle-a',
+      workspaceId: 'engineering-workspace',
+      workspaceRevision: 1,
+    }
+
+    const flow = useBackendFlowStages()
+
+    expect(
+      flow.dynamicFlowStages.value.filter((step) => step.state === 'Ongoing'),
+    ).toEqual([expect.objectContaining({ label: 'Place', tool: 'openroad' })])
   })
 })

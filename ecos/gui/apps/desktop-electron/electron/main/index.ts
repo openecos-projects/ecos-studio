@@ -5,7 +5,8 @@ import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
-import { installRuntimeQuitGuard } from './runtimeQuitGuard'
+import type { ShutdownCoordinator } from './shutdownCoordinator'
+import { createShutdownCoordinator } from './createShutdownCoordinator'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
@@ -45,6 +46,7 @@ import {
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
+import { WorkspaceCreationJournal } from '../services/workspaceCreationJournal'
 import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
@@ -76,6 +78,8 @@ let services: {
   surferProtocolService: SurferProtocolService
   workspaceResourceService: WorkspaceResourceService
   workspaceService: WorkspaceService
+  workspaceCreationJournal: WorkspaceCreationJournal
+  shutdownCoordinator: ShutdownCoordinator
 } | null = null
 
 function readHostInfo(path: string): string {
@@ -180,13 +184,6 @@ function getDesktopServices() {
       }),
     lazyWorkspaceOpen: false,
   })
-  installRuntimeQuitGuard({
-    app,
-    onShutdownError: (error) => {
-      electronLogger.error('[runtime] Failed to shut down ECC sidecars', error)
-    },
-    runtime: eccRuntimeService,
-  })
   const frontendRpcCore = new EccRpcRuntimeService({
     adapterManagementRpc: true,
     createSidecar: (directory, onEvent) =>
@@ -227,11 +224,25 @@ function getDesktopServices() {
     projectScopeService,
     workspaceService,
   )
+  const creationProjectScope = projectScopeService
+  const workspaceCreationJournal = new WorkspaceCreationJournal({
+    canonicalizePaths: (projectRoot, targetDirectory) =>
+      creationProjectScope.canonicalizeProjectTarget(projectRoot, targetDirectory),
+    directory: join(app.getPath('userData'), 'workspace-creations'),
+    inspectWorkspaceIdentity: (path) => eccRuntimeService.inspectWorkspaceIdentity(path),
+    isWorkspace: (path) => workspaceService.isProjectDirectory(path),
+    projectManifestService,
+    settingsStore,
+  })
+  const shutdownCoordinator = createShutdownCoordinator(
+    eccRuntimeService,
+    workspaceCreationJournal,
+  )
   const projectManagementReadService = new ProjectManagementReadService()
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
     undefined,
-    () => eccRuntimeService.activeOperations(),
+    () => eccRuntimeService.operationProjection().operations,
   )
   const backendWorkspaceService = new BackendWorkspaceService({
     projectManagementReadService,
@@ -291,6 +302,8 @@ function getDesktopServices() {
     surferProtocolService,
     workspaceResourceService,
     workspaceService,
+    workspaceCreationJournal,
+    shutdownCoordinator,
   }
 
   return services
@@ -299,10 +312,14 @@ function getDesktopServices() {
 async function ensureDesktopBridgeReady(): Promise<void> {
   const desktopServices = getDesktopServices()
   if (!workspaceReplacementRecoveryComplete) {
-    workspaceReplacementRecovery ??= desktopServices.workspaceService
-      .recoverProjectDirectoryReplacements()
+    workspaceReplacementRecovery ??= desktopServices.workspaceCreationJournal
+      .initialize()
+      .then(() => desktopServices.workspaceService.recoverProjectDirectoryReplacements())
+      .then(() => undefined)
       .catch((error) => {
-        electronLogger.error('[desktop] Failed to recover workspace replacements', error)
+        electronLogger.error('[desktop] Failed to recover workspace state', error)
+        workspaceReplacementRecovery = null
+        throw error
       })
     await workspaceReplacementRecovery
     workspaceReplacementRecoveryComplete = true
@@ -339,6 +356,8 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       surferProtocolService: desktopServices.surferProtocolService,
       workspaceResourceService: desktopServices.workspaceResourceService,
       workspaceService: desktopServices.workspaceService,
+      workspaceCreationJournal: desktopServices.workspaceCreationJournal,
+      shutdownCoordinator: desktopServices.shutdownCoordinator,
     })
     ipcRegistered = true
   }
@@ -353,8 +372,20 @@ async function launchWindow(
     openWorkspacePath: options.openWorkspacePath,
   })
   const windowId = mainWindow.webContents.id
-  bindWindowEvents(mainWindow)
+  bindWindowEvents(mainWindow, {
+    onCloseRequest: () => {
+      const coordinator = services?.shutdownCoordinator
+      if (!coordinator) return
+      const openWindowCount = BrowserWindow.getAllWindows().filter(
+        (window) => !window.isDestroyed(),
+      ).length
+      void (openWindowCount <= 1
+        ? coordinator.requestApplicationQuit()
+        : coordinator.requestWindowClose(windowId))
+    },
+  })
   mainWindow.on('closed', () => {
+    services?.shutdownCoordinator.windowClosed(windowId)
     workspaceWindowRegistry.unregisterByWindow(mainWindow as WorkspaceWindowLike)
     services?.backendWorkspaceService.clearWindow(windowId)
     services?.backendProjectComparisonService.disposeWindow(windowId)

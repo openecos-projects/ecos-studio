@@ -219,6 +219,29 @@ export class ProjectScopeService {
     return await canonicalizeExistingDirectory(path)
   }
 
+  async canonicalizeProjectTarget(
+    requestedProjectRoot: string,
+    requestedTarget: string,
+  ): Promise<{ projectRoot: string; targetDirectory: string }> {
+    const projectRoot = resolve(requestedProjectRoot)
+    const targetDirectory = resolve(requestedTarget)
+    if (pathsEqual(projectRoot, targetDirectory)) {
+      const parent = await canonicalizeExistingDirectory(dirname(projectRoot))
+      const canonical = await canonicalizePotentialPathWithinRoot(projectRoot, parent)
+      return { projectRoot: canonical, targetDirectory: canonical }
+    }
+
+    const canonicalRoot = await this.resolveProjectRoot(projectRoot)
+    const canonicalTarget = await canonicalizePotentialPathWithinRoot(
+      targetDirectory,
+      canonicalRoot,
+    )
+    if (!isPathWithinRoot(canonicalTarget, canonicalRoot)) {
+      throw new Error('Workspace creation target is outside the Project root.')
+    }
+    return { projectRoot: canonicalRoot, targetDirectory: canonicalTarget }
+  }
+
   async getProjectRoot(): Promise<string> {
     const root = this.rootsByWindowId.get(requireWindowScopeId())
     if (!root) {

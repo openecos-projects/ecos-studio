@@ -76,7 +76,6 @@ export interface EccWorkspaceRuntimeOptions {
     onNotification: (notification: JsonRpcNotificationPayload) => void,
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
-  diagnosticIdleTimeoutMs?: number
   adapterManagementRpc?: boolean
   lazyWorkspaceOpen?: boolean
   sessions?: WorkspaceSessionRegistry
@@ -131,7 +130,7 @@ export class EccWorkspaceRuntime {
     this.sidecarLifecycle = new RuntimeSidecarLifecycle({
       captureFinalSnapshot: async (workspaceId) => {
         const client = this.client
-        if (!client) return
+        if (!client) throw new Error('ECC Runtime client is unavailable.')
         const snapshot = await client.call<
           Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
         >('workspace.snapshot', { workspaceId })
@@ -140,7 +139,6 @@ export class EccWorkspaceRuntime {
       closeSidecar: async () => {
         await this.shutdown()
       },
-      diagnosticIdleTimeoutMs: options.diagnosticIdleTimeoutMs,
       emitError: (text) => {
         this.emit({
           text,
@@ -192,6 +190,41 @@ export class EccWorkspaceRuntime {
 
   activeOperations(): EccRuntimeOperation[] {
     return this.operationTracker.activeOperations()
+  }
+
+  recentOperationOutcomes(): EccRuntimeOperation[] {
+    return this.operationTracker.recentOutcomes()
+  }
+
+  trackOperationSnapshot(operation: EccRuntimeOperation): void {
+    if (this.operationTracker.knowsOperation(operation.operationId)) return
+    this.commitReconciledOperation(operation)
+  }
+
+  async reconcileActiveOperations(workspaceHandle: string): Promise<void> {
+    const active = this.operationTracker.activeOperations()
+    if (!active.length) return
+    const client = await this.ensureStarted()
+    await this.resolveEccWorkspaceId(workspaceHandle)
+    const results = await Promise.allSettled(
+      active.map((operation) =>
+        client.call<EccRuntimeOperation>(
+          'operation.status',
+          {
+            operationId: operation.operationId,
+          },
+          { timeoutMs: 1_000 },
+        ),
+      ),
+    )
+    for (const [index, result] of results.entries()) {
+      if (
+        result.status === 'fulfilled' &&
+        result.value.operationId === active[index]?.operationId
+      ) {
+        this.commitReconciledOperation(result.value)
+      }
+    }
   }
 
   hasInFlightOperation(operationId?: string): boolean {
@@ -254,7 +287,15 @@ export class EccWorkspaceRuntime {
   }
 
   hasPendingRuntimeWork(): boolean {
-    return this.isActive() || this.sidecarLifecycle.hasFinalSnapshotTask()
+    return this.isActive() || this.sidecarLifecycle.hasFinalizationBlocker()
+  }
+
+  finalization() {
+    return this.sidecarLifecycle.finalization()
+  }
+
+  retryFinalSnapshot(): Promise<boolean> {
+    return this.sidecarLifecycle.retryFinalSnapshot()
   }
 
   shutdownBarrier(): {
@@ -269,7 +310,8 @@ export class EccWorkspaceRuntime {
     const operationId =
       this.inFlightOperation?.operationId ??
       this.operationTracker.firstActiveOperationId()
-    if (!operationId && !this.sidecarLifecycle.hasFinalSnapshotTask()) return null
+    const finalization = this.sidecarLifecycle.finalization()
+    if (!operationId && !finalization) return null
     return {
       cancelRequested: false,
       interruptibility: 'deferred',
@@ -279,7 +321,7 @@ export class EccWorkspaceRuntime {
         ? this.inFlightOperation
           ? 'request_in_flight'
           : 'running'
-        : 'finalizing',
+        : (finalization?.state ?? 'finalizing'),
       step: '',
       workspaceId: this.boundDirectory ?? '',
     }
@@ -312,6 +354,17 @@ export class EccWorkspaceRuntime {
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.commands.openWorkspace(request)
+  }
+
+  workspaceSession(workspaceHandle: string): EccWorkspaceOpenResult {
+    const session = this.sessions.require(workspaceHandle)
+    return {
+      directory: session.directory,
+      reused: true,
+      workspaceHandle: session.workspaceHandle,
+      workspaceId: session.eccWorkspaceId ?? undefined,
+      workspaceRevision: session.workspaceRevision,
+    }
   }
 
   closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
@@ -456,6 +509,15 @@ export class EccWorkspaceRuntime {
     return this.operationTracker.waitFor(request.operationId)
   }
 
+  operationLogFile(request: EccRuntimeOperationRequest): string {
+    this.sessions.require(request.workspaceHandle)
+    if (!this.operationTracker.knowsOperation(request.operationId)) {
+      throw new Error('ECC Operation is not owned by this Workspace Session.')
+    }
+    if (!this.sidecar.logFile) throw new Error('ECC Runtime log is unavailable.')
+    return this.sidecar.logFile
+  }
+
   async cancelOperation(
     request: EccRuntimeOperationRequest,
   ): Promise<{ accepted: boolean; operationId: string; state: string }> {
@@ -561,7 +623,6 @@ export class EccWorkspaceRuntime {
   }
 
   async shutdown(): Promise<RuntimeShutdownResult> {
-    this.sidecarLifecycle.cancelDiagnosticRelease()
     if (!this.options.adapterManagementRpc && this.isActive()) {
       return {
         deferred: true,
@@ -588,6 +649,18 @@ export class EccWorkspaceRuntime {
     return { ok: true }
   }
 
+  async forceShutdown(): Promise<void> {
+    if (this.sidecar.forceShutdown) await this.sidecar.forceShutdown()
+    else await this.sidecar.shutdown()
+    this.client = null
+    this.managementHelloResult = null
+    this.ready = false
+    this.sessions.clearEccWorkspaceIds()
+    this.operationTracker.rejectAll(
+      new Error('ECC sidecar was terminated during Force quit.'),
+    )
+  }
+
   async releaseIdleSidecar(): Promise<void> {
     if (this.hasPendingRuntimeWork()) return
     await this.shutdown()
@@ -603,7 +676,6 @@ export class EccWorkspaceRuntime {
   }
 
   private async ensureStarted(): Promise<EccRpcRuntimeClient> {
-    this.sidecarLifecycle.cancelDiagnosticRelease()
     const client = await this.sidecar.start()
     if (client !== this.client) {
       this.client = client
@@ -861,23 +933,16 @@ export class EccWorkspaceRuntime {
     }
     if (
       protocolEvent.type === 'operation.changed' &&
-      operationState === 'succeeded' &&
+      ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+        String(operationState),
+      ) &&
       isTerminal &&
       !terminalAlreadyRecorded
     ) {
       // The prior cache may describe the final step as Ongoing. A fresh page
       // must wait for the terminal ECC snapshot.
       this.cachedSnapshot = null
-      this.sidecarLifecycle.releaseAfterSuccessfulOperation(protocolEvent.workspaceId)
-    } else if (
-      isTerminal &&
-      !terminalAlreadyRecorded &&
-      protocolEvent.type === 'operation.changed' &&
-      (operationState === 'failed' ||
-        operationState === 'cancelled' ||
-        operationState === 'interrupted')
-    ) {
-      this.sidecarLifecycle.retainFailedOperationForDiagnostics()
+      this.sidecarLifecycle.finalizeOperation(protocolEvent.workspaceId)
     }
     this.emit({
       event: protocolEvent,
@@ -903,6 +968,12 @@ export class EccWorkspaceRuntime {
     } catch {
       return this.boundDirectory
     }
+  }
+
+  private commitReconciledOperation(operation: EccRuntimeOperation): void {
+    if (!this.operationTracker.reconcile(operation)) return
+    this.cachedSnapshot = null
+    this.sidecarLifecycle.finalizeOperation(operation.workspaceId)
   }
 
   private flushPendingRecoveryEvents(): void {

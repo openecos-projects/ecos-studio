@@ -33,6 +33,14 @@ async function loadDesktopBridge() {
     app: {
       getVersions(): Promise<unknown>
     }
+    shutdown: {
+      cancel(): Promise<void>
+      completeCleanup(request: unknown): Promise<void>
+      getStatus(): Promise<unknown>
+      onCleanupRequested(listener: (event: unknown) => void): () => void
+      onStatusChanged(listener: (event: unknown) => void): () => void
+      reviewOptions(): Promise<void>
+    }
     backendWorkspace: {
       getArtifact(request: unknown): Promise<unknown>
       getOverview(): Promise<unknown>
@@ -56,6 +64,9 @@ async function loadDesktopBridge() {
       }
       runtime: {
         engineeringSnapshot(request: unknown): Promise<unknown>
+        operationProjection(): Promise<unknown>
+        operationLog(request: unknown): Promise<unknown>
+        onOperationProjectionInvalidated(listener: (event: unknown) => void): () => void
         waitForOperation(request: unknown): Promise<unknown>
       }
     }
@@ -359,6 +370,69 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccRuntimeWaitForOperation,
       request,
+    )
+  })
+
+  it('exposes the authoritative background Operation projection', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValueOnce({ generation: 3, operations: [] })
+
+    await expect(bridge.ecc.runtime.operationProjection()).resolves.toEqual({
+      generation: 3,
+      operations: [],
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccRuntimeOperationProjection,
+    )
+
+    const logRequest = { operationId: 'operation-1', workspaceHandle: 'handle-1' }
+    ipcRenderer.invoke.mockResolvedValueOnce({ content: 'log', truncated: false })
+    await expect(bridge.ecc.runtime.operationLog(logRequest)).resolves.toEqual({
+      content: 'log',
+      truncated: false,
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccRuntimeOperationLog,
+      logRequest,
+    )
+
+    const unsubscribe = bridge.ecc.runtime.onOperationProjectionInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.find(
+      ([channel]) =>
+        channel === desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+    )?.[1]
+    eventListener?.({}, { generation: 4 })
+    expect(listener).toHaveBeenCalledWith({ generation: 4 })
+    unsubscribe()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+      eventListener,
+    )
+  })
+
+  it('routes shutdown status and Renderer cleanup through typed channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const cleanupListener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValueOnce({ state: 'draining' })
+
+    await expect(bridge.shutdown.getStatus()).resolves.toEqual({ state: 'draining' })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.shutdownGetStatus,
+    )
+
+    bridge.shutdown.onCleanupRequested(cleanupListener)
+    const eventListener = ipcRenderer.on.mock.calls.find(
+      ([channel]) => channel === desktopApiEventChannels.shutdownCleanupRequested,
+    )?.[1]
+    eventListener?.({}, { attemptId: 'attempt-1' })
+    expect(cleanupListener).toHaveBeenCalledWith({ attemptId: 'attempt-1' })
+
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+    await bridge.shutdown.completeCleanup({ attemptId: 'attempt-1', ok: true })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.shutdownCompleteCleanup,
+      { attemptId: 'attempt-1', ok: true },
     )
   })
 

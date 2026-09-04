@@ -88,16 +88,11 @@ const desktopApi: DesktopApi = {
     minimize: () => invokeDesktop(desktopApiIpcChannels.windowMinimize),
     toggleMaximize: () => invokeDesktop(desktopApiIpcChannels.windowToggleMaximize),
     close: () => invokeDesktop(desktopApiIpcChannels.windowClose),
-    confirmClose: () => invokeDesktop(desktopApiIpcChannels.windowConfirmClose),
     setTitle: (title) => invokeDesktop(desktopApiIpcChannels.windowSetTitle, title),
     isMaximized: () => invokeDesktop(desktopApiIpcChannels.windowIsMaximized),
     setZoomFactor: (factor) =>
       invokeDesktop(desktopApiIpcChannels.windowSetZoomFactor, factor),
     create: (options) => invokeDesktop(desktopApiIpcChannels.windowCreate, options),
-    onCloseRequested: (listener) =>
-      subscribeToDesktopEvent(desktopApiEventChannels.windowCloseRequested, () => {
-        listener()
-      }),
     onResized: (listener) =>
       subscribeToDesktopEvent(desktopApiEventChannels.windowResized, () => {
         listener()
@@ -108,6 +103,24 @@ const desktopApi: DesktopApi = {
         (_event, isMaximized: unknown) => {
           listener(Boolean(isMaximized))
         },
+      ),
+  },
+  shutdown: {
+    cancel: () => invokeDesktop(desktopApiIpcChannels.shutdownCancel),
+    completeCleanup: (request) =>
+      invokeDesktop(desktopApiIpcChannels.shutdownCompleteCleanup, request),
+    getStatus: () => invokeDesktop(desktopApiIpcChannels.shutdownGetStatus),
+    reviewOptions: () => invokeDesktop(desktopApiIpcChannels.shutdownReviewOptions),
+    onCleanupRequested: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.shutdownCleanupRequested,
+        (_event, payload: unknown) => listener(payload as { attemptId: string }),
+      ),
+    onStatusChanged: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.shutdownStatusChanged,
+        (_event, payload: unknown) =>
+          listener(payload as import('@ecos-studio/shared').DesktopShutdownStatus),
       ),
   },
   menu: {
@@ -401,6 +414,17 @@ const desktopApi: DesktopApi = {
     runtime: {
       engineeringSnapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
+      operationProjection: () =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationProjection),
+      operationLog: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationLog, request),
+      onOperationProjectionInvalidated: (listener) =>
+        subscribeToDesktopEvent(
+          desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+          (_event, payload: unknown) => {
+            listener(payload as { generation: number })
+          },
+        ),
       snapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
       waitForOperation: (request) =>

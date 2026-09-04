@@ -7,7 +7,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
   desktopApiEventChannels,
@@ -28,6 +28,8 @@ import {
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
   type EccFlowRunStepRequest,
+  type EccBackgroundOperationProjection,
+  type EccBackgroundWorkspaceCreation,
   type EccRuntimeEvent,
   type EccRuntimeOperation,
   type EccRuntimeOperationRequest,
@@ -38,6 +40,7 @@ import {
   type EccWorkspaceHandleRequest,
   type EccWorkspaceInfoRequest,
   type EccWorkspaceOpenRequest,
+  type EccWorkspaceOpenResult,
   type EccWorkspaceSyncConfigRequest,
   type EccWorkspaceSpecValidationRequest,
   type EccWorkspaceUpdateRequest,
@@ -52,6 +55,7 @@ import {
   type DesktopProjectTextFileChunk,
   type DesktopProjectTextFileTail,
   type DesktopSettingsValue,
+  type DesktopShutdownStatus,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
@@ -87,7 +91,6 @@ import {
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import {
   closeWindow,
-  confirmWindowClose,
   isWindowMaximized,
   minimizeWindow,
   setWindowTitle,
@@ -111,6 +114,7 @@ import {
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
+import { registerBackgroundLifecycleIpc } from './registerBackgroundLifecycleIpc'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -128,6 +132,35 @@ interface DesktopBridgeErrorResult {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+function isShutdownBlockedProductCommand(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.command !== 'string') return false
+  return [
+    'workspace.create',
+    'workspace.run',
+    'workspace.runStep',
+    'workspace.update',
+    'workspace.reset',
+    'workspace.syncConfig',
+    'workspace.exportSignoff',
+    'workspace.continueCreation',
+    'workspace.abandonCreation',
+  ].includes(value.command)
+}
+
+const acceptedWorkChannels = new Set<string>([
+  desktopApiIpcChannels.productCommandExecute,
+  desktopApiIpcChannels.projectManifestMutate,
+  desktopApiIpcChannels.workspaceExecuteFlowAgentRerun,
+  desktopApiIpcChannels.workspaceWriteProjectTextFile,
+  desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
+  desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
+  desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+  desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+  desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
+  desktopApiIpcChannels.workspaceAddDesignFiles,
+  desktopApiIpcChannels.workspaceRemoveDesignFile,
+])
 
 export interface DesktopBridgeServices {
   agentRuntimeService?: AgentProviderRuntime & {
@@ -369,12 +402,21 @@ export interface DesktopBridgeServices {
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
+    onOperationProjectionInvalidated(listener: (generation: number) => void): () => void
+    onWorkspaceReleased?(listener: (workspaceHandle: string) => void): () => void
+    operationProjection(): EccBackgroundOperationProjection
+    reconcileOperationProjection?(): Promise<EccBackgroundOperationProjection>
+    operationLog(request: EccRuntimeOperationRequest): Promise<unknown>
     operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
     openWorkspace(
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
+    releaseWorkspace(
+      request: EccWorkspaceHandleRequest,
+    ): Promise<{ ok: boolean; retained?: boolean }>
+    retryFinalSnapshot(request: EccWorkspaceHandleRequest): Promise<boolean>
     resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
     runFlow(request: EccFlowRunRequest): Promise<unknown>
     runStep(request: EccFlowRunStepRequest): Promise<unknown>
@@ -386,6 +428,54 @@ export interface DesktopBridgeServices {
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
     workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
+    workspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult>
+  }
+  workspaceCreationJournal?: {
+    abandon(creationId: string, ownerWindowId: number): Promise<{ abandoned: boolean }>
+    begin(
+      ownerWindowId: number,
+      request: EccWorkspaceCreateRequest,
+    ): Promise<{ creationId: string; targetDirectory: string }>
+    complete(creationId: string, ownerWindowId: number): Promise<void>
+    continueInitialization(
+      creationId: string,
+      ownerWindowId: number,
+    ): Promise<{ recovered: boolean; issue?: string }>
+    allowsRegistration(
+      windowId: number,
+      projectRoot: string,
+      targetDirectory: string,
+    ): Promise<boolean>
+    entriesForWindow(windowId: number): Promise<EccBackgroundWorkspaceCreation[]>
+    generation: number
+    markUnfinished(
+      creationId: string,
+      issue: string,
+      ownerWindowId: number,
+    ): Promise<void>
+    markWorkspaceCreated(
+      creationId: string,
+      result: { workspaceId?: string; workspaceRevision?: number },
+      ownerWindowId: number,
+    ): Promise<void>
+    onInvalidated(listener: (generation: number) => void): () => void
+    registerWorkspace(creationId: string, ownerWindowId: number): Promise<void>
+  }
+  shutdownCoordinator?: {
+    beginAcceptedWork?(windowId: number): () => void
+    cancelShutdown(): void
+    completeRendererCleanup(
+      attemptId: string,
+      windowId: number,
+      ok: boolean,
+      issue?: string,
+    ): Promise<void>
+    isMutationBlocked(windowId: number): boolean
+    onStatusChanged(listener: (status: DesktopShutdownStatus) => void): () => void
+    reviewShutdownOptions(): Promise<void>
+    statusForWindow(windowId: number): DesktopShutdownStatus
+    trackWorkspaceHandle(windowId: number, workspaceHandle: string): void
+    untrackWorkspaceHandle(workspaceHandle: string): void
   }
   shellService: {
     createSession(
@@ -663,7 +753,17 @@ export function registerIpc(
   services: DesktopBridgeServices,
 ): void {
   const handle = (channel: string, handler: IpcHandler): void => {
-    target.handle(channel, wrapIpcHandler(channel, handler))
+    const trackedHandler: IpcHandler = async (event, ...args) => {
+      const finish = acceptedWorkChannels.has(channel)
+        ? services.shutdownCoordinator?.beginAcceptedWork?.(event.sender.id)
+        : undefined
+      try {
+        return await handler(event, ...args)
+      } finally {
+        finish?.()
+      }
+    }
+    target.handle(channel, wrapIpcHandler(channel, trackedHandler))
   }
 
   services.backendWorkspaceService.onInvalidated((event) => {
@@ -696,7 +796,6 @@ export function registerIpc(
       event,
     )
   })
-
   const shellSessions = new Map<
     string,
     {
@@ -715,6 +814,7 @@ export function registerIpc(
     }
   >()
   const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
+  const backendWorkspaceOpenClaims = new Map<string, IpcMainInvokeEvent['sender']>()
   const agentSessionSubscriptions = new Map<
     string,
     {
@@ -738,8 +838,33 @@ export function registerIpc(
   >()
   /** Last runtime.ready per tool and directory, replayed when a handle subscribes. */
   const lastReadyByDirectory = new Map<string, EccRuntimeEvent>()
+  const releasedWorkspaceHandleOwnerIds = new Map<string, number>()
   const readyKey = (designTool: DesignTool, directory: string): string =>
     `${designTool}:${directory}`
+  registerBackgroundLifecycleIpc({
+    creationJournal: services.workspaceCreationJournal,
+    handle,
+    ownsWorkspaceHandle: (sender, workspaceHandle) =>
+      workspaceHandleSubscriptions.get(workspaceHandle)?.sender === sender ||
+      releasedWorkspaceHandleOwnerIds.get(workspaceHandle) === sender.id,
+    runtime: services.eccRuntimeService,
+    shutdown: services.shutdownCoordinator,
+  })
+  services.eccRuntimeService.onWorkspaceReleased?.((workspaceHandle) => {
+    services.shutdownCoordinator?.untrackWorkspaceHandle(workspaceHandle)
+    const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
+    if (!subscription) return
+    releasedWorkspaceHandleOwnerIds.set(workspaceHandle, subscription.sender.id)
+    while (releasedWorkspaceHandleOwnerIds.size > 64) {
+      releasedWorkspaceHandleOwnerIds.delete(
+        releasedWorkspaceHandleOwnerIds.keys().next().value!,
+      )
+    }
+    workspaceHandleSubscriptions.delete(workspaceHandle)
+    if (typeof subscription.sender.off === 'function') {
+      subscription.sender.off('destroyed', subscription.onDestroyed)
+    }
+  })
 
   const sendDesignRuntimeEventToSender = (
     sender: IpcMainInvokeEvent['sender'],
@@ -756,6 +881,28 @@ export function registerIpc(
     if (typeof sender.id === 'number') {
       services.backendWorkspaceService.invalidateWindow(sender.id)
     }
+  }
+
+  const requireBackendMutationAllowed = (event: IpcMainInvokeEvent): void => {
+    if (!services.shutdownCoordinator?.isMutationBlocked(event.sender.id)) return
+    throw Object.assign(new Error('Shutdown is in progress.'), {
+      code: 'SHUTDOWN_IN_PROGRESS',
+    })
+  }
+
+  const requireCreationCleanupAllowed = async (
+    event: IpcMainInvokeEvent,
+    projectRoot: string,
+    targetDirectory: string,
+  ): Promise<void> => {
+    if (!services.shutdownCoordinator?.isMutationBlocked(event.sender.id)) return
+    const allowed =
+      (await services.workspaceCreationJournal?.allowsRegistration(
+        event.sender.id,
+        projectRoot,
+        targetDirectory,
+      )) ?? false
+    if (!allowed) requireBackendMutationAllowed(event)
   }
 
   const runtimeEventCommitsWorkspaceFacts = (payload: EccRuntimeEvent): boolean => {
@@ -966,9 +1113,12 @@ export function registerIpc(
       }
     }
 
-    // A renderer/page only owns a subscription lease. Releasing that lease
-    // must not close a running ECC operation or its sidecar.
-    const closePromise = Promise.resolve({ ok: true })
+    // Backend release is lifecycle-aware: active work is retained, then an
+    // unreferenced Session closes only after terminal snapshot finalization.
+    const closePromise =
+      subscription?.designTool === 'backend'
+        ? services.eccRuntimeService.releaseWorkspace({ workspaceHandle })
+        : Promise.resolve({ ok: true })
     const trackedClosePromise = closePromise.finally(() => {
       workspaceHandleClosePromises.delete(workspaceHandle)
     })
@@ -992,12 +1142,9 @@ export function registerIpc(
     }
 
     const previous = workspaceHandleSubscriptions.get(workspaceHandle)
-    if (
-      previous &&
-      previous.sender !== sender &&
-      typeof previous.sender.off === 'function'
-    ) {
-      previous.sender.off('destroyed', previous.onDestroyed)
+    releasedWorkspaceHandleOwnerIds.delete(workspaceHandle)
+    if (previous && previous.sender !== sender) {
+      throw new Error('Workspace Runtime Session is owned by another window.')
     }
 
     const onDestroyed = (): void => {
@@ -1011,6 +1158,9 @@ export function registerIpc(
       sender,
       onDestroyed: previous?.sender === sender ? previous.onDestroyed : onDestroyed,
     })
+    if (typeof sender.id === 'number') {
+      services.shutdownCoordinator?.trackWorkspaceHandle(sender.id, workspaceHandle)
+    }
     if (previous?.sender !== sender && typeof sender.once === 'function') {
       sender.once('destroyed', onDestroyed)
     }
@@ -1058,6 +1208,18 @@ export function registerIpc(
     return null
   }
 
+  const workspaceOwnedByAnotherSender = (
+    sender: IpcMainInvokeEvent['sender'],
+    directory: string,
+  ): boolean => {
+    const normalizedDirectory = normalizeWorkspacePath(directory)
+    return [...workspaceHandleSubscriptions.values()].some(
+      (subscription) =>
+        subscription.sender !== sender &&
+        subscription.directories.has(normalizedDirectory),
+    )
+  }
+
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
   })
@@ -1072,10 +1234,6 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.windowClose, (event) => {
     closeWindow(getEventWindow(event))
-  })
-
-  handle(desktopApiIpcChannels.windowConfirmClose, (event) => {
-    confirmWindowClose(getEventWindow(event))
   })
 
   handle(desktopApiIpcChannels.windowSetTitle, (event, title) => {
@@ -1167,6 +1325,7 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
+    requireBackendMutationAllowed(event)
     const token = readWorkspaceRerunToken(request)
     const pending = pendingWorkspaceRerunExecutions.get(token)
     if (!pending || pending.sender !== event.sender) {
@@ -1286,6 +1445,31 @@ export function registerIpc(
     }
     if (!isRecord(request.mutation) || typeof request.mutation.type !== 'string') {
       throw new Error('Project manifest mutation must include a type')
+    }
+    let acceptedCreationRegistration = false
+    const mutationInput = isRecord(request.mutation.input) ? request.mutation.input : {}
+    const mutationBlocked =
+      services.shutdownCoordinator?.isMutationBlocked(event.sender.id) ?? false
+    if (mutationBlocked && request.mutation.type === 'register-workspace') {
+      acceptedCreationRegistration =
+        (await services.workspaceCreationJournal?.allowsRegistration(
+          event.sender.id,
+          request.projectRoot,
+          String(mutationInput.workspacePath ?? ''),
+        )) ?? false
+    } else if (mutationBlocked && request.mutation.type === 'record-replacement-backup') {
+      const replacement = services.workspaceService.getProjectDirectoryReplacement(
+        String(mutationInput.replacementId ?? ''),
+      )
+      acceptedCreationRegistration =
+        (await services.workspaceCreationJournal?.allowsRegistration(
+          event.sender.id,
+          request.projectRoot,
+          replacement.targetPath,
+        )) ?? false
+    }
+    if (mutationBlocked && !acceptedCreationRegistration) {
+      requireBackendMutationAllowed(event)
     }
     const result = await services.projectManifestService.mutate(
       request as unknown as ProjectManifestMutationRequest,
@@ -1578,6 +1762,7 @@ export function registerIpc(
   handle(
     desktopApiIpcChannels.workspaceWriteProjectTextFile,
     async (event, path, content) => {
+      requireBackendMutationAllowed(event)
       await services.workspaceService.writeProjectTextFile(
         path as string,
         content as string,
@@ -1600,7 +1785,8 @@ export function registerIpc(
 
   handle(
     desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate,
-    async (_event, path) => {
+    async (event, path) => {
+      requireBackendMutationAllowed(event)
       if (typeof path !== 'string') {
         throw new Error('Workspace path must be a string')
       }
@@ -1610,7 +1796,8 @@ export function registerIpc(
 
   handle(
     desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
-    async (_event, path) => {
+    async (event, path) => {
+      requireBackendMutationAllowed(event)
       return await services.workspaceService.prepareProjectDirectoryReplacement(
         path as string,
       )
@@ -1625,6 +1812,11 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      await requireCreationCleanupAllowed(
+        event,
+        replacement.projectRoot,
+        replacement.targetPath,
+      )
       await services.workspaceService.restoreProjectDirectoryReplacement(replacementId)
       invalidateBackendWorkspaceForSender(event.sender)
       services.backendProjectComparisonService.invalidateWorkspace(replacement.targetPath)
@@ -1639,6 +1831,11 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      await requireCreationCleanupAllowed(
+        event,
+        replacement.projectRoot,
+        replacement.targetPath,
+      )
       await services.workspaceService.finalizeProjectDirectoryReplacement(replacementId)
       invalidateBackendWorkspaceForSender(event.sender)
       services.backendProjectComparisonService.invalidateWorkspace(replacement.targetPath)
@@ -1653,6 +1850,11 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      await requireCreationCleanupAllowed(
+        event,
+        replacement.projectRoot,
+        replacement.targetPath,
+      )
       await services.workspaceService.retainProjectDirectoryReplacement(replacementId)
       invalidateBackendWorkspaceForSender(event.sender)
       services.backendProjectComparisonService.invalidateWorkspace(replacement.targetPath)
@@ -1672,6 +1874,7 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.workspaceAddDesignFiles, async (event, sourcePaths) => {
+    requireBackendMutationAllowed(event)
     const result = await services.workspaceService.addDesignFiles(sourcePaths as string[])
     const workspaceRoot = await services.workspaceService.getProjectRoot()
     invalidateBackendWorkspaceForSender(event.sender)
@@ -1682,6 +1885,7 @@ export function registerIpc(
   handle(
     desktopApiIpcChannels.workspaceRemoveDesignFile,
     async (event, filelistEntry) => {
+      requireBackendMutationAllowed(event)
       const result = await services.workspaceService.removeDesignFile(
         filelistEntry as string,
       )
@@ -1888,7 +2092,58 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.productCommandExecute, async (event, request) => {
+    if (
+      services.shutdownCoordinator?.isMutationBlocked(event.sender.id) &&
+      isShutdownBlockedProductCommand(request)
+    ) {
+      throw Object.assign(new Error('Shutdown is in progress.'), {
+        code: 'SHUTDOWN_IN_PROGRESS',
+      })
+    }
+    const ownerWindowId = typeof event.sender.id === 'number' ? event.sender.id : 0
     return await executeProductCommand(request, {
+      beginCreate: services.workspaceCreationJournal
+        ? (createRequest) =>
+            services.workspaceCreationJournal!.begin(ownerWindowId, createRequest)
+        : undefined,
+      abandonCreate: services.workspaceCreationJournal
+        ? (creationId) =>
+            services.workspaceCreationJournal!.abandon(creationId, ownerWindowId)
+        : undefined,
+      completeCreate: services.workspaceCreationJournal
+        ? (creationId) =>
+            services.workspaceCreationJournal!.complete(creationId, ownerWindowId)
+        : undefined,
+      continueCreate: services.workspaceCreationJournal
+        ? (creationId) =>
+            services.workspaceCreationJournal!.continueInitialization(
+              creationId,
+              ownerWindowId,
+            )
+        : undefined,
+      failCreate: services.workspaceCreationJournal
+        ? (creationId, error) =>
+            services.workspaceCreationJournal!.markUnfinished(
+              creationId,
+              error instanceof Error ? error.message : String(error),
+              ownerWindowId,
+            )
+        : undefined,
+      markCreateWorkspaceCreated: services.workspaceCreationJournal
+        ? (creationId, result) =>
+            services.workspaceCreationJournal!.markWorkspaceCreated(
+              creationId,
+              result,
+              ownerWindowId,
+            )
+        : undefined,
+      registerCreateWorkspace: services.workspaceCreationJournal
+        ? (creationId) =>
+            services.workspaceCreationJournal!.registerWorkspace(
+              creationId,
+              ownerWindowId,
+            )
+        : undefined,
       ownsWorkspaceHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
       prepareCreate: async (createRequest) =>
@@ -1961,52 +2216,83 @@ export function registerIpc(
   handle(desktopApiIpcChannels.designRuntimeWorkspaceOpen, async (event, request) => {
     const runtimeRequest = request as DesignRuntimeWorkspaceOpenRequest
     const designTool = requireDesignTool(runtimeRequest.designTool)
-    const result =
-      designTool === 'frontend'
-        ? await services.frontendRpcRuntimeService.openWorkspace(runtimeRequest.directory)
-        : await services.eccRuntimeService.openWorkspace(
-            await prepareWorkspaceOpenBinding(services, runtimeRequest.directory),
+    const openDirectory =
+      designTool === 'backend'
+        ? await realpath(runtimeRequest.directory).catch(() =>
+            normalizeWorkspacePath(runtimeRequest.directory),
           )
-    const workspaceHandle = workspaceHandleFromResult(result)
-    if (workspaceHandle) {
-      trackWorkspaceHandle(
-        event.sender,
-        workspaceHandle,
-        runtimeRequest.directory,
-        designTool,
-      )
-      const directory = workspaceDirectoryFromResult(result)
-      if (directory)
-        trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
+        : runtimeRequest.directory
+    if (
+      designTool === 'backend' &&
+      (workspaceOwnedByAnotherSender(event.sender, openDirectory) ||
+        backendWorkspaceOpenClaims.has(openDirectory))
+    ) {
+      throw new Error('Workspace Runtime Session is owned by another window.')
     }
-    return result
+    if (designTool === 'backend') {
+      backendWorkspaceOpenClaims.set(openDirectory, event.sender)
+    }
+    try {
+      const existingHandle =
+        designTool === 'backend'
+          ? workspaceHandleForSender(event.sender, openDirectory)
+          : null
+      const result =
+        designTool === 'frontend'
+          ? await services.frontendRpcRuntimeService.openWorkspace(openDirectory)
+          : existingHandle
+            ? await services.eccRuntimeService.workspaceSession(existingHandle)
+            : await services.eccRuntimeService.openWorkspace(
+                await prepareWorkspaceOpenBinding(services, openDirectory),
+              )
+      const workspaceHandle = workspaceHandleFromResult(result)
+      if (workspaceHandle) {
+        trackWorkspaceHandle(event.sender, workspaceHandle, openDirectory, designTool)
+        const directory = workspaceDirectoryFromResult(result)
+        if (directory)
+          trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
+      }
+      return result
+    } finally {
+      if (backendWorkspaceOpenClaims.get(openDirectory) === event.sender) {
+        backendWorkspaceOpenClaims.delete(openDirectory)
+      }
+    }
   })
 
-  handle(desktopApiIpcChannels.designRuntimeWorkspaceClose, async (_event, request) => {
+  handle(desktopApiIpcChannels.designRuntimeWorkspaceClose, async (event, request) => {
     const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
     const subscription = workspaceHandleSubscriptions.get(runtimeRequest.workspaceHandle)
+    if (!subscription || subscription.sender !== event.sender) return { ok: true }
     const designTool = requireDesignTool(
       runtimeRequest.designTool ?? subscription?.designTool,
     )
     const existingClose = workspaceHandleClosePromises.get(runtimeRequest.workspaceHandle)
     if (existingClose) return await existingClose
 
-    if (subscription) {
-      workspaceHandleSubscriptions.delete(runtimeRequest.workspaceHandle)
-      if (typeof subscription.sender.off === 'function') {
-        subscription.sender.off('destroyed', subscription.onDestroyed)
-      }
-    }
-
-    const closePromise = Promise.resolve().then(() =>
-      designTool === 'frontend'
-        ? services.frontendRpcRuntimeService.closeWorkspace(
+    const closePromise = Promise.resolve()
+      .then(() =>
+        designTool === 'frontend'
+          ? services.frontendRpcRuntimeService.closeWorkspace(
+              runtimeRequest.workspaceHandle,
+            )
+          : services.eccRuntimeService.releaseWorkspace({
+              workspaceHandle: runtimeRequest.workspaceHandle,
+            }),
+      )
+      .then((result) => {
+        const retained = isRecord(result) && result.retained === true
+        if (!retained) {
+          workspaceHandleSubscriptions.delete(runtimeRequest.workspaceHandle)
+          services.shutdownCoordinator?.untrackWorkspaceHandle(
             runtimeRequest.workspaceHandle,
           )
-        : services.eccRuntimeService.closeWorkspace({
-            workspaceHandle: runtimeRequest.workspaceHandle,
-          }),
-    )
+          if (typeof subscription.sender.off === 'function') {
+            subscription.sender.off('destroyed', subscription.onDestroyed)
+          }
+        }
+        return result
+      })
     const trackedClosePromise = closePromise.finally(() => {
       workspaceHandleClosePromises.delete(runtimeRequest.workspaceHandle)
     })

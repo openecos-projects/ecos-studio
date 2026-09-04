@@ -90,12 +90,6 @@ let currentProjectPathMutationQueue = Promise.resolve()
 let projectRootMutationQueue = Promise.resolve()
 let activeWorkspaceCreationRequest = false
 let workspaceRootOwnerSequence = 0
-const backgroundWorkspaceReleaseTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const backgroundWorkspaceSnapshotFailures = ref<Record<string, string>>({})
-const retainedBackgroundWorkspaceHandles = new Map<
-  string,
-  { workspaceHandle: string; designTool: DesignTool }
->()
 
 function enqueueCurrentProjectPathMutation<T>(operation: () => Promise<T>): Promise<T> {
   const next = currentProjectPathMutationQueue.then(operation, operation)
@@ -180,6 +174,7 @@ const runtimeBackendSubtitle = ref(
   'First load or restoring your project may take a moment',
 )
 const lastWorkspaceCreationError = ref('')
+const lastWorkspaceCreationId = ref('')
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -271,98 +266,19 @@ export function useWorkspace() {
 
   const releaseWorkspaceHandleAfterFlow = (
     workspaceHandle: string,
-    workspacePath: string | undefined,
     designTool: DesignTool,
   ): void => {
-    if (!workspaceHandle) return
-    const normalizedPath = workspacePath ? normalizePath(workspacePath) : ''
-    if (
-      designTool !== 'backend' ||
-      !normalizedPath ||
-      !isFlowExecutionActiveForWorkspace(normalizedPath)
-    ) {
-      void releaseWorkspaceHandle(workspaceHandle, designTool)
-      return
-    }
-    if (backgroundWorkspaceReleaseTimers.has(workspaceHandle)) return
-
-    const poll = () => {
-      if (isFlowExecutionActiveForWorkspace(normalizedPath)) {
-        backgroundWorkspaceReleaseTimers.set(workspaceHandle, setTimeout(poll, 250))
-        return
-      }
-      backgroundWorkspaceReleaseTimers.delete(workspaceHandle)
-      void (async () => {
-        try {
-          const snapshot = getDesktopApi().ecc.runtime?.snapshot
-          if (!snapshot) throw new Error('ECC runtime snapshot API is unavailable.')
-          await snapshot({ workspaceHandle })
-        } catch (error) {
-          if (normalizedPath) {
-            backgroundWorkspaceSnapshotFailures.value = {
-              ...backgroundWorkspaceSnapshotFailures.value,
-              [normalizedPath]: error instanceof Error ? error.message : String(error),
-            }
-            retainedBackgroundWorkspaceHandles.set(normalizedPath, {
-              workspaceHandle,
-              designTool,
-            })
-          }
-          console.warn(
-            `Retaining background workspace ${workspaceHandle} after final snapshot failure:`,
-            error,
-          )
-          showToast({
-            severity: 'warn',
-            summary: 'Workspace retained for recovery',
-            detail:
-              'The completed Flow could not be snapshotted. The background Workspace remains open until recovery succeeds.',
-            life: 8000,
-          })
-          return
-        }
-        if (normalizedPath) {
-          const failures = { ...backgroundWorkspaceSnapshotFailures.value }
-          delete failures[normalizedPath]
-          backgroundWorkspaceSnapshotFailures.value = failures
-          retainedBackgroundWorkspaceHandles.delete(normalizedPath)
-        }
-        await releaseWorkspaceHandle(workspaceHandle, designTool)
-      })()
-    }
-    backgroundWorkspaceReleaseTimers.set(workspaceHandle, setTimeout(poll, 250))
+    void releaseWorkspaceHandle(workspaceHandle, designTool)
   }
 
-  const cancelBackgroundWorkspaceRelease = (workspaceHandle: string): void => {
-    const timer = backgroundWorkspaceReleaseTimers.get(workspaceHandle)
-    if (timer === undefined) return
-    clearTimeout(timer)
-    backgroundWorkspaceReleaseTimers.delete(workspaceHandle)
-  }
-
-  const retryBackgroundWorkspaceSnapshot = async (
-    workspacePath: string,
-  ): Promise<boolean> => {
-    const normalizedPath = normalizePath(workspacePath)
-    const retained = retainedBackgroundWorkspaceHandles.get(normalizedPath)
-    if (!retained || isFlowExecutionActiveForWorkspace(normalizedPath)) return false
-    try {
-      const snapshot = getDesktopApi().ecc.runtime?.snapshot
-      if (!snapshot) throw new Error('ECC runtime snapshot API is unavailable.')
-      await snapshot({ workspaceHandle: retained.workspaceHandle })
-      retainedBackgroundWorkspaceHandles.delete(normalizedPath)
-      const failures = { ...backgroundWorkspaceSnapshotFailures.value }
-      delete failures[normalizedPath]
-      backgroundWorkspaceSnapshotFailures.value = failures
-      await releaseWorkspaceHandle(retained.workspaceHandle, retained.designTool)
-      return true
-    } catch (error) {
-      backgroundWorkspaceSnapshotFailures.value = {
-        ...backgroundWorkspaceSnapshotFailures.value,
-        [normalizedPath]: error instanceof Error ? error.message : String(error),
-      }
-      return false
-    }
+  const completeWorkspaceCreation = async (): Promise<void> => {
+    const creationId = lastWorkspaceCreationId.value
+    if (!creationId) return
+    await getDesktopApi().productCommands.execute({
+      command: 'workspace.completeCreation',
+      payload: { creationId },
+    })
+    lastWorkspaceCreationId.value = ''
   }
 
   /**
@@ -778,7 +694,6 @@ export function useWorkspace() {
       workspaceLifecycle.session.value.state === 'active'
         ? workspaceLifecycle.session.value.workspaceId
         : ''
-    const previousWorkspacePath = currentProject.value?.path
     const previousDesignTool = currentProject.value?.designTool ?? 'backend'
     let candidateDesignTool: DesignTool = 'backend'
     let candidateWorkspaceHandle = ''
@@ -873,22 +788,6 @@ export function useWorkspace() {
         'Opening project data and preparing the workspace view'
       if (session) workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      if (currentProject.value) {
-        const previousProjectPath = currentProject.value.path
-        if (
-          previousDesignTool === 'backend' &&
-          isFlowExecutionActiveForWorkspace(previousProjectPath)
-        ) {
-          // Active runtimes own their terminal snapshot; navigation must not issue
-          // a competing read against the same-directory mutation lock.
-        } else {
-          try {
-            await snapshotCurrentProject(isLatestOpenProjectRequest)
-          } catch (err) {
-            console.error('Failed to snapshot project data before switching:', err)
-          }
-        }
-      }
       if (!isLatestOpenProjectRequest()) return false
 
       if (!preserveExistingSession) {
@@ -959,11 +858,7 @@ export function useWorkspace() {
             isFlowExecutionActiveForWorkspace(loadedProject.path)
           ) {
             candidateWorkspaceReleaseDeferred = true
-            releaseWorkspaceHandleAfterFlow(
-              candidateWorkspaceHandle,
-              loadedProject.path,
-              requestedDesignTool,
-            )
+            releaseWorkspaceHandleAfterFlow(candidateWorkspaceHandle, requestedDesignTool)
           }
           await addToRecent(loadedProject)
           return true
@@ -998,7 +893,6 @@ export function useWorkspace() {
             requestedDesignTool,
             canonicalProjectRoot,
           )
-        cancelBackgroundWorkspaceRelease(workspaceId)
         workspaceLifecycle.activateSession(activeSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
@@ -1039,11 +933,7 @@ export function useWorkspace() {
         }
 
         if (previousWorkspaceHandle !== workspaceId) {
-          releaseWorkspaceHandleAfterFlow(
-            previousWorkspaceHandle,
-            previousWorkspacePath,
-            previousDesignTool,
-          )
+          releaseWorkspaceHandleAfterFlow(previousWorkspaceHandle, previousDesignTool)
         }
 
         // 更新窗口标题
@@ -1119,6 +1009,7 @@ export function useWorkspace() {
     }
     activeWorkspaceCreationRequest = true
     lastWorkspaceCreationError.value = ''
+    lastWorkspaceCreationId.value = ''
     const previousWorkspaceHandle =
       workspaceLifecycle.session.value.state === 'active'
         ? workspaceLifecycle.session.value.workspaceId
@@ -1137,6 +1028,7 @@ export function useWorkspace() {
     let existedBeforeCreate = false
     let usedDirectoryReplacement = false
     let candidateWorkspaceSucceeded = false
+    let candidateCreationCompleted = false
     const candidateRootOwner = ++workspaceRootOwnerSequence
     let candidateProjectRootRegistered = false
     const restoreReplacement = async () => {
@@ -1153,8 +1045,9 @@ export function useWorkspace() {
       replacement = null
     }
     const discardFailedCreateIfNeeded = async () => {
-      // Replacement failures restore the prior workspace; only discard brand-new residue.
+      // Backend failures keep journaled partial directories for explicit recovery.
       if (
+        candidateDesignTool === 'backend' ||
         !selectedPath ||
         existedBeforeCreate ||
         usedDirectoryReplacement ||
@@ -1376,6 +1269,8 @@ export function useWorkspace() {
         )
       }
       if (response.response === 'success') {
+        lastWorkspaceCreationId.value = response.data.creationId ?? ''
+        candidateWorkspaceSucceeded = true
         candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
           response.data,
           designTool,
@@ -1411,14 +1306,19 @@ export function useWorkspace() {
         }
 
         if (options.shouldActivate && !options.shouldActivate()) {
-          candidateWorkspaceSucceeded = true
-          await addToRecent({
-            id: canonicalProjectRoot,
-            name: workspaceNameFromPath(canonicalProjectRoot),
-            path: canonicalProjectRoot,
-            designTool,
-            lastOpened: new Date(),
-          })
+          if (
+            !(await addToRecent({
+              id: canonicalProjectRoot,
+              name: workspaceNameFromPath(canonicalProjectRoot),
+              path: canonicalProjectRoot,
+              designTool,
+              lastOpened: new Date(),
+            }))
+          ) {
+            throw new Error('Workspace creation did not finish application registration.')
+          }
+          await completeWorkspaceCreation()
+          candidateCreationCompleted = true
           showToast({
             severity: 'success',
             summary: 'Workspace Created',
@@ -1428,12 +1328,6 @@ export function useWorkspace() {
           return true
         }
 
-        const createdSession = workspaceLifecycle.beginSession({
-          projectRoot: canonicalProjectRoot,
-        })
-        sessionId = createdSession.sessionId
-        workspaceLifecycle.setSessionLoading(createdSession.sessionId)
-
         const createdProject: Project = {
           id: canonicalProjectRoot,
           name: workspaceNameFromPath(canonicalProjectRoot),
@@ -1441,6 +1335,17 @@ export function useWorkspace() {
           designTool,
           lastOpened: new Date(),
         }
+
+        if (!(await addToRecent(createdProject))) {
+          throw new Error('Workspace creation did not finish application registration.')
+        }
+        await completeWorkspaceCreation()
+
+        const createdSession = workspaceLifecycle.beginSession({
+          projectRoot: canonicalProjectRoot,
+        })
+        sessionId = createdSession.sessionId
+        workspaceLifecycle.setSessionLoading(createdSession.sessionId)
 
         currentProject.value = createdProject
         if (useAgentShellStore().shouldPreserveMessages()) {
@@ -1461,7 +1366,6 @@ export function useWorkspace() {
           designTool,
           canonicalProjectRoot,
         )
-        cancelBackgroundWorkspaceRelease(workspaceId)
         workspaceLifecycle.activateSession(createdSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
@@ -1475,18 +1379,13 @@ export function useWorkspace() {
         connectRuntimeEvents(workspaceId, designTool, createdSession.sessionId)
 
         if (previousWorkspaceHandle && previousWorkspaceHandle !== workspaceId) {
-          releaseWorkspaceHandleAfterFlow(
-            previousWorkspaceHandle,
-            previousWorkspacePath,
-            previousDesignTool,
-          )
+          releaseWorkspaceHandleAfterFlow(previousWorkspaceHandle, previousDesignTool)
         }
 
         // 更新窗口标题
         await updateWindowTitle(createdProject.name)
 
-        // 添加到最近项目列表（包含路径标准化和持久化）
-        await addToRecent(createdProject)
+        candidateCreationCompleted = true
 
         return true
       } else {
@@ -1524,6 +1423,21 @@ export function useWorkspace() {
       return false
     } finally {
       activeWorkspaceCreationRequest = false
+      if (lastWorkspaceCreationId.value && !candidateCreationCompleted) {
+        void getDesktopApi()
+          .productCommands.execute({
+            command: 'workspace.failCreation',
+            payload: {
+              creationId: lastWorkspaceCreationId.value,
+              issue:
+                lastWorkspaceCreationError.value ||
+                'Workspace creation did not finish application registration.',
+            },
+          })
+          .catch((error) =>
+            console.warn('Failed to retain Workspace creation recovery state:', error),
+          )
+      }
       if (!candidateWorkspaceCommitted) {
         if (claimedCreatePath) {
           await unbindWorkspaceWindow(claimedCreatePath)
@@ -1703,7 +1617,6 @@ export function useWorkspace() {
         ? workspaceLifecycle.session.value.workspaceId
         : ''
     const closingDesignTool = currentProject.value?.designTool ?? 'backend'
-    cancelBackgroundWorkspaceRelease(closingWorkspaceHandle)
     if (currentProject.value) {
       try {
         await snapshotCurrentProject(isCurrentCloseRequest)
@@ -2281,8 +2194,6 @@ export function useWorkspace() {
     runtimeBackendSubtitle,
     ensureApiReady,
     lastWorkspaceCreationError,
-    backgroundWorkspaceSnapshotFailures,
-    retryBackgroundWorkspaceSnapshot,
     // Toast
     showToast,
   }

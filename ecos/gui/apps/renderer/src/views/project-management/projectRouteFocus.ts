@@ -1,12 +1,13 @@
 export interface ProjectRouteFocusCandidate {
   id: string
   path: string
-  workspaces: Array<{ id: string }>
+  workspaces: Array<{ id: string; path?: string }>
 }
 
 export interface ProjectRouteFocusInput {
   projectRoot?: string | null
   workspaceId?: string | null
+  workspacePath?: string | null
   projects: readonly ProjectRouteFocusCandidate[]
 }
 
@@ -23,8 +24,9 @@ export function resolveProjectManagementRouteFocus(
   input: ProjectRouteFocusInput,
 ): ProjectRouteFocus | null {
   const projectRoot = normalizePath(input.projectRoot)
-  const workspaceId = asNonEmpty(input.workspaceId)
-  if (!projectRoot && !workspaceId) return null
+  const workspacePath = normalizePath(input.workspacePath)
+  let workspaceId = asNonEmpty(input.workspaceId)
+  if (!projectRoot && !workspaceId && !workspacePath) return null
 
   let project =
     projectRoot != null
@@ -39,6 +41,18 @@ export function resolveProjectManagementRouteFocus(
     project = input.projects.find((candidate) =>
       candidate.workspaces.some((workspace) => workspace.id === workspaceId),
     )
+  }
+
+  if (!project && workspacePath) {
+    project = input.projects.find((candidate) =>
+      candidate.workspaces.some(
+        (workspace) => normalizePath(workspace.path) === workspacePath,
+      ),
+    )
+    workspaceId =
+      project?.workspaces.find(
+        (workspace) => normalizePath(workspace.path) === workspacePath,
+      )?.id ?? null
   }
 
   if (!project) return null

@@ -124,7 +124,9 @@ export interface EccWorkspaceOpenResult {
   workspaceRevision?: number
 }
 
-export type EccWorkspaceCreateResult = EccWorkspaceOpenResult
+export interface EccWorkspaceCreateResult extends EccWorkspaceOpenResult {
+  creationId?: string
+}
 
 export interface EccWorkspaceCloseResult {
   ok: boolean
@@ -277,6 +279,62 @@ export interface EccRuntimeOperation {
   updatedAt: number
   workspaceId: string
   deduplicated?: boolean
+}
+
+export interface EccBackgroundOperation extends EccRuntimeOperation {
+  workspaceDirectory: string
+  workspaceHandle: string
+}
+
+export interface EccBackgroundOperationOutcome extends EccRuntimeOperation {
+  workspaceDirectory: string
+  workspaceHandle: string
+}
+
+export interface EccBackgroundFinalization {
+  issue?: string
+  state: 'finalizing' | 'snapshot-failed'
+  workspaceDirectory: string
+  workspaceHandle: string
+  workspaceId: string
+}
+
+export type EccWorkspaceCreationStage =
+  | 'intent-recorded'
+  | 'workspace-created'
+  | 'manifest-registered'
+  | 'application-registered'
+  | 'completed'
+
+export interface EccBackgroundWorkspaceCreation {
+  commandId?: string
+  creationId: string
+  issue?: string
+  ownerWindowId?: number
+  projectId?: string
+  projectRoot?: string
+  stage?: EccWorkspaceCreationStage
+  status: 'active' | 'unfinished' | 'invalid' | 'recovered'
+  targetDirectory?: string
+  targetExistedBefore?: boolean
+  updatedAt: number
+}
+
+export interface EccBackgroundOperationProjection {
+  creations: EccBackgroundWorkspaceCreation[]
+  finalizations: EccBackgroundFinalization[]
+  generation: number
+  operations: EccBackgroundOperation[]
+  outcomes: EccBackgroundOperationOutcome[]
+}
+
+export interface EccBackgroundOperationInvalidatedEvent {
+  generation: number
+}
+
+export interface EccBackgroundOperationLogResult {
+  content: string
+  truncated: boolean
 }
 
 export interface EccRuntimeStartFlowRequest extends EccWorkspaceMutationRequest {
@@ -543,5 +601,12 @@ export interface EccRuntimeApi {
     ): Promise<EccEngineeringSnapshot>
     snapshot(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceRuntimeSnapshot>
     waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation>
+    operationProjection(): Promise<EccBackgroundOperationProjection>
+    operationLog(
+      request: EccRuntimeOperationRequest,
+    ): Promise<EccBackgroundOperationLogResult>
+    onOperationProjectionInvalidated(
+      listener: (event: EccBackgroundOperationInvalidatedEvent) => void,
+    ): () => void
   }
 }

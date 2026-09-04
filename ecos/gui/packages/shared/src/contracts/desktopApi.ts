@@ -24,6 +24,7 @@ import type {
   ResourceUpdateCheckResult,
 } from './resources.ts'
 import type { EccRuntimeApi } from './eccRuntime.ts'
+import type { DesktopShutdownApi } from './shutdown.ts'
 import type {
   PdkBinding,
   PdkImportRequest,
@@ -205,12 +206,10 @@ export interface DesktopApi {
     minimize(): Promise<void>
     toggleMaximize(): Promise<void>
     close(): Promise<void>
-    confirmClose(): Promise<void>
     setTitle(title: string): Promise<void>
     isMaximized(): Promise<boolean>
     setZoomFactor(factor: number): Promise<void>
     create(options?: { initialRoute?: string }): Promise<void>
-    onCloseRequested(listener: () => void): DesktopEventUnsubscribe
     onResized(listener: () => void): DesktopEventUnsubscribe
     onMaximizedChanged(listener: (isMaximized: boolean) => void): DesktopEventUnsubscribe
   }
@@ -338,6 +337,7 @@ export interface DesktopApi {
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi
+  shutdown?: DesktopShutdownApi
   agent?: {
     interrupt(request: DesktopAgentInterruptRequest): Promise<void>
     start(request: DesktopAgentStartRequest): Promise<void>

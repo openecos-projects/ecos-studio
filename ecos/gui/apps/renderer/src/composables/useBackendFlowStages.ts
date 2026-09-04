@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import type { FlowStepState } from '@ecos-studio/shared'
 import { getStepMetadata, STEP_METADATA } from '@/api/type'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
+import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useWorkspace } from './useWorkspace'
 import { projectBackendFlowSteps } from './backendFlowProjection'
 
@@ -62,6 +63,7 @@ function displayFlowState(state: FlowStepState): string {
 
 export function useBackendFlowStages() {
   const session = useBackendWorkspaceSession()
+  const backgroundOperations = useBackgroundOperationStore()
   const { backendRuntimeEvents, currentProject } = useWorkspace()
 
   const committedSteps = computed(() => {
@@ -75,6 +77,31 @@ export function useBackendFlowStages() {
       committedSteps.value,
       backendRuntimeEvents.value,
     )
+    const revision = session.projection.data?.revision
+    const operation =
+      revision?.status === 'ready'
+        ? backgroundOperations.operationForWorkspace(
+            revision.data.workspaceId,
+            revision.data.workspaceRevision,
+          )
+        : undefined
+    const operationStep = operation?.currentStep || operation?.step
+    if (operationStep) {
+      const key = operationStep.trim().toLowerCase()
+      for (const step of steps) {
+        if (step.state === 'running') step.state = 'not-started'
+      }
+      const activeStep = steps.find(
+        (step) =>
+          step.stepId.trim().toLowerCase() === key ||
+          step.name.trim().toLowerCase() === key ||
+          (getStepMetadata(step.stepId)?.path ?? '').toLowerCase() === key,
+      )
+      if (activeStep) {
+        activeStep.state = 'running'
+        if (operation.currentTool) activeStep.toolId = operation.currentTool
+      }
+    }
     const request = optimisticRun.value
     if (
       !request ||

@@ -25,6 +25,7 @@ export interface RuntimeShutdownResult {
 }
 
 export interface EccRpcRuntimeSidecar {
+  forceShutdown?(): Promise<void>
   logFile: string | null
   relocateLogFileFrom?(workspaceDirectory: string | null): void
   shutdown(): Promise<void>

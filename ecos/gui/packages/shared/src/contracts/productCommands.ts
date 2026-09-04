@@ -33,6 +33,26 @@ export type ProductCommandRequest =
       command: 'workspace.cancel'
       payload: { workspaceHandle: string; operationId: string }
     }
+  | {
+      command: 'workspace.retrySnapshot'
+      payload: { workspaceHandle: string }
+    }
+  | {
+      command: 'workspace.continueCreation'
+      payload: { creationId: string }
+    }
+  | {
+      command: 'workspace.abandonCreation'
+      payload: { creationId: string }
+    }
+  | {
+      command: 'workspace.completeCreation'
+      payload: { creationId: string }
+    }
+  | {
+      command: 'workspace.failCreation'
+      payload: { creationId: string; issue: string }
+    }
   | { command: 'workspace.reset'; payload: EccWorkspaceMutationRequest }
   | {
       command: 'workspace.syncConfig'
@@ -48,6 +68,10 @@ export type ProductCommandResult =
   | EccWorkspaceExportSignoffResult
   | EccRuntimeOperation
   | { accepted: boolean; operationId: string; state: string }
+  | { recovered: boolean }
+  | { recovered: boolean; issue?: string }
+  | { abandoned: boolean }
+  | { completed: boolean }
 
 export interface ProductCommandApi {
   execute(request: ProductCommandRequest): Promise<ProductCommandResult>

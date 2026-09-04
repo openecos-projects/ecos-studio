@@ -282,6 +282,12 @@ export class EccRpcSidecarProcess {
     await this.stopForRestart(child)
   }
 
+  async forceShutdown(): Promise<void> {
+    this.shuttingDown = true
+    this.clearForceKillTimer()
+    this.child?.kill('SIGKILL')
+  }
+
   /**
    * Move a legacy workspace-owned sidecar log before ECC deletes rerun artifacts.
    * stderr is appended by path, so updating logFile synchronously prevents the

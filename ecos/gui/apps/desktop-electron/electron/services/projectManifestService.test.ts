@@ -85,6 +85,78 @@ describe('ProjectManifestService', () => {
     )
   })
 
+  it('conditionally removes only the exact Workspace registration it confirmed', async () => {
+    const projectRoot = await createTemporaryProject()
+    const service = createService(projectRoot)
+    const workspacePath = join(projectRoot, 'ws_0001')
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
+
+    const evidence = await service.ensureWorkspaceRegistration(projectRoot, workspacePath)
+    expect(
+      await service.inspectWorkspaceRegistration(projectRoot, workspacePath),
+    ).toEqual(evidence)
+
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: { projectRoot, workspacePath, startStep: 'Floor' },
+      },
+    })
+    await expect(
+      service.removeWorkspaceRegistration(projectRoot, evidence),
+    ).rejects.toThrow('registration changed')
+
+    const current = await service.inspectWorkspaceRegistration(projectRoot, workspacePath)
+    await service.removeWorkspaceRegistration(projectRoot, current!)
+    expect(
+      await service.inspectWorkspaceRegistration(projectRoot, workspacePath),
+    ).toBeNull()
+  })
+
+  it('refuses to replace a conflicting Workspace registration during recovery', async () => {
+    const projectRoot = await createTemporaryProject()
+    const service = createService(projectRoot)
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: {
+          projectRoot,
+          workspacePath: join(projectRoot, 'elsewhere', 'ws_0001'),
+        },
+      },
+    })
+
+    await expect(
+      service.ensureWorkspaceRegistration(projectRoot, join(projectRoot, 'ws_0001')),
+    ).rejects.toThrow('conflicting Workspace identity')
+  })
+
+  it('refuses recovery when the Project identity changed', async () => {
+    const projectRoot = await createTemporaryProject()
+    const service = createService(projectRoot)
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
+
+    await expect(
+      service.ensureWorkspaceRegistration(
+        projectRoot,
+        join(projectRoot, 'ws_0001'),
+        'different-project',
+      ),
+    ).rejects.toThrow('Project manifest identity changed')
+  })
+
   it('writes project manifests atomically and refuses to overwrite an existing project manifest', async () => {
     const projectRoot = await createTemporaryProject()
     const service = createService(projectRoot)

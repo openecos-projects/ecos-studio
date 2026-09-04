@@ -5,6 +5,12 @@ export {
   type DesktopApiIpcChannel,
 } from './constants/ipcChannels.ts'
 export type {
+  DesktopShutdownApi,
+  DesktopShutdownCleanupRequest,
+  DesktopShutdownState,
+  DesktopShutdownStatus,
+} from './contracts/shutdown.ts'
+export type {
   ProductCommandApi,
   ProductCommandRequest,
   ProductCommandResult,
@@ -167,6 +173,13 @@ export type {
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
   EccArtifactRef,
+  EccBackgroundOperation,
+  EccBackgroundFinalization,
+  EccBackgroundWorkspaceCreation,
+  EccBackgroundOperationInvalidatedEvent,
+  EccBackgroundOperationLogResult,
+  EccBackgroundOperationOutcome,
+  EccBackgroundOperationProjection,
   EccEngineeringAnalysis,
   EccEngineeringAnalysisArtifactRef,
   EccEngineeringAnalysisFile,
@@ -188,6 +201,7 @@ export type {
   EccRuntimeProtocolEvent,
   EccRuntimeProtocolPayload,
   EccRuntimeStartFlowRequest,
+  EccWorkspaceCreationStage,
   EccRuntimeStartStepRequest,
   EccRuntimeStepSnapshot,
   EccSignoffReviewDetail,

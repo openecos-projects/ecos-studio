@@ -86,7 +86,7 @@ function createService(
   directory = '/work/demo',
   options: Pick<
     ConstructorParameters<typeof EccWorkspaceRuntime>[0],
-    'adapterManagementRpc' | 'diagnosticIdleTimeoutMs' | 'lazyWorkspaceOpen'
+    'adapterManagementRpc' | 'lazyWorkspaceOpen'
   > = {},
 ) {
   const client = new FakeRpcClient()
@@ -640,38 +640,42 @@ describe('EccWorkspaceRuntime', () => {
     ).toHaveLength(2)
   })
 
-  it('releases a failed operation sidecar after the diagnostic idle timeout', async () => {
-    vi.useFakeTimers()
-    try {
-      const { sidecar, sidecarNotification } = createService('/work/demo', {
-        diagnosticIdleTimeoutMs: 25,
-      })
+  it('finalizes a failed operation before releasing its sidecar', async () => {
+    const { client, service, sidecar, sidecarNotification } = createService('/work/demo')
+    client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })
+    await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      directory: '/work/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'workspace-1:2',
+      operations: [],
+      parameters: {},
+    })
 
-      sidecarNotification({
-        jsonrpc: '2.0',
-        method: 'runtime.event',
-        params: {
-          eventId: 'workspace-1:2',
-          kind: 'flow',
-          operationId: 'operation-1',
-          origin: 'gui',
-          payload: {
-            error: { code: 'command_failed', message: 'failed' },
-            sourceType: 'operation.failed',
-            state: 'failed',
-          },
-          sequence: 2,
-          timestamp: 2,
-          type: 'operation.changed',
-          workspaceId: 'workspace-1',
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: {
+          error: { code: 'command_failed', message: 'failed' },
+          sourceType: 'operation.failed',
+          state: 'failed',
         },
-      })
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.changed',
+        workspaceId: 'workspace-1',
+      },
+    })
 
-      await vi.advanceTimersByTimeAsync(25)
-      expect(sidecar.shutdownCount).toBe(1)
-    } finally {
-      vi.useRealTimers()
-    }
+    await vi.waitFor(() => expect(sidecar.shutdownCount).toBe(1))
+    expect(client.calls.some((call) => call.method === 'workspace.snapshot')).toBe(true)
+    expect(sidecar.shutdownCount).toBe(1)
   })
 
   it('forwards the wizard flow range when creating a workspace', async () => {

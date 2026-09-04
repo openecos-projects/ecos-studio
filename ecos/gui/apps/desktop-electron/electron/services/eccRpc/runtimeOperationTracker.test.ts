@@ -139,4 +139,21 @@ describe('RuntimeOperationTracker active operations', () => {
       }),
     ])
   })
+
+  it('reconciles a missed terminal notification from operation.status', async () => {
+    const tracker = new RuntimeOperationTracker()
+    tracker.track(operationEvent('running'))
+    const completed = tracker.waitFor('operation-1')
+
+    expect(
+      tracker.reconcile({
+        ...tracker.activeOperations()[0]!,
+        state: 'succeeded',
+        updatedAt: 20,
+      }),
+    ).toBe(true)
+
+    await expect(completed).resolves.toMatchObject({ state: 'succeeded' })
+    expect(tracker.activeOperations()).toEqual([])
+  })
 })

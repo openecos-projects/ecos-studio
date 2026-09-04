@@ -78,6 +78,24 @@ describe('ProjectScopeService', () => {
     })
   })
 
+  it('canonicalizes a prospective creation target and rejects a symlink escape', async () => {
+    const projectRoot = await createTempDir('ecos-creation-project-')
+    const outside = await createTempDir('ecos-creation-outside-')
+    const linkedTarget = join(projectRoot, 'ws_link')
+    await symlink(outside, linkedTarget)
+    const service = new ProjectScopeService()
+
+    await expect(
+      service.canonicalizeProjectTarget(projectRoot, join(projectRoot, 'ws_new')),
+    ).resolves.toEqual({
+      projectRoot,
+      targetDirectory: join(projectRoot, 'ws_new'),
+    })
+    await expect(
+      service.canonicalizeProjectTarget(projectRoot, linkedTarget),
+    ).rejects.toThrow('outside the Project root')
+  })
+
   it('adds the workspace parent as a read root without replacing the active root', async () => {
     const projectRoot = await createTempDir('ecos-parent-project-root-')
     const workspaceRoot = join(projectRoot, 'ws_0004')

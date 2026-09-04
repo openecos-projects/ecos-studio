@@ -81,16 +81,7 @@
       >
         <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
       </button>
-      <div
-        v-if="workspaceCreation"
-        class="workspace-creation-tip"
-        role="status"
-        aria-live="polite"
-        title="Workspace creation is in progress. Duplicate submission is disabled."
-      >
-        <i class="ri-loader-4-line" aria-hidden="true"></i>
-        <span>Creating Workspace</span>
-      </div>
+      <BackgroundTasksButton />
       <NotificationCenter />
       <button
         @click="toggleTheme"
@@ -212,10 +203,8 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useRoute, useRouter } from 'vue-router'
 import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
-import {
-  rememberWorkspaceManagementReturnRoute,
-  useWorkspaceCreation,
-} from '@/utils/workspaceNavigation'
+import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
+import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -244,6 +233,7 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 const props = defineProps<{
   projectName?: string | null
   hasWorkspace?: boolean
+  mutationsDisabled?: boolean
   signoffExportDisabled?: boolean
 }>()
 
@@ -256,7 +246,6 @@ const workspaceFocusId = computed(
   () =>
     queryString(route.query.workspaceId) || workspaceIdFromProjectName(props.projectName),
 )
-const workspaceCreation = useWorkspaceCreation()
 
 const themeStore = useThemeStore()
 const agentShell = useAgentShellStore()
@@ -313,6 +302,7 @@ const menus = computed<Menu[]>(() => [
         icon: 'ri-add-line',
         shortcut: '⌘N',
         event: appMenuActionIds.newProject,
+        disabled: props.mutationsDisabled,
       },
       {
         label: 'Open Workspace',
@@ -324,7 +314,7 @@ const menus = computed<Menu[]>(() => [
         label: 'Update Workspace',
         icon: 'ri-settings-3-line',
         event: appMenuActionIds.reconfigureWorkspace,
-        disabled: !props.hasWorkspace,
+        disabled: !props.hasWorkspace || props.mutationsDisabled,
       },
       ...(isWorkspaceRoute.value
         ? [
@@ -500,7 +490,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   if (!e.shiftKey && key === 'n') {
     e.preventDefault()
     activeMenu.value = null
-    emit('menu-action', appMenuActionIds.newProject)
+    if (!props.mutationsDisabled) emit('menu-action', appMenuActionIds.newProject)
     return
   }
   if (!e.shiftKey && key === 'o') {
@@ -813,31 +803,6 @@ const handleClose = async () => {
   height: 18px;
   margin: 0 2px;
   background: var(--border-color);
-}
-
-.workspace-creation-tip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  margin: 0 6px;
-  padding: 0 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.workspace-creation-tip i {
-  color: var(--accent-color);
-  animation: workspace-creation-spin 1.2s linear infinite;
-}
-
-@keyframes workspace-creation-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .quick-dropdown-menu {

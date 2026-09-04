@@ -38,16 +38,16 @@ describe('useAppWindowClose', () => {
     vi.restoreAllMocks()
   })
 
-  it('subscribes once and runs cleanup before confirming native window close', async () => {
+  it('subscribes once and acknowledges Renderer cleanup by shutdown attempt', async () => {
     const unsubscribe = vi.fn()
-    const confirmClose = vi.fn().mockResolvedValue(undefined)
-    let onCloseRequested: (() => void) | undefined
+    const completeCleanup = vi.fn().mockResolvedValue(undefined)
+    let onCleanupRequested: ((request: { attemptId: string }) => void) | undefined
 
     getDesktopApi.mockReturnValue({
-      window: {
-        confirmClose,
-        onCloseRequested: vi.fn((listener: () => void) => {
-          onCloseRequested = listener
+      shutdown: {
+        completeCleanup,
+        onCleanupRequested: vi.fn((listener) => {
+          onCleanupRequested = listener
           return unsubscribe
         }),
       },
@@ -59,25 +59,25 @@ describe('useAppWindowClose', () => {
 
     await mountedCallbacks[0]?.()
     await Promise.resolve()
-    await onCloseRequested?.()
+    await onCleanupRequested?.({ attemptId: 'attempt-1' })
 
     expect(cleanup).toHaveBeenCalledTimes(1)
-    expect(confirmClose).toHaveBeenCalledTimes(1)
+    expect(completeCleanup).toHaveBeenCalledWith({ attemptId: 'attempt-1', ok: true })
 
     unmountedCallbacks[0]?.()
 
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  it('still confirms close when cleanup fails so the window is not trapped open', async () => {
-    const confirmClose = vi.fn().mockResolvedValue(undefined)
-    let onCloseRequested: (() => void) | undefined
+  it('reports cleanup failure without approving native close', async () => {
+    const completeCleanup = vi.fn().mockResolvedValue(undefined)
+    let onCleanupRequested: ((request: { attemptId: string }) => void) | undefined
 
     getDesktopApi.mockReturnValue({
-      window: {
-        confirmClose,
-        onCloseRequested: vi.fn((listener: () => void) => {
-          onCloseRequested = listener
+      shutdown: {
+        completeCleanup,
+        onCleanupRequested: vi.fn((listener) => {
+          onCleanupRequested = listener
           return vi.fn()
         }),
       },
@@ -89,33 +89,13 @@ describe('useAppWindowClose', () => {
 
     await mountedCallbacks[0]?.()
     await Promise.resolve()
-    await onCloseRequested?.()
+    await onCleanupRequested?.({ attemptId: 'attempt-2' })
 
     expect(consoleError).toHaveBeenCalledTimes(1)
-    expect(confirmClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the window open when the lifecycle prompt is declined', async () => {
-    const confirmClose = vi.fn().mockResolvedValue(undefined)
-    let onCloseRequested: (() => void) | undefined
-
-    getDesktopApi.mockReturnValue({
-      window: {
-        confirmClose,
-        onCloseRequested: vi.fn((listener: () => void) => {
-          onCloseRequested = listener
-          return vi.fn()
-        }),
-      },
+    expect(completeCleanup).toHaveBeenCalledWith({
+      attemptId: 'attempt-2',
+      issue: 'close failed',
+      ok: false,
     })
-
-    const cleanup = vi.fn().mockResolvedValue(undefined)
-    useAppWindowClose(cleanup, { beforeClose: () => false })
-
-    await mountedCallbacks[0]?.()
-    await onCloseRequested?.()
-
-    expect(cleanup).not.toHaveBeenCalled()
-    expect(confirmClose).not.toHaveBeenCalled()
   })
 })

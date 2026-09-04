@@ -6,6 +6,7 @@
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
+        :mutations-disabled="mutationsDisabled"
         :signoff-export-disabled="signoffExportDisabled"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
@@ -220,15 +221,16 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
+import {
+  isShutdownInProgress,
+  useBackgroundOperationStore,
+} from '@/stores/backgroundOperationStore'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import {
-  activeFlowExecutionWorkspacePaths,
-  isFlowExecutionActiveForWorkspace,
-} from '@/composables/flowExecutionState'
+import { isFlowExecutionActiveForWorkspace } from '@/composables/flowExecutionState'
 import { getDesktopApi } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
@@ -406,6 +408,10 @@ const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
 const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
 const workspaceCreation = useWorkspaceCreation()
+const backgroundOperations = useBackgroundOperationStore()
+const mutationsDisabled = computed(() =>
+  isShutdownInProgress(backgroundOperations.shutdownStatus.state),
+)
 
 watch(
   pendingWorkspaceWizardRequest,
@@ -437,27 +443,6 @@ function updateStepConfigDialogVisibility(visible: boolean): void {
   closeStepConfigDialog()
 }
 
-function confirmWorkspaceShutdown(): boolean {
-  const activeWorkspaces = activeFlowExecutionWorkspacePaths()
-  const pendingCreation = workspaceCreation.value
-  if (activeWorkspaces.length === 0 && !pendingCreation) return true
-
-  const flowDetails = activeWorkspaces.map((path) => `- ${path}: Flow is still running`)
-  const creationDetails = pendingCreation
-    ? [`- ${pendingCreation.targetPath}: Workspace creation is still in progress`]
-    : []
-  return window.confirm(
-    [
-      'Still have work in progress',
-      '',
-      ...flowDetails,
-      ...creationDetails,
-      '',
-      'The application will wait for completion and save the final Workspace data before closing.',
-      'Choose Cancel to keep the window open.',
-    ].join('\n'),
-  )
-}
 const pendingWorkspaceUpdatePath = ref('')
 const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
@@ -1158,7 +1143,7 @@ const { handleMenuAction } = useAppMenuActions({
   manageDesignFiles: openManageDialog,
   adjustZoom,
 })
-useAppWindowClose(closeProject, { beforeClose: confirmWorkspaceShutdown })
+useAppWindowClose(closeProject)
 
 let isResizing = false
 
@@ -1244,6 +1229,7 @@ const handleSelectStart = (e: Event) => {
 }
 
 onMounted(async () => {
+  void backgroundOperations.start()
   try {
     const savedZoom = await desktopApi.settings.get<number>(zoomSettingKey)
     if (
@@ -1288,6 +1274,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  backgroundOperations.dispose()
   document.removeEventListener('selectstart', handleSelectStart)
   if (resizeIdleTimer) {
     clearTimeout(resizeIdleTimer)

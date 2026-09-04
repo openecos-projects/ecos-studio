@@ -537,4 +537,14 @@ describe('EccRpcSidecarProcess', () => {
       message: 'ECC RPC sidecar did not exit after SIGKILL.',
     })
   })
+
+  it('force terminates the running sidecar with SIGKILL', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    await sidecar.forceShutdown()
+
+    expect(child.signals).toEqual(['SIGKILL'])
+  })
 })

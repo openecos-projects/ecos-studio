@@ -1,38 +1,29 @@
 import { onMounted, onUnmounted } from 'vue'
 import { getDesktopApi } from '@/platform/desktop'
 
-export function useAppWindowClose(
-  cleanup: () => Promise<void>,
-  options: { beforeClose?: () => boolean | Promise<boolean> } = {},
-) {
+export function useAppWindowClose(cleanup: () => Promise<void>) {
   let isHandlingClose = false
   let unsubscribe: (() => void) | undefined
 
   onMounted(() => {
     const desktopApi = getDesktopApi()
-    unsubscribe = desktopApi.window.onCloseRequested(async () => {
+    const shutdown = desktopApi.shutdown
+    if (!shutdown) return
+    unsubscribe = shutdown.onCleanupRequested(async ({ attemptId }) => {
       if (isHandlingClose) return
       isHandlingClose = true
-      let shouldConfirmClose = true
-
       try {
-        if (options.beforeClose && !(await options.beforeClose())) {
-          shouldConfirmClose = false
-          return
-        }
         await cleanup()
+        await shutdown.completeCleanup({ attemptId, ok: true })
       } catch (error) {
         console.error('Failed to clean up workspace before window close:', error)
+        await shutdown.completeCleanup({
+          attemptId,
+          issue: error instanceof Error ? error.message : String(error),
+          ok: false,
+        })
       } finally {
-        if (shouldConfirmClose) {
-          try {
-            await desktopApi.window.confirmClose()
-          } finally {
-            isHandlingClose = false
-          }
-        } else {
-          isHandlingClose = false
-        }
+        isHandlingClose = false
       }
     })
   })

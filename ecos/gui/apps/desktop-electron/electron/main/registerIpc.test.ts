@@ -4,6 +4,8 @@ import {
   desktopApiIpcChannels,
   desktopMenuEventIds,
   type EccRuntimeEvent,
+  type EccBackgroundOperationProjection,
+  type DesktopShutdownStatus,
   type EccWorkspaceCreateRequest,
 } from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -220,10 +222,28 @@ function registerHandlers(
       engineeringSnapshot: vi.fn(),
       exportSignoff: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
+      onOperationProjectionInvalidated: vi.fn(
+        (_listener: (generation: number) => void) => () => undefined,
+      ),
+      onWorkspaceReleased: vi.fn(
+        (_listener: (workspaceHandle: string) => void) => () => undefined,
+      ),
+      operationProjection: vi.fn(
+        (): EccBackgroundOperationProjection => ({
+          creations: [],
+          finalizations: [],
+          generation: 0,
+          operations: [],
+          outcomes: [],
+        }),
+      ),
+      operationLog: vi.fn(),
       operationStatus: vi.fn(),
       waitForOperation: vi.fn(),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
+      releaseWorkspace: vi.fn().mockResolvedValue({ ok: true }),
+      retryFinalSnapshot: vi.fn(),
       resetFlow: vi.fn(),
       runFlow: vi.fn(),
       runStep: vi.fn(),
@@ -235,6 +255,47 @@ function registerHandlers(
       workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
       workspaceSnapshot: vi.fn(),
+      workspaceSession: vi.fn(),
+    },
+    workspaceCreationJournal: {
+      abandon: vi.fn(),
+      allowsRegistration: vi.fn().mockResolvedValue(false),
+      begin: vi.fn(
+        async (_ownerWindowId: number, request: EccWorkspaceCreateRequest) => ({
+          creationId: 'creation-1',
+          targetDirectory: request.targetDirectory,
+        }),
+      ),
+      complete: vi.fn().mockResolvedValue(undefined),
+      continueInitialization: vi.fn(),
+      entriesForWindow: vi.fn().mockResolvedValue([]),
+      generation: 0,
+      markUnfinished: vi.fn().mockResolvedValue(undefined),
+      markWorkspaceCreated: vi.fn().mockResolvedValue(undefined),
+      onInvalidated: vi.fn(() => () => undefined),
+      registerWorkspace: vi.fn().mockResolvedValue(undefined),
+    },
+    shutdownCoordinator: {
+      beginAcceptedWork: vi.fn(() => vi.fn()),
+      cancelShutdown: vi.fn(),
+      completeRendererCleanup: vi.fn(),
+      isMutationBlocked: vi.fn(() => false),
+      onStatusChanged: vi.fn(() => () => undefined),
+      reviewShutdownOptions: vi.fn(),
+      statusForWindow: vi.fn(
+        (): DesktopShutdownStatus => ({
+          activeFlows: 0,
+          attemptId: null,
+          finalizations: 0,
+          forceEligible: false,
+          pendingCreations: 0,
+          scope: null,
+          snapshotFailures: 0,
+          state: 'idle',
+        }),
+      ),
+      trackWorkspaceHandle: vi.fn(),
+      untrackWorkspaceHandle: vi.fn(),
     },
     frontendRpcRuntimeService: {
       cancelOperationLegacy: vi.fn(),
@@ -369,6 +430,131 @@ describe('registerIpc', () => {
 
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
+    )
+  })
+
+  it('rejects new backend mutations while the owning scope is draining', async () => {
+    const { handlers, services } = registerHandlers()
+    services.shutdownCoordinator.isMutationBlocked.mockReturnValue(true)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(
+        { sender: { id: 7 } },
+        {
+          command: 'workspace.create',
+          payload: workspaceCreateRequest({ commandId: 'blocked-create' }),
+        },
+      ),
+    ).resolves.toEqual({
+      error: {
+        code: 'SHUTDOWN_IN_PROGRESS',
+        message: 'Shutdown is in progress.',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(
+        { sender: { id: 7 } },
+        {
+          command: 'workspace.continueCreation',
+          payload: { creationId: 'creation-1' },
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: { code: 'SHUTDOWN_IN_PROGRESS' },
+      ok: false,
+    })
+    expect(
+      services.workspaceCreationJournal.continueInitialization,
+    ).not.toHaveBeenCalled()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceWriteProjectTextFile)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/home/parameters.json',
+        '{}',
+      ),
+    ).resolves.toMatchObject({
+      error: { code: 'SHUTDOWN_IN_PROGRESS' },
+      ok: false,
+    })
+    expect(services.workspaceService.writeProjectTextFile).not.toHaveBeenCalled()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceDiscardFailedWorkspaceCreate)?.(
+        { sender: { id: 7 } },
+        '/projects/demo/ws_1',
+      ),
+    ).resolves.toMatchObject({
+      error: { code: 'SHUTDOWN_IN_PROGRESS' },
+      ok: false,
+    })
+    expect(services.workspaceService.discardFailedWorkspaceCreate).not.toHaveBeenCalled()
+  })
+
+  it('tracks an accepted mutating command until its handler settles', async () => {
+    const { handlers, services } = registerHandlers()
+    const finish = vi.fn()
+    services.shutdownCoordinator.beginAcceptedWork.mockReturnValueOnce(finish)
+
+    await handlers.get(desktopApiIpcChannels.workspaceWriteProjectTextFile)?.(
+      { sender: { id: 7 } },
+      'notes.txt',
+      'ready',
+    )
+
+    expect(services.shutdownCoordinator.beginAcceptedWork).toHaveBeenCalledWith(7)
+    expect(finish).toHaveBeenCalledOnce()
+  })
+
+  it('allows only the exact active creation registration while draining', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 7 } }
+    const request = {
+      mutation: {
+        input: {
+          projectRoot: '/projects/demo',
+          workspacePath: '/projects/demo/ws_1',
+        },
+        type: 'register-workspace',
+      },
+      projectRoot: '/projects/demo',
+    }
+    services.shutdownCoordinator.isMutationBlocked.mockReturnValue(true)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManifestMutate)?.(event, request),
+    ).resolves.toMatchObject({
+      error: { code: 'SHUTDOWN_IN_PROGRESS' },
+      ok: false,
+    })
+
+    services.workspaceCreationJournal.allowsRegistration.mockResolvedValueOnce(true)
+    await handlers.get(desktopApiIpcChannels.projectManifestMutate)?.(event, request)
+    expect(services.projectManifestService.mutate).toHaveBeenCalledWith(request)
+    expect(services.workspaceCreationJournal.allowsRegistration).toHaveBeenCalledWith(
+      7,
+      '/projects/demo',
+      '/projects/demo/ws_1',
+    )
+  })
+
+  it('matches Renderer cleanup acknowledgements to the sending window', async () => {
+    const { handlers, services } = registerHandlers()
+
+    await handlers.get(desktopApiIpcChannels.shutdownCompleteCleanup)?.(
+      { sender: { id: 7 } },
+      { attemptId: 'attempt-1', ok: true },
+    )
+
+    expect(services.shutdownCoordinator.completeRendererCleanup).toHaveBeenCalledWith(
+      'attempt-1',
+      7,
+      true,
+      undefined,
     )
   })
 
@@ -1233,7 +1419,7 @@ describe('registerIpc', () => {
         command: 'workspace.create',
         payload,
       }),
-    ).resolves.toEqual(result)
+    ).resolves.toEqual({ ...result, creationId: 'creation-1' })
     expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
       installationId: payload.pdkInstallationId,
       requirement: persistedRequirement,
@@ -1267,6 +1453,29 @@ describe('registerIpc', () => {
         },
         workspaceSpec: payload.workspaceSpec,
       }),
+    )
+    expect(services.workspaceCreationJournal.begin).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        commandId: payload.commandId,
+        projectId: payload.projectId,
+        projectRoot: payload.projectRoot,
+      }),
+    )
+    expect(services.workspaceCreationJournal.markWorkspaceCreated).toHaveBeenCalledWith(
+      'creation-1',
+      result,
+      0,
+    )
+    expect(services.workspaceCreationJournal.registerWorkspace).toHaveBeenCalledWith(
+      'creation-1',
+      0,
+    )
+    expect(services.workspaceCreationJournal.complete).not.toHaveBeenCalled()
+    expect(
+      services.workspaceCreationJournal.begin.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      services.eccRuntimeService.createWorkspace.mock.invocationCallOrder[0]!,
     )
   })
 
@@ -1355,14 +1564,13 @@ describe('registerIpc', () => {
       event,
     )
     await handlers.get(desktopApiIpcChannels.windowClose)?.(event)
-    await handlers.get(desktopApiIpcChannels.windowConfirmClose)?.(event)
 
-    expect(fromWebContents).toHaveBeenCalledTimes(5)
+    expect(fromWebContents).toHaveBeenCalledTimes(4)
     expect(fromWebContents).toHaveBeenNthCalledWith(1, event.sender)
     expect(windowDouble.minimize).toHaveBeenCalledTimes(1)
     expect(windowDouble.setTitle).toHaveBeenCalledWith('ECOS Studio')
     expect(isMaximized).toBe(false)
-    expect(windowDouble.close).toHaveBeenCalledTimes(2)
+    expect(windowDouble.close).toHaveBeenCalledTimes(1)
   })
 
   it('applies valid zoom factors and rejects values outside the supported range', async () => {
@@ -2169,6 +2377,307 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.engineeringSnapshot).toHaveBeenCalledWith(request)
   })
 
+  it('returns and invalidates only Operations owned by the sending window', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const otherSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    const otherSender = Object.assign(new EventEmitter(), {
+      id: 22,
+      isDestroyed: vi.fn(() => false),
+      send: otherSend,
+    })
+    services.eccRuntimeService.openWorkspace
+      .mockResolvedValueOnce({
+        directory: '/work/a',
+        workspaceHandle: 'workspace-handle-a',
+      })
+      .mockResolvedValueOnce({
+        directory: '/work/b',
+        workspaceHandle: 'workspace-handle-b',
+      })
+    await openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/a' },
+    )
+    await openBackendWorkspace(
+      handlers,
+      { sender: otherSender },
+      { directory: '/work/b' },
+    )
+    services.eccRuntimeService.operationProjection.mockReturnValue({
+      creations: [],
+      finalizations: [],
+      generation: 4,
+      operations: [
+        { operationId: 'operation-a', workspaceHandle: 'workspace-handle-a' },
+        { operationId: 'operation-b', workspaceHandle: 'workspace-handle-b' },
+      ],
+      outcomes: [],
+    } as unknown as EccBackgroundOperationProjection)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeOperationProjection)?.({
+        sender: ownerSender,
+      }),
+    ).resolves.toEqual({
+      creations: [],
+      finalizations: [],
+      generation: 4,
+      operations: [{ operationId: 'operation-a', workspaceHandle: 'workspace-handle-a' }],
+      outcomes: [],
+    })
+    await handlers.get(desktopApiIpcChannels.eccRuntimeOperationProjection)?.({
+      sender: otherSender,
+    })
+
+    const invalidate =
+      services.eccRuntimeService.onOperationProjectionInvalidated.mock.calls[0]?.[0]
+    services.eccRuntimeService.operationProjection.mockReturnValue({
+      creations: [],
+      finalizations: [],
+      generation: 5,
+      operations: [],
+      outcomes: [],
+    })
+    invalidate?.(5)
+    expect(ownerSend).toHaveBeenCalledWith(
+      desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+      { generation: 5 },
+    )
+    expect(otherSend).toHaveBeenCalledWith(
+      desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+      { generation: 5 },
+    )
+  })
+
+  it('retains released terminal outcomes for the window that owned the handle', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/a',
+      workspaceHandle: 'workspace-handle-a',
+    })
+    await openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/a' },
+    )
+
+    const released = services.eccRuntimeService.onWorkspaceReleased.mock.calls[0]?.[0]
+    released?.('workspace-handle-a')
+    services.eccRuntimeService.operationProjection.mockReturnValue({
+      creations: [],
+      finalizations: [],
+      generation: 5,
+      operations: [],
+      outcomes: [{ operationId: 'operation-a', workspaceHandle: 'workspace-handle-a' }],
+    } as unknown as EccBackgroundOperationProjection)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeOperationProjection)?.({
+        sender: ownerSender,
+      }),
+    ).resolves.toMatchObject({
+      outcomes: [{ operationId: 'operation-a', workspaceHandle: 'workspace-handle-a' }],
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeOperationProjection)?.({
+        sender: Object.assign(new EventEmitter(), {
+          id: 22,
+          isDestroyed: vi.fn(() => false),
+          send: vi.fn(),
+        }),
+      }),
+    ).resolves.toMatchObject({ outcomes: [] })
+  })
+
+  it('reuses a tracked backend Workspace Session only for its owning window', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+      workspaceId: 'engineering-1',
+      workspaceRevision: 7,
+    })
+    services.eccRuntimeService.workspaceSession.mockReturnValue({
+      directory: '/work/demo',
+      reused: true,
+      workspaceHandle: 'workspace-handle-1',
+      workspaceId: 'engineering-1',
+      workspaceRevision: 7,
+    })
+
+    await openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/demo' },
+    )
+    await expect(
+      openBackendWorkspace(
+        handlers,
+        { sender: ownerSender },
+        { directory: '/work/demo/' },
+      ),
+    ).resolves.toMatchObject({
+      reused: true,
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(services.eccRuntimeService.openWorkspace).toHaveBeenCalledOnce()
+    expect(services.eccRuntimeService.workspaceSession).toHaveBeenCalledWith(
+      'workspace-handle-1',
+    )
+  })
+
+  it('does not transfer a reused Runtime handle to another window', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    const otherSender = Object.assign(new EventEmitter(), {
+      id: 22,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/demo' },
+    )
+
+    await expect(
+      openBackendWorkspace(
+        handlers,
+        { sender: otherSender },
+        { directory: '/work/demo' },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace Runtime Session is owned by another window.' },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.openWorkspace).toHaveBeenCalledOnce()
+
+    services.eccRuntimeService.operationLog.mockResolvedValue({
+      content: 'still owned',
+      truncated: false,
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeOperationLog)?.(
+        { sender: ownerSender },
+        { operationId: 'operation-1', workspaceHandle: 'workspace-handle-1' },
+      ),
+    ).resolves.toMatchObject({ content: 'still owned' })
+  })
+
+  it('claims a Workspace directory while an open is in flight', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    const otherSender = Object.assign(new EventEmitter(), {
+      id: 22,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    let finishOpen:
+      | ((value: { directory: string; workspaceHandle: string }) => void)
+      | undefined
+    services.eccRuntimeService.openWorkspace.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishOpen = resolve
+      }),
+    )
+
+    const firstOpen = openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/demo' },
+    )
+    await vi.waitFor(() =>
+      expect(services.eccRuntimeService.openWorkspace).toHaveBeenCalledOnce(),
+    )
+
+    await expect(
+      openBackendWorkspace(
+        handlers,
+        { sender: otherSender },
+        { directory: '/work/demo' },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace Runtime Session is owned by another window.' },
+      ok: false,
+    })
+
+    finishOpen?.({ directory: '/work/demo', workspaceHandle: 'workspace-handle-1' })
+    await expect(firstOpen).resolves.toMatchObject({
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(services.eccRuntimeService.openWorkspace).toHaveBeenCalledOnce()
+  })
+
+  it('loads bounded Operation logs only for the window that owns the handle', async () => {
+    const { handlers, services } = registerHandlers()
+    const owner = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    services.eccRuntimeService.operationLog.mockResolvedValue({
+      content: 'route completed',
+      truncated: false,
+    })
+    await openBackendWorkspace(handlers, { sender: owner }, { directory: '/work/demo' })
+    const request = {
+      operationId: 'operation-1',
+      workspaceHandle: 'workspace-handle-1',
+    }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeOperationLog)?.(
+        { sender: owner },
+        request,
+      ),
+    ).resolves.toEqual({ content: 'route completed', truncated: false })
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeOperationLog)?.(
+        { sender: { id: 22 } },
+        request,
+      ),
+    ).resolves.toMatchObject({
+      error: {
+        message: 'Operation log request does not own this Workspace handle.',
+      },
+      ok: false,
+    })
+  })
+
   it('routes directory-scoped runtime.ready only to the matching workspace window', async () => {
     const { handlers, services } = registerHandlers()
     const ownerSend = vi.fn()
@@ -2851,7 +3360,7 @@ describe('registerIpc', () => {
     expect(services.createWindow).toHaveBeenCalledWith({ initialRoute: '/' })
   })
 
-  it('detaches a renderer without closing its ECC workspace runtime', async () => {
+  it('marks a destroyed renderer Workspace lease for lifecycle-aware release', async () => {
     const { handlers, services } = registerHandlers()
     const sender = Object.assign(new EventEmitter(), {
       isDestroyed: vi.fn(() => false),
@@ -2880,6 +3389,9 @@ describe('registerIpc', () => {
     await explicitClose
 
     expect(services.eccRuntimeService.closeWorkspace).not.toHaveBeenCalled()
+    expect(services.eccRuntimeService.releaseWorkspace).toHaveBeenCalledWith({
+      workspaceHandle: 'workspace-handle-1',
+    })
     expect(sender.listenerCount('destroyed')).toBe(0)
   })
 

@@ -1,0 +1,262 @@
+.background-tasks {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.shutdown-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  margin-right: 4px;
+  padding: 0 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.background-tasks-trigger {
+  position: relative;
+}
+
+.background-tasks-trigger.active {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.background-tasks-badge {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border: 1px solid var(--topbar-bg);
+  border-radius: 8px;
+  color: #fff;
+  background: var(--accent-color);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+}
+
+.background-tasks-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: min(390px, calc(100vw - 16px));
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  z-index: 1100;
+}
+
+.background-tasks-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 5px 6px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.background-tasks-header span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.shutdown-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.shutdown-summary > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shutdown-summary strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.shutdown-summary span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.shutdown-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.shutdown-actions button {
+  padding: 5px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.background-tasks-list {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.background-task-row {
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid var(--border-color);
+}
+
+.background-task-main {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 6px;
+  border: 0;
+  color: var(--text-primary);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.background-task-main:hover,
+.background-task-main:focus-visible,
+.background-task-cancel:hover,
+.background-task-cancel:focus-visible,
+.background-tasks-view:hover,
+.background-tasks-view:focus-visible {
+  background: var(--bg-tertiary);
+  outline: none;
+}
+
+.background-task-static {
+  cursor: default;
+}
+
+.background-task-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--accent-color);
+}
+
+.background-task-copy,
+.background-task-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.background-task-copy strong,
+.background-task-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-task-copy strong {
+  font-size: 12px;
+}
+
+.background-task-copy span,
+.background-task-meta {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.background-task-meta {
+  align-items: flex-end;
+  white-space: nowrap;
+}
+
+.background-task-cancel {
+  width: 36px;
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.background-task-retry {
+  align-self: center;
+  margin-right: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.background-task-cancel:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.background-tasks-empty {
+  padding: 24px 8px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.background-tasks-view {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 7px;
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.background-tasks-popover-enter-active,
+.background-tasks-popover-leave-active {
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.background-tasks-popover-enter-from,
+.background-tasks-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-tasks-popover-enter-active,
+  .background-tasks-popover-leave-active {
+    transition: none;
+  }
+}

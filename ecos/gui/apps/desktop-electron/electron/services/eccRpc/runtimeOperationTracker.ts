@@ -31,8 +31,16 @@ export class RuntimeOperationTracker {
     return [...this.active.values()]
   }
 
+  recentOutcomes(limit = 64): EccRuntimeOperation[] {
+    return [...this.terminalOperations.values()].slice(-limit)
+  }
+
   hasTerminalOperation(operationId: string): boolean {
     return this.terminalOperations.has(operationId)
+  }
+
+  knowsOperation(operationId: string): boolean {
+    return this.active.has(operationId) || this.terminalOperations.has(operationId)
   }
 
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
@@ -67,21 +75,39 @@ export class RuntimeOperationTracker {
     const state = stringPayloadValue(protocolEvent.payload, 'state')
     if (activeStates.has(state)) {
       if (this.terminalOperations.has(protocolEvent.operationId)) return false
-      this.active.set(protocolEvent.operationId, operationFrom(protocolEvent))
+      this.active.set(
+        protocolEvent.operationId,
+        operationFrom(protocolEvent, this.active.get(protocolEvent.operationId)),
+      )
       return false
     }
     if (!terminalStates.has(state)) return false
 
+    const previous = this.active.get(protocolEvent.operationId)
     this.active.delete(protocolEvent.operationId)
-    const operation = operationFrom(protocolEvent)
+    const operation = operationFrom(protocolEvent, previous)
     this.terminalOperations.set(operation.operationId, operation)
-    if (this.terminalOperations.size > 512) {
-      const oldestOperationId = this.terminalOperations.keys().next().value!
-      this.terminalOperations.delete(oldestOperationId)
-      this.latestSequences.delete(oldestOperationId)
-    }
+    this.trimOutcomes()
     this.resolveWaiters(operation.operationId, operation)
     return true
+  }
+
+  reconcile(operation: EccRuntimeOperation): boolean {
+    if (terminalStates.has(operation.state)) {
+      const alreadyTerminal = this.terminalOperations.has(operation.operationId)
+      this.active.delete(operation.operationId)
+      this.terminalOperations.set(operation.operationId, operation)
+      this.trimOutcomes()
+      this.resolveWaiters(operation.operationId, operation)
+      return !alreadyTerminal
+    }
+    if (
+      activeStates.has(operation.state) &&
+      !this.terminalOperations.has(operation.operationId)
+    ) {
+      this.active.set(operation.operationId, operation)
+    }
+    return false
   }
 
   waitFor(operationId: string): Promise<EccRuntimeOperation> {
@@ -119,6 +145,14 @@ export class RuntimeOperationTracker {
     this.waiters.delete(operationId)
     for (const waiter of waiters) waiter.resolve(operation)
   }
+
+  private trimOutcomes(): void {
+    while (this.terminalOperations.size > 512) {
+      const oldestOperationId = this.terminalOperations.keys().next().value!
+      this.terminalOperations.delete(oldestOperationId)
+      this.latestSequences.delete(oldestOperationId)
+    }
+  }
 }
 
 export function isRuntimeProtocolPayload(
@@ -138,7 +172,10 @@ export function isRuntimeProtocolPayload(
   )
 }
 
-function operationFrom(protocolEvent: EccRuntimeProtocolPayload): EccRuntimeOperation {
+function operationFrom(
+  protocolEvent: EccRuntimeProtocolPayload,
+  previous?: EccRuntimeOperation,
+): EccRuntimeOperation {
   const payload = protocolEvent.payload
   const error = isRuntimeErrorPayload(payload.error)
     ? payload.error
@@ -147,14 +184,22 @@ function operationFrom(protocolEvent: EccRuntimeProtocolPayload): EccRuntimeOper
       : null
   return {
     cancelRequested: payload.state === 'cancelled' || Boolean(payload.cancelRequested),
-    createdAt: protocolEvent.timestamp,
-    currentStep: stringPayloadValue(payload, 'step'),
-    currentTool: stringPayloadValue(payload, 'tool'),
+    createdAt:
+      numberPayloadValue(payload, 'createdAt') ??
+      previous?.createdAt ??
+      protocolEvent.timestamp,
+    currentStep: stringPayloadValue(payload, 'step') || previous?.currentStep || '',
+    currentTool: stringPayloadValue(payload, 'tool') || previous?.currentTool || '',
     error,
     kind: protocolEvent.kind ?? 'step',
     operationId: protocolEvent.operationId,
     origin: protocolEvent.origin,
     rerun: Boolean(protocolEvent.rerun),
+    ...(isInterruptibility(payload.interruptibility)
+      ? { interruptibility: payload.interruptibility }
+      : previous?.interruptibility
+        ? { interruptibility: previous.interruptibility }
+        : {}),
     ...(protocolEvent.runSessionId ? { runSessionId: protocolEvent.runSessionId } : {}),
     ...(protocolEvent.runtimeInstanceId
       ? { runtimeInstanceId: protocolEvent.runtimeInstanceId }
@@ -162,6 +207,12 @@ function operationFrom(protocolEvent: EccRuntimeProtocolPayload): EccRuntimeOper
     result: recordPayloadValue(payload, 'result'),
     state: stringPayloadValue(payload, 'state') as EccRuntimeOperation['state'],
     step: stringPayloadValue(payload, 'step'),
+    ...(typeof payload.safeToStop === 'boolean'
+      ? { safeToStop: payload.safeToStop }
+      : {}),
+    ...(typeof payload.shutdownBarrier === 'boolean'
+      ? { shutdownBarrier: payload.shutdownBarrier }
+      : {}),
     updatedAt: protocolEvent.timestamp,
     ...(typeof (payload.workspaceRevision ?? protocolEvent.workspaceRevision) === 'number'
       ? {
@@ -171,6 +222,21 @@ function operationFrom(protocolEvent: EccRuntimeProtocolPayload): EccRuntimeOper
       : {}),
     workspaceId: protocolEvent.workspaceId,
   }
+}
+
+function numberPayloadValue(
+  payload: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  return typeof payload[key] === 'number' && Number.isFinite(payload[key])
+    ? payload[key]
+    : undefined
+}
+
+function isInterruptibility(
+  value: unknown,
+): value is NonNullable<EccRuntimeOperation['interruptibility']> {
+  return value === 'safe' || value === 'deferred' || value === 'forbidden'
 }
 
 function stringPayloadValue(payload: Record<string, unknown>, key: string): string {

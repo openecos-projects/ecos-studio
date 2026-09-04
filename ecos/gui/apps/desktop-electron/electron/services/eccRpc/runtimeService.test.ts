@@ -1,5 +1,5 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   EccRpcRuntimeService,
@@ -372,6 +372,21 @@ describe('EccRpcRuntimeService pool', () => {
     ).rejects.toThrow(WorkspaceSessionNotFoundError)
   })
 
+  it('returns an existing Workspace Session without reopening ECC', async () => {
+    const pool = createPool()
+    const opened = await pool.service.openWorkspace({ directory: '/work/demo' })
+
+    await expect(pool.service.workspaceSession(opened.workspaceHandle)).resolves.toEqual({
+      ...opened,
+      reused: true,
+    })
+    expect(
+      pool
+        .clientFor('/work/demo')
+        .calls.filter((call) => call.method === 'workspace.open'),
+    ).toHaveLength(1)
+  })
+
   it('resolves the Engineering Snapshot for an active Workspace directory', async () => {
     const pool = createPool()
     const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
@@ -533,6 +548,143 @@ describe('EccRpcRuntimeService pool', () => {
     expect(sidecar.shutdownCount).toBe(0)
   })
 
+  it('retains an active Runtime when its Renderer lease is released', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'active-1',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+
+    await expect(
+      pool.service.releaseWorkspace({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toEqual({ ok: true, retained: true })
+    expect(pool.sidecarFor('/work/demo').shutdownCount).toBe(0)
+    await expect(
+      pool.service.workspaceSession(workspace.workspaceHandle),
+    ).resolves.toMatchObject({
+      reused: true,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+  })
+
+  it('releases an unreferenced Session after its terminal snapshot and retains the outcome', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    const released = vi.fn()
+    pool.service.onWorkspaceReleased(released)
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'active-release',
+        kind: 'flow',
+        operationId: 'operation-release',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+    await pool.service.releaseWorkspace({ workspaceHandle: workspace.workspaceHandle })
+    pool.clientFor('/work/demo').responses.push({
+      directory: '/work/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'terminal-release',
+      operations: [],
+      parameters: {},
+    })
+
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'terminal-release',
+        kind: 'flow',
+        operationId: 'operation-release',
+        origin: 'gui',
+        payload: { state: 'succeeded', step: 'Route' },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+
+    await vi.waitFor(() =>
+      expect(released).toHaveBeenCalledWith(workspace.workspaceHandle),
+    )
+    await expect(
+      pool.service.workspaceSession(workspace.workspaceHandle),
+    ).rejects.toThrow(WorkspaceSessionNotFoundError)
+    expect(pool.service.operationProjection().outcomes).toEqual([
+      expect.objectContaining({
+        operationId: 'operation-release',
+        state: 'succeeded',
+        workspaceDirectory: '/work/demo',
+      }),
+    ])
+  })
+
+  it('force shuts down only the Runtime handles in a window-scoped request', async () => {
+    const pool = createPool()
+    const first = await pool.service.openWorkspace({ directory: '/work/a' })
+    const second = await pool.service.openWorkspace({ directory: '/work/b' })
+
+    await pool.service.forceShutdown([first.workspaceHandle])
+
+    expect(pool.sidecarFor('/work/a').shutdownCount).toBe(1)
+    expect(pool.sidecarFor('/work/b').shutdownCount).toBe(0)
+    await expect(pool.service.workspaceSession(first.workspaceHandle)).rejects.toThrow(
+      WorkspaceSessionNotFoundError,
+    )
+    await expect(
+      pool.service.workspaceSession(second.workspaceHandle),
+    ).resolves.toMatchObject({
+      workspaceHandle: second.workspaceHandle,
+    })
+  })
+
+  it('does not let sibling Runtime work block a handle-scoped idle wait', async () => {
+    const pool = createPool()
+    const first = await pool.service.openWorkspace({ directory: '/work/a' })
+    const second = await pool.service.openWorkspace({ directory: '/work/b' })
+    pool.sidecarNotification('/work/b', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'active-b',
+        kind: 'flow',
+        operationId: 'operation-b',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/b',
+      },
+    })
+
+    await expect(
+      pool.service.waitForIdle([first.workspaceHandle]),
+    ).resolves.toBeUndefined()
+    expect(pool.service.hasPendingRuntimeWork([second.workspaceHandle])).toBe(true)
+  })
+
   it('aggregates onEvent listeners and supports unsubscribe', async () => {
     const pool = createPool()
     const seen: EccRuntimeEvent[] = []
@@ -574,6 +726,209 @@ describe('EccRpcRuntimeService pool', () => {
     expect(
       pool.service.activeOperations().map((operation) => operation.operationId),
     ).toEqual(['operation-0', 'operation-1'])
+  })
+
+  it('projects active operations with their workspace handles and generations', async () => {
+    const pool = createPool()
+    const workspaceA = await pool.service.openWorkspace({ directory: '/work/a' })
+    const workspaceB = await pool.service.openWorkspace({ directory: '/work/b' })
+    const invalidations: number[] = []
+    const unsubscribe = pool.service.onOperationProjectionInvalidated((generation) => {
+      invalidations.push(generation)
+    })
+
+    for (const [index, directory] of ['/work/a', '/work/b'].entries()) {
+      pool.sidecarNotification(directory, {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: `projection-${index}`,
+          kind: 'flow',
+          operationId: `operation-${index}`,
+          origin: 'gui',
+          payload: {
+            error:
+              index === 0 ? { code: 'C'.repeat(200), message: 'M'.repeat(1_000) } : null,
+            result: { artifact: 'x'.repeat(10_000) },
+            state: 'running',
+            step: index === 0 ? 'R'.repeat(500) : 'Route',
+            workspaceRevision: 3,
+          },
+          sequence: 1,
+          timestamp: index + 1,
+          type: 'operation.changed',
+          workspaceId: `id-${directory}`,
+        },
+      })
+    }
+
+    expect(pool.service.operationProjection()).toEqual({
+      creations: [],
+      finalizations: [],
+      generation: 2,
+      operations: [
+        expect.objectContaining({
+          operationId: 'operation-0',
+          workspaceDirectory: '/work/a',
+          workspaceHandle: workspaceA.workspaceHandle,
+          workspaceId: 'id-/work/a',
+        }),
+        expect.objectContaining({
+          operationId: 'operation-1',
+          workspaceDirectory: '/work/b',
+          workspaceHandle: workspaceB.workspaceHandle,
+          workspaceId: 'id-/work/b',
+        }),
+      ],
+      outcomes: [],
+    })
+    const bounded = pool.service.operationProjection().operations[0]!
+    expect(bounded.result).toBeNull()
+    expect(bounded.currentStep).toHaveLength(256)
+    expect(bounded.error?.code).toHaveLength(128)
+    expect(bounded.error?.message).toHaveLength(500)
+    expect(invalidations).toEqual([1, 2])
+
+    unsubscribe()
+  })
+
+  it('adopts the operation.start response when the start notification is missed', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.clientFor('/work/demo').responses.push({
+      createdAt: 1,
+      currentStep: 'Route',
+      currentTool: 'openroad',
+      error: null,
+      kind: 'flow',
+      operationId: 'operation-start-response',
+      origin: 'gui',
+      rerun: false,
+      result: null,
+      state: 'running',
+      step: '',
+      updatedAt: 1,
+      workspaceId: 'id-/work/demo',
+    })
+
+    await pool.service.startFlowOperation({
+      expectedWorkspaceRevision: 1,
+      idempotencyKey: 'start-response',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(pool.service.operationProjection().operations).toEqual([
+      expect.objectContaining({
+        operationId: 'operation-start-response',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ])
+  })
+
+  it('repairs a missed terminal notification through operation.status', async () => {
+    const pool = createPool()
+    await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'running-before-reconcile',
+        kind: 'flow',
+        operationId: 'operation-reconcile',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+    pool.clientFor('/work/demo').responses.push(
+      {
+        createdAt: 1,
+        currentStep: 'Route',
+        currentTool: 'openroad',
+        error: null,
+        kind: 'flow',
+        operationId: 'operation-reconcile',
+        origin: 'gui',
+        rerun: false,
+        result: {},
+        state: 'succeeded',
+        step: '',
+        updatedAt: 2,
+        workspaceId: 'id-/work/demo',
+      },
+      {
+        directory: '/work/demo',
+        flow: { steps: [] },
+        home: {},
+        lastEventId: 'terminal-reconciled',
+        operations: [],
+        parameters: {},
+      },
+    )
+
+    await pool.service.reconcileOperationProjection()
+
+    expect(pool.service.operationProjection().operations).toEqual([])
+    expect(pool.service.operationProjection().outcomes).toEqual([
+      expect.objectContaining({
+        operationId: 'operation-reconcile',
+        state: 'succeeded',
+      }),
+    ])
+    await vi.waitFor(() => expect(pool.sidecarFor('/work/demo').shutdownCount).toBe(1))
+  })
+
+  it('automatically retries a failed final snapshot when its Session is reopened', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'terminal-failed',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { state: 'failed', step: 'Route', workspaceRevision: 4 },
+        sequence: 2,
+        timestamp: 20,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+
+    await vi.waitFor(() =>
+      expect(pool.service.operationProjection().finalizations).toEqual([
+        expect.objectContaining({
+          issue: expect.stringContaining('Unexpected RPC call'),
+          state: 'snapshot-failed',
+          workspaceHandle: workspace.workspaceHandle,
+        }),
+      ]),
+    )
+    expect(pool.sidecarFor('/work/demo').shutdownCount).toBe(0)
+    await expect(
+      pool.service.releaseWorkspace({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toEqual({ ok: true, retained: true })
+
+    pool.clientFor('/work/demo').responses.push({
+      directory: '/work/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'terminal-failed',
+      operations: [],
+      parameters: {},
+      workspaceId: 'id-/work/demo',
+      workspaceRevision: 4,
+    })
+    await expect(
+      pool.service.openWorkspace({ directory: '/work/demo' }),
+    ).resolves.toMatchObject({ workspaceHandle: workspace.workspaceHandle })
+    expect(pool.service.operationProjection().finalizations).toEqual([])
+    expect(pool.sidecarFor('/work/demo').shutdownCount).toBe(1)
   })
 
   it('routes handles when ECC returns a resolved directory different from the request', async () => {

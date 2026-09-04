@@ -114,4 +114,34 @@ describe('backendWorkspaceSession', () => {
     expect(session.projection.status).toBe('stale')
     session.dispose()
   })
+
+  it('restores the committed overview immediately when switching A to B to A', async () => {
+    backendWorkspace.getOverview
+      .mockResolvedValueOnce(result('Workspace A'))
+      .mockResolvedValueOnce(result('Workspace B'))
+    let finishARefresh!: (value: BackendWorkspaceOverviewResult) => void
+    backendWorkspace.getOverview.mockReturnValueOnce(
+      new Promise((resolve) => (finishARefresh = resolve)),
+    )
+    const session = useBackendWorkspaceSession()
+    await session.start('/work/a')
+    session.clear()
+    await session.start('/work/b')
+    session.clear()
+
+    const refreshing = session.start('/work/a')
+    await nextTick()
+    expect(session.projection).toMatchObject({
+      data: { identity: { workspaceName: 'Workspace A' } },
+      status: 'refreshing',
+    })
+    expect(session.workspaceContextId).toBeNull()
+
+    finishARefresh(result('Workspace A refreshed', 1))
+    await refreshing
+    expect(session.projection).toMatchObject({
+      data: { identity: { workspaceName: 'Workspace A refreshed' } },
+      status: 'ready',
+    })
+  })
 })
