@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -304,29 +303,27 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def _revision(path: Path) -> str:
-    return subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
-
-
-def _stage_sources(stage: Stage) -> tuple[dict[str, str], tuple[str, ...]]:
+def _stage_sources(stage: Stage) -> dict[str, str]:
     paths = dict(SOURCE_PATHS)
-    source_ids = tuple(paths)
     if stage.config_path:
-        config_id = f"config.{stage.slug}"
-        paths[config_id] = stage.config_path
-        source_ids += (config_id,)
-    return paths, source_ids
+        paths[f"config.{stage.slug}"] = stage.config_path
+    return paths
+
+
+def _referenced_sources(
+    paths: dict[str, str], entries: list[dict[str, object]]
+) -> dict[str, str]:
+    source_ids = {
+        evidence["source_id"]
+        for entry in entries
+        for evidence in entry["evidence"]
+    }
+    return {source_id: paths[source_id] for source_id in sorted(source_ids)}
 
 
 def _source_inventory(paths: dict[str, str], schema_version: str) -> dict[str, object]:
     return {
         "schema_version": schema_version,
-        "repositories": {
-            "ecos_studio": _revision(ECOS_ROOT),
-            "ecc": _revision(ECOS_ROOT / "ecc"),
-            "ecc_dreamplace": _revision(ECOS_ROOT / "ecc/chipcompiler/thirdparty/ecc-dreamplace"),
-            "ecc_tools": _revision(ECOS_ROOT / "ecc/chipcompiler/thirdparty/ecc-tools"),
-        },
         "sources": [
             {"id": source_id, "path": path, "sha256": _sha256((ECOS_ROOT / path).read_bytes())}
             for source_id, path in paths.items()
@@ -334,8 +331,10 @@ def _source_inventory(paths: dict[str, str], schema_version: str) -> dict[str, o
     }
 
 
-def _stage_source_inventory(stage: Stage) -> dict[str, object]:
-    paths, _source_ids = _stage_sources(stage)
+def _stage_source_inventory(
+    stage: Stage, entries: list[dict[str, object]]
+) -> dict[str, object]:
+    paths = _referenced_sources(_stage_sources(stage), entries)
     return _source_inventory(paths, "ecos-step-sources.v1")
 
 
@@ -704,7 +703,7 @@ def _build_bundle(stage: Stage, output: Path) -> None:
     }
     (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
     (output / "sources.json").write_text(
-        _json(_stage_source_inventory(stage)) + "\n", encoding="utf-8"
+        _json(_stage_source_inventory(stage, entries)) + "\n", encoding="utf-8"
     )
     _write_regression(stage, output, entries)
     files = {
@@ -737,7 +736,9 @@ def _build_place_bundle(output: Path) -> None:
         "entities": entries,
     }
     (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
-    sources = _source_inventory(PLACE_SOURCE_PATHS, "ecos-place-sources.v1")
+    sources = _source_inventory(
+        _referenced_sources(PLACE_SOURCE_PATHS, entries), "ecos-place-sources.v1"
+    )
     (output / "sources.json").write_text(_json(sources) + "\n", encoding="utf-8")
     regression = output / "regression"
     regression.mkdir(exist_ok=True)

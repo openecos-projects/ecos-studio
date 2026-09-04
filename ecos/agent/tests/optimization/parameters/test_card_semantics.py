@@ -8,12 +8,16 @@ import sys
 
 import pytest
 
-from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
-from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
+from ecos_agent.optimization.parameters.contracts import (
+    ParameterApplicationReceipt,
+    ParameterSemanticsCard,
+)
 from ecos_agent.optimization.parameters.semantics import (
     CARD_ROOT,
     ParameterSemanticsError,
+    card_hash,
     load_parameter_cards,
 )
 from tests.paths import AGENT_ROOT
@@ -30,6 +34,32 @@ def test_parameter_cards_are_flat_under_optimization() -> None:
         "manifest.json",
         *(f"{knob.value}.json" for knob in OptimizationKnob),
     }
+
+
+def test_loader_accepts_semantically_identical_json_formatting(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "floorplan.aspect_ratio.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card_path.write_text(json.dumps(card, indent=2) + "\n", encoding="utf-8")
+
+    loaded = load_parameter_cards(root)
+
+    assert loaded[OptimizationKnob.FLOORPLAN_ASPECT_RATIO].knob_id == (
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO
+    )
+
+
+def test_loader_rejects_semantically_changed_card_without_manifest_update(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "floorplan.aspect_ratio.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["runtime_semantics"]["mechanism"] += " Changed."
+    card_path.write_text(json.dumps(card), encoding="utf-8")
+
+    with pytest.raises(ParameterSemanticsError, match="card hash"):
+        load_parameter_cards(root)
 
 
 def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
@@ -183,7 +213,10 @@ def _refresh_card_manifest(root) -> None:
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for item in manifest["cards"]:
-        item["sha256"] = file_sha256(root / item["path"])
+        card = ParameterSemanticsCard.model_validate_json(
+            (root / item["path"]).read_bytes()
+        )
+        item["sha256"] = card_hash(card)
     manifest["manifest_sha256"] = canonical_sha256(
         {key: value for key, value in manifest.items() if key != "manifest_sha256"}
     )

@@ -8,7 +8,15 @@ from pathlib import Path
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 
-from .steps import AGENT_ROOT, STAGES, _add, _json, _sha256, _source_inventory
+from .steps import (
+    AGENT_ROOT,
+    STAGES,
+    _add,
+    _json,
+    _referenced_sources,
+    _sha256,
+    _source_inventory,
+)
 
 GENERAL_DIR = AGENT_ROOT / "knowledge" / "inputs" / "general"
 GENERAL_SOURCE_PATHS = {
@@ -341,7 +349,12 @@ def build_general_bundle(output: Path, metric: str) -> None:
     }
     (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
     (output / "sources.json").write_text(
-        _json(_source_inventory(GENERAL_SOURCE_PATHS[metric], "ecos-general-sources.v1"))
+        _json(
+            _source_inventory(
+                _referenced_sources(GENERAL_SOURCE_PATHS[metric], entries),
+                "ecos-general-sources.v1",
+            )
+        )
         + "\n",
         encoding="utf-8",
     )

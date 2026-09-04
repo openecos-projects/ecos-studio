@@ -104,9 +104,9 @@ def load_parameter_cards(
         listed.add(knob_id)
         path = base / relative
         try:
-            if file_sha256(path) != expected_hash:
-                raise ParameterSemanticsError("parameter card hash does not match")
             card = ParameterSemanticsCard.model_validate_json(path.read_bytes())
+            if card_hash(card) != expected_hash:
+                raise ParameterSemanticsError("parameter card hash does not match")
         except ParameterSemanticsError:
             raise
         except (OSError, ValueError) as exc:

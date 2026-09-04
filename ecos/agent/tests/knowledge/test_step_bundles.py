@@ -1,4 +1,3 @@
-import hashlib
 import json
 import re
 import shutil
@@ -127,28 +126,28 @@ def test_committed_stage_bundles_pass_generator_check() -> None:
     )
 
 
-def test_generator_check_ignores_repository_revisions(tmp_path: Path) -> None:
+def test_generated_source_inventories_are_scoped_and_revision_free(tmp_path: Path) -> None:
     output = tmp_path / "knowledge"
-    shutil.copytree(KNOWLEDGE_ROOT, output)
-    sources_path = output / "tool" / "place" / "sources.json"
-    manifest_path = sources_path.with_name("manifest.json")
-    sources = json.loads(sources_path.read_text(encoding="utf-8"))
-    sources["repositories"] = dict.fromkeys(sources["repositories"], "0" * 40)
-    data = (json.dumps(sources, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-    sources_path.write_bytes(data)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["files"][sources_path.name] = hashlib.sha256(data).hexdigest()
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
     subprocess.run(
-        ["uv", "run", "python", "scripts/build_knowledge.py", "--check", "--output", str(output)],
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--output", str(output)],
         cwd=AGENT_ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
+
+    for sources_path in output.glob("**/sources.json"):
+        sources = json.loads(sources_path.read_text(encoding="utf-8"))
+        catalog = json.loads(sources_path.with_name("catalog.json").read_text(encoding="utf-8"))
+        inventory_ids = {item["id"] for item in sources["sources"]}
+        referenced_ids = {
+            evidence["source_id"]
+            for entity in catalog["entities"]
+            for evidence in entity["evidence"]
+        }
+
+        assert "repositories" not in sources
+        assert inventory_ids == referenced_ids
 
 
 def test_every_flow_step_has_a_source_audited_knowledge_bundle() -> None:
