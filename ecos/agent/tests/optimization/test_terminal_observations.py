@@ -5,10 +5,15 @@ import shutil
 from pathlib import Path
 
 import pytest
-from ecos_agent.optimization.contracts import TimingMetric
+from ecos_agent.optimization.contracts import PowerMetric, TimingMetric
 from ecos_agent.optimization.observations import (
     OptimizationObservationError,
     build_terminal_observation,
+)
+from ecos_agent.optimization.rules import (
+    IncumbentDecision,
+    compare_incumbent,
+    freeze_routability_objective,
 )
 
 
@@ -168,6 +173,60 @@ def test_terminal_manifest_binds_corner_power_evidence(frozen_workspace: Path) -
     after = build_terminal_observation(frozen_workspace)
 
     assert after.evidence_manifest_sha256 != before.evidence_manifest_sha256
+
+
+@pytest.mark.parametrize(
+    ("path_pattern", "source_id", "candidate_value", "decision", "decisive_metric"),
+    [
+        (
+            "*/*", "dynamic_uw", 1.0, IncumbentDecision.CANDIDATE_BETTER,
+            PowerMetric.STA_TYPICAL_DYNAMIC_POWER,
+        ),
+        (
+            "*/*", "leakage_uw", 0.1, IncumbentDecision.CANDIDATE_BETTER,
+            PowerMetric.STA_TYPICAL_LEAKAGE_POWER,
+        ),
+        (
+            "*/*", "dynamic_uw", 200.0, IncumbentDecision.INCUMBENT_RETAINED,
+            PowerMetric.STA_TYPICAL_DYNAMIC_POWER,
+        ),
+        (
+            "MAX_125/Cworst", "dynamic_uw", 100.0,
+            IncumbentDecision.CANDIDATE_BETTER,
+            PowerMetric.STA_WORST_DYNAMIC_POWER,
+        ),
+        (
+            "ML_125/RCworst", "leakage_uw", 70.0,
+            IncumbentDecision.CANDIDATE_BETTER,
+            PowerMetric.STA_WORST_LEAKAGE_POWER,
+        ),
+    ],
+)
+def test_incumbent_selection_uses_sta_power_metrics(
+    frozen_workspace: Path,
+    path_pattern: str,
+    source_id: str,
+    candidate_value: float,
+    decision: IncumbentDecision,
+    decisive_metric: PowerMetric,
+) -> None:
+    incumbent = build_terminal_observation(frozen_workspace)
+    for power_path in frozen_workspace.glob(
+        f"sta_ecc/feature/{path_pattern}/power_summary.json"
+    ):
+        power = json.loads(power_path.read_text(encoding="utf-8"))
+        power[source_id] = candidate_value
+        _write_json(power_path, power)
+    candidate = build_terminal_observation(frozen_workspace)
+
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+    )
+
+    assert comparison.decision == decision
+    assert comparison.decisive_metric == decisive_metric
 
 
 @pytest.mark.parametrize("case", ["missing", "extra", "mismatched"])

@@ -50,6 +50,13 @@ class ObjectiveMetric(StrEnum):
     ROUTE_WIRELENGTH = "route_wirelength"
 
 
+class PowerMetric(StrEnum):
+    STA_TYPICAL_DYNAMIC_POWER = "sta_typical_dynamic_power"
+    STA_TYPICAL_LEAKAGE_POWER = "sta_typical_leakage_power"
+    STA_WORST_DYNAMIC_POWER = "sta_worst_dynamic_power"
+    STA_WORST_LEAKAGE_POWER = "sta_worst_leakage_power"
+
+
 class TimingMetric(StrEnum):
     STA_SETUP_WNS = "sta_setup_wns"
     STA_SETUP_TNS = "sta_setup_tns"
@@ -63,6 +70,8 @@ ROUTABILITY_OBJECTIVE_ORDER = (
     ObjectiveMetric.ROUTE_WIRELENGTH,
 )
 
+POWER_SELECTION_ORDER = tuple(PowerMetric)
+
 REQUIRED_SIGNOFF_GATES = (
     "drc_clean",
     "lvs_clean",
@@ -73,7 +82,7 @@ REQUIRED_SIGNOFF_GATES = (
 )
 
 TIMING_GUARDRAIL_ORDER = tuple(TimingMetric)
-SelectionMetric = ObjectiveMetric | TimingMetric
+SelectionMetric = ObjectiveMetric | TimingMetric | PowerMetric
 
 
 class OptimizationDecision(StrEnum):

@@ -9,6 +9,7 @@ from typing import Iterable, Mapping
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
+    POWER_SELECTION_ORDER,
     REQUIRED_SIGNOFF_GATES,
     ROUTABILITY_OBJECTIVE_ORDER,
     TIMING_GUARDRAIL_ORDER,
@@ -352,21 +353,39 @@ def compare_incumbent(
                 incumbent_value, candidate_value
             ):
                 return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
-        metric_id = semantic_objective.primary_metric
+    metric_order = (
+        (semantic_objective.primary_metric,)
+        if semantic_objective is not None
+        else ROUTABILITY_OBJECTIVE_ORDER
+    )
+    for metric_id in metric_order:
         incumbent_value = incumbent.metrics[metric_id]
         candidate_value = candidate.metrics[metric_id]
         if candidate_value < incumbent_value:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
         if candidate_value > incumbent_value:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
-        return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
-    for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
-        incumbent_value = incumbent.metrics[metric_id]
-        candidate_value = candidate.metrics[metric_id]
-        if candidate_value < incumbent_value:
-            return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
-        if candidate_value > incumbent_value:
-            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+    incumbent_evaluation = {
+        metric.metric_id: metric.value for metric in incumbent.evaluation_metrics
+    }
+    candidate_evaluation = {
+        metric.metric_id: metric.value for metric in candidate.evaluation_metrics
+    }
+    for metric_id in POWER_SELECTION_ORDER:
+        incumbent_value = incumbent_evaluation.get(metric_id.value)
+        candidate_value = candidate_evaluation.get(metric_id.value)
+        if (
+            incumbent_value is None
+            or candidate_value is None
+            or not _meaningful_metric_change(incumbent_value, candidate_value)
+        ):
+            continue
+        decision = (
+            IncumbentDecision.CANDIDATE_BETTER
+            if candidate_value < incumbent_value
+            else IncumbentDecision.INCUMBENT_RETAINED
+        )
+        return IncumbentComparison(decision, metric_id)
     return IncumbentComparison(IncumbentDecision.NOISE_TIE, None)
 
 
