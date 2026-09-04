@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ecos_agent.optimization.contracts import (
+    ROUTABILITY_OBJECTIVE_ORDER,
     GateResult,
     ObjectiveMetric,
     SignoffGates,
@@ -124,7 +125,7 @@ def test_design_block_statistics_reports_win_tie_loss_and_holm() -> None:
     baseline = _terminal(10, 5, 100).model_dump(mode="json")
     better = _terminal(9, 5, 100).model_dump(mode="json")
     epsilon = {
-        **{metric.value: 0.0 for metric in ObjectiveMetric},
+        **{metric.value: 0.0 for metric in ROUTABILITY_OBJECTIVE_ORDER},
         **{metric.value: 0.0 for metric in TimingMetric},
     }
 

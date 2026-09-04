@@ -11,7 +11,6 @@ from typing import Mapping, Sequence
 from ecos_agent.optimization.experiments.baselines import ONLINE_BASELINE_METHODS, BaselineMethod
 from ecos_agent.optimization.contracts import (
     ROUTABILITY_OBJECTIVE_ORDER,
-    ObjectiveMetric,
     TerminalObservation,
     TimingMetric,
 )
@@ -149,7 +148,10 @@ def _paired_auc_comparisons(
 
 def _terminal_metrics(observation: TerminalObservation) -> dict[str, float]:
     return {
-        **{metric.value: float(observation.metrics[metric]) for metric in ObjectiveMetric},
+        **{
+            metric.value: float(observation.metrics[metric])
+            for metric in ROUTABILITY_OBJECTIVE_ORDER
+        },
         **{
             metric.value: float(observation.timing_guardrail[metric])
             for metric in TimingMetric

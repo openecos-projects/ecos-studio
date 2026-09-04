@@ -30,6 +30,7 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.metrics.extraction import (
     OptimizationObservationError,
+    build_area_metrics,
     build_cost_metrics,
     build_eligibility_metrics,
     build_routing_diagnostics,
@@ -63,6 +64,10 @@ _PLACE_STATE_EVIDENCE_FILES = {
     "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
 }
 _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
+_AREA_EVIDENCE_STEPS = (
+    ECCStepName.SYNTHESIS,
+    ECCStepName.FLOORPLAN,
+)
 _TERMINAL_FLOW_STEPS = (
     ECCStepName.PLACEMENT,
     ECCStepName.CTS,
@@ -83,6 +88,7 @@ _TERMINAL_QOR_FILES = tuple(
 _REQUIRED_TERMINAL_QOR_FILES = tuple(
     f"{_STAGE_DIRECTORIES[stage]}/analysis/qor_metrics.json"
     for stage in (
+        *_AREA_EVIDENCE_STEPS,
         ECCStepName.ROUTING,
         ECCStepName.DRC,
         ECCStepName.LVS,
@@ -210,11 +216,11 @@ def _place_map_state_evidence(
 
 
 def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
-    """Build the fixed routability terminal observation without running ECC."""
+    """Build the fixed terminal optimization observation without running ECC."""
     root = _workspace_root(workspace_root)
     files = {path: _read_json(root, path) for path in _TERMINAL_FILES}
     flow = files["home/flow.json"]
-    for stage in _TERMINAL_FLOW_STEPS:
+    for stage in (*_AREA_EVIDENCE_STEPS, *_TERMINAL_FLOW_STEPS):
         _require_successful_stage(flow, stage)
     metrics_by_path = {
         path: _qor_metrics(files[path]) for path in _REQUIRED_TERMINAL_QOR_FILES
@@ -368,11 +374,13 @@ def _evaluation_metrics(
     routing_metrics, routing_complete = build_routing_diagnostics(
         metrics_by_path["route_ecc/analysis/qor_metrics.json"]
     )
+    area_metrics = build_area_metrics(metrics_by_path)
     cost_metrics, cost_complete = build_cost_metrics(metrics_by_path, _TERMINAL_QOR_FILES)
     metrics = (
         *build_eligibility_metrics(metrics_by_path),
         *routing_metrics,
         *cost_metrics,
+        *area_metrics,
         *ppa_metrics,
         *corner_metrics,
     )

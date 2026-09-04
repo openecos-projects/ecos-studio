@@ -48,6 +48,10 @@ class ObjectiveMetric(StrEnum):
     ROUTE_DR_TOTAL_VIOLATION_COUNT = "route_dr_total_violation_count"
     ROUTE_LA_TOTAL_OVERFLOW = "route_la_total_overflow"
     ROUTE_WIRELENGTH = "route_wirelength"
+    DIE_AREA = "die_area"
+    CORE_AREA = "core_area"
+    SYNTHESIS_CELL_AREA = "synthesis_cell_area"
+    STA_STANDARD_CELL_AREA = "sta_standard_cell_area"
 
 
 class PowerMetric(StrEnum):
@@ -68,6 +72,13 @@ ROUTABILITY_OBJECTIVE_ORDER = (
     ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
     ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
     ObjectiveMetric.ROUTE_WIRELENGTH,
+)
+
+AREA_OBJECTIVE_ORDER = (
+    ObjectiveMetric.DIE_AREA,
+    ObjectiveMetric.CORE_AREA,
+    ObjectiveMetric.SYNTHESIS_CELL_AREA,
+    ObjectiveMetric.STA_STANDARD_CELL_AREA,
 )
 
 POWER_SELECTION_ORDER = tuple(PowerMetric)

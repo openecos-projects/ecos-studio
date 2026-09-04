@@ -724,6 +724,15 @@ def test_optimization_objective_parser_sends_only_bounded_request(
         "preserve_metrics",
         "rationale_summary",
     ]
+    objective_metrics = captured["output_schema"]["$defs"]["ObjectiveMetric"][
+        "enum"
+    ]
+    assert {
+        "die_area",
+        "core_area",
+        "synthesis_cell_area",
+        "sta_standard_cell_area",
+    } <= set(objective_metrics)
 
 
 def test_optimization_objective_parser_rejects_empty_goal(tmp_path: Path) -> None:

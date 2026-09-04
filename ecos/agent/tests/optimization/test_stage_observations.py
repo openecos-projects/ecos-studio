@@ -148,13 +148,14 @@ def test_stage_observation_rejects_incomplete_and_unsafe_workspace_evidence(
 ) -> None:
     flow_path = frozen_workspace / "home/flow.json"
     flow = json.loads(flow_path.read_text(encoding="utf-8"))
-    flow["steps"][0]["state"] = "Running"
+    place_step = next(item for item in flow["steps"] if item["name"] == "place")
+    place_step["state"] = "Running"
     _write_json(flow_path, flow)
 
     with pytest.raises(OptimizationObservationError, match="not successful"):
         build_stage_observation(frozen_workspace, "place", budget=_budget())
 
-    flow["steps"][0]["state"] = "Success"
+    place_step["state"] = "Success"
     _write_json(flow_path, flow)
     external = tmp_path / "external.json"
     _write_json(external, _metrics(("place_lutrudy_utilization_max", 0.88)))

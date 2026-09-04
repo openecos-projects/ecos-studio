@@ -68,6 +68,28 @@ def build_routing_diagnostics(
     return records, len(records) == len(metric_ids)
 
 
+def build_area_metrics(
+    metrics_by_path: dict[str, dict[str, float]],
+) -> tuple[TerminalEvaluationMetric, ...]:
+    specifications = (
+        ("Synthesis_yosys/analysis/qor_metrics.json", "synthesis_cell_area"),
+        ("Floorplan_ecc/analysis/qor_metrics.json", "die_area"),
+        ("Floorplan_ecc/analysis/qor_metrics.json", "core_area"),
+    )
+    return tuple(
+        metric_record(
+            metric_id,
+            required_nonnegative_metric(metrics_by_path[path], metric_id),
+            "um^2",
+            EvaluationMetricCategory.PPA,
+            EvaluationMetricRole.REPORT,
+            EvaluationMetricDirection.LOWER_IS_BETTER,
+            (path,),
+        )
+        for path, metric_id in specifications
+    )
+
+
 def build_cost_metrics(
     metrics_by_path: dict[str, dict[str, float]], terminal_qor_files: tuple[str, ...]
 ) -> tuple[tuple[TerminalEvaluationMetric, ...], bool]:

@@ -659,8 +659,13 @@ def _summaries(
             )
         )
         ranges = []
+        objective_rows = [
+            entry.terminal_observation.objective_metrics for entry in group
+        ]
         for metric in ObjectiveMetric:
-            values = [entry.terminal_observation.metrics[metric] for entry in group]
+            values = [row[metric] for row in objective_rows if metric in row]
+            if len(values) != len(objective_rows):
+                continue
             ranges.append(
                 OptimizationTaskMemoryMetricRange(
                     metric_id=metric, minimum=min(values), maximum=max(values)

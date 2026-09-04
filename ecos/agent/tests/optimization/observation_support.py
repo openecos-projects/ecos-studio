@@ -74,6 +74,8 @@ def frozen_workspace(tmp_path: Path) -> Path:
         root / "home/flow.json",
         {
             "steps": [
+                {"name": "Synthesis", "state": "Success"},
+                {"name": "Floorplan", "state": "Success"},
                 {"name": "place", "state": "Success"},
                 {"name": "CTS", "state": "Success"},
                 {"name": "legalization", "state": "Success"},
@@ -96,6 +98,23 @@ def frozen_workspace(tmp_path: Path) -> Path:
             "Cell padding x": 300,
             "Routability opt flag": 1,
         },
+    )
+    _write_json(
+        root / "Synthesis_yosys/analysis/qor_metrics.json",
+        _metrics(
+            ("synthesis_cell_area", 1200.0),
+            ("runtime_seconds", 0.5),
+            ("peak_memory_mb", 80.0),
+        ),
+    )
+    _write_json(
+        root / "Floorplan_ecc/analysis/qor_metrics.json",
+        _metrics(
+            ("die_area", 3000.0),
+            ("core_area", 2500.0),
+            ("runtime_seconds", 0.75),
+            ("peak_memory_mb", 90.0),
+        ),
     )
     _write_json(
         root / "place_dreamplace/analysis/qor_metrics.json",

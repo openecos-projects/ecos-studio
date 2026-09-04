@@ -5,7 +5,12 @@ import shutil
 from pathlib import Path
 
 import pytest
-from ecos_agent.optimization.contracts import PowerMetric, TimingMetric
+from ecos_agent.optimization.contracts import (
+    ObjectiveMetric,
+    OptimizationObjectiveProposal,
+    PowerMetric,
+    TimingMetric,
+)
 from ecos_agent.optimization.observations import (
     OptimizationObservationError,
     build_terminal_observation,
@@ -13,6 +18,7 @@ from ecos_agent.optimization.observations import (
 from ecos_agent.optimization.rules import (
     IncumbentDecision,
     compare_incumbent,
+    freeze_optimization_objective,
     freeze_routability_objective,
 )
 
@@ -59,7 +65,19 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert by_id[("eligibility", "drc_count", None)].value == 0
     assert by_id[("eligibility", "lvs_count", None)].value == 0
     assert by_id[("eligibility", "sta_corner_count", None)].value == 3
+    assert by_id[("ppa", "synthesis_cell_area", None)].value == 1200
+    assert by_id[("ppa", "die_area", None)].value == 3000
+    assert by_id[("ppa", "core_area", None)].value == 2500
     assert by_id[("ppa", "sta_standard_cell_area", None)].value == 1140
+    assert observation.objective_metrics == {
+        ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 0.0,
+        ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 1.0,
+        ObjectiveMetric.ROUTE_WIRELENGTH: 5243.741,
+        ObjectiveMetric.DIE_AREA: 3000.0,
+        ObjectiveMetric.CORE_AREA: 2500.0,
+        ObjectiveMetric.SYNTHESIS_CELL_AREA: 1200.0,
+        ObjectiveMetric.STA_STANDARD_CELL_AREA: 1140.0,
+    }
     assert by_id[("ppa", "sta_typical_dynamic_power", "TYP_25/TYPICAL")].value == 66.8
     assert by_id[("ppa", "sta_typical_leakage_power", "TYP_25/TYPICAL")].value == 0.267
     assert by_id[("ppa", "sta_worst_dynamic_power", "MAX_125/Cworst")].value == 105.2
@@ -173,6 +191,159 @@ def test_terminal_manifest_binds_corner_power_evidence(frozen_workspace: Path) -
     after = build_terminal_observation(frozen_workspace)
 
     assert after.evidence_manifest_sha256 != before.evidence_manifest_sha256
+
+
+@pytest.mark.parametrize(
+    ("metric", "relative_path", "metric_id"),
+    [
+        (
+            ObjectiveMetric.SYNTHESIS_CELL_AREA,
+            "Synthesis_yosys/analysis/qor_metrics.json",
+            "synthesis_cell_area",
+        ),
+        (
+            ObjectiveMetric.DIE_AREA,
+            "Floorplan_ecc/analysis/qor_metrics.json",
+            "die_area",
+        ),
+        (
+            ObjectiveMetric.CORE_AREA,
+            "Floorplan_ecc/analysis/qor_metrics.json",
+            "core_area",
+        ),
+    ],
+)
+def test_area_metric_can_be_the_primary_objective(
+    frozen_workspace: Path,
+    metric: ObjectiveMetric,
+    relative_path: str,
+    metric_id: str,
+) -> None:
+    incumbent = build_terminal_observation(frozen_workspace)
+    path = frozen_workspace / relative_path
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    next(item for item in payload["metrics"] if item["id"] == metric_id)["value"] *= 0.9
+    _write_json(path, payload)
+    candidate = build_terminal_observation(frozen_workspace)
+    assert candidate.evidence_manifest_sha256 != incumbent.evidence_manifest_sha256
+    semantic = freeze_optimization_objective(
+        f"reduce {metric.value}",
+        OptimizationObjectiveProposal(
+            primary_metric=metric,
+            rationale_summary=f"Reduce {metric.value} from terminal evidence.",
+        ),
+    )
+
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == metric
+
+
+def test_sta_standard_cell_area_can_protect_the_primary_objective(
+    frozen_workspace: Path,
+) -> None:
+    incumbent = build_terminal_observation(frozen_workspace)
+    route_path = frozen_workspace / "route_ecc/analysis/qor_metrics.json"
+    route = json.loads(route_path.read_text(encoding="utf-8"))
+    next(item for item in route["metrics"] if item["id"] == "route_wirelength")[
+        "value"
+    ] = 5000
+    _write_json(route_path, route)
+    area_path = frozen_workspace / "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+    area = json.loads(area_path.read_text(encoding="utf-8"))
+    area["design_statistics"]["cella"] = 1200
+    _write_json(area_path, area)
+    candidate = build_terminal_observation(frozen_workspace)
+    semantic = freeze_optimization_objective(
+        "reduce wirelength while preserving standard cell area",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.STA_STANDARD_CELL_AREA,),
+            rationale_summary="Reduce wirelength without increasing final cell area.",
+        ),
+    )
+
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.INCUMBENT_RETAINED
+    assert comparison.decisive_metric == ObjectiveMetric.STA_STANDARD_CELL_AREA
+
+
+def test_missing_selected_area_metric_rejects_candidate(
+    frozen_workspace: Path,
+) -> None:
+    incumbent = build_terminal_observation(frozen_workspace)
+    candidate = incumbent.model_copy(
+        update={
+            "evaluation_metrics": tuple(
+                item
+                for item in incumbent.evaluation_metrics
+                if item.metric_id != "die_area"
+            )
+        }
+    )
+    semantic = freeze_optimization_objective(
+        "reduce die area",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.DIE_AREA,
+            rationale_summary="Reduce die area from terminal evidence.",
+        ),
+    )
+
+    comparison = compare_incumbent(
+        incumbent=incumbent,
+        candidate=candidate,
+        objective=freeze_routability_objective(incumbent),
+        semantic_objective=semantic,
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    assert comparison.decisive_metric == ObjectiveMetric.DIE_AREA
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "metric_id"),
+    [
+        ("Synthesis_yosys/analysis/qor_metrics.json", "synthesis_cell_area"),
+        ("Floorplan_ecc/analysis/qor_metrics.json", "die_area"),
+        ("Floorplan_ecc/analysis/qor_metrics.json", "core_area"),
+    ],
+)
+def test_terminal_observation_requires_area_evidence(
+    frozen_workspace: Path, relative_path: str, metric_id: str
+) -> None:
+    path = frozen_workspace / relative_path
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metrics"] = [
+        item for item in payload["metrics"] if item["id"] != metric_id
+    ]
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="evaluation metric"):
+        build_terminal_observation(frozen_workspace)
+
+
+def test_terminal_observation_requires_sta_standard_cell_area(
+    frozen_workspace: Path,
+) -> None:
+    path = frozen_workspace / "sta_ecc/feature/TYP_25/TYPICAL/qor_summary.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["design_statistics"]["cella"]
+    _write_json(path, payload)
+
+    with pytest.raises(OptimizationObservationError, match="metric payload"):
+        build_terminal_observation(frozen_workspace)
 
 
 @pytest.mark.parametrize(

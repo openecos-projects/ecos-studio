@@ -165,11 +165,13 @@ def build_candidate_trace(
         terminal_success=terminal_success,
         planning_mode=planning_mode,
         terminal_utility=(
-            -float(terminal_observation.metrics[objective_metric])
+            -float(terminal_observation.objective_metrics[objective_metric])
             if terminal_success and terminal_observation is not None
             else None
         ),
-        reference_utility=-float(reference_observation.metrics[objective_metric]),
+        reference_utility=-float(
+            reference_observation.objective_metrics[objective_metric]
+        ),
         area=_evaluation_value(evaluation, "sta_standard_cell_area"),
         dynamic_power=_evaluation_value(evaluation, "sta_typical_dynamic_power"),
         leakage_power=_evaluation_value(evaluation, "sta_typical_leakage_power"),

@@ -338,6 +338,20 @@ def compare_incumbent(
         raise ValueError("incumbent terminal observation is not eligible")
     if not candidate.eligible_for_incumbent:
         return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
+    incumbent_objectives = incumbent.objective_metrics
+    candidate_objectives = candidate.objective_metrics
+    selected_metrics = (
+        (*semantic_objective.preserve_metrics, semantic_objective.primary_metric)
+        if semantic_objective is not None
+        else ROUTABILITY_OBJECTIVE_ORDER
+    )
+    for metric_id in selected_metrics:
+        if metric_id not in incumbent_objectives:
+            raise ValueError("incumbent terminal objective metric is unavailable")
+        if metric_id not in candidate_objectives:
+            return IncumbentComparison(
+                IncumbentDecision.CANDIDATE_INELIGIBLE, metric_id
+            )
     for metric_id in TIMING_GUARDRAIL_ORDER:
         incumbent_value = incumbent.timing_guardrail[metric_id]
         candidate_value = candidate.timing_guardrail[metric_id]
@@ -347,8 +361,8 @@ def compare_incumbent(
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     if semantic_objective is not None:
         for metric_id in semantic_objective.preserve_metrics:
-            incumbent_value = incumbent.metrics[metric_id]
-            candidate_value = candidate.metrics[metric_id]
+            incumbent_value = incumbent_objectives[metric_id]
+            candidate_value = candidate_objectives[metric_id]
             if candidate_value > incumbent_value and _meaningful_metric_change(
                 incumbent_value, candidate_value
             ):
@@ -359,8 +373,8 @@ def compare_incumbent(
         else ROUTABILITY_OBJECTIVE_ORDER
     )
     for metric_id in metric_order:
-        incumbent_value = incumbent.metrics[metric_id]
-        candidate_value = candidate.metrics[metric_id]
+        incumbent_value = incumbent_objectives[metric_id]
+        candidate_value = candidate_objectives[metric_id]
         if candidate_value < incumbent_value:
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
         if candidate_value > incumbent_value:

@@ -314,6 +314,37 @@ def test_candidate_ineligible_is_not_a_terminal_success() -> None:
     assert trace.terminal_utility is None
 
 
+def test_candidate_trace_uses_area_objective_utility() -> None:
+    terminal = _terminal_observation()
+    reference = terminal.model_copy(
+        update={
+            "observation_id": "reference",
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 15.0})
+                if item.metric_id == "sta_standard_cell_area"
+                else item
+                for item in terminal.evaluation_metrics
+            ),
+        }
+    )
+
+    trace = build_candidate_trace(
+        design_id="gcd",
+        candidate_id="episode-1.intervention-1",
+        planning_mode="receipt-aware",
+        outcome=OptimizationOutcomeKind.IMPROVED,
+        receipt=None,
+        terminal_observation=terminal,
+        reference_observation=reference,
+        objective_metric=ObjectiveMetric.STA_STANDARD_CELL_AREA,
+        runtime_seconds=12.0,
+        peak_memory_mb=64.0,
+    )
+
+    assert trace.terminal_utility == -12.0
+    assert trace.reference_utility == -15.0
+
+
 def test_infeasible_is_not_a_terminal_success() -> None:
     terminal = _terminal_observation()
 

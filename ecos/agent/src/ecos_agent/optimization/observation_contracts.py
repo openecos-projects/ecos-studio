@@ -11,10 +11,13 @@ from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
+    EvaluationMetricDirection,
+    EvaluationMetricRole,
     TerminalEvaluationMetric,
     safe_relative_ref,
 )
 from ecos_agent.optimization.contracts import (
+    AREA_OBJECTIVE_ORDER,
     _ContractModel,
     _ID,
     _METRIC_ID,
@@ -254,6 +257,24 @@ class TerminalObservation(_ContractModel):
         if self.sta_corner_set_sha256 != expected:
             raise ValueError("terminal STA corner set hash does not match")
         return self
+
+    @property
+    def objective_metrics(self) -> dict[ObjectiveMetric, float]:
+        values = dict(self.metrics)
+        for metric_id in AREA_OBJECTIVE_ORDER:
+            matches = [
+                item
+                for item in self.evaluation_metrics
+                if item.metric_id == metric_id.value
+                and item.corner is None
+                and item.unit == "um^2"
+                and item.category == EvaluationMetricCategory.PPA
+                and item.role == EvaluationMetricRole.REPORT
+                and item.direction == EvaluationMetricDirection.LOWER_IS_BETTER
+            ]
+            if len(matches) == 1:
+                values[metric_id] = matches[0].value
+        return values
 
     @property
     def eligible_for_incumbent(self) -> bool:

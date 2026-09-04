@@ -164,6 +164,24 @@ def test_natural_language_objective_is_frozen_with_required_signoff_gates() -> N
     )
 
 
+@pytest.mark.parametrize(
+    "metric",
+    [
+        ObjectiveMetric.DIE_AREA,
+        ObjectiveMetric.CORE_AREA,
+        ObjectiveMetric.SYNTHESIS_CELL_AREA,
+        ObjectiveMetric.STA_STANDARD_CELL_AREA,
+    ],
+)
+def test_area_metrics_are_allowed_objectives(metric: ObjectiveMetric) -> None:
+    proposal = OptimizationObjectiveProposal(
+        primary_metric=metric,
+        rationale_summary=f"Reduce {metric.value}.",
+    )
+
+    assert proposal.primary_metric == metric
+
+
 def test_drc_goal_is_locally_bound_to_detail_route_violations() -> None:
     contract = freeze_optimization_objective(
         "reduce routed wirelength while preserving DRC and timing",

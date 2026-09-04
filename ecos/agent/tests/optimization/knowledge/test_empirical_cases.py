@@ -6,6 +6,7 @@ import pytest
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
+    ROUTABILITY_OBJECTIVE_ORDER,
     GateResult,
     ObjectiveMetric,
     OptimizationKnob,
@@ -147,7 +148,7 @@ def _terminal() -> TerminalObservation:
         evidence_valid=True,
         harden_artifacts_complete=True,
         signoff_gates=SignoffGates.all(GateResult.PASS),
-        metrics={metric: 0.0 for metric in ObjectiveMetric},
+        metrics={metric: 0.0 for metric in ROUTABILITY_OBJECTIVE_ORDER},
         timing_guardrail={metric: 0.0 for metric in TimingMetric},
     )
 
