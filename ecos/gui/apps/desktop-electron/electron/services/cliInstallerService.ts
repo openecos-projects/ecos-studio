@@ -172,6 +172,7 @@ export class CliInstallerService {
   private readonly resolveNow: () => Date
 
   private ensurePromise: Promise<string> | null = null
+  private uninstalling = false
   private lastFailure: string | null = null
   private readonly progressListeners = new Set<
     (event: CliInstallerProgressEvent) => void
@@ -304,6 +305,9 @@ export class CliInstallerService {
         'Development mode runs the repository wrapper directly; there is no bundle to install',
       )
     }
+    if (this.uninstalling) {
+      throw new Error('An uninstall is in progress; retry the install afterwards')
+    }
     if (this.ensurePromise) {
       return await this.ensurePromise
     }
@@ -373,13 +377,23 @@ export class CliInstallerService {
     if (this.platform !== 'linux') {
       throw new Error('The ECC bundle installer currently supports Linux only')
     }
-    await rm(join(this.binDir, SHIM_NAME), { force: true })
-    if (this.isPackaged) {
-      await rm(this.dataDir, { force: true, recursive: true })
-    } else {
-      await rm(join(this.dataDir, 'env'), { force: true })
+    if (this.ensurePromise) {
+      throw new Error(
+        'An install is in progress; wait for it to finish before uninstalling',
+      )
     }
-    this.lastFailure = null
+    this.uninstalling = true
+    try {
+      await rm(join(this.binDir, SHIM_NAME), { force: true })
+      if (this.isPackaged) {
+        await rm(this.dataDir, { force: true, recursive: true })
+      } else {
+        await rm(join(this.dataDir, 'env'), { force: true })
+      }
+      this.lastFailure = null
+    } finally {
+      this.uninstalling = false
+    }
   }
 
   /**
@@ -567,11 +581,6 @@ export class CliInstallerService {
       await this.buildRuntimeEnv(stagingBinaries),
     )
     const versionDirName = `${this.expectedVersion}-${sha256.slice(0, 8)}`
-    // The env file must reference the binaries inside its own version
-    // directory (packaged mounts are ephemeral), so build it against the
-    // final absolute location even though the directory is renamed later.
-    // The _internal probe reads the staged copy, which has identical content.
-    const finalBinariesDir = join(this.dataDir, versionDirName, 'binaries')
     const record: CliBundleInstallRecord = {
       version: this.expectedVersion,
       sha256,
@@ -580,16 +589,12 @@ export class CliInstallerService {
       selfCheck,
     }
     await writeFile(
-      join(stagingDir, 'env'),
-      await this.buildEnvFileContent(
-        finalBinariesDir,
-        join(stagingBinaries, '_internal'),
-      ),
-    )
-    await writeFile(
       join(stagingDir, 'install.json'),
       `${JSON.stringify(record, null, 2)}\n`,
     )
+    // The env file itself is written by finalizeStagedBundle once the final
+    // directory name is known — the repair path activates a unique sibling
+    // directory, and the env file must reference its own directory.
     return versionDirName
   }
 
@@ -653,9 +658,11 @@ export class CliInstallerService {
   /**
    * Move a fully staged bundle into its content-addressed version directory
    * and return the directory name to activate. A valid identical install is
-   * kept; a damaged or self-check-failed one stays in place while the fresh
-   * copy installs under a unique sibling name, and is deleted only after
-   * `current` no longer references it — so `current` never dangles.
+   * kept (its env file is refreshed); a damaged or self-check-failed one
+   * stays in place while the fresh copy installs under a unique sibling
+   * name, and is deleted only after `current` no longer references it — so
+   * `current` never dangles. The env file is written here against the final
+   * directory so it always references its own binaries.
    */
   private async finalizeStagedBundle(
     stagingDir: string,
@@ -667,10 +674,16 @@ export class CliInstallerService {
       const existing = await this.readInstallRecord(versionDir)
       if ('record' in existing && existing.record.selfCheck.ok) {
         await rm(stagingDir, { force: true, recursive: true })
+        await this.writeEnvFile(versionDir, join(versionDir, 'binaries'))
         electronLogger.info(
           '[cli-installer] ECC bundle %s already installed; keeping it',
           versionDirName,
         )
+        this.publishProgress(options, {
+          phase: 'switching',
+          progress: 0.95,
+          message: 'Activating the ECC bundle...',
+        })
         return versionDirName
       }
       electronLogger.info(
@@ -679,6 +692,13 @@ export class CliInstallerService {
         'record' in existing ? 'recorded self-check failed' : existing.error,
       )
       const repairedName = `${versionDirName}-${randomUUID().slice(0, 8)}`
+      // The _internal probe reads the staged copy, which has identical
+      // content to what the final directory will contain.
+      await this.writeEnvFile(
+        stagingDir,
+        join(this.dataDir, repairedName, 'binaries'),
+        join(stagingDir, 'binaries', '_internal'),
+      )
       await rename(stagingDir, join(this.dataDir, repairedName))
       this.publishProgress(options, {
         phase: 'switching',
@@ -689,6 +709,11 @@ export class CliInstallerService {
       await rm(versionDir, { force: true, recursive: true }).catch(() => undefined)
       return repairedName
     }
+    await this.writeEnvFile(
+      stagingDir,
+      join(this.dataDir, versionDirName, 'binaries'),
+      join(stagingDir, 'binaries', '_internal'),
+    )
     await rename(stagingDir, versionDir)
 
     this.publishProgress(options, {
@@ -872,8 +897,15 @@ export class CliInstallerService {
     return `${lines.join('\n')}\n`
   }
 
-  private async writeEnvFile(targetDir: string, eccBinDir: string | null): Promise<void> {
-    await writeFile(join(targetDir, 'env'), await this.buildEnvFileContent(eccBinDir))
+  private async writeEnvFile(
+    targetDir: string,
+    eccBinDir: string | null,
+    libDirProbe?: string,
+  ): Promise<void> {
+    await writeFile(
+      join(targetDir, 'env'),
+      await this.buildEnvFileContent(eccBinDir, libDirProbe),
+    )
   }
 
   private shimContent(): string {

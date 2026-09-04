@@ -179,10 +179,16 @@ function getDesktopServices() {
     resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
     userDataPath: app.getPath('userData'),
   })
-  const runtimeEnvProvider = () =>
-    resourceManagerService.createRuntimeEnv(runtimeEnv, {
+  const runtimeEnvProvider = () => {
+    // Rebuild the base env on every resolution so a bundle acquired (or
+    // refreshed) by the CLI installer contributes fresh PATH and
+    // LD_LIBRARY_PATH entries — the packaged mount or bundle home may not
+    // have existed at startup.
+    const baseEccEnv = createEccRuntimeEnv(eccRuntimeOptions)
+    return resourceManagerService.createRuntimeEnv(baseEccEnv, {
       platform: process.platform,
     })
+  }
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({

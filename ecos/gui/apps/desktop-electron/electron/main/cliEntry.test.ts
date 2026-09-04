@@ -1,12 +1,23 @@
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applyHeadlessDisplayHint,
   parseCliInvocation,
   runCliCommand,
   type CliRunDependencies,
 } from './cliEntry'
+
+const tempDirectories: string[] = []
+
+afterEach(() => {
+  for (const directory of tempDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true })
+  }
+})
 
 function createChildDouble(): ChildProcess {
   const child = new EventEmitter() as unknown as ChildProcess & {
@@ -44,14 +55,12 @@ describe('parseCliInvocation', () => {
   })
 
   it('skips the electron default-app entry script prefix', () => {
+    const entryDir = mkdtempSync(join(tmpdir(), 'ecos-cli-entry-'))
+    tempDirectories.push(entryDir)
+    const entryPath = join(entryDir, 'index.js')
+    writeFileSync(entryPath, '')
     expect(
-      parseCliInvocation([
-        '/usr/bin/electron',
-        '/opt/app/index.js',
-        '--cli',
-        'ecc',
-        '--version',
-      ]),
+      parseCliInvocation(['/usr/bin/electron', entryPath, '--cli', 'ecc', '--version']),
     ).toEqual({ command: 'ecc', args: ['--version'] })
     expect(parseCliInvocation(['/usr/bin/electron', '.', '--cli', 'ecc'])).toEqual({
       command: 'ecc',
@@ -62,6 +71,11 @@ describe('parseCliInvocation', () => {
   it('returns null for GUI launches, workspace paths, and non-entry prefixes', () => {
     expect(parseCliInvocation(['/opt/AppImage'])).toBeNull()
     expect(parseCliInvocation(['/opt/AppImage', '--project', 'gcd'])).toBeNull()
+    // A *.js suffix alone is not enough: only an existing regular file is an
+    // entry script, so workspace-looking paths stay GUI launches.
+    expect(
+      parseCliInvocation(['/opt/AppImage', '/home/user/design.js', '--cli', 'ecc']),
+    ).toBeNull()
     // A workspace path at argv[1] is not a default-app prefix, so a later
     // --cli belongs to some other tool.
     expect(

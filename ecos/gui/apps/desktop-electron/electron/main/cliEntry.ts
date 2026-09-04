@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import type { SpawnOptions } from 'node:child_process'
+import { statSync } from 'node:fs'
 
 /**
  * CLI pass-through entry (`ecos-studio --cli <command> [args...]`).
@@ -17,8 +18,9 @@ export interface CliCommand {
 /**
  * Recognize a `--cli` invocation. `--cli` must be the first user argument;
  * unpackaged (electron default-app) launches prefix argv with the entry
- * script ('.', '*.js', '*.asar'), which is skipped. Anything else in that
- * position (e.g. a workspace path) means this is not a CLI launch.
+ * script ('.', or a *.js/*.mjs/*.cjs/*.asar file), which is skipped.
+ * Anything else in that position (e.g. a workspace directory) means this is
+ * not a CLI launch.
  *
  * Returns null when the launch is not a CLI invocation, and a command with
  * an empty `command` when `--cli` was given without a command (treated as
@@ -26,13 +28,24 @@ export interface CliCommand {
  */
 export function parseCliInvocation(argv: readonly string[]): CliCommand | null {
   const hasDefaultAppPrefix =
-    argv.length > 2 &&
-    (argv[1] === '.' ||
-      (typeof argv[1] === 'string' && /\.(js|mjs|cjs|asar)$/.test(argv[1])))
+    argv.length > 2 && (argv[1] === '.' || isEntryScriptFile(argv[1]))
   const cliIndex = hasDefaultAppPrefix ? 2 : 1
   if (argv[cliIndex] !== '--cli') return null
   const [command = '', ...args] = argv.slice(cliIndex + 1)
   return { command, args }
+}
+
+function isEntryScriptFile(pathValue: unknown): boolean {
+  if (typeof pathValue !== 'string' || !/\.(js|mjs|cjs|asar)$/.test(pathValue)) {
+    return false
+  }
+  // Workspace directories can legitimately end in .js; only an existing
+  // regular file is an entry script.
+  try {
+    return statSync(pathValue).isFile()
+  } catch {
+    return false
+  }
 }
 
 /**
