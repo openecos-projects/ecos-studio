@@ -7832,3 +7832,166 @@ describe('ResourceManagerService', () => {
     await expect(stat(projectRoot)).resolves.toMatchObject({})
   })
 })
+
+describe('ResourceManagerService external bundle download', () => {
+  async function createEccBundleArchive(
+    root: string,
+  ): Promise<{ path: string; sha256: string; size: number }> {
+    const sourceRoot = join(root, 'ecc-source')
+    const bundleDir = join(sourceRoot, 'ecc-bundle-0.1.0-alpha.11')
+    await mkdir(join(bundleDir, 'bin'), { recursive: true })
+    await mkdir(join(bundleDir, '_internal', 'ecc_tools_bin'), { recursive: true })
+    await writeFile(join(bundleDir, 'bin', 'ecc'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(bundleDir, 'bin', 'ecc'), 0o755)
+    await writeFile(
+      join(bundleDir, '_internal', 'ecc_tools_bin', 'lib.txt'),
+      'library\n',
+      'utf8',
+    )
+    const archive = join(root, 'ecc-bundle.tar')
+    await runFixtureCommand('tar', [
+      '-cf',
+      archive,
+      '-C',
+      sourceRoot,
+      'ecc-bundle-0.1.0-alpha.11',
+    ])
+    const archiveBytes = await readFile(archive)
+    return {
+      path: archive,
+      sha256: createHash('sha256').update(archiveBytes).digest('hex'),
+      size: archiveBytes.byteLength,
+    }
+  }
+
+  function createDownloadService(
+    root: string,
+    archive: { path: string; sha256: string; size: number },
+    registryOverrides: Record<string, unknown> = {},
+  ): ResourceManagerService {
+    const registry = {
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc',
+          display_name: 'ECC',
+          description: 'ECC runtime bundle',
+          category: 'runtime',
+          homepage: '',
+          versions: [
+            {
+              version: '0.1.0-alpha.11',
+              platforms: {
+                'all-platform': {
+                  url: 'https://example.com/ecc-bundle.tar',
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'ecc-bundle-0.1.0-alpha.11',
+                  ...registryOverrides,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }
+    return new ResourceManagerService({
+      cacheDir: join(root, 'cache'),
+      registryUrl: 'https://registry.example/tool-registry.json',
+      fetchImpl: vi.fn(async (url: string | URL | Request) => {
+        if (String(url).startsWith('https://registry.example/')) {
+          return new Response(JSON.stringify(registry))
+        }
+        return new Response(await readFile(archive.path))
+      }),
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+  }
+
+  it('downloads and extracts a registry asset into an arbitrary directory', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const service = createDownloadService(root, archive)
+    const destinationDir = join(root, 'bundle-home', 'binaries-root')
+    const events: Array<Record<string, unknown>> = []
+
+    const result = await service.downloadRegistryAssetToDirectory({
+      resourceId: 'tool:ecc',
+      version: '0.1.0-alpha.11',
+      destinationDir,
+      listener: (event) => events.push({ ...event }),
+    })
+
+    expect(result).toEqual({
+      version: '0.1.0-alpha.11',
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    await expect(readFile(join(destinationDir, 'bin', 'ecc'), 'utf8')).resolves.toBe(
+      '#!/bin/sh\n',
+    )
+    await expect(
+      readFile(join(destinationDir, '_internal', 'ecc_tools_bin', 'lib.txt'), 'utf8'),
+    ).resolves.toBe('library\n')
+    expect(events.map((event) => event.phase)).toContain('downloading')
+    expect(events.at(-1)).toMatchObject({ phase: 'done', progress: 1 })
+    // No manifest is written for external downloads.
+    await expect(stat(join(root, 'state', 'resources', 'manifest.json'))).rejects.toThrow(
+      /ENOENT/,
+    )
+  })
+
+  it('fails on a sha256 mismatch and leaves no extracted content', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const service = createDownloadService(root, archive, {
+      sha256: 'b'.repeat(64),
+    })
+    const destinationDir = join(root, 'bundle-home', 'binaries-root')
+
+    await expect(
+      service.downloadRegistryAssetToDirectory({
+        resourceId: 'tool:ecc',
+        version: '0.1.0-alpha.11',
+        destinationDir,
+      }),
+    ).rejects.toThrow(/SHA256 verification failed/)
+    await expect(stat(destinationDir)).rejects.toThrow(/ENOENT/)
+  })
+
+  it('reports the expected version when the registry lacks it', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const service = createDownloadService(root, archive)
+    const destinationDir = join(root, 'bundle-home', 'binaries-root')
+
+    await expect(
+      service.downloadRegistryAssetToDirectory({
+        resourceId: 'tool:ecc',
+        version: '9.9.9-missing',
+        destinationDir,
+      }),
+    ).rejects.toThrow(/Version 9\.9\.9-missing of tool 'ecc' not found in registry/)
+  })
+
+  it('notifies manifest change listeners on install and uninstall', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccBundleArchive(root)
+    const service = createDownloadService(root, archive)
+    const manifestChange = vi.fn()
+    const unsubscribe = service.onManifestChanged(manifestChange)
+
+    await service.installResource('tool:ecc')
+    expect(manifestChange).toHaveBeenCalledTimes(1)
+
+    await service.uninstallResource('tool:ecc')
+    expect(manifestChange).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+    await service.installResource('tool:ecc')
+    expect(manifestChange).toHaveBeenCalledTimes(2)
+  })
+})
