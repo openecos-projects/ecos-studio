@@ -140,6 +140,11 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace
 
+      - name: Check the browser target
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo check -p chip-viewer-wasm --target wasm32-unknown-unknown
+
   build-appimage:
     name: Build AppImage
     needs: [changes, check-version, gui-checks, chip-viewer-rust]
