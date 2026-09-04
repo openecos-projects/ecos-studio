@@ -167,6 +167,24 @@ function manifestWithBaseline() {
 }
 
 describe('BackendWorkspaceService', () => {
+  it('invalidates the previous Context when its window scope is cleared', async () => {
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: persistedReadService(engineeringSnapshot()),
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const invalidated = vi.fn()
+    service.onInvalidated(invalidated)
+    const initial = await runWithWindowScope(41, () => service.getOverview())
+
+    service.clearWindow(41)
+
+    expect(invalidated).toHaveBeenCalledWith({
+      generation: initial.generation + 1,
+      windowId: 41,
+      workspaceContextId: initial.workspaceContextId,
+    })
+  })
+
   it('returns window-scoped identity and configuration from committed facts', async () => {
     const readManifest = vi.fn().mockResolvedValue(
       JSON.stringify({

@@ -96,7 +96,7 @@ export const useBackendWorkspaceSession = defineStore('backendWorkspaceSession',
     }
     unsubscribe ??= getDesktopApi().backendWorkspace.onInvalidated((event) => {
       if (
-        event.workspaceContextId === workspaceContextId.value &&
+        event.workspaceContextId !== workspaceContextId.value ||
         event.generation > generation.value
       ) {
         void refresh()

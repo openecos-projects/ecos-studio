@@ -1,11 +1,16 @@
-import type { BackendWorkspaceOverviewResult } from '@ecos-studio/shared'
+import type {
+  BackendWorkspaceInvalidatedEvent,
+  BackendWorkspaceOverviewResult,
+} from '@ecos-studio/shared'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
 const backendWorkspace = vi.hoisted(() => ({
   getOverview: vi.fn(),
-  onInvalidated: vi.fn(() => () => undefined),
+  onInvalidated: vi.fn(
+    (_listener: (event: BackendWorkspaceInvalidatedEvent) => void) => () => undefined,
+  ),
   refreshOverview: vi.fn(),
 }))
 
@@ -16,7 +21,11 @@ vi.mock('@/platform/desktop', () => ({
 import { useBackendWorkspaceSession } from './backendWorkspaceSession'
 import { finishRuntimeStepRender } from '@/composables/runtimeStepRenderSync'
 
-function result(workspaceName: string, generation = 0): BackendWorkspaceOverviewResult {
+function result(
+  workspaceName: string,
+  generation = 0,
+  workspaceContextId = 'context-1',
+): BackendWorkspaceOverviewResult {
   const unavailable = {
     issues: [{ code: 'BACKEND_SECTION_NOT_MIGRATED' }],
     status: 'unavailable' as const,
@@ -46,7 +55,7 @@ function result(workspaceName: string, generation = 0): BackendWorkspaceOverview
       keyMetrics: unavailable,
       qor: unavailable,
     },
-    workspaceContextId: 'context-1',
+    workspaceContextId,
   }
 }
 
@@ -93,6 +102,38 @@ describe('backendWorkspaceSession', () => {
     resolveRefresh(result('Workspace A', 1))
     await refreshing
     expect(session.projection).toMatchObject({ status: 'ready' })
+  })
+
+  it('follows a second Context rotation while the first refresh is pending', async () => {
+    backendWorkspace.getOverview.mockResolvedValue(result('Workspace A', 0, 'context-a'))
+    let resolveFirstRefresh!: (value: BackendWorkspaceOverviewResult) => void
+    backendWorkspace.refreshOverview
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstRefresh = resolve
+        }),
+      )
+      .mockResolvedValueOnce(result('Workspace C', 0, 'context-c'))
+    const session = useBackendWorkspaceSession()
+    await session.start('/work/a')
+    const invalidate = backendWorkspace.onInvalidated.mock.calls[0]![0]
+
+    invalidate({ generation: 1, workspaceContextId: 'context-a' })
+    await vi.waitFor(() =>
+      expect(backendWorkspace.refreshOverview).toHaveBeenCalledOnce(),
+    )
+    invalidate({ generation: 1, workspaceContextId: 'context-b' })
+
+    await vi.waitFor(() =>
+      expect(backendWorkspace.refreshOverview).toHaveBeenCalledTimes(2),
+    )
+    resolveFirstRefresh(result('Workspace B', 0, 'context-b'))
+    await vi.waitFor(() => expect(session.workspaceContextId).toBe('context-c'))
+    expect(session.projection).toMatchObject({
+      data: { identity: { workspaceName: 'Workspace C' } },
+      status: 'ready',
+    })
+    session.dispose()
   })
 
   it('refreshes for the GUI render gate without propagating section failure', async () => {

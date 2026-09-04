@@ -284,6 +284,13 @@ export class BackendWorkspaceService {
     const context = this.contexts.get(windowId)
     this.contexts.delete(windowId)
     void context?.watcher?.close()
+    if (!context) return
+    const event = {
+      generation: context.generation + 1,
+      windowId,
+      workspaceContextId: context.id,
+    }
+    for (const listener of this.invalidationListeners) listener(event)
   }
 
   private contextForWindow(windowId: number): WorkspaceContext {
