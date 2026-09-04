@@ -22,6 +22,30 @@ from tests.optimization.parameters.acceptance_trace_support import (
 )
 
 
+def test_density_floor_override_accepts_float32_tensor_rounding() -> None:
+    receipt = {
+        "requested": {"knob_id": "place.target_density", "value": 0.2},
+        "effective_initial": {"value": 0.65},
+        "effective_final": {"value": 0.65},
+        "consumer_observation": {
+            "effective_target_density": 0.65,
+            "density_tensor_value": 0.6499999761581421,
+            "density_operator_call_count": 1,
+        },
+        "transitions": [
+            {
+                "to": "overridden",
+                "rule_id": "dreamplace.target_density.utilization_floor",
+                "value": 0.65,
+                "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+                "evidence_sha256": HASH,
+            }
+        ],
+    }
+
+    assert acceptance._has_native_density_floor_override(receipt) is True
+
+
 @pytest.mark.parametrize(
     ("case", "classification", "issue"),
     [

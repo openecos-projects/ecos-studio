@@ -72,6 +72,7 @@ def density_receipt(
         "requested_target_density": 0.2,
         "effective_target_density": 0.8,
         "density_tensor_value": 0.8,
+        "density_operator_call_count": 1,
         "placement_iteration_count": 4,
         "evidence_complete": True,
     }

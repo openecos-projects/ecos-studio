@@ -274,23 +274,28 @@ def _native_receipt(
         "place.target_density": {
             "effective_target_density": effective_value,
             "density_tensor_value": effective_value,
+            "density_operator_call_count": 1,
             "placement_iteration_count": 4,
         },
         "place.target_overflow": {
             "effective_stop_overflow": effective_value,
             "final_overflow": 0.08,
+            "threshold_read_count": 1,
             "placement_iteration_count": 4,
         },
         "place.cell_padding_x": {
             "effective_padding_dbu": effective_value,
             "movable_node_count": 12,
+            "geometry_apply_count": 1,
             "placement_iteration_count": 4,
         },
         "place.routability_opt": {
             "branch_round_count": 1 if activation_status == "used" else 0,
         },
         "place.density_weight": {
-            "configured_density_weight": effective_value,
+            "configured_density_weight": value,
+            "internal_initial_density_weight": effective_value,
+            "final_internal_density_weight": effective_value,
             "final_objective": 12.5,
             "placement_iteration_count": 4,
         },

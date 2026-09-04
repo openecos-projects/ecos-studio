@@ -326,6 +326,7 @@ def _native_receipt(
             "requested_padding_site": requested.value,
             "effective_padding_dbu": effective_value,
             "movable_node_count": 12,
+            "geometry_apply_count": 1,
             "placement_iteration_count": 4,
             "evidence_complete": True,
         }
@@ -334,6 +335,7 @@ def _native_receipt(
             "requested_target_density": requested.value,
             "effective_target_density": effective_value,
             "density_tensor_value": effective_value,
+            "density_operator_call_count": 1,
             "placement_iteration_count": 4,
             "evidence_complete": True,
         }

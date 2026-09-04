@@ -289,5 +289,6 @@ def write_padding_candidate(
             "evidence_complete": True,
             "effective_padding_dbu": effective_value,
             "movable_node_count": 10,
+            "geometry_apply_count": 1,
         },
     )

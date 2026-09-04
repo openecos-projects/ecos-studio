@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -169,7 +170,8 @@ def _has_native_density_floor_override(receipt: dict) -> bool:
         or requested >= effective
         or final != effective
         or observation.get("effective_target_density") != effective
-        or observation.get("density_tensor_value") != effective
+        or not _same_number(observation.get("density_tensor_value"), effective)
+        or observation.get("density_operator_call_count", 0) <= 0
     ):
         return False
     return any(
@@ -180,6 +182,14 @@ def _has_native_density_floor_override(receipt: dict) -> bool:
         and bool(transition.get("evidence_sha256"))
         for transition in receipt.get("transitions", [])
         if isinstance(transition, dict)
+    )
+
+
+def _same_number(left: object, right: object) -> bool:
+    return (
+        type(left) in {int, float}
+        and type(right) in {int, float}
+        and math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-7)
     )
 
 

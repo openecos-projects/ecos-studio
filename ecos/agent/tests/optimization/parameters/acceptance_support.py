@@ -117,6 +117,7 @@ def write_candidate(
         "evidence_complete": True,
         "effective_target_density": effective_value,
         "density_tensor_value": effective_value,
+        "density_operator_call_count": 1,
     }
     evidence = {
         "consumer_id": consumer_id,

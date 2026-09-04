@@ -24,6 +24,61 @@ from tests.optimization.parameters.effectiveness_support import (
 )
 
 
+def _runtime_receipt(
+    knob: OptimizationKnob,
+    *,
+    requested: int | float,
+    effective_initial: int | float,
+    effective_final: int | float,
+    effective_unit: str,
+    consumer_id: str,
+    outcome: str,
+    observation: dict,
+) -> ParameterApplicationReceipt:
+    card = load_parameter_cards()[knob]
+    payload = density_receipt(domain_context()).model_dump(
+        mode="json", exclude={"evidence_sha256"}
+    )
+    payload.update(
+        receipt_id=f"parameter-receipt-{knob.value.replace('.', '-')}",
+        tool=card.tool.model_dump(mode="json"),
+        context={
+            "stage": card.stage,
+            "lattice_version": "ecos.optimization_lattice.v1",
+        },
+        requested={
+            "knob_id": knob.value,
+            "value": requested,
+            "unit": card.surface.unit,
+        },
+        effective_initial={"value": effective_initial, "unit": effective_unit},
+        effective_final={"value": effective_final, "unit": effective_unit},
+        transitions=[],
+        consumer_observation=observation,
+    )
+    payload["materialization"].update(
+        written_value=requested,
+        unit=card.surface.unit,
+    )
+    evidence = {
+        "consumer_id": consumer_id,
+        "outcome": outcome,
+        "evidence_ref": "analysis/parameter_runtime_report.v1.json",
+        "evidence_sha256": canonical_sha256(
+            {
+                "consumer_id": consumer_id,
+                "outcome": outcome,
+                "consumer_observation": observation,
+            }
+        ),
+    }
+    payload["activation"] = {"status": "used", "consumers": [evidence]}
+    return ParameterApplicationReceipt(
+        **payload,
+        evidence_sha256=canonical_sha256(payload),
+    )
+
+
 def test_dreamplace_used_receipt_requires_consumer_observation() -> None:
     cards = load_parameter_cards()
     context = domain_context()
@@ -207,3 +262,56 @@ def test_padding_materialization_keeps_surface_and_written_units_distinct() -> N
     validate_application_receipt(receipt, load_parameter_cards())
     assert receipt.requested["unit"] == "site"
     assert receipt.materialization.unit == "dbu"
+
+
+def test_density_weight_receipt_binds_internal_initial_and_final_values() -> None:
+    observation = {
+        "configured_density_weight": 0.001,
+        "internal_initial_density_weight": 0.004,
+        "final_internal_density_weight": 0.009,
+        "placement_iteration_count": 5,
+        "evidence_complete": True,
+        "lifecycle": [
+            {"phase": "adopted", "value": 0.004},
+            {"phase": "evolved", "value": 0.009},
+        ],
+    }
+    receipt = _runtime_receipt(
+        OptimizationKnob.DENSITY_WEIGHT,
+        requested=0.001,
+        effective_initial=0.004,
+        effective_final=0.009,
+        effective_unit="internal_objective_weight",
+        consumer_id="dreamplace.density_preconditioner",
+        outcome="entered",
+        observation=observation,
+    )
+
+    validate_application_receipt(receipt, load_parameter_cards())
+
+
+def test_floorplan_receipt_rejects_unbound_realized_geometry() -> None:
+    observation = {
+        "configured_value": 0.8,
+        "realized_core_utilization": 0.79,
+        "realized_aspect_ratio": 2.0,
+        "evidence_complete": True,
+        "lifecycle": [
+            {"phase": "adopted", "value": 0.8},
+            {"phase": "consumed", "value": 0.8},
+            {"phase": "realized", "value": 0.79},
+        ],
+    }
+    receipt = _runtime_receipt(
+        OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        requested=0.8,
+        effective_initial=0.8,
+        effective_final=0.75,
+        effective_unit="ratio",
+        consumer_id="ifp.die_builder.die_utilization",
+        outcome="geometry_constructed",
+        observation=observation,
+    )
+
+    with pytest.raises(ParameterSemanticsError, match="realized geometry"):
+        validate_application_receipt(receipt, load_parameter_cards())

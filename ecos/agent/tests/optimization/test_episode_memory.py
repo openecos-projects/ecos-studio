@@ -129,6 +129,7 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
     observation = {
         "effective_padding_dbu": effective,
         "movable_node_count": 1,
+        "geometry_apply_count": 1,
         "evidence_complete": True,
     }
     consumer = {

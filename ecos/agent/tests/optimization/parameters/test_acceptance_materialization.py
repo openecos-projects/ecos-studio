@@ -31,6 +31,7 @@ def test_acceptance_allows_evidenced_target_density_override(
         "evidence_complete": True,
         "effective_target_density": 0.8,
         "density_tensor_value": 0.8,
+        "density_operator_call_count": 1,
     }
     override_hash = canonical_sha256(
         {

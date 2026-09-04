@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
@@ -233,13 +234,16 @@ def validate_application_receipt(
     allowed = {item.consumer_id: item.event for item in card.consumers}
     if _is_routability_false_arm(receipt):
         _validate_routability_false_arm(receipt, set(allowed))
-    if card.tool.name == "DREAMPlace" and receipt.activation.status in {
+    if card.tool.name in {"DREAMPlace", "ECC-Floorplan"} and receipt.activation.status in {
         "used",
         "not_activated",
     }:
         if receipt.activation.status == "used":
-            _validate_dreamplace_observation(receipt)
-        _validate_dreamplace_consumer_evidence(receipt)
+            if card.tool.name == "DREAMPlace":
+                _validate_dreamplace_observation(receipt)
+            else:
+                _validate_floorplan_observation(receipt)
+        _validate_consumer_evidence(receipt)
     if (
         receipt.application_status == "applied"
         and receipt.materialization.config_before_sha256
@@ -298,40 +302,131 @@ def _validate_dreamplace_observation(receipt: ParameterApplicationReceipt) -> No
         or observation.get("evidence_complete") is not True
     ):
         raise ParameterSemanticsError("DREAMPlace consumer observation is incomplete")
-    knob_id = receipt.requested["knob_id"]
-    effective = receipt.effective_initial.value
-    expected_fields = {
-        "place.target_density": ("effective_target_density", "density_tensor_value"),
-        "place.target_overflow": (
-            "effective_stop_overflow",
-            "placement_iteration_count",
-        ),
-        "place.cell_padding_x": ("effective_padding_dbu", "movable_node_count"),
-        "place.routability_opt": ("branch_round_count",),
-        "place.density_weight": (
-            "configured_density_weight",
-            "placement_iteration_count",
-        ),
-    }[knob_id]
-    if any(observation.get(field) is None for field in expected_fields):
+    validators = {
+        "place.target_density": _validate_target_density_observation,
+        "place.target_overflow": _validate_target_overflow_observation,
+        "place.cell_padding_x": _validate_padding_observation,
+        "place.routability_opt": _validate_routability_observation,
+        "place.density_weight": _validate_density_weight_observation,
+    }
+    validators[receipt.requested["knob_id"]](receipt, observation)
+
+
+def _require_observation_fields(observation: dict, *fields: str) -> None:
+    if any(observation.get(field) is None for field in fields):
         raise ParameterSemanticsError(
             "DREAMPlace consumer observation fields are missing"
         )
-    effective_field = expected_fields[0]
-    if knob_id != "place.routability_opt" and observation[effective_field] != effective:
+
+
+def _validate_target_density_observation(receipt, observation) -> None:
+    _require_observation_fields(
+        observation,
+        "effective_target_density",
+        "density_tensor_value",
+        "density_operator_call_count",
+    )
+    effective = receipt.effective_initial.value
+    if (
+        observation["effective_target_density"] != effective
+        or not _same_number(observation["density_tensor_value"], effective)
+        or observation["density_operator_call_count"] <= 0
+    ):
         raise ParameterSemanticsError(
             "DREAMPlace consumer observation value does not match"
         )
-    if knob_id == "place.routability_opt" and observation["branch_round_count"] <= 0:
+
+
+def _validate_target_overflow_observation(receipt, observation) -> None:
+    _require_observation_fields(
+        observation,
+        "effective_stop_overflow",
+        "placement_iteration_count",
+        "threshold_read_count",
+    )
+    if (
+        observation["effective_stop_overflow"] != receipt.effective_initial.value
+        or receipt.effective_final.value != receipt.effective_initial.value
+        or observation["threshold_read_count"] <= 0
+    ):
+        raise ParameterSemanticsError(
+            "DREAMPlace overflow threshold consumption does not match"
+        )
+
+
+def _validate_padding_observation(receipt, observation) -> None:
+    _require_observation_fields(
+        observation,
+        "effective_padding_dbu",
+        "movable_node_count",
+        "geometry_apply_count",
+    )
+    effective = observation["effective_padding_dbu"]
+    if (
+        effective != receipt.effective_initial.value
+        or effective != receipt.effective_final.value
+        or receipt.effective_final.unit != "dbu"
+        or observation["geometry_apply_count"] <= 0
+    ):
+        raise ParameterSemanticsError("DREAMPlace padding lifecycle does not match")
+
+
+def _validate_routability_observation(_receipt, observation) -> None:
+    _require_observation_fields(observation, "branch_round_count")
+    if observation["branch_round_count"] <= 0:
         raise ParameterSemanticsError("DREAMPlace routability consumer was not entered")
 
 
-def _validate_dreamplace_consumer_evidence(
+def _validate_density_weight_observation(receipt, observation) -> None:
+    _require_observation_fields(
+        observation,
+        "configured_density_weight",
+        "internal_initial_density_weight",
+        "final_internal_density_weight",
+        "placement_iteration_count",
+    )
+    if (
+        observation["configured_density_weight"]
+        != receipt.materialization.written_value
+        or observation["internal_initial_density_weight"]
+        != receipt.effective_initial.value
+        or observation["final_internal_density_weight"] != receipt.effective_final.value
+        or receipt.effective_initial.unit != "internal_objective_weight"
+        or receipt.effective_final.unit != "internal_objective_weight"
+    ):
+        raise ParameterSemanticsError(
+            "DREAMPlace density-weight runtime values do not match"
+        )
+
+
+def _validate_floorplan_observation(receipt: ParameterApplicationReceipt) -> None:
+    observation = receipt.consumer_observation
+    if (
+        not isinstance(observation, dict)
+        or observation.get("evidence_complete") is not True
+    ):
+        raise ParameterSemanticsError("floorplan consumer observation is incomplete")
+    realized_field = {
+        "floorplan.core_util": "realized_core_utilization",
+        "floorplan.aspect_ratio": "realized_aspect_ratio",
+    }[receipt.requested["knob_id"]]
+    lifecycle = observation.get("lifecycle")
+    if (
+        observation.get("configured_value") != receipt.effective_initial.value
+        or observation.get(realized_field) != receipt.effective_final.value
+        or not isinstance(lifecycle, list)
+        or [item.get("phase") for item in lifecycle]
+        != ["adopted", "consumed", "realized"]
+    ):
+        raise ParameterSemanticsError("floorplan realized geometry does not match")
+
+
+def _validate_consumer_evidence(
     receipt: ParameterApplicationReceipt,
 ) -> None:
     observation = receipt.consumer_observation
     if not isinstance(observation, dict):
-        raise ParameterSemanticsError("DREAMPlace consumer observation is incomplete")
+        raise ParameterSemanticsError("consumer observation is incomplete")
     bound_consumers = set()
     for consumer in receipt.activation.consumers:
         expected_hash = canonical_sha256(
@@ -343,7 +438,7 @@ def _validate_dreamplace_consumer_evidence(
         )
         if consumer.evidence_sha256 != expected_hash:
             raise ParameterSemanticsError(
-                "DREAMPlace consumer evidence hash does not match observation"
+                "consumer evidence hash does not match observation"
             )
         bound_consumers.add((consumer.evidence_ref, consumer.evidence_sha256))
     for transition in receipt.transitions:
@@ -357,6 +452,14 @@ def _validate_dreamplace_consumer_evidence(
             raise ParameterSemanticsError(
                 "DREAMPlace transition evidence is not bound to activation consumer"
             )
+
+
+def _same_number(left: object, right: object) -> bool:
+    return (
+        type(left) in {int, float}
+        and type(right) in {int, float}
+        and math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-7)
+    )
 
 
 def _validate_source_spans(card: ParameterSemanticsCard, card_root: Path) -> None:
