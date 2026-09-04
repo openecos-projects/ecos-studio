@@ -129,6 +129,17 @@ export type {
 } from './contracts/desktopCodex.ts'
 export { DESKTOP_CODEX_BIN_SETTING_KEY } from './contracts/desktopCodex.ts'
 export type {
+  CliInstallSelfCheck,
+  CliInstallSource,
+  CliInstallState,
+  CliInstallStatus,
+  CliInstallerProgressEvent,
+} from './contracts/cliInstaller.ts'
+export {
+  ECC_BUNDLE_RESOURCE_ID,
+  EXPECTED_ECC_BUNDLE_VERSION,
+} from './constants/eccBundle.ts'
+export type {
   DesktopAgentEvent,
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
