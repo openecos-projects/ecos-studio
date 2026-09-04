@@ -477,7 +477,7 @@ describe('CliInstallerService', () => {
   it('reports an incomplete active install as failed instead of ready', async () => {
     const root = createTempDir('ecos-cli-installer-incomplete-')
     const bundle = createFakeEccBundle(root)
-    const { dataDir, service } = createService({
+    const { service } = createService({
       resourcesPath: bundle.resourcesPath,
     })
     const versionDir = await service.ensureBundle()
@@ -486,6 +486,5 @@ describe('CliInstallerService', () => {
     const status = await service.status()
     expect(status.status).toBe('failed')
     expect(status.error).toContain('incomplete')
-    void dataDir
   })
 })
