@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -562,6 +569,36 @@ describe('bundle home resolution', () => {
       `${join(binariesDir, '_internal', 'ecc_tools_bin', 'lib')}:/existing/libs`,
     )
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+  })
+})
+
+describe('bundle home symlink containment', () => {
+  it('ignores a current symlink that resolves outside the bundle home', () => {
+    const fixture = createRepoFixture()
+    const dataHome = join(fixture.repoRoot, 'data-home')
+    const homeRoot = join(dataHome, 'ecos-studio', 'ecc-runtime')
+    const current = join(homeRoot, 'current')
+    mkdirSync(current, { recursive: true })
+    // current -> inside-link -> outside
+    const insideLink = join(homeRoot, 'inside-link')
+    const outside = join(fixture.repoRoot, 'outside')
+    mkdirSync(join(outside, 'binaries'), { recursive: true })
+    writeFileSync(join(outside, 'binaries', 'ecc'), '#!/bin/sh\n')
+    symlinkSync(outside, insideLink)
+    rmSync(current, { recursive: true })
+    symlinkSync(insideLink, current)
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { PATH: '/usr/bin' },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome,
+    })
+
+    expect(executable).toBeNull()
   })
 })
 

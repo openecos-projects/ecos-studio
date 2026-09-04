@@ -548,11 +548,14 @@ describe('CliInstallerService', () => {
     })
     await service.ensureBundle()
 
-    // Point current at a directory outside the bundle home.
+    // Point current at a directory outside the bundle home via a two-hop
+    // symlink chain (the bypass the physical containment check guards).
     const outside = join(serviceRoot, 'outside')
     mkdirSync(outside, { recursive: true })
+    const insideLink = join(dataDir, 'inside-link')
+    symlinkSync(outside, insideLink)
     rmSync(join(dataDir, 'current'))
-    symlinkSync(outside, join(dataDir, 'current'))
+    symlinkSync(insideLink, join(dataDir, 'current'))
 
     await service.regenerateEnvFile()
     expect(existsSync(join(outside, 'env'))).toBe(false)

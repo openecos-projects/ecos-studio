@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { resolveContainedSymlinkDir } from '../cliInstallerArtifacts'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
@@ -94,7 +95,12 @@ export function resolveBundleHomeBinariesPath(options: EccRuntimeEnvOptions): st
 }
 
 function resolveBundleHomeRuntimeBin(options: EccRuntimeEnvOptions): string | null {
-  const binariesPath = resolveBundleHomeBinariesPath(options)
+  // Physical containment check: a tampered 'current' link (possibly via
+  // intermediate symlinks) must not redirect the executed ECC binary.
+  const homeRoot = join(resolveDataHome(options), 'ecos-studio', 'ecc-runtime')
+  const currentPhysical = resolveContainedSymlinkDir(join(homeRoot, 'current'), homeRoot)
+  if (!currentPhysical) return null
+  const binariesPath = join(currentPhysical, 'binaries')
   return existsSync(join(binariesPath, packagedEccExecutableName(options.platform)))
     ? binariesPath
     : null

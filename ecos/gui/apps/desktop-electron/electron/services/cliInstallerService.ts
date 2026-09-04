@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
-import { chmod, mkdir, readlink, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { join } from 'node:path'
 import {
   ECC_BUNDLE_RESOURCE_ID,
   EXPECTED_ECC_BUNDLE_VERSION,
@@ -14,6 +14,7 @@ import {
 import { electronLogger } from './logger'
 import {
   buildShimScript,
+  resolveContainedSymlinkDir,
   executableNameFor,
   readInstallRecord,
   type CliBundleInstallRecord,
@@ -531,24 +532,9 @@ export class CliInstallerService {
 
   private async resolveCurrentVersionDir(): Promise<string | null> {
     const linkPath = join(this.dataDir, 'current')
-    try {
-      const target = await readlink(linkPath)
-      const resolved = resolve(join(this.dataDir, target))
-      // The symlink target must stay inside the bundle home: a tampered
-      // 'current' must not make us write or execute outside it.
-      const relativePath = relative(resolve(this.dataDir), resolved)
-      if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
-        electronLogger.warn(
-          '[cli-installer] Ignoring current link escaping the bundle home: %s',
-          target,
-        )
-        return null
-      }
-      if (!existsSync(resolved)) return null
-      return resolved
-    } catch {
-      return null
-    }
+    // Physical containment check: a purely lexical check on the readlink
+    // target is bypassable with intermediate symlinks.
+    return resolveContainedSymlinkDir(linkPath, this.dataDir)
   }
 
   /**

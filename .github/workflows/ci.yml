@@ -81,6 +81,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The version gate compares EXPECTED_ECC_BUNDLE_VERSION against the
+          # pinned ecc submodule, so its content must be present.
+          submodules: recursive
 
       - name: Check version
         uses: ./.github/actions/check-version

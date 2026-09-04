@@ -1,6 +1,12 @@
-import { constants as fsConstants, existsSync } from 'node:fs'
+import {
+  constants as fsConstants,
+  existsSync,
+  lstatSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { access, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import type { CliInstallSelfCheck, CliInstallSource } from '@ecos-studio/shared'
 
 /**
@@ -190,5 +196,27 @@ export async function readInstallRecord(
     return { record }
   } catch {
     return { error: 'install.json is missing or unreadable' }
+  }
+}
+
+/**
+ * Physically resolve a 'current'-style symlink and verify it stays inside
+ * allowedRoot (following any chain of intermediate symlinks) and points at
+ * a directory. Returns the canonical path, or null when the link is absent,
+ * dangling, escaping, or not a directory.
+ */
+export function resolveContainedSymlinkDir(
+  linkPath: string,
+  allowedRoot: string,
+): string | null {
+  try {
+    lstatSync(linkPath)
+    const physical = realpathSync(linkPath)
+    const root = realpathSync(allowedRoot)
+    const rel = relative(root, physical)
+    if (rel.startsWith('..') || isAbsolute(rel)) return null
+    return statSync(physical).isDirectory() ? physical : null
+  } catch {
+    return null
   }
 }
