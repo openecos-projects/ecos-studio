@@ -1563,7 +1563,7 @@ async function continueWorkspaceDraft() {
 
 async function openWorkspace(workspace: ProjectWorkspace) {
   closeRowActionMenus()
-  const originFullPath = route.fullPath
+  const originFullPath = normalizeProjectManagementLocation(route.fullPath)
   const originWorkspacePath = currentProject.value?.path
   const success = await openProject(
     {
@@ -1574,13 +1574,13 @@ async function openWorkspace(workspace: ProjectWorkspace) {
     },
     {
       shouldActivate: () =>
-        route.fullPath === originFullPath &&
+        normalizeProjectManagementLocation(route.fullPath) === originFullPath &&
         normalizePath(currentProject.value?.path ?? '') ===
           normalizePath(originWorkspacePath ?? ''),
     },
   )
   if (success) {
-    if (route.fullPath === originFullPath) {
+    if (normalizeProjectManagementLocation(route.fullPath) === originFullPath) {
       await router.push({
         path: '/workspace/home',
         query: workspaceRouteQuery(workspace.workspacePath, workspace.id),
@@ -2145,6 +2145,10 @@ function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+function normalizeProjectManagementLocation(fullPath: string): string {
+  return fullPath.replace(/^\/workspace\/projects(?=[?#]|$)/, '/projects')
 }
 
 function basenamePath(path: string): string {

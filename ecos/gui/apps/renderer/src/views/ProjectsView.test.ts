@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const testState = vi.hoisted(() => ({
   currentProject: null,
+  openProject: vi.fn(),
   project: {
     id: '/projects/demo',
     name: 'demo',
@@ -13,20 +14,22 @@ const testState = vi.hoisted(() => ({
     designTool: 'backend' as const,
     lastOpened: new Date('2026-09-04T00:00:00.000Z'),
   },
-  route: { path: '/workspace/projects', query: {} },
+  route: { fullPath: '/workspace/projects', path: '/workspace/projects', query: {} },
+  routerPush: vi.fn(),
+  showToast: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => testState.route,
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: testState.routerPush, replace: vi.fn() }),
 }))
 vi.mock('../composables/useWorkspace', async () => {
   const { ref } = await import('vue')
   return {
     useWorkspace: () => ({
       currentProject: ref(testState.currentProject),
-      openProject: vi.fn(),
-      showToast: vi.fn(),
+      openProject: testState.openProject,
+      showToast: testState.showToast,
     }),
   }
 })
@@ -87,6 +90,37 @@ import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 describe('ProjectsView background lifecycle integration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    testState.openProject.mockReset()
+    testState.route.fullPath = '/workspace/projects'
+    testState.route.path = '/workspace/projects'
+    testState.route.query = {}
+    testState.routerPush.mockReset()
+    testState.showToast.mockReset()
+  })
+
+  it('keeps opening after the Project Management route is normalized', async () => {
+    testState.route.fullPath = '/projects'
+    testState.route.path = '/projects'
+    testState.openProject.mockImplementation(
+      async (_project: unknown, options: { shouldActivate?: () => boolean }) => {
+        expect(options.shouldActivate?.()).toBe(true)
+        testState.route.fullPath = '/workspace/projects'
+        testState.route.path = '/workspace/projects'
+        return true
+      },
+    )
+
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+    await wrapper.get('button[aria-label="Open workspace ws_0001"]').trigger('click')
+    await flushPromises()
+
+    expect(testState.showToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'Workspace ready' }),
+    )
+    expect(testState.routerPush).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/workspace/home' }),
+    )
   })
 
   it('disables mutations during shutdown and mounts the shared task surfaces', async () => {
