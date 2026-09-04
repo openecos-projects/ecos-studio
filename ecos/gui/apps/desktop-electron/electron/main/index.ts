@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
+import { applyHeadlessDisplayHint, parseCliInvocation, runCliCommand } from './cliEntry'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
@@ -12,6 +13,7 @@ import { CodexDependencyService } from '../services/agent/codexDependencyService
 import { AppInfoService } from '../services/appInfoService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
+import type { EccRuntimeEnvOptions } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
@@ -48,7 +50,17 @@ import {
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
 
-const gotSingleInstanceLock = app.requestSingleInstanceLock()
+/**
+ * CLI pass-through launches (`--cli ecc ...`) are dispatched before the
+ * single-instance lock is consulted: they run as independent processes,
+ * including on headless machines and while the GUI is running.
+ */
+const cliInvocation = parseCliInvocation(process.argv)
+if (cliInvocation) {
+  applyHeadlessDisplayHint(process.env)
+}
+
+const gotSingleInstanceLock = cliInvocation || app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
   app.quit()
 }
@@ -343,7 +355,38 @@ function handleLaunchError(error: unknown): void {
   app.quit()
 }
 
-if (gotSingleInstanceLock) {
+function cliEccRuntimeOptions(): EccRuntimeEnvOptions {
+  return {
+    appPath: app.getAppPath(),
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...(app.isPackaged ? { ECOS_ELECTRON_RESOURCES_PATH: process.resourcesPath } : {}),
+    },
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    userDataPath: app.getPath('userData'),
+  }
+}
+
+if (cliInvocation) {
+  void app.whenReady().then(async () => {
+    const resourceManager = new ResourceManagerService()
+    const exitCode = await runCliCommand(cliInvocation, {
+      env: process.env,
+      platform: process.platform,
+      resolveExecutable: () => resolveEccExecutable(cliEccRuntimeOptions()),
+      buildRuntimeEnv: async () =>
+        await resourceManager.createRuntimeEnv(
+          createEccRuntimeEnv(cliEccRuntimeOptions()),
+          { platform: process.platform },
+        ),
+    })
+    app.exit(exitCode)
+  })
+}
+
+if (!cliInvocation && gotSingleInstanceLock) {
   app.on('second-instance', (_event, argv) => {
     void runAfterAppReady(
       () => app.whenReady(),
