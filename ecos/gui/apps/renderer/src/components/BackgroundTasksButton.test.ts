@@ -158,29 +158,6 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
-  it('shows safe-drain blocker counts and lets the user cancel shutdown', async () => {
-    const store = useBackgroundOperationStore()
-    store.shutdownStatus = {
-      activeFlows: 2,
-      attemptId: 'attempt-1',
-      finalizations: 1,
-      forceEligible: false,
-      pendingCreations: 1,
-      scope: 'application',
-      snapshotFailures: 0,
-      state: 'draining',
-    }
-    const cancelShutdown = vi.spyOn(store, 'cancelShutdown').mockResolvedValue(undefined)
-    const wrapper = mount(BackgroundTasksButton)
-
-    expect(wrapper.text()).toContain('Waiting to close safely')
-    await wrapper.get('.shutdown-waiting').trigger('click')
-    expect(wrapper.text()).toContain('2 Flows')
-    await wrapper.get('.shutdown-actions button').trigger('click')
-    expect(cancelShutdown).toHaveBeenCalledOnce()
-    wrapper.unmount()
-  })
-
   it('keeps the background task and notification popovers mutually exclusive', async () => {
     const backgroundTasks = mount(BackgroundTasksButton)
     const notifications = mount(NotificationCenter)

@@ -19,17 +19,6 @@
         {{ taskCount ? (taskCount > 99 ? '99+' : taskCount) : '!' }}
       </span>
     </button>
-    <button
-      v-if="shutdownVisible"
-      type="button"
-      class="shutdown-waiting"
-      title="View shutdown progress"
-      @click.stop="openTasks"
-    >
-      <i class="ri-shut-down-line" aria-hidden="true"></i>
-      <span>{{ shutdownLabel }}</span>
-    </button>
-
     <Transition name="background-tasks-popover">
       <section
         v-if="open"
@@ -41,34 +30,6 @@
           <strong>Background Tasks</strong>
           <span role="status" aria-live="polite">{{ taskCount }} active</span>
         </header>
-        <div v-if="shutdownVisible" class="shutdown-summary" role="status">
-          <div>
-            <strong>{{ shutdownLabel }}</strong>
-            <span>
-              {{ shutdownStatus.activeFlows }} Flows ·
-              {{ shutdownStatus.finalizations }} finalizing ·
-              {{ shutdownStatus.pendingCreations }} creations ·
-              {{ shutdownStatus.pendingCommands ?? 0 }} commands
-            </span>
-          </div>
-          <div class="shutdown-actions">
-            <button
-              v-if="shutdownStatus.state !== 'forcing'"
-              type="button"
-              @click="cancelShutdown"
-            >
-              Cancel Shutdown
-            </button>
-            <button
-              v-if="shutdownStatus.forceEligible || shutdownStatus.state === 'error'"
-              type="button"
-              @click="store.reviewShutdownOptions()"
-            >
-              Review Shutdown Options
-            </button>
-          </div>
-        </div>
-
         <div v-if="taskCount || attentionCount" class="background-tasks-list">
           <article
             v-for="operation in operations"
@@ -208,10 +169,7 @@ import type {
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  isShutdownInProgress,
-  useBackgroundOperationStore,
-} from '@/stores/backgroundOperationStore'
+import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { useWorkspaceCreation } from '@/utils/workspaceNavigation'
 
@@ -219,7 +177,7 @@ const route = useRoute()
 const router = useRouter()
 const store = useBackgroundOperationStore()
 const notifications = useNotificationStore()
-const { creations, finalizations, operations, shutdownStatus } = storeToRefs(store)
+const { creations, finalizations, operations } = storeToRefs(store)
 const workspaceCreation = useWorkspaceCreation()
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -275,14 +233,6 @@ const taskButtonLabel = computed(() => {
   const attention = attentionCount.value ? `, ${attentionCount.value} need attention` : ''
   return `Background tasks, ${taskCount.value} active${attention}`
 })
-const shutdownVisible = computed(() => isShutdownInProgress(shutdownStatus.value.state))
-const shutdownLabel = computed(() => {
-  if (shutdownStatus.value.state === 'force-eligible') return 'Still waiting to close'
-  if (shutdownStatus.value.state === 'forcing') return 'Force quitting'
-  if (shutdownStatus.value.state === 'error') return 'Shutdown needs attention'
-  return 'Waiting to close safely'
-})
-
 watch(open, (isOpen) => {
   if (clock) clearInterval(clock)
   clock = isOpen ? setInterval(() => (now.value = Date.now()), 1000) : null
@@ -303,8 +253,8 @@ function openTasks(): void {
   open.value = true
 }
 
-function closeForOverlay(event: Event): void {
-  if ((event as CustomEvent<string>).detail === 'notifications') open.value = false
+function handleOverlay(event: Event): void {
+  open.value = (event as CustomEvent<string>).detail === 'background-tasks'
 }
 
 function projectManagementPath(): string {
@@ -325,11 +275,6 @@ function inspect(operation: EccBackgroundOperation): void {
 function viewTasks(): void {
   open.value = false
   void router.push({ path: projectManagementPath() })
-}
-
-async function cancelShutdown(): Promise<void> {
-  await store.cancelShutdown()
-  open.value = false
 }
 
 async function cancel(operation: EccBackgroundOperation): Promise<void> {
@@ -410,14 +355,14 @@ function closeFromKeyboard(event: KeyboardEvent): void {
 onMounted(() => {
   document.addEventListener('click', closeFromDocument)
   document.addEventListener('keydown', closeFromKeyboard)
-  document.addEventListener(topbarOverlayEvent, closeForOverlay)
+  document.addEventListener(topbarOverlayEvent, handleOverlay)
 })
 
 onUnmounted(() => {
   if (clock) clearInterval(clock)
   document.removeEventListener('click', closeFromDocument)
   document.removeEventListener('keydown', closeFromKeyboard)
-  document.removeEventListener(topbarOverlayEvent, closeForOverlay)
+  document.removeEventListener(topbarOverlayEvent, handleOverlay)
 })
 </script>
 

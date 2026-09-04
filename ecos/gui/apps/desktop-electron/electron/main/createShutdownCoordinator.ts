@@ -70,24 +70,20 @@ export function createShutdownCoordinator(
     operationProjection: () => runtime.reconcileOperationProjection(),
     promptForce: async (blockers) => {
       const result = await showDialog(coordinator.scope(), {
-        buttons: ['Keep Waiting', 'Cancel Shutdown', 'Force Quit'],
-        cancelId: 1,
+        buttons: ['Keep Waiting', 'Force Quit'],
+        cancelId: 0,
         defaultId: 0,
         detail: [
           ...blockers.details,
           '',
           'Force quit may leave local Workspace details or Runtime logs unsynchronized. Unfinished creation will require recovery next time.',
         ].join('\n'),
-        message: 'ECOS Studio is still waiting',
+        message: 'Force quit ECOS Studio?',
         noLink: true,
-        title: 'ECOS Studio is still waiting',
+        title: 'Force quit ECOS Studio?',
         type: 'warning',
       })
-      return result.response === 2
-        ? 'force'
-        : result.response === 1
-          ? 'cancel'
-          : 'keep-waiting'
+      return result.response === 1 ? 'force' : 'keep-waiting'
     },
     promptInitial: async (blockers) => {
       const result = await showDialog(coordinator.scope(), {

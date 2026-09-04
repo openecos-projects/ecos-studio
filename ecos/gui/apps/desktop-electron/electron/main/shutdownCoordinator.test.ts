@@ -100,23 +100,17 @@ describe('ShutdownCoordinator', () => {
     expect(state.approve).toHaveBeenCalledOnce()
   })
 
-  it('offers Force quit when Renderer cleanup does not acknowledge within thirty seconds', async () => {
+  it('exposes Force quit without interrupting stalled Renderer cleanup', async () => {
     const state = setup()
 
     await state.coordinator.requestWindowClose(7)
-    expect(state.coordinator.status().state).toBe('cleaning-renderers')
-
-    await vi.advanceTimersByTimeAsync(29_999)
     expect(state.promptForce).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-
-    expect(state.promptForce).toHaveBeenCalledOnce()
     expect(state.coordinator.status()).toMatchObject({
       forceEligible: true,
       state: 'cleaning-renderers',
     })
-    await state.coordinator.requestWindowClose(7)
-    expect(state.promptForce).toHaveBeenCalledTimes(2)
+    await state.coordinator.reviewShutdownOptions()
+    expect(state.promptForce).toHaveBeenCalledOnce()
   })
 
   it('releases an approved window attempt so another window can close later', async () => {
@@ -132,20 +126,21 @@ describe('ShutdownCoordinator', () => {
     expect(state.requestRendererCleanup).toHaveBeenLastCalledWith(expect.any(String), [8])
   })
 
-  it('enters safe drain and offers Force quit only after thirty seconds', async () => {
+  it('exposes Force quit without interrupting safe drain', async () => {
     const state = setup(operationProjection())
 
     await state.coordinator.requestWindowClose(7)
-    expect(state.coordinator.status().state).toBe('draining')
+    expect(state.coordinator.status()).toMatchObject({
+      forceEligible: true,
+      state: 'draining',
+    })
     expect(state.promptInitial).toHaveBeenCalledWith(
       expect.objectContaining({ activeFlows: 1 }),
     )
-
-    await vi.advanceTimersByTimeAsync(29_999)
     expect(state.promptForce).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
+
+    await state.coordinator.reviewShutdownOptions()
     expect(state.promptForce).toHaveBeenCalledOnce()
-    expect(state.coordinator.status().state).toBe('force-eligible')
   })
 
   it('waits for an already accepted backend command before Renderer cleanup', async () => {
@@ -171,8 +166,9 @@ describe('ShutdownCoordinator', () => {
     state.promptForce.mockResolvedValueOnce('force')
     await state.coordinator.requestWindowClose(7)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    const forcing = state.coordinator.reviewShutdownOptions()
     await vi.runAllTimersAsync()
+    await forcing
 
     expect(state.markCreationsUnfinished).toHaveBeenCalledOnce()
     expect(state.markCreationsUnfinished.mock.invocationCallOrder[0]).toBeLessThan(
@@ -193,8 +189,9 @@ describe('ShutdownCoordinator', () => {
     state.promptForce.mockResolvedValueOnce('force')
     await state.coordinator.requestWindowClose(7)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    const forcing = state.coordinator.reviewShutdownOptions()
     await vi.runAllTimersAsync()
+    await forcing
 
     expect(state.cancelOperation).not.toHaveBeenCalled()
     expect(state.forceTerminate).toHaveBeenCalledWith(['handle-1'])
@@ -206,14 +203,16 @@ describe('ShutdownCoordinator', () => {
     state.promptForce.mockResolvedValueOnce('force')
     await state.coordinator.requestWindowClose(7)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    const forcing = state.coordinator.reviewShutdownOptions()
+    await vi.advanceTimersByTimeAsync(0)
     const attemptId = state.coordinator.status().attemptId!
     await state.coordinator.completeRendererCleanup(attemptId, 7, true)
     expect(state.forceTerminate).not.toHaveBeenCalled()
     expect(state.flushRuntimeState).not.toHaveBeenCalled()
 
     finishAcceptedWork()
-    await vi.waitFor(() => expect(state.forceTerminate).toHaveBeenCalledOnce())
+    await forcing
+    expect(state.forceTerminate).toHaveBeenCalledOnce()
     expect(state.flushRuntimeState).toHaveBeenCalledOnce()
   })
 
@@ -223,13 +222,16 @@ describe('ShutdownCoordinator', () => {
     state.promptForce.mockResolvedValueOnce('force')
     await state.coordinator.requestWindowClose(7)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    const forcing = state.coordinator.reviewShutdownOptions()
+    await vi.advanceTimersByTimeAsync(0)
     const attemptId = state.coordinator.status().attemptId!
     await state.coordinator.completeRendererCleanup(attemptId, 7, true)
-    await vi.waitFor(() => expect(state.flushRuntimeState).toHaveBeenCalledOnce())
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.flushRuntimeState).toHaveBeenCalledOnce()
     expect(state.forceTerminate).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(3_000)
+    await forcing
     expect(state.forceTerminate).toHaveBeenCalledWith(['handle-1'])
   })
 
@@ -238,12 +240,14 @@ describe('ShutdownCoordinator', () => {
     state.promptForce.mockResolvedValueOnce('force')
     await state.coordinator.requestWindowClose(7)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    const forcing = state.coordinator.reviewShutdownOptions()
+    await vi.advanceTimersByTimeAsync(0)
     const attemptId = state.coordinator.status().attemptId!
     await state.coordinator.completeRendererCleanup(attemptId, 999, true)
     expect(state.forceTerminate).not.toHaveBeenCalled()
     await state.coordinator.completeRendererCleanup(attemptId, 7, true)
     await vi.runAllTimersAsync()
+    await forcing
 
     expect(state.forceTerminate).toHaveBeenCalledOnce()
   })
@@ -254,7 +258,7 @@ describe('ShutdownCoordinator', () => {
     state.markCreationsUnfinished.mockRejectedValueOnce(new Error('journal unavailable'))
     await state.coordinator.requestWindowClose(7)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    await state.coordinator.reviewShutdownOptions()
 
     expect(state.coordinator.status()).toMatchObject({
       issue: 'journal unavailable',

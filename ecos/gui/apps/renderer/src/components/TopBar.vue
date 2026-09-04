@@ -82,6 +82,7 @@
         <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
       </button>
       <BackgroundTasksButton />
+      <ShutdownStatusButton />
       <NotificationCenter />
       <button
         @click="toggleTheme"
@@ -204,6 +205,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
+import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'

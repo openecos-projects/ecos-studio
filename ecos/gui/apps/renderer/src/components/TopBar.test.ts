@@ -35,6 +35,9 @@ vi.mock('@/components/NotificationCenter.vue', () => ({
 vi.mock('@/components/BackgroundTasksButton.vue', () => ({
   default: { template: '<div />' },
 }))
+vi.mock('@/components/ShutdownStatusButton.vue', () => ({
+  default: { template: '<div />' },
+}))
 
 import TopBar from './TopBar.vue'
 

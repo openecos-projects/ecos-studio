@@ -71,4 +71,53 @@ describe('createShutdownCoordinator', () => {
     expect(electron.windows[0]!.close).toHaveBeenCalledOnce()
     expect(electron.appQuit).toHaveBeenCalledOnce()
   })
+
+  it('keeps Force Quit confirmation separate from cancelling shutdown', async () => {
+    const active = projection()
+    active.operations.push({
+      createdAt: 1,
+      currentStep: 'Place',
+      currentTool: 'openroad',
+      error: null,
+      kind: 'flow',
+      operationId: 'operation-1',
+      origin: 'gui',
+      rerun: false,
+      result: null,
+      state: 'running',
+      step: '',
+      updatedAt: 2,
+      workspaceDirectory: '/projects/demo/ws_1',
+      workspaceHandle: 'handle-1',
+      workspaceId: 'engineering-1',
+    })
+    const runtime = {
+      cancelOperation: vi.fn(),
+      forceShutdown: vi.fn(),
+      flushPendingState: vi.fn(),
+      onOperationProjectionInvalidated: vi.fn(() => () => undefined),
+      operationProjection: vi.fn(() => active),
+      reconcileOperationProjection: vi.fn(async () => active),
+      waitForIdle: vi.fn(),
+    }
+    const coordinator = createShutdownCoordinator(runtime, {
+      allEntries: vi.fn(async () => []),
+      markActiveUnfinished: vi.fn(),
+      onInvalidated: vi.fn(() => () => undefined),
+    })
+
+    await coordinator.requestWindowClose(7)
+    await coordinator.reviewShutdownOptions()
+
+    expect(electron.dialog).toHaveBeenLastCalledWith(
+      electron.windows[0],
+      expect.objectContaining({
+        buttons: ['Keep Waiting', 'Force Quit'],
+        cancelId: 0,
+        defaultId: 0,
+        message: 'Force quit ECOS Studio?',
+      }),
+    )
+    expect(runtime.forceShutdown).not.toHaveBeenCalled()
+  })
 })

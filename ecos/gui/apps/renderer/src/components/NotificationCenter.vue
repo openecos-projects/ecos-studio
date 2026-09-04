@@ -122,7 +122,7 @@ function toggle(): void {
 }
 
 function closeForOverlay(event: Event): void {
-  if ((event as CustomEvent<string>).detail === 'background-tasks') open.value = false
+  if ((event as CustomEvent<string>).detail !== 'notifications') open.value = false
 }
 
 function handleKeydown(event: KeyboardEvent): void {

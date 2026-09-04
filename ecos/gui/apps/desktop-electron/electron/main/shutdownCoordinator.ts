@@ -29,9 +29,7 @@ interface ShutdownCoordinatorOptions {
   operationProjection():
     | EccBackgroundOperationProjection
     | Promise<EccBackgroundOperationProjection>
-  promptForce(
-    blockers: ShutdownBlockerSummary,
-  ): Promise<'keep-waiting' | 'cancel' | 'force'>
+  promptForce(blockers: ShutdownBlockerSummary): Promise<'keep-waiting' | 'force'>
   promptInitial(blockers: ShutdownBlockerSummary): Promise<'wait' | 'cancel'>
   requestRendererCleanup(attemptId: string, windowIds: number[]): void
   waitForRuntimeIdle?(workspaceHandles?: readonly string[]): Promise<void>
@@ -56,7 +54,6 @@ export class ShutdownCoordinator {
   private readonly acceptedWork = new ShutdownAcceptedWork()
   private readonly handleOwners = new Map<string, number>()
   private readonly listeners = new Set<(status: DesktopShutdownStatus) => void>()
-  private forceTimer: ReturnType<typeof setTimeout> | null = null
   private forcePromptOpen = false
   private applicationApproved = false
   private readonly approvedWindows = new Set<number>()
@@ -83,7 +80,6 @@ export class ShutdownCoordinator {
       this.attempt?.scope.kind === 'window' &&
       this.attempt.scope.windowId === windowId
     ) {
-      this.clearForceTimer()
       this.attempt = null
       this.emit()
     }
@@ -204,7 +200,6 @@ export class ShutdownCoordinator {
 
   cancelShutdown(): void {
     if (this.attempt?.state === 'forcing' || this.attempt?.state === 'approved') return
-    this.clearForceTimer()
     this.attempt = null
     this.forcePromptOpen = false
     this.emit()
@@ -295,36 +290,10 @@ export class ShutdownCoordinator {
 
   private enterDraining(): void {
     if (!this.attempt) return
+    this.attempt.forceEligible = true
     this.attempt.state = 'draining'
     this.attempt.issue = undefined
     this.emit()
-    this.scheduleForceEligibility()
-  }
-
-  private scheduleForceEligibility(): void {
-    if (this.forceTimer || this.attempt?.forceEligible) return
-    const schedule = this.options.setTimeout ?? setTimeout
-    this.forceTimer = schedule(() => {
-      this.forceTimer = null
-      void this.enableForceQuit()
-    }, 30_000)
-  }
-
-  private async enableForceQuit(): Promise<void> {
-    const attempt = this.attempt
-    if (!attempt || !['draining', 'cleaning-renderers', 'error'].includes(attempt.state))
-      return
-    const blockers = await this.inspect(attempt.scope)
-    if (this.attempt !== attempt) return
-    attempt.blockers = blockers
-    if (!hasShutdownBlockers(blockers) && attempt.state !== 'cleaning-renderers') {
-      await this.beginRendererCleanup()
-    }
-    if (this.attempt !== attempt || attempt.state === 'approved') return
-    attempt.forceEligible = true
-    if (attempt.state === 'draining') attempt.state = 'force-eligible'
-    this.emit()
-    await this.showForcePrompt()
   }
 
   private async showForcePrompt(): Promise<void> {
@@ -339,8 +308,7 @@ export class ShutdownCoordinator {
         attempt.state === 'approved'
       )
         return
-      if (result === 'cancel') this.cancelShutdown()
-      else if (result === 'force') await this.forceQuit()
+      if (result === 'force') await this.forceQuit()
     } finally {
       this.forcePromptOpen = false
     }
@@ -422,13 +390,13 @@ export class ShutdownCoordinator {
   private async beginRendererCleanup(): Promise<void> {
     const attempt = this.attempt
     if (!attempt || attempt.state === 'cleaning-renderers') return
-    this.scheduleForceEligibility()
     const windowIds =
       attempt.scope.kind === 'application'
         ? this.options.listWindowIds()
         : attempt.scope.windowId === undefined
           ? []
           : [attempt.scope.windowId]
+    attempt.forceEligible = true
     attempt.state = 'cleaning-renderers'
     attempt.pendingCleanup = new Set(windowIds)
     this.emit()
@@ -442,7 +410,6 @@ export class ShutdownCoordinator {
   private async approve(): Promise<void> {
     const attempt = this.attempt
     if (!attempt || attempt.state === 'approved') return
-    this.clearForceTimer()
     attempt.forceEligible = false
     attempt.state = 'approved'
     if (attempt.scope.kind === 'application') this.applicationApproved = true
@@ -484,12 +451,6 @@ export class ShutdownCoordinator {
     return scope.kind === 'application' || scope.windowId === undefined
       ? undefined
       : new Set([scope.windowId])
-  }
-
-  private clearForceTimer(): void {
-    if (!this.forceTimer) return
-    ;(this.options.clearTimeout ?? clearTimeout)(this.forceTimer)
-    this.forceTimer = null
   }
 
   private emit(): void {
