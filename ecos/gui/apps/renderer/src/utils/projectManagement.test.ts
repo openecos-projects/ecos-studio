@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createProjectManifestDraft,
+  recordReplacementBackupInManifest,
   registerWorkspaceInManifest,
   type BackendProjectComparison,
   type ReadSection,
@@ -222,6 +223,24 @@ describe('project management V3 model', () => {
     )
 
     expect(model.stepCompareSummaries).toEqual([])
+  })
+
+  it('keeps committed flow state for an archived replacement backup', () => {
+    const backupId = '.ws_0014.replace-backup-1'
+    const manifest = recordReplacementBackupInManifest(manifestWithWorkspace('ws_0014'), {
+      backupPath: `/projects/gcd/${backupId}`,
+      targetPath: '/projects/gcd/ws_0014',
+    })
+
+    const model = buildProjectManagementProject(project, manifest, {
+      [backupId]: { Synth: 'success', Harden: 'success' },
+    })
+    const backup = model.workspaces.find((workspace) => workspace.id === backupId)
+
+    expect(backup).toMatchObject({
+      status: 'archived',
+      flowStatusHint: { state: 'success', label: 'Success' },
+    })
   })
 
   it('resolves and persists the project-local default QoR baseline rule', () => {

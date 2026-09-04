@@ -40,6 +40,7 @@ const fullContentLoads = new Map<string, Promise<boolean>>()
 const MAX_RUNTIME_LOG_CHARS = 128 * 1024
 const LOG_CHUNK_BYTES = 256 * 1024
 let activeWorkspacePath = ''
+let activeWorkspaceSessionId = ''
 let loadGeneration = 0
 
 function segmentKey(segment: Pick<FlowLogSegment, 'stepName' | 'tool'>): string {
@@ -87,6 +88,7 @@ function resetFlowLogState(): void {
 
 export function resetSharedHomeDataProjectState(): void {
   activeWorkspacePath = ''
+  activeWorkspaceSessionId = ''
   resetFlowLogState()
 }
 
@@ -180,7 +182,7 @@ function rerunPreparedForWorkspace(
 }
 
 export function useBackendFlowLogs() {
-  const { backendRuntimeEvents, currentProject } = useWorkspace()
+  const { backendRuntimeEvents, currentProject, workspaceSession } = useWorkspace()
   const handledEventIds = new Set<string>()
   const handledEventObjects = new WeakSet<object>()
 
@@ -418,11 +420,12 @@ export function useBackendFlowLogs() {
   }
 
   watch(
-    () => currentProject.value?.path,
-    (path) => {
+    () => [currentProject.value?.path, workspaceSession.value.sessionId] as const,
+    ([path, sessionId]) => {
       const normalized = normalizedPath(path)
-      if (normalized !== activeWorkspacePath) {
+      if (normalized !== activeWorkspacePath || sessionId !== activeWorkspaceSessionId) {
         activeWorkspacePath = normalized
+        activeWorkspaceSessionId = sessionId
         resetFlowLogState()
       }
       if (path) void refreshFlowLogs()

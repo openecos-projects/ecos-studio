@@ -16,6 +16,10 @@ type QueryProjectionState<T> =
   | { status: 'stale'; data: T; issue: ReadIssue }
   | { status: 'error'; data: null; issue: ReadIssue }
 
+interface BackendWorkspaceSessionStartOptions {
+  forceRefresh?: boolean
+}
+
 function queryIssue(error: unknown): ReadIssue {
   return {
     code: 'BACKEND_WORKSPACE_QUERY_FAILED',
@@ -78,7 +82,10 @@ export const useBackendWorkspaceSession = defineStore('backendWorkspaceSession',
     }
   }
 
-  function start(workspacePath?: string): Promise<void> {
+  function start(
+    workspacePath?: string,
+    options: BackendWorkspaceSessionStartOptions = {},
+  ): Promise<void> {
     const workspaceKey = normalizeWorkspaceKey(workspacePath)
     if (workspaceKey !== currentWorkspaceKey) {
       requestSequence += 1
@@ -105,7 +112,7 @@ export const useBackendWorkspaceSession = defineStore('backendWorkspaceSession',
     unregisterRenderTask ??= registerRuntimeStepRenderTask(async () => {
       await refresh()
     })
-    return load()
+    return options.forceRefresh ? refresh() : load()
   }
 
   function clear(): void {

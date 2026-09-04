@@ -27,6 +27,7 @@ import {
   backendRuntimeEventTerminalState,
   connectBackendRuntimeEventSession,
   type BackendRuntimeEventClient,
+  type BackendRuntimeEventClientOptions,
 } from '../api/backendRuntimeEvents'
 import {
   clearFlowExecutionActiveForWorkspace,
@@ -1090,6 +1091,7 @@ export function useWorkspace() {
       }
       const updatesCurrentBackendWorkspace = Boolean(
         config?.replaceExistingWorkspace &&
+        !config.keepReplacementBackup &&
         (config.designTool ?? 'backend') === 'backend' &&
         currentProject.value &&
         normalizePath(currentProject.value.path) === selectedPath &&
@@ -1110,18 +1112,32 @@ export function useWorkspace() {
         if (!Number.isInteger(expectedWorkspaceRevision)) {
           throw new Error('The current Workspace revision is unavailable.')
         }
+        const currentWorkspaceHandle = workspaceLifecycle.session.value.workspaceId
         const updated = await updateWorkspaceApi(
           backendWorkspaceOptions(config!, selectedPath),
-          workspaceLifecycle.session.value.workspaceId,
+          currentWorkspaceHandle,
           expectedWorkspaceRevision!,
         )
         if (
-          'workspaceRevision' in updated &&
-          typeof updated.workspaceRevision === 'number'
+          !('workspaceRevision' in updated) ||
+          typeof updated.workspaceRevision !== 'number'
         ) {
-          workspaceLifecycle.updateWorkspaceRevision(updated.workspaceRevision)
+          throw new Error('Workspace update did not return a revision.')
         }
-        workspaceLifecycle.invalidate('all', { reason: 'workspace-updated' })
+        const updatedSession = workspaceLifecycle.beginSession({
+          projectRoot: selectedPath,
+        })
+        workspaceLifecycle.setSessionLoading(updatedSession.sessionId)
+        workspaceLifecycle.activateSession(updatedSession.sessionId, {
+          projectRoot: selectedPath,
+          workspaceId: currentWorkspaceHandle,
+          workspaceRevision: updated.workspaceRevision,
+        })
+        connectRuntimeEvents(currentWorkspaceHandle, 'backend', updatedSession.sessionId)
+        workspaceLifecycle.invalidate('all', {
+          reason: 'workspace-updated',
+          sessionId: updatedSession.sessionId,
+        })
         runtimeBackendConnecting.value = false
         showToast({
           severity: 'success',
@@ -1376,7 +1392,9 @@ export function useWorkspace() {
           sessionId: createdSession.sessionId,
           reason: 'workspace-created',
         })
-        connectRuntimeEvents(workspaceId, designTool, createdSession.sessionId)
+        connectRuntimeEvents(workspaceId, designTool, createdSession.sessionId, {
+          allowDirectoryFallback: !usedDirectoryReplacement,
+        })
 
         if (previousWorkspaceHandle && previousWorkspaceHandle !== workspaceId) {
           releaseWorkspaceHandleAfterFlow(previousWorkspaceHandle, previousDesignTool)
@@ -1654,9 +1672,14 @@ export function useWorkspace() {
   /**
    * 建立 runtime event 连接，订阅 workspace 的运行生命周期通知
    */
-  function connectBackendRuntimeEvents(workspaceId: string, sessionId: string): void {
+  function connectBackendRuntimeEvents(
+    workspaceId: string,
+    sessionId: string,
+    options?: BackendRuntimeEventClientOptions,
+  ): void {
     const projectPath = currentProject.value?.path
     const client = connectBackendRuntimeEventSession(workspaceId, projectPath, {
+      allowDirectoryFallback: options?.allowDirectoryFallback,
       isCurrent: () => workspaceLifecycle.isCurrentSession(sessionId),
       onEvent: (event) => {
         backendRuntimeEvents.value.push(event)
@@ -1733,13 +1756,14 @@ export function useWorkspace() {
     workspaceId: string,
     designTool: DesignTool = 'backend',
     sessionId = workspaceLifecycle.session.value.sessionId,
+    options?: BackendRuntimeEventClientOptions,
   ) {
     // 如果已有连接，先关闭
     disconnectRuntimeEvents()
     handledRuntimeProtocolEvents.clear()
 
     if (designTool === 'backend') {
-      connectBackendRuntimeEvents(workspaceId, sessionId)
+      connectBackendRuntimeEvents(workspaceId, sessionId, options)
       return
     }
 

@@ -62,4 +62,38 @@ describe('createBackendRuntimeEventClient', () => {
     expect(handler).toHaveBeenCalledOnce()
     expect(handler).toHaveBeenCalledWith(event)
   })
+
+  it('can reject stale handles that share the replacement directory', () => {
+    const createClient = createBackendRuntimeEventClient as unknown as (
+      workspaceHandle: string,
+      workspaceDirectory: string,
+      options?: { allowDirectoryFallback?: boolean },
+    ) => ReturnType<typeof createBackendRuntimeEventClient>
+    const client = createClient('new-workspace', '/work/gcd', {
+      allowDirectoryFallback: false,
+    })
+    const handler = vi.fn()
+    client.onAll(handler)
+    client.connect()
+
+    bridge.emit({
+      designTool: 'backend',
+      event: {
+        eventId: 'engineering-workspace:8',
+        kind: 'flow',
+        operationId: 'old-operation',
+        origin: 'gui',
+        payload: { sourceType: 'step.completed', state: 'Skipped', step: 'Synthesis' },
+        sequence: 8,
+        timestamp: 1,
+        type: 'execution.progress',
+        workspaceId: 'old-engineering-workspace',
+      },
+      type: 'runtime.protocol',
+      workspaceDirectory: '/work/gcd',
+      workspaceHandle: 'old-workspace',
+    })
+
+    expect(handler).not.toHaveBeenCalled()
+  })
 })

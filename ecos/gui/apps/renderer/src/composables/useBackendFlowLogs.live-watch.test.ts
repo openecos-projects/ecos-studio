@@ -4,6 +4,7 @@ import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
+  workspaceSession: null as Ref<{ sessionId: string }> | null,
   getWorkspaceResourceIndexApi: vi.fn<() => Promise<any>>(async () => ({
     flow: { steps: [] },
   })),
@@ -26,6 +27,7 @@ vi.mock('vue', async () => {
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: testState.currentProject,
+    workspaceSession: testState.workspaceSession,
     resourceVersions: ref({ all: 0, flow: 0, home: 0, logs: 0 }),
     backendRuntimeEvents: testState.runtimeEvents,
   }),
@@ -104,6 +106,7 @@ describe('useBackendFlowLogs runtime updates', () => {
     const { resetSharedHomeDataProjectState } = await import('./useBackendFlowLogs')
     resetSharedHomeDataProjectState()
     eventSequence = 0
+    testState.workspaceSession = ref({ sessionId: 'session-1' })
     testState.getWorkspaceResourceIndexApi.mockReset()
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [] } })
   })
@@ -178,6 +181,31 @@ describe('useBackendFlowLogs runtime updates', () => {
       ]),
     )
     expect(Object.values(home.flowLogContentByKey.value)).toContain('final synthesis log')
+    scope.stop()
+  })
+
+  it('clears stale log segments when the same path starts a new workspace session', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+    const scope = effectScope()
+    const home = scope.run(() => useBackendFlowLogs())!
+
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'Harden',
+        tool: 'ecc',
+      }),
+    )
+    await nextTick()
+    expect(home.flowLogSegments.value).toHaveLength(1)
+
+    testState.workspaceSession!.value = { sessionId: 'session-2' }
+    await nextTick()
+
+    expect(home.flowLogSegments.value).toEqual([])
     scope.stop()
   })
 

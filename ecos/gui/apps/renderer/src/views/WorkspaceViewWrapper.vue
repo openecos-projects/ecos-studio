@@ -24,18 +24,33 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
-const { currentProject } = useWorkspace()
+const { currentProject, workspaceSession } = useWorkspace()
 const agentShell = useAgentShellStore()
 const backendWorkspaceSession = useBackendWorkspaceSession()
-const workspaceViewKey = computed(() => currentProject.value?.path ?? '')
+const workspaceViewKey = computed(
+  () => `${currentProject.value?.path ?? ''}:${workspaceSession.value.sessionId}`,
+)
 
 watch(
-  () => currentProject.value?.path,
-  (path, previousPath) => {
-    if (path !== previousPath) {
+  () =>
+    [
+      currentProject.value?.path ?? '',
+      workspaceSession.value.sessionId,
+      workspaceSession.value.state,
+    ] as const,
+  ([path, sessionId, state], previous) => {
+    const [previousPath, previousSessionId, previousState] = previous
+    const pathChanged = path !== previousPath
+    const activeSessionReplaced =
+      state === 'active' &&
+      (sessionId !== previousSessionId || previousState !== 'active')
+    if (pathChanged || activeSessionReplaced) {
+      if (path) backendWorkspaceSession.clearWorkspace(path)
       backendWorkspaceSession.clear()
       if (path && currentProject.value?.designTool !== 'frontend') {
-        void backendWorkspaceSession.start(path)
+        void backendWorkspaceSession.start(path, {
+          forceRefresh: activeSessionReplaced,
+        })
       }
     }
     if (!path || !previousPath || path === previousPath) return

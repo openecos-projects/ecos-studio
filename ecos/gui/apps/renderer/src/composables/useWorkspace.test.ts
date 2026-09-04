@@ -2695,6 +2695,12 @@ describe('useWorkspace openProject', () => {
       workspaceId: 'workspace-handle-1',
       workspaceRevision: 1,
     })
+    workspace.backendRuntimeEvents.value.push(
+      backendProtocolEvent('step.completed', {
+        step: 'Harden',
+        state: 'succeeded',
+      }),
+    )
 
     await expect(
       workspace.newProject({
@@ -2716,6 +2722,71 @@ describe('useWorkspace openProject', () => {
     )
     expect(createWorkspaceApiMock).not.toHaveBeenCalled()
     expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(workspace.workspaceSession.value.sessionId).not.toBe(session.sessionId)
+    expect(workspace.workspaceSession.value).toMatchObject({
+      projectRoot: '/work/existing',
+      state: 'active',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 2,
+    })
+    expect(workspace.backendRuntimeEvents.value).toHaveLength(0)
+  })
+
+  it('replaces the active backend workspace when keeping the original backup', async () => {
+    const workspace = useWorkspace()
+    const lifecycle = useWorkspaceLifecycle()
+    workspace.currentProject.value = {
+      id: '/work/existing',
+      name: 'existing',
+      path: '/work/existing',
+      designTool: 'backend',
+      lastOpened: new Date(),
+    }
+    const session = lifecycle.beginSession({ projectRoot: '/work/existing' })
+    lifecycle.activateSession(session.sessionId, {
+      projectRoot: '/work/existing',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+    const replacement = {
+      id: 'replacement-existing-1',
+      targetPath: '/work/existing',
+      backupPath: '/work/.existing.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/existing',
+        workspace_id: 'workspace-existing-new',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/existing',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        parameters: { design: 'gcd', top_module: 'gcd', clock: 'clk' },
+        origin_def: '',
+        origin_verilog: '/work/gcd.v',
+        rtl_list: ['/work/gcd.v'],
+      }),
+    ).resolves.toBe(true)
+
+    expect(updateWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).toHaveBeenCalledWith(
+      '/work/existing',
+    )
+    expect(createWorkspaceApiMock).toHaveBeenCalled()
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
+    )
   })
 
   it('closes a freshly created workspace handle when local activation fails', async () => {

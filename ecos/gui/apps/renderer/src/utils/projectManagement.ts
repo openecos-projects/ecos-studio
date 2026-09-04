@@ -1068,7 +1068,7 @@ function buildStepCell(
   let status: ProjectStepStatus
 
   const flowStatus = flowStateMap[step]
-  if (workspace.status !== 'archived' && flowStatus) {
+  if (flowStatus) {
     status = flowStatus
   } else if (workspace.status === 'archived') {
     status = 'skipped'

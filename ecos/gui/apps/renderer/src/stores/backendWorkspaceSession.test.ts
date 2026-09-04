@@ -185,4 +185,22 @@ describe('backendWorkspaceSession', () => {
       status: 'ready',
     })
   })
+
+  it('refreshes the query service when the same path starts a new session', async () => {
+    backendWorkspace.getOverview
+      .mockResolvedValueOnce(result('Workspace A'))
+      .mockResolvedValueOnce(result('Workspace A'))
+    backendWorkspace.refreshOverview.mockResolvedValueOnce(result('Workspace A fresh', 1))
+    const session = useBackendWorkspaceSession()
+
+    await session.start('/work/a')
+    session.clear()
+    await session.start('/work/a', { forceRefresh: true })
+
+    expect(backendWorkspace.refreshOverview).toHaveBeenCalledOnce()
+    expect(session.projection).toMatchObject({
+      data: { identity: { workspaceName: 'Workspace A fresh' } },
+      status: 'ready',
+    })
+  })
 })

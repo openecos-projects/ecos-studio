@@ -8,6 +8,10 @@ export interface BackendRuntimeEventClient {
   onAll(handler: (event: DesignRuntimeEvent) => void): void
 }
 
+export interface BackendRuntimeEventClientOptions {
+  allowDirectoryFallback?: boolean
+}
+
 export interface BackendRuntimeFailure {
   code?: string
   details?: unknown
@@ -36,6 +40,7 @@ export interface BackendRuntimeStepCommit {
 }
 
 export interface BackendRuntimeEventSink {
+  allowDirectoryFallback?: boolean
   isCurrent(): boolean
   onEvent(event: DesignRuntimeEvent): void
   onFailure(failure: BackendRuntimeFailure): void
@@ -52,7 +57,9 @@ export function connectBackendRuntimeEventSession(
   sink: BackendRuntimeEventSink,
 ): BackendRuntimeEventClient {
   const handledEvents = new Set<string>()
-  const client = createBackendRuntimeEventClient(workspaceHandle, workspaceDirectory)
+  const client = createBackendRuntimeEventClient(workspaceHandle, workspaceDirectory, {
+    allowDirectoryFallback: sink.allowDirectoryFallback,
+  })
   client.onAll((event) => {
     if (!sink.isCurrent()) return
     const eventKey = backendRuntimeEventKey(event)
@@ -249,6 +256,7 @@ function record(value: unknown): Record<string, unknown> | null {
 export function createBackendRuntimeEventClient(
   workspaceHandle: string,
   workspaceDirectory?: string,
+  options: BackendRuntimeEventClientOptions = {},
 ): BackendRuntimeEventClient {
   const handlers = new Set<(event: DesignRuntimeEvent) => void>()
   let unsubscribe: (() => void) | null = null
@@ -266,7 +274,12 @@ export function createBackendRuntimeEventClient(
       unsubscribe = runtime.events.onEvent((event) => {
         if (
           event.designTool !== 'backend' ||
-          !eventMatchesWorkspace(event, workspaceHandle, workspaceDirectory)
+          !eventMatchesWorkspace(
+            event,
+            workspaceHandle,
+            workspaceDirectory,
+            options.allowDirectoryFallback ?? true,
+          )
         ) {
           return
         }
@@ -286,9 +299,11 @@ function eventMatchesWorkspace(
   event: DesignRuntimeEvent,
   workspaceHandle: string,
   workspaceDirectory?: string,
+  allowDirectoryFallback = true,
 ): boolean {
   if (!('workspaceHandle' in event) || !event.workspaceHandle) return true
   if (event.workspaceHandle === workspaceHandle) return true
+  if (!allowDirectoryFallback) return false
   return Boolean(
     workspaceDirectory &&
     event.workspaceDirectory &&
