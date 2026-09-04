@@ -272,13 +272,45 @@ export class CliInstallerService {
       throw new Error('An uninstall is in progress; retry the install afterwards')
     }
     if (this.ensurePromise) {
-      // Another install owns the pipeline; still honor a requested shim
-      // install once the bundle work settles.
-      const versionDir = await this.ensurePromise
-      if (options.installShim) {
-        await this.installShim()
+      // Another install owns the pipeline. A requested shim install is
+      // chained INTO the tracked transaction (not run outside it), so
+      // uninstall guards still apply and failures publish terminal error
+      // progress with the manual-shim remediation.
+      const pending = this.ensurePromise
+      if (!options.installShim) {
+        return await pending
       }
-      return versionDir
+      this.ensurePromise = (async () => {
+        const versionDir = await pending
+        try {
+          await this.installShim()
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          this.lastShimFailure = message
+          this.publishProgress(options, {
+            phase: 'error',
+            progress: 0,
+            message,
+            error: message,
+          })
+          throw error
+        }
+        this.lastShimFailure = null
+        this.publishProgress(options, {
+          phase: 'done',
+          progress: 1,
+          message: 'ECC bundle installed successfully',
+        })
+        return versionDir
+      })()
+        .catch((error: unknown) => {
+          this.lastFailure = error instanceof Error ? error.message : String(error)
+          throw error
+        })
+        .finally(() => {
+          this.ensurePromise = null
+        })
+      return await this.ensurePromise
     }
     this.ensurePromise = this.runEnsureBundle(options)
       .catch((error: unknown) => {

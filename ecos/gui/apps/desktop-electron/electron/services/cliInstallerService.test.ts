@@ -499,8 +499,7 @@ describe('CliInstallerService', () => {
   })
 
   it('still honors a requested shim install when deduplicating concurrent installs', async () => {
-    const root = createTempDir('ecos-cli-installer-concurrent-')
-    const bundle = createFakeEccBundle(root)
+    createTempDir('ecos-cli-installer-concurrent-')
     let releaseDownload: (() => void) | null = null
     const gate = new Promise<void>((resolve) => {
       releaseDownload = resolve
@@ -533,7 +532,6 @@ describe('CliInstallerService', () => {
 
     expect(existsSync(join(binDir, 'ecos-ecc'))).toBe(true)
     expect(existsSync(join(dataDir, 'current', 'binaries', 'ecc'))).toBe(true)
-    void bundle
   })
 
   it('ignores a current symlink that escapes the bundle home', async () => {
