@@ -271,49 +271,43 @@ export class CliInstallerService {
     if (this.uninstalling) {
       throw new Error('An uninstall is in progress; retry the install afterwards')
     }
-    if (this.ensurePromise) {
+    const pending = this.ensurePromise
+    let task: Promise<string>
+    if (pending) {
       // Another install owns the pipeline. A requested shim install is
       // chained INTO the tracked transaction (not run outside it), so
       // uninstall guards still apply and failures publish terminal error
       // progress with the manual-shim remediation.
-      const pending = this.ensurePromise
-      if (!options.installShim) {
-        return await pending
-      }
-      this.ensurePromise = (async () => {
+      task = (async () => {
         const versionDir = await pending
-        try {
-          await this.installShim()
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          this.lastShimFailure = message
+        if (options.installShim) {
+          try {
+            await this.installShim()
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            this.lastShimFailure = message
+            this.publishProgress(options, {
+              phase: 'error',
+              progress: 0,
+              message,
+              error: message,
+            })
+            throw error
+          }
+          this.lastShimFailure = null
           this.publishProgress(options, {
-            phase: 'error',
-            progress: 0,
-            message,
-            error: message,
+            phase: 'done',
+            progress: 1,
+            message: 'ECC bundle installed successfully',
           })
-          throw error
         }
-        this.lastShimFailure = null
-        this.publishProgress(options, {
-          phase: 'done',
-          progress: 1,
-          message: 'ECC bundle installed successfully',
-        })
         return versionDir
-      })()
-        .catch((error: unknown) => {
-          this.lastFailure = error instanceof Error ? error.message : String(error)
-          throw error
-        })
-        .finally(() => {
-          this.ensurePromise = null
-        })
-      return await this.ensurePromise
-    }
-    this.ensurePromise = this.runEnsureBundle(options)
-      .catch((error: unknown) => {
+      })().catch((error: unknown) => {
+        this.lastFailure = error instanceof Error ? error.message : String(error)
+        throw error
+      })
+    } else {
+      task = this.runEnsureBundle(options).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
         this.lastFailure = message
         this.publishProgress(options, {
@@ -324,10 +318,19 @@ export class CliInstallerService {
         })
         throw error
       })
+    }
+    // Clear the tracked promise only when the chain that is still tracked is
+    // the one finishing (a chained shim install replaces it meanwhile). The
+    // watcher swallows the outcome so it never becomes an unhandled rejection.
+    this.ensurePromise = task
+    void task
+      .catch(() => undefined)
       .finally(() => {
-        this.ensurePromise = null
+        if (this.ensurePromise === task) {
+          this.ensurePromise = null
+        }
       })
-    return await this.ensurePromise
+    return await task
   }
 
   /** Write the `ecos-ecc` shim into the host bin directory. */

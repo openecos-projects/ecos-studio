@@ -534,6 +534,75 @@ describe('CliInstallerService', () => {
     expect(existsSync(join(dataDir, 'current', 'binaries', 'ecc'))).toBe(true)
   })
 
+  it('blocks uninstall while a deduplicated shim install is in flight', async () => {
+    createTempDir('ecos-cli-installer-uninstall-race-')
+    let releaseDownload: (() => void) | null = null
+    const gate = new Promise<void>((resolve) => {
+      releaseDownload = resolve
+    })
+    const resourceManagerWithGate = createResourceManagerDouble({
+      downloadRegistryAssetToDirectory: vi.fn(
+        async (request: { destinationDir: string }) => {
+          await gate
+          mkdirSync(join(request.destinationDir, '_internal'), { recursive: true })
+          writeFileSync(join(request.destinationDir, 'ecc'), '#!/bin/sh\n')
+          chmodSync(join(request.destinationDir, 'ecc'), 0o755)
+          return { version: STUB_VERSION, sha256: 'd'.repeat(64), size: 1 }
+        },
+      ),
+    })
+    const fixture = createService({
+      resourcesPath: '',
+      resourceManager: resourceManagerWithGate,
+      spawnResult: { code: 0, output: 'ecc 1.0' },
+    })
+    const dataDir = fixture.dataDir
+    const binDir = fixture.binDir
+
+    const firstInstall = fixture.service.ensureBundle()
+    const secondInstall = fixture.service.ensureBundle({ installShim: true })
+    const uninstallAttempt = fixture.service.uninstall().catch((error: Error) => error)
+    releaseDownload!()
+    await Promise.all([firstInstall, secondInstall])
+    const uninstallError = (await uninstallAttempt) as Error
+    expect(uninstallError.message).toContain('An install is in progress')
+
+    // The tracked install completes and leaves a usable CLI.
+    expect(existsSync(join(binDir, 'ecos-ecc'))).toBe(true)
+    const status = await fixture.service.status()
+    expect(status.status).toBe('ready')
+    void dataDir
+  })
+
+  it('records the shim failure remediation when the shim cannot be written', async () => {
+    const root = createTempDir('ecos-cli-installer-foreign2-')
+    const bundle = createFakeEccBundle(root)
+    const blocker = join(root, 'not-a-dir')
+    writeFileSync(blocker, 'file occupying the bin path')
+    const dataDir = join(root, 'ecc-runtime')
+    const binDir = join(blocker, 'bin')
+    const service = new CliInstallerService({
+      resourceManager: createResourceManagerDouble(),
+      env: { PATH: '/usr/bin' },
+      platform: 'linux',
+      isPackaged: true,
+      appPath: join(root, 'app'),
+      resourcesPath: bundle.resourcesPath,
+      userDataPath: join(root, 'user-data'),
+      dataDir,
+      binDir,
+      spawn: spawnLike(createSpawnDouble({ code: 0 })),
+      expectedVersion: STUB_VERSION,
+    })
+
+    await expect(service.ensureBundle({ installShim: true })).rejects.toThrow(
+      /Unable to write/,
+    )
+    const status = await service.status()
+    expect(status.status).toBe('failed')
+    expect(status.error).toContain('Unable to write')
+  })
+
   it('ignores a current symlink that escapes the bundle home', async () => {
     const root = createTempDir('ecos-cli-installer-escape-')
     const bundle = createFakeEccBundle(root)
