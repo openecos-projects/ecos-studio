@@ -986,12 +986,10 @@ export class ResourceManagerService {
     if (!resourceId.startsWith('tool:')) {
       if (resourceId.startsWith('pdk:')) {
         await this.pdkInventoryService.removeInstallation(resourceId)
-        this.notifyManifestChanged()
         return { status: 'uninstalled', resource_id: resourceId }
       }
       if (resourceId.startsWith('mpc:')) {
         await this.removeManagedMpc(resourceId.slice('mpc:'.length))
-        this.notifyManifestChanged()
         return { status: 'uninstalled', resource_id: resourceId }
       }
       throw new Error(`Unsupported resource id: ${resourceId}`)
@@ -1018,6 +1016,15 @@ export class ResourceManagerService {
     }
   }
 
+  /**
+   * Subscribe to changes of the active-state resource manifest. Fired after
+   * a successful manifest commit (tool installs, updates, uninstalls) — the
+   * mutations that change the shared runtime env (tool PATH entries, OSS CAD
+   * roots, RISCV vars, ...). PDK inventory changes do not affect the runtime
+   * env and do not fire this hook. Returns an unsubscribe function;
+   * Promise-returning listeners have rejections observed (and logged), but
+   * are not awaited by the caller.
+   */
   onManifestChanged(listener: () => void | Promise<void>): () => void {
     this.manifestChangeListeners.add(listener)
     return () => {
@@ -1289,7 +1296,6 @@ export class ResourceManagerService {
 
   async removePdkReference(resourceId: string): Promise<ResourceOperationResult> {
     await this.pdkInventoryService.removeInstallation(resourceId)
-    this.notifyManifestChanged()
     return { status: 'removed', resource_id: resourceId }
   }
 
@@ -1300,7 +1306,6 @@ export class ResourceManagerService {
       displayName: scanned.name,
       root: scanned.canonicalPath,
     })
-    this.notifyManifestChanged()
     return pdkSnapshotToResource(installation, scanned.detectedFiles)
   }
 
@@ -1927,7 +1932,6 @@ export class ResourceManagerService {
       const installedArchive = tempArchive
       tempArchive = ''
       removeCompletedResourceArchive(installedArchive, resourceId)
-      this.notifyManifestChanged()
       this.publish(listener, {
         resource_id: resourceId,
         action,

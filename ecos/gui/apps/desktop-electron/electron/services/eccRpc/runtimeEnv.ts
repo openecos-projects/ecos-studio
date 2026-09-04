@@ -171,6 +171,18 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
   return existsSync(candidate) ? candidate : null
 }
 
+/**
+ * Directory that wins the ECC runtime resolution (packaged binaries, bundle
+ * home, or the development runtime-bin shim), or null when none is usable.
+ * This is the directory createEccRuntimeEnv prepends to PATH.
+ */
+export function resolveEccRuntimeBinDir(options: EccRuntimeEnvOptions): string | null {
+  if (options.isPackaged) {
+    return resolvePackagedRuntimeBin(options) ?? resolveBundleHomeRuntimeBin(options)
+  }
+  return resolveDevelopmentEccBinDir(options)
+}
+
 export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
