@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process'
-import type { SpawnOptions } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   createReadStream,
@@ -26,33 +25,27 @@ import { join } from 'node:path'
 import {
   ECC_BUNDLE_RESOURCE_ID,
   EXPECTED_ECC_BUNDLE_VERSION,
-  type CliInstallSelfCheck,
-  type CliInstallSource,
   type CliInstallState,
   type CliInstallerProgressEvent,
   type ResourceJob,
 } from '@ecos-studio/shared'
 import { electronLogger } from './logger'
 import {
-  createEccRuntimeEnv,
+  buildShimScript,
+  executableNameFor,
+  parseInstallRecord,
+  readInstallRecord,
+  type CliBundleInstallRecord,
+} from './cliInstallerArtifacts'
+import { runSelfCheck, type CliSpawnLike } from './cliSelfCheck'
+import { CliInstallerEnvWriter } from './cliInstallerEnv'
+import {
   resolveDataHome,
   resolveEccRuntimeBinDir,
   type EccRuntimeEnvOptions,
 } from './eccRpc/runtimeEnv'
 
-/** Minimal child-process surface the self-check consumes. */
-export interface CliSelfCheckChild {
-  stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown }
-  stderr: { on(event: 'data', listener: (chunk: Buffer) => void): unknown }
-  on(event: 'error', listener: (error: Error) => void): unknown
-  on(event: 'close', listener: (code: number | null) => void): unknown
-}
-
-export type CliSpawnLike = (
-  command: string,
-  args: readonly string[],
-  options: SpawnOptions & { timeout?: number },
-) => CliSelfCheckChild
+export type { CliSpawnLike, CliSelfCheckChild } from './cliSelfCheck'
 
 /** The subset of ResourceManagerService the installer consumes. */
 export interface CliInstallerResourceManager {
@@ -94,13 +87,7 @@ export interface CliInstallerServiceOptions {
   now?: () => Date
 }
 
-export interface CliBundleInstallRecord {
-  version: string
-  sha256: string
-  source: CliInstallSource
-  installedAt: string
-  selfCheck: CliInstallSelfCheck
-}
+export type { CliBundleInstallRecord } from './cliInstallerArtifacts'
 
 interface EnsureBundleOptions {
   onProgress?: (event: CliInstallerProgressEvent) => void
@@ -109,39 +96,6 @@ interface EnsureBundleOptions {
 const SHIM_NAME = 'ecos-ecc'
 const SELF_CHECK_TIMEOUT_MS = 30_000
 const ENV_REGENERATION_DEBOUNCE_MS = 500
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
-}
-
-function pathSeparator(platform: NodeJS.Platform): string {
-  return platform === 'win32' ? ';' : ':'
-}
-
-/**
- * Finite allowlist of ECC runtime variables for the generated env file.
- * Session-specific variables (HOME, USER, DISPLAY, XDG_*, SHELL, ...) are
- * inherited from the invoking terminal instead; ECOS_ELECTRON_* variables
- * describe the GUI process (e.g. ephemeral AppImage mounts) and are excluded.
- */
-const ECC_RUNTIME_ENV_KEYS = new Set([
-  'CHIPCOMPILER_OSS_CAD_DIR',
-  'ECOS_FE_CLI',
-  'ECOS_FE_COMPILER_ROOT',
-  'ECOS_FE_RESOURCE_ROOTS',
-  'ECOS_FE_SOC_ROOT',
-  'ECOS_SLANG',
-  'ECOS_SURFER_ASSETS_PATH',
-  'ECOS_VERILATOR',
-  'RISCV',
-  'RISCV_PREFIX',
-  'RISCV_TOOLCHAIN',
-  'VERILATOR_ROOT',
-])
-
-function executableNameFor(platform: NodeJS.Platform): string {
-  return platform === 'win32' ? 'ecc.cmd' : 'ecc'
-}
 
 async function sha256File(filePath: string): Promise<string> {
   const hash = createHash('sha256')
@@ -179,6 +133,7 @@ export class CliInstallerService {
   >()
   private lastProgress: CliInstallerProgressEvent | null = null
   private readonly unsubscribeManifest: () => void
+  private readonly envWriter: CliInstallerEnvWriter
   private envRegenerationTimer: NodeJS.Timeout | null = null
 
   constructor(options: CliInstallerServiceOptions) {
@@ -200,6 +155,11 @@ export class CliInstallerService {
     this.expectedVersion = options.expectedVersion ?? EXPECTED_ECC_BUNDLE_VERSION
     this.selfCheckTimeoutMs = options.selfCheckTimeoutMs ?? SELF_CHECK_TIMEOUT_MS
     this.resolveNow = options.now ?? (() => new Date())
+    this.envWriter = new CliInstallerEnvWriter({
+      resourceManager: options.resourceManager,
+      platform: this.platform,
+      eccRuntimeOptions: () => this.eccRuntimeOptions(),
+    })
     this.unsubscribeManifest = options.resourceManager.onManifestChanged(() => {
       this.scheduleEnvRegeneration()
     })
@@ -253,6 +213,7 @@ export class CliInstallerService {
       }
     }
     const shimPath = join(this.binDir, SHIM_NAME)
+    const shimPresent = existsSync(shimPath)
     const install = await this.readActiveInstall()
     if (!install) {
       // lstat: existsSync is false for a dangling link, which must still be
@@ -261,7 +222,7 @@ export class CliInstallerService {
         const versionDir = await this.resolveCurrentVersionDir()
         let problem = "the 'current' link is dangling"
         if (versionDir) {
-          const loaded = await this.readInstallRecord(versionDir)
+          const loaded = await readInstallRecord(versionDir, this.platform)
           if ('error' in loaded) problem = loaded.error
         }
         return {
@@ -276,12 +237,27 @@ export class CliInstallerService {
         error: this.lastFailure,
       }
     }
+    if (!shimPresent) {
+      // Without the shim the host command does not exist, so this is not a
+      // ready install even though the bundle itself is intact.
+      return {
+        expectedVersion: this.expectedVersion,
+        installedVersion: install.version,
+        source: install.source,
+        versionDir: this.currentLinkPath(),
+        shimPath: null,
+        selfCheck: install.selfCheck,
+        status: 'failed',
+        error:
+          'The ECC bundle is installed but the ecos-ecc shim is missing; reinstall to recreate it.',
+      }
+    }
     return {
       expectedVersion: this.expectedVersion,
       installedVersion: install.version,
       source: install.source,
       versionDir: this.currentLinkPath(),
-      shimPath: existsSync(shimPath) ? shimPath : null,
+      shimPath: shimPath,
       selfCheck: install.selfCheck,
       status: install.selfCheck.ok ? 'ready' : 'self-check-failed',
       error: install.selfCheck.ok
@@ -576,9 +552,11 @@ export class CliInstallerService {
       progress: 0.6,
       message: 'Running the ECC self-check...',
     })
-    const selfCheck = await this.runSelfCheck(
+    const selfCheck = await runSelfCheck(
+      this.spawnImpl,
       eccExecutable,
-      await this.buildRuntimeEnv(stagingBinaries),
+      await this.envWriter.buildRuntimeEnv(stagingBinaries),
+      this.selfCheckTimeoutMs,
     )
     const versionDirName = `${this.expectedVersion}-${sha256.slice(0, 8)}`
     const record: CliBundleInstallRecord = {
@@ -623,33 +601,11 @@ export class CliInstallerService {
       const parsed: unknown = JSON.parse(
         await readFile(join(versionDir, 'install.json'), 'utf8'),
       )
-      const record = parsed as Partial<CliBundleInstallRecord>
-      if (
-        !record ||
-        typeof record !== 'object' ||
-        typeof record.version !== 'string' ||
-        typeof record.sha256 !== 'string' ||
-        (record.source !== 'bundled' && record.source !== 'downloaded') ||
-        !record.selfCheck ||
-        typeof record.selfCheck.ok !== 'boolean'
-      ) {
+      const record = parseInstallRecord(parsed)
+      if (!record) {
         return { error: 'install.json is missing or unreadable' }
       }
-      return {
-        record: {
-          version: record.version,
-          sha256: record.sha256,
-          source: record.source,
-          installedAt: typeof record.installedAt === 'string' ? record.installedAt : '',
-          selfCheck: {
-            ok: record.selfCheck.ok,
-            detail:
-              typeof record.selfCheck.detail === 'string'
-                ? record.selfCheck.detail
-                : null,
-          },
-        },
-      }
+      return { record }
     } catch {
       return { error: 'install.json is missing or unreadable' }
     }
@@ -671,7 +627,7 @@ export class CliInstallerService {
   ): Promise<string> {
     const versionDir = join(this.dataDir, versionDirName)
     if (existsSync(versionDir)) {
-      const existing = await this.readInstallRecord(versionDir)
+      const existing = await readInstallRecord(versionDir, this.platform)
       if ('record' in existing && existing.record.selfCheck.ok) {
         await rm(stagingDir, { force: true, recursive: true })
         await this.writeEnvFile(versionDir, join(versionDir, 'binaries'))
@@ -774,7 +730,7 @@ export class CliInstallerService {
     // Only a complete install counts as active; damaged directories are
     // re-acquired by the drift check. A passing recorded self-check is not
     // required here so status() can surface self-check failures.
-    const loaded = await this.readInstallRecord(versionDir)
+    const loaded = await readInstallRecord(versionDir, this.platform)
     return 'record' in loaded ? loaded.record : null
   }
 
@@ -834,145 +790,19 @@ export class CliInstallerService {
     }
   }
 
-  private async buildRuntimeEnv(
-    binariesDirOverride?: string,
-  ): Promise<NodeJS.ProcessEnv> {
-    const baseEccEnv = createEccRuntimeEnv(this.eccRuntimeOptions())
-    const runtimeEnv = await this.resourceManager.createRuntimeEnv(baseEccEnv, {
-      platform: this.platform,
-    })
-    if (!binariesDirOverride) return runtimeEnv
-    const separator = pathSeparator(this.platform)
-    const libDir = join(binariesDirOverride, '_internal', 'ecc_tools_bin', 'lib')
-    return {
-      ...runtimeEnv,
-      PATH: `${binariesDirOverride}${separator}${runtimeEnv.PATH ?? ''}`,
-      ...(this.platform === 'linux' && existsSync(libDir)
-        ? { LD_LIBRARY_PATH: `${libDir}:${runtimeEnv.LD_LIBRARY_PATH ?? ''}` }
-        : {}),
-    }
-  }
-
-  /**
-   * Build the generated env file: ECC-relevant variables only, with PATH and
-   * LD_LIBRARY_PATH written as prepend expressions so the invoking
-   * terminal's own values are preserved. `eccBinDir` is the ECC binaries
-   * directory the file must reference (the active version directory's
-   * binaries, or the dev runtime-bin dir).
-   */
-  private async buildEnvFileContent(
-    eccBinDir: string | null,
-    libDirProbe?: string,
-  ): Promise<string> {
-    const runtimeEnv = await this.buildRuntimeEnv()
-    const toolOnlyEnv = await this.resourceManager.createRuntimeEnv(
-      {},
-      { platform: this.platform },
-    )
-    const separator = pathSeparator(this.platform)
-    const toolBinDirs = (toolOnlyEnv.PATH ?? '')
-      .split(separator)
-      .filter((entry) => entry !== '')
-    const pathDirs = [...toolBinDirs]
-    if (eccBinDir && !pathDirs.includes(eccBinDir)) pathDirs.push(eccBinDir)
-
-    const lines: string[] = [
-      '# Generated by ECOS Studio. Regenerated on installs; do not edit.',
-      // The directories are single-quoted so arbitrary paths stay literal,
-      // while the caller's own value (outside the quotes) is still expanded.
-      `PATH=${shellQuote(pathDirs.join(separator))}:$PATH`,
-    ]
-    if (eccBinDir) {
-      const libDir = join(eccBinDir, '_internal', 'ecc_tools_bin', 'lib')
-      if (this.platform === 'linux' && existsSync(libDirProbe ?? libDir)) {
-        lines.push(`LD_LIBRARY_PATH=${shellQuote(libDir)}:$LD_LIBRARY_PATH`)
-      }
-    }
-    for (const [key, value] of Object.entries(runtimeEnv)) {
-      if (typeof value !== 'string' || value === '') continue
-      if (key === 'PATH' || key === 'LD_LIBRARY_PATH') continue
-      if (!ECC_RUNTIME_ENV_KEYS.has(key)) continue
-      lines.push(`${key}=${shellQuote(value)}`)
-    }
-    return `${lines.join('\n')}\n`
-  }
-
   private async writeEnvFile(
     targetDir: string,
     eccBinDir: string | null,
     libDirProbe?: string,
   ): Promise<void> {
-    await writeFile(
-      join(targetDir, 'env'),
-      await this.buildEnvFileContent(eccBinDir, libDirProbe),
-    )
+    await this.envWriter.writeEnvFile(targetDir, eccBinDir, libDirProbe)
   }
 
   private shimContent(): string {
-    if (this.isPackaged) {
-      const envPath = join(this.dataDir, 'current', 'env')
-      const executable = join(this.dataDir, 'current', 'binaries', 'ecc')
-      return [
-        '#!/bin/sh',
-        '# Generated by ECOS Studio.',
-        `set -a; . "${envPath}"; set +a`,
-        `exec "${executable}" "$@"`,
-        '',
-      ].join('\n')
-    }
-    const envPath = join(this.dataDir, 'env')
-    const wrapper = join(this.userDataPath, 'runtime-bin', 'ecc')
-    return [
-      '#!/bin/sh',
-      '# Generated by ECOS Studio (development mode: runs the repository wrapper).',
-      `set -a; . "${envPath}"; set +a`,
-      `exec "${wrapper}" "$@"`,
-      '',
-    ].join('\n')
-  }
-
-  private runSelfCheck(
-    executable: string,
-    env: NodeJS.ProcessEnv,
-  ): Promise<CliInstallSelfCheck> {
-    return new Promise((resolve) => {
-      let settled = false
-      const finish = (result: CliInstallSelfCheck): void => {
-        if (settled) return
-        settled = true
-        resolve(result)
-      }
-      try {
-        const child = this.spawnImpl(executable, ['--version'], {
-          env,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: this.selfCheckTimeoutMs,
-        })
-        let output = ''
-        child.stdout?.on('data', (chunk: Buffer) => {
-          output += chunk.toString()
-        })
-        child.stderr?.on('data', (chunk: Buffer) => {
-          output += chunk.toString()
-        })
-        child.on('error', (error: Error) => {
-          finish({
-            ok: false,
-            detail: `${output}spawn failed: ${error.message}`.trim(),
-          })
-        })
-        child.on('close', (code: number | null) => {
-          finish({
-            ok: code === 0,
-            detail: output.trim() === '' ? null : output.trim(),
-          })
-        })
-      } catch (error) {
-        finish({
-          ok: false,
-          detail: error instanceof Error ? error.message : String(error),
-        })
-      }
+    return buildShimScript({
+      isPackaged: this.isPackaged,
+      dataDir: this.dataDir,
+      devWrapper: join(this.userDataPath, 'runtime-bin', 'ecc'),
     })
   }
 

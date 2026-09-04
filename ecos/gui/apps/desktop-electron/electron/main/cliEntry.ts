@@ -123,14 +123,19 @@ export async function runCliCommand(
 
   return await new Promise<number>((resolve) => {
     const child = spawnImpl(executable, cli.args, options)
-    const forwardSignal = (signal: NodeJS.Signals): void => {
-      child.kill(signal)
+    // Keep the signal names distinct: forwarding SIGINT as SIGTERM would
+    // change the child's exit status (130 vs 143).
+    const signalHandlers: Array<[NodeJS.Signals, () => void]> = [
+      ['SIGINT', () => child.kill('SIGINT')],
+      ['SIGTERM', () => child.kill('SIGTERM')],
+    ]
+    for (const [signal, handler] of signalHandlers) {
+      process.on(signal, handler)
     }
-    process.on('SIGINT', forwardSignal)
-    process.on('SIGTERM', forwardSignal)
     const settle = (code: number): void => {
-      process.off('SIGINT', forwardSignal)
-      process.off('SIGTERM', forwardSignal)
+      for (const [signal, handler] of signalHandlers) {
+        process.off(signal, handler)
+      }
       resolve(code)
     }
     child.on('error', (error: Error) => {

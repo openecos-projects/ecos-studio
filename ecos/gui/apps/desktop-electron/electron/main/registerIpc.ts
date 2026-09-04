@@ -2350,32 +2350,23 @@ export function registerIpc(
     return await requireCliInstallerService(services).status()
   })
 
-  handle(desktopApiIpcChannels.cliInstallerInstall, async (event) => {
-    const sender = event.sender
+  handle(desktopApiIpcChannels.cliInstallerInstall, async () => {
     const installer = requireCliInstallerService(services)
-    const unsubscribe = installer.onProgress((payload) => {
-      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
-      if (typeof sender.send === 'function') {
-        sender.send(desktopApiEventChannels.cliInstallerProgress, payload)
-      }
-    })
+    await installer.ensureBundle()
+    let shimError: string | null = null
     try {
-      await installer.ensureBundle()
-      let shimError: string | null = null
-      try {
-        await installer.installShim()
-      } catch (error) {
-        // The bundle itself is fine; surface the shim failure (including the
-        // manual-shim remediation) instead of reporting success.
-        shimError = error instanceof Error ? error.message : String(error)
-      }
-      const status = await installer.status()
-      return shimError && status.status === 'ready'
-        ? { ...status, error: shimError }
-        : status
-    } finally {
-      unsubscribe()
+      await installer.installShim()
+    } catch (error) {
+      // The bundle itself is fine; surface the shim failure (including the
+      // manual-shim remediation) instead of reporting success.
+      shimError = error instanceof Error ? error.message : String(error)
     }
+    const status = await installer.status()
+    // Progress is broadcast to all windows by the startup wiring, so no
+    // per-request forwarding is needed here.
+    return shimError && status.status === 'ready'
+      ? { ...status, error: shimError }
+      : status
   })
 
   handle(desktopApiIpcChannels.cliInstallerUninstall, async () => {

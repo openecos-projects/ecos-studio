@@ -192,8 +192,10 @@ describe('CliInstallerService', () => {
 
     const shimPath = join(binDir, 'ecos-ecc')
     const shim = readFileSync(shimPath, 'utf8')
-    expect(shim).toContain(`. "${join(dataDir, 'current', 'env')}"`)
-    expect(shim).toContain(`exec "${join(dataDir, 'current', 'binaries', 'ecc')}" "$@"`)
+    const expectedEnv = join(dataDir, 'current', 'env')
+    const expectedEcc = join(dataDir, 'current', 'binaries', 'ecc')
+    expect(shim).toContain(`. '${expectedEnv}'; set +a`)
+    expect(shim).toContain(`exec '${expectedEcc}' "$@"`)
 
     const status = await service.status()
     expect(status.status).toBe('ready')
@@ -345,12 +347,14 @@ describe('CliInstallerService', () => {
     await expect(service.installShim()).rejects.toThrow(
       /Unable to write [\s\S]*manually with:/,
     )
-    // The bundle itself still installs and current points at a complete install.
+    // The bundle itself still installs and current points at a complete install,
+    // but a missing shim means the host command is NOT ready.
     await service.ensureBundle()
     const versionDir = join(dataDir, currentVersionDirName(dataDir))
     expect(existsSync(join(versionDir, 'install.json'))).toBe(true)
     const status = await service.status()
-    expect(status.status).toBe('ready')
+    expect(status.status).toBe('failed')
+    expect(status.error).toContain('shim is missing')
     expect(status.shimPath).toBeNull()
   })
 
@@ -386,8 +390,8 @@ describe('CliInstallerService', () => {
     await service.installShim()
 
     const shim = readFileSync(join(binDir, 'ecos-ecc'), 'utf8')
-    expect(shim).toContain(`. "${join(dataDir, 'env')}"`)
-    expect(shim).toContain(`exec "${join(userDataPath, 'runtime-bin', 'ecc')}" "$@"`)
+    expect(shim).toContain(`. '${join(dataDir, 'env')}'; set +a`)
+    expect(shim).toContain(`exec '${join(userDataPath, 'runtime-bin', 'ecc')}' "$@"`)
     expect(existsSync(join(dataDir, 'env'))).toBe(true)
 
     await expect(service.ensureBundle()).rejects.toThrow(/Development mode/)

@@ -25,6 +25,7 @@ import {
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
 import { CliInstallerService } from '../services/cliInstallerService'
+import { desktopApiEventChannels } from '@ecos-studio/shared'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -402,6 +403,15 @@ function cliEccRuntimeOptions(): EccRuntimeEnvOptions {
 function startCliInstallerStartupTasks(): void {
   const cliInstaller = getDesktopServices().cliInstallerService
   if (!cliInstaller) return
+  // Broadcast installer progress to every window: startup acquisition runs
+  // outside any IPC request, so the renderer cards rely on this channel.
+  cliInstaller.onProgress((event) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(desktopApiEventChannels.cliInstallerProgress, event)
+      }
+    }
+  })
   void cliInstaller.checkSyncOnStartup()
   if (!resolveEccExecutable(cliEccRuntimeOptions())) {
     electronLogger.info('[cli-installer] No ECC bundle resolved; acquiring on first use')
