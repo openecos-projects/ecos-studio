@@ -464,3 +464,103 @@ describe('createEccRuntimeEnv', () => {
     expect(env).toEqual({ PATH: '/usr/bin' })
   })
 })
+
+describe('bundle home resolution', () => {
+  function createBundleHome(userDataParent: string): {
+    dataHome: string
+    binariesDir: string
+  } {
+    const dataHome = join(userDataParent, 'data-home')
+    const binariesDir = join(
+      dataHome,
+      'ecos-studio',
+      'ecc-runtime',
+      'current',
+      'binaries',
+    )
+    mkdirSync(join(binariesDir, '_internal', 'ecc_tools_bin', 'lib'), {
+      recursive: true,
+    })
+    writeFileSync(join(binariesDir, 'ecc'), '#!/usr/bin/env bash\n')
+    return { dataHome, binariesDir }
+  }
+
+  it('falls back to the bundle home when packaged binaries are absent', () => {
+    const fixture = createRepoFixture()
+    const { dataHome, binariesDir } = createBundleHome(fixture.repoRoot)
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { PATH: '/usr/bin' },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome,
+    })
+
+    expect(executable).toBe(join(binariesDir, 'ecc'))
+  })
+
+  it('prefers packaged binaries over the bundle home', () => {
+    const fixture = createRepoFixture()
+    const { dataHome } = createBundleHome(fixture.repoRoot)
+    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
+    const packagedEcc = join(resourcesPath, 'binaries', 'ecc')
+    mkdirSync(join(resourcesPath, 'binaries'), { recursive: true })
+    writeFileSync(packagedEcc, '#!/usr/bin/env bash\n')
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { ECOS_ELECTRON_RESOURCES_PATH: resourcesPath, PATH: '/usr/bin' },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome,
+    })
+
+    expect(executable).toBe(packagedEcc)
+  })
+
+  it('returns null when neither packaged nor bundle-home binaries exist', () => {
+    const fixture = createRepoFixture()
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { PATH: '/usr/bin' },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(executable).toBeNull()
+  })
+
+  it('prepends the bundle home to PATH and LD_LIBRARY_PATH', () => {
+    const fixture = createRepoFixture()
+    const { dataHome, binariesDir } = createBundleHome(fixture.repoRoot)
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        CHIPCOMPILER_OSS_CAD_DIR: '/host/oss-cad-suite',
+        LD_LIBRARY_PATH: '/existing/libs',
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome,
+    })
+
+    expect(env.PATH).toBe(`${binariesDir}:/usr/bin`)
+    expect(env.LD_LIBRARY_PATH).toBe(
+      `${join(binariesDir, '_internal', 'ecc_tools_bin', 'lib')}:/existing/libs`,
+    )
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+  })
+})

@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
@@ -10,6 +11,8 @@ export interface EccRuntimeEnvOptions {
   isPackaged: boolean
   platform: RuntimePlatform
   userDataPath: string
+  /** Host data home; defaults to XDG_DATA_HOME (or ~/.local/share). */
+  dataHome?: string
 }
 
 function getPathKey(env: NodeJS.ProcessEnv): string {
@@ -67,6 +70,36 @@ function resolvePackagedResourcesPath(options: EccRuntimeEnvOptions): string {
   return options.env.ECOS_ELECTRON_RESOURCES_PATH ?? join(options.appPath, 'resources')
 }
 
+/** Host data home shared with the Resource Manager and the CLI installer. */
+export function resolveDataHome(options: EccRuntimeEnvOptions): string {
+  return (
+    options.dataHome ?? options.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')
+  )
+}
+
+/**
+ * Stable bundle-home location (`<dataHome>/ecos-studio/ecc-runtime/current`)
+ * where the CLI installer materializes the ECC bundle. The `current` symlink
+ * only ever points at a complete installation, so existence of the binary is
+ * a sufficient readiness check.
+ */
+export function resolveBundleHomeBinariesPath(options: EccRuntimeEnvOptions): string {
+  return join(
+    resolveDataHome(options),
+    'ecos-studio',
+    'ecc-runtime',
+    'current',
+    'binaries',
+  )
+}
+
+function resolveBundleHomeRuntimeBin(options: EccRuntimeEnvOptions): string | null {
+  const binariesPath = resolveBundleHomeBinariesPath(options)
+  return existsSync(join(binariesPath, packagedEccExecutableName(options.platform)))
+    ? binariesPath
+    : null
+}
+
 function packagedEccLibraryEnv(
   env: NodeJS.ProcessEnv,
   binariesPath: string,
@@ -121,8 +154,12 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
   const executableName = packagedEccExecutableName(options.platform)
 
   if (options.isPackaged) {
-    const candidate = join(resolvePackagedBinariesPath(options), executableName)
-    return existsSync(candidate) ? candidate : null
+    const packagedCandidate = join(resolvePackagedBinariesPath(options), executableName)
+    if (existsSync(packagedCandidate)) {
+      return packagedCandidate
+    }
+    const bundleHomeBin = resolveBundleHomeRuntimeBin(options)
+    return bundleHomeBin ? join(bundleHomeBin, executableName) : null
   }
 
   const developmentBinDir = resolveDevelopmentEccBinDir(options)
@@ -137,17 +174,23 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
 export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
+    const bundleHomeRuntimeBin = resolveBundleHomeRuntimeBin(options)
+    const runtimeBin = packagedRuntimeBin ?? bundleHomeRuntimeBin
+    const libraryBinariesPath = runtimeBin ?? resolvePackagedBinariesPath(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
-    const binariesPath = resolvePackagedBinariesPath(options)
     const {
       CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
       ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
       ...baseEnv
     } = options.env
-    const libraryEnv = packagedEccLibraryEnv(baseEnv, binariesPath, options.platform)
+    const libraryEnv = packagedEccLibraryEnv(
+      baseEnv,
+      libraryBinariesPath,
+      options.platform,
+    )
 
-    if (packagedRuntimeBin) {
-      const nextPath = prependPath(baseEnv, packagedRuntimeBin, options.platform)
+    if (runtimeBin) {
+      const nextPath = prependPath(baseEnv, runtimeBin, options.platform)
 
       return {
         ...baseEnv,
