@@ -205,10 +205,14 @@ class ControllerContextMixin:
             raise OptimizationEpisodeControllerError(
                 "task memory snapshot does not match the episode"
             )
-        available_actions = legal_actions(
-            current_values=active_values,
-            attempted=self._attempted_requests(),
-            known_aliases=ineffective_requests,
+        available_actions = tuple(
+            action
+            for action in legal_actions(
+                current_values=active_values,
+                attempted=self._attempted_requests(),
+                known_aliases=ineffective_requests,
+            )
+            if candidate_target_step(action.knob_id) == observation.stage.value
         )
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,

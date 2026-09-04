@@ -20,6 +20,7 @@ from pydantic import (
     field_validator,
 )
 
+from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
@@ -84,6 +85,10 @@ _OPTIMIZATION_RERUN_STAGES = (
     "RCX",
     "sta",
     CANDIDATE_END_STEP,
+)
+_OPTIMIZATION_OBSERVATION_STAGES = (
+    ECCStepName.FLOORPLAN,
+    ECCStepName.PLACEMENT,
 )
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
@@ -410,7 +415,13 @@ def _assemble_runner(
     )
 
     def observation_supplier(current_budget: BudgetSnapshot):
-        return build_stage_observation(workspace, "place", budget=current_budget)
+        stage = _OPTIMIZATION_OBSERVATION_STAGES[
+            current_budget.consumed_candidates % len(_OPTIMIZATION_OBSERVATION_STAGES)
+        ]
+        incumbent = _incumbent_workspace(
+            workspace, controller.incumbent_candidate_root_ref
+        )
+        return build_stage_observation(incumbent, stage, budget=current_budget)
 
     def retrieval_supplier(observation, previous: OptimizationOutcomeKind | None):
         active = controller.active_objective

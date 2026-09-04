@@ -27,6 +27,7 @@ from .support import (
 )
 
 from ecos_agent.codex.rpc import CodexProviderError
+from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.optimization.contracts import (
     ObservationReference,
     OptimizationDecision,
@@ -271,7 +272,7 @@ def test_v2_terminal_case_is_persisted_and_injected_on_next_turn(
         knowledge_case_shots=3,
     )
     retrieval = _retrieval()
-    card = load_parameter_cards()[OptimizationKnob.FLOORPLAN_CORE_UTIL]
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     binding = retrieval.support_catalog.bindings[0].model_copy(
         update={"toolchain_ref": card.tool.source_sha256}
     )
@@ -353,7 +354,34 @@ def test_controller_accepts_llm_selected_non_first_knob(
     planner = _V2FakeCodex(choose_aspect_ratio)
     controller = _controller(tmp_path, planner, _FakeEcc())
 
-    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    observation = _observation().model_copy(
+        update={
+            "observation_id": "observation-floorplan",
+            "stage": ECCStepName.FLOORPLAN,
+            "metrics": {"core_area": 2500.0, "die_area": 3000.0},
+        }
+    )
+    retrieval = _retrieval()
+    retrieval = replace(
+        retrieval,
+        request=retrieval.request.model_copy(
+            update={
+                "current_stage": ECCStepName.FLOORPLAN,
+                "observed_metric_ids": ("core_area", "die_area"),
+            }
+        ),
+        support_catalog=retrieval.support_catalog.model_copy(
+            update={
+                "claims": (
+                    retrieval.support_catalog.claims[0].model_copy(
+                        update={"stages": ("Floorplan",), "state_predicates": ()}
+                    ),
+                )
+            }
+        ),
+    )
+
+    result = controller.plan(observation, retrieval, CURRENT_VALUES)
 
     assert result.planner_source == "llm"
     assert result.requested == RequestedKnobValue(

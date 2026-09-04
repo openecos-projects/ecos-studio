@@ -28,6 +28,7 @@ from .support import (
     _terminal,
 )
 
+from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.optimization.contracts import (
     KnowledgeReference,
     ObservationReference,
@@ -473,7 +474,7 @@ def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(
     assert rejected.proposal is None
 
 
-def test_raw_rag_mode_exposes_retrieval_without_state_conditioned_support(
+def test_raw_rag_rejects_action_from_a_stage_that_was_not_observed(
     tmp_path: Path,
 ) -> None:
     codex = _FakeCodex(
@@ -494,6 +495,51 @@ def test_raw_rag_mode_exposes_retrieval_without_state_conditioned_support(
 
     assert codex.contexts[0].knowledge_refs == _retrieval().knowledge_refs
     assert codex.contexts[0].supported_action_view is None
+    assert {
+        action.knob_id.value.split(".", 1)[0]
+        for action in codex.contexts[0].legal_actions
+    } == {"place"}
+    assert result.rejection_reason == "proposal_action"
+
+
+def test_floorplan_observation_exposes_only_floorplan_actions(tmp_path: Path) -> None:
+    observation = _observation().model_copy(
+        update={
+            "observation_id": "observation-floorplan",
+            "stage": ECCStepName.FLOORPLAN,
+            "metrics": {"core_area": 2500.0, "die_area": 3000.0},
+        }
+    )
+    retrieval = _retrieval()
+    retrieval = replace(
+        retrieval,
+        request=retrieval.request.model_copy(
+            update={
+                "current_stage": ECCStepName.FLOORPLAN,
+                "observed_metric_ids": ("core_area", "die_area"),
+            }
+        ),
+    )
+    codex = _FakeCodex(
+        lambda context: _proposal(
+            context,
+            knob_id="floorplan.core_util",
+            direction=StrategyDirection.DECREASE,
+        )
+    )
+    controller = _controller(
+        tmp_path,
+        codex,
+        _FakeEcc(),
+        mode=OptimizationAgentMode.RAW_RAG,
+    )
+
+    result = controller.plan(observation, retrieval, CURRENT_VALUES)
+
+    assert {
+        action.knob_id.value.split(".", 1)[0]
+        for action in codex.contexts[0].legal_actions
+    } == {"floorplan"}
     assert result.rejection_reason is None
 
 

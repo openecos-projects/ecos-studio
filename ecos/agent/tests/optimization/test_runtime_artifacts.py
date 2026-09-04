@@ -10,6 +10,8 @@ from pydantic import ValidationError
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
+    BudgetSnapshot,
+    EpisodeBudget,
     GateResult,
     ObjectiveMetric,
     OptimizationObjectiveContract,
@@ -25,6 +27,7 @@ from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import (
     OptimizationRuntimeContext,
     OptimizationRuntimeError,
+    _assemble_runner,
     _current_values,
     _design_id,
     _incumbent_workspace,
@@ -220,6 +223,48 @@ def test_current_values_read_the_seven_runtime_knob_surfaces(tmp_path: Path) -> 
         "floorplan.core_util": 0.6,
         "floorplan.aspect_ratio": 1.33,
     }
+
+
+def test_runner_observes_each_parameter_stage_from_the_current_incumbent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    incumbent = workspace / ".agent/candidates/candidate-1"
+    incumbent.mkdir(parents=True)
+    calls: list[tuple[Path, str]] = []
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.runtime.OptimizationKnowledgeRetriever",
+        lambda: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization.runtime._current_values", lambda _path, _width: {}
+    )
+
+    def observe(path: Path, stage: str, *, budget: BudgetSnapshot) -> None:
+        calls.append((path, stage))
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.runtime.build_stage_observation", observe
+    )
+    budget = BudgetSnapshot(budget=EpisodeBudget.from_reference_rerun(10.0))
+    controller = SimpleNamespace(
+        incumbent_candidate_root_ref=".agent/candidates/candidate-1",
+        budget=budget,
+    )
+    runner = _assemble_runner(
+        runtime=SimpleNamespace(episode_id="episode-1", objective=None),
+        workspace=workspace,
+        controller=controller,
+        executor=SimpleNamespace(),
+        routability_objective=None,
+        site_width_dbu=200,
+    )
+
+    runner._observation_supplier(budget)
+    runner._observation_supplier(budget.model_copy(update={"consumed_candidates": 1}))
+
+    assert calls == [(incumbent, "Floorplan"), (incumbent, "place")]
 
 
 def test_incumbent_workspace_resolves_only_registered_candidate_roots(

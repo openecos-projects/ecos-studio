@@ -297,6 +297,12 @@ def validate_planner_proposal(
         return "knowledge_reference"
     if proposal.action is None:
         return "proposal_action"
+    if not any(
+        action.knob_id == proposal.action.knob_id
+        and action.direction == proposal.action.direction
+        for action in context.legal_actions
+    ):
+        return "proposal_action"
     if require_knowledge and not any(
         item.knob_id == proposal.action.knob_id
         and item.direction == proposal.action.direction
