@@ -2352,6 +2352,12 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.cliInstallerInstall, async () => {
     const installer = requireCliInstallerService(services)
+    // Development mode has no bundle: installing only (re)creates the shim
+    // that execs the repository wrapper.
+    if ((await installer.status()).status === 'dev-wrapper') {
+      await installer.installShim()
+      return await installer.status()
+    }
     await installer.ensureBundle()
     let shimError: string | null = null
     try {

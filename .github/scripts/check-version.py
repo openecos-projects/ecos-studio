@@ -101,11 +101,10 @@ if expected_ecc_bundle != ecc_package:
         file=sys.stderr,
     )
     sys.exit(1)
-print("Detected versions:")
-print(f"  EXPECTED_ECC_BUNDLE_VERSION: {expected_ecc_bundle} (matches ecc/pyproject.toml)")
-print(f"  ecc/pyproject.toml: {ecc_package}")
 
 print("Detected versions:")
+print(f"  EXPECTED_ECC_BUNDLE_VERSION: {expected_ecc_bundle}")
+print(f"  ecc/pyproject.toml: {ecc_package}")
 for name, value in versions:
     print(f"  {name}: {value}")
 

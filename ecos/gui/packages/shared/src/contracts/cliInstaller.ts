@@ -25,7 +25,10 @@ export interface CliInstallSelfCheck {
  * - `not-installed`: no complete bundle home. Location fields null.
  * - `installing`: an install is running; in-memory state only.
  * - `failed`: the last install attempt failed; `error` carries the reason.
- *   Location fields null.
+ *   Location fields are null unless the failure is repairable on an intact
+ *   bundle (e.g. missing shim after a successful install), in which case
+ *   `versionDir`/`installedVersion`/`source`/`selfCheck` describe the bundle
+ *   that is waiting for the shim.
  * - `ready` / `self-check-failed`: a complete install exists at
  *   `versionDir`; `source`, `installedVersion` and `selfCheck` are set.
  *   They differ only in `selfCheck.ok` (environmental failure; see the

@@ -160,8 +160,10 @@ describe('CliInstallerService', () => {
     const events: CliInstallerProgressEvent[] = []
 
     const versionDir = await service.ensureBundle({
-      onProgress: (event) => events.push(event),
+      onProgress: (event: CliInstallerProgressEvent) => events.push(event),
     })
+    // The shim is a separate step so background drift never rewrites it.
+    await service.installShim()
 
     expect(versionDir).toBe(join(dataDir, `1.0.0-${bundle.sha256.slice(0, 8)}`))
     expect(existsSync(join(versionDir, 'binaries', 'ecc'))).toBe(true)
@@ -248,7 +250,9 @@ describe('CliInstallerService', () => {
     const events: CliInstallerProgressEvent[] = []
 
     await expect(
-      service.ensureBundle({ onProgress: (event) => events.push(event) }),
+      service.ensureBundle({
+        onProgress: (event: CliInstallerProgressEvent) => events.push(event),
+      }),
     ).rejects.toThrow(/SHA256 verification failed/)
 
     expect(existsSync(join(dataDir, 'current'))).toBe(false)
@@ -267,6 +271,9 @@ describe('CliInstallerService', () => {
     })
 
     await service.ensureBundle()
+    // Install the shim so the missing-shim failure doesn't mask the
+    // self-check state under test.
+    await service.installShim()
 
     const versionDir = join(dataDir, currentVersionDirName(dataDir))
     const record = JSON.parse(readFileSync(join(versionDir, 'install.json'), 'utf8'))
@@ -464,6 +471,7 @@ describe('CliInstallerService', () => {
       expectedVersion: STUB_VERSION,
     })
     await second.ensureBundle()
+    await second.installShim()
 
     // The active directory is a fresh repaired copy (unique sibling name),
     // and the broken one was removed only after 'current' moved off it.

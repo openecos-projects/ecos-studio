@@ -417,11 +417,19 @@ function startCliInstallerStartupTasks(): void {
     electronLogger.info('[cli-installer] No ECC bundle resolved; acquiring on first use')
     void cliInstaller
       .ensureBundle()
-      .then((versionDir) => {
+      .then(async (versionDir) => {
         electronLogger.info(
           '[cli-installer] First-use acquisition installed %s',
           versionDir,
         )
+        // Make the host command available immediately after the first-use
+        // download instead of waiting for an explicit reinstall.
+        await cliInstaller.installShim().catch((error: unknown) => {
+          electronLogger.warn(
+            '[cli-installer] First-use shim install failed: %s',
+            error instanceof Error ? error.message : String(error),
+          )
+        })
       })
       .catch((error: unknown) => {
         electronLogger.warn(

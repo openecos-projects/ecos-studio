@@ -116,6 +116,11 @@ function packagedEccLibraryEnv(
   }
 }
 
+/** POSIX single-quote a value so it stays literal in the generated shim. */
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
 function ensureRepoEccDevShim(
   userDataPath: string,
   wrapperScript: string,
@@ -130,8 +135,10 @@ function ensureRepoEccDevShim(
     return runtimeBin
   }
 
+  // Single-quote the wrapper path so checkout paths containing $, backticks,
+  // or double quotes stay literal.
   const shimPath = join(runtimeBin, 'ecc')
-  writeFileSync(shimPath, `#!/usr/bin/env bash\nexec "${wrapperScript}" "$@"\n`)
+  writeFileSync(shimPath, `#!/usr/bin/env bash\nexec ${shQuote(wrapperScript)} "$@"\n`)
   chmodSync(shimPath, 0o755)
   return runtimeBin
 }
