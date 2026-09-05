@@ -110,6 +110,7 @@ export const desktopApiIpcChannels = {
   designRuntimeWorkspaceClose: 'design-runtime:workspace-close',
   designRuntimeWorkspaceHome: 'design-runtime:workspace-home',
   designRuntimeWorkspaceInfo: 'design-runtime:workspace-info',
+  designRuntimeWorkspaceStepConfiguration: 'design-runtime:workspace-step-configuration',
   designRuntimeWorkspaceRefreshConfig: 'design-runtime:workspace-refresh-config',
   designRuntimeWorkspaceResetFlow: 'design-runtime:workspace-reset-flow',
   designRuntimeFlowRun: 'design-runtime:flow-run',

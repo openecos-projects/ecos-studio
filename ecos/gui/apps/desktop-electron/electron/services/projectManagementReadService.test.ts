@@ -83,7 +83,10 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
 }
 
 function createReadService(
-  readStepConfiguration?: (workspacePath: string, step: string) => Promise<unknown>,
+  readStepConfiguration?: (
+    workspacePath: string,
+    step: string,
+  ) => Promise<import('@ecos-studio/shared').EccWorkspaceStepConfigurationReadResult>,
 ): ProjectManagementReadService {
   return new ProjectManagementReadService(
     {
@@ -235,7 +238,14 @@ describe('ProjectManagementReadService', () => {
 
   it('reads Step Options through the ECC domain reader and rejects config file paths', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
-    const readStepConfiguration = vi.fn().mockResolvedValue({ cts_buf_list: 'BUF' })
+    const readStepConfiguration = vi.fn().mockResolvedValue({
+      options: { cts_buf_list: 'BUF' },
+      status: 'available',
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
     const service = createReadService(readStepConfiguration)
 
     await expect(
@@ -247,6 +257,10 @@ describe('ProjectManagementReadService', () => {
     ).resolves.toEqual({
       options: { cts_buf_list: 'BUF' },
       step: 'CTS',
+      stepId: 'CTS',
+      status: 'available',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
     })
     expect(readStepConfiguration).toHaveBeenCalledWith(workspaceRoot, 'CTS')
     await expect(

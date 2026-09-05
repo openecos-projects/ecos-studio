@@ -93,6 +93,13 @@ class WorkspaceStepConfigurationUpdateRequest:
 
 
 @dataclass(frozen=True)
+class WorkspaceStepConfigurationReadRequest:
+    step: str
+    workspace_id: str = ""
+    directory: str = ""
+
+
+@dataclass(frozen=True)
 class WorkspaceIdRequest:
     workspace_id: str
 

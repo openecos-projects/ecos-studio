@@ -75,7 +75,11 @@ describe('useBaselineStepConfig', () => {
     testState.readManifest.mockReset().mockResolvedValue(projectManifest())
     testState.readWorkspaceStepConfiguration.mockReset().mockResolvedValue({
       options: { cts_buf_list: 'BUF' },
+      status: 'available',
       step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'ws_0001',
+      workspaceRevision: 1,
     })
   })
 
@@ -95,6 +99,7 @@ describe('useBaselineStepConfig', () => {
       workspacePath: '/projects/gcd/ws_0001',
     })
     expect(baseline.parsed.value).toEqual({ cts_buf_list: 'BUF' })
+    expect(baseline.workspaceRevision.value).toBe(1)
   })
 
   it('does not request ECC options for a frontend workspace', async () => {

@@ -251,7 +251,8 @@ function registerHandlers(
       runStep: vi.fn(),
       startFlowOperation: vi.fn(),
       startStepOperation: vi.fn(),
-      syncConfig: vi.fn(),
+      readWorkspaceStepConfiguration: vi.fn(),
+      readWorkspaceStepConfigurationForDirectory: vi.fn(),
       updateWorkspaceConfiguration: vi.fn(),
       updateWorkspaceStepConfiguration: vi.fn(),
       updateWorkspace: vi.fn(),
@@ -315,7 +316,6 @@ function registerHandlers(
       rpcShutdown: vi.fn(),
       runFlow: vi.fn(),
       runStep: vi.fn(),
-      syncConfig: vi.fn(),
       validateConfig: vi.fn(),
       workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
@@ -732,12 +732,16 @@ describe('registerIpc', () => {
       directory: '/runs/gcd',
       engineeringSnapshot: { workspaceRevision: 4 },
     })
-    services.eccRuntimeService.workspaceInfo.mockImplementation(({ step }) =>
-      Promise.resolve({
-        id: 'config',
-        info: { options: step === 'CTS' ? { skew_bound: 0.08 } : {} },
-        step,
-      }),
+    services.eccRuntimeService.readWorkspaceStepConfiguration.mockImplementation(
+      ({ step }) =>
+        Promise.resolve({
+          options: step === 'CTS' ? { skew_bound: 0.08 } : {},
+          status: 'available',
+          step,
+          stepId: step,
+          workspaceId: 'workspace-1',
+          workspaceRevision: 4,
+        }),
     )
     const sender = {
       id: 42,
@@ -2306,27 +2310,32 @@ describe('registerIpc', () => {
       directory: '/work/demo',
       workspaceHandle: 'workspace-1',
     })
-    services.eccRuntimeService.workspaceInfo.mockResolvedValue({
-      id: 'config',
-      info: { options: { skew_bound: 0.08 } },
+    services.eccRuntimeService.readWorkspaceStepConfiguration.mockResolvedValue({
+      options: { skew_bound: 0.08 },
+      status: 'available',
       step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
     })
     await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
 
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceResourcesResolveStepInfo)?.(event, {
-        designTool: 'backend',
-        id: 'config',
-        step: 'CTS',
-        workspaceHandle: 'workspace-1',
-      }),
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceStepConfiguration)?.(
+        event,
+        {
+          designTool: 'backend',
+          step: 'CTS',
+          workspaceHandle: 'workspace-1',
+        },
+      ),
     ).resolves.toEqual({
-      id: 'config',
-      info: { options: { skew_bound: 0.08 }, stepId: 'CTS' },
-      message: [],
-      missing: [],
-      response: 'available',
+      options: { skew_bound: 0.08 },
+      status: 'available',
       step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
     })
     expect(services.workspaceResourceService.resolveStepInfo).not.toHaveBeenCalled()
   })

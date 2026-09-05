@@ -1,6 +1,6 @@
 const testState = vi.hoisted(() => ({
   currentProject: null as import('vue').Ref<{ path: string } | null> | null,
-  resolveWorkspaceStepInfoApi: vi.fn(),
+  readWorkspaceStepConfigurationApi: vi.fn(),
   route: { path: '/workspace/floorplan' },
   updateWorkspaceStepConfigurationApi: vi.fn(),
 }))
@@ -12,10 +12,8 @@ vi.mock('vue-router', () => ({ useRoute: () => testState.route }))
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({ currentProject: testState.currentProject }),
 }))
-vi.mock('@/api/workspaceResources', () => ({
-  resolveWorkspaceStepInfoApi: testState.resolveWorkspaceStepInfoApi,
-}))
 vi.mock('@/api/workspace', () => ({
+  readWorkspaceStepConfigurationApi: testState.readWorkspaceStepConfigurationApi,
   updateWorkspaceStepConfigurationApi: testState.updateWorkspaceStepConfigurationApi,
 }))
 
@@ -28,12 +26,12 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 function available(options: Record<string, unknown>) {
   return {
-    response: 'available',
-    info: { stepId: 'Floorplan', options },
-    missing: [],
-    message: [],
-    id: 'config',
+    options,
+    status: 'available',
     step: 'Floorplan',
+    stepId: 'Floorplan',
+    workspaceId: 'workspace-demo',
+    workspaceRevision: 1,
   }
 }
 
@@ -55,7 +53,7 @@ describe('useStepConfigInfo', () => {
     })
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.route.path = '/workspace/floorplan'
-    testState.resolveWorkspaceStepInfoApi.mockReset()
+    testState.readWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockResolvedValue({
       workspaceRevision: 2,
@@ -66,7 +64,7 @@ describe('useStepConfigInfo', () => {
   afterEach(() => scope.stop())
 
   it('loads an ECC-owned Step configuration object', async () => {
-    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ ifp: { thread_number: 16 } }),
     )
 
@@ -76,17 +74,16 @@ describe('useStepConfigInfo', () => {
       expect(result.stepConfigDraft.value).toEqual({ ifp: { thread_number: 16 } }),
     )
     expect(result.stepConfigPathResolved.value).toBe('Floorplan options')
+    expect(result.workspaceRevision.value).toBe(1)
     expect(result.isEmpty.value).toBe(false)
-    expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledWith({
-      designTool: 'backend',
-      id: 'config',
+    expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
       step: 'Floorplan',
       workspaceHandle: 'workspace-demo',
     })
   })
 
   it('saves Step Options through one Product Command and advances Revision', async () => {
-    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ ifp: { thread_number: 16 } }),
     )
     const result = scope.run(() => useStepConfigInfo())!
@@ -107,7 +104,7 @@ describe('useStepConfigInfo', () => {
   })
 
   it('keeps Step configuration read-only while execution is active', async () => {
-    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ ifp: { thread_number: 16 } }),
     )
     const result = scope.run(() => useStepConfigInfo())!
@@ -122,7 +119,7 @@ describe('useStepConfigInfo', () => {
 
   it('discards a response after the Workspace session changes', async () => {
     let resolveRequest!: (value: ReturnType<typeof available>) => void
-    testState.resolveWorkspaceStepInfoApi.mockReturnValue(
+    testState.readWorkspaceStepConfigurationApi.mockReturnValue(
       new Promise((resolve) => {
         resolveRequest = resolve
       }),

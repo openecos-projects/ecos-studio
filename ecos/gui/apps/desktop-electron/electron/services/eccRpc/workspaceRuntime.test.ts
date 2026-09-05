@@ -160,6 +160,43 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.workspaceSession(opened.workspaceHandle).workspaceRevision).toBe(2)
   })
 
+  it('reads Step Configuration without entering the operation queue', async () => {
+    const { client, service, events } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      options: { skew_bound: 0.08 },
+      status: 'available',
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        step: 'CTS',
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ status: 'available', workspaceRevision: 4 })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.step_configuration.read',
+      params: { step: 'CTS', workspaceId: 'workspace-1' },
+    })
+    expect(
+      events.filter(
+        (event) =>
+          'method' in event && event.method === 'workspace.step_configuration.read',
+      ),
+    ).toEqual([])
+    expect(service.isActive()).toBe(false)
+  })
+
   it('updates Step Options by identity without a file path', async () => {
     const { client, service } = createService()
     client.responses.push({

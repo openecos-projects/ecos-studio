@@ -23,7 +23,10 @@ import type {
   ResourceOperationResult,
   ResourceUpdateCheckResult,
 } from './resources.ts'
-import type { EccRuntimeApi } from './eccRuntime.ts'
+import type {
+  EccRuntimeApi,
+  EccWorkspaceStepConfigurationReadResult,
+} from './eccRuntime.ts'
 import type { DesktopShutdownApi } from './shutdown.ts'
 import type {
   PdkBinding,
@@ -169,10 +172,8 @@ export interface DesktopProjectManagementWorkspaceStepConfigurationRequest {
   workspacePath: string
 }
 
-export interface DesktopProjectManagementWorkspaceStepConfigurationResult {
-  options: Record<string, unknown>
-  step: string
-}
+export type DesktopProjectManagementWorkspaceStepConfigurationResult =
+  EccWorkspaceStepConfigurationReadResult
 
 export interface ChipViewerOpenRequest {
   projectPath: string

@@ -43,6 +43,7 @@ import {
   type EccWorkspaceInfoRequest,
   type EccWorkspaceOpenRequest,
   type EccWorkspaceOpenResult,
+  type EccWorkspaceStepConfigurationReadResult,
   type EccWorkspaceStepConfigurationUpdateRequest,
   type EccWorkspaceSpecValidationRequest,
   type EccWorkspaceUpdateRequest,
@@ -444,6 +445,13 @@ export interface DesktopBridgeServices {
     updateWorkspaceStepConfiguration(
       request: EccWorkspaceStepConfigurationUpdateRequest,
     ): Promise<{ workspaceRevision: number }>
+    readWorkspaceStepConfiguration(
+      request: import('@ecos-studio/shared').EccWorkspaceStepConfigurationReadRequest,
+    ): Promise<EccWorkspaceStepConfigurationReadResult>
+    readWorkspaceStepConfigurationForDirectory(
+      directory: string,
+      step: string,
+    ): Promise<EccWorkspaceStepConfigurationReadResult>
     updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
     validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -2006,46 +2014,10 @@ export function registerIpc(
 
   handle(
     desktopApiIpcChannels.workspaceResourcesResolveStepInfo,
-    async (event, request) => {
-      const resourceRequest = request as WorkspaceStepInfoRequest
-      if (
-        (resourceRequest.designTool ?? 'backend') === 'backend' &&
-        resourceRequest.id === 'config'
-      ) {
-        const workspaceHandle = resourceRequest.workspaceHandle
-        const subscription = workspaceHandle
-          ? workspaceHandleSubscriptions.get(workspaceHandle)
-          : undefined
-        if (
-          !workspaceHandle ||
-          !subscription ||
-          subscription.sender !== event.sender ||
-          subscription.designTool !== 'backend'
-        ) {
-          throw new Error(
-            'Backend Step Configuration requires an owned Workspace Session.',
-          )
-        }
-        const result = await services.eccRuntimeService.workspaceInfo({
-          id: 'config',
-          step: resourceRequest.step,
-          workspaceHandle,
-        })
-        if (!isRecord(result) || typeof result.step !== 'string') {
-          throw new Error('ECC Step Configuration response is invalid.')
-        }
-        const info = isRecord(result.info) ? result.info : {}
-        const options = isRecord(info.options) ? info.options : null
-        return {
-          id: 'config',
-          info: options ? { options, stepId: result.step } : {},
-          message: [],
-          missing: [],
-          response: options ? 'available' : 'missing',
-          step: result.step,
-        } satisfies WorkspaceStepInfoResult
-      }
-      return await services.workspaceResourceService.resolveStepInfo(resourceRequest)
+    async (_event, request) => {
+      return await services.workspaceResourceService.resolveStepInfo(
+        request as WorkspaceStepInfoRequest,
+      )
     },
   )
 
@@ -2425,6 +2397,36 @@ export function registerIpc(
   })
 
   handle(
+    desktopApiIpcChannels.designRuntimeWorkspaceStepConfiguration,
+    async (event, request) => {
+      const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest & {
+        step: string
+      }
+      if (requireDesignTool(runtimeRequest.designTool) !== 'backend') {
+        return {
+          status: 'unavailable',
+          step: runtimeRequest.step,
+          reason: 'step_configuration_not_supported',
+        } satisfies EccWorkspaceStepConfigurationReadResult
+      }
+      const subscription = workspaceHandleSubscriptions.get(
+        runtimeRequest.workspaceHandle,
+      )
+      if (
+        !subscription ||
+        subscription.sender !== event.sender ||
+        subscription.designTool !== 'backend'
+      ) {
+        throw new Error('Backend Step Configuration requires an owned Workspace Session.')
+      }
+      return await services.eccRuntimeService.readWorkspaceStepConfiguration({
+        step: runtimeRequest.step,
+        workspaceHandle: runtimeRequest.workspaceHandle,
+      })
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.designRuntimeWorkspaceRefreshConfig,
     async (_event, request) => {
       const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
@@ -2578,14 +2580,14 @@ export function registerIpc(
           await Promise.all(
             agentWorkspaceStepIds.map(async (step) => {
               try {
-                const result = await services.eccRuntimeService.workspaceInfo({
-                  id: 'config',
-                  step,
-                  workspaceHandle: agentRequest.workspaceId!,
-                })
-                const info = isRecord(result) ? result.info : null
-                const options = isRecord(info) ? info.options : null
-                return isRecord(options) ? ([step, options] as const) : null
+                const result =
+                  await services.eccRuntimeService.readWorkspaceStepConfiguration({
+                    step,
+                    workspaceHandle: agentRequest.workspaceId!,
+                  })
+                return result.status === 'available' && isRecord(result.options)
+                  ? ([step, result.options] as const)
+                  : null
               } catch {
                 return null
               }

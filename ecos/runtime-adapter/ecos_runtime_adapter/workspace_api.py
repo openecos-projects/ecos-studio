@@ -51,6 +51,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceInfoRequest,
     WorkspaceMutationRequest,
     WorkspaceRecoverInterruptedRequest,
+    WorkspaceStepConfigurationReadRequest,
 )
 from ecos_runtime_adapter.sessions import (
     LayoutEditSession,
@@ -106,17 +107,10 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
     def workspace_info(self, request: WorkspaceInfoRequest) -> dict:
         session = self._get_session(request.workspace_id)
         if request.info_id == "config":
-            from chipcompiler.engine import read_step_configuration
-
-            try:
-                info = read_step_configuration(session.workspace, request.step)
-            except Exception as exc:
-                from chipcompiler.engine import WorkspaceLifecycleError
-
-                if isinstance(exc, WorkspaceLifecycleError):
-                    raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
-                raise
-            return {"step": request.step, "id": request.info_id, "info": info}
+            raise RuntimeApiError(
+                "unsupported_info",
+                "workspace.info does not support Step Configuration reads",
+            )
         workspace_step = _workspace_step_from_flow(session.workspace, request.step)
         if workspace_step is None:
             raise RuntimeApiError("command_failed", f"step not found: {request.step}")
@@ -133,6 +127,50 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
             "id": request.info_id,
             "info": stringify_paths(info or {}),
         }
+
+    def read_workspace_step_configuration(
+        self, request: WorkspaceStepConfigurationReadRequest
+    ) -> dict:
+        if bool(request.workspace_id) == bool(request.directory):
+            raise RuntimeApiError(
+                "invalid_request",
+                "Exactly one of workspaceId or directory is required",
+            )
+
+        from chipcompiler.engine import (
+            WorkspaceLifecycleError,
+            read_step_configuration,
+            read_step_configuration_from_directory,
+        )
+
+        try:
+            if request.directory:
+                result = read_step_configuration_from_directory(
+                    request.directory,
+                    request.step,
+                )
+            else:
+                session = self._get_session(request.workspace_id)
+                result = read_step_configuration(session.workspace, request.step)
+        except WorkspaceLifecycleError as exc:
+            if exc.code == "step_configuration_unavailable":
+                return {
+                    "status": "unavailable",
+                    "step": request.step,
+                    "reason": exc.code,
+                    **exc.details,
+                    **(
+                        {
+                            "workspaceId": session.workspace_id,
+                            "workspaceRevision": session.workspace_revision,
+                        }
+                        if request.workspace_id
+                        else {}
+                    ),
+                }
+            raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+
+        return {"status": "available", **result}
 
     def refresh_config(self, request: WorkspaceIdRequest) -> dict:
         def refresh(session: WorkspaceSession) -> dict:

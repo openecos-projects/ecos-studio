@@ -243,6 +243,57 @@ describe('EccRpcRuntimeService pool', () => {
     })
   })
 
+  it('reads a baseline Step Configuration without opening a workspace session', async () => {
+    const pool = createPool()
+    const request = pool.service.readWorkspaceStepConfigurationForDirectory(
+      '/work/baseline',
+      'CTS',
+    )
+    pool.clientFor(null).responses.push({
+      options: { skew_bound: 0.08 },
+      status: 'available',
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-baseline',
+      workspaceRevision: 2,
+    })
+
+    await expect(request).resolves.toMatchObject({
+      status: 'available',
+      workspaceRevision: 2,
+    })
+    expect(
+      pool.clientFor(null).calls.filter((call) => call.method === 'workspace.open'),
+    ).toEqual([])
+    expect(pool.clientFor(null).calls.at(-1)).toEqual({
+      method: 'workspace.step_configuration.read',
+      params: { directory: '/work/baseline', step: 'CTS' },
+    })
+  })
+
+  it('maps a normal unavailable Step Configuration to a product missing result', async () => {
+    const pool = createPool()
+    const request = pool.service.readWorkspaceStepConfigurationForDirectory(
+      '/work/baseline',
+      'Synthesis',
+    )
+    pool.clientFor(null).responses.push({
+      reason: 'step_configuration_unavailable',
+      status: 'unavailable',
+      step: 'Synthesis',
+      workspaceId: 'workspace-baseline',
+      workspaceRevision: 2,
+    })
+
+    await expect(request).resolves.toEqual({
+      reason: 'step_configuration_unavailable',
+      status: 'missing',
+      step: 'Synthesis',
+      workspaceId: 'workspace-baseline',
+      workspaceRevision: 2,
+    })
+  })
+
   it('releases the one-shot workspace creation sidecar after the session is registered', async () => {
     const pool = createPool()
 

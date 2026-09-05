@@ -227,6 +227,8 @@ export type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,

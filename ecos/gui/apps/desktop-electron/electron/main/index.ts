@@ -252,30 +252,8 @@ function getDesktopServices() {
   )
   const projectManagementReadService = new ProjectManagementReadService(
     projectManifestService,
-    async (directory, step) => {
-      const opened = await eccRuntimeService.openWorkspace({ directory })
-      try {
-        const result = await eccRuntimeService.workspaceInfo({
-          id: 'config',
-          step,
-          workspaceHandle: opened.workspaceHandle,
-        })
-        const info: Record<string, unknown> =
-          typeof result.info === 'object' &&
-          result.info !== null &&
-          !Array.isArray(result.info)
-            ? (result.info as Record<string, unknown>)
-            : {}
-        const options = info.options
-        return typeof options === 'object' && options !== null && !Array.isArray(options)
-          ? options
-          : {}
-      } finally {
-        await eccRuntimeService.releaseWorkspace({
-          workspaceHandle: opened.workspaceHandle,
-        })
-      }
-    },
+    (directory, step) =>
+      eccRuntimeService.readWorkspaceStepConfigurationForDirectory(directory, step),
   )
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,

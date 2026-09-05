@@ -59,6 +59,29 @@ export interface EccWorkspaceStepConfigurationUpdateRequest extends EccWorkspace
   stepId: string
 }
 
+export interface EccWorkspaceStepConfigurationReadRequest extends EccWorkspaceHandleRequest {
+  step: string
+}
+
+export type EccWorkspaceStepConfigurationReadResult =
+  | {
+      options: Record<string, unknown>
+      status: 'available'
+      step: string
+      stepId: string
+      workspaceId: string
+      workspaceRevision: number
+    }
+  | {
+      options?: Record<string, unknown>
+      reason: string
+      status: 'missing' | 'unavailable'
+      step: string
+      stepId?: string
+      workspaceId?: string
+      workspaceRevision?: number
+    }
+
 export interface EccWorkspaceHandleRequest {
   workspaceHandle: string
   expectedWorkspaceRevision?: number

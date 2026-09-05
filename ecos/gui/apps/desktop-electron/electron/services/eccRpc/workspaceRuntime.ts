@@ -33,6 +33,8 @@ import type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
   EccWorkspaceRuntimeSnapshot,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
@@ -393,6 +395,23 @@ export class EccWorkspaceRuntime {
 
   workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
     return this.commands.workspaceInfo(request)
+  }
+
+  readWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationReadRequest,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    return this.commands.readWorkspaceStepConfiguration(request)
+  }
+
+  async readWorkspaceStepConfigurationForDirectory(
+    directory: string,
+    step: string,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const client = await this.ensureStarted()
+    return await client.call<EccWorkspaceStepConfigurationReadResult>(
+      'workspace.step_configuration.read',
+      { directory, step },
+    )
   }
 
   async refreshConfig(

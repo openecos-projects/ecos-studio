@@ -19,6 +19,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceCreateRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
+    WorkspaceStepConfigurationReadRequest,
     WorkspaceMutationRequest,
     WorkspaceOpenRequest,
     WorkspaceRecoverInterruptedRequest,
@@ -26,7 +27,10 @@ from ecos_runtime_adapter.requests import (
     WorkspaceSpecOpenRequest,
     WorkspaceStepConfigurationUpdateRequest,
 )
-from ecos_runtime_adapter.sessions import WorkspaceSessionRegistry
+from ecos_runtime_adapter.sessions import (
+    WorkspaceSessionNotFound,
+    WorkspaceSessionRegistry,
+)
 from ecos_runtime_adapter.workspace_api import RuntimeApiError, WorkspaceRuntimeApi
 
 
@@ -836,6 +840,73 @@ def test_workspace_home_and_info_use_session_id(monkeypatch, tmp_path):
         "id": "layout",
         "info": {"path": str(ws.resolve() / "layout.png")},
     }
+
+
+def test_step_configuration_read_returns_unavailable_for_noneditable_step(
+    monkeypatch, tmp_path
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    from chipcompiler.engine import WorkspaceLifecycleError
+
+    def read_step_configuration(_workspace, _step):
+        raise WorkspaceLifecycleError(
+            "step_configuration_unavailable",
+            "Flow Step has no editable configuration: Synthesis",
+        )
+
+    monkeypatch.setattr(
+        "chipcompiler.engine.read_step_configuration", read_step_configuration
+    )
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
+
+    info = api.read_workspace_step_configuration(
+        WorkspaceStepConfigurationReadRequest(
+            workspace_id=workspace_id, step="Synthesis"
+        )
+    )
+
+    assert info == {
+        "status": "unavailable",
+        "step": "Synthesis",
+        "reason": "step_configuration_unavailable",
+        "workspaceId": workspace_id,
+        "workspaceRevision": 1,
+    }
+
+
+def test_step_configuration_directory_read_does_not_create_session(
+    monkeypatch, tmp_path
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "chipcompiler.engine.read_step_configuration_from_directory",
+        lambda directory, step: {
+            "step": step,
+            "stepId": step,
+            "options": {"skew_bound": 0.08},
+            "workspaceId": "workspace-1",
+            "workspaceRevision": 3,
+        },
+    )
+    api = WorkspaceRuntimeApi()
+
+    result = api.read_workspace_step_configuration(
+        WorkspaceStepConfigurationReadRequest(directory=str(ws), step="CTS")
+    )
+
+    assert result == {
+        "status": "available",
+        "step": "CTS",
+        "stepId": "CTS",
+        "options": {"skew_bound": 0.08},
+        "workspaceId": "workspace-1",
+        "workspaceRevision": 3,
+    }
+    with pytest.raises(WorkspaceSessionNotFound):
+        api.sessions.get_session("workspace-1")
 
 
 def test_refresh_and_reset_flow_use_session(monkeypatch, tmp_path):

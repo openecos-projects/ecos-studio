@@ -26,6 +26,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceMutationRequest,
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
+    WorkspaceStepConfigurationReadRequest,
     WorkspaceStepConfigurationUpdateRequest,
     parse_request_model,
 )
@@ -122,6 +123,24 @@ def test_workspace_step_configuration_update_maps_canonical_payload():
     assert isinstance(request, WorkspaceStepConfigurationUpdateRequest)
     assert request.step_id == "Floorplan"
     assert request.options == {"ifp": {"thread_number": 8}}
+
+
+def test_workspace_step_configuration_read_accepts_session_or_directory():
+    session_request = _parse_runtime_request(
+        "workspace.step_configuration.read",
+        {"workspaceId": "workspace-1", "step": "CTS"},
+    )
+    directory_request = _parse_runtime_request(
+        "workspace.step_configuration.read",
+        {"directory": "/work/ws", "step": "CTS"},
+    )
+
+    assert isinstance(session_request, WorkspaceStepConfigurationReadRequest)
+    assert session_request.workspace_id == "workspace-1"
+    assert session_request.directory == ""
+    assert isinstance(directory_request, WorkspaceStepConfigurationReadRequest)
+    assert directory_request.directory == "/work/ws"
+    assert directory_request.workspace_id == ""
 
 
 @pytest.mark.parametrize(

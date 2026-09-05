@@ -26,6 +26,7 @@ def test_runtime_method_registry_contains_current_methods_once():
         "workspace.update",
         "workspace.configuration.update",
         "workspace.step_configuration.update",
+        "workspace.step_configuration.read",
         "workspace.close",
         "workspace.home",
         "workspace.info",

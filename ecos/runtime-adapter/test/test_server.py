@@ -50,6 +50,9 @@ class CompleteFakeApi:
     def update_workspace_step_configuration(self, _request):
         raise AssertionError("unexpected update_workspace_step_configuration call")
 
+    def read_workspace_step_configuration(self, _request):
+        raise AssertionError("unexpected read_workspace_step_configuration call")
+
     def close_workspace(self, _request):
         raise AssertionError("unexpected close_workspace call")
 

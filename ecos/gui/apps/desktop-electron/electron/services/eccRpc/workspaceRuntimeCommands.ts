@@ -26,6 +26,8 @@ import type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -292,6 +294,20 @@ export class WorkspaceRuntimeCommands {
     }))
   }
 
+  async readWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationReadRequest,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const client = await this.context.ensureStarted()
+    const workspaceId = await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+    return await client.call<EccWorkspaceStepConfigurationReadResult>(
+      'workspace.step_configuration.read',
+      {
+        step: request.step,
+        workspaceId,
+      },
+    )
+  }
+
   refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
@@ -465,16 +481,26 @@ export class WorkspaceRuntimeCommands {
     request: EccWorkspaceHandleRequest,
     params: (workspaceId: string, workspaceRevision: number) => Record<string, unknown>,
     options?: { timeoutMs?: number },
+    metadata?: RuntimeOperationMetadata,
   ): Promise<T> {
-    return this.context.enqueue(method, request.workspaceHandle, async () => {
-      const client = await this.context.ensureStarted()
-      const workspaceId = await this.context.resolveEccWorkspaceId(
-        request.workspaceHandle,
-      )
-      const workspaceRevision = this.context.sessions.require(
-        request.workspaceHandle,
-      ).workspaceRevision
-      return await client.call<T>(method, params(workspaceId, workspaceRevision), options)
-    })
+    return this.context.enqueue(
+      method,
+      request.workspaceHandle,
+      async () => {
+        const client = await this.context.ensureStarted()
+        const workspaceId = await this.context.resolveEccWorkspaceId(
+          request.workspaceHandle,
+        )
+        const workspaceRevision = this.context.sessions.require(
+          request.workspaceHandle,
+        ).workspaceRevision
+        return await client.call<T>(
+          method,
+          params(workspaceId, workspaceRevision),
+          options,
+        )
+      },
+      metadata,
+    )
   }
 }

@@ -6,6 +6,8 @@ import {
   type DesignTool,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
+  type EccWorkspaceStepConfigurationReadRequest,
+  type EccWorkspaceStepConfigurationReadResult,
   type EccWorkspaceStepConfigurationUpdateRequest,
   type ProjectManifestMpc,
   type WorkspaceConfig,
@@ -376,5 +378,14 @@ export function updateWorkspaceStepConfigurationApi(
   return getDesktopApi().productCommands.execute({
     command: 'workspace.updateStepConfiguration',
     payload: request,
+  })
+}
+
+export function readWorkspaceStepConfigurationApi(
+  request: EccWorkspaceStepConfigurationReadRequest,
+): Promise<EccWorkspaceStepConfigurationReadResult> {
+  return getDesktopApi().runtime.workspace.stepConfiguration({
+    ...request,
+    designTool: 'backend',
   })
 }

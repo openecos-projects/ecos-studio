@@ -108,7 +108,7 @@ export class ProjectManagementReadService {
     private readonly readStepConfiguration?: (
       workspacePath: string,
       step: string,
-    ) => Promise<unknown>,
+    ) => Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>,
   ) {}
 
   async readManifest(projectRoot: string): Promise<ProjectManifest | null> {
@@ -196,8 +196,10 @@ export class ProjectManagementReadService {
       request.workspacePath,
     )
     const result = await this.readStepConfiguration(workspacePath, request.step)
-    if (!isRecord(result)) throw new Error('ECC Step Configuration is unavailable.')
-    return { options: result, step: request.step }
+    if (!isRecord(result) || typeof result.status !== 'string') {
+      throw new Error('ECC Step Configuration is unavailable.')
+    }
+    return result
   }
 
   async readEngineeringSnapshot(request: {

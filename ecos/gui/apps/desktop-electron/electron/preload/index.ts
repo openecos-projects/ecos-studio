@@ -407,6 +407,11 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceHome, request),
       info: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceInfo, request),
+      stepConfiguration: (request) =>
+        invokeDesktop(
+          desktopApiIpcChannels.designRuntimeWorkspaceStepConfiguration,
+          request,
+        ),
       open: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceOpen, request),
       refreshConfig: (request) =>

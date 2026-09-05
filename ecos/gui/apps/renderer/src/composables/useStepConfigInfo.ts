@@ -1,8 +1,10 @@
 import { computed, nextTick, ref, unref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { InfoEnum, StepEnum } from '@/api/type'
-import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
-import { updateWorkspaceStepConfigurationApi } from '@/api/workspace'
+import { StepEnum } from '@/api/type'
+import {
+  readWorkspaceStepConfigurationApi,
+  updateWorkspaceStepConfigurationApi,
+} from '@/api/workspace'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
@@ -75,6 +77,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   const loading = ref(true)
   const error = ref<string | null>(null)
   const info = ref<Record<string, unknown> | null>(null)
+  const workspaceRevision = ref<number | null>(null)
   const runtimeMessages = ref<string[]>([])
   const responseKind = ref<'idle' | 'success' | 'warning' | 'failed' | 'error'>('idle')
 
@@ -101,6 +104,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   )
   let activeRefetchToken: symbol | null = null
   let lastLoadedStep: StepEnum | null = null
+  let revisionRetryCount = 0
 
   const currentStep = computed(() => {
     const explicitStep = unref(stepOverride)
@@ -112,7 +116,8 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
   const hasFlowStep = computed(() => currentStep.value !== undefined)
 
-  async function refetch(): Promise<void> {
+  async function fetchStepConfiguration(retryingRevision = false): Promise<void> {
+    if (!retryingRevision) revisionRetryCount = 0
     const stepEnum = currentStep.value
     const sessionId = workspaceLifecycle.currentSessionId.value
     const refetchToken = Symbol('step-config-refetch')
@@ -123,6 +128,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     if (!stepEnum) {
       info.value = null
       error.value = null
+      workspaceRevision.value = null
       runtimeMessages.value = []
       responseKind.value = 'idle'
       clearFileState()
@@ -133,6 +139,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
     loading.value = true
     error.value = null
+    workspaceRevision.value = null
     runtimeMessages.value = []
     if (lastLoadedStep !== stepEnum) {
       clearFileState()
@@ -140,31 +147,61 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
     try {
       const response = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveWorkspaceStepInfoApi({
-          designTool: currentProject.value?.designTool ?? 'backend',
+        readWorkspaceStepConfigurationApi({
           step: stepEnum,
-          id: InfoEnum.config,
           workspaceHandle: workspaceLifecycle.session.value.workspaceId,
         }),
       )
       if (!canApply() || !response) return
-      runtimeMessages.value = response.message ?? []
+      const currentSession = workspaceLifecycle.session.value
+      if (
+        (response.status === 'available' || response.status === 'missing') &&
+        (response.workspaceId !== currentSession.workspaceId ||
+          typeof response.workspaceRevision !== 'number' ||
+          !Number.isInteger(response.workspaceRevision) ||
+          response.workspaceRevision < 1)
+      ) {
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Step configuration response has no valid Workspace identity.'
+        clearFileState()
+        return
+      }
+      if (
+        typeof response.workspaceRevision === 'number' &&
+        response.workspaceRevision !== currentSession.workspaceRevision
+      ) {
+        if (revisionRetryCount < 1) {
+          revisionRetryCount += 1
+          void fetchStepConfiguration(true)
+          return
+        }
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Workspace Revision changed while loading Step Configuration.'
+        clearFileState()
+        return
+      }
 
-      const payload = response.info
-
-      if (response.response === 'available') {
+      if (response.status === 'available' && isRecord(response.options)) {
+        const payload = {
+          options: response.options,
+          stepId: response.stepId ?? response.step,
+        }
         responseKind.value = 'success'
-        info.value = payload ?? {}
-        await loadStepConfigFileFromInfo(info.value, sessionId, refetchToken)
+        workspaceRevision.value = response.workspaceRevision
+        info.value = payload
+        await loadStepConfigFileFromInfo(payload, sessionId, refetchToken)
         if (canApply()) {
           lastLoadedStep = stepEnum
         }
         return
       }
 
-      if (response.response === 'missing') {
-        info.value = payload
+      if (response.status === 'missing' || response.status === 'unavailable') {
+        info.value = {}
         responseKind.value = 'idle'
+        workspaceRevision.value = response.workspaceRevision ?? null
         clearFileState()
         lastLoadedStep = stepEnum
         return
@@ -172,8 +209,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
       responseKind.value = 'error'
       info.value = null
-      error.value =
-        (response.message && response.message[0]) || 'Failed to load step configuration'
+      error.value = 'Failed to load step configuration'
       clearFileState()
     } catch (e) {
       if (!canApply()) return
@@ -185,6 +221,10 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         loading.value = false
       }
     }
+  }
+
+  function refetch(): Promise<void> {
+    return fetchStepConfiguration()
   }
 
   function clearFileState() {
@@ -390,15 +430,15 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         stepConfigSaveError.value = 'Step configuration must be an object'
         return false
       }
-      const workspaceRevision = workspaceLifecycle.session.value.workspaceRevision
-      if (typeof workspaceRevision !== 'number') {
+      const expectedWorkspaceRevision = workspaceLifecycle.session.value.workspaceRevision
+      if (typeof expectedWorkspaceRevision !== 'number') {
         stepConfigSaveError.value = 'Workspace Revision is unavailable'
         return false
       }
       const result = await workspaceLifecycle.runForSession(sessionId, () =>
         updateWorkspaceStepConfigurationApi({
           commandId: crypto.randomUUID(),
-          expectedWorkspaceRevision: workspaceRevision,
+          expectedWorkspaceRevision,
           options: normalizedDraft,
           stepId: step,
           workspaceHandle: workspaceLifecycle.session.value.workspaceId,
@@ -412,6 +452,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       )
         return false
       workspaceLifecycle.updateWorkspaceRevision(result.workspaceRevision, sessionId)
+      workspaceRevision.value = result.workspaceRevision
       workspaceLifecycle.invalidate(['step-config', 'step', 'home'], {
         reason: 'step-config-save',
         sessionId,
@@ -449,6 +490,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     isEmpty,
     refetch,
     stepConfigPathResolved,
+    workspaceRevision,
     stepConfigRaw,
     stepConfigDisplay,
     stepConfigReadError,

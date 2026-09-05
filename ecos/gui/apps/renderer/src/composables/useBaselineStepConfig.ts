@@ -33,6 +33,10 @@ interface BaselineWorkspaceSnapshot {
 const snapshotCache = new Map<string, BaselineWorkspaceSnapshot>()
 const READ_TIMEOUT_MS = 12_000
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 /** Clears cached baseline workspace snapshots (route leave / workspace close). */
 export function clearBaselineStepConfigCache(): void {
   snapshotCache.clear()
@@ -52,6 +56,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
   const noConfigReason = ref<BaselineStepConfigNoConfigReason | null>(null)
   const baselineWorkspaceName = ref<string | null>(null)
   const baselineSource = ref<ProjectQorBaselineSource | null>(null)
+  const workspaceRevision = ref<number | null>(null)
   const configRelativePath = ref<string | null>(null)
   const configFileName = ref<string | null>(null)
   const rawText = ref<string | null>(null)
@@ -68,6 +73,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
     noConfigReason?: BaselineStepConfigNoConfigReason | null
     baselineWorkspaceName?: string | null
     baselineSource?: ProjectQorBaselineSource | null
+    workspaceRevision?: number | null
     configRelativePath?: string | null
     rawText?: string | null
     error?: string | null
@@ -76,6 +82,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
     noConfigReason.value = next.noConfigReason ?? null
     baselineWorkspaceName.value = next.baselineWorkspaceName ?? null
     baselineSource.value = next.baselineSource ?? null
+    workspaceRevision.value = next.workspaceRevision ?? null
     configRelativePath.value = next.configRelativePath ?? null
     configFileName.value = next.configRelativePath
       ? basename(next.configRelativePath)
@@ -214,11 +221,77 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
       )
       if (disposed || token !== requestToken) return
 
+      if (
+        result.status === 'available' &&
+        (result.workspaceId !== baseline.workspaceId ||
+          typeof result.workspaceRevision !== 'number' ||
+          !Number.isInteger(result.workspaceRevision) ||
+          result.workspaceRevision < 1)
+      ) {
+        applyResult({
+          status: 'unavailable',
+          baselineWorkspaceName: snapshot.workspaceName,
+          baselineSource: baseline.source,
+          error: 'Baseline Step Configuration response has no valid Workspace identity.',
+        })
+        return
+      }
+
+      if (result.status === 'missing' || result.status === 'unavailable') {
+        if (
+          result.status === 'missing' &&
+          (result.workspaceId !== baseline.workspaceId ||
+            typeof result.workspaceRevision !== 'number' ||
+            !Number.isInteger(result.workspaceRevision) ||
+            result.workspaceRevision < 1)
+        ) {
+          applyResult({
+            status: 'unavailable',
+            baselineWorkspaceName: snapshot.workspaceName,
+            baselineSource: baseline.source,
+            error:
+              'Baseline Step Configuration response has no valid Workspace identity.',
+          })
+          return
+        }
+        if (
+          result.status === 'missing' ||
+          result.reason === 'step_configuration_unavailable'
+        ) {
+          applyResult({
+            status: 'no-config-for-step',
+            noConfigReason: 'no-config-file',
+            baselineWorkspaceName: snapshot.workspaceName,
+            baselineSource: baseline.source,
+            workspaceRevision: result.workspaceRevision,
+          })
+        } else {
+          applyResult({
+            status: 'unavailable',
+            baselineWorkspaceName: snapshot.workspaceName,
+            baselineSource: baseline.source,
+            workspaceRevision: result.workspaceRevision,
+            error: result.reason ?? 'Step Configuration is unavailable.',
+          })
+        }
+        return
+      }
+      if (!isRecord(result.options)) {
+        applyResult({
+          status: 'unavailable',
+          baselineWorkspaceName: snapshot.workspaceName,
+          baselineSource: baseline.source,
+          error: 'Step Configuration response is invalid.',
+        })
+        return
+      }
+
       applyResult({
         status: 'available',
         baselineWorkspaceName: snapshot.workspaceName,
         baselineSource: baseline.source,
-        configRelativePath: result.step,
+        workspaceRevision: result.workspaceRevision,
+        configRelativePath: result.stepId ?? result.step,
         rawText: JSON.stringify(result.options, null, 2),
       })
     } catch (cause) {
@@ -250,6 +323,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
     noConfigReason,
     baselineWorkspaceName,
     baselineSource,
+    workspaceRevision,
     configRelativePath,
     configFileName,
     rawText,

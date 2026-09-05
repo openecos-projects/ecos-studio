@@ -36,6 +36,8 @@ import type {
   EccWorkspaceResetFlowResult,
   EccWorkspaceRuntimeSnapshot,
   EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -403,6 +405,27 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).workspaceInfo(request)
   }
 
+  async readWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationReadRequest,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const result = await this.runtimeForHandle(
+      request.workspaceHandle,
+    ).readWorkspaceStepConfiguration(request)
+    return mapStepConfigurationReadResult(result)
+  }
+
+  async readWorkspaceStepConfigurationForDirectory(
+    directory: string,
+    step: string,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const result =
+      await this.getOrCreateControlRuntime().readWorkspaceStepConfigurationForDirectory(
+        directory,
+        step,
+      )
+    return mapStepConfigurationReadResult(result)
+  }
+
   async refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
@@ -705,4 +728,67 @@ export class EccRpcRuntimeService {
       })
     }
   }
+}
+
+function mapStepConfigurationReadResult(
+  result: unknown,
+): EccWorkspaceStepConfigurationReadResult {
+  if (!isRecord(result) || typeof result.step !== 'string') {
+    return {
+      reason: 'step_configuration_invalid_response',
+      status: 'unavailable',
+      step: '',
+    }
+  }
+  if (result.status === 'available') {
+    if (
+      typeof result.workspaceId !== 'string' ||
+      typeof result.workspaceRevision !== 'number' ||
+      !Number.isInteger(result.workspaceRevision) ||
+      result.workspaceRevision < 1 ||
+      typeof result.stepId !== 'string' ||
+      !isRecord(result.options)
+    ) {
+      return {
+        reason: 'step_configuration_invalid_response',
+        status: 'unavailable',
+        step: result.step,
+      }
+    }
+    return result as EccWorkspaceStepConfigurationReadResult
+  }
+  if (
+    (result.status === 'missing' || result.status === 'unavailable') &&
+    typeof result.reason === 'string'
+  ) {
+    if (
+      result.reason === 'step_configuration_unavailable' &&
+      (typeof result.workspaceId !== 'string' ||
+        typeof result.workspaceRevision !== 'number' ||
+        !Number.isInteger(result.workspaceRevision) ||
+        result.workspaceRevision < 1)
+    ) {
+      return {
+        reason: 'step_configuration_invalid_response',
+        status: 'unavailable',
+        step: result.step,
+      }
+    }
+    if (
+      result.status === 'unavailable' &&
+      result.reason === 'step_configuration_unavailable'
+    ) {
+      return { ...result, status: 'missing' } as EccWorkspaceStepConfigurationReadResult
+    }
+    return result as EccWorkspaceStepConfigurationReadResult
+  }
+  return {
+    reason: 'step_configuration_invalid_response',
+    status: 'unavailable',
+    step: result.step,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
