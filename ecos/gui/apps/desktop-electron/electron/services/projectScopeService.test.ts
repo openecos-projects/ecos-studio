@@ -391,10 +391,31 @@ describe('ProjectScopeService', () => {
     await expect(service.isProjectDirectory(root)).resolves.toBe(true)
   })
 
+  it('recognizes a workspace configured by home/params.toml', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(join(root, 'home', 'flow.json'), '{"steps":[]}')
+    await writeFile(join(root, 'home', 'params.toml'), '[params]\ndesign = "demo"\n')
+
+    const service = new ProjectScopeService()
+
+    await expect(service.isProjectDirectory(root)).resolves.toBe(true)
+  })
+
   it('rejects a directory with only one workspace marker file', async () => {
     const root = await createTempDir('ecos-project-root-')
     await mkdir(join(root, 'home'), { recursive: true })
     await writeFile(join(root, 'home', 'flow.json'), '{"steps":[]}')
+
+    const service = new ProjectScopeService()
+
+    await expect(service.isProjectDirectory(root)).resolves.toBe(false)
+  })
+
+  it('rejects a directory with only a workspace config file', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(join(root, 'home', 'params.toml'), '[params]\ndesign = "demo"\n')
 
     const service = new ProjectScopeService()
 

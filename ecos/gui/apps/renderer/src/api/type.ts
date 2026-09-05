@@ -45,6 +45,8 @@ export enum StepEnum {
   LEGALIZATION = 'legalization',
   ROUTING = 'route',
   FILLER = 'filler',
+  LEC = 'lec',
+  POST_ROUTE_LEC = 'postRouteLec',
   GDS = 'GDS',
   SIGNOFF = 'Signoff',
   HARDEN = 'Harden',
@@ -165,6 +167,20 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: true,
     group: 'run',
   },
+  [StepEnum.POST_ROUTE_LEC.toLowerCase()]: {
+    label: 'Post-Route LEC',
+    icon: 'ri-equal-line',
+    path: StepEnum.POST_ROUTE_LEC,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.LEC.toLowerCase()]: {
+    label: 'LEC',
+    icon: 'ri-equal-line',
+    path: StepEnum.LEC,
+    showInSidebar: true,
+    group: 'run',
+  },
   [StepEnum.STA.toLowerCase()]: {
     label: 'STA',
     icon: 'ri-pulse-line',
@@ -274,6 +290,7 @@ const STEP_TOOL_LABELS: Record<string, string> = {
   ecc: 'ECC',
   dreamplace: 'DreamPlace',
   yosys: 'Yosys',
+  yosys_lec: 'Yosys LEC',
   klayout: 'KLayout',
   sizer: 'Sizer',
 }

@@ -13,11 +13,23 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import {
-  desktopAgentParameterWriteFiles,
+  assignOwnJsonPathValue,
+  hasSafeJsonPath,
+  parameterWritesMatchPatch,
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopAgentWorkspaceRerunContract,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
+import {
+  assertNoSubMillisecondDatetimes,
+  editWorkspaceParameters,
+  locateWorkspaceParametersFile,
+  parseTomlDocument,
+  readWorkspaceConfigContained,
+  stringifyTomlDocument,
+  WORKSPACE_CONFIG_BASENAME,
+  writeTextAtomically,
+} from '../workspaceParametersFile'
 
 interface WorkspaceRerunRuntime {
   refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
@@ -50,6 +62,7 @@ const FLOW_STEP_SEQUENCE = [
   'drc',
   'lvs',
   'filler',
+  'postRouteLec',
   'RCX',
   'sta',
   'Harden',
@@ -68,11 +81,17 @@ const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = 
   drc: 'ecc',
   lvs: 'ecc',
   filler: 'ecc',
+  postRouteLec: 'yosys_lec',
   RCX: 'ecc',
   sta: 'ecc',
   Harden: 'ecc',
 }
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
+
+/** Step slug for rerun target directories and ids; spaces are not path-safe. */
+function rerunStepSlug(stepName: string): string {
+  return stepName.trim().split(/\s+/).join('_').toLowerCase()
+}
 const AUTHORIZED_KNOBS = {
   place: new Set([
     'place.target_density',
@@ -288,7 +307,7 @@ async function verifyWorkspaceRerunContract(
   const targetWorkspace = resolve(contract.target_workspace)
   const expectedTarget = join(
     dirname(sourceWorkspace),
-    `${basename(sourceWorkspace)}_rerun_${contract.target_step.toLowerCase()}`,
+    `${basename(sourceWorkspace)}_rerun_${rerunStepSlug(contract.target_step)}`,
   )
   const targetSuffix = targetWorkspace.slice(expectedTarget.length)
   if (
@@ -331,13 +350,16 @@ async function verifyWorkspaceRerunContract(
   if (!targetTool) {
     throw new Error('Workspace rerun target step is not completed in the source flow.')
   }
-  if (
-    !STAGE_OUTPUT_SUFFIXES.some(
-      (suffix) =>
-        contract.source_stage_artifact ===
-        `${workspaceStepDirectoryName(contract.target_step, targetTool)}/output/${contract.design_id}_${workspaceStepArtifactName(contract.target_step, targetTool)}${suffix}`,
-    )
-  ) {
+  const stageFileStem = workspaceStepArtifactName(contract.target_step, targetTool)
+  const stageOutputPrefix = `${workspaceStepDirectoryName(contract.target_step, targetTool)}/output/${contract.design_id}_${stageFileStem}`
+  const isStageArtifact = STAGE_OUTPUT_SUFFIXES.some(
+    (suffix) => contract.source_stage_artifact === `${stageOutputPrefix}${suffix}`,
+  )
+  // LEC stages publish an equivalence result JSON instead of layout outputs.
+  const isLecResultArtifact =
+    targetTool === 'yosys_lec' &&
+    contract.source_stage_artifact === `${stageOutputPrefix}_result.json`
+  if (!isStageArtifact && !isLecResultArtifact) {
     throw new Error('Workspace rerun source artifact does not match the completed stage.')
   }
   const artifact = await resolvePathWithinWorkspace(
@@ -454,52 +476,18 @@ function hasValidParameterWrites(
   writes: DesktopAgentWorkspaceParameterWrite[],
 ): boolean {
   if (!Array.isArray(writes) || writes.length !== patch.length) return false
-  const patchesByKnob = new Map(patch.map((item) => [item.knob_id, item]))
-  const writeKnobs = new Set<string>()
-  const writePaths = new Set<string>()
-  return writes.every((write) => {
-    const pathKey = `${write.file}:${JSON.stringify(write.json_path)}`
-    const patchItem = patchesByKnob.get(write.knob_id)
-    if (
-      !patchItem ||
-      writeKnobs.has(write.knob_id) ||
-      writePaths.has(pathKey) ||
-      !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
-      (write.surface === 'parameters' && write.file !== 'home/parameters.json') ||
-      (write.surface === 'step_config' && write.file === 'home/parameters.json') ||
-      !hasValidJsonPath(write.json_path) ||
-      !isValidParameterValue(write.value) ||
-      !writeValueMatchesPatch(write, patchItem)
-    ) {
-      return false
-    }
-    writeKnobs.add(write.knob_id)
-    writePaths.add(pathKey)
-    return true
-  })
-}
-
-function writeValueMatchesPatch(
-  write: DesktopAgentWorkspaceParameterWrite,
-  patch: DesktopAgentWorkspaceRerunContract['parameter_patch'][number],
-): boolean {
-  const expected =
-    patch.knob_id === 'place.routability_opt' && typeof patch.value === 'boolean'
-      ? Number(patch.value)
-      : patch.value
-  return JSON.stringify(write.value) === JSON.stringify(expected)
+  if (
+    !writes.every(
+      (write) => hasValidJsonPath(write.json_path) && isValidParameterValue(write.value),
+    )
+  ) {
+    return false
+  }
+  return parameterWritesMatchPatch(patch, writes)
 }
 
 function hasValidJsonPath(path: (string | number)[]): boolean {
-  return (
-    path.length > 0 &&
-    path.length <= 8 &&
-    path.every(
-      (segment) =>
-        (typeof segment === 'string' && segment.length > 0 && segment.length <= 128) ||
-        (typeof segment === 'number' && Number.isInteger(segment) && segment >= 0),
-    )
-  )
+  return hasSafeJsonPath(path)
 }
 
 function isValidParameterValue(
@@ -588,6 +576,10 @@ async function materializeWorkspaceRerunParameterWrites(
     writesByFile.set(write.file, fileWrites)
   }
   for (const [file, fileWrites] of writesByFile) {
+    if (file === 'home/params.toml' || file === 'home/parameters.json') {
+      await materializeParameterSurfaceWrites(workspace, fileWrites)
+      continue
+    }
     const path = await resolvePathWithinWorkspace(
       workspace,
       join(workspace, file),
@@ -599,6 +591,44 @@ async function materializeWorkspaceRerunParameterWrites(
     const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
     await writeFile(path, raw.endsWith('\n') ? `${serialized}\n` : serialized, 'utf8')
   }
+}
+
+/**
+ * Apply `surface: 'parameters'` writes to the workspace configuration that
+ * actually exists on disk: `home/params.toml` when present, `home/parameters.json`
+ * otherwise. The contract's `file` field names the format the Agent saw; disk
+ * reality wins when the two disagree, and the `json_path` keys are interpreted
+ * in the on-disk file's vocabulary (display keys for JSON, flat snake_case
+ * for TOML).
+ */
+async function materializeParameterSurfaceWrites(
+  workspace: string,
+  writes: DesktopAgentWorkspaceParameterWrite[],
+): Promise<void> {
+  const location = await locateWorkspaceParametersFile(workspace)
+  if (!location) {
+    throw new Error(
+      `Workspace rerun parameter file is invalid: neither home/params.toml nor home/parameters.json exists`,
+    )
+  }
+  const locationStats = await lstat(location.path)
+  if (locationStats.isSymbolicLink()) {
+    // A symlinked config path makes the materialization target ambiguous —
+    // refuse it, matching the save/edit paths and ECC's own symlink refusal.
+    throw new Error(
+      `Refusing to materialize rerun parameters through a symlink: ${location.path}`,
+    )
+  }
+  const validatedPath = await resolvePathWithinWorkspace(
+    workspace,
+    location.path,
+    'workspace configuration',
+  )
+  await editWorkspaceParameters(workspace, writes, {
+    format: location.format,
+    path: validatedPath,
+    spelledPath: location.path,
+  })
 }
 
 function parseWorkspaceParameterDocument(
@@ -620,27 +650,9 @@ function setWorkspaceParameterValue(
   document: Record<string, unknown>,
   write: DesktopAgentWorkspaceParameterWrite,
 ): void {
-  let node: unknown = document
-  for (const segment of write.json_path.slice(0, -1)) {
-    node = workspaceParameterPathValue(node, segment)
-    if (node === undefined) throw new Error(`Parameter ${write.knob_id} does not exist.`)
-  }
-  const last = write.json_path.at(-1)!
-  if (workspaceParameterPathValue(node, last) === undefined) {
+  assignOwnJsonPathValue(document, write.json_path, write.value, () => {
     throw new Error(`Parameter ${write.knob_id} does not exist.`)
-  }
-  if (typeof last === 'number' && Array.isArray(node)) node[last] = write.value
-  else if (typeof last === 'string' && isRecord(node)) node[last] = write.value
-  else throw new Error(`Parameter ${write.knob_id} has an invalid write path.`)
-}
-
-function workspaceParameterPathValue(node: unknown, segment: string | number): unknown {
-  if (typeof segment === 'number') return Array.isArray(node) ? node[segment] : undefined
-  return isRecord(node) ? node[segment] : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  })
 }
 
 function detectJsonIndent(raw: string): number {
@@ -694,13 +706,11 @@ async function prepareWorkspaceRerunFlow(
   }
 
   if (executionScope === 'full_flow') {
-    const presentIndexes = flow.steps.map((step) =>
-      FLOW_STEP_SEQUENCE.indexOf(step.name as (typeof FLOW_STEP_SEQUENCE)[number]),
-    )
-    const maxPresentIndex = Math.max(-1, ...presentIndexes)
     const present = new Set(flow.steps.map((step) => step.name))
-    // Extend past the source flow's last step up to the catalog terminus.
-    for (let index = maxPresentIndex + 1; index <= endIndex; index += 1) {
+    // Fill missing catalog steps throughout the rerun range: flows created
+    // before a step was inserted (e.g. Timing Opt, postRouteLec) still gain
+    // it on a full-flow rerun instead of silently skipping the gate.
+    for (let index = targetIndex; index <= endIndex; index += 1) {
       const name = FLOW_STEP_SEQUENCE[index]!
       if (present.has(name)) continue
       flow.steps.push({
@@ -772,7 +782,171 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
   await pruneWorkspaceRerunChecklistJson(join(home, 'checklist.json'), wipedStageNames)
 }
 
-async function rewriteHomeJsonSourcePaths(
+function trimPathSeparators(value: string): string {
+  return value.replace(/[\\/]+$/g, '')
+}
+
+function normalizePathSeparators(value: string): string {
+  return value.replace(/\\/g, '/')
+}
+
+function isJsonWhitespace(char: string): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r'
+}
+
+function nextNonWhitespaceChar(raw: string, index: number): string | undefined {
+  while (index < raw.length && isJsonWhitespace(raw[index]!)) {
+    index += 1
+  }
+  return raw[index]
+}
+
+/**
+ * Rewrite decoded JSON string values with rewriteSourceRootedPath, then
+ * re-escape only those tokens. Object keys are left untouched even when they
+ * look like workspace paths (`{"/src/ws/cache":"metadata"}`). Raw-text
+ * replacement misses JSON-escaped Windows paths (`C:\\runs\\gcd`) and can
+ * insert unescaped native separators into otherwise slash-based JSON.
+ */
+export function rewriteJsonSourcePathStrings(
+  raw: string,
+  prefixes: string[],
+  targetWorkspace: string,
+): string {
+  let index = 0
+  let output = ''
+  while (index < raw.length) {
+    const char = raw[index]
+    if (char !== '"') {
+      output += char
+      index += 1
+      continue
+    }
+    const start = index
+    index += 1
+    let decoded = ''
+    let escaped = false
+    while (index < raw.length) {
+      const current = raw[index]
+      if (escaped) {
+        if (current === 'u' && /^[0-9a-fA-F]{4}/.test(raw.slice(index + 1, index + 5))) {
+          decoded += String.fromCharCode(
+            Number.parseInt(raw.slice(index + 1, index + 5), 16),
+          )
+          index += 5
+        } else {
+          decoded += unescapeJsonChar(current)
+          index += 1
+        }
+        escaped = false
+        continue
+      }
+      if (current === '\\') {
+        escaped = true
+        index += 1
+        continue
+      }
+      if (current === '"') {
+        index += 1
+        break
+      }
+      decoded += current
+      index += 1
+    }
+    // In JSON, a string is an object key iff the next non-whitespace token is
+    // `:`. Keys are identity, not workspace-rooted values.
+    if (nextNonWhitespaceChar(raw, index) === ':') {
+      output += raw.slice(start, index)
+      continue
+    }
+    const rewritten = rewriteSourceRootedPath(decoded, prefixes, targetWorkspace)
+    output += rewritten === decoded ? raw.slice(start, index) : JSON.stringify(rewritten)
+  }
+  return output
+}
+
+/**
+ * Rewrite a parsed string scalar that is the source workspace root or a
+ * path under it. Comparison is separator-normalized so Windows leaves
+ * (`C:\runs\gcd\origin\gcd.v`) match a `/`-terminated prefix; the
+ * replacement keeps the original value's separator style.
+ */
+
+export function rewriteSourceRootedPath(
+  value: string,
+  prefixes: string[],
+  targetWorkspace: string,
+): string {
+  const valueNormalized = normalizePathSeparators(value)
+  const targetTrimmed = trimPathSeparators(targetWorkspace)
+  const targetNormalized = normalizePathSeparators(targetTrimmed)
+  const separator = value.includes('\\') || targetWorkspace.includes('\\') ? '\\' : '/'
+  for (const prefix of prefixes) {
+    const trimmed = trimPathSeparators(prefix)
+    if (!trimmed) continue
+    const trimmedNormalized = normalizePathSeparators(trimmed)
+    if (!trimmedNormalized || trimmedNormalized === targetNormalized) continue
+    if (valueNormalized === trimmedNormalized) return targetWorkspace
+    if (valueNormalized.startsWith(`${trimmedNormalized}/`)) {
+      const rest = valueNormalized.slice(trimmedNormalized.length + 1)
+      const renderedRest = separator === '\\' ? rest.replace(/\//g, '\\') : rest
+      return `${targetTrimmed}${separator}${renderedRest}`
+    }
+  }
+  return value
+}
+
+/**
+ * Rewrite source-workspace prefixes inside parsed TOML string scalars: a
+ * value is workspace-rooted only when it equals the source prefix or lives
+ * under it, so prose sharing the prefix is untouched and TOML escaping is
+ * always correct (textual replacement would corrupt escaped paths).
+ */
+function rewriteTomlSourcePathLeaves(
+  node: unknown,
+  prefixes: string[],
+  targetWorkspace: string,
+): boolean {
+  const rewriteValue = (value: string): string =>
+    rewriteSourceRootedPath(value, prefixes, targetWorkspace)
+  const visit = (current: unknown): boolean => {
+    if (Array.isArray(current)) {
+      let changed = false
+      for (let index = 0; index < current.length; index += 1) {
+        const item = current[index]
+        if (typeof item === 'string') {
+          const rewritten = rewriteValue(item)
+          if (rewritten !== item) {
+            current[index] = rewritten
+            changed = true
+          }
+        } else {
+          changed = visit(item) || changed
+        }
+      }
+      return changed
+    }
+    if (current !== null && typeof current === 'object' && !(current instanceof Date)) {
+      let changed = false
+      for (const [key, item] of Object.entries(current)) {
+        if (typeof item === 'string') {
+          const rewritten = rewriteValue(item)
+          if (rewritten !== item) {
+            ;(current as Record<string, unknown>)[key] = rewritten
+            changed = true
+          }
+        } else {
+          changed = visit(item) || changed
+        }
+      }
+      return changed
+    }
+    return false
+  }
+  return visit(node)
+}
+
+export async function rewriteHomeJsonSourcePaths(
   homeDirectory: string,
   options: {
     sourceWorkspace: string
@@ -786,6 +960,20 @@ async function rewriteHomeJsonSourcePaths(
   ])
   if (prefixes.length === 0) return
 
+  let authorizedParent: string
+  try {
+    const homeStats = await lstat(homeDirectory)
+    if (homeStats.isSymbolicLink() || !homeStats.isDirectory()) {
+      throw new Error(
+        `Refusing to rewrite ${homeDirectory}: the home directory is a symlink or not a regular directory`,
+      )
+    }
+    authorizedParent = await realpath(homeDirectory)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+
   let entries: string[]
   try {
     entries = await readdir(homeDirectory)
@@ -795,29 +983,72 @@ async function rewriteHomeJsonSourcePaths(
   }
 
   for (const entry of entries) {
-    if (!entry.endsWith('.json')) continue
+    if (entry !== WORKSPACE_CONFIG_BASENAME && !entry.endsWith('.json')) continue
     if (entry === 'flow_agent_workspace_rerun_contract.v1.json') continue
     const filePath = join(homeDirectory, entry)
-    const original = await readFile(filePath, 'utf8')
-    let next = original
-    for (const prefix of prefixes) {
-      if (!prefix || prefix === options.targetWorkspace) continue
-      next = next.split(prefix).join(options.targetWorkspace)
+    const canonicalPath = join(authorizedParent, entry)
+    // Skip anything that is not a regular file: a symlinked config (the
+    // clone preserves it) would otherwise redirect the rewrite outside the
+    // workspace, and the read must not follow it either. Parent revalidation
+    // uses the already-authorized home directory so a swapped ancestor
+    // cannot retarget the rewrite.
+    const entryStats = await lstat(filePath)
+    if (!entryStats.isFile() || entryStats.isSymbolicLink()) continue
+    const original = await readWorkspaceConfigContained(filePath, canonicalPath)
+    if (entry === WORKSPACE_CONFIG_BASENAME) {
+      // Parse and rewrite only string scalars whose value is the source
+      // prefix or lives under it: prose is untouched and TOML escaping
+      // stays correct (a textual replacement corrupts escaped paths and
+      // misses their unescaped form).
+      assertNoSubMillisecondDatetimes(original, filePath)
+      const document = parseTomlDocument(original, filePath)
+      if (rewriteTomlSourcePathLeaves(document, prefixes, options.targetWorkspace)) {
+        await writeTextAtomically(filePath, stringifyTomlDocument(document), {
+          authorizedParent,
+        })
+      }
+      continue
     }
-    if (next !== original) {
-      await writeFile(filePath, next, 'utf8')
+    const rewritten = rewriteJsonSourcePathStrings(
+      original,
+      prefixes,
+      options.targetWorkspace,
+    )
+    if (rewritten !== original) {
+      await writeTextAtomically(filePath, rewritten, { authorizedParent })
     }
+  }
+}
+
+function unescapeJsonChar(char: string): string {
+  switch (char) {
+    case '"':
+    case '\\':
+    case '/':
+      return char
+    case 'b':
+      return '\b'
+    case 'f':
+      return '\f'
+    case 'n':
+      return '\n'
+    case 'r':
+      return '\r'
+    case 't':
+      return '\t'
+    default:
+      return char
   }
 }
 
 function uniquePathPrefixes(values: string[]): string[] {
   const prefixes = new Set<string>()
   for (const value of values) {
-    const trimmed = value.trim()
+    const trimmed = trimPathSeparators(value.trim())
     if (!trimmed) continue
     prefixes.add(trimmed)
-    const normalized = trimmed.replace(/\\/g, '/')
-    if (normalized !== trimmed) prefixes.add(normalized)
+    prefixes.add(trimmed.replace(/\\/g, '/'))
+    prefixes.add(trimmed.replace(/\//g, '\\'))
   }
   return [...prefixes].sort((left, right) => right.length - left.length)
 }

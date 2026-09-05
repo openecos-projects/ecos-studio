@@ -206,11 +206,19 @@ const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   timing_optimization: 'Sizer',
   timing_optimization_sizer: 'Sizer',
   sizer: 'Sizer',
+  // Timing Opt runs between Legal and Route; keep the coarse boundary at the
+  // preceding catalog step so branching from it starts at Route.
+  timingopt: 'Legal',
+  timingoptimization: 'Sizer',
+  timingoptimizationsizer: 'Sizer',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  // postRouteLec runs between Filler and RCX; same preceding-step rationale.
+  postlec: 'Filler',
+  postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
   gds: 'Harden',
@@ -606,7 +614,13 @@ export function normalizeProjectManifestFlowStep(
   if ((projectManifestFlowSteps as readonly string[]).includes(step)) {
     return step as ProjectManifestFlowStep
   }
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? 'Synth'
+  return (
+    FLOW_STEP_ALIASES[
+      String(step)
+        .toLowerCase()
+        .replace(/[_\-\s]+/g, '')
+    ] ?? 'Synth'
+  )
 }
 
 function normalizeWorkspace(

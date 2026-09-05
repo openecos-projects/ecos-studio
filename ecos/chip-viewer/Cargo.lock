@@ -708,6 +708,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "image",
+ "log",
  "pollster",
  "rstar",
  "serde",

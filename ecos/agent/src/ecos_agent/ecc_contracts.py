@@ -16,6 +16,7 @@ class ECCStepName(StrEnum):
     DRC = "drc"
     LVS = "lvs"
     FILLER = "filler"
+    POST_ROUTE_LEC = "postRouteLec"
     RCX = "RCX"
     STA = "sta"
     HARDEN = "Harden"

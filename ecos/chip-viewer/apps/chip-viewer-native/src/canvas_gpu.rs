@@ -92,10 +92,29 @@ pub struct GpuCanvasState {
 
 impl GpuCanvasState {
     pub fn new_from_env(target_format: wgpu::TextureFormat) -> Self {
+        Self::new_with_wgpu(true, target_format)
+    }
+
+    pub fn new_with_wgpu(has_wgpu: bool, target_format: wgpu::TextureFormat) -> Self {
+        if !has_wgpu {
+            return Self::cpu_only(target_format);
+        }
         let env_var = std::env::var("ECOS_GPU_CANVAS").unwrap_or_else(|_| "1".to_string());
-        let enabled = env_flag_requested(Some(&env_var));
+        let force_cpu = std::env::var("ECOS_FORCE_CPU")
+            .ok()
+            .map(|v| env_flag_requested(Some(&v)))
+            .unwrap_or(false);
+        let enabled = env_flag_requested(Some(&env_var)) && !force_cpu;
         Self {
             enabled,
+            failed: false,
+            target_format,
+        }
+    }
+
+    pub fn cpu_only(target_format: wgpu::TextureFormat) -> Self {
+        Self {
+            enabled: false,
             failed: false,
             target_format,
         }
@@ -427,6 +446,17 @@ mod tests {
     }
 
     #[test]
+    fn gpu_canvas_state_fallback_when_wgpu_unavailable() {
+        let state = GpuCanvasState::new_with_wgpu(false, wgpu::TextureFormat::Bgra8Unorm);
+        assert!(!state.enabled);
+        assert!(!state.failed);
+
+        let cpu_state = GpuCanvasState::cpu_only(wgpu::TextureFormat::Bgra8Unorm);
+        assert!(!cpu_state.enabled);
+        assert!(!cpu_state.failed);
+    }
+
+    #[test]
     fn test_tile_coords_single_tile() {
         let bbox = chipgeom_format::Rect32 {
             lx: 100,
@@ -516,7 +546,12 @@ pub struct CanvasGpuResources {
 }
 
 impl CanvasGpuResources {
-    pub fn new(device: &wgpu::Device, render_format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, render_format: wgpu::TextureFormat) -> Option<Self> {
+        if device.limits().max_storage_buffers_per_shader_stage < 1 {
+            log::warn!("GPU device lacks storage buffers; GPU canvas disabled");
+            return None;
+        }
+
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Canvas Uniform Buffer"),
             size: std::mem::size_of::<CanvasUniform>() as u64,
@@ -599,13 +634,17 @@ impl CanvasGpuResources {
             cache: None,
         });
 
-        Self {
+        Some(Self {
             pipeline,
             bind_group_layout,
             uniform_buffer,
             instance_buffers: std::collections::HashMap::new(),
-        }
+        })
     }
+}
+
+pub fn device_supports_storage_buffers(device: &wgpu::Device) -> bool {
+    device.limits().max_storage_buffers_per_shader_stage >= 1
 }
 
 pub struct CanvasGpuCallback {
@@ -625,11 +664,17 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if callback_resources.get::<CanvasGpuResources>().is_none() {
-            let res = CanvasGpuResources::new(device, self.target_format);
-            callback_resources.insert(res);
+        if !device_supports_storage_buffers(device) {
+            return Vec::new();
         }
-        let resources: &mut CanvasGpuResources = callback_resources.get_mut().unwrap();
+        if callback_resources.get::<CanvasGpuResources>().is_none() {
+            if let Some(res) = CanvasGpuResources::new(device, self.target_format) {
+                callback_resources.insert(res);
+            }
+        }
+        let Some(resources) = callback_resources.get_mut::<CanvasGpuResources>() else {
+            return Vec::new();
+        };
 
         queue.write_buffer(
             &resources.uniform_buffer,
@@ -705,7 +750,9 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        let resources: &CanvasGpuResources = callback_resources.get().unwrap();
+        let Some(resources) = callback_resources.get::<CanvasGpuResources>() else {
+            return;
+        };
         if let Some(entry) = resources.instance_buffers.get(&self.buffer_key) {
             if entry.count == 0 {
                 return;
@@ -782,16 +829,18 @@ impl egui_wgpu::CallbackTrait for HeatmapGpuCallback {
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if callback_resources.get::<HeatmapGpuResources>().is_none() {
-            callback_resources.insert(HeatmapGpuResources(CanvasGpuResources::new(
-                device,
-                self.target_format,
-            )));
+        if !device_supports_storage_buffers(device) {
+            return Vec::new();
         }
-        let resources = &mut callback_resources
-            .get_mut::<HeatmapGpuResources>()
-            .unwrap()
-            .0;
+        if callback_resources.get::<HeatmapGpuResources>().is_none() {
+            if let Some(res) = CanvasGpuResources::new(device, self.target_format) {
+                callback_resources.insert(HeatmapGpuResources(res));
+            }
+        }
+        let Some(resources_wrapper) = callback_resources.get_mut::<HeatmapGpuResources>() else {
+            return Vec::new();
+        };
+        let resources = &mut resources_wrapper.0;
 
         queue.write_buffer(
             &resources.uniform_buffer,

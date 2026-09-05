@@ -66,6 +66,7 @@ pub struct CanvasRenderStats {
     pub lod: u8,
     pub visible_drc_count: usize,
     pub visible_antenna_count: usize,
+    pub is_gpu: bool,
 }
 
 struct GpuCachedLabel {
@@ -101,6 +102,7 @@ struct LoadingViewer {
     antenna_statis_path: Option<PathBuf>,
     map_root_path: Option<PathBuf>,
     pub target_format: wgpu::TextureFormat,
+    pub render_mode: crate::RenderMode,
 }
 
 struct LoadedViewer {
@@ -170,7 +172,8 @@ struct LoadedViewer {
     geometry_epoch: u64,
     owner_category_cache: OwnerCategoryCache,
     visibility_rules_cache: VisibilityRulesCache,
-    gpu_canvas: crate::canvas_gpu::GpuCanvasState,
+    pub render_mode: crate::RenderMode,
+    pub gpu_canvas: Option<crate::canvas_gpu::GpuCanvasState>,
     gpu_frame_counter: u64,
     gpu_tile_instances:
         std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
@@ -187,6 +190,15 @@ struct LoadedViewer {
     status_line_buffer: String,
     shortcuts_overlay_visible: bool,
     loading_3d_start: Option<std::time::Instant>,
+}
+
+impl LoadedViewer {
+    #[inline]
+    pub fn is_gpu_active(&self) -> bool {
+        self.gpu_canvas
+            .as_ref()
+            .is_some_and(|g| g.enabled && !g.failed)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1362,6 +1374,7 @@ impl ChipViewerApp {
         antenna_statis_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
+        render_mode: crate::RenderMode,
     ) -> Self {
         let edit_enabled = mode == "edit";
         let (sender, receiver) = mpsc::channel();
@@ -1386,6 +1399,7 @@ impl ChipViewerApp {
                 antenna_statis_path,
                 map_root_path,
                 target_format,
+                render_mode,
             }),
             theme_initialized: false,
             startup_focus_requested: false,
@@ -1461,6 +1475,7 @@ impl ChipViewerApp {
                     loading.antenna_statis_path.clone(),
                     loading.map_root_path.clone(),
                     loading.target_format,
+                    loading.render_mode,
                 ))),
                 Ok(Err(err)) => Some(ViewerState::Error(err)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(ViewerState::Error(
@@ -2021,6 +2036,7 @@ impl LoadedViewer {
         antenna_statis_path: Option<PathBuf>,
         map_root_path: Option<PathBuf>,
         target_format: wgpu::TextureFormat,
+        render_mode: crate::RenderMode,
     ) -> Self {
         let stats = db.stats();
         let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
@@ -2050,6 +2066,18 @@ impl LoadedViewer {
             .map(|category| BTreeSet::from([category.id.clone()]))
             .unwrap_or_default();
         let map_thumbnail_worker = map_catalog.as_ref().map(|_| spawn_map_thumbnail_worker());
+        let gpu_canvas = match render_mode {
+            crate::RenderMode::Gpu => Some(crate::canvas_gpu::GpuCanvasState::new_with_wgpu(
+                true,
+                target_format,
+            )),
+            crate::RenderMode::Software | crate::RenderMode::EguiOnly => {
+                log::info!(
+                    "CPU/egui safe mode active, completely bypassing GPU canvas state creation"
+                );
+                None
+            }
+        };
         Self {
             color_theme,
             start_time: Instant::now(),
@@ -2117,7 +2145,8 @@ impl LoadedViewer {
             geometry_epoch: 1,
             owner_category_cache: OwnerCategoryCache::default(),
             visibility_rules_cache: VisibilityRulesCache::default(),
-            gpu_canvas: crate::canvas_gpu::GpuCanvasState::new_from_env(target_format),
+            render_mode,
+            gpu_canvas,
             gpu_tile_instances: std::collections::HashMap::new(),
             gpu_3d_instances_cache: None,
             last_3d_query_rect: None,
@@ -2653,23 +2682,28 @@ impl LoadedViewer {
         });
         ui.horizontal(|ui| {
             for (mode, label) in [(ViewMode::TwoD, "2D"), (ViewMode::ThreeD, "3D")] {
-                if ui
-                    .selectable_label(self.view_mode == mode, label)
-                    .on_hover_text(if mode == ViewMode::ThreeD {
-                        "Orbit the extruded metal stack"
-                    } else {
-                        "Plan-view layout canvas"
-                    })
-                    .clicked()
-                {
-                    if self.view_mode != mode {
-                        if mode == ViewMode::ThreeD {
-                            self.switch_to_3d_mode();
+                let enabled = mode == ViewMode::TwoD || self.is_gpu_active();
+                ui.add_enabled_ui(enabled, |ui| {
+                    if ui
+                        .selectable_label(self.view_mode == mode, label)
+                        .on_hover_text(if !enabled && mode == ViewMode::ThreeD {
+                            "3D view requires hardware acceleration (running in CPU fallback)"
+                        } else if mode == ViewMode::ThreeD {
+                            "Orbit the extruded metal stack"
                         } else {
-                            self.switch_to_2d_mode();
+                            "Plan-view layout canvas"
+                        })
+                        .clicked()
+                    {
+                        if self.view_mode != mode {
+                            if mode == ViewMode::ThreeD {
+                                self.switch_to_3d_mode();
+                            } else {
+                                self.switch_to_2d_mode();
+                            }
                         }
                     }
-                }
+                });
             }
             ui.separator();
             if ui.button("⛶").on_hover_text("Fit layout to view").clicked() {
@@ -3330,6 +3364,37 @@ impl LoadedViewer {
             return;
         }
 
+        if !self.is_gpu_active() {
+            let painter = ui.painter();
+            for instance in heatmap.instances.iter() {
+                let rect = shape_screen_rect(
+                    Rect32 {
+                        lx: instance.rect_dbu[0],
+                        ly: instance.rect_dbu[1],
+                        hx: instance.rect_dbu[2],
+                        hy: instance.rect_dbu[3],
+                    },
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
+                );
+                let visible = rect.intersect(canvas);
+                if visible.is_positive() {
+                    let rgba_bytes = instance.fill_rgba.to_le_bytes();
+                    let alpha = ((rgba_bytes[3] as f32) * heatmap.opacity).round() as u8;
+                    let color = egui::Color32::from_rgba_unmultiplied(
+                        rgba_bytes[0],
+                        rgba_bytes[1],
+                        rgba_bytes[2],
+                        alpha,
+                    );
+                    painter.rect_filled(visible, 0.0, color);
+                }
+            }
+            return;
+        }
+
         let scale = world_to_screen_scale(world, canvas, self.zoom);
         let uniform = crate::canvas_gpu::CanvasUniform {
             world_center_dbu: [
@@ -3360,12 +3425,18 @@ impl LoadedViewer {
             object_visibility_bits: 0,
         };
 
+        let target_format = self
+            .gpu_canvas
+            .as_ref()
+            .map(|g| g.target_format)
+            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+
         let callback = crate::canvas_gpu::HeatmapGpuCallback {
             uniform,
             instances: std::sync::Arc::clone(&heatmap.instances),
             buffer_key,
             frame_counter: self.gpu_frame_counter,
-            target_format: self.gpu_canvas.target_format,
+            target_format,
         };
 
         ui.painter()
@@ -3642,7 +3713,7 @@ impl LoadedViewer {
             let layer_index = &self.visibility_rules_cache.layer_index;
             let zoom_rules = &self.visibility_rules_cache.zoom_rules;
             let mut visible_ids = Vec::new();
-            if !self.gpu_canvas.enabled {
+            if !self.is_gpu_active() {
                 let query_start = Instant::now();
                 visible_ids = self.render_cache.visible_shape_ids_for_layers(
                     &self.db,
@@ -3654,7 +3725,7 @@ impl LoadedViewer {
 
             self.paint_gpu_heatmap_overlay(ui, canvas, world);
 
-            if self.gpu_canvas.enabled {
+            if self.is_gpu_active() {
                 let gpu_start = Instant::now();
 
                 self.gpu_tile_instances.retain(|key, _| {
@@ -3847,12 +3918,18 @@ impl LoadedViewer {
 
                     drawn += tile_instances.instances.len();
 
+                    let target_format = self
+                        .gpu_canvas
+                        .as_ref()
+                        .map(|g| g.target_format)
+                        .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+
                     let callback = crate::canvas_gpu::CanvasGpuCallback {
                         uniform,
                         instances: std::sync::Arc::clone(&tile_instances.instances),
                         buffer_key,
                         frame_counter: self.gpu_frame_counter,
-                        target_format: self.gpu_canvas.target_format,
+                        target_format,
                     };
 
                     ui.painter()
@@ -4161,6 +4238,7 @@ impl LoadedViewer {
                 lod: view_lod,
                 visible_drc_count,
                 visible_antenna_count,
+                is_gpu: self.is_gpu_active(),
             };
             paint_render_stats_overlay(&painter, canvas, &stats);
         }
@@ -4507,6 +4585,17 @@ impl LoadedViewer {
         drag_started_in_canvas: bool,
         world: Rect32,
     ) {
+        if !self.is_gpu_active() {
+            painter.text(
+                canvas.center(),
+                egui::Align2::CENTER_CENTER,
+                "3D acceleration unavailable in this environment.\n2D layout rendering remains available.",
+                egui::FontId::proportional(14.0),
+                ecos_text_secondary(),
+            );
+            return;
+        }
+
         self.ensure_3d_view(world, canvas);
 
         let dt = ui.input(|i| i.stable_dt);
@@ -4768,11 +4857,11 @@ impl LoadedViewer {
             ui.ctx().request_repaint();
         }
 
-        if !self.gpu_canvas.enabled || self.gpu_canvas.failed {
+        if !self.is_gpu_active() {
             painter.text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
-                "3D view requires the GPU canvas",
+                "3D view requires hardware acceleration or GPU canvas (running in CPU fallback mode)",
                 egui::FontId::proportional(14.0),
                 ecos_text_secondary(),
             );
@@ -4797,6 +4886,11 @@ impl LoadedViewer {
                 instances.len().hash(&mut hasher);
                 hasher.finish()
             };
+            let target_format = self
+                .gpu_canvas
+                .as_ref()
+                .map(|g| g.target_format)
+                .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
             let callback = crate::canvas_gpu3d::CanvasGpu3dCallback {
                 uniform: crate::canvas_gpu3d::CanvasUniform3d::from_camera(
                     current_camera,
@@ -4812,7 +4906,7 @@ impl LoadedViewer {
                 instances,
                 instances_key,
                 target_pixels: [target_w, target_h],
-                target_format: self.gpu_canvas.target_format,
+                target_format,
             };
             ui.painter()
                 .add(egui_wgpu::Callback::new_paint_callback(canvas, callback));
@@ -5875,7 +5969,7 @@ impl LoadedViewer {
     }
 
     fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
-        if self.gpu_canvas.enabled {
+        if self.is_gpu_active() {
             return false;
         }
         should_use_view_tiles_for_state(
@@ -8178,14 +8272,14 @@ fn paint_render_stats_overlay(
             stats.query_time_ms, stats.filter_time_ms
         ),
         format!(
-            "Mode: {} | Zoom: {:.2} | LOD: {}",
+            "Engine: {} | Mode: {} | Zoom: {:.2}",
+            if stats.is_gpu { "GPU" } else { "CPU Fallback" },
             if stats.use_view_tiles {
                 "Tiles"
             } else {
                 "Exact"
             },
-            stats.zoom,
-            stats.lod
+            stats.zoom
         ),
         format!(
             "Shapes: {} | Est Primitives: {}",
@@ -11661,6 +11755,7 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
         );
         loaded.layers = vec![layer_state(1, true)];
         loaded.rebuild_layer_stack();
@@ -11741,6 +11836,7 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
         );
         loaded.layers = vec![layer_state(1, true)];
         loaded.rebuild_layer_stack();
@@ -13676,6 +13772,7 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
         );
         let delta_path = dir.join("geometry.delta.bin");
 
@@ -13716,9 +13813,37 @@ mod tests {
             None,
             None,
             wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::Gpu,
         );
 
         assert!(loaded.session_dirty);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loaded_viewer_falls_back_to_cpu_when_wgpu_unavailable() {
+        let dir = temp_snapshot_dir("cpu-fallback-test");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let loaded = LoadedViewer::new(
+            chip_display::ColorTheme::Vivid,
+            db,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            wgpu::TextureFormat::Bgra8Unorm,
+            crate::RenderMode::EguiOnly,
+        );
+
+        assert!(loaded.gpu_canvas.is_none());
+        assert!(!loaded.is_gpu_active());
 
         let _ = fs::remove_dir_all(&dir);
     }

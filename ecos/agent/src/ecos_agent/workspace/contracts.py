@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from ecos_agent.ecc_contracts import ECCStepName
 
-
 GUI_WORKSPACE_FLOW_STEPS = tuple(step.value for step in ECCStepName)
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 

@@ -844,6 +844,34 @@ describe('useWorkspace openProject', () => {
     ])
   })
 
+  it('reads canonical die_area utilization when Core is absent', async () => {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/demo',
+      name: 'demo',
+      path: '/work/demo',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    workspace.currentProject.value = project
+    workspace.recentProjects.value = [{ ...project }]
+    readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
+      steps: [{ name: 'synthesis', state: 'Success', runtime: '00:01:05' }],
+    })
+    readWorkspaceParametersResourceApiMock.mockResolvedValueOnce({
+      pdk: 'ics55',
+      top_module: 'top',
+      frequency_max: 125,
+      die_area: { utilitization: 0.41 },
+    })
+    await workspace.closeProject()
+
+    expect(settingsData.get('recent_projects')).toEqual([
+      expect.objectContaining({
+        coreUtilization: 0.41,
+      }),
+    ])
+  })
+
   it('applies a delayed snapshot to the original recent project after the list is prepended', async () => {
     const workspace = useWorkspace()
     const oldProject: Project = {

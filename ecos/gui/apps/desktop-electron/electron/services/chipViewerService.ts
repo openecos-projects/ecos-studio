@@ -503,15 +503,25 @@ function hasLinuxDisplayEnvironment(env: NodeJS.ProcessEnv): boolean {
 function viewerLaunchFailureMessage(
   summary: string,
   context: ViewerLaunchContext,
+  stderrContent: string = '',
 ): string {
-  return [
-    summary,
+  const lines = [summary]
+  if (stderrContent.includes('libxkbcommon-x11')) {
+    lines.push(
+      '',
+      'Diagnostic: Missing required system library "libxkbcommon-x11.so.0".',
+      'Alternatively, run ECOS Studio inside a Wayland kiosk compositor:',
+      '    cage -- ./ECOS-Studio... --no-sandbox',
+    )
+  }
+  lines.push(
     `Viewer binary: ${context.viewerPath}`,
     `Arguments: ${context.args.join(' ')}`,
     `Manifest: ${context.manifestPath}`,
     `stdout log: ${context.stdoutLogPath}`,
     `stderr log: ${context.stderrLogPath}`,
-  ].join('\n')
+  )
+  return lines.join('\n')
 }
 
 export class ChipViewerService {
@@ -827,12 +837,27 @@ export class ChipViewerService {
       this.closeOpenLogFile(stdoutFd)
       this.closeOpenLogFile(stderrFd)
       const detail = error instanceof Error ? error.message : String(error)
+      const stderrContent = await this.readStderrTail(launchContext.stderrLogPath)
       throw new Error(
         viewerLaunchFailureMessage(
           `Chip viewer failed to launch: ${detail}`,
           launchContext,
+          stderrContent,
         ),
       )
+    }
+  }
+
+  private async readStderrTail(logPath: string): Promise<string> {
+    if (!this.fileExists(logPath)) {
+      return ''
+    }
+    try {
+      const content = await this.readTextFile(logPath)
+      const lines = content.split('\n')
+      return lines.slice(-50).join('\n')
+    } catch {
+      return ''
     }
   }
 

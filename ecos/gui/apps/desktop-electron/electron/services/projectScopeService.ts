@@ -9,7 +9,10 @@ import {
 import { requireWindowScopeId } from './windowScopeContext'
 import { isPathWithinRoot } from './pathScope'
 
-const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
+const REQUIRED_PROJECT_FILES = ['flow.json']
+// A workspace persists its configuration as either home/params.toml (preferred)
+// or home/parameters.json (JSON workspaces, including ecc-fe).
+const WORKSPACE_CONFIG_FILES = ['params.toml', 'parameters.json']
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
   'sim_soc_root',
@@ -192,8 +195,21 @@ async function isProjectDirectoryCandidate(path: string): Promise<boolean> {
       }
     }),
   )
+  if (!requiredFileChecks.every(Boolean)) {
+    return false
+  }
 
-  return requiredFileChecks.every(Boolean)
+  const configFileChecks = await Promise.all(
+    WORKSPACE_CONFIG_FILES.map(async (fileName) => {
+      try {
+        const fileStats = await stat(`${homeDirectory}/${fileName}`)
+        return fileStats.isFile()
+      } catch {
+        return false
+      }
+    }),
+  )
+  return configFileChecks.some(Boolean)
 }
 
 function getPathLeafName(path: string): string | null {

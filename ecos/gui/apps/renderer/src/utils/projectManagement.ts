@@ -426,11 +426,20 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   timing_optimization: 'Sizer',
   timing_optimization_sizer: 'Sizer',
   sizer: 'Sizer',
+  // Timing Opt runs between Legal and Route; report it under the preceding
+  // coarse step. parseWorkspaceFlowStateMap merges duplicate coarse entries
+  // failure-first so a failed Timing Opt still fails the workspace.
+  timingopt: 'Legal',
+  timingoptimization: 'Sizer',
+  timingoptimizationsizer: 'Sizer',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  // postRouteLec runs between Filler and RCX; same failure-first rationale.
+  postlec: 'Filler',
+  postroutelec: 'Filler',
   rcx: 'RCX',
   sta: 'STA',
   gds: 'Harden',
@@ -1140,9 +1149,30 @@ export function parseWorkspaceFlowStateMap(
     const flowStep = knownFlowStep(name)
     if (!flowStep || !status) return stateMap
 
-    stateMap[flowStep] = status
+    // Timing Opt and postRouteLec alias onto the preceding coarse step; the
+    // aliased gate's state wins whenever it is more urgent than the
+    // predecessor's, so a pending or failed gate keeps the workspace out of
+    // success and blocks branching past it.
+    const existing = stateMap[flowStep]
+    if (existing === undefined || statusUrgency(status) > statusUrgency(existing)) {
+      stateMap[flowStep] = status
+    }
     return stateMap
   }, {})
+}
+
+/** Project-step status severity for merging aliased gates: failed > running > unstart. */
+function statusUrgency(status: ProjectStepStatus): number {
+  switch (status) {
+    case 'failed':
+      return 3
+    case 'running':
+      return 2
+    case 'unstart':
+      return 1
+    default:
+      return 0
+  }
 }
 
 export function nextWorkspaceId(
@@ -2099,7 +2129,13 @@ function normalizeFlowStep(step: FlowStep | string): FlowStep {
 
 function knownFlowStep(step: FlowStep | string): FlowStep | null {
   if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
+  return (
+    FLOW_STEP_ALIASES[
+      String(step)
+        .toLowerCase()
+        .replace(/[_\-\s]+/g, '')
+    ] ?? null
+  )
 }
 
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {
