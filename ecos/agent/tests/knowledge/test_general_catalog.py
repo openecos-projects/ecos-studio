@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+from ecos_agent.knowledge.bundle import KnowledgeBundle
 from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever
 from ecos_agent.optimization.knowledge.compiler import (
     knowledge_support_catalog_from_bundles,
@@ -117,6 +120,62 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
     assert target_density.activation_predicate_ids == card.runtime_probe_ids
     assert binding.consumer_ids
     assert binding.activation_predicate_ids
+
+
+def test_support_catalog_loads_parameter_cards_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original = load_parameter_cards
+
+    def counted_load():
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.knowledge.compiler_runtime.load_parameter_cards",
+        counted_load,
+    )
+
+    catalog = knowledge_support_catalog_from_bundles(
+        load_default_general_knowledge_bundles()
+    )
+
+    assert len(catalog.bindings) > 1
+    assert calls == 1
+
+
+def test_claim_only_support_does_not_load_parameter_cards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = next(
+        bundle
+        for bundle in load_default_general_knowledge_bundles()
+        if any(
+            entity.support is not None and entity.support.get("binding") is None
+            for entity in bundle.entities
+        )
+    )
+    entity = next(
+        entity
+        for entity in bundle.entities
+        if entity.support is not None and entity.support.get("binding") is None
+    )
+    claim_only = KnowledgeBundle(
+        bundle.spec,
+        (entity,),
+        {entity.entity_id: bundle.chunk_text(entity.entity_id)},
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization.knowledge.compiler_runtime.load_parameter_cards",
+        lambda: pytest.fail("claim-only support must not load parameter cards"),
+    )
+
+    catalog = knowledge_support_catalog_from_bundles((claim_only,))
+
+    assert len(catalog.claims) == 1
+    assert catalog.bindings == ()
 
 
 def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:

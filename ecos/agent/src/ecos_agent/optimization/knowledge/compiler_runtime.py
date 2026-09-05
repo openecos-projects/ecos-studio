@@ -36,6 +36,7 @@ from ecos_agent.optimization.knowledge.compiler import (
     SupportedKnowledgeAction,
     VersionBoundToolBinding,
 )
+from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
@@ -371,8 +372,9 @@ def knowledge_support_catalog_from_bundles(
         for item in raw_support
         if item.get("binding") is not None
     )
+    cards = load_parameter_cards() if bindings else {}
     for binding in bindings:
-        _validate_parameter_card_bindings(binding)
+        _validate_parameter_card_bindings(binding, cards)
     return KnowledgeSupportCatalog(
         catalog_sha256=canonical_sha256(raw_support),
         claims=claims,
@@ -380,8 +382,12 @@ def knowledge_support_catalog_from_bundles(
     )
 
 
-def _validate_parameter_card_bindings(binding: VersionBoundToolBinding) -> None:
-    cards = load_parameter_cards()
+def _validate_parameter_card_bindings(
+    binding: VersionBoundToolBinding,
+    cards: dict[OptimizationKnob, ParameterSemanticsCard] | None = None,
+) -> None:
+    if cards is None:
+        cards = load_parameter_cards()
     for action in binding.actions:
         try:
             knob = OptimizationKnob(action.knob_id)

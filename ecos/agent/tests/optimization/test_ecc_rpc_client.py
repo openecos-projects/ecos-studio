@@ -54,6 +54,64 @@ def test_step_completed_event_has_one_fixed_render_ack() -> None:
     )
 
 
+def test_stdio_client_queues_only_terminal_events_and_keeps_step_ack(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    sent = []
+    monkeypatch.setattr(client, "_send", sent.append)
+    step = {
+        "type": "step.completed",
+        "eventId": "event-1",
+        "operationId": "operation-1",
+        "payload": {
+            "state": "Success",
+            "stepCommitId": "operation-1:step:1",
+            "workspaceRevision": 1,
+        },
+    }
+    terminal = {
+        "type": "operation.completed",
+        "operationId": "operation-1",
+        "payload": {"state": "succeeded"},
+    }
+
+    client._handle_message(json.dumps({"method": "runtime.event", "params": step}).encode())
+    client._handle_message(
+        json.dumps(
+            {
+                "method": "runtime.event",
+                "params": {
+                    "type": "step.log",
+                    "operationId": "operation-1",
+                    "payload": {"lines": ["noise"]},
+                },
+            }
+        ).encode()
+    )
+    client._handle_message(
+        json.dumps({"method": "runtime.event", "params": terminal}).encode()
+    )
+
+    assert sent == [
+        {
+            "jsonrpc": "2.0",
+            "method": "operation.ack_step_rendered",
+            "params": {
+                "operationId": "operation-1",
+                "eventId": "event-1",
+                "stepCommitId": "operation-1:step:1",
+                "workspaceRevision": 1,
+            },
+        }
+    ]
+    assert client._events.get_nowait() == terminal
+    assert client._events.empty()
+
+
 def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
     executable = tmp_path / "ecc"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")

@@ -120,8 +120,9 @@ def _load_entities(
         raise KnowledgeBundleError("knowledge bundle has no entity catalog")
     entities: list[KnowledgeEntity] = []
     chunks: dict[str, str] = {}
+    document_chunks: dict[Path, dict[str, str]] = {}
     for raw_entity in raw_entities:
-        entity, chunk = _load_entity(root, raw_entity, source_ids)
+        entity, chunk = _load_entity(root, raw_entity, source_ids, document_chunks)
         if entity.entity_id in chunks:
             raise KnowledgeBundleError(f"duplicate knowledge entity: {entity.entity_id}")
         entities.append(entity)
@@ -130,7 +131,10 @@ def _load_entities(
 
 
 def _load_entity(
-    root: Path, raw: object, known_source_ids: set[object]
+    root: Path,
+    raw: object,
+    known_source_ids: set[object],
+    document_chunks: dict[Path, dict[str, str]],
 ) -> tuple[KnowledgeEntity, str]:
     if not isinstance(raw, dict) or raw.get("review_status") != "source-audited":
         raise KnowledgeBundleError("knowledge bundle has an unreviewed entity")
@@ -141,7 +145,12 @@ def _load_entity(
     source_ids = tuple(str(item.get("source_id", "")) for item in evidence if isinstance(item, dict))
     if not source_ids or any(source_id not in known_source_ids for source_id in source_ids):
         raise KnowledgeBundleError(f"knowledge bundle entity has invalid evidence: {entity_id}")
-    chunk = _markdown_chunk(root / "knowledge" / document, anchor)
+    path = root / "knowledge" / document
+    if path not in document_chunks:
+        document_chunks[path] = _markdown_chunks(path)
+    chunk = document_chunks[path].get(anchor)
+    if chunk is None:
+        raise KnowledgeBundleError(f"knowledge anchor is unavailable: {anchor}")
     if _sha256(chunk.encode("utf-8")) != str(raw.get("chunk_sha256", "")):
         raise KnowledgeBundleError(f"knowledge bundle chunk hash mismatch: {entity_id}")
     raw_stages = raw.get("stages")
@@ -169,17 +178,17 @@ def _load_entity(
     ), chunk
 
 
-def _markdown_chunk(path: Path, anchor: str) -> str:
+def _markdown_chunks(path: Path) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise KnowledgeBundleError(f"knowledge document is unavailable: {path.name}") from exc
     matches = list(re.finditer(r'<a id="([^"]+)"></a>', text))
+    chunks: dict[str, str] = {}
     for index, match in enumerate(matches):
-        if match.group(1) == anchor:
-            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-            return text[match.start():end].strip()
-    raise KnowledgeBundleError(f"knowledge anchor is unavailable: {anchor}")
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        chunks.setdefault(match.group(1), text[match.start():end].strip())
+    return chunks
 
 
 def _sha256(data: bytes) -> str:

@@ -227,7 +227,12 @@ class EccContentLengthRpcClient:
                     "params": ack,
                 }
             )
-        self._events.put(event)
+        if event.get("type") in {
+            "operation.completed",
+            "operation.failed",
+            "operation.cancelled",
+        }:
+            self._events.put(event)
 
     def _send(self, payload: dict[str, object]) -> None:
         process = self._process
