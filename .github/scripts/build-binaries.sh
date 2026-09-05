@@ -205,7 +205,7 @@ if [[ -d ecos/gui/apps/desktop-electron/resources/binaries/sizer ]]; then
 fi
 rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/{agent,binaries}
-cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
+cp -a ecc/dist/ecc/. ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
 cp -a "$SIZER_RUNTIME_ROOT" ecos/gui/apps/desktop-electron/resources/binaries/sizer
 cp ecos/agent/dist/ecos-agent ecos/gui/apps/desktop-electron/resources/agent
