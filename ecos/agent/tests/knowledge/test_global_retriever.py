@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 
 import pytest
 
+import ecos_agent.knowledge.retriever as retriever_module
 from ecos_agent.knowledge.bundle import KnowledgeBundle, KnowledgeBundleSpec, KnowledgeEntity
 from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, RetrievalConfig
 from ecos_agent.knowledge.step import STEP_KNOWLEDGE_SPECS, StepKnowledge
@@ -38,6 +40,30 @@ def _bundle_for_stage(
         for entity_id, aliases, _text in entities
     )
     return KnowledgeBundle(spec, records, {entity_id: text for entity_id, _aliases, text in entities})
+
+
+def test_index_initialization_tokenizes_each_distinct_field_once(monkeypatch) -> None:
+    calls = []
+    original = retriever_module.tokenize
+
+    def counted_tokenize(text, *, limit=None):
+        calls.append(text)
+        return original(text, limit=limit)
+
+    monkeypatch.setattr(retriever_module, "tokenize", counted_tokenize)
+
+    GlobalKnowledgeRetriever(
+        (
+            _bundle(
+                ("entity.one", (), "first content"),
+                ("entity.two", (), "second content"),
+            ),
+        )
+    )
+
+    assert Counter(calls) == Counter(
+        {"test": 1, "entity.one": 1, "entity.two": 1, "first content": 1, "second content": 1}
+    )
 
 
 def test_global_retriever_indexes_every_stage_and_records_replayable_trace() -> None:

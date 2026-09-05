@@ -134,6 +134,7 @@ class _Record:
     identifier_phrase_tokens: tuple[str, ...]
     tokens: frozenset[str]
     metadata_tokens: frozenset[str]
+    index_row: tuple[str, str, str, str, str]
 
 
 @dataclass(frozen=True)
@@ -420,33 +421,46 @@ def _record_stages(bundle: KnowledgeBundle, entity: KnowledgeEntity) -> tuple[st
 def _records_from_bundles(bundles: tuple[KnowledgeBundle, ...]) -> tuple[_Record, ...]:
     records: list[_Record] = []
     seen_keys: set[str] = set()
+    token_cache: dict[str, tuple[str, ...]] = {}
+
+    def cached_tokens(value: str) -> tuple[str, ...]:
+        if value not in token_cache:
+            token_cache[value] = tokenize(value)
+        return token_cache[value]
+
     for bundle in bundles:
         for entity in bundle.entities:
             text = bundle.chunk_text(entity.entity_id)
+            identifier_tokens = cached_tokens(entity.entity_id)
+            text_tokens = cached_tokens(text)
             for stage in _record_stages(bundle, entity):
                 key = f"{stage}:{entity.entity_id}"
                 if key in seen_keys:
                     raise KnowledgeRetrievalError(f"duplicate knowledge entity: {key}")
                 seen_keys.add(key)
-                metadata_fields = (
-                    stage,
-                    entity.entity_id,
-                )
-                fields = (
-                    *metadata_fields,
-                    text,
-                )
+                stage_tokens = cached_tokens(stage)
                 records.append(
                     _Record(
                         key,
                         entity,
                         stage,
                         text,
-                        frozenset(token for field in fields for token in _acronym_tokens(field)),
-                        frozenset(tokenize(entity.entity_id)),
+                        frozenset(
+                            token
+                            for field in (stage, entity.entity_id, text)
+                            for token in _acronym_tokens(field)
+                        ),
+                        frozenset(identifier_tokens),
                         _identifier_phrase_tokens(entity.entity_id),
-                        frozenset(token for field in fields for token in tokenize(field)),
-                        frozenset(token for field in metadata_fields for token in tokenize(field)),
+                        frozenset((*stage_tokens, *identifier_tokens, *text_tokens)),
+                        frozenset((*stage_tokens, *identifier_tokens)),
+                        (
+                            key,
+                            " ".join(stage_tokens),
+                            " ".join(identifier_tokens),
+                            "",
+                            " ".join(text_tokens),
+                        ),
                     )
                 )
     return tuple(records)
@@ -528,14 +542,7 @@ def _create_index(records: tuple[_Record, ...]) -> sqlite3.Connection:
 
 
 def _index_row(record: _Record) -> tuple[str, str, str, str, str]:
-    entity = record.entity
-    return (
-        record.key,
-        " ".join(tokenize(record.stage)),
-        " ".join(tokenize(entity.entity_id)),
-        "",
-        " ".join(tokenize(record.text)),
-    )
+    return record.index_row
 
 
 def _is_confident_match(

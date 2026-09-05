@@ -189,6 +189,25 @@ def test_bundle_rejects_a_markdown_chunk_with_a_changed_hash(tmp_path: Path) -> 
         _load_place_knowledge(copied_bundle)
 
 
+def test_bundle_reads_each_markdown_document_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    parameters = BUNDLE_ROOT / "knowledge" / "parameters.md"
+    original = Path.read_text
+    reads = 0
+
+    def counted_read(path: Path, *args, **kwargs):
+        nonlocal reads
+        if path == parameters:
+            reads += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted_read)
+
+    knowledge = _load_place_knowledge()
+
+    assert len(knowledge.entities) > 1
+    assert reads == 1
+
+
 def test_provider_answers_place_questions_without_changing_operation_state() -> None:
     events: list[dict[str, object]] = []
     contexts: list[dict[str, object]] = []
