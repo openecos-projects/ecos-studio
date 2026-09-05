@@ -1,7 +1,7 @@
 <a id="algorithm.filler.execution"></a>
 ## algorithm.filler.execution
 
-**Execution path:** The ECC runner loads the design, invokes `run_filler` with the workspace Filler configuration, saves the updated design and geometry snapshot, then runs analysis and checklist generation.
+**Execution path:** The ECC runner loads the design, invokes `run_filler` with the workspace Filler configuration, saves the updated design and geometry snapshot, then runs analysis and checklist generation. The wrapper records the filler subflow successful without inspecting the native insertion return value.
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 

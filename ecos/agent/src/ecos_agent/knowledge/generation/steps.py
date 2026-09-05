@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .algorithm_details import ALGORITHM_DETAILS, SOURCE_PATHS as ALGORITHM_SOURCE_PATHS
 from .metric_details import METRIC_DETAILS, SOURCE_PATHS as METRIC_SOURCE_PATHS
+from .failure_details import FAILURE_DETAILS, FAILURE_NATIVE_SOURCE_IDS
 from .place_details import (
     PLACE_PARAMETER_SEMANTICS,
     PLACE_REGRESSION_CASES,
@@ -84,8 +85,8 @@ STAGES = (
         "floorplan",
         "Floorplan",
         ("floorplan", "floor plan", "floorplanning", "floorplan stage", "布局规划阶段"),
-        "The ECC runner loads the design database, calls `init_fp` with the Floorplan configuration, runs the floorplanner, and records track creation, IO-pin placement, tap-cell insertion, and PDN as subflow steps. It destroys the floorplan engine, saves the updated database and geometry snapshot, then runs analysis and checklist generation.",
-        "The step cannot proceed without an ECC database instance. Its subflow status is progress evidence only; inspect saved artifacts and analysis records before claiming a successful floorplan.",
+        "The ECC runner loads the design database, calls `init_fp` with the Floorplan configuration, runs iFP in the native order `DieBuilder -> IOPlacer -> MacroPlacer -> PDNGenerator -> PhyPlacer`, destroys the floorplan engine, saves the updated database and geometry snapshot, then runs analysis and checklist generation. The runner marks each subflow item successful without branching on the native iFP return values.",
+        "The step cannot proceed without an ECC database instance. iFP can log configuration, layer/capacity, macro-placement, or geometry errors while the wrapper still records subflow progress; inspect native logs, saved artifacts, and analysis records before claiming a successful floorplan.",
         "ECC reads design-layout and design-statistics facts to publish die/core area, core utilization, instance count, and net count.",
         "ecc/chipcompiler/tools/ecc/configs/floorplan_ecc.json",
     ),
@@ -111,8 +112,8 @@ STAGES = (
         "cts",
         "CTS",
         ("cts", "clock tree synthesis", "clock tree", "cts stage", "时钟树阶段"),
-        "The ECC runner loads the design, invokes `run_cts` for clock-tree synthesis with the CTS configuration and step data directory, writes a CTS report and map, saves the design, persists clock-timing feature facts, and then runs analysis and checklist generation.",
-        "The step cannot execute without an ECC database instance. CTS metric availability depends on the persisted `CTS` feature facts; absent timing-quality facts must remain unavailable rather than be interpreted as zero skew.",
+        "The ECC runner loads the design, invokes `run_cts` for clock-tree synthesis with the CTS configuration and step data directory, writes a CTS report and map, saves the design, persists clock-timing feature facts, and then runs analysis and checklist generation. The wrapper does not branch on the native `run_cts`, report, or map return values; timing-fact persistence and shared save-data results are the explicit gates it checks.",
+        "The step cannot execute without an ECC database instance. Native CTS may return not-initialized, no-op, synthesis, optimization, instantiation, evaluation, or report errors that are not reflected by the wrapper's subflow updates; CTS metric availability also depends on persisted `CTS` feature facts and must not be interpreted as zero skew.",
         "ECC reads the `CTS` feature record for buffer, clock-path, wirelength, level, skew, and insertion-latency facts, then the GUI selects the published normalized metrics.",
         "ecc/chipcompiler/tools/ecc/configs/cts_ecc.json",
     ),
@@ -139,8 +140,8 @@ STAGES = (
         "route",
         "route",
         ("route", "routing", "route stage", "布线阶段"),
-        "The ECC runner loads the design, initializes STA first only when routing timing is enabled by the route configuration, invokes `run_routing`, saves the resulting design and geometry snapshot, then runs analysis and checklist generation.",
-        "The step cannot execute without an ECC database instance. Routing timing initialization is conditional on the configuration, so timing data must not be assumed from route completion alone.",
+        "The ECC runner loads the design, initializes STA first only when routing timing is enabled by the route configuration, invokes the iRT pipeline, saves the resulting design and geometry snapshot, then runs analysis and checklist generation. The wrapper marks the routing subflow successful without inspecting the native routing return value.",
+        "The step cannot execute without an ECC database instance. iRT initialization, pin access, planar/layer/track/detailed routing, or violation reporting can fail while the wrapper still records progress; routing timing initialization is conditional, so timing data must not be assumed from route completion alone.",
         "ECC collects database net wirelength and via counts plus route feature facts; the GUI exposes detailed-route patch, via, violation, wirelength, demand, and overflow records when available.",
         "ecc/chipcompiler/tools/ecc/configs/route_ecc.json",
     ),
@@ -148,8 +149,8 @@ STAGES = (
         "drc",
         "drc",
         ("drc", "design rule check", "drc stage", "设计规则检查阶段"),
-        "The ECC runner loads the design, initializes the DRC engine in the step data directory, invokes `run_drc` with the configured report path, saves the design, persists DRC feature data, and then runs analysis and checklist generation.",
-        "The step cannot execute without an ECC database instance. A DRC run needs its feature/report artifacts to distinguish zero reported violations from missing analysis output.",
+        "The ECC runner loads the design, initializes the DRC engine in the step data directory, invokes `run_drc` with the configured report path, saves the design, persists DRC feature data, and then runs analysis and checklist generation. The wrapper does not branch on native DRC initialization or run results, so report and feature artifacts are the observable completion evidence.",
+        "The step cannot execute without an ECC database instance. Shape collection, cluster partitioning, enabled-rule dispatch, or report/feature persistence can fail while the wrapper records subflow progress; a DRC run needs its feature/report artifacts to distinguish zero reported violations from missing analysis output.",
         "ECC reads the `drc.number` feature fact to publish the DRC count used by the GUI.",
         "ecc/chipcompiler/tools/ecc/configs/drc_ecc.json",
     ),
@@ -157,16 +158,16 @@ STAGES = (
         "filler",
         "filler",
         ("filler", "filler insertion", "filler stage", "填充单元阶段"),
-        "The ECC runner loads the design, invokes `run_filler` with the workspace Filler configuration, saves the updated design and geometry snapshot, then runs analysis and checklist generation.",
-        "The step cannot execute without an ECC database instance. The standard GUI has no filler-specific comparison metric, so artifact and checklist evidence are required to assess its result.",
+        "The ECC runner loads the design, invokes `run_filler` with the workspace Filler configuration, saves the updated design and geometry snapshot, then runs analysis and checklist generation. The wrapper records the filler subflow successful without inspecting the native insertion return value.",
+        "The step cannot execute without an ECC database instance. Native filler initialization, row/master filtering, segment extraction, packing, or instance writeback can fail while the wrapper records progress; the standard GUI has no filler-specific comparison metric, so artifact and checklist evidence are required.",
         "The standard GUI stage comparison has no filler-specific numeric metric; shared database and QoR artifacts remain the available evidence.",
     ),
     Stage(
         "rcx",
         "RCX",
         ("rcx", "parasitic extraction", "spef", "rcx stage", "寄生参数提取阶段"),
-        "The ECC runner loads the design, initializes RCX with the workspace PDK, runs and destroys RCX, copies generated SPEF files to the declared output paths, saves the design, persists bounded SPEF feature facts, and runs analysis and checklist generation.",
-        "The step cannot execute without an ECC database instance. Missing SPEF outputs or unparseable corner files must remain visible through RCX feature and signoff metrics rather than being treated as a successful extraction.",
+        "The ECC runner loads the design, initializes RCX with the workspace PDK, runs and destroys RCX, copies generated SPEF files to the declared output paths, saves the design, persists bounded SPEF feature facts, and runs analysis and checklist generation. Native RCX return values are not used as wrapper gates; save-data and parsed SPEF facts are checked explicitly.",
+        "The step cannot execute without an ECC database instance. Topology/environment construction, process-table extraction, SPEF writing, or output copying can fail before the checked persistence gates; missing SPEF outputs or unparseable corner files must remain visible through RCX feature and signoff metrics rather than being treated as successful extraction.",
         "ECC derives SPEF file and expected-corner coverage, parses electrical totals by corner, and publishes missing-corner, parse-failure, worst-capacitance, and worst-resistance facts.",
         "ecc/chipcompiler/tools/ecc/configs/rcx_ecc.json",
     ),
@@ -183,8 +184,8 @@ STAGES = (
         "harden",
         "Harden",
         ("harden", "hardening", "harden stage", "交付阶段"),
-        "The ECC runner loads the database, requires at least one configured STA signoff item, writes an abstract LEF, writes a timing-model LIB from the selected signoff inputs, exports hardened GDS, and then runs final package analysis.",
-        "Without signoff STA items the runner returns failure before artifact generation. Final delivery evidence requires the generated GDS, LEF, and LIB package artifacts, not merely a completed subflow record.",
+        "The ECC runner loads the database, requires at least one configured STA signoff item, writes an abstract LEF, writes a timing-model LIB from the selected signoff inputs, exports hardened GDS, and then runs final package analysis. Native writer return values are not wrapper gates; the runner marks the harden subflow successful and relies on package analysis to expose missing outputs.",
+        "Without an ECC module, a configured STA signoff item, or a workspace STA config path the runner returns failure before delivery. LEF/LIB/GDS writer errors can still leave a successful subflow record, so final evidence requires all generated package artifacts and their completeness metric.",
         "ECC checks hardened GDS, LEF, and LIB existence and publishes the count of missing required delivery artifacts.",
         "ecc/chipcompiler/tools/ecc/configs/sta_ecc.json",
     ),
@@ -210,61 +211,12 @@ SOURCE_PATHS = {
     **METRIC_SOURCE_PATHS,
 }
 
-FAILURE_DETAILS = {
-    "synthesis": (
-        ("runtime", ("yosys unavailable", "synthesis runtime missing"), "The runner marks `run yosys` invalid when neither the bundled runtime nor PATH provides Yosys. It writes the error to the step log when possible and does not invoke Tcl."),
-        ("output_netlist", ("synthesis netlist missing", "yosys output missing"), "After the subprocess returns, the runner requires the configured output netlist to exist. A zero process exit without that file is reported as invalid synthesis."),
-    ),
-    "floorplan": (
-        ("engine", ("floorplan ECC unavailable", "floorplan load data failed"), "If `get_eda_instance` returns no ECC module, the floorplan runner does not enter `init_fp` or `run_fp` and returns false."),
-        ("geometry", ("floorplan geometry missing", "floorplan manifest missing"), "For floorplan, shared persistence requires `geometry_snapshot_save` and an existing geometry manifest. Either failure causes `save_data` to return false."),
-    ),
-    "cts": (
-        ("engine", ("cts ECC unavailable", "cts load data failed"), "Without an ECC module, CTS, its report, map, and timing feature facts are not executed."),
-        ("timing_facts", ("cts timing facts missing", "cts skew unavailable"), "If `feature_cts_timing` cannot be persisted after `save_data`, the CTS runner logs an error and returns false. Missing timing facts cannot be repaired by the visual map."),
-    ),
-    "legalization": (
-        ("engine", ("legalization ECC unavailable", "legalization load data failed"), "Without an ECC module, DreamPlace legalization is not constructed and no legal placement is produced."),
-        ("infinite_hpwl", ("legalization hpwl inf", "dreamplace legalization failed"), "`DreamplaceModule` returns false when `PlacementEngine.run()` reports infinite HPWL. The DreamPlace runner's progress record must not override that terminal tool result."),
-    ),
-    "sizer": (
-        ("runtime", ("sizer runtime unavailable", "timing optimization scripts missing"), "The runner returns `Invalid` before subprocess execution when ECC, Sizer, or DreamPlace is unavailable, or when the generated Sizer env/cmd script paths do not exist."),
-        ("staging", ("sizer staging output missing", "timing optimization subprocess failed"), "A nonzero Sizer exit or absence of either staging DEF or staging Verilog marks `run sizer` incomplete and prevents legalization."),
-        ("publication", ("sizer legalization failed", "timing optimization publication failed"), "Legalization must return a live ECC object before persistence. If legalization or shared `save_data` fails, the wrapper removes partial published outputs and does not report stage success."),
-    ),
-    "route": (
-        ("engine", ("route ECC unavailable", "routing load data failed"), "Without an ECC module, routing and conditional STA initialization do not run."),
-        ("conditional_sta", ("route timing unavailable", "routing sta disabled"), "A completed route does not prove timing-aware routing. Verify that the route configuration enabled timing and that STA initialization/artifacts exist before making that claim."),
-    ),
-    "drc": (
-        ("engine", ("drc ECC unavailable", "drc load data failed"), "Without an ECC module, DRC initialization and rule checking do not run."),
-        ("feature", ("drc feature missing", "drc count unavailable"), "The DRC count comes from the saved feature record. If that record is absent or malformed, a missing number must not be reported as zero violations."),
-    ),
-    "filler": (
-        ("engine", ("filler ECC unavailable", "filler load data failed"), "Without an ECC module, the runner does not invoke filler insertion."),
-        ("evidence", ("filler artifacts missing", "filler result unavailable"), "There is no dedicated filler metric in the GUI comparison set. Missing saved artifacts or checklist output leaves the filler result unverified."),
-    ),
-    "rcx": (
-        ("engine", ("rcx ECC unavailable", "rcx load data failed"), "Without an ECC module, RCX cannot initialize with the workspace PDK."),
-        ("spef_facts", ("rcx spef facts missing", "rcx corner coverage missing"), "If RCX SPEF fact persistence fails after extraction, the runner returns false. Do not use transient files in `spef_writer` as a substitute for declared SPEF outputs."),
-    ),
-    "sta": (
-        ("missing_sdc", ("sta sdc missing", "sta constraint missing"), "STA marks its subflow incomplete and returns false when the workspace SDC path does not exist."),
-        ("missing_corner_input", ("sta spef missing", "sta liberty missing"), "For every signoff item, a missing SPEF or any missing Liberty file marks STA incomplete before timing is run. The aggregate must preserve that incomplete coverage."),
-    ),
-    "harden": (
-        ("engine", ("harden ECC unavailable", "harden load data failed"), "Without an ECC module, abstract LEF, timing-model LIB, and hardened GDS are not generated."),
-        ("delivery", ("harden artifact missing", "harden package incomplete"), "The final missing-artifact metric counts absent GDS, LEF, or LIB. It is a package-completeness gate, not a substitute for checking their contents."),
-    ),
-}
-
 PARAMETER_DETAILS = {
     "floorplan": {
         "ifp.temp_directory_path": ("The floorplan temporary-directory path.", "It selects the scratch location used by the floorplan engine."),
         "ifp.thread_number": ("The floorplan worker-thread count.", "It bounds parallel work performed by the floorplan engine."),
         "macro_placer.macro_placement_halo": ("The halo reserved around placed macros.", "It keeps standard-cell and routing resources away from macro boundaries during macro placement."),
         "macro_placer.macro_routing_halo": ("The routing halo reserved around macros.", "It reserves routing clearance around macro boundaries."),
-        "macro_placer.macro_location_path": ("The macro-location input path.", "It supplies fixed or guided macro positions to the macro placer."),
         "die_builder.mode": ("The die-construction mode.", "It selects whether die geometry is derived from utilization or an explicit size."),
         "die_builder.site_name": ("The core placement-site name.", "It selects the technology site used to build core rows."),
         "die_builder.die_util.aspect_ratio": ("The target die aspect ratio in utilization mode.", "It shapes the die dimensions while the target utilization determines area."),
@@ -491,6 +443,9 @@ def _add_parameters(
         return
     evidence = (*stage.tool_source_ids, f"config.{stage.slug}")
     for key, _value in config_entries:
+        if stage.slug == "floorplan" and key == "macro_placer.macro_location_path":
+            # Compatibility-only field; the main iFP flow does not consume it.
+            continue
         meaning, role = _parameter_detail(stage, key)
         _add(
             entries,
@@ -630,6 +585,9 @@ def _add_artifacts(
 def _add_failures(
     stage: Stage, entries: list[dict[str, object]], documents: dict[str, list[str]]
 ) -> None:
+    evidence = tuple(
+        dict.fromkeys((*stage.tool_source_ids, *FAILURE_NATIVE_SOURCE_IDS.get(stage.slug, ())))
+    )
     _add(
         entries,
         documents,
@@ -638,7 +596,7 @@ def _add_failures(
         aliases=tuple(f"{alias} failed" for alias in stage.aliases),
         document="failures.md",
         body=f"**Failure mode:** {stage.failure}",
-        evidence=stage.tool_source_ids,
+        evidence=evidence,
     )
     for name, aliases, body in FAILURE_DETAILS[stage.slug]:
         _add(
@@ -649,7 +607,7 @@ def _add_failures(
             aliases=aliases,
             document="failures.md",
             body=f"**Failure mode:** {body}",
-            evidence=stage.tool_source_ids,
+            evidence=evidence,
         )
     _add(
         entries,
@@ -659,7 +617,7 @@ def _add_failures(
         aliases=tuple(f"{alias} completion evidence" for alias in stage.aliases),
         document="failures.md",
         body="**Failure mode:** A successful subflow checkpoint records progress, not a terminal claim. Verify the stage return state together with its declared artifacts, feature records, QoR payloads, and log before reporting completion.",
-        evidence=stage.tool_source_ids,
+        evidence=evidence,
     )
 
 

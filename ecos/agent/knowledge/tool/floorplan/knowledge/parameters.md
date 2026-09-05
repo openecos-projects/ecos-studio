@@ -115,15 +115,6 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
-<a id="parameter.floorplan.macro_placer_macro_location_path"></a>
-## parameter.floorplan.macro_placer_macro_location_path
-
-**Meaning:** The macro-location input path.
-
-**Role:** It supplies fixed or guided macro positions to the macro placer.
-
-**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
-
 <a id="parameter.floorplan.macro_placer_macro_placement_halo"></a>
 ## parameter.floorplan.macro_placer_macro_placement_halo
 

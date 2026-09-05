@@ -1,7 +1,7 @@
 <a id="algorithm.cts.execution"></a>
 ## algorithm.cts.execution
 
-**Execution path:** The ECC runner loads the design, invokes `run_cts` for clock-tree synthesis with the CTS configuration and step data directory, writes a CTS report and map, saves the design, persists clock-timing feature facts, and then runs analysis and checklist generation.
+**Execution path:** The ECC runner loads the design, invokes `run_cts` for clock-tree synthesis with the CTS configuration and step data directory, writes a CTS report and map, saves the design, persists clock-timing feature facts, and then runs analysis and checklist generation. The wrapper does not branch on the native `run_cts`, report, or map return values; timing-fact persistence and shared save-data results are the explicit gates it checks.
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 

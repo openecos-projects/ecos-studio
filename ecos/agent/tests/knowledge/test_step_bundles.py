@@ -97,6 +97,66 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
     assert (AGENT_ROOT / "src/ecos_agent/knowledge/generation/steps.py").is_file()
 
 
+def test_generated_floorplan_bundle_covers_current_io_and_macro_boundaries(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "knowledge"
+    subprocess.run(
+        ["uv", "run", "python", "scripts/build_knowledge.py", "--output", str(output)],
+        cwd=AGENT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    floorplan = output / "tool" / "floorplan"
+    drc = output / "tool" / "drc"
+    algorithms = (floorplan / "knowledge" / "algorithms.md").read_text(encoding="utf-8")
+    failures = (floorplan / "knowledge" / "failures.md").read_text(encoding="utf-8")
+    parameters = (floorplan / "knowledge" / "parameters.md").read_text(encoding="utf-8")
+    drc_failures = (drc / "knowledge" / "failures.md").read_text(encoding="utf-8")
+    catalog = json.loads((floorplan / "catalog.json").read_text(encoding="utf-8"))
+    entities = {entity["id"]: entity for entity in catalog["entities"]}
+
+    parameter_ids = {
+        entity["id"] for entity in catalog["entities"] if entity["kind"] == "parameter"
+    }
+    assert "parameter.floorplan.macro_placer_macro_location_path" not in parameter_ids
+    assert "macro_location_path" not in parameters
+
+    assert "**Debug-only path:**" in algorithms
+    assert "not a main floorplan input" in algorithms
+    assert "two-pitch spacing" in algorithms
+    assert "one-pitch spacing" in algorithms
+    assert "capacity exhaustion emits a native error" in algorithms
+    assert "native error severity" in algorithms
+    assert "GUI checklist may expose the aggregate check as a warning" in algorithms
+
+    for failure_id in (
+        "failure.floorplan.io_capacity",
+        "failure.floorplan.macro_placement",
+        "failure.floorplan.macro_core",
+    ):
+        assert "ifp.interface" in {
+            evidence["source_id"] for evidence in entities[failure_id]["evidence"]
+        }
+
+    for failure_id in (
+        "failure.floorplan.config",
+        "failure.floorplan.io_layers",
+        "failure.floorplan.io_capacity",
+        "failure.floorplan.macro_placement",
+        "failure.floorplan.macro_core",
+        "failure.floorplan.native_progress",
+    ):
+        assert f"<a id=\"{failure_id}\"></a>" in failures
+    assert "does not relocate it" in failures
+    assert "not a relocation or repair algorithm" in failures
+    assert "<a id=\"failure.drc.invalid_shape\"></a>" in drc_failures
+    assert "regular_net_num" in drc_failures
+    assert "negative result-net" not in drc_failures
+
+
 def test_build_all_uses_the_same_bundle_builder_for_every_stage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

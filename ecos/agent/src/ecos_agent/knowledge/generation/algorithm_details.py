@@ -6,6 +6,7 @@ from __future__ import annotations
 AlgorithmDetail = tuple[str, tuple[str, ...], str, tuple[str, ...]]
 
 SOURCE_PATHS = {
+    "ecc.workspace": "ecc/chipcompiler/data/workspace/__init__.py",
     "yosys.builder": "ecc/chipcompiler/tools/yosys/builder.py",
     "yosys.script": "ecc/chipcompiler/tools/yosys/scripts/yosys_synthesis.tcl",
     "yosys.tech": "ecc/chipcompiler/tools/yosys/scripts/init_tech.tcl",
@@ -97,14 +98,20 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
         (
             "io_pin_placement",
             ("floorplan io pin placement", "io placer edge distribution"),
-            "**Input and state:** `IOPlacer` consumes eligible layers, pin width/depth, die/core bounds, preferred routing directions, manufacturing grid, and IO pins.\n\n**Algorithm:** It selects horizontal and vertical layers, distributes pins across four edges using `ceil(num_pins / 4)`, interpolates each edge coordinate, and grid-aligns the generated port rectangle.\n\n**Constraint and stop:** The placer reserves an edge track pitch and falls back to a core/range center when the legal interval is too small. It stops after the finite IO-pin list and writes pin, port, and net-pin coordinates.",
+            "**Input and state:** `IOPlacer` consumes the configured layer-name list, each layer's preferred direction, minimum width, preferred track offset/pitch, die/core bounds, and the IO-pin list.\n\n**Algorithm:** It chooses the first valid horizontal and vertical layers, derives pin depths as four times the perpendicular track pitch, and enumerates track-aligned legal slots on all four die edges. Slots are first sampled at two-pitch spacing; if that cannot fit all pins, it retries at one-pitch spacing. It ranks slots by distance from the die center plus a perpendicular-span tie-breaker, keeps the best slots, then restores edge/coordinate order while assigning them to the original IO-pin order.\n\n**Constraint and stop:** Missing usable layers, non-positive width/pitch, an empty pin list, or insufficient minimum-pitch capacity returns without placement; capacity exhaustion emits a native error. Valid assignments create die-edge port rectangles and synchronize IO pin and net-pin coordinates.",
             ("ifp.io_placer",),
         ),
         (
             "macro_halo_row_cutting",
             ("floorplan macro halo row cutting", "macro placement blockage rows"),
-            "**Input and state:** Placed macros, core bounds, placement/routing halos, rows, and site dimensions form the macro-placement state.\n\n**Algorithm:** `MacroPlacer` expands macro halos; for each row it gathers intersecting placement-halo blockage intervals, aligns them to sites, sorts them, and emits the remaining legal row segments.\n\n**Constraint and stop:** Only placed macros participate, and out-of-core macros are warnings rather than a relocation optimizer. The finite macro/row traversal replaces the row list with cut rows.",
+            "**Input and state:** Existing placed macro instances, core bounds, placement/routing halo values, rows, and site dimensions form the macro-placement state.\n\n**Algorithm:** Before cutting rows, `MacroPlacer` checks every macro for placement and core containment, expands placement and routing halos around placed macros, and gathers each row's site-aligned halo intersections. Sorted blockage intervals are subtracted from each row and the remaining legal segments replace the original row list.\n\n**Constraint and stop:** iFP does not move or optimize macro locations. Unplaced or out-of-core macros are reported at native error severity, while the GUI checklist may expose the aggregate check as a warning; only placed macros contribute halo blockages.",
             ("ifp.macro_placer",),
+        ),
+        (
+            "macro_location_boundary",
+            ("floorplan macro location path", "debug input macro", "macro placement file boundary"),
+            "**Flow boundary:** The `macro_location_path` key remains in the default workspace JSON for compatibility, but `FPInterface::wrapConfig()` reads only macro halos and `runFP()` never calls `debugInputMacro()`. The workspace helper normalizes the path and creates an empty file when needed; it is not a main floorplan input.\n\n**Debug-only path:** The separate `debug_input_macro` Tcl command passes `-path` to `debugInputMacro()`, which reads `instance x y orient` lines, places fixed block macros, and logs malformed, unknown, non-block, or failed placements as warnings.\n\n**Boundary:** Debug-file placement must complete before the normal iFP macro checks; an empty or unused compatibility file does not place macros.",
+            ("ifp.interface", "ecc.workspace"),
         ),
         (
             "pdn_and_physical_cells",

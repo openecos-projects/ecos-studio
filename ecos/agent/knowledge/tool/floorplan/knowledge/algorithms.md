@@ -1,7 +1,7 @@
 <a id="algorithm.floorplan.execution"></a>
 ## algorithm.floorplan.execution
 
-**Execution path:** The ECC runner loads the design database, calls `init_fp` with the Floorplan configuration, runs the floorplanner, and records track creation, IO-pin placement, tap-cell insertion, and PDN as subflow steps. It destroys the floorplan engine, saves the updated database and geometry snapshot, then runs analysis and checklist generation.
+**Execution path:** The ECC runner loads the design database, calls `init_fp` with the Floorplan configuration, runs iFP in the native order `DieBuilder -> IOPlacer -> MacroPlacer -> PDNGenerator -> PhyPlacer`, destroys the floorplan engine, saves the updated database and geometry snapshot, then runs analysis and checklist generation. The runner marks each subflow item successful without branching on the native iFP return values.
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 
@@ -30,24 +30,35 @@
 <a id="algorithm.floorplan.io_pin_placement"></a>
 ## algorithm.floorplan.io_pin_placement
 
-**Input and state:** `IOPlacer` consumes eligible layers, pin width/depth, die/core bounds, preferred routing directions, manufacturing grid, and IO pins.
+**Input and state:** `IOPlacer` consumes the configured layer-name list, each layer's preferred direction, minimum width, preferred track offset/pitch, die/core bounds, and the IO-pin list.
 
-**Algorithm:** It selects horizontal and vertical layers, distributes pins across four edges using `ceil(num_pins / 4)`, interpolates each edge coordinate, and grid-aligns the generated port rectangle.
+**Algorithm:** It chooses the first valid horizontal and vertical layers, derives pin depths as four times the perpendicular track pitch, and enumerates track-aligned legal slots on all four die edges. Slots are first sampled at two-pitch spacing; if that cannot fit all pins, it retries at one-pitch spacing. It ranks slots by distance from the die center plus a perpendicular-span tie-breaker, keeps the best slots, then restores edge/coordinate order while assigning them to the original IO-pin order.
 
-**Constraint and stop:** The placer reserves an edge track pitch and falls back to a core/range center when the legal interval is too small. It stops after the finite IO-pin list and writes pin, port, and net-pin coordinates.
+**Constraint and stop:** Missing usable layers, non-positive width/pitch, an empty pin list, or insufficient minimum-pitch capacity returns without placement; capacity exhaustion emits a native error. Valid assignments create die-edge port rectangles and synchronize IO pin and net-pin coordinates.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ifp.io_placer**
 
 <a id="algorithm.floorplan.macro_halo_row_cutting"></a>
 ## algorithm.floorplan.macro_halo_row_cutting
 
-**Input and state:** Placed macros, core bounds, placement/routing halos, rows, and site dimensions form the macro-placement state.
+**Input and state:** Existing placed macro instances, core bounds, placement/routing halo values, rows, and site dimensions form the macro-placement state.
 
-**Algorithm:** `MacroPlacer` expands macro halos; for each row it gathers intersecting placement-halo blockage intervals, aligns them to sites, sorts them, and emits the remaining legal row segments.
+**Algorithm:** Before cutting rows, `MacroPlacer` checks every macro for placement and core containment, expands placement and routing halos around placed macros, and gathers each row's site-aligned halo intersections. Sorted blockage intervals are subtracted from each row and the remaining legal segments replace the original row list.
 
-**Constraint and stop:** Only placed macros participate, and out-of-core macros are warnings rather than a relocation optimizer. The finite macro/row traversal replaces the row list with cut rows.
+**Constraint and stop:** iFP does not move or optimize macro locations. Unplaced or out-of-core macros are reported at native error severity, while the GUI checklist may expose the aggregate check as a warning; only placed macros contribute halo blockages.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ifp.macro_placer**
+
+<a id="algorithm.floorplan.macro_location_boundary"></a>
+## algorithm.floorplan.macro_location_boundary
+
+**Flow boundary:** The `macro_location_path` key remains in the default workspace JSON for compatibility, but `FPInterface::wrapConfig()` reads only macro halos and `runFP()` never calls `debugInputMacro()`. The workspace helper normalizes the path and creates an empty file when needed; it is not a main floorplan input.
+
+**Debug-only path:** The separate `debug_input_macro` Tcl command passes `-path` to `debugInputMacro()`, which reads `instance x y orient` lines, places fixed block macros, and logs malformed, unknown, non-block, or failed placements as warnings.
+
+**Boundary:** Debug-file placement must complete before the normal iFP macro checks; an empty or unused compatibility file does not place macros.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ifp.interface**, **ecc.workspace**
 
 <a id="algorithm.floorplan.pdn_and_physical_cells"></a>
 ## algorithm.floorplan.pdn_and_physical_cells

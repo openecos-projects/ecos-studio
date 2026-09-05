@@ -12,10 +12,24 @@
 
 **Source evidence:** **sizer.runner**, **sizer.builder**, **sizer.subflow**, **sizer.metrics**, **dreamplace.runner**, **ecc.runner**
 
+<a id="failure.sizer.command"></a>
+## failure.sizer.command
+
+**Failure mode:** The current wrapper resolves an executable named `Sizer` from PATH; an environment-root binary override is not part of this source contract.
+
+**Source evidence:** **sizer.runner**, **sizer.builder**, **sizer.subflow**, **sizer.metrics**, **dreamplace.runner**, **ecc.runner**
+
 <a id="failure.sizer.staging"></a>
 ## failure.sizer.staging
 
 **Failure mode:** A nonzero Sizer exit or absence of either staging DEF or staging Verilog marks `run sizer` incomplete and prevents legalization.
+
+**Source evidence:** **sizer.runner**, **sizer.builder**, **sizer.subflow**, **sizer.metrics**, **dreamplace.runner**, **ecc.runner**
+
+<a id="failure.sizer.legalization"></a>
+## failure.sizer.legalization
+
+**Failure mode:** A missing DreamPlace legalizer or a failed legalize-only run prevents creation of the live ECC object required for publication.
 
 **Source evidence:** **sizer.runner**, **sizer.builder**, **sizer.subflow**, **sizer.metrics**, **dreamplace.runner**, **ecc.runner**
 
