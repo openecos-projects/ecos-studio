@@ -613,21 +613,13 @@ const pendingInteraction = computed(() => {
       ...interaction.interaction,
       options:
         interaction.interaction.options.length >= 3
-          ? interaction.interaction.options.map((option, index) =>
-              index === 2
-                ? {
-                    ...option,
-                    label:
-                      'Quick Start: create a Workspace and run a full RTL-to-GDS flow',
-                  }
-                : option,
-            )
+          ? interaction.interaction.options
           : [
-              ...interaction.interaction.options,
               {
                 id: QUICK_START_OPTION_ID,
-                label: 'Quick Start: create a Workspace and run a full RTL-to-GDS flow',
+                label: 'Quick Start: run the built-in GCD RTL-to-GDS example',
               },
+              ...interaction.interaction.options,
             ],
     },
   }
@@ -724,12 +716,12 @@ const emptyStateSuggestions = computed(() => {
   if (tabMode === 'home') {
     return [
       {
-        label: 'Start creating a Workspace and run a full RTL-to-GDS flow',
-        value: '1',
+        label: 'Run your own RTL-to-GDS flow',
+        value: '2',
       },
       {
-        label: 'Start a bounded optimization episode',
-        value: '2',
+        label: 'Optimize a completed design',
+        value: '3',
       },
     ]
   }
@@ -1593,7 +1585,7 @@ async function handleInteraction(
     kind === 'choice' &&
     'optionId' in answer &&
     interaction?.interaction.kind === 'choice' &&
-    (interaction.interaction.options[2]?.id === answer.optionId ||
+    (interaction.interaction.options[0]?.id === answer.optionId ||
       answer.optionId === QUICK_START_OPTION_ID)
   if (
     !interaction ||

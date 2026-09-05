@@ -37,19 +37,26 @@ def test_home_mode_separates_manual_flow_setup_from_optimization_entry(tmp_path:
     choice = _last_event(events, "interaction")["interaction"]
     assert choice["title"] == "Get started"
     assert choice["kind"] == "choice"
-    assert choice["options"][0]["id"]
-    assert choice["options"][0]["label"] == (
-        "Start creating a Workspace and run a full RTL-to-GDS flow"
-    )
-    assert "bounded optimization episode" in choice["options"][1]["label"]
-    assert len(choice["options"]) == 3
-    assert "Quick Start" in choice["options"][2]["label"]
-    welcome = next(event["text"] for event in events if event["type"] == "message")
-    assert "state-controlled, PPA-oriented design-flow agent" in str(welcome)
-    assert "Choose quick RTL setup" not in str(welcome)
-    assert "Choose an operation below" not in str(welcome)
+    assert [option["label"] for option in choice["options"]] == [
+        "Quick Start: run the built-in GCD RTL-to-GDS example",
+        "Run your own RTL-to-GDS flow",
+        "Optimize a completed design",
+    ]
+    assert list(provider.sessions[session_id].pending_interaction["values"].values()) == [
+        "1",
+        "2",
+        "3",
+    ]
+    messages = [str(event["text"]) for event in events if event["type"] == "message"]
+    assert messages == [
+        "ECOS Agent helps you understand, run, and improve physical-design flows. "
+        "Ask in natural language about IC/EDA concepts, ECOS Studio, or your current design; "
+        "use controlled, reviewable actions to run RTL-to-GDS, rerun stages, update parameters, "
+        "and optimize PPA.",
+        "Ask a question, or choose an action below.",
+    ]
 
-    _send(provider, session_id, "2")
+    _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_workspace"
     assert "baseline workspace completed through Harden" in str(_last_event(events, "message")["text"])
 
@@ -70,7 +77,7 @@ def test_home_nl_bootstrap_skips_fields_that_are_already_clear(tmp_path: Path) -
     def parse_operation(context: dict[str, object]) -> dict[str, object]:
         return {
             "schema_version": "flow-agent.gui_chat_response.v1",
-            "operation": "1",
+            "operation": "2",
             "answer": None,
         }
 
@@ -153,7 +160,7 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
         }
     )["sessionId"]
 
-    _send(provider, session_id, "1")
+    _send(provider, session_id, "2")
     assert provider.sessions[session_id].phase == "workspace_project_mode"
     mode_choice = _last_event(events, "interaction")["interaction"]
     assert mode_choice["title"] == "Choose a Project"
@@ -215,7 +222,7 @@ def test_existing_project_branch_keeps_all_known_projects_selectable(tmp_path: P
         {"mode": "home", "knownProjects": projects}
     )["sessionId"]
 
-    _send(provider, session_id, "1")
+    _send(provider, session_id, "2")
     _send(provider, session_id, "1")
 
     interaction = _last_event(events, "interaction")["interaction"]
@@ -236,7 +243,7 @@ def test_invalid_form_answer_keeps_the_same_request_available(tmp_path: Path) ->
         {"mode": "home", "knownProjects": [{"name": "project", "path": str(project)}]}
     )["sessionId"]
 
-    _send(provider, session_id, "1")
+    _send(provider, session_id, "2")
     _send(provider, session_id, "1")
     _send(provider, session_id, str(project))
     session = provider.sessions[session_id]
@@ -274,7 +281,7 @@ def test_design_name_uses_local_file_candidates_without_codex(tmp_path: Path, mo
     monkeypatch.setattr(provider_module, "_propose_gui_workspace_path_discovery", fail_if_called)
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
-    for message in ("1", "2", str(project_root), "ws_0001", "gcd"):
+    for message in ("2", "2", str(project_root), "ws_0001", "gcd"):
         _send(provider, session_id, message)
 
     session = provider.sessions[session_id]
@@ -301,7 +308,7 @@ def test_path_discovery_parse_error_falls_back_to_local_candidates(tmp_path: Pat
         workspace_path_recommender=invalid_codex_response,
     )
     session_id = provider.start_session({"mode": "home"})["sessionId"]
-    for message in ("1", "2", str(project_root), "ws_0001", "gcd"):
+    for message in ("2", "2", str(project_root), "ws_0001", "gcd"):
         _send(provider, session_id, message)
 
     session = provider.sessions[session_id]
@@ -326,7 +333,7 @@ def test_rtl_recommendation_emits_a_path_choice_without_embedding_the_path(
         ),
     )
     session_id = provider.start_session({})["sessionId"]
-    for message in ("1", "2", str(project_root), "ws_0001", "gcd", "0"):
+    for message in ("2", "2", str(project_root), "ws_0001", "gcd", "0"):
         _send(provider, session_id, message)
 
     assert provider.sessions[session_id].phase == "workspace_rtl"
@@ -367,7 +374,7 @@ def test_workspace_name_offers_auto_suggestion_and_accepts_custom_input(
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
-    for message in ("1", "2", str(project_root)):
+    for message in ("2", "2", str(project_root)):
         _send(provider, session_id, message)
 
     session = provider.sessions[session_id]
@@ -392,7 +399,7 @@ def test_workspace_name_default_choice_accepts_auto_suggestion(tmp_path: Path) -
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
-    for message in ("1", "2", str(project_root)):
+    for message in ("2", "2", str(project_root)):
         _send(provider, session_id, message)
 
     choice = _last_event(events, "interaction")["interaction"]
@@ -526,7 +533,7 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
         ),
     )
     session_id = provider.start_session({})["sessionId"]
-    for message in ("1", "2", str(project_root), "ws_0001", "gcd", "4", str(rtl)):
+    for message in ("2", "2", str(project_root), "ws_0001", "gcd", "4", str(rtl)):
         _send(provider, session_id, message)
 
     session = provider.sessions[session_id]

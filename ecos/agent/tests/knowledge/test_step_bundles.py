@@ -305,7 +305,7 @@ def test_provider_clarifies_ambiguous_cts_request_without_changing_operation_sta
     def choose_operation(_context: dict[str, object]) -> dict[str, object]:
         return {
             "schema_version": "flow-agent.gui_chat_response.v1",
-            "operation": "1",
+            "operation": "2",
             "answer": None,
         }
 

@@ -525,7 +525,7 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
 
     session_id = provider.start_session({})["sessionId"]
     for message in (
-        "1",
+        "2",
         "2",
         str(project_root),
         "ws_0001",
