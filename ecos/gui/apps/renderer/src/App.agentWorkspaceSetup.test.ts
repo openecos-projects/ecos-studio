@@ -9,6 +9,7 @@ describe('agent workspace creation', () => {
     expect(source).toContain('ownerSessionId,')
     expect(source).not.toContain('void runAllFlow()')
     expect(source).not.toContain('agentShell.expandWorkspaceChat()')
+    expect(source).toContain("newProject(config, { runtimeTarget: 'agent' })")
   })
 
   it('returns the workspace creation failure reason to the chat host', () => {
@@ -183,5 +184,10 @@ describe('quick start resources', () => {
     expect(startFlowSource).not.toContain('waitForRuntimeOperation')
     expect(startFlowSource).not.toContain("status: 'flow_completed'")
     expect(startFlowSource).not.toContain("status: 'flow_failed'")
+  })
+
+  it('routes Quick Start workspace creation and execution through Agent RPC', () => {
+    expect(source).toContain("newProject(config, { runtimeTarget: 'agent' })")
+    expect(source).toContain("runAllFlow({ rerun: false, runtimeTarget: 'agent' })")
   })
 })

@@ -458,7 +458,7 @@ async function createWorkspaceFromAgent(
   }
   const agentShell = useAgentShellStore()
   agentShell.beginPreserveForAgentWorkspaceSwitch()
-  const success = await newProject(config)
+  const success = await newProject(config, { runtimeTarget: 'agent' })
   if (!success) {
     agentShell.consumePreserveMessages()
     agentShell.consumePreserveSession()
@@ -720,7 +720,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
       },
       startFlow: async (input: { project: any; workspace: any }) => {
         narrate('现在正在启动完整 RTL 到 GDS 流程。')
-        const flowResult = await runAllFlow({ rerun: false })
+        const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })
         if (!flowResult) throw new Error('Run All Flow did not start.')
         await writeQuickStartRunRecord(api, input.workspace.path, {
           flow: {
@@ -1264,7 +1264,7 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     quickStartWizardResolve = null
     quickStartWizardReject = null
     resetWorkspaceWizard()
-    const success = await newProject(config)
+    const success = await newProject(config, { runtimeTarget: 'agent' })
     if (!success) {
       reject?.(
         new Error(lastWorkspaceCreationError.value || 'Workspace creation failed.'),

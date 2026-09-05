@@ -76,6 +76,7 @@ export type {
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccRuntimeStepRenderedAckRequest,
+  EccRuntimeTarget,
   EccRuntimeStepSnapshot,
   EccSignoffReviewDetail,
   EccSignoffReviewDetailKind,

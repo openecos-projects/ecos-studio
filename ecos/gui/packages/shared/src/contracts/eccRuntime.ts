@@ -26,6 +26,8 @@ export interface EccRpcShutdownResult {
 
 import type { PdkRequirement } from './pdkInventory.ts'
 
+export type EccRuntimeTarget = 'agent'
+
 export interface EccWorkspaceCreateRequest {
   directory: string
   filelist?: string
@@ -41,14 +43,17 @@ export interface EccWorkspaceCreateRequest {
   projectId?: string
   projectRoot?: string
   rtlList?: string[]
+  runtimeTarget?: EccRuntimeTarget
   sdc?: string
 }
 
 export interface EccWorkspaceOpenRequest {
   directory: string
+  runtimeTarget?: EccRuntimeTarget
 }
 
 export interface EccWorkspaceHandleRequest {
+  runtimeTarget?: EccRuntimeTarget
   workspaceHandle: string
 }
 

@@ -76,6 +76,7 @@ describe('workspace desktop bridge', () => {
         end_step: 'Harden',
         steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
       },
+      runtimeTarget: 'agent' as const,
     })
 
     await expect(createWorkspaceApi(options)).resolves.toMatchObject({
@@ -87,6 +88,7 @@ describe('workspace desktop bridge', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         designTool: 'backend',
+        runtimeTarget: 'agent',
         payload: expect.objectContaining({
           parameters: expect.objectContaining({
             design: 'demo',

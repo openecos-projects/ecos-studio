@@ -140,10 +140,10 @@ function getDesktopServices() {
     platform: process.platform,
     userDataPath: app.getPath('userData'),
   }
-  const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
   const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
   const eccAgentExecutable = resolveEccAgentExecutable(eccRuntimeOptions)
-  const quickStartRoot = join(app.getPath('userData'), 'quick-runs')
+  const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
+  if (eccAgentExecutable) runtimeEnv.ECOS_AGENT_ECC_RPC_BIN = eccAgentExecutable
   if (eccExecutable) {
     electronLogger.info('[runtime] Using ECC executable %s', eccExecutable)
   } else {
@@ -171,23 +171,22 @@ function getDesktopServices() {
       platform: process.platform,
     })
   const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (directory, onEvent, onNotification) => {
-      const launch = resolveEccSidecarLaunch({
-        agentEccExecutable: eccAgentExecutable,
-        directory,
-        eccExecutable: eccExecutable ?? 'ecc',
-        quickStartRoot,
-      })
-      return new EccRpcSidecarProcess({
-        command: launch.command,
-        commandArgs: launch.commandArgs,
+    createSidecar: (_directory, onEvent, onNotification, runtimeTarget) =>
+      new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification,
-      })
-    },
+        resolveLaunch: () => {
+          const launch = resolveEccSidecarLaunch({
+            agentEccExecutable: eccAgentExecutable,
+            eccExecutable: eccExecutable ?? 'ecc',
+            runtimeTarget: runtimeTarget(),
+          })
+          return { args: launch.commandArgs, command: launch.command }
+        },
+      }),
     lazyWorkspaceOpen: true,
     snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
   })

@@ -20,6 +20,7 @@ import type {
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccRuntimeStepRenderedAckRequest,
+  EccRuntimeTarget,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
@@ -57,6 +58,7 @@ export interface EccRpcRuntimeServiceOptions {
     directory: string | null,
     onEvent: (event: EccRuntimeEvent) => void,
     onNotification: (notification: JsonRpcNotificationPayload) => void,
+    runtimeTarget: () => EccRuntimeTarget | undefined,
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
@@ -74,6 +76,8 @@ export class EccRpcRuntimeService {
   private readonly runtimes = new Map<string, EccWorkspaceRuntime>()
   private readonly handleToDirectory = new Map<string, string>()
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  private readonly agentRuntimeLeases = new WeakMap<EccWorkspaceRuntime, number>()
+  private readonly agentOperationLeases = new Map<string, () => void>()
   private controlRuntime: EccWorkspaceRuntime | null = null
 
   constructor(private readonly options: EccRpcRuntimeServiceOptions) {}
@@ -166,6 +170,9 @@ export class EccRpcRuntimeService {
       }
     }
     await Promise.all(runtimes.map((runtime) => runtime.shutdown()))
+    for (const operationId of this.agentOperationLeases.keys()) {
+      this.releaseAgentOperation(operationId)
+    }
     this.runtimes.clear()
     this.handleToDirectory.clear()
     this.controlRuntime = null
@@ -173,9 +180,11 @@ export class EccRpcRuntimeService {
   }
 
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
-    const requestKey = normalizeWorkspacePath(request.directory)
-    const runtime = this.getOrCreateRuntime(request.directory)
-    return runtime.createWorkspace(request).then(async (result) => {
+    const { runtimeTarget, ...runtimeRequest } = request
+    const requestKey = normalizeWorkspacePath(runtimeRequest.directory)
+    const runtime = this.getOrCreateRuntime(runtimeRequest.directory)
+    return this.withRuntimeTarget(runtime, runtimeTarget, async () => {
+      const result = await runtime.createWorkspace(runtimeRequest)
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
       await runtime.releaseIdleSidecar()
       return result
@@ -183,9 +192,11 @@ export class EccRpcRuntimeService {
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
-    const requestKey = normalizeWorkspacePath(request.directory)
-    const runtime = this.getOrCreateRuntime(request.directory)
-    return runtime.openWorkspace(request).then(async (result) => {
+    const { runtimeTarget, ...runtimeRequest } = request
+    const requestKey = normalizeWorkspacePath(runtimeRequest.directory)
+    const runtime = this.getOrCreateRuntime(runtimeRequest.directory)
+    return this.withRuntimeTarget(runtime, runtimeTarget, async () => {
+      const result = await runtime.openWorkspace(runtimeRequest)
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
       try {
         await runtime.recoverInterrupted(result.workspaceHandle)
@@ -198,6 +209,14 @@ export class EccRpcRuntimeService {
       }
       return result
     })
+  }
+
+  withAgentRuntime<T>(workspaceHandle: string, operation: () => Promise<T>): Promise<T> {
+    return this.withRuntimeTarget(
+      this.runtimeForHandle(workspaceHandle),
+      'agent',
+      operation,
+    )
   }
 
   async closeWorkspace(
@@ -219,41 +238,55 @@ export class EccRpcRuntimeService {
   async workspaceHome(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceHomeResult> {
-    return this.runtimeForHandle(request.workspaceHandle).workspaceHome(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.workspaceHome(runtimeRequest),
+    )
   }
 
   async workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
-    return this.runtimeForHandle(request.workspaceHandle).workspaceInfo(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.workspaceInfo(runtimeRequest),
+    )
   }
 
   async refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
-    return this.runtimeForHandle(request.workspaceHandle).refreshConfig(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.refreshConfig(runtimeRequest),
+    )
   }
 
   async syncConfig(
     request: EccWorkspaceSyncConfigRequest,
   ): Promise<EccWorkspaceSyncConfigResult> {
-    return this.runtimeForHandle(request.workspaceHandle).syncConfig(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.syncConfig(runtimeRequest),
+    )
   }
 
   async resetFlow(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceResetFlowResult> {
-    return this.runtimeForHandle(request.workspaceHandle).resetFlow(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.resetFlow(runtimeRequest),
+    )
   }
 
   async exportSignoff(
     request: EccWorkspaceExportSignoffRequest,
   ): Promise<EccWorkspaceExportSignoffResult> {
-    return this.runtimeForHandle(request.workspaceHandle).exportSignoff(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.exportSignoff(runtimeRequest),
+    )
   }
 
   async inspectSignoff(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.runtimeForHandle(request.workspaceHandle).inspectSignoff(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.inspectSignoff(runtimeRequest),
+    )
   }
 
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
@@ -275,33 +308,63 @@ export class EccRpcRuntimeService {
   }
 
   async runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {
-    return this.runtimeForHandle(request.workspaceHandle).runFlow(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.runFlow(runtimeRequest),
+    )
   }
 
   async runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
-    return this.runtimeForHandle(request.workspaceHandle).runStep(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.runStep(runtimeRequest),
+    )
   }
 
   startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).startFlowOperation(request)
+    return this.startOperation(request, (runtime, runtimeRequest) =>
+      runtime.startFlowOperation(runtimeRequest),
+    )
   }
 
   startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).startStepOperation(request)
+    return this.startOperation(request, (runtime, runtimeRequest) =>
+      runtime.startStepOperation(runtimeRequest),
+    )
   }
 
-  operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).operationStatus(request)
+  async operationStatus(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
+    return this.runForRequest(request, async (runtime, runtimeRequest) => {
+      const result = await runtime.operationStatus(runtimeRequest)
+      if (isTerminalOperationState(result.state)) {
+        this.releaseAgentOperation(result.operationId)
+      }
+      return result
+    })
   }
 
-  waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).waitForOperation(request)
+  async waitForOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
+    try {
+      return await this.runForRequest(request, (runtime, runtimeRequest) =>
+        runtime.waitForOperation(runtimeRequest),
+      )
+    } finally {
+      this.releaseAgentOperation(request.operationId)
+    }
   }
 
   cancelOperation(
     request: EccRuntimeOperationRequest,
   ): Promise<{ accepted: boolean; operationId: string; state: string }> {
-    return this.runtimeForHandle(request.workspaceHandle).cancelOperation(request)
+    return this.runForRequest(request, async (runtime, runtimeRequest) => {
+      const result = await runtime.cancelOperation(runtimeRequest)
+      if (isTerminalOperationState(result.state)) {
+        this.releaseAgentOperation(result.operationId)
+      }
+      return result
+    })
   }
 
   acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
@@ -310,7 +373,9 @@ export class EccRpcRuntimeService {
     eventId: string
     operationId: string
   }> {
-    return this.runtimeForHandle(request.workspaceHandle).acknowledgeStepRendered(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.acknowledgeStepRendered(runtimeRequest),
+    )
   }
 
   acknowledgeDetachedStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
@@ -327,7 +392,9 @@ export class EccRpcRuntimeService {
   workspaceSnapshot(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRuntimeSnapshot> {
-    return this.runtimeForHandle(request.workspaceHandle).workspaceSnapshot(request)
+    return this.runForRequest(request, (runtime, runtimeRequest) =>
+      runtime.workspaceSnapshot(runtimeRequest),
+    )
   }
 
   private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {
@@ -337,14 +404,18 @@ export class EccRpcRuntimeService {
     }
     let runtime = this.runtimes.get(key)
     if (!runtime) {
-      runtime = new EccWorkspaceRuntime({
+      let createdRuntime!: EccWorkspaceRuntime
+      createdRuntime = new EccWorkspaceRuntime({
         createSidecar: (onEvent, onNotification) =>
-          this.options.createSidecar(key, onEvent, onNotification),
+          this.options.createSidecar(key, onEvent, onNotification, () =>
+            this.runtimeTargetFor(createdRuntime),
+          ),
         directory: key,
         lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
         onEvent: (event) => this.emit(event),
         snapshotLoader: this.options.snapshotLoader,
       })
+      runtime = createdRuntime
       this.runtimes.set(key, runtime)
     }
     return runtime
@@ -363,7 +434,7 @@ export class EccRpcRuntimeService {
     if (!this.controlRuntime) {
       this.controlRuntime = new EccWorkspaceRuntime({
         createSidecar: (onEvent, onNotification) =>
-          this.options.createSidecar(null, onEvent, onNotification),
+          this.options.createSidecar(null, onEvent, onNotification, () => undefined),
         directory: null,
         onEvent: (event) => this.emit(event),
       })
@@ -436,9 +507,109 @@ export class EccRpcRuntimeService {
   }
 
   private emit(event: EccRuntimeEvent): void {
+    if (event.type === 'runtime.exited' && event.interruptedOperationId) {
+      this.releaseAgentOperation(event.interruptedOperationId)
+    }
+    if (
+      event.type === 'runtime.protocol' &&
+      ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
+        event.event.type,
+      )
+    ) {
+      this.releaseAgentOperation(event.event.operationId)
+    }
     this.options.onEvent?.(event)
     for (const listener of this.eventListeners) {
       listener(event)
     }
   }
+
+  private async runForRequest<TRequest extends EccWorkspaceHandleRequest, TResult>(
+    request: TRequest,
+    operation: (
+      runtime: EccWorkspaceRuntime,
+      request: Omit<TRequest, 'runtimeTarget'>,
+    ) => Promise<TResult>,
+  ): Promise<TResult> {
+    const { runtimeTarget, ...runtimeRequest } = request
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    return this.withRuntimeTarget(runtime, runtimeTarget, () =>
+      operation(runtime, runtimeRequest),
+    )
+  }
+
+  private async startOperation<TRequest extends EccRuntimeStartFlowRequest>(
+    request: TRequest,
+    operation: (
+      runtime: EccWorkspaceRuntime,
+      request: Omit<TRequest, 'runtimeTarget'>,
+    ) => Promise<EccRuntimeOperation>,
+  ): Promise<EccRuntimeOperation> {
+    const { runtimeTarget, ...runtimeRequest } = request
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    if (runtimeTarget === undefined) return await operation(runtime, runtimeRequest)
+    this.requireRuntimeTarget(runtimeTarget)
+    const release = this.acquireAgentRuntime(runtime)
+    try {
+      const result = await operation(runtime, runtimeRequest)
+      if (isTerminalOperationState(result.state)) {
+        release()
+      } else {
+        this.agentOperationLeases.get(result.operationId)?.()
+        this.agentOperationLeases.set(result.operationId, release)
+      }
+      return result
+    } catch (error) {
+      release()
+      throw error
+    }
+  }
+
+  private async withRuntimeTarget<T>(
+    runtime: EccWorkspaceRuntime,
+    runtimeTarget: EccRuntimeTarget | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (runtimeTarget === undefined) return await operation()
+    this.requireRuntimeTarget(runtimeTarget)
+    const release = this.acquireAgentRuntime(runtime)
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+
+  private requireRuntimeTarget(runtimeTarget: unknown): asserts runtimeTarget is 'agent' {
+    if (runtimeTarget !== 'agent') {
+      throw new Error(`Unsupported ECC runtime target: ${String(runtimeTarget)}`)
+    }
+  }
+
+  private acquireAgentRuntime(runtime: EccWorkspaceRuntime): () => void {
+    this.agentRuntimeLeases.set(runtime, (this.agentRuntimeLeases.get(runtime) ?? 0) + 1)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      const remaining = (this.agentRuntimeLeases.get(runtime) ?? 1) - 1
+      if (remaining > 0) this.agentRuntimeLeases.set(runtime, remaining)
+      else this.agentRuntimeLeases.delete(runtime)
+    }
+  }
+
+  private runtimeTargetFor(runtime: EccWorkspaceRuntime): EccRuntimeTarget | undefined {
+    return (this.agentRuntimeLeases.get(runtime) ?? 0) > 0 ? 'agent' : undefined
+  }
+
+  private releaseAgentOperation(operationId: string): void {
+    const release = this.agentOperationLeases.get(operationId)
+    if (!release) return
+    this.agentOperationLeases.delete(operationId)
+    release()
+  }
+}
+
+function isTerminalOperationState(state: string): boolean {
+  return ['succeeded', 'failed', 'cancelled'].includes(state)
 }

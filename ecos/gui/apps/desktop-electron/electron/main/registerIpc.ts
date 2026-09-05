@@ -365,6 +365,7 @@ export interface DesktopBridgeServices {
     startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation>
     startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation>
     syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
+    withAgentRuntime<T>(workspaceHandle: string, operation: () => Promise<T>): Promise<T>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
     workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
     workspaceSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -1280,6 +1281,7 @@ export function registerIpc(
       // canonical directory than the contract path; open/track under both.
       const opened = await services.eccRuntimeService.openWorkspace({
         directory: targetWorkspace,
+        runtimeTarget: 'agent',
       })
       const openedHandle = workspaceHandleFromResult(opened)
       const openedDirectory = workspaceDirectoryFromResult(opened)
@@ -1294,10 +1296,12 @@ export function registerIpc(
       workspaceHandle = openedHandle
     }
     pendingWorkspaceRerunExecutions.delete(token)
-    await executeWorkspaceRerun(
-      pending.contract,
-      services.eccRuntimeService,
-      workspaceHandle,
+    await services.eccRuntimeService.withAgentRuntime(workspaceHandle, () =>
+      executeWorkspaceRerun(
+        pending.contract,
+        services.eccRuntimeService,
+        workspaceHandle,
+      ),
     )
   })
 
@@ -2023,7 +2027,10 @@ export function registerIpc(
     const designTool = requireDesignTool(runtimeRequest.designTool)
     const backendRequest =
       designTool === 'backend'
-        ? (runtimeRequest.payload as unknown as EccWorkspaceCreateRequest)
+        ? ({
+            ...runtimeRequest.payload,
+            runtimeTarget: runtimeRequest.runtimeTarget,
+          } as unknown as EccWorkspaceCreateRequest)
         : null
     const eccBackendRequest = backendRequest
       ? await prepareEccWorkspaceCreateRequest(services, backendRequest)
@@ -2055,6 +2062,7 @@ export function registerIpc(
         ? await services.frontendRpcRuntimeService.openWorkspace(runtimeRequest.directory)
         : await services.eccRuntimeService.openWorkspace({
             directory: runtimeRequest.directory,
+            runtimeTarget: runtimeRequest.runtimeTarget,
           })
     const workspaceHandle = workspaceHandleFromResult(result)
     if (workspaceHandle) {

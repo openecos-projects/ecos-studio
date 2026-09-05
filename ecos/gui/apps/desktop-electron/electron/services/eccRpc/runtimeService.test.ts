@@ -101,8 +101,13 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   shutdownError: Error | null = null
   private started = false
   readonly directory: string | null
+  readonly runtimeTargetsAtStart: Array<'agent' | undefined> = []
 
-  constructor(client: FakeRpcClient, directory: string | null) {
+  constructor(
+    client: FakeRpcClient,
+    directory: string | null,
+    private readonly runtimeTarget: () => 'agent' | undefined = () => undefined,
+  ) {
     this.client = client
     this.directory = directory
   }
@@ -114,6 +119,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   }
 
   async start(): Promise<EccRpcRuntimeClient> {
+    this.runtimeTargetsAtStart.push(this.runtimeTarget())
     if (!this.started) {
       this.startCount += 1
       this.started = true
@@ -134,10 +140,10 @@ function createPool() {
   let createCount = 0
 
   const service = new EccRpcRuntimeService({
-    createSidecar: (directory, onEvent, onNotification) => {
+    createSidecar: (directory, onEvent, onNotification, runtimeTarget) => {
       createCount += 1
       const client = new FakeRpcClient(directory, `id-${directory ?? 'control'}`)
-      const sidecar = new FakeSidecar(client, directory)
+      const sidecar = new FakeSidecar(client, directory, runtimeTarget)
       clients.set(directory, client)
       sidecars.set(directory, sidecar)
       sidecarEvents.set(directory, onEvent)
@@ -179,6 +185,129 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it('keeps ordinary workspace calls on the default runtime', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    const client = pool.clientFor('/work/demo')
+    client.responses.push({ id: 'layout', step: 'route' })
+
+    await pool.service.workspaceInfo({
+      id: 'layout',
+      step: 'route',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(pool.sidecarFor('/work/demo').runtimeTargetsAtStart.at(-1)).toBeUndefined()
+  })
+
+  it('uses and strips an explicit Agent target for a synchronous workspace call', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    const client = pool.clientFor('/work/demo')
+    client.responses.push({ directory: '/work/demo', refreshed: true })
+
+    await pool.service.refreshConfig({
+      runtimeTarget: 'agent',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    expect(pool.sidecarFor('/work/demo').runtimeTargetsAtStart.at(-1)).toBe('agent')
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.refresh_config',
+      params: { workspaceId: 'id-/work/demo' },
+    })
+  })
+
+  it('keeps the Agent target until an asynchronous flow reaches terminal state', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    const client = pool.clientFor('/work/demo')
+    client.responses.push({
+      kind: 'flow',
+      operationId: 'operation-1',
+      state: 'running',
+      workspaceId: 'id-/work/demo',
+    })
+
+    await pool.service.startFlowOperation({
+      idempotencyKey: 'agent-flow-1',
+      runtimeTarget: 'agent',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    client.responses.push({ id: 'layout', step: 'route' })
+    await pool.service.workspaceInfo({
+      id: 'layout',
+      step: 'route',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    expect(pool.sidecarFor('/work/demo').runtimeTargetsAtStart.at(-1)).toBe('agent')
+
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'id-/work/demo:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { error: { message: 'failed' } },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.failed',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+    client.responses.push({ id: 'layout', step: 'route' })
+    await pool.service.workspaceInfo({
+      id: 'layout',
+      step: 'route',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    expect(pool.sidecarFor('/work/demo').runtimeTargetsAtStart.at(-1)).toBeUndefined()
+  })
+
+  it('releases the Agent target when its sidecar exits unexpectedly', async () => {
+    const pool = createPool()
+    const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })
+    const client = pool.clientFor('/work/demo')
+    client.responses.push({
+      kind: 'flow',
+      operationId: 'operation-1',
+      state: 'running',
+      workspaceId: 'id-/work/demo',
+    })
+    await pool.service.startFlowOperation({
+      idempotencyKey: 'agent-flow-1',
+      runtimeTarget: 'agent',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    pool.sidecarNotification('/work/demo', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'id-/work/demo:1',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: {},
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.started',
+        workspaceId: 'id-/work/demo',
+      },
+    })
+
+    pool.sidecarEvent('/work/demo', {
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+    await waitForQueuedOperation()
+
+    expect(pool.sidecarFor('/work/demo').runtimeTargetsAtStart.at(-1)).toBeUndefined()
+  })
+
   it('routes frontend-specific workspace payloads through the workspace pool', async () => {
     const pool = createPool()
     const workspace = await pool.service.createWorkspacePayload({

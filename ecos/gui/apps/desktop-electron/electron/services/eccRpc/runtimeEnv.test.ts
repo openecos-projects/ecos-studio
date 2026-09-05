@@ -522,34 +522,30 @@ describe('createEccRuntimeEnv', () => {
     ).toBe(executable)
   })
 
-  it('routes only managed Quick Start workspaces to the Agent RPC executable', () => {
+  it('routes explicit Agent requests to the Agent RPC executable', () => {
     const options = {
       agentEccExecutable: '/runtime/ecc-agent-rpc',
       eccExecutable: '/runtime/ecc',
-      quickStartRoot: '/state/quick-runs',
     }
 
     expect(
       resolveEccSidecarLaunch({
         ...options,
-        directory: '/state/quick-runs/gcd/ws_0001',
+        runtimeTarget: 'agent',
       }),
     ).toEqual({ command: '/runtime/ecc-agent-rpc', commandArgs: [] })
-    expect(resolveEccSidecarLaunch({ ...options, directory: '/work/gcd' })).toEqual({
+    expect(resolveEccSidecarLaunch(options)).toEqual({
       command: '/runtime/ecc',
-    })
-    expect(resolveEccSidecarLaunch({ ...options, directory: null })).toEqual({
-      command: '/runtime/ecc',
+      commandArgs: ['rpc', 'serve', '--stdio', '--persistent-db'],
     })
   })
 
-  it('fails closed when Quick Start has no dedicated Agent RPC executable', () => {
+  it('fails closed when an Agent request has no dedicated Agent RPC executable', () => {
     expect(() =>
       resolveEccSidecarLaunch({
         agentEccExecutable: null,
-        directory: '/state/quick-runs/gcd/ws_0001',
         eccExecutable: '/runtime/ecc',
-        quickStartRoot: '/state/quick-runs',
+        runtimeTarget: 'agent',
       }),
     ).toThrow('ECC Agent RPC executable is unavailable')
   })

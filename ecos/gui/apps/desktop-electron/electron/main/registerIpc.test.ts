@@ -223,6 +223,7 @@ function registerHandlers(
       startFlowOperation: vi.fn(),
       startStepOperation: vi.fn(),
       syncConfig: vi.fn(),
+      withAgentRuntime: vi.fn(async (_workspaceHandle, operation) => await operation()),
       workspaceHome: vi.fn(),
       workspaceInfo: vi.fn(),
       workspaceSnapshot: vi.fn(),
@@ -663,6 +664,10 @@ describe('registerIpc', () => {
       contract,
       services.eccRuntimeService,
       'target-gui-handle',
+    )
+    expect(services.eccRuntimeService.withAgentRuntime).toHaveBeenCalledWith(
+      'target-gui-handle',
+      expect.any(Function),
     )
   })
 
@@ -1229,6 +1234,7 @@ describe('registerIpc', () => {
       handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
         designTool: 'backend',
         payload,
+        runtimeTarget: 'agent',
       }),
     ).resolves.toEqual(result)
     expect(services.pdkInventoryService.bindInstallation).toHaveBeenCalledWith({
@@ -1251,6 +1257,7 @@ describe('registerIpc', () => {
       directory: payload.directory,
       pdk: payload.pdk,
       pdkRoot: '/canonical/pdk',
+      runtimeTarget: 'agent',
     })
   })
 

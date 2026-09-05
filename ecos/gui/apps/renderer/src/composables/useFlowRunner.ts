@@ -10,7 +10,7 @@ import {
   startStepOperationApi,
   type RunStepResponse,
 } from '@/api/flow'
-import type { DesignTool } from '@ecos-studio/shared'
+import type { DesignTool, EccRuntimeTarget } from '@ecos-studio/shared'
 import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
@@ -30,6 +30,7 @@ import {
 export interface FlowRunOptions {
   rerun?: boolean
   resetDependents?: boolean
+  runtimeTarget?: EccRuntimeTarget
 }
 
 // A completed backend or frontend flow can update every Home data source. Keep
@@ -259,6 +260,7 @@ export function useFlowRunner() {
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         resetDependents: Boolean(options.resetDependents),
+        runtimeTarget: options.runtimeTarget,
         step,
         workspaceHandle: requestScope.workspaceHandle,
       })
@@ -381,6 +383,7 @@ export function useFlowRunner() {
       const operation = await startFlowOperationApi({
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
+        runtimeTarget: options.runtimeTarget,
         workspaceHandle: requestScope.workspaceHandle,
       })
       // Keep the rerun marker until the backend emits its authoritative
