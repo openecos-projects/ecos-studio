@@ -129,6 +129,10 @@ function registerHandlers(
       listPendingExternalReadRoots: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       readOptionalProjectTextFile: vi.fn(),
+      readWorkspaceParameters: vi.fn(),
+      hasWorkspaceConfigShadow: vi.fn(),
+      editWorkspaceParameters: vi.fn(),
+      applyWorkspaceParameterWrites: vi.fn(),
       readOptionalProjectTextFileChunk: vi.fn(),
       readOptionalProjectTextFileTail: vi.fn(),
       readOptionalProjectTextFileUpdate: vi.fn(),
@@ -160,6 +164,7 @@ function registerHandlers(
       readFlow: vi.fn(),
       readHome: vi.fn(),
       readParameters: vi.fn(),
+      writeParameters: vi.fn(),
       resolveStepInfo: vi.fn(),
     },
     resourceManagerService: {

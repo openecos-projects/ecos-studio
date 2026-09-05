@@ -137,6 +137,19 @@ describe('StepDashboard', () => {
     expect(componentSource).toContain('white-space: normal')
   })
 
+  it('renders a dedicated LEC equivalence result card for lec and postRouteLec steps', () => {
+    expect(componentSource).toContain('v-else-if="isLecStep"')
+    expect(componentSource).toContain("['lec', 'postroutelec'].includes(")
+    expect(componentSource).toContain('Equivalence Result')
+    expect(componentSource).toContain('data.lecInsights')
+    expect(componentSource).toContain('lecStatusLabel')
+    expect(componentSource).toContain('is-${data.lecInsights.tone}')
+    expect(componentSource).toContain('Stale — rerun LEC')
+    expect(componentSource).toContain('No LEC result')
+    expect(componentSource).toContain('lec-failure-hint')
+    expect(componentSource).toContain('.data-body.lec-data-body')
+  })
+
   it('allocates the shared bottom row eight parts to Data Insights and two to Data Reports', () => {
     expect(componentSource).toContain(
       'grid-template-columns: minmax(0, 8fr) minmax(180px, 2fr)',

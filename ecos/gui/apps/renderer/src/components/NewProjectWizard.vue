@@ -455,7 +455,7 @@
                           v-for="step in hardenFlowSteps"
                           :key="step.name"
                           :value="step.name"
-                          :disabled="isFlowStepLocked(step.name)"
+                          :disabled="isFlowStepStartDisabled(step.name)"
                         >
                           {{ step.name }}
                         </option>
@@ -1282,7 +1282,7 @@
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Spec Setting</h2>
                   <p class="mt-2 text-sm text-(--text-secondary)">
-                    These values are saved into the workspace home parameters.json.
+                    These values are saved into the workspace home params.toml.
                   </p>
                 </header>
 
@@ -1616,6 +1616,7 @@ type FlowStepName =
   | 'drc'
   | 'lvs'
   | 'filler'
+  | 'postRouteLec'
   | 'RCX'
   | 'sta'
   | 'Harden'
@@ -1702,8 +1703,23 @@ const projectParentPath = ref(parentPath(initialProjectRoot(props.initialConfig)
 const designNameTouched = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim() !== '',
 )
+/**
+ * LEC compares the golden netlist against the final one; starting a fresh
+ * workspace at it would let ECC self-compare the origin netlist.
+ * Declared before the flowStartStep initializer below (const TDZ).
+ */
+const FLOW_START_DISABLED_STEPS: ReadonlySet<FlowStepName> = new Set(['postRouteLec'])
+
+function isFlowStepStartDisabled(stepName: FlowStepName) {
+  return isFlowStepLocked(stepName) || FLOW_START_DISABLED_STEPS.has(stepName)
+}
+
+function normalizeFlowStartStep(value: unknown, fallback: FlowStepName): FlowStepName {
+  const step = normalizeFlowStepName(value, fallback)
+  return FLOW_START_DISABLED_STEPS.has(step) ? fallback : step
+}
 const flowStartStep = ref<FlowStepName>(
-  normalizeFlowStepName(
+  normalizeFlowStartStep(
     props.initialConfig?.flow_config?.start_step ??
       props.initialConfig?.parameters?.start_step,
     'Synthesis',
@@ -1758,6 +1774,7 @@ const hardenFlowSteps: Array<{ name: FlowStepName; description: string }> = [
   { name: 'drc', description: 'Design rule checking.' },
   { name: 'lvs', description: 'Layout versus netlist connectivity.' },
   { name: 'filler', description: 'Filler insertion.' },
+  { name: 'postRouteLec', description: 'Post-route logic equivalence check.' },
   { name: 'RCX', description: 'Parasitic extraction.' },
   { name: 'sta', description: 'Static timing analysis.' },
   { name: 'Harden', description: 'Final harden output.' },
@@ -2056,11 +2073,13 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     drc: 'drc',
     lvs: 'lvs',
     filler: 'filler',
+    postlec: 'postRouteLec',
+    postroutelec: 'postRouteLec',
     rcx: 'RCX',
     sta: 'sta',
     harden: 'Harden',
   }
-  const alias = aliases[candidate.toLowerCase()]
+  const alias = aliases[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
   const validSteps: FlowStepName[] = [
     'Synthesis',
@@ -2073,6 +2092,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     'drc',
     'lvs',
     'filler',
+    'postRouteLec',
     'RCX',
     'sta',
     'Harden',
@@ -2548,7 +2568,7 @@ function applyProjectFlowDefaults(
   const nextStart = firstString(parameters.start_step, baseDesign.start_step)
   const nextEnd = firstString(parameters.end_step, baseDesign.end_step)
   if (nextStart) {
-    flowStartStep.value = normalizeFlowStepName(nextStart, flowStartStep.value)
+    flowStartStep.value = normalizeFlowStartStep(nextStart, flowStartStep.value)
   }
   if (nextEnd) {
     flowEndStep.value = normalizeFlowStepName(nextEnd, flowEndStep.value)
@@ -2851,6 +2871,7 @@ function selectFlowStartStep(event: Event) {
 }
 
 function applyFlowStartStep(stepName: FlowStepName) {
+  if (FLOW_START_DISABLED_STEPS.has(stepName)) return
   const index = hardenFlowSteps.findIndex((step) => step.name === stepName)
   if (index < 0) return
 

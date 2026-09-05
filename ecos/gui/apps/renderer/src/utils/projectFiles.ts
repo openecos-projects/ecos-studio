@@ -107,6 +107,59 @@ export async function readOptionalProjectTextFile(
   }
 }
 
+/**
+ * Read a workspace's persisted parameters (home/params.toml preferred,
+ * home/parameters.json fallback) by workspace directory. The main process
+ * owns the on-disk format; the renderer always gets a JSON object.
+ */
+const shadowNotifiedWorkspaces = new Set<string>()
+
+/**
+ * One warn toast per workspace per session when both home/params.toml and
+ * home/parameters.json exist: the JSON is inert and deletable. The check is
+ * a cheap main-process probe riding the parameters read paths (disk read
+ * and runtime snapshot alike). Advisory only: never throws.
+ */
+export async function warnOnceOnConfigShadow(workspacePath: string): Promise<void> {
+  if (shadowNotifiedWorkspaces.has(workspacePath)) return
+  const workspace = getDesktopApi().workspace
+  if (typeof workspace.hasWorkspaceConfigShadow !== 'function') return
+  // Mark synchronously so overlapping reads cannot double-toast; a `false`
+  // or failed probe unmarks so a later read can still warn.
+  shadowNotifiedWorkspaces.add(workspacePath)
+  try {
+    if (!(await workspace.hasWorkspaceConfigShadow(workspacePath))) {
+      shadowNotifiedWorkspaces.delete(workspacePath)
+      return
+    }
+    const { useWorkspace } = await import('@/composables/useWorkspace')
+    useWorkspace().showToast({
+      severity: 'warn',
+      summary: 'Workspace configuration shadowed',
+      detail:
+        'home/params.toml wins over home/parameters.json; the legacy JSON is inert — delete it to silence this warning.',
+      life: 6000,
+    })
+  } catch {
+    // A probe/toast failure must never reject the parameters read; unmark
+    // so a later read can retry the warning.
+    shadowNotifiedWorkspaces.delete(workspacePath)
+  }
+}
+
+export async function readWorkspaceParametersFile(
+  workspacePath: string,
+): Promise<Record<string, unknown> | null> {
+  const workspace = getDesktopApi().workspace
+  if (typeof workspace.readWorkspaceParameters !== 'function') {
+    return null
+  }
+  const parameters = await workspace.readWorkspaceParameters(workspacePath)
+  // Fire-and-forget: the advisory probe must not delay or block the read.
+  void warnOnceOnConfigShadow(workspacePath)
+  return parameters
+}
+
 export async function readProjectTextFileTail(
   path: string,
   maxChars: number,

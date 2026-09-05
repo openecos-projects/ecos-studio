@@ -50,6 +50,7 @@ import type {
   DesktopAgentInterruptRequest,
   DesktopAgentModelSettings,
   DesktopAgentModelSettingsRequest,
+  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
@@ -302,6 +303,18 @@ export interface DesktopApi {
     openWaveformExternal(path: string): Promise<void>
     readProjectTextFile(path: string): Promise<string>
     readOptionalProjectTextFile(path: string): Promise<string | null>
+    readWorkspaceParameters(
+      workspacePath: string,
+    ): Promise<Record<string, unknown> | null>
+    hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean>
+    editWorkspaceParameters(
+      workspacePath: string,
+      edits: { json_path: (string | number)[]; value: unknown }[],
+    ): Promise<{ format: 'toml' | 'json'; path: string }>
+    applyWorkspaceParameterWrites(
+      workspacePath: string,
+      writes: DesktopAgentWorkspaceParameterWrite[],
+    ): Promise<void>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail?(
       path: string,
@@ -352,6 +365,13 @@ export interface DesktopApi {
     readHome(): Promise<Record<string, unknown> | null>
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
+    writeParameters(request: {
+      parameters: Record<string, unknown>
+      /** The workspace the renderer captured at dispatch time. Required so a
+       * save queued behind another writer cannot land after the window has
+       * switched to a different workspace. */
+      workspace: string
+    }): Promise<{ format: 'toml' | 'json'; path: string }>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }
   resources: {

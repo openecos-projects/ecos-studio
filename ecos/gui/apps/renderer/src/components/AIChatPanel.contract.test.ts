@@ -295,11 +295,12 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain(
       'applyWorkspaceParameterWrites(workspaceRoot, contract.writes)',
     )
-    expect(source).toContain('for (const write of fileWrites)')
-    expect(source).toContain('setJsonPathValue(document, write)')
     expect(source).toContain(
-      'throw new Error(`Parameter ${write.knob_id} does not exist in ${write.file}.`)',
+      'desktopApi.workspace.applyWorkspaceParameterWrites(workspaceRoot, writes)',
     )
+    expect(source).not.toContain('restorations.reverse()')
+    expect(source).not.toContain('readExistingWorkspaceConfig')
+    expect(source).not.toContain('writeProjectTextFile')
   })
 
   it('pushes parameter writes back through ECC so the next run sees them', () => {
@@ -319,10 +320,9 @@ describe('AIChatPanel flow contracts', () => {
     )
   })
 
-  it('writes parameter files with the indentation they already use', () => {
+  it('does not serialize parameter files in the renderer', () => {
     expect(source).not.toContain('JSON.stringify(parameters, null, 2)')
-    expect(source).toContain('JSON.stringify(document, null, detectJsonIndent(raw))')
-    expect(source).toContain("raw.endsWith('\\n') ? `${serialized}\\n` : serialized")
+    expect(source).not.toContain('detectJsonIndent')
   })
 
   it('opens the rerun workspace and restores the source workspace on failure', () => {

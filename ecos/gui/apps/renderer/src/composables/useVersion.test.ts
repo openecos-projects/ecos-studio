@@ -61,6 +61,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     workspace: {
       openOrFocus: async () => ({ action: 'proceed' as const }),
+      hasWorkspaceConfigShadow: async () => false,
       bindWindow: async (path: string) => path,
       unbindWindow: async () => undefined,
       getBoundPath: async () => null,
@@ -73,6 +74,12 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       openWaveformExternal: async (_path: string) => undefined,
       readProjectTextFile: async () => '',
       readOptionalProjectTextFile: async () => null,
+      readWorkspaceParameters: async () => null,
+      editWorkspaceParameters: async () => ({
+        format: 'toml',
+        path: '/tmp/home/params.toml',
+      }),
+      applyWorkspaceParameterWrites: async () => undefined,
       readProjectTextFileTail: async () => null,
       readProjectBinaryFile: async () => new Uint8Array(),
       writeProjectTextFile: async () => undefined,
@@ -124,6 +131,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readHome: async () => null,
       readFlow: async () => null,
       readParameters: async () => null,
+      writeParameters: async () => ({ format: 'toml', path: '/tmp/home/params.toml' }),
       resolveStepInfo: async (request) => ({
         step: request.step,
         id: request.id,

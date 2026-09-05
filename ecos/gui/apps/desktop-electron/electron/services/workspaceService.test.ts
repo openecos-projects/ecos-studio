@@ -7,6 +7,7 @@ import {
   readdir,
   rename,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -922,5 +923,295 @@ describe('WorkspaceService', () => {
     await delay(150)
 
     expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('editWorkspaceParameters', () => {
+  it('refuses to edit parameters through a symlinked config file', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const homeDir = join(directory, 'home')
+    await mkdir(homeDir, { recursive: true })
+    const externalPath = join(directory, 'external.toml')
+    await writeFile(externalPath, '[params]\ndesign = "gcd"\n', 'utf8')
+    await symlink(externalPath, join(homeDir, 'params.toml'))
+
+    const { service } = createWorkspaceService(directory, externalPath)
+
+    await expect(
+      service.editWorkspaceParameters(directory, [{ json_path: ['design'], value: 'x' }]),
+    ).rejects.toThrow(/symlink/i)
+    await expect(readFile(externalPath, 'utf8')).resolves.toBe(
+      '[params]\ndesign = "gcd"\n',
+    )
+  })
+
+  it('refuses to edit parameters in a nested workspace under the active root', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const nested = join(directory, 'archive', 'other')
+    await mkdir(join(nested, 'home'), { recursive: true })
+    const tomlPath = join(nested, 'home', 'params.toml')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
+
+    const { service } = createWorkspaceService(directory, tomlPath)
+    await expect(
+      service.editWorkspaceParameters(nested, [{ json_path: ['design'], value: 'x' }]),
+    ).rejects.toThrow(/not the active workspace/)
+    await expect(readFile(tomlPath, 'utf8')).resolves.toBe('[params]\ndesign = "gcd"\n')
+  })
+
+  it('edits parameters in a real params.toml file', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const homeDir = join(directory, 'home')
+    await mkdir(homeDir, { recursive: true })
+    const tomlPath = join(homeDir, 'params.toml')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
+
+    const { service } = createWorkspaceService(directory, tomlPath)
+    const result = await service.editWorkspaceParameters(directory, [
+      { json_path: ['design'], value: 'updated' },
+    ])
+
+    expect(result.format).toBe('toml')
+    await expect(readFile(tomlPath, 'utf8')).resolves.toContain('design = "updated"')
+  })
+})
+
+describe('applyWorkspaceParameterWrites', () => {
+  function createApplyService(rootPath: string): WorkspaceService {
+    const projectScopeProvider = createProjectScopeProvider(rootPath, rootPath)
+    projectScopeProvider.requestWritableProjectPathAccess = vi.fn(
+      async (path: string) => path,
+    )
+    return new WorkspaceService({
+      projectScopeProvider,
+      replacementJournalDirectory: join(rootPath, '.workspace-replacement-journals'),
+    })
+  }
+
+  it('rolls back the parameter file when a later step-config write fails', async () => {
+    const directory = await createTempDir('ecos-workspace-service-apply-rollback-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const tomlPath = join(directory, 'home', 'params.toml')
+    const original = '[params]\ndesign = "gcd"\nmax_fanout = 20\n'
+    await writeFile(tomlPath, original, 'utf8')
+    await writeFile(
+      join(directory, 'config', 'dreamplace_ecc.json'),
+      '{\n    "other_key": 1\n}\n',
+      'utf8',
+    )
+
+    const service = createApplyService(directory)
+    await expect(
+      service.applyWorkspaceParameterWrites(directory, [
+        {
+          file: 'home/params.toml',
+          json_path: ['max_fanout'],
+          knob_id: 'cts.max_fanout',
+          surface: 'parameters',
+          value: 64,
+        },
+        {
+          file: 'config/dreamplace_ecc.json',
+          json_path: ['density_weight'],
+          knob_id: 'place.density_weight',
+          surface: 'step_config',
+          value: 0.1,
+        },
+      ]),
+    ).rejects.toThrow(/does not exist/)
+
+    await expect(readFile(tomlPath, 'utf8')).resolves.toBe(original)
+  })
+
+  it('applies parameter and step-config writes together', async () => {
+    const directory = await createTempDir('ecos-workspace-service-apply-ok-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const tomlPath = join(directory, 'home', 'params.toml')
+    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
+    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
+
+    const service = createApplyService(directory)
+    await service.applyWorkspaceParameterWrites(directory, [
+      {
+        file: 'home/params.toml',
+        json_path: ['max_fanout'],
+        knob_id: 'cts.max_fanout',
+        surface: 'parameters',
+        value: 64,
+      },
+      {
+        file: 'config/dreamplace_ecc.json',
+        json_path: ['density_weight'],
+        knob_id: 'place.density_weight',
+        surface: 'step_config',
+        value: 0.1,
+      },
+    ])
+
+    await expect(readFile(tomlPath, 'utf8')).resolves.toContain('max_fanout = 64')
+    await expect(readFile(stepPath, 'utf8')).resolves.toContain('"density_weight": 0.1')
+  })
+
+  it('serializes step-config editor saves behind the parameter write queue', async () => {
+    const directory = await createTempDir('ecos-workspace-service-step-config-queue-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
+    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
+
+    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
+      await import('./workspaceParametersFile')
+    const queueKey = await workspaceParameterWriteQueueKey(directory)
+    let release!: () => void
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate
+    })
+    const hold = enqueueParameterWrite(queueKey, async () => {
+      await gate
+    })
+
+    const service = createApplyService(directory)
+    const editorContent = '{\n    "density_weight": 0.8,\n    "extra": true\n}\n'
+    const editor = service.writeProjectTextFile(stepPath, editorContent)
+
+    let editorDone = false
+    void editor.then(() => {
+      editorDone = true
+    })
+    await delay(50)
+    expect(editorDone).toBe(false)
+    await expect(readFile(stepPath, 'utf8')).resolves.toBe(
+      '{\n    "density_weight": 0.2\n}\n',
+    )
+
+    release()
+    await hold
+    await editor
+    await expect(readFile(stepPath, 'utf8')).resolves.toBe(editorContent)
+  })
+
+  it('lets a later agent step-config RMW observe a queued editor save', async () => {
+    const directory = await createTempDir('ecos-workspace-service-step-config-overlap-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await mkdir(join(directory, 'config'), { recursive: true })
+    const tomlPath = join(directory, 'home', 'params.toml')
+    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
+    await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
+    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
+
+    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
+      await import('./workspaceParametersFile')
+    const queueKey = await workspaceParameterWriteQueueKey(directory)
+    let release!: () => void
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate
+    })
+    const hold = enqueueParameterWrite(queueKey, async () => {
+      await gate
+    })
+
+    const service = createApplyService(directory)
+    const editorContent = '{\n    "density_weight": 0.8,\n    "extra": true\n}\n'
+    const editor = service.writeProjectTextFile(stepPath, editorContent)
+    await delay(20)
+    const agent = service.applyWorkspaceParameterWrites(directory, [
+      {
+        file: 'config/dreamplace_ecc.json',
+        json_path: ['density_weight'],
+        knob_id: 'place.density_weight',
+        surface: 'step_config',
+        value: 0.1,
+      },
+    ])
+
+    release()
+    await hold
+    await Promise.all([agent, editor])
+
+    const finalDocument = JSON.parse(await readFile(stepPath, 'utf8')) as {
+      density_weight: number
+      extra?: boolean
+    }
+    // Without the shared queue the agent can read 0.2, the editor can land
+    // `extra`, and the agent rename then drops it. Serialized, the agent
+    // RMW sees the editor document and keeps unknown leaves.
+    expect(finalDocument.extra).toBe(true)
+    expect(finalDocument.density_weight).toBe(0.1)
+  })
+
+  it('refuses a queued config-editor save after the active workspace changes', async () => {
+    const workspaceA = await createTempDir('ecos-workspace-service-editor-root-a-')
+    const workspaceB = await createTempDir('ecos-workspace-service-editor-root-b-')
+    await mkdir(join(workspaceA, 'home'), { recursive: true })
+    await mkdir(join(workspaceA, 'config'), { recursive: true })
+    const stepPath = join(workspaceA, 'config', 'dreamplace_ecc.json')
+    const original = '{\n    "density_weight": 0.2\n}\n'
+    await writeFile(stepPath, original, 'utf8')
+
+    const projectScopeProvider = createProjectScopeProvider(workspaceA, workspaceA)
+    projectScopeProvider.requestWritableProjectPathAccess = vi.fn(
+      async (path: string) => path,
+    )
+    let activeRoot = workspaceA
+    projectScopeProvider.getProjectRoot = vi.fn(async () => activeRoot)
+    const service = new WorkspaceService({
+      projectScopeProvider,
+      replacementJournalDirectory: join(workspaceA, '.workspace-replacement-journals'),
+    })
+
+    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
+      await import('./workspaceParametersFile')
+    const queueKey = await workspaceParameterWriteQueueKey(workspaceA)
+    let release!: () => void
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate
+    })
+    const hold = enqueueParameterWrite(queueKey, async () => {
+      await gate
+    })
+
+    const editor = service.writeProjectTextFile(
+      stepPath,
+      '{\n    "density_weight": 0.8\n}\n',
+    )
+    await delay(20)
+    activeRoot = workspaceB
+    release()
+    await hold
+    await expect(editor).rejects.toThrow(/active workspace/)
+    await expect(readFile(stepPath, 'utf8')).resolves.toBe(original)
+  })
+})
+
+describe('hasWorkspaceConfigShadow', () => {
+  it('refuses to probe paths outside the project scope', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+    projectScopeProvider.requestProjectPathAccess = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('Refusing to grant access outside current project root'),
+      )
+
+    await expect(service.hasWorkspaceConfigShadow('/etc')).rejects.toThrow(
+      /outside current project root/,
+    )
+  })
+
+  it('probes the shadow pair for in-scope workspaces', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const workspace = join(directory, 'ws')
+    await mkdir(join(workspace, 'home'), { recursive: true })
+    await writeFile(join(workspace, 'home', 'params.toml'), '[params]\n', 'utf8')
+    await writeFile(join(workspace, 'home', 'parameters.json'), '{}', 'utf8')
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+
+    await expect(service.hasWorkspaceConfigShadow(workspace)).resolves.toBe(true)
+    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+      join(workspace, 'home', 'params.toml'),
+    )
   })
 })

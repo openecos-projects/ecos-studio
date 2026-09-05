@@ -8,6 +8,7 @@ import {
   readProjectTextFileTail,
   readProjectBlobUrl,
   readProjectTextFile,
+  readWorkspaceParametersFile,
   resolveProjectFilePath,
   writeProjectTextFile,
 } from './projectFiles'
@@ -155,6 +156,23 @@ describe('projectFiles', () => {
       '{"PDK":"ics55"}',
     )
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the parameters read successful when the shadow probe fails', async () => {
+    const readWorkspaceParameters = vi.fn().mockResolvedValue({ design: 'gcd' })
+    const hasWorkspaceConfigShadow = vi.fn().mockRejectedValue(new Error('EACCES'))
+    setWindow({
+      ecosDesktop: {
+        workspace: { readWorkspaceParameters, hasWorkspaceConfigShadow },
+      },
+    })
+
+    await expect(
+      readWorkspaceParametersFile('/workspace/shadow-probe-failure'),
+    ).resolves.toEqual({ design: 'gcd' })
+    expect(hasWorkspaceConfigShadow).toHaveBeenCalledWith(
+      '/workspace/shadow-probe-failure',
+    )
   })
 
   it('infers MIME types from common file extensions', () => {

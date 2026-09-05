@@ -180,6 +180,25 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFile, path),
     readOptionalProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadOptionalProjectTextFile, path),
+    readWorkspaceParameters: (workspacePath) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceReadWorkspaceParameters,
+        workspacePath,
+      ),
+    hasWorkspaceConfigShadow: (workspacePath: string) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceHasConfigShadow, workspacePath),
+    editWorkspaceParameters: (workspacePath, edits) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceEditWorkspaceParameters,
+        workspacePath,
+        edits,
+      ),
+    applyWorkspaceParameterWrites: (workspacePath, writes) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceApplyWorkspaceParameterWrites,
+        workspacePath,
+        writes,
+      ),
     readProjectTextFileTail: (path, maxChars) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadProjectTextFileTail,
@@ -308,6 +327,10 @@ const desktopApi: DesktopApi = {
     readFlow: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadFlow),
     readParameters: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadParameters),
+    writeParameters: (request: {
+      parameters: Record<string, unknown>
+      workspace: string
+    }) => invokeDesktop(desktopApiIpcChannels.workspaceResourcesWriteParameters, request),
     resolveStepInfo: (request: WorkspaceStepInfoRequest) =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesResolveStepInfo, request),
   },

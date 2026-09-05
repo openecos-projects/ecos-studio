@@ -1,7 +1,56 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const growAfterStat = vi.hoisted(() => ({
+  path: null as string | null,
+}))
+
+const shortReadPath = vi.hoisted(() => ({
+  path: null as string | null,
+}))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    open: async (
+      path: Parameters<typeof actual.open>[0],
+      flags?: Parameters<typeof actual.open>[1],
+    ) => {
+      const handle = await actual.open(path, flags)
+      if (growAfterStat.path && String(path) === growAfterStat.path) {
+        const originalStat = handle.stat.bind(handle)
+        handle.stat = (async () => {
+          const info = await originalStat()
+          appendFileSync(growAfterStat.path!, 'x'.repeat(512 * 1024))
+          return info
+        }) as typeof handle.stat
+      }
+      if (shortReadPath.path && String(path) === shortReadPath.path) {
+        const originalRead = handle.read.bind(handle)
+        let first = true
+        handle.read = (async (options?: Parameters<typeof handle.read>[0]) => {
+          if (first && options && typeof options === 'object' && 'length' in options) {
+            first = false
+            const length = Math.min(1, Number(options.length) || 0)
+            return await originalRead({ ...options, length })
+          }
+          return await originalRead(options)
+        }) as typeof handle.read
+      }
+      return handle
+    },
+  }
+})
 
 import { WorkspaceSnapshotLoader } from './workspaceSnapshotLoader'
 
@@ -62,6 +111,75 @@ describe('WorkspaceSnapshotLoader', () => {
 
     await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
       'Workspace snapshot resource exceeds',
+    )
+  })
+
+  it('rejects a file that grows past the cap after the opened handle is statted', async () => {
+    const directory = createWorkspace()
+    const flowPath = join(directory, 'home', 'flow.json')
+    writeFileSync(join(directory, 'home', 'home.json'), '{}')
+    writeFileSync(join(directory, 'home', 'parameters.json'), '{}')
+    writeFileSync(flowPath, '{}')
+
+    growAfterStat.path = flowPath
+    try {
+      await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
+        'Workspace snapshot resource exceeds',
+      )
+    } finally {
+      growAfterStat.path = null
+    }
+  })
+
+  it('reassembles a snapshot file that arrives in short reads', async () => {
+    const directory = createWorkspace()
+    const flowPath = join(directory, 'home', 'flow.json')
+    writeFileSync(join(directory, 'home', 'home.json'), '{}')
+    writeFileSync(join(directory, 'home', 'parameters.json'), '{}')
+    writeFileSync(
+      flowPath,
+      JSON.stringify({
+        steps: [{ name: 'Synthesis', runtime: '1s', state: 'Success', tool: 'yosys' }],
+      }),
+    )
+
+    shortReadPath.path = flowPath
+    try {
+      await expect(new WorkspaceSnapshotLoader().load(directory)).resolves.toMatchObject({
+        flow: { steps: [{ name: 'Synthesis', state: 'Success', tool: 'yosys' }] },
+      })
+    } finally {
+      shortReadPath.path = null
+    }
+  })
+
+  it('rejects a symlinked parameters file instead of reading its target', async () => {
+    const directory = createWorkspace()
+    const external = join(directory, 'external.toml')
+    writeFileSync(external, '[params]\ndesign = "external"\n')
+    symlinkSync(external, join(directory, 'home', 'params.toml'))
+    writeFileSync(join(directory, 'home', 'home.json'), '{}')
+    writeFileSync(join(directory, 'home', 'flow.json'), JSON.stringify({ steps: [] }))
+
+    await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
+      /symlink/i,
+    )
+  })
+
+  it('rejects reads redirected by a symlinked home directory', async () => {
+    const directory = createWorkspace()
+    const external = mkdtempSync(join(tmpdir(), 'ecos-snapshot-external-'))
+    temporaryDirectories.push(external)
+    mkdirSync(join(external, 'home'))
+    writeFileSync(
+      join(external, 'home', 'params.toml'),
+      '[params]\ndesign = "external"\n',
+    )
+    rmSync(join(directory, 'home'), { recursive: true, force: true })
+    symlinkSync(join(external, 'home'), join(directory, 'home'))
+
+    await expect(new WorkspaceSnapshotLoader().load(directory)).rejects.toThrow(
+      /outside the workspace/i,
     )
   })
 
