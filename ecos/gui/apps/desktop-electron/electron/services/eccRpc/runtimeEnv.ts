@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { isPathWithinRoot } from '../pathScope'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
@@ -10,6 +11,13 @@ export interface EccRuntimeEnvOptions {
   isPackaged: boolean
   platform: RuntimePlatform
   userDataPath: string
+}
+
+export interface EccSidecarLaunchOptions {
+  agentEccExecutable: string | null
+  directory: string | null
+  eccExecutable: string
+  quickStartRoot: string
 }
 
 function getPathKey(env: NodeJS.ProcessEnv): string {
@@ -148,6 +156,43 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
 
   const candidate = join(developmentBinDir, executableName)
   return existsSync(candidate) ? candidate : null
+}
+
+export function resolveEccAgentExecutable(options: EccRuntimeEnvOptions): string | null {
+  const configured = options.env.ECOS_AGENT_ECC_RPC_BIN?.trim()
+  if (configured) return existsSync(configured) ? resolve(configured) : null
+
+  const executableName =
+    options.platform === 'win32' ? 'ecc-agent-rpc.exe' : 'ecc-agent-rpc'
+  if (options.isPackaged) {
+    const candidate = join(resolvePackagedBinariesPath(options), executableName)
+    return existsSync(candidate) ? candidate : null
+  }
+
+  const repoRoot = findRepoRootFromAppPath(options.appPath)
+  if (!repoRoot) return null
+  const venvBin = options.platform === 'win32' ? 'Scripts' : 'bin'
+  const candidates = [
+    join(repoRoot, 'ecc', '.venv', venvBin, executableName),
+    join(repoRoot, 'ecc', 'dist', 'ecc', executableName),
+  ]
+  return candidates.find((candidate) => existsSync(candidate)) ?? null
+}
+
+export function resolveEccSidecarLaunch(options: EccSidecarLaunchOptions): {
+  command: string
+  commandArgs?: string[]
+} {
+  const isQuickStart = Boolean(
+    options.directory &&
+    resolve(options.directory) !== resolve(options.quickStartRoot) &&
+    isPathWithinRoot(resolve(options.directory), resolve(options.quickStartRoot)),
+  )
+  if (!isQuickStart) return { command: options.eccExecutable }
+  if (!options.agentEccExecutable) {
+    throw new Error('ECC Agent RPC executable is unavailable')
+  }
+  return { command: options.agentEccExecutable, commandArgs: [] }
 }
 
 export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {

@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createEccRuntimeEnv, resolveEccExecutable } from './runtimeEnv'
+import {
+  createEccRuntimeEnv,
+  resolveEccAgentExecutable,
+  resolveEccExecutable,
+  resolveEccSidecarLaunch,
+} from './runtimeEnv'
 
 function createRepoFixture(): {
   appPath: string
@@ -496,6 +501,57 @@ describe('createEccRuntimeEnv', () => {
     })
 
     expect(executable).toBe(join(fixture.userDataPath, 'runtime-bin', 'ecc'))
+  })
+
+  it('resolves the dedicated Agent RPC executable in development', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
+    const executable = join(fixture.repoRoot, 'ecc', '.venv', 'bin', 'ecc-agent-rpc')
+    mkdirSync(join(fixture.repoRoot, 'ecc', '.venv', 'bin'), { recursive: true })
+    writeFileSync(executable, '#!/usr/bin/env bash\n')
+
+    expect(
+      resolveEccAgentExecutable({
+        appPath: fixture.appPath,
+        cwd: fixture.appPath,
+        env: { PATH: '/usr/bin' },
+        isPackaged: false,
+        platform: 'linux',
+        userDataPath: fixture.userDataPath,
+      }),
+    ).toBe(executable)
+  })
+
+  it('routes only managed Quick Start workspaces to the Agent RPC executable', () => {
+    const options = {
+      agentEccExecutable: '/runtime/ecc-agent-rpc',
+      eccExecutable: '/runtime/ecc',
+      quickStartRoot: '/state/quick-runs',
+    }
+
+    expect(
+      resolveEccSidecarLaunch({
+        ...options,
+        directory: '/state/quick-runs/gcd/ws_0001',
+      }),
+    ).toEqual({ command: '/runtime/ecc-agent-rpc', commandArgs: [] })
+    expect(resolveEccSidecarLaunch({ ...options, directory: '/work/gcd' })).toEqual({
+      command: '/runtime/ecc',
+    })
+    expect(resolveEccSidecarLaunch({ ...options, directory: null })).toEqual({
+      command: '/runtime/ecc',
+    })
+  })
+
+  it('fails closed when Quick Start has no dedicated Agent RPC executable', () => {
+    expect(() =>
+      resolveEccSidecarLaunch({
+        agentEccExecutable: null,
+        directory: '/state/quick-runs/gcd/ws_0001',
+        eccExecutable: '/runtime/ecc',
+        quickStartRoot: '/state/quick-runs',
+      }),
+    ).toThrow('ECC Agent RPC executable is unavailable')
   })
 
   it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {

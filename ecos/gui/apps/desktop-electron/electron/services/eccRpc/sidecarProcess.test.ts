@@ -102,6 +102,9 @@ describe('EccRpcSidecarProcess', () => {
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     )
+    expect(readFileSync(sidecar.logFile!, 'utf8')).toContain(
+      '[sidecar] spawning python3 -m fecompiler.cli.main rpc serve --stdio',
+    )
   })
 
   it('spawns the resolved absolute ECC executable when provided', async () => {
