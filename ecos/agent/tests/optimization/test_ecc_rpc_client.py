@@ -210,7 +210,10 @@ write_frame({{"jsonrpc": "2.0", "method": "runtime.event", "params": {{
     "payload": {{"state": "Success", "stepCommitId": "operation-1:step:1", "workspaceRevision": 1}},
 }}}})
 write_frame({{"jsonrpc": "2.0", "id": request["id"], "result": {{"operationId": "operation-1", "state": "running"}}}})
-Path({str(acknowledgement)!r}).write_text(json.dumps(read_frame()), encoding="utf-8")
+ack_path = Path({str(acknowledgement)!r})
+pending_path = ack_path.with_suffix(".tmp")
+pending_path.write_text(json.dumps(read_frame()), encoding="utf-8")
+pending_path.replace(ack_path)
 """,
         encoding="utf-8",
     )
