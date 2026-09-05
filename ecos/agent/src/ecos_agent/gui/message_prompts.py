@@ -51,11 +51,10 @@ def welcome_message(
             f"It can {capabilities}."
         )
     return (
-        "ECOS Agent is a state-controlled, PPA-oriented design-flow agent. "
-        "From the home screen it selects or creates a Project "
-        "(directory with project.json), then creates a Workspace under that Project "
-        "and runs a full ECC physical-design flow. It can also start a bounded optimization episode "
-        "from an existing baseline workspace completed through Harden."
+        "ECOS Agent helps you understand, run, and improve physical-design flows. "
+        "Ask in natural language about IC/EDA concepts, ECOS Studio, or your current design; "
+        "use controlled, reviewable actions to run RTL-to-GDS, rerun stages, update parameters, "
+        "and optimize PPA."
     )
 
 
@@ -66,8 +65,8 @@ def operation_prompt(language: str) -> str:
 def home_ready_prompt(language: str) -> str:
     return _prompt(
         language,
-        "可从 RTL 快速运行 Flow、手工创建 Workspace，或为自动优化提供一个已完成的 baseline workspace。",
-        "Run a flow quickly from RTL, use manual Workspace setup, or provide a completed baseline workspace for bounded optimization.",
+        "可以直接提问，也可以从下方选择一项操作。",
+        "Ask a question, or choose an action below.",
     )
 
 

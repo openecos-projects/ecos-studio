@@ -37,24 +37,24 @@ def home_ready_choice(language: str, prompt_id: str) -> dict[str, Any]:
             (
                 _prompt(
                     language,
-                    "开始创建 Workspace 并运行完整 RTL 到 GDS 流程",
-                    "Start creating a Workspace and run a full RTL-to-GDS flow",
+                    "Quick Start：运行内置 GCD RTL 到 GDS 示例",
+                    "Quick Start: run the built-in GCD RTL-to-GDS example",
                 ),
                 "1",
             ),
             (
                 _prompt(
                     language,
-                    "启动受约束优化 episode",
-                    "Start a bounded optimization episode",
+                    "运行自己的 RTL 到 GDS 流程",
+                    "Run your own RTL-to-GDS flow",
                 ),
                 "2",
             ),
             (
                 _prompt(
                     language,
-                    "Quick Start：创建 Workspace 并运行完整 RTL 到 GDS 流程",
-                    "Quick Start: create a Workspace and run a full RTL-to-GDS flow",
+                    "优化已完成的设计",
+                    "Optimize a completed design",
                 ),
                 "3",
             ),

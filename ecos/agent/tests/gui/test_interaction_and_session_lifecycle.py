@@ -29,7 +29,7 @@ def test_operation_choice_uses_interaction_request_and_dedicated_answer() -> Non
     assert events.index(interaction_event) > max(
         index for index, event in enumerate(events) if event["type"] == "message"
     )
-    option = request["interaction"]["options"][0]
+    option = request["interaction"]["options"][1]
     assert "value" not in option
 
     result = provider.answer_interaction(
@@ -70,7 +70,7 @@ def test_interaction_choice_accepts_a_typed_answer() -> None:
             "sessionId": session_id,
             "requestId": request["requestId"],
             "kind": "choice",
-            "text": "1",
+            "text": "2",
         }
     )
 
@@ -85,7 +85,7 @@ def test_interaction_undo_restores_the_previous_choice_in_the_same_session() -> 
     session = provider.sessions[session_id]
     original = session.pending_interaction["request"]
 
-    _send(provider, session_id, "1")
+    _send(provider, session_id, "2")
     current = session.pending_interaction["request"]
     assert session.phase == "workspace_project_mode"
 
@@ -120,7 +120,7 @@ def test_interaction_undo_can_walk_back_multiple_choices_in_the_same_session() -
     session = provider.sessions[session_id]
     first = session.pending_interaction["request"]
 
-    _send(provider, session_id, "1")
+    _send(provider, session_id, "2")
     second = session.pending_interaction["request"]
     _send(provider, session_id, "1")
     third = session.pending_interaction["request"]
@@ -176,7 +176,7 @@ def test_free_text_answer_does_not_create_undo_history() -> None:
             "sessionId": session_id,
             "requestId": request["requestId"],
             "kind": request["kind"],
-            "text": "1",
+            "text": "2",
         }
     )
 

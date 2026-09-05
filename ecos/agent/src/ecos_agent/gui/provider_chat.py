@@ -500,9 +500,12 @@ class ProviderChatMixin:
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":
-            self._begin_home_workspace_create(session, message if message.strip() != "1" else "")
+            # Quick Start is authorized and launched by the renderer after this answer is accepted.
             return
         if choice == "2":
+            self._begin_home_workspace_create(session, message if message.strip() != "2" else "")
+            return
+        if choice == "3":
             session.phase = "optimization_workspace"
             self._emit(session, "message", optimization_workspace_prompt(session.language))
             return

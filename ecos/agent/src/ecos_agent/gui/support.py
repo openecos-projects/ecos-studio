@@ -605,7 +605,7 @@ def _keyword_operation_choice(
         # Home: require an intentional setup or optimization signal.
         candidates = (
             (
-                "1",
+                "2",
                 (
                     "create workspace",
                     "创建 workspace",
@@ -621,7 +621,7 @@ def _keyword_operation_choice(
                 ),
             ),
             (
-                "2",
+                "3",
                 ("optimiz", "优化", "routability search", "tuning"),
             ),
         )
