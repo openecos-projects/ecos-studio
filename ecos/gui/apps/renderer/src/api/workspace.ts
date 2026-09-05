@@ -1,7 +1,11 @@
 import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
-import { projectIdFromName, type DesignTool } from '@ecos-studio/shared'
+import {
+  projectIdFromName,
+  type DesignTool,
+  type EccRuntimeTarget,
+} from '@ecos-studio/shared'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -96,6 +100,7 @@ export function createWorkspaceApi(options: {
   origin_def?: string
   origin_verilog?: string
   rtl_list?: string[]
+  runtimeTarget?: EccRuntimeTarget
   pdk_root?: string
   pdk_installation_id?: string
   pdk_requirement?: import('@ecos-studio/shared').PdkRequirement
@@ -224,6 +229,7 @@ export function createWorkspaceApi(options: {
   return getDesktopApi()
     .runtime.workspace.create({
       designTool: 'backend',
+      runtimeTarget: options.runtimeTarget,
       payload: {
         directory: String(data.directory ?? ''),
         filelist: String(data.filelist ?? ''),

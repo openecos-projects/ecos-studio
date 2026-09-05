@@ -109,6 +109,7 @@ describe('flow API desktop bridge payloads', () => {
         cmd: CMDEnum.refresh_config,
         data: {
           directory: '/work/demo',
+          runtimeTarget: 'agent',
           workspaceHandle: 'workspace-handle-1',
         },
       }),
@@ -119,6 +120,7 @@ describe('flow API desktop bridge payloads', () => {
         data: {
           config_path: '/work/demo/config/route_ecc.json',
           directory: '/work/demo',
+          runtimeTarget: 'agent',
           workspaceHandle: 'workspace-handle-1',
         },
       }),
@@ -144,11 +146,13 @@ describe('flow API desktop bridge payloads', () => {
     })
     expect(refreshConfig).toHaveBeenCalledWith({
       designTool: 'backend',
+      runtimeTarget: 'agent',
       workspaceHandle: 'workspace-handle-1',
     })
     expect(syncConfig).toHaveBeenCalledWith({
       configPath: '/work/demo/config/route_ecc.json',
       designTool: 'backend',
+      runtimeTarget: 'agent',
       workspaceHandle: 'workspace-handle-1',
     })
   })

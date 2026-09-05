@@ -237,12 +237,14 @@ describe('AIChatPanel flow contracts', () => {
     )
     expect(source).toContain('maybeRunPostCreateFlow')
     expect(source).toContain('takePendingPostCreateFlow')
-    expect(source).toContain('const flowResult = await runAllFlow({ rerun: false })')
+    expect(source).toContain(
+      "const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })",
+    )
     expect(source).toContain(
       "throw new Error('Flow execution did not complete successfully.')",
     )
     expect(source).toMatch(
-      /const flowResult = await runAllFlow\(\{ rerun: false \}\)[\s\S]*await reportWorkspaceCreationResult\([\s\S]*handoff\.setupId,[\s\S]*'succeeded',[\s\S]*handoff\.ownerSessionId/,
+      /const flowResult = await runAllFlow\(\{ rerun: false, runtimeTarget: 'agent' \}\)[\s\S]*await reportWorkspaceCreationResult\([\s\S]*handoff\.setupId,[\s\S]*'succeeded',[\s\S]*handoff\.ownerSessionId/,
     )
   })
 
@@ -265,7 +267,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("ui.lastContractSurface = 'signoff'")
     expect(source).toContain("event.type === 'interaction'")
     expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
-    expect(source).toContain('inspectSignoff({ workspaceHandle })')
+    expect(source).toMatch(
+      /inspectSignoff\(\{\s*runtimeTarget: 'agent',\s*workspaceHandle,?\s*\}\)/,
+    )
     expect(source).toContain("risk.severity === 'blocked'")
     expect(source).toContain('workspace_signoff_inspection:')
     expect(source).toContain('review.status')

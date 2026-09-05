@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { isPathWithinRoot } from '../pathScope'
+import type { EccRuntimeTarget } from '@ecos-studio/shared'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
@@ -15,9 +15,8 @@ export interface EccRuntimeEnvOptions {
 
 export interface EccSidecarLaunchOptions {
   agentEccExecutable: string | null
-  directory: string | null
   eccExecutable: string
-  quickStartRoot: string
+  runtimeTarget?: EccRuntimeTarget
 }
 
 function getPathKey(env: NodeJS.ProcessEnv): string {
@@ -181,14 +180,14 @@ export function resolveEccAgentExecutable(options: EccRuntimeEnvOptions): string
 
 export function resolveEccSidecarLaunch(options: EccSidecarLaunchOptions): {
   command: string
-  commandArgs?: string[]
+  commandArgs: string[]
 } {
-  const isQuickStart = Boolean(
-    options.directory &&
-    resolve(options.directory) !== resolve(options.quickStartRoot) &&
-    isPathWithinRoot(resolve(options.directory), resolve(options.quickStartRoot)),
-  )
-  if (!isQuickStart) return { command: options.eccExecutable }
+  if (options.runtimeTarget !== 'agent') {
+    return {
+      command: options.eccExecutable,
+      commandArgs: ['rpc', 'serve', '--stdio', '--persistent-db'],
+    }
+  }
   if (!options.agentEccExecutable) {
     throw new Error('ECC Agent RPC executable is unavailable')
   }

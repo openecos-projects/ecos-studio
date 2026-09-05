@@ -1168,7 +1168,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
   try {
     await agentFlowProgress.start(handoff.workspacePath)
     try {
-      const flowResult = await runAllFlow({ rerun: false })
+      const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })
       if (flowResult === null) {
         throw new Error('Flow execution did not complete successfully.')
       }
@@ -2112,7 +2112,7 @@ async function executeWorkspaceContinue(
   messageStore.setActiveSessionId(ownerSessionId)
   try {
     await agentFlowProgress.start(contract.workspace)
-    const flowResult = await runAllFlow({ rerun: false })
+    const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })
     if (flowResult === null) {
       throw new Error('Flow execution did not complete successfully.')
     }
@@ -2195,7 +2195,10 @@ async function executeWorkspaceSignoff(
       throw new Error('The signoff contract targets a workspace that is not open.')
     }
     if (contract.action === 'inspect') {
-      const review = await desktopApi.ecc.workspace.inspectSignoff({ workspaceHandle })
+      const review = await desktopApi.ecc.workspace.inspectSignoff({
+        runtimeTarget: 'agent',
+        workspaceHandle,
+      })
       ui.workspaceSignoffReview = review
       const blocked = review.risks
         .filter((risk) => risk.severity === 'blocked')
@@ -2217,6 +2220,7 @@ async function executeWorkspaceSignoff(
     if (!outputPath) throw new Error('Enter a signoff package output path.')
     const result = await desktopApi.ecc.workspace.exportSignoff({
       outputPath,
+      runtimeTarget: 'agent',
       workspaceHandle,
     })
     messageStore.addAssistantMessage(
@@ -2407,7 +2411,12 @@ async function syncWorkspaceParameterWrites(
     assertEccSuccess(
       await syncConfigApi({
         cmd: CMDEnum.sync_config,
-        data: { config_path: configPath, directory: workspaceRoot, workspaceHandle },
+        data: {
+          config_path: configPath,
+          directory: workspaceRoot,
+          runtimeTarget: 'agent',
+          workspaceHandle,
+        },
       }),
       `Failed to sync ${configPath}`,
     )
@@ -2415,7 +2424,7 @@ async function syncWorkspaceParameterWrites(
   assertEccSuccess(
     await refreshConfigApi({
       cmd: CMDEnum.refresh_config,
-      data: { directory: workspaceRoot, workspaceHandle },
+      data: { directory: workspaceRoot, runtimeTarget: 'agent', workspaceHandle },
     }),
     'Failed to refresh the workspace configuration',
   )

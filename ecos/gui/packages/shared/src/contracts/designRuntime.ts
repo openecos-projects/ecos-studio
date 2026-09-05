@@ -4,6 +4,7 @@ import type {
   EccRpcPingResult,
   EccRpcShutdownResult,
   EccRuntimeEvent,
+  EccRuntimeTarget,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateResult,
   EccWorkspaceHomeResult,
@@ -27,6 +28,7 @@ export interface DesignRuntimeHelloResult {
 
 export interface DesignRuntimeTargetRequest {
   designTool: DesignTool
+  runtimeTarget?: EccRuntimeTarget
 }
 
 export interface DesignRuntimeWorkspaceCreateRequest extends DesignRuntimeTargetRequest {

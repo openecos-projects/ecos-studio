@@ -984,7 +984,10 @@ export function useWorkspace() {
    * 新建项目 - 支持 Wizard 配置
    * @param config 项目配置（来自向导）
    */
-  const newProject = async (config?: WorkspaceConfig) => {
+  const newProject = async (
+    config?: WorkspaceConfig,
+    options: { runtimeTarget?: 'agent' } = {},
+  ) => {
     lastWorkspaceCreationError.value = ''
     let sessionId: string | null = null
     let replacement: WorkspaceDirectoryReplacement | null = null
@@ -1274,6 +1277,7 @@ export function useWorkspace() {
           origin_def: creationConfig?.origin_def,
           origin_verilog: creationConfig?.origin_verilog,
           rtl_list: creationConfig?.rtl_list || [],
+          runtimeTarget: options.runtimeTarget,
           filelist: creationConfig?.filelist,
           design_input_mode: creationConfig?.design_input_mode,
           sdc: creationConfig?.sdc,

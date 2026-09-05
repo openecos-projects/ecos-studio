@@ -12,6 +12,7 @@ import type {
   EccRuntimeOperation,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
+  EccRuntimeTarget,
   DesignTool,
 } from '@ecos-studio/shared'
 
@@ -164,6 +165,7 @@ export type { EccRuntimeOperation }
 export interface RefreshConfigRequest {
   designTool?: DesignTool
   directory: string
+  runtimeTarget?: EccRuntimeTarget
   workspaceHandle?: string
   workspace_handle?: string
 }
@@ -178,6 +180,7 @@ export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
   return getDesktopApi()
     .runtime.workspace.refreshConfig({
       designTool: designToolFromData(data),
+      runtimeTarget: data.runtimeTarget === 'agent' ? 'agent' : undefined,
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then((result) =>
@@ -188,6 +191,7 @@ export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
 export interface SyncConfigRequest {
   designTool?: DesignTool
   directory: string
+  runtimeTarget?: EccRuntimeTarget
   config_path: string
   workspaceHandle?: string
   workspace_handle?: string
@@ -206,6 +210,7 @@ export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
     .runtime.workspace.syncConfig({
       configPath: String(data.config_path ?? data.configPath ?? ''),
       designTool: designToolFromData(data),
+      runtimeTarget: data.runtimeTarget === 'agent' ? 'agent' : undefined,
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then(

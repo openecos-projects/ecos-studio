@@ -179,7 +179,9 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     })
 
     const runner = useFlowRunner()
-    await expect(runner.runAllFlow({ rerun: true })).resolves.toMatchObject({
+    await expect(
+      runner.runAllFlow({ rerun: true, runtimeTarget: 'agent' }),
+    ).resolves.toMatchObject({
       operationId: 'operation-flow',
     })
     clearFlowExecutionActiveForWorkspace('/work/demo')
@@ -190,6 +192,7 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(startFlowOperationApi).toHaveBeenCalledWith({
       idempotencyKey: expect.any(String),
       rerun: true,
+      runtimeTarget: 'agent',
       workspaceHandle: 'workspace-demo',
     })
     expect(startStepOperationApi).toHaveBeenCalledWith({
