@@ -74,7 +74,7 @@ from ecos_agent.optimization.runtime import (
 from ecos_agent.optimization.parameters.semantics import (
     LATTICE_VERSION,
     card_hash,
-    load_parameter_cards,
+    load_parameter_card,
 )
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -627,7 +627,7 @@ def _pilot_context_sha256(
         parent_manifest_sha256,
         ecc_revision,
     )
-    card = load_parameter_cards()[requested.knob_id]
+    card = load_parameter_card(requested.knob_id)
     target_step = candidate_target_step(requested.knob_id)
     context = {
         **execution_context,

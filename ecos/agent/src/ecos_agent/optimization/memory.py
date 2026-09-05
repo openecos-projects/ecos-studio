@@ -49,7 +49,7 @@ from ecos_agent.optimization.parameters.contracts import ParameterApplicationRec
 from ecos_agent.optimization.parameters.semantics import (
     ParameterSemanticsError,
     card_hash,
-    load_parameter_cards,
+    load_parameter_card,
     validate_application_receipt,
 )
 
@@ -595,9 +595,8 @@ def _eligible(start, terminal) -> bool:
     ):
         return False
     try:
-        cards = load_parameter_cards()
-        card = cards[start.requested.knob_id]
-        validate_application_receipt(receipt, cards)
+        card = load_parameter_card(start.requested.knob_id)
+        validate_application_receipt(receipt, {start.requested.knob_id: card})
     except (KeyError, ParameterSemanticsError, TypeError, ValueError):
         return False
     return (

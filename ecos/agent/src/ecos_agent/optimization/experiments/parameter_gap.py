@@ -9,7 +9,7 @@ from typing import Any, Iterable, Literal
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
-from ecos_agent.optimization.parameters.semantics import load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import load_parameter_card
 
 GapVerdict = Literal[
     "gap_confirmed",
@@ -131,7 +131,7 @@ def classify_receipt(
     receipt: ParameterApplicationReceipt, *, site_width_dbu: int
 ) -> tuple[str, ...]:
     knob = OptimizationKnob(receipt.requested["knob_id"])
-    card = load_parameter_cards()[knob]
+    card = load_parameter_card(knob)
     requested = receipt.requested["value"]
     written = receipt.materialization.written_value
     expected_written = (
@@ -272,7 +272,7 @@ def _equivalence_groups(
 ) -> tuple[tuple[bool | int | float, ...], ...]:
     allowed_rules = {
         rule.get("rule_id")
-        for rule in load_parameter_cards()[knob].resolution_rules
+        for rule in load_parameter_card(knob).resolution_rules
     }
     groups: dict[str, set[bool | int | float]] = defaultdict(set)
     for item in results:

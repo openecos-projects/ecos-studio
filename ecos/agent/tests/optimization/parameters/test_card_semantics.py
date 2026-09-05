@@ -18,6 +18,7 @@ from ecos_agent.optimization.parameters.semantics import (
     CARD_ROOT,
     ParameterSemanticsError,
     card_hash,
+    load_parameter_card,
     load_parameter_cards,
 )
 from tests.paths import AGENT_ROOT
@@ -59,6 +60,22 @@ def test_loader_rejects_semantically_changed_card_without_manifest_update(tmp_pa
     card_path.write_text(json.dumps(card), encoding="utf-8")
 
     with pytest.raises(ParameterSemanticsError, match="card hash"):
+        load_parameter_cards(root)
+
+
+def test_single_card_loader_ignores_unrelated_invalid_card(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_overflow.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["requested_domain"]["values"][0] = 0.117
+    card_path.write_text(json.dumps(card), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    loaded = load_parameter_card(OptimizationKnob.TARGET_DENSITY, root)
+
+    assert loaded.knob_id is OptimizationKnob.TARGET_DENSITY
+    with pytest.raises(ParameterSemanticsError, match="lattice"):
         load_parameter_cards(root)
 
 

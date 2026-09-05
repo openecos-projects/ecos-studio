@@ -77,8 +77,8 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     )
     monkeypatch.setattr(
         optimization_memory,
-        "load_parameter_cards",
-        lambda: {OptimizationKnob.TARGET_DENSITY: card()},
+        "load_parameter_card",
+        lambda _knob: card(),
     )
     monkeypatch.setattr(acceptance, "_state_sha256", lambda _: HASH)
     revisions = acceptance._current_revisions()

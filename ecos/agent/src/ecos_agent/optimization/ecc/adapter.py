@@ -33,7 +33,7 @@ from ecos_agent.optimization.parameters.contracts import ParameterApplicationRec
 from ecos_agent.optimization.parameters.semantics import (
     ParameterSemanticsError,
     card_hash,
-    load_parameter_cards,
+    load_parameter_card,
     validate_application_receipt,
 )
 
@@ -149,7 +149,7 @@ class EccCandidateRerunAdapter:
             "idempotencyKey": idempotency_key,
             "contextSha256": context_sha256,
             "parameterCardSha256": card_hash(
-                load_parameter_cards()[requested.knob_id]
+                load_parameter_card(requested.knob_id)
             ),
             "seed": seed,
         }
@@ -423,15 +423,13 @@ class EccCandidateRerunAdapter:
                 "application receipt ECC revision does not match"
             )
         self._validate_receipt_result_binding(result, raw, candidate_ref)
-        cards = load_parameter_cards()
-        if receipt.context.get("parameter_card_sha256") != card_hash(
-            cards[requested.knob_id]
-        ):
+        card = load_parameter_card(requested.knob_id)
+        if receipt.context.get("parameter_card_sha256") != card_hash(card):
             raise OptimizationEccAdapterError(
                 "application receipt parameter card does not match"
             )
         try:
-            validate_application_receipt(receipt, cards)
+            validate_application_receipt(receipt, {requested.knob_id: card})
         except (ParameterSemanticsError, ValueError) as exc:
             raise OptimizationEccAdapterError(
                 "application receipt card binding is invalid"
@@ -448,8 +446,8 @@ class EccCandidateRerunAdapter:
             parent_ref=parent_ref,
             terminal_state=state,
             target_step=candidate_target_step(requested.knob_id),
-            config_ref=cards[requested.knob_id].surface.file,
-            config_json_path=cards[requested.knob_id].surface.json_path,
+            config_ref=card.surface.file,
+            config_json_path=card.surface.json_path,
         )
         return receipt
 

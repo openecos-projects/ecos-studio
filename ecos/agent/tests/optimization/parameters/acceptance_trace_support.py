@@ -258,8 +258,8 @@ def patch_acceptance_for_single_knob(
     )
     monkeypatch.setattr(
         optimization_memory,
-        "load_parameter_cards",
-        lambda: {knob: card_for(knob)},
+        "load_parameter_card",
+        lambda _knob: card_for(knob),
     )
     monkeypatch.setattr(acceptance, "_state_sha256", lambda _: HASH)
     monkeypatch.setattr(

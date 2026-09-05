@@ -117,7 +117,7 @@ from ecos_agent.optimization.parameters.contracts import (
 from ecos_agent.optimization.parameters.semantics import (
     LATTICE_VERSION,
     card_hash,
-    load_parameter_cards,
+    load_parameter_card,
 )
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -519,7 +519,7 @@ class ControllerExecutionMixin:
             terminal_observation=terminal_observation,
             parameter_application_receipt=receipt.parameter_application_receipt,
             parameter_card_sha256=(
-                card_hash(load_parameter_cards()[self._requested.knob_id])
+                card_hash(load_parameter_card(self._requested.knob_id))
                 if receipt.parameter_application_receipt is not None
                 and self._requested is not None
                 else None

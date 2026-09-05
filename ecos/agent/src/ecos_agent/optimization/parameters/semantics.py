@@ -70,115 +70,130 @@ class ParameterSemanticsError(ValueError):
     """Parameter cards cannot be trusted for this runtime."""
 
 
-def load_parameter_cards(
-    root: Path | None = None, *, tool_revisions: dict[str, str] | None = None
-) -> dict[OptimizationKnob, ParameterSemanticsCard]:
-    base = Path(root or CARD_ROOT).resolve()
-    manifest_path = base / "manifest.json"
+def _load_manifest(base: Path) -> CardManifest:
     try:
-        manifest = CardManifest.model_validate_json(manifest_path.read_bytes())
+        manifest = CardManifest.model_validate_json((base / "manifest.json").read_bytes())
     except (OSError, ValueError) as exc:
         raise ParameterSemanticsError("parameter card manifest is invalid") from exc
     if manifest.lattice_version != LATTICE_VERSION:
         raise ParameterSemanticsError("parameter lattice version does not match")
+    return manifest
+
+
+def _load_card_entry(
+    item: dict[str, str],
+    base: Path,
+    *,
+    tool_revisions: dict[str, str] | None,
+) -> ParameterSemanticsCard:
+    knob_id, relative, expected_hash = (
+        item.get("knob_id"),
+        item.get("path"),
+        item.get("sha256"),
+    )
+    if (
+        not isinstance(knob_id, str)
+        or not isinstance(relative, str)
+        or not isinstance(expected_hash, str)
+    ):
+        raise ParameterSemanticsError("parameter card manifest entry is invalid")
+    if Path(relative).is_absolute() or ".." in Path(relative).parts:
+        raise ParameterSemanticsError("parameter card manifest entry is unsafe")
+    try:
+        card = ParameterSemanticsCard.model_validate_json(
+            (base / relative).read_bytes()
+        )
+        if card_hash(card) != expected_hash:
+            raise ParameterSemanticsError("parameter card hash does not match")
+    except ParameterSemanticsError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise ParameterSemanticsError("parameter card is invalid") from exc
+    if (
+        card.knob_id.value != knob_id
+        or card.review.get("status") != "source-audited"
+    ):
+        raise ParameterSemanticsError("parameter card identity or review status is invalid")
+    try:
+        expected_values = tuple(item.value for item in requested_lattice(card))
+    except ValueError as exc:
+        raise ParameterSemanticsError("parameter card lattice is invalid") from exc
+    if (
+        len(expected_values) != EXPECTED_LATTICE_COUNTS[card.knob_id]
+        or expected_values != requested_reference_values(card.knob_id)
+        or tuple(card.requested_domain.values) != expected_values
+    ):
+        raise ParameterSemanticsError(
+            "parameter card lattice does not match the frozen contract"
+        )
+    spec = knob_spec(knob_id)
+    target = spec.read_target
+    expected_type, expected_unit = _EXPECTED_SURFACES[card.knob_id]
+    if (
+        card.surface.file != target.file
+        or tuple(card.surface.json_path) != tuple(target.json_path)
+        or card.surface.type != expected_type
+        or card.surface.unit != expected_unit
+        or card.stage != spec.step.value
+    ):
+        raise ParameterSemanticsError("parameter card surface does not match registry")
+    if (
+        not card.runtime_probe_ids
+        or not set(card.runtime_probe_ids) <= _REGISTERED_PROBES
+    ):
+        raise ParameterSemanticsError("parameter card runtime probe is not registered")
+    consumer_ids = {consumer.consumer_id for consumer in card.consumers}
+    if not consumer_ids or not consumer_ids <= _REGISTERED_PROBES:
+        raise ParameterSemanticsError("parameter card consumer is not registered")
+    roles = {span.role for span in card.source_spans}
+    if card.runtime_semantics is None or any(
+        span.span_id is None for span in card.source_spans
+    ):
+        raise ParameterSemanticsError("parameter card runtime semantics are incomplete")
+    if card.tool.source_sha256 is None or "runtime_report_producer" not in roles:
+        raise ParameterSemanticsError("parameter card runtime report producer is missing")
+    if "native_consumer" not in roles:
+        raise ParameterSemanticsError("parameter card native consumer source is missing")
+    _validate_source_spans(card, base)
+    if (
+        tool_revisions is not None
+        and tool_revisions.get(card.tool.name) != card.tool.revision
+    ):
+        raise ParameterSemanticsError("parameter card tool revision does not match")
+    return card
+
+
+def load_parameter_card(
+    knob_id: OptimizationKnob | str,
+    root: Path | None = None,
+    *,
+    tool_revisions: dict[str, str] | None = None,
+) -> ParameterSemanticsCard:
+    try:
+        target_knob = OptimizationKnob(knob_id)
+    except (TypeError, ValueError) as exc:
+        raise ParameterSemanticsError("parameter card knob is invalid") from exc
+    base = Path(root or CARD_ROOT).resolve()
+    manifest = _load_manifest(base)
+    matches = [item for item in manifest.cards if item.get("knob_id") == target_knob.value]
+    if len(matches) != 1:
+        raise ParameterSemanticsError("parameter card is not listed exactly once")
+    return _load_card_entry(matches[0], base, tool_revisions=tool_revisions)
+
+
+def load_parameter_cards(
+    root: Path | None = None, *, tool_revisions: dict[str, str] | None = None
+) -> dict[OptimizationKnob, ParameterSemanticsCard]:
+    base = Path(root or CARD_ROOT).resolve()
+    manifest = _load_manifest(base)
     cards: dict[OptimizationKnob, ParameterSemanticsCard] = {}
     listed = set()
     for item in manifest.cards:
-        knob_id, relative, expected_hash = (
-            item.get("knob_id"),
-            item.get("path"),
-            item.get("sha256"),
-        )
-        if (
-            not isinstance(knob_id, str)
-            or not isinstance(relative, str)
-            or not isinstance(expected_hash, str)
-        ):
-            raise ParameterSemanticsError("parameter card manifest entry is invalid")
-        if (
-            knob_id in listed
-            or Path(relative).is_absolute()
-            or ".." in Path(relative).parts
-        ):
-            raise ParameterSemanticsError(
-                "parameter card manifest has duplicate or unsafe entry"
-            )
+        knob_id = item.get("knob_id")
+        if not isinstance(knob_id, str) or knob_id in listed:
+            raise ParameterSemanticsError("parameter card manifest has duplicate entry")
         listed.add(knob_id)
-        path = base / relative
-        try:
-            card = ParameterSemanticsCard.model_validate_json(path.read_bytes())
-            if card_hash(card) != expected_hash:
-                raise ParameterSemanticsError("parameter card hash does not match")
-        except ParameterSemanticsError:
-            raise
-        except (OSError, ValueError) as exc:
-            raise ParameterSemanticsError("parameter card is invalid") from exc
-        if (
-            card.knob_id.value != knob_id
-            or card.review.get("status") != "source-audited"
-        ):
-            raise ParameterSemanticsError(
-                "parameter card identity or review status is invalid"
-            )
-        try:
-            expected_values = tuple(item.value for item in requested_lattice(card))
-        except ValueError as exc:
-            raise ParameterSemanticsError("parameter card lattice is invalid") from exc
-        if (
-            len(expected_values) != EXPECTED_LATTICE_COUNTS[card.knob_id]
-            or expected_values != requested_reference_values(card.knob_id)
-            or tuple(card.requested_domain.values) != expected_values
-        ):
-            raise ParameterSemanticsError(
-                "parameter card lattice does not match the frozen contract"
-            )
-        spec = knob_spec(knob_id)
-        target = spec.read_target
-        expected_type, expected_unit = _EXPECTED_SURFACES[card.knob_id]
-        if (
-            card.surface.file != target.file
-            or tuple(card.surface.json_path) != tuple(target.json_path)
-            or card.surface.type != expected_type
-            or card.surface.unit != expected_unit
-            or card.stage != spec.step.value
-        ):
-            raise ParameterSemanticsError(
-                "parameter card surface does not match registry"
-            )
-        if (
-            not card.runtime_probe_ids
-            or not set(card.runtime_probe_ids) <= _REGISTERED_PROBES
-        ):
-            raise ParameterSemanticsError(
-                "parameter card runtime probe is not registered"
-            )
-        consumer_ids = {item.consumer_id for item in card.consumers}
-        if not consumer_ids or not consumer_ids <= _REGISTERED_PROBES:
-            raise ParameterSemanticsError("parameter card consumer is not registered")
-        roles = {span.role for span in card.source_spans}
-        if card.runtime_semantics is None or any(
-            span.span_id is None for span in card.source_spans
-        ):
-            raise ParameterSemanticsError(
-                "parameter card runtime semantics are incomplete"
-            )
-        if (
-            card.tool.source_sha256 is None
-            or "runtime_report_producer" not in roles
-        ):
-            raise ParameterSemanticsError(
-                "parameter card runtime report producer is missing"
-            )
-        if "native_consumer" not in roles:
-            raise ParameterSemanticsError(
-                "parameter card native consumer source is missing"
-            )
-        _validate_source_spans(card, base)
-        if (
-            tool_revisions is not None
-            and tool_revisions.get(card.tool.name) != card.tool.revision
-        ):
-            raise ParameterSemanticsError("parameter card tool revision does not match")
+        card = _load_card_entry(item, base, tool_revisions=tool_revisions)
         if card.knob_id in cards:
             raise ParameterSemanticsError("duplicate parameter card")
         cards[card.knob_id] = card
