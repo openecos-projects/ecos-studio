@@ -11,7 +11,12 @@ import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProvid
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
-import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
+import {
+  createEccRuntimeEnv,
+  resolveEccAgentExecutable,
+  resolveEccExecutable,
+  resolveEccSidecarLaunch,
+} from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
@@ -137,6 +142,8 @@ function getDesktopServices() {
   }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
   const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
+  const eccAgentExecutable = resolveEccAgentExecutable(eccRuntimeOptions)
+  const quickStartRoot = join(app.getPath('userData'), 'quick-runs')
   if (eccExecutable) {
     electronLogger.info('[runtime] Using ECC executable %s', eccExecutable)
   } else {
@@ -164,15 +171,23 @@ function getDesktopServices() {
       platform: process.platform,
     })
   const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (_directory, onEvent, onNotification) =>
-      new EccRpcSidecarProcess({
-        command: eccExecutable ?? 'ecc',
+    createSidecar: (directory, onEvent, onNotification) => {
+      const launch = resolveEccSidecarLaunch({
+        agentEccExecutable: eccAgentExecutable,
+        directory,
+        eccExecutable: eccExecutable ?? 'ecc',
+        quickStartRoot,
+      })
+      return new EccRpcSidecarProcess({
+        command: launch.command,
+        commandArgs: launch.commandArgs,
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification,
-      }),
+      })
+    },
     lazyWorkspaceOpen: true,
     snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
   })
