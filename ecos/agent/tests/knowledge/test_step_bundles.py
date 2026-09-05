@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ecos_agent.knowledge.generation import general_details, steps
 from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, RetrievalConfig
 from ecos_agent.gui.provider import EcosAgentProvider
 from ecos_agent.knowledge.step import (
@@ -94,6 +95,24 @@ def test_stage_generator_builds_place_through_the_single_step_dispatch(tmp_path:
     assert "strategy" not in {entity["kind"] for entity in place_catalog["entities"]}
     assert not (AGENT_ROOT / "scripts" / "knowledge").exists()
     assert (AGENT_ROOT / "src/ecos_agent/knowledge/generation/steps.py").is_file()
+
+
+def test_build_all_uses_the_same_bundle_builder_for_every_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        steps,
+        "_build_bundle",
+        lambda stage, output: built.append((stage.slug, output)),
+    )
+    monkeypatch.setattr(general_details, "GENERAL_KNOWLEDGE_METRICS", ())
+
+    steps.build_all(tmp_path)
+
+    assert built == [
+        (stage.slug, tmp_path / "tool" / stage.slug) for stage in steps.STAGES
+    ]
 
 
 def test_committed_stage_bundles_pass_generator_check() -> None:

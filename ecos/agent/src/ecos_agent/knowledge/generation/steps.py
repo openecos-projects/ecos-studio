@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,19 @@ METRICS = {
 }
 
 
+def _add_place_stage_entries(
+    _stage: Stage,
+    entries: list[dict[str, object]],
+    documents: dict[str, list[str]],
+) -> None:
+    config = json.loads(
+        (ECOS_ROOT / PLACE_SOURCE_PATHS["dreamplace.config"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    add_place_entries(entries, documents, config)
+
+
 @dataclass(frozen=True)
 class Stage:
     slug: str
@@ -44,6 +58,16 @@ class Stage:
     metric_source: str
     config_path: str | None = None
     tool_source_ids: tuple[str, ...] = ("ecc.runner", "ecc.module")
+    entry_writer: Callable[
+        [Stage, list[dict[str, object]], dict[str, list[str]]], None
+    ] | None = None
+    catalog_schema: str = "ecos-step-catalog.v2"
+    manifest_schema: str = "ecos-step-manifest.v1"
+    source_schema: str = "ecos-step-sources.v1"
+    domain: str | None = None
+    publication_scope: str | None = None
+    source_paths: tuple[tuple[str, str], ...] = ()
+    regression_cases: tuple[dict[str, str], ...] = ()
 
 
 STAGES = (
@@ -74,6 +98,14 @@ STAGES = (
         "DreamPlace and ECC publish placement wirelength, density, and congestion facts together with the placement-map resources consumed by the GUI.",
         "ecc/chipcompiler/tools/ecc_dreamplace/configs/dreamplace_ecc.json",
         ("dreamplace.runner", "dreamplace.module", "ecc.runner", "ecc.module"),
+        entry_writer=_add_place_stage_entries,
+        catalog_schema="ecos-place-catalog.v3",
+        manifest_schema="ecos-place-manifest.v1",
+        source_schema="ecos-place-sources.v1",
+        domain="ecos_placement",
+        publication_scope="ECOS place and DreamPlace source snapshot",
+        source_paths=tuple(PLACE_SOURCE_PATHS.items()),
+        regression_cases=PLACE_REGRESSION_CASES,
     ),
     Stage(
         "cts",
@@ -305,6 +337,7 @@ def _json(value: object) -> str:
 
 def _stage_sources(stage: Stage) -> dict[str, str]:
     paths = dict(SOURCE_PATHS)
+    paths.update(stage.source_paths)
     if stage.config_path:
         paths[f"config.{stage.slug}"] = stage.config_path
     return paths
@@ -335,7 +368,7 @@ def _stage_source_inventory(
     stage: Stage, entries: list[dict[str, object]]
 ) -> dict[str, object]:
     paths = _referenced_sources(_stage_sources(stage), entries)
-    return _source_inventory(paths, "ecos-step-sources.v1")
+    return _source_inventory(paths, stage.source_schema)
 
 
 def _section(entity_id: str, body: str, evidence: tuple[str, ...]) -> str:
@@ -659,6 +692,20 @@ def _add_stage(stage: Stage, entries: list[dict[str, object]], documents: dict[s
 
 
 def _write_regression(stage: Stage, output: Path, entries: list[dict[str, object]]) -> None:
+    cases = [
+        {**case, "question": f"Explain {case['entity_id']}"}
+        for case in stage.regression_cases
+    ] or _stage_regression_cases(stage, entries)
+    regression = output / "regression"
+    regression.mkdir(exist_ok=True)
+    regression.joinpath(f"{stage.slug}_questions.jsonl").write_text(
+        "".join(_json(case) + "\n" for case in cases), encoding="utf-8"
+    )
+
+
+def _stage_regression_cases(
+    stage: Stage, entries: list[dict[str, object]]
+) -> list[dict[str, object]]:
     metric_id = f"metric.{METRICS[stage.slug][0]}" if METRICS[stage.slug] else f"metric.{stage.slug}.database_summary"
     parameter_id = next(entry["id"] for entry in entries if str(entry["id"]).startswith(f"parameter.{stage.slug}."))
     cases = [
@@ -679,11 +726,7 @@ def _write_regression(stage: Stage, output: Path, entries: list[dict[str, object
         {"id": f"{stage.slug}-artifact", "question": f"Explain artifact.{stage.slug}.outputs", "entity_id": f"artifact.{stage.slug}.outputs", "required_text": "**Meaning:**"},
         {"id": f"{stage.slug}-failure", "question": f"Explain failure.{stage.slug}.preconditions", "entity_id": f"failure.{stage.slug}.preconditions", "required_text": "**Failure mode:**"},
     ))
-    regression = output / "regression"
-    regression.mkdir(exist_ok=True)
-    regression.joinpath(f"{stage.slug}_questions.jsonl").write_text(
-        "".join(_json(case) + "\n" for case in cases), encoding="utf-8"
-    )
+    return cases
 
 
 def _build_bundle(stage: Stage, output: Path) -> None:
@@ -692,13 +735,17 @@ def _build_bundle(stage: Stage, output: Path) -> None:
     knowledge.mkdir(exist_ok=True)
     entries: list[dict[str, object]] = []
     documents: dict[str, list[str]] = {name: [] for name in ("algorithms.md", "parameters.md", "metrics.md", "artifacts.md", "failures.md")}
-    _add_stage(stage, entries, documents)
+    (stage.entry_writer or _add_stage)(stage, entries, documents)
     for name, chunks in documents.items():
         (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
     catalog = {
-        "schema_version": "ecos-step-catalog.v2",
-        "domain": f"ecos_{stage.slug}",
-        "publication": {"status": "source-audited", "scope": f"ECOS {stage.step_name} source snapshot"},
+        "schema_version": stage.catalog_schema,
+        "domain": stage.domain or f"ecos_{stage.slug}",
+        "publication": {
+            "status": "source-audited",
+            "scope": stage.publication_scope
+            or f"ECOS {stage.step_name} source snapshot",
+        },
         "entities": entries,
     }
     (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
@@ -711,56 +758,13 @@ def _build_bundle(stage: Stage, output: Path) -> None:
         for path in sorted(output.rglob("*"))
         if path.is_file() and path.name != "manifest.json"
     }
-    manifest = {"schema_version": "ecos-step-manifest.v1", "files": files, "entity_count": len(entries)}
-    (output / "manifest.json").write_text(_json(manifest) + "\n", encoding="utf-8")
-
-
-def _build_place_bundle(output: Path) -> None:
-    config_path = ECOS_ROOT / PLACE_SOURCE_PATHS["dreamplace.config"]
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    output.mkdir(parents=True, exist_ok=True)
-    knowledge = output / "knowledge"
-    knowledge.mkdir(exist_ok=True)
-    entries: list[dict[str, object]] = []
-    documents: dict[str, list[str]] = {}
-    add_place_entries(entries, documents, config)
-    for name, chunks in documents.items():
-        (knowledge / name).write_text("\n".join(chunks), encoding="utf-8")
-    catalog = {
-        "schema_version": "ecos-place-catalog.v3",
-        "domain": "ecos_placement",
-        "publication": {
-            "status": "source-audited",
-            "scope": "ECOS place and DreamPlace source snapshot",
-        },
-        "entities": entries,
-    }
-    (output / "catalog.json").write_text(_json(catalog) + "\n", encoding="utf-8")
-    sources = _source_inventory(
-        _referenced_sources(PLACE_SOURCE_PATHS, entries), "ecos-place-sources.v1"
-    )
-    (output / "sources.json").write_text(_json(sources) + "\n", encoding="utf-8")
-    regression = output / "regression"
-    regression.mkdir(exist_ok=True)
-    regression.joinpath("place_questions.jsonl").write_text(
-        "".join(_json({**case, "question": f"Explain {case['entity_id']}"}) + "\n" for case in PLACE_REGRESSION_CASES), encoding="utf-8"
-    )
-    files = {
-        str(path.relative_to(output)): _sha256(path.read_bytes())
-        for path in sorted(output.rglob("*"))
-        if path.is_file() and path.name != "manifest.json"
-    }
-    manifest = {"schema_version": "ecos-place-manifest.v1", "files": files, "entity_count": len(entries)}
+    manifest = {"schema_version": stage.manifest_schema, "files": files, "entity_count": len(entries)}
     (output / "manifest.json").write_text(_json(manifest) + "\n", encoding="utf-8")
 
 
 def build_all(output: Path) -> None:
     for stage in STAGES:
-        bundle_output = output / "tool" / stage.slug
-        if stage.slug == "place":
-            _build_place_bundle(bundle_output)
-        else:
-            _build_bundle(stage, bundle_output)
+        _build_bundle(stage, output / "tool" / stage.slug)
     from .general_details import GENERAL_KNOWLEDGE_METRICS, build_general_bundle
     for metric in GENERAL_KNOWLEDGE_METRICS:
         build_general_bundle(output / "general" / metric, metric)
