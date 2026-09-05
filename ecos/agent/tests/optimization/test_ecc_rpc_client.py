@@ -64,7 +64,7 @@ def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
 
     client = EccContentLengthRpcClient(executable)
 
-    assert client.command == (str(executable), "rpc", "serve", "--stdio", "--agent")
+    assert client.command == (str(executable),)
 
 
 def test_stdio_client_exposes_ecc_revision(monkeypatch, tmp_path: Path) -> None:

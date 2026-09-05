@@ -30,6 +30,7 @@ from ecos_agent.optimization.runtime import (
     _assemble_runner,
     _current_values,
     _design_id,
+    _ecc_executable,
     _incumbent_workspace,
     _knowledge_case_pool_root,
     _optimization_execution_context,
@@ -55,6 +56,15 @@ _STAGES = (
     "Harden",
 )
 _HASH = "sha256:" + "a" * 64
+
+
+def test_ecc_executable_uses_dedicated_agent_rpc_override(monkeypatch, tmp_path: Path) -> None:
+    executable = tmp_path / "ecc-agent-rpc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setenv("ECOS_AGENT_ECC_RPC_BIN", str(executable))
+
+    assert _ecc_executable() == executable.resolve()
 
 
 def _write_flow(tmp_path: Path, *, states: dict[str, str] | None = None) -> None:

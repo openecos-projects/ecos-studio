@@ -37,6 +37,7 @@ describe('runGuiDoctor', () => {
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/ecc-agent-rpc'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [
@@ -96,6 +97,7 @@ describe('runGuiDoctor', () => {
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/ecc-agent-rpc'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [['pnpm --version', { stdout: '11.0.9\n' }]],
@@ -120,7 +122,7 @@ describe('runGuiDoctor', () => {
     )
   })
 
-  it('requires packaged chip viewer resources', async () => {
+  it('requires packaged native resources', async () => {
     const cwd = '/repo/ecos/gui'
 
     const report = await createDoctorFixture({
@@ -139,7 +141,7 @@ describe('runGuiDoctor', () => {
         expect.objectContaining({
           name: 'native resources',
           status: 'error',
-          message: 'Missing native resources: ecc, chip-viewer-native',
+          message: 'Missing native resources: ecc, ecc-agent-rpc, chip-viewer-native',
         }),
       ]),
     )

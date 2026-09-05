@@ -155,6 +155,7 @@ validate_packaged_binaries() {
 
   local required_files=(
     "$binary_dir/ecc"
+    "$binary_dir/ecc-agent-rpc"
     "$binary_dir/chip-viewer-native"
     "$binary_dir/sizer/bin/Sizer"
     "$binary_dir/sizer/libexec/Sizer"

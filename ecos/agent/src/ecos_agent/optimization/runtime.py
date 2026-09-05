@@ -723,21 +723,24 @@ def _ledger(root: Path):
 
 
 def _ecc_executable() -> Path:
-    candidate = os.environ.get("ECOS_AGENT_ECC_BIN", "").strip()
+    candidate = os.environ.get("ECOS_AGENT_ECC_RPC_BIN", "").strip()
     if candidate:
         path = Path(candidate).expanduser()
         if path.is_file() and os.access(path, os.X_OK):
             return path.resolve()
-        raise OptimizationRuntimeError("ECOS_AGENT_ECC_BIN is not executable")
-    resolved = shutil.which("ecc")
+        raise OptimizationRuntimeError("ECOS_AGENT_ECC_RPC_BIN is not executable")
+    resolved = shutil.which("ecc-agent-rpc")
     if resolved:
         return Path(resolved).resolve()
     repo_root = Path(__file__).resolve().parents[5]
-    for relative in ("ecc/.venv/bin/ecc", "ecc/build/ecc/ecc", "ecc/dist/ecc/ecc"):
+    for relative in (
+        "ecc/.venv/bin/ecc-agent-rpc",
+        "ecc/dist/ecc/ecc-agent-rpc",
+    ):
         path = repo_root / relative
         if path.is_file() and os.access(path, os.X_OK):
             return path.resolve()
-    raise OptimizationRuntimeError("ECC executable is unavailable")
+    raise OptimizationRuntimeError("ECC Agent RPC executable is unavailable")
 
 
 def _site_width_dbu(workspace: Path) -> int:

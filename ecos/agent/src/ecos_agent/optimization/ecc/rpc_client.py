@@ -33,13 +33,13 @@ _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 
 
 class EccContentLengthRpcClient:
-    """Launch the ECC binary with a fixed stdio command and RPC allowlist."""
+    """Launch the ECC Agent RPC executable with a fixed method allowlist."""
 
     def __init__(
         self, executable: Path, *, response_timeout_seconds: float = 10.0
     ) -> None:
         if not executable.is_absolute():
-            raise OptimizationEccAdapterError("ECC executable path must be absolute")
+            raise OptimizationEccAdapterError("ECC Agent RPC executable path must be absolute")
         if (
             type(response_timeout_seconds) not in {int, float}
             or response_timeout_seconds <= 0
@@ -48,10 +48,10 @@ class EccContentLengthRpcClient:
         try:
             resolved = executable.resolve(strict=True)
         except OSError as exc:
-            raise OptimizationEccAdapterError("ECC executable is unavailable") from exc
+            raise OptimizationEccAdapterError("ECC Agent RPC executable is unavailable") from exc
         if not resolved.is_file() or not os.access(resolved, os.X_OK):
-            raise OptimizationEccAdapterError("ECC executable is not executable")
-        self.command = (str(resolved), "rpc", "serve", "--stdio", "--agent")
+            raise OptimizationEccAdapterError("ECC Agent RPC executable is not executable")
+        self.command = (str(resolved),)
         self._response_timeout_seconds = float(response_timeout_seconds)
         self._process: subprocess.Popen[bytes] | None = None
         self._pending: dict[int, queue.Queue[dict[str, object]]] = {}
