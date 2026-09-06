@@ -199,7 +199,17 @@ def _validate_l1_payload(
 ) -> None:
     materialization = receipt.materialization
     digest_payload = {key: value for key, value in payload.items() if key != "receipt_sha256"}
-    patch = [{"knob_id": knob_id, "value": written_value}]
+    payload_patch = payload.get("patch")
+    if (
+        not isinstance(payload_patch, list)
+        or len(payload_patch) != 1
+        or not isinstance(payload_patch[0], Mapping)
+        or set(payload_patch[0]) != {"knob_id", "value"}
+        or payload_patch[0].get("knob_id") != knob_id
+        or not _same_numeric_value(payload_patch[0].get("value"), written_value)
+    ):
+        raise OptimizationEccAdapterError("application receipt materialization is invalid")
+    patch = [{"knob_id": knob_id, "value": payload_patch[0]["value"]}]
     if (
         payload.get("schema") != "ecc.workspace.candidate_materialization.v1"
         or payload.get("schema_version") != 1
@@ -212,10 +222,18 @@ def _validate_l1_payload(
         or payload.get("registry_sha256") != materialization.registry_sha256
         or payload.get("receipt_sha256") != materialization.receipt_sha256
         or canonical_sha256(digest_payload) != materialization.receipt_sha256
-        or materialization.written_value != written_value
+        or not _same_numeric_value(materialization.written_value, written_value)
         or materialization.config_ref != expected_config_ref
     ):
         raise OptimizationEccAdapterError("application receipt materialization is invalid")
+
+
+def _same_numeric_value(left: object, right: object) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    return left == right
 
 
 def _validate_l1_files(

@@ -20,6 +20,7 @@ _SAFE_RPC_ERROR_DETAIL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,255}$")
 _MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 _ALLOWED_METHODS = frozenset(
     {
+        "agent.runtime_preflight",
         "workspace.open",
         "rpc.hello",
         "candidate.resume",
@@ -120,6 +121,12 @@ class EccContentLengthRpcClient:
         if not _valid_revision(revision):
             raise OptimizationEccAdapterError("ECC revision is invalid")
         return revision.strip()
+
+    def agent_runtime_preflight(self) -> dict[str, object]:
+        result = self.call("agent.runtime_preflight", {})
+        if result.get("sizer") is not True or result.get("dreamplace") is not True:
+            raise OptimizationEccAdapterError("ECC Agent runtime preflight result is invalid")
+        return result
 
     def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method not in _ALLOWED_METHODS - {"operation.ack_step_rendered"}:

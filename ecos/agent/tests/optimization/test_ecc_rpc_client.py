@@ -226,6 +226,20 @@ def test_stdio_client_exposes_ecc_revision(monkeypatch, tmp_path: Path) -> None:
     assert client.ecc_revision() == "ecc-test-revision"
 
 
+def test_stdio_client_validates_agent_runtime_preflight(monkeypatch, tmp_path: Path) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    monkeypatch.setattr(
+        client,
+        "call",
+        lambda method, params: {"sizer": True, "dreamplace": True},
+    )
+
+    assert client.agent_runtime_preflight() == {"sizer": True, "dreamplace": True}
+
+
 def test_stdio_client_opens_workspace(monkeypatch, tmp_path: Path) -> None:
     executable = tmp_path / "ecc"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")

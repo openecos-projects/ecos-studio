@@ -16,7 +16,11 @@ from ecos_agent.optimization.ecc.adapter import (
     EccCandidateRerunAdapter,
     OptimizationEccAdapterError,
 )
-from ecos_agent.optimization.ecc.evidence import _validate_l1_files
+from ecos_agent.optimization.ecc.evidence import (
+    _same_numeric_value,
+    _validate_l1_files,
+    _validate_l1_payload,
+)
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
@@ -376,6 +380,49 @@ def test_l1_evidence_reads_canonical_workspace_parameters_toml(tmp_path: Path) -
     }
 
     _validate_l1_files(candidate, payload, receipt, ("core", "utilitization"))
+
+
+@pytest.mark.parametrize("requested", (0, 1))
+def test_l1_payload_accepts_native_float_for_integer_request(
+    tmp_path: Path, requested: int
+) -> None:
+    native, _evidence, paths = _write_candidate_evidence(tmp_path)
+    materialization_path = paths["materialization"]
+    materialization = json.loads(materialization_path.read_text(encoding="utf-8"))
+    materialization["patch"][0]["knob_id"] = "place.target_overflow"
+    materialization["patch"][0]["value"] = float(requested)
+    materialization["patch_sha256"] = canonical_sha256(materialization["patch"])
+    materialization["receipt_sha256"] = canonical_sha256(
+        {key: value for key, value in materialization.items() if key != "receipt_sha256"}
+    )
+    materialization_path.write_text(json.dumps(materialization), encoding="utf-8")
+    native["materialization"]["patch_sha256"] = materialization["patch_sha256"]
+    native["materialization"]["receipt_sha256"] = materialization["receipt_sha256"]
+    native["materialization"]["written_value"] = float(requested)
+    native["requested"]["knob_id"] = "place.target_overflow"
+    native["requested"]["value"] = float(requested)
+    native["effective_initial"]["value"] = float(requested)
+    native["effective_final"]["value"] = float(requested)
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    receipt = ParameterApplicationReceipt.model_validate(native)
+    candidate = tmp_path / native["materialization"]["candidate_ref"]
+
+    _validate_l1_payload(
+        materialization,
+        receipt,
+        candidate.name,
+        "place.target_overflow",
+        requested,
+        "place",
+        "config/dreamplace_ecc.json",
+    )
+
+
+def test_numeric_receipt_comparison_does_not_alias_booleans_and_integers() -> None:
+    assert _same_numeric_value(1, 1.0)
+    assert not _same_numeric_value(True, 1)
 
 
 def test_adapter_retains_l1_l2_evidence_on_failed_terminal(tmp_path: Path) -> None:
