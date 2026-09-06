@@ -362,3 +362,82 @@ candidate workspace，再失败。
 - observation 的 `params.toml` 阻塞已修复，未削弱 hash-bound evidence；
 - 继续削减 STA/Harden、DREAMPlace/Sizer 内部 iteration PNG 或 full-flow baseline 时间需要进入
   native 工具/普通 GUI 行为边界，本轮不扩散。
+
+### 11.6 repair sequence 004 补充审计
+
+复查对象：
+
+- repair probe：
+  `/tmp/ecos-agent-gcd-baseline-repair-20260906/core-util-0.2-fixed-339f03ef/probes/rq1-floorplan-core_util-004`
+- candidate root：
+  `/tmp/ecos-agent-gcd-7knob-20260906-v2/gcd-gap-a236fdba-v2/baseline-1/workspace/.agent/candidates/candidate-02ea4dd42a43ad5f-rq1-floorplan-core_util-004`
+- 当前父仓库：`0a991b2cc5bfa3db6e39de5d4ab298f4563a5a2a`
+- 当前 ECC：`4feb98480d38ad0af7a4ff7d9fdfecabf9444301`
+
+关键结果：
+
+| 指标 | 数值 |
+|---|---:|
+| `runtime.v1.json elapsed_seconds` | 227.49 s |
+| `probe-result.v1.json runtime_seconds` | 228.29 s |
+| `/usr/bin/time` wall | 229.23 s |
+| `/usr/bin/time` max RSS | 2,540,232 KiB |
+| `probe-result.v1.json peak_child_memory_mb` | 2,480.70 MiB |
+| terminal state | `succeeded` |
+| execution outcome | `execution_succeeded` |
+
+阶段证据来自 candidate `home/flow.json`、各 step `subflow.json` 与 native log timestamp：
+
+| 阶段 | `home/flow.json` runtime | native timestamp span | 判断 |
+|---|---:|---:|---|
+| Floorplan | 0 s | 0 s | 非热点 |
+| place | 27 s | 27 s | 原生 placement/early route |
+| CTS | 13 s | 14 s | 原生 CTS/early route |
+| legalization | 0 s | 1 s | 非热点 |
+| Timing optimization | 7 s | log timestamp 不完整 | 原生 Sizer + legalization |
+| route | 2 s | 3 s | 原生 routing |
+| DRC/LVS/filler/RCX | 0 s | 0 s | 非热点 |
+| postRouteLec | 2 s | 无 native timestamp | 非热点 |
+| STA | 157 s | 157 s | 最大剩余原生 STA 开销 |
+| Harden | 11 s | 12 s | 原生 harden/lib extraction |
+
+可控 Agent 开销边界：
+
+- `Floorplan -> Harden` 主段 native timestamp 从 `12:24:41` 到 `12:28:26`，约 225 s；
+  与 driver `227.49 s` 的差值约 2.5 s。
+- 该差值包含 JSON-RPC polling、candidate receipt 写入、terminal observation、manifest/hash
+  校验和 Python driver book-keeping；未达到值得继续引入缓存或并发复杂度的量级。
+- 剩余最大单项是 `sta_ecc/log/sta.log` 的 157 s；日志显示 STA 在多个 timing corner 上重复
+  `readLib -> initSTA -> wrapTimingLibrary -> runSTA/report`。这是 ECC/native STA 语义路径，
+  不属于 `ecc-agent-rpc` 或 `ecos/agent` 客户端队列开销。
+
+绘图复查：
+
+- candidate root 内共 26 张 PNG、约 683,957 bytes；
+- 分布为 DREAMPlace/Sizer 内部 iteration 图：`place_dreamplace/data` 22 张、
+  `legalization_dreamplace/data` 2 张、`timing_optimization_sizer/data` 2 张；
+- target 及后续 step 没有恢复 `analysis/*.png` 或 `feature/*.png` 展示图；
+- 这些 iteration PNG 的日志单次约 0.02 s，总量远低于 STA/Harden 原生耗时，且继续删除需要进入
+  DREAMPlace/Sizer 内部工具边界，本轮不处理。
+
+产物大小复查：
+
+| step root | 文件数 | 字节数 |
+|---|---:|---:|
+| `Floorplan_ecc` | 54 | 5,220,078 |
+| `place_dreamplace` | 131 | 11,054,616 |
+| `CTS_ecc` | 115 | 8,713,741 |
+| `timing_optimization_sizer` | 70 | 8,345,019 |
+| `sta_ecc` | 251 | 17,639,059 |
+| `Harden_ecc` | 13 | 91,719 |
+
+本轮补充审计未发现报告前文未覆盖的、可在 Agent 所有权边界内继续修复的显著性能问题：
+
+- `ecc/agent/workspace_api.py` 已在 candidate clone 前执行 Sizer preflight，并在 clone 时跳过
+  后续会清理的 target/subsequent artifacts；
+- `ecc/agent/plot.py` 与 `ecc/agent/engine.py` 已对 candidate-only 展示图和 KLayout snapshot
+  做跳过，普通 Quick Start/GUI 行为仍保留；
+- `ecos/agent/.../ecc/rpc_client.py` 已只缓存 terminal runtime events，并对
+  `operation.ack_step_rendered` 做 `(operationId, eventId)` 幂等去重；
+- repair sequence 004 的剩余 wall/RSS 主要来自原生 EDA 工具，尤其 STA 多 corner 分析和 harden
+  timing characterization；继续优化会越过本任务限定的 Agent/ecc-agent-rpc 边界。
