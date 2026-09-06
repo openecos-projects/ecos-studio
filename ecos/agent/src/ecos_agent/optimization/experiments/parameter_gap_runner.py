@@ -24,7 +24,7 @@ from ecos_agent.optimization.experiments.gate0 import (
 )
 from ecos_agent.optimization.experiments.parameter_gap_artifacts import (
     build_report,
-    peak_child_memory_mb,
+    flow_peak_memory_mb,
     timestamp,
     write_json,
     write_outputs,
@@ -385,7 +385,7 @@ def _execute_probe(
         error=error,
         site_width_dbu=readiness["site_width_dbu"],
     )
-    payload = {**result.to_dict(), "peak_child_memory_mb": peak_child_memory_mb()}
+    payload = {**result.to_dict(), "flow_peak_memory_mb": flow_peak_memory_mb(output)}
     write_json(output / "probe-result.v1.json", payload)
     return result
 

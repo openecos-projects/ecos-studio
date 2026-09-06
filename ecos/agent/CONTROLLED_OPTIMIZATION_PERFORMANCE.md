@@ -227,22 +227,21 @@ uv run pytest -q tests/knowledge/test_general_catalog.py \
   tests/optimization/test_ecc_rpc_client.py
 # 61 passed
 
-uv run pytest -q
-# 742 passed, 4 failed
+uv run --locked pytest -q
+# 772 passed, 2 failed
 ```
 
 GUI 边界回归测试另以 Node 23 执行：desktop runtimeEnv/runtimeService `43 passed`，renderer
 Agent workspace/chat/flow IPC `51 passed`。普通 GUI/Quick Start 的 Agent runtime 解析为
 `ecc-agent-rpc`；RPC 非终态事件过滤仅存在于受控优化 Python client，不影响 GUI sidecar 日志事件。
 
-四个 full-suite 失败在本任务开始前已存在：
+两个 full-suite 失败已在无本轮未提交修改的独立 `HEAD` worktree 中复现：
 
 1. proposal provider 的 bounded-context 字段断言未同步；
 2. progressive recovery 测试的 native requested receipt 与 controller request 不一致；
-3. terminal observation 测试未包含新增的三个 violation-count objective；
-4. `optimization/observations.py` 已有 805 行，超过 800 行架构阈值。
 
-这些失败与本轮性能修改无关；focused 测试和 ECC Agent 全量测试均通过。
+这两项与本轮性能修改无关；本轮 focused 测试、package architecture 检查和 ECC Agent 全量测试
+均通过。
 
 ## 10. 停止条件
 
@@ -441,3 +440,91 @@ candidate workspace，再失败。
   `operation.ack_step_rendered` 做 `(operationId, eventId)` 幂等去重；
 - repair sequence 004 的剩余 wall/RSS 主要来自原生 EDA 工具，尤其 STA 多 corner 分析和 harden
   timing characterization；继续优化会越过本任务限定的 Agent/ecc-agent-rpc 边界。
+
+### 11.7 readiness 的 DreamPlace late-failure
+
+v11 debug run 在完成 Synthesis/Place 后才于 `Timing optimization` 报告：
+
+```text
+Sizer tools not available for step Timing optimization
+```
+
+源码审计确认原 readiness 只检查仓库、PDK、ECC executable 和参数卡；Sizer/DreamPlace
+runtime 直到 candidate flow 才检查。因此缺失 runtime 会浪费已经完成的 Place 时间，并把可恢复的
+环境错误归因到昂贵的后续阶段。
+
+修复保持在 `ecc/agent/**`：
+
+- `agent/runtime_env.py` 的 Agent preflight 同时检查 Sizer 和 DreamPlace；candidate rerun
+  继续在 clone 前复用该 helper。
+- 增加只读 `agent.runtime_preflight` Agent RPC 方法；`ecos/agent` readiness 通过同一个
+  `ecc-agent-rpc` executable 调用它，baseline 尚未启动前即失败。
+- RPC client 验证返回的两个工具状态均为 `true`，不接受模糊成功。
+
+验证证据：
+
+```text
+PYTHONPATH=. ./.venv/bin/pytest -q agent/test/test_runtime.py agent/test/test_workspace_api.py agent/test/test_requests.py
+51 passed
+
+uv run --locked pytest -q tests/optimization/test_ecc_rpc_client.py \
+  tests/optimization/experiments/test_parameter_gap.py
+40 passed
+
+CHIPCOMPILER_ECC_SIZER_ROOT=/tmp/ecc-sizer-official-31361700161/ecc-sizer \
+PATH=/tmp/ecc-sizer-official-31361700161/ecc-sizer/bin:$PATH \
+ECOS_AGENT_ECC_RPC_BIN=/home/yhqiu1/iagent-survey/ecos-studio/ecc/.venv/bin/ecc-agent-rpc \
+uv run --locked python -c '...client.agent_runtime_preflight()...'
+# returned: {"sizer": true, "dreamplace": true}
+```
+
+该修复不改变普通 ECC RPC，也不将 debug/repair run 纳入正式实验分母。
+
+### 11.8 native numeric representation 的 receipt failure
+
+v12 有四个 candidate 在 ECOS receipt 校验阶段报
+`application receipt materialization is invalid`：`place.target_overflow=0/1` 和
+`floorplan.aspect_ratio=1/5`。四个候选目录的 `candidate_materialization.v1.json`、
+`parameter_runtime_report.v1.json` 均保留了 patch/effective 值；native execution receipt 显示
+后三个为 `terminal_state=succeeded`，`target_overflow=0` 则在 place 阶段失败。旧 verifier
+先拒绝 receipt，因而掩盖了该候选的真实 terminal state。
+
+根因是 native materialization 使用 `0.0`/`1.0`，请求侧 canonical payload 使用 `0`/`1`，
+导致数值语义相同但 SHA-256 文本不同。修复位于
+`ecos/agent/src/ecos_agent/optimization/ecc/evidence.py`：校验以 native patch 数值重算 patch
+hash，并分别严格绑定 knob、数值语义、patch/receipt hash、config 和 candidate；只放宽整数/浮点
+表示差异。新增回归测试覆盖 native float zero。
+
+原始 v12 失败目录保持不变。四个新 ID 的独立 repair 不进入正式 denominator，结果为：
+
+- `target_overflow=1` terminal closed，effective `1.0`，activation `used`；
+- `aspect_ratio=1/5` 均 terminal closed，但在 GCD 的固定 `die_size` 模式下 `not_activated`；
+- `target_overflow=0` 的 receipt 校验通过，但 native place 在 1000 iterations 后仍未达到
+  zero overflow，按真实执行失败保留。
+
+### 11.9 report 前提与内存指标
+
+正式 v12 的 3 个 baseline 都有完整 terminal evidence，但 DRC count 为 4，不满足 signoff
+eligibility。parameter-gap runner 允许这种 baseline 用于 testability screen，汇总阶段却复用了
+Gate0 的 eligible 前提，最终留下：
+
+```text
+Gate0Error: default replays cannot define a noise profile
+```
+
+修复为 Gate0 的 `noise_profile` 默认仍要求 eligible；只有 parameter-gap report 显式传入
+`require_eligible=False`。由已落盘 artifacts 重建的正式报告保留 76 个 candidate、72 个
+terminal closure 和 `gap_confirmed_on_gcd`，不改变实验分母，也不产生 QoR utility claim。
+
+同时确认旧 `peak_child_memory_mb` 来自 runner 生命周期累计的 `RUSAGE_CHILDREN.ru_maxrss`：
+76 个 probe 全部重复 `2712.73046875 MiB`，不能解释为 per-candidate 内存。该字段已删除，改为从
+各 candidate 的 terminal observation 读取 `flow_peak_memory`；72 个 closed candidate 的范围为
+`1111.770..1121.195 MB`，无 terminal observation 的失败候选记录 `null`。
+
+### 11.10 最终停止条件
+
+正式运行、隔离 repair 和 artifact 复核完成后，candidate driver 中位时间为 `231.140 s`，native
+`flow_tool_runtime` 中位时间为 `225.136 s`，约占 `97.4%`。剩余差值包含整秒 stage runtime
+量化误差、clone/materialization、RPC、receipt 和 terminal observation，分布窄且未显示新的
+Agent-owned 长尾热点。因此当前 GCD/ICS55/单 worker 边界内不再增加缓存、并发或 native 工具
+改动；完整 requested/effective/signoff 结论见 `GCD_PARAMETER_EFFECTIVENESS_AUDIT.md`。
