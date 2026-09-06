@@ -12,7 +12,10 @@ import ecos_agent.optimization.experiments.parameter_gap_resume as gap_resume
 import ecos_agent.optimization.experiments.parameter_gap_runner as gap_runner
 import ecos_agent.optimization.experiments.parameter_gap_setup as gap_setup
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization.contracts import OptimizationKnob
+from ecos_agent.optimization.contracts import (
+    GateResult,
+    OptimizationKnob,
+)
 from ecos_agent.optimization.experiments.parameter_gap import (
     ProbeResult,
     classify_receipt,
@@ -34,6 +37,9 @@ from ecos_agent.optimization.parameters.contracts import (
     ToolRef,
 )
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, load_parameter_cards
+from tests.optimization.experiments.equal_budget_support import (
+    _terminal_observation as _complete_terminal,
+)
 
 HASH = "sha256:" + "a" * 64
 
@@ -271,6 +277,51 @@ def test_successful_probe_is_terminal_closed_even_when_signoff_is_ineligible(
     assert returned_receipt == receipt
     assert terminal_closed is True
     assert error is None
+
+
+def test_gap_baselines_request_complete_terminal_without_signoff(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    complete = _complete_terminal()
+    terminal = complete.model_copy(
+        update={
+            "signoff_gates": complete.signoff_gates.model_copy(
+                update={"drc_clean": GateResult.FAIL}
+            ),
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 2.0})
+                if item.metric_id == "drc_count"
+                else item
+                for item in complete.evaluation_metrics
+            ),
+        }
+    )
+    assert terminal.evaluation_metrics_complete is True
+    assert terminal.eligible_for_incumbent is False
+    calls: list[bool] = []
+
+    class FakeClient:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def run_canonical(*_args: object, require_eligible: bool):
+        calls.append(require_eligible)
+        return {"observation": terminal}
+
+    monkeypatch.setattr(gap_runner, "EccContentLengthRpcClient", FakeClient)
+    monkeypatch.setattr(gap_runner, "_run_canonical", run_canonical)
+    observations = gap_runner._run_baselines(
+        tmp_path / "config.json",
+        SimpleNamespace(baseline_replays=1, design=object()),
+        {"ecc_executable": str(tmp_path / "ecc")},
+        tmp_path,
+    )
+
+    assert observations == (terminal,)
+    assert calls == [False]
 
 
 def test_typed_alias_requires_distinct_requests_and_card_rule() -> None:

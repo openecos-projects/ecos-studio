@@ -317,6 +317,8 @@ def _run_canonical(
     output: Path,
     client: EccContentLengthRpcClient,
     readiness: Mapping[str, object],
+    *,
+    require_eligible: bool = True,
 ) -> dict[str, object]:
     pdk_root = readiness["pdk"]["root"]  # type: ignore[index]
     site_width = int(readiness["pdk"]["site_width_dbu"])  # type: ignore[index]
@@ -381,7 +383,14 @@ def _run_canonical(
         output / "canonical-runtime.v1.json",
         {"elapsed_seconds": time.monotonic() - started},
     )
-    if not observation.eligible_for_incumbent:
+    terminal_complete = (
+        observation.evidence_valid
+        and observation.harden_artifacts_complete
+        and observation.evaluation_metrics_complete is True
+    )
+    if not terminal_complete:
+        raise Gate0Error("canonical baseline terminal evidence is incomplete")
+    if require_eligible and not observation.eligible_for_incumbent:
         raise Gate0Error("canonical baseline is not terminal eligible")
     return {"workspace_id": workspace_id, "observation": observation}
 

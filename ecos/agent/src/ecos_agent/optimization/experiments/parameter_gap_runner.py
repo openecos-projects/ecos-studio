@@ -118,7 +118,14 @@ def _run_baselines(
         )
         try:
             result = _run_canonical(
-                config_path, config, config.design, output / "workspace", output, client, readiness
+                config_path,
+                config,
+                config.design,
+                output / "workspace",
+                output,
+                client,
+                readiness,
+                require_eligible=False,
             )
         finally:
             client.close()
