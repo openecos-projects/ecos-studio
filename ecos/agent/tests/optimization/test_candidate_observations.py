@@ -26,6 +26,10 @@ def test_candidate_terminal_observation_verifies_child_manifest_and_parent_flow(
     shutil.copytree(frozen_workspace, source_copy)
     candidate_root = frozen_workspace / ".agent/candidates/candidate-1"
     shutil.copytree(source_copy, candidate_root)
+    (candidate_root / "home/parameters.json").unlink()
+    (candidate_root / "home/params.toml").write_text(
+        '[params]\ndesign = "tiny"\n', encoding="utf-8"
+    )
     manifest_ref = ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
     manifest_path = frozen_workspace / manifest_ref
     parent_flow_hash = file_sha256(frozen_workspace / "home/flow.json")

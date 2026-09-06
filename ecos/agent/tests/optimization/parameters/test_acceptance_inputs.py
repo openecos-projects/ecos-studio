@@ -56,3 +56,23 @@ def test_acceptance_cli_requires_exactly_seven_unique_candidate_bindings() -> No
     assert acceptance.IGNORED_KNOBS == ("cts.max_fanout",)
     with pytest.raises(ValueError, match="seven unique"):
         acceptance._parse_candidates(specs[:-1])
+
+
+def test_acceptance_state_hash_binds_canonical_params_toml(tmp_path) -> None:
+    for relative, content in (
+        ("home/flow.json", "{}\n"),
+        ("home/params.toml", '[params]\ndesign = "gcd"\n'),
+        ("config/floorplan_ecc.json", "{}\n"),
+        ("config/cts_ecc.json", "{}\n"),
+        ("config/dreamplace_ecc.json", "{}\n"),
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    before = acceptance._state_sha256(tmp_path)
+    (tmp_path / "home/params.toml").write_text(
+        '[params]\ndesign = "aes"\n', encoding="utf-8"
+    )
+
+    assert acceptance._state_sha256(tmp_path) != before

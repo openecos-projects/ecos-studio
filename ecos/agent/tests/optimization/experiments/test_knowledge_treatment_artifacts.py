@@ -280,16 +280,17 @@ def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:
         "routability_opt": True,
         "density_weight": 0.00085,
     }
-    (workspace / "home/parameters.json").write_text(
-        json.dumps(
-            {
-                "Design": "design",
-                "Top module": "top",
-                "Clock": "clk",
-                "PDK Root": str(pdk),
-                "Frequency max [MHz]": 50,
-            }
-        ),
+    (workspace / "home/params.toml").write_text(
+        f"""
+[design]
+name = "design"
+top = "top"
+clock_port = "clk"
+frequency_mhz = 50
+
+[pdk]
+root = "{pdk}"
+""".strip(),
         encoding="utf-8",
     )
     (workspace / "config/dreamplace_ecc.json").write_text(

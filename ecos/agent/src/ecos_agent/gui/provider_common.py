@@ -28,6 +28,10 @@ from ecos_agent.knowledge.contracts import SourceSearchProposal, StageRoutingPro
 from ecos_agent.workspace.contracts import (
     GuiWorkspaceSetupProposal,
 )
+from ecos_agent.workspace.parameters import (
+    WorkspaceParametersError,
+    read_workspace_parameters,
+)
 from ecos_agent.knowledge.bundle import KnowledgeAnswer
 from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
 from ecos_agent.knowledge.source import SourceCodeRetriever, SourceSearchResult
@@ -291,16 +295,13 @@ def _known_projects(value: object) -> list[tuple[str, str]]:
 
 def _design_id_for_workspace(workspace: str) -> str | None:
     root = Path(workspace)
-    parameters_path = root / "home" / "parameters.json"
-    if parameters_path.is_file():
-        try:
-            payload = json.loads(parameters_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            payload = None
-        if isinstance(payload, dict):
-            design = payload.get("Design")
-            if isinstance(design, str) and design.strip():
-                return design.strip()
+    try:
+        _parameters_ref, payload = read_workspace_parameters(root)
+    except WorkspaceParametersError:
+        payload = {}
+    design = payload.get("design")
+    if isinstance(design, str) and design.strip():
+        return design.strip()
     # Prefer known ECC output locations; avoid full-tree rglob on large workspaces.
     for pattern in (
         "place_dreamplace/output/*_place.*",

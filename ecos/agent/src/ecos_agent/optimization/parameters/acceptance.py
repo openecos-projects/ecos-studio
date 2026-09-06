@@ -42,6 +42,7 @@ from ecos_agent.optimization.parameters.semantics import (
     load_parameter_cards,
     validate_application_receipt,
 )
+from ecos_agent.workspace.parameters import WorkspaceParametersError, read_workspace_parameters
 
 IGNORED_KNOBS = ("cts.max_fanout",)
 _CANDIDATE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$")
@@ -194,13 +195,12 @@ def _same_number(left: object, right: object) -> bool:
 
 
 def _state_sha256(root: Path) -> str:
-    files = (
-        "home/flow.json",
-        "home/parameters.json",
-        "config/floorplan_ecc.json",
-        "config/cts_ecc.json",
-        "config/dreamplace_ecc.json",
-    )
+    try:
+        parameters_ref = read_workspace_parameters(root)[0]
+    except WorkspaceParametersError as exc:
+        raise FileNotFoundError("parent state files missing: workspace parameters") from exc
+    files = ("home/flow.json", parameters_ref, "config/floorplan_ecc.json",
+             "config/cts_ecc.json", "config/dreamplace_ecc.json")
     missing = [relative for relative in files if not (root / relative).is_file()]
     if missing:
         raise FileNotFoundError(f"parent state files missing: {', '.join(missing)}")
