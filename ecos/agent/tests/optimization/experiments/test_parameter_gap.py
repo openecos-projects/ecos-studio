@@ -229,6 +229,50 @@ def test_missing_terminal_or_failed_probe_makes_negative_result_indeterminate() 
     assert report.failed_candidates == ("failed",)
 
 
+@pytest.mark.parametrize(
+    ("module", "config_hash_key", "resume_existing"),
+    [
+        (gap_runner, "config_sha256", None),
+        (gap_resume, "source_config_sha256", False),
+    ],
+)
+def test_successful_probe_is_terminal_closed_even_when_signoff_is_ineligible(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    module: object,
+    config_hash_key: str,
+    resume_existing: bool | None,
+) -> None:
+    receipt = _receipt("place.target_density", 0.65)
+    run = SimpleNamespace(
+        receipt=SimpleNamespace(parameter_application_receipt=receipt),
+        observation=SimpleNamespace(eligible_for_incumbent=False),
+    )
+    monkeypatch.setattr(module, "run_pilot_candidate", lambda *_args, **_kwargs: run)
+    client = SimpleNamespace(open_workspace=lambda _workspace: "workspace-1")
+    args = (
+        client,
+        SimpleNamespace(terminal_timeout_seconds=60),
+        {"site_width_dbu": 200, config_hash_key: HASH},
+        tmp_path,
+        SimpleNamespace(),
+        OptimizationKnob.TARGET_DENSITY,
+        0.65,
+        0.6,
+        "candidate-1",
+        tmp_path / "probe",
+        None,
+    )
+    if resume_existing is not None:
+        args = (*args, resume_existing)
+
+    returned_receipt, terminal_closed, error = module._probe_evidence(*args)
+
+    assert returned_receipt == receipt
+    assert terminal_closed is True
+    assert error is None
+
+
 def test_typed_alias_requires_distinct_requests_and_card_rule() -> None:
     left = _receipt(
         "place.target_density",
