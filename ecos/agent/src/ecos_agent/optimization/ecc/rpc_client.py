@@ -59,6 +59,7 @@ class EccContentLengthRpcClient:
         self._next_id = 1
         self._lock = threading.Lock()
         self._reader_error: OptimizationEccAdapterError | None = None
+        self._acked_step_events: set[tuple[str, str]] = set()
 
     def start(self) -> None:
         if self._process is not None:
@@ -220,6 +221,10 @@ class EccContentLengthRpcClient:
             raise ValueError("runtime event is invalid")
         ack = _step_render_ack(event)
         if ack is not None:
+            ack_key = (str(ack["operationId"]), str(ack["eventId"]))
+            if ack_key in self._acked_step_events:
+                return
+            self._acked_step_events.add(ack_key)
             self._send(
                 {
                     "jsonrpc": "2.0",
