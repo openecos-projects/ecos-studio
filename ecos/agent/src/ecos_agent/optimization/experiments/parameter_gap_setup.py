@@ -23,7 +23,7 @@ from ecos_agent.optimization.experiments.gate0 import (
 )
 from ecos_agent.optimization.experiments.parameter_gap import KnobGapSummary
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
-from ecos_agent.optimization.parameters.semantics import load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import CARD_ROOT, load_parameter_cards
 
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _RUNTIME_VERSION = re.compile(
@@ -242,11 +242,7 @@ def readiness_report(config_path: Path) -> dict[str, Any]:
         **ecc,
         **pdk,
         "parameter_cards": {
-            knob.value: file_sha256(
-                agent_root
-                / "knowledge/optimization/parameter-effectiveness/cards"
-                / f"{knob.value}.json"
-            )
+            knob.value: file_sha256(CARD_ROOT / f"{knob.value}.json")
             for knob in cards
         },
         "inputs": {
@@ -289,11 +285,7 @@ def resume_readiness_report(config_path: Path, resume_config_path: Path) -> dict
         **ecc,
         **pdk,
         "parameter_cards": {
-            knob.value: file_sha256(
-                agent_root
-                / "knowledge/optimization/parameter-effectiveness/cards"
-                / f"{knob.value}.json"
-            )
+            knob.value: file_sha256(CARD_ROOT / f"{knob.value}.json")
             for knob in cards
         },
         "inputs": {

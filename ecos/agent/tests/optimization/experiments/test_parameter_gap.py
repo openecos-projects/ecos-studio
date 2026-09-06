@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -32,7 +33,7 @@ from ecos_agent.optimization.parameters.contracts import (
     RuntimeTransition,
     ToolRef,
 )
-from ecos_agent.optimization.parameters.semantics import load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import CARD_ROOT, load_parameter_cards
 
 HASH = "sha256:" + "a" * 64
 
@@ -289,6 +290,26 @@ def test_ecc_readiness_checks_runtime_version_separately(monkeypatch, tmp_path) 
     report = gap_setup._ecc_readiness(config)
 
     assert report["ecc_runtime_version"] == "0.1.0-alpha.11"
+
+
+def test_readiness_hashes_flat_parameter_cards(monkeypatch, tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}\n", encoding="utf-8")
+    snapshot = SimpleNamespace(sha256=HASH)
+    config = SimpleNamespace(
+        design=SimpleNamespace(rtl=snapshot, filelist=snapshot, sdc=snapshot)
+    )
+    monkeypatch.setattr(gap_setup, "load_parameter_gap_config", lambda _path: config)
+    monkeypatch.setattr(gap_setup, "_repository_readiness", lambda *_args: {})
+    monkeypatch.setattr(gap_setup, "_pdk_readiness", lambda *_args: {})
+    monkeypatch.setattr(gap_setup, "_ecc_readiness", lambda *_args: {})
+
+    report = gap_setup.readiness_report(config_path)
+
+    assert report["parameter_cards"] == {
+        knob.value: gap_setup.file_sha256(CARD_ROOT / f"{knob.value}.json")
+        for knob in OptimizationKnob
+    }
 
 
 def test_resume_readiness_rejects_source_config_hash_drift(monkeypatch, tmp_path) -> None:
