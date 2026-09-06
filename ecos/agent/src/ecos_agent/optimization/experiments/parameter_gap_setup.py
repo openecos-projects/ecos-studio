@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
+from ecos_agent.optimization.ecc.evidence import OptimizationEccAdapterError
 from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
 from ecos_agent.optimization.experiments.gate0 import (
     Gate0Baseline,
@@ -353,11 +354,16 @@ def _ecc_readiness(config: ParameterGapConfig) -> dict[str, Any]:
         client.close()
     if runtime_version != config.expected_ecc_runtime_version:
         raise ParameterGapError("ECC runtime version does not match frozen config")
+    try:
+        runtime_preflight = client.agent_runtime_preflight()
+    except OptimizationEccAdapterError as exc:
+        raise ParameterGapError("ECC Agent runtime preflight failed") from exc
     return {
         "ecc_runtime_version": runtime_version,
         "ecc_executable": str(executable),
         "ecc_executable_sha256": executable_sha256,
         "ecc": {"executable": str(executable)},
+        "agent_runtime_preflight": runtime_preflight,
     }
 
 

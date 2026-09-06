@@ -375,6 +375,9 @@ def test_ecc_readiness_checks_runtime_version_separately(monkeypatch, tmp_path) 
         def ecc_revision(self) -> str:
             return "0.1.0-alpha.11"
 
+        def agent_runtime_preflight(self) -> dict[str, bool]:
+            return {"sizer": True, "dreamplace": True}
+
         def close(self) -> None:
             pass
 
@@ -385,6 +388,7 @@ def test_ecc_readiness_checks_runtime_version_separately(monkeypatch, tmp_path) 
     report = gap_setup._ecc_readiness(config)
 
     assert report["ecc_runtime_version"] == "0.1.0-alpha.11"
+    assert report["agent_runtime_preflight"] == {"sizer": True, "dreamplace": True}
 
 
 def test_readiness_hashes_flat_parameter_cards(monkeypatch, tmp_path) -> None:
