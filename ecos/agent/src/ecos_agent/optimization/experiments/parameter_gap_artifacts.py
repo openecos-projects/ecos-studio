@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import csv
 import json
-import platform
-import resource
 import time
 from pathlib import Path
 from typing import Any
@@ -37,7 +35,7 @@ def build_report(
         "research_scope": "rq1_testability_gate_only",
         "utility_claim": "not_assessed",
         "readiness": readiness,
-        "baseline_noise": noise_profile(baselines),
+        "baseline_noise": noise_profile(baselines, require_eligible=False),
         "baseline_observations": [item.model_dump(mode="json") for item in baselines],
         "current_values": dict(sorted(current.items())),
         "candidate_count": len(results),
@@ -89,10 +87,18 @@ def write_json(path: Path, payload: Any) -> None:
     temporary.replace(path)
 
 
-def peak_child_memory_mb() -> float:
-    usage = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    return float(
-        usage / 1024 if platform.system() != "Darwin" else usage / 1024 / 1024
+def flow_peak_memory_mb(output: Path) -> float | None:
+    path = output / "terminal-observation.v1.json"
+    if not path.is_file():
+        return None
+    observation = TerminalObservation.model_validate_json(path.read_text(encoding="utf-8"))
+    return next(
+        (
+            float(metric.value)
+            for metric in observation.evaluation_metrics
+            if metric.metric_id == "flow_peak_memory"
+        ),
+        None,
     )
 
 

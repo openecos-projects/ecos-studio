@@ -165,9 +165,12 @@ def load_gate0_config(config_path: Path) -> Gate0Config:
 
 def noise_profile(
     default_replays: Sequence[TerminalObservation],
+    *,
+    require_eligible: bool = True,
 ) -> dict[str, dict[str, float]]:
     if len(default_replays) < 2 or any(
-        not item.eligible_for_incumbent for item in default_replays
+        require_eligible and not item.eligible_for_incumbent
+        for item in default_replays
     ):
         raise Gate0Error("default replays cannot define a noise profile")
     rows = [_all_metrics(item) for item in default_replays]
