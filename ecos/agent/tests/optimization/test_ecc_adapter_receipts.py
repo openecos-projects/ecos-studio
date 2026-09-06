@@ -16,15 +16,11 @@ from ecos_agent.optimization.ecc.adapter import (
     EccCandidateRerunAdapter,
     OptimizationEccAdapterError,
 )
+from ecos_agent.optimization.ecc.evidence import _validate_l1_files
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
-
-HASH = "sha256:" + "a" * 64
-CHUNK_HASH = "b" * 64
-
-
+from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
 from tests.optimization.ecc_adapter_support import (
-    CHUNK_HASH,
     HASH,
     _FakeEccRpc,
     _application_receipt_payload,
@@ -329,6 +325,57 @@ def test_adapter_binds_candidate_parent_manifest(tmp_path: Path) -> None:
     )
 
     assert adapter.wait_for_terminal("operation-1").parameter_application_receipt
+
+
+def test_l1_evidence_reads_canonical_workspace_parameters_toml(tmp_path: Path) -> None:
+    native, _evidence, _paths = _write_candidate_evidence(tmp_path)
+    candidate = tmp_path / native["materialization"]["candidate_ref"]
+    config = candidate / "home/params.toml"
+    before = candidate / "analysis/params.before.toml"
+    after = candidate / "analysis/params.after.toml"
+    for path, value in ((before, 0.4), (config, 0.65), (after, 0.65)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"[params.core]\nutilitization = {value}\n", encoding="utf-8"
+        )
+    materialization = native["materialization"]
+    materialization.update(
+        {
+            "config_ref": "home/params.toml",
+            "config_before_sha256": file_sha256(before),
+            "config_after_sha256": file_sha256(config),
+            "before_snapshot_ref": before.relative_to(candidate).as_posix(),
+            "before_snapshot_sha256": file_sha256(before),
+            "after_snapshot_ref": after.relative_to(candidate).as_posix(),
+            "after_snapshot_sha256": file_sha256(after),
+            "written_value": 0.65,
+        }
+    )
+    native["evidence_sha256"] = canonical_sha256(
+        {key: value for key, value in native.items() if key != "evidence_sha256"}
+    )
+    receipt = ParameterApplicationReceipt.model_validate(native)
+    payload = {
+        "configs": [
+            {
+                "config_key": "parameters",
+                "ref": "home/params.toml",
+                "before_sha256": file_sha256(before),
+                "after_sha256": file_sha256(config),
+            }
+        ],
+        "snapshots": [
+            {
+                "config_key": "parameters",
+                "before_ref": before.relative_to(candidate).as_posix(),
+                "before_sha256": file_sha256(before),
+                "after_ref": after.relative_to(candidate).as_posix(),
+                "after_sha256": file_sha256(after),
+            }
+        ],
+    }
+
+    _validate_l1_files(candidate, payload, receipt, ("core", "utilitization"))
 
 
 def test_adapter_retains_l1_l2_evidence_on_failed_terminal(tmp_path: Path) -> None:

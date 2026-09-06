@@ -15,6 +15,7 @@ from ecos_agent.optimization.execution import (
     CandidateExecutionEvidence,
 )
 from ecos_agent.optimization.parameters.contracts import MaterializationRef, ParameterApplicationReceipt
+from ecos_agent.workspace.parameters import PARAMS_TOML, read_workspace_parameters
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
@@ -258,7 +259,12 @@ def _validate_l1_files(
         config_path = _safe_path(candidate, str(expected_config["ref"]))
         before_path = _safe_path(candidate, str(expected_snapshot["before_ref"]))
         after_path = _safe_path(candidate, str(expected_snapshot["after_ref"]))
-        config_payload = _read_json_object(config_path)
+        if materialization.config_ref == PARAMS_TOML:
+            config_ref, config_payload = read_workspace_parameters(candidate)
+            if config_ref != materialization.config_ref:
+                raise ValueError("materialized parameter config does not match")
+        else:
+            config_payload = _read_json_object(config_path)
         written_value = _nested_json_value(config_payload, config_json_path)
     except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError) as exc:
         raise OptimizationEccAdapterError(
