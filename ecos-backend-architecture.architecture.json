@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ECOS Studio 新后端架构与数据流",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "ecos-backend-architecture.html",
+    "repository": {
+      "url": "https://github.com/openecos-projects/ecos-studio",
+      "revision": "a231bae4184a4627359de8f3bdacad7038d99eec"
+    },
+    "viewBox": [1300, 900]
+  },
+  "components": [
+    {
+      "id": "renderer",
+      "type": "frontend",
+      "label": "Renderer",
+      "sublabel": "Vue / Pinia：UI 与查询投影",
+      "tag": "无 Node / ECC 访问",
+      "sources": [
+        { "path": "ecos/gui/apps/renderer/src/api/flow.ts", "line": 140, "label": "运行命令" },
+        { "path": "ecos/gui/apps/renderer/src/api/workspace.ts", "line": 366, "label": "配置命令" },
+        { "path": "ecos/gui/apps/renderer/src/api/backendRuntimeEvents.ts", "line": 256, "label": "事件消费" }
+      ],
+      "pos": [40, 320],
+      "size": [180, 84]
+    },
+    {
+      "id": "desktop_bridge",
+      "type": "security",
+      "label": "Preload + Shared Contracts",
+      "sublabel": "contextBridge / typed DesktopApi",
+      "tag": "最小暴露面",
+      "sources": [
+        { "path": "ecos/gui/apps/desktop-electron/electron/preload/index.ts", "line": 53, "label": "IPC invoke" },
+        { "path": "ecos/gui/apps/desktop-electron/electron/preload/index.ts", "line": 370, "label": "Runtime bridge" },
+        { "path": "ecos/gui/packages/shared/src/contracts/desktopApi.ts", "line": 212, "label": "DesktopApi" }
+      ],
+      "pos": [310, 220],
+      "size": [205, 84]
+    },
+    {
+      "id": "electron_gateway",
+      "type": "backend",
+      "label": "Electron Main",
+      "sublabel": "IPC / Product Commands / Runtime pool",
+      "tag": "授权、进程与 Workspace Handle",
+      "sources": [
+        { "path": "ecos/gui/apps/desktop-electron/electron/main/registerIpc.ts", "line": 2167, "label": "Product Command IPC" },
+        { "path": "ecos/gui/apps/desktop-electron/electron/services/productCommandService.ts", "line": 51, "label": "命令校验与分派" },
+        { "path": "ecos/gui/apps/desktop-electron/electron/services/eccRpc/runtimeService.ts", "line": 74, "label": "Runtime pool" }
+      ],
+      "pos": [620, 220],
+      "size": [220, 84]
+    },
+    {
+      "id": "runtime_adapter",
+      "type": "backend",
+      "label": "ECOS Runtime Adapter",
+      "sublabel": "JSON-RPC / session / operation",
+      "tag": "ecos-ecc-runtime-adapter",
+      "sources": [
+        { "path": "ecos/runtime-adapter/main.py", "line": 6, "label": "进程入口" },
+        { "path": "ecos/runtime-adapter/ecos_runtime_adapter/stdio_server.py", "line": 71, "label": "stdio server" },
+        { "path": "ecos/runtime-adapter/ecos_runtime_adapter/server.py", "line": 18, "label": "RPC 与事件投影" }
+      ],
+      "pos": [970, 220],
+      "size": [220, 84]
+    },
+    {
+      "id": "ecc_domain",
+      "type": "backend",
+      "label": "ECC Headless Domain",
+      "sublabel": "Project / Workspace / Engine / Tools",
+      "tag": "唯一工程语义",
+      "sources": [
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 65, "label": "Headless 边界" },
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 79, "label": "领域所有权" },
+        { "path": "ecos/runtime-adapter/ecos_runtime_adapter/workspace_api.py", "line": 14, "label": "Adapter 调用 ECC" }
+      ],
+      "pos": [750, 500],
+      "size": [220, 84]
+    },
+    {
+      "id": "eda_tools",
+      "type": "external",
+      "label": "EDA Toolchain",
+      "sublabel": "Yosys / ECC-Tools / KLayout 等",
+      "tag": "Step subprocesses",
+      "sources": [
+        { "path": "ecos/AGENTS.md", "line": 12, "label": "RTL-to-GDS runtime" }
+      ],
+      "pos": [1060, 500],
+      "size": [185, 84]
+    },
+    {
+      "id": "ecc_cli",
+      "type": "external",
+      "label": "ECC CLI",
+      "sublabel": "ecc init / run / status / config",
+      "tag": "独立、无状态入口",
+      "sources": [
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 15, "label": "CLI 直连边界" },
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 66, "label": "双入口契约" },
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 89, "label": "ECC RPC 已移除" }
+      ],
+      "pos": [750, 740],
+      "size": [220, 84]
+    },
+    {
+      "id": "workspace_state",
+      "type": "database",
+      "label": "Workspace 权威状态",
+      "sublabel": "Descriptor / Flow / Snapshot / Artifact",
+      "tag": "ECC 单一写入者",
+      "sources": [
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 76, "label": "Workspace Descriptor" },
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 79, "label": "ECC 单一写入者" },
+        { "path": "ecos/docs/specs/ecc-project-workspace-contract-alignment.md", "line": 86, "label": "Snapshot 持久化" }
+      ],
+      "pos": [400, 500],
+      "size": [270, 84]
+    },
+    {
+      "id": "backend_read_model",
+      "type": "backend",
+      "label": "Electron Backend Read Model",
+      "sublabel": "Snapshot 校验 / QoR / Step 投影",
+      "tag": "window context + generation",
+      "sources": [
+        { "path": "ecos/gui/apps/desktop-electron/electron/services/backendWorkspaceService.ts", "line": 97, "label": "Read Model" },
+        { "path": "ecos/gui/apps/desktop-electron/electron/services/projectManagementReadService.ts", "line": 205, "label": "受限 Snapshot 读取" },
+        { "path": "ecos/gui/apps/renderer/src/stores/backendWorkspaceSession.ts", "line": 30, "label": "Renderer session" }
+      ],
+      "pos": [40, 500],
+      "size": [260, 84]
+    }
+  ],
+  "connections": [
+    {
+      "id": "renderer-bridge-commands",
+      "from": "renderer",
+      "to": "desktop_bridge",
+      "label": "DesktopApi",
+      "variant": "emphasis"
+    },
+    {
+      "id": "bridge-electron-commands",
+      "from": "desktop_bridge",
+      "to": "electron_gateway",
+      "label": "IPC invoke",
+      "variant": "security"
+    },
+    {
+      "id": "electron-adapter-rpc",
+      "from": "electron_gateway",
+      "to": "runtime_adapter",
+      "label": "JSON-RPC stdio",
+      "variant": "emphasis"
+    },
+    {
+      "id": "adapter-ecc-call",
+      "from": "runtime_adapter",
+      "to": "ecc_domain",
+      "label": "ECC public API",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "cli-ecc-call",
+      "from": "ecc_cli",
+      "to": "ecc_domain",
+      "label": "直接调用 headless APIs"
+    },
+    {
+      "id": "ecc-tool-execution",
+      "from": "ecc_domain",
+      "to": "eda_tools",
+      "label": "Flow Steps"
+    },
+    {
+      "id": "ecc-state-commit",
+      "from": "ecc_domain",
+      "to": "workspace_state",
+      "label": "提交领域事实"
+    },
+    {
+      "id": "electron-read-query",
+      "from": "electron_gateway",
+      "to": "backend_read_model",
+      "label": "Backend Query",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "read-model-snapshot",
+      "from": "backend_read_model",
+      "to": "workspace_state",
+      "label": "受限校验读取"
+    },
+    {
+      "id": "runtime-event-return",
+      "from": "runtime_adapter",
+      "to": "renderer",
+      "label": "runtime.event → Electron / preload → refresh",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "双入口，同一领域",
+      "items": [
+        "Studio 通过 Runtime Adapter 调用 ECC；ECC CLI 直接调用同一套 headless APIs",
+        "CLI 不启动 Runtime Adapter，Renderer 也不直接访问 ECC 或 JSON-RPC"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "事实与写入所有权",
+      "items": [
+        "ECC 独占 Project Manifest、Workspace Descriptor、Revision、失效与 Snapshot 语义",
+        "Electron 只负责授权、生命周期、命令编排和 Renderer-facing Read Model"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "一次运行的闭环",
+      "items": [
+        "命令携带 Workspace Handle、commandId / idempotencyKey 与 expectedWorkspaceRevision",
+        "ECC commit → runtime.event → Electron invalidate → Renderer refresh"
+      ]
+    }
+  ]
+}
