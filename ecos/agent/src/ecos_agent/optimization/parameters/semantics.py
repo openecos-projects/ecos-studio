@@ -127,7 +127,7 @@ def _load_card_entry(
             "parameter card lattice does not match the frozen contract"
         )
     spec = knob_spec(knob_id)
-    target = spec.read_target
+    target = spec.evidence_target
     expected_type, expected_unit = _EXPECTED_SURFACES[card.knob_id]
     if (
         card.surface.file != target.file

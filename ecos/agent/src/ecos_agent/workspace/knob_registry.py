@@ -13,10 +13,9 @@ Two surfaces exist in an ECOS workspace and ECC keeps them in sync:
   candidate registry's ``config_key`` / ``json_path``. ``sync_config`` pushes a
   change here back into ``parameters`` and then refreshes.
 
-A knob may exist on one surface or both. Reads use the ECC-canonical surface
-(the step config, which the candidate rerun system applies to). Writes use the
-authoritative surface, and the caller must always invoke the matching sync RPC
-so the two converge -- skipping it is what makes the surfaces drift apart.
+A knob may exist on one surface or both. GUI reads and writes retain their
+workspace contract, while ``evidence_target`` binds receipts to the file that
+the ECC Agent candidate materializer actually changed.
 """
 
 from __future__ import annotations
@@ -30,6 +29,7 @@ from ecos_agent.ecc_contracts import ECCParameterPatchItem, ECCStepName
 KnobSurface = Literal["parameters", "step_config"]
 
 PARAMETERS_FILE = "home/parameters.json"
+PARAMS_TOML_FILE = "home/params.toml"
 DREAMPLACE_FILE = "config/dreamplace_ecc.json"
 CTS_FILE = "config/cts_ecc.json"
 ROUTE_FILE = "config/route_ecc.json"
@@ -55,6 +55,7 @@ class KnobSpec:
     kind: str
     config: KnobTarget | None = None
     parameters: KnobTarget | None = None
+    evidence: KnobTarget | None = None
     bounds: tuple[float, float] | None = None
     # parameters.json stores some flags as 0/1 rather than JSON booleans.
     store_boolean_as_int: bool = False
@@ -73,9 +74,18 @@ class KnobSpec:
         assert target is not None
         return target
 
+    @property
+    def evidence_target(self) -> KnobTarget:
+        """Canonical surface hashed by ECC Agent candidate receipts."""
+        return self.evidence or self.read_target
+
 
 def _parameters(*json_path: str | int) -> KnobTarget:
     return KnobTarget(surface="parameters", file=PARAMETERS_FILE, json_path=json_path)
+
+
+def _params_toml(*json_path: str | int) -> KnobTarget:
+    return KnobTarget(surface="parameters", file=PARAMS_TOML_FILE, json_path=json_path)
 
 
 def _dreamplace(key: str) -> KnobTarget:
@@ -105,6 +115,7 @@ _SPECS: tuple[KnobSpec, ...] = (
         ECCStepName.FLOORPLAN,
         "ranged",
         parameters=_parameters("Core", "Utilitization"),
+        evidence=_params_toml("core", "utilitization"),
         bounds=(0.01, 1.0),
     ),
     KnobSpec(
@@ -112,6 +123,7 @@ _SPECS: tuple[KnobSpec, ...] = (
         ECCStepName.FLOORPLAN,
         "positive_number",
         parameters=_parameters("Core", "Aspect ratio"),
+        evidence=_params_toml("core", "aspect_ratio"),
     ),
     KnobSpec(
         "floorplan.margin_x",

@@ -116,6 +116,22 @@ def test_cards_are_exactly_the_frozen_seven() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("knob", "json_path"),
+    [
+        (OptimizationKnob.FLOORPLAN_CORE_UTIL, ("core", "utilitization")),
+        (OptimizationKnob.FLOORPLAN_ASPECT_RATIO, ("core", "aspect_ratio")),
+    ],
+)
+def test_floorplan_cards_bind_canonical_workspace_parameters(
+    knob: OptimizationKnob, json_path: tuple[str, ...]
+) -> None:
+    card = load_parameter_cards()[knob]
+
+    assert card.surface.file == "home/params.toml"
+    assert card.surface.json_path == json_path
+
+
 def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> None:
     cards = load_parameter_cards()
     dreamplace_cards = [
