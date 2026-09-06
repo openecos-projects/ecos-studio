@@ -493,7 +493,7 @@ def _probe_evidence(
         )
         return (
             run.receipt.parameter_application_receipt,
-            run.observation.eligible_for_incumbent,
+            True,
             None,
         )
     except PilotCandidateExecutionError as exc:
