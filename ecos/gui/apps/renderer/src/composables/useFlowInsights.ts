@@ -36,15 +36,16 @@ export function useFlowInsights() {
     await Promise.all(
       (data.value?.congestionTiles ?? []).map(async (tile) => {
         if (next.has(tile.pngPath)) return
+        const artifactRevision = tile.sourceRevision ?? workspaceRevision
         const result = await getDesktopApi().backendWorkspace.getArtifact({
           artifactId: tile.pngPath,
           workspaceContextId: contextId,
-          workspaceRevision,
+          workspaceRevision: artifactRevision,
         })
         if (
           version !== loadVersion ||
           result.workspaceContextId !== contextId ||
-          result.workspaceRevision !== workspaceRevision ||
+          result.workspaceRevision !== artifactRevision ||
           result.artifact.status !== 'ready'
         ) {
           return

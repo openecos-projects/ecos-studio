@@ -94,9 +94,11 @@ export function useHomeSnapshots() {
       .filter(
         (artifact) =>
           artifact.kind === 'layout_image' &&
+          artifact.availability !== 'missing' &&
           artifact.stepId &&
           layoutSteps.has(artifact.stepId.trim().toLowerCase()) &&
-          successfulSteps.has(artifact.stepId.trim().toLowerCase()),
+          (artifact.sourceRevision !== undefined ||
+            successfulSteps.has(artifact.stepId.trim().toLowerCase())),
       )
       .slice(0, 16)
     const geometrySteps = new Set(
@@ -125,18 +127,19 @@ export function useHomeSnapshots() {
             reason,
           })
           if (artifact.availability !== 'available') return thumbnail(null)
-          const cacheId = `${contextId}:${revision}:${artifact.artifactId}`
+          const artifactRevision = artifact.sourceRevision ?? revision
+          const cacheId = `${contextId}:${artifactRevision}:${artifact.artifactId}`
           let url = layoutUrls.get(cacheId)
           if (!url) {
             const result = await getDesktopApi().backendWorkspace.getArtifact({
               artifactId: artifact.artifactId,
               workspaceContextId: contextId,
-              workspaceRevision: revision,
+              workspaceRevision: artifactRevision,
             })
             if (
               version !== requestVersion ||
               result.workspaceContextId !== contextId ||
-              result.workspaceRevision !== revision
+              result.workspaceRevision !== artifactRevision
             ) {
               return null
             }

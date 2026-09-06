@@ -376,6 +376,7 @@ export interface WorkspaceBaselineComparison {
 
 export interface WorkspaceOverviewCore {
   revision?: ReadSection<WorkspaceCommittedRevision>
+  resultFreshness?: WorkspaceResultFreshness
   artifacts?: ReadSection<{ items: WorkspaceArtifactDescriptor[] }>
   identity: WorkspaceOverviewIdentity
   configuration: ReadSection<WorkspaceConfigurationSummary>
@@ -385,6 +386,14 @@ export interface WorkspaceOverviewCore {
   qor: ReadSection<WorkspaceQorSummary>
   keyMetrics: ReadSection<{ items: WorkspaceDashboardMetric[] }>
   baselineComparison: ReadSection<WorkspaceBaselineComparison>
+}
+
+export interface WorkspaceResultFreshness {
+  status: 'current' | 'stale' | 'mixed'
+  currentRevision: number
+  staleRevision?: number
+  currentStepIds: string[]
+  staleStepIds: string[]
 }
 
 export interface WorkspaceCommittedRevision {
@@ -401,6 +410,7 @@ export interface WorkspaceArtifactDescriptor {
   availability: 'available' | 'missing' | 'stale'
   kind: string
   name: string
+  sourceRevision?: number
   sizeBytes?: number
   stepId?: string
 }

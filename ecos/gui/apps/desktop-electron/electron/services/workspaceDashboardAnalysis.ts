@@ -1,4 +1,8 @@
-import type { MetricValue, WorkspaceDashboardMetric } from '@ecos-studio/shared'
+import {
+  parseProjectManifestFlowStep,
+  type MetricValue,
+  type WorkspaceDashboardMetric,
+} from '@ecos-studio/shared'
 
 const METRICS: ReadonlyArray<{
   id: string
@@ -61,12 +65,19 @@ const METRICS: ReadonlyArray<{
 
 export function workspaceDashboardMetrics(
   qorMetrics: readonly MetricValue[],
+  currentStepIds: readonly string[] = [],
 ): WorkspaceDashboardMetric[] {
   const values = new Map(
     qorMetrics.flatMap((metric) =>
       metric.value === null ? [] : ([[metric.id, metric.value]] as const),
     ),
   )
+  const currentSteps = new Set(currentStepIds.map(canonicalStepIdentity))
+  for (const metric of qorMetrics) {
+    if (metric.value !== null && currentSteps.has(canonicalStepIdentity(metric.stepId))) {
+      values.set(metric.id, metric.value)
+    }
+  }
   return METRICS.map((metric) => ({
     id: metric.id,
     label: metric.label,
@@ -77,4 +88,8 @@ export function workspaceDashboardMetrics(
       })[0] ?? null,
     unit: metric.unit,
   }))
+}
+
+function canonicalStepIdentity(stepId: string): string {
+  return (parseProjectManifestFlowStep(stepId) ?? stepId).trim().toLowerCase()
 }

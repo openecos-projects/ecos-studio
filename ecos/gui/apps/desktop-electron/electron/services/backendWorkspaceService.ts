@@ -13,6 +13,7 @@ import {
   type WorkspaceDashboardMetric,
   type WorkspaceFlowInsightsSummary,
   type WorkspaceOverviewCore,
+  type WorkspaceArtifactDescriptor,
   type WorkspaceBaselineComparison,
   type WorkspaceQorSummary,
 } from '@ecos-studio/shared'
@@ -42,6 +43,7 @@ import {
 } from './backendWorkspaceOverviewProjection'
 import { flowInsightsSection } from './backendWorkspaceFlowInsights'
 import { isPathWithinRoot } from './pathScope'
+import { projectWorkspaceResults } from './backendWorkspaceResultProjection'
 
 interface BackendWorkspaceServiceOptions {
   workspaceRootProvider: {
@@ -76,6 +78,7 @@ interface WorkspaceContext {
 }
 
 interface BuiltWorkspaceOverview {
+  flowInsights: ReadSection<WorkspaceFlowInsightsSummary>
   result: BackendWorkspaceOverviewResult
   snapshot: ProjectEngineeringSnapshotReadResult | null
   workspaceRoot: string
@@ -114,11 +117,11 @@ export class BackendWorkspaceService {
     const generation = context.generation
     let query: Promise<BackendWorkspaceOverviewResult>
     query = this.buildOverview(context, generation)
-      .then(({ result, snapshot, workspaceRoot, watchedRoots }) => {
+      .then(({ flowInsights, result, snapshot, workspaceRoot, watchedRoots }) => {
         const current = this.contexts.get(windowId)
         if (current === context && current.generation === generation) {
           current.cache = result
-          current.flowInsights = result.overview.flowInsights
+          current.flowInsights = flowInsights
           if (snapshot?.ok || !current.snapshot) current.snapshot = snapshot ?? undefined
           current.workspaceRoot = workspaceRoot
           this.observeWorkspace(current, workspaceRoot, watchedRoots)
@@ -362,11 +365,22 @@ export class BackendWorkspaceService {
         throw new Error('ENGINEERING_SNAPSHOT_REVISION_REGRESSION')
       }
     }
+    const resultProjection = snapshot?.ok ? projectWorkspaceResults(snapshot) : null
+    const displaySnapshot = resultProjection?.snapshot ?? snapshot
     const flow = flowSection(snapshot)
-    const checklist = checklistSection(snapshot, flow)
-    const qor = await this.readQor(workspaceRoot, manifest, snapshot)
+    const checklist = checklistSection(displaySnapshot, flow)
+    const qor = await this.readQor(workspaceRoot, manifest, displaySnapshot)
     const flowInsights = flowInsightsSection(snapshot, flow, qor.qor)
-    const keyMetrics = this.readKeyMetrics(qor.qor)
+    const displayFlowInsights = flowInsightsSection(displaySnapshot, flow, qor.qor)
+    const displayArtifacts = artifactSection(
+      displaySnapshot,
+      resultProjection?.staleArtifactIds,
+      resultProjection?.freshness.staleRevision,
+    )
+    const keyMetrics = this.readKeyMetrics(
+      qor.qor,
+      resultProjection?.freshness.currentStepIds,
+    )
     const readMs = performance.now() - readStartedAt
     const normalizeStartedAt = performance.now()
     const overview: WorkspaceOverviewCore = {
@@ -386,28 +400,12 @@ export class BackendWorkspaceService {
             status: 'unavailable',
             issues: [snapshot?.issue ?? { code: 'ENGINEERING_SNAPSHOT_READ_FAILED' }],
           },
-      artifacts:
-        snapshot?.ok && snapshot.sections.artifacts.status === 'ready'
-          ? {
-              status: 'ready',
-              data: {
-                items: snapshot.sections.artifacts.data.map(artifactDescriptor),
-              },
-              issues: [],
-            }
-          : {
-              status: 'unavailable',
-              issues:
-                snapshot?.ok && snapshot.sections.artifacts.status !== 'ready'
-                  ? snapshot.sections.artifacts.issues
-                  : snapshot && !snapshot.ok
-                    ? [snapshot.issue]
-                    : [{ code: 'ENGINEERING_ARTIFACT_INVALID' }],
-            },
+      ...(resultProjection ? { resultFreshness: resultProjection.freshness } : {}),
+      artifacts: displayArtifacts,
       identity: identityFromManifest(workspaceRoot, manifest),
       configuration: configurationSection(snapshot),
       flow,
-      flowInsights,
+      flowInsights: displayFlowInsights,
       checklist,
       qor: qor.qor,
       keyMetrics,
@@ -433,7 +431,7 @@ export class BackendWorkspaceService {
       readMs: roundMs(readMs),
       totalMs: roundMs(performance.now() - startedAt),
     })
-    return { result, snapshot, workspaceRoot, watchedRoots }
+    return { flowInsights, result, snapshot, workspaceRoot, watchedRoots }
   }
 
   private async readManifest(workspaceRoot: string): Promise<ProjectManifest | null> {
@@ -543,13 +541,14 @@ export class BackendWorkspaceService {
 
   private readKeyMetrics(
     qor: ReadSection<WorkspaceQorSummary>,
+    currentStepIds: readonly string[] = [],
   ): ReadSection<{ items: WorkspaceDashboardMetric[] }> {
     const metrics =
       qor.status === 'ready' || qor.status === 'partial' ? qor.data.metrics : []
     return {
       status: 'ready',
       data: {
-        items: workspaceDashboardMetrics(metrics),
+        items: workspaceDashboardMetrics(metrics, currentStepIds),
       },
       issues: [],
     }
@@ -623,6 +622,36 @@ function engineeringFacts(
     ...result.sections.qor.data,
     ...(flow.status === 'ready' ? { flow: flow.data } : {}),
     ...(signoff.status === 'ready' ? { signoffAssessment: signoff.data } : {}),
+  }
+}
+
+function artifactSection(
+  snapshot: ProjectEngineeringSnapshotReadResult | null,
+  staleArtifactIds: ReadonlySet<string> = new Set(),
+  staleRevision?: number,
+): ReadSection<{ items: WorkspaceArtifactDescriptor[] }> {
+  if (snapshot?.ok && snapshot.sections.artifacts.status === 'ready') {
+    return {
+      status: 'ready',
+      data: {
+        items: snapshot.sections.artifacts.data.map((artifact) =>
+          artifactDescriptor(
+            artifact,
+            staleArtifactIds.has(artifact.artifactId) ? staleRevision : undefined,
+          ),
+        ),
+      },
+      issues: [],
+    }
+  }
+  return {
+    status: 'unavailable',
+    issues:
+      snapshot?.ok && snapshot.sections.artifacts.status !== 'ready'
+        ? snapshot.sections.artifacts.issues
+        : snapshot && !snapshot.ok
+          ? [snapshot.issue]
+          : [{ code: 'ENGINEERING_ARTIFACT_INVALID' }],
   }
 }
 

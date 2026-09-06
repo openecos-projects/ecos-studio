@@ -78,7 +78,7 @@ describe('useBaselineStepConfig', () => {
       status: 'available',
       step: 'CTS',
       stepId: 'CTS',
-      workspaceId: 'ws_0001',
+      workspaceId: 'engineering-workspace-1',
       workspaceRevision: 1,
     })
   })

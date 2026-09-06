@@ -58,6 +58,7 @@ export type {
   WorkspaceOverviewCore,
   WorkspaceOverviewIdentity,
   WorkspaceQorSummary,
+  WorkspaceResultFreshness,
   WorkspaceRcxInsights,
   WorkspaceStaCornerSummary,
   WorkspaceStaInsights,

@@ -33,13 +33,13 @@ function resourceIndex(): WorkspaceResourceIndex {
     homeData: {},
     messages: [],
     parameters: {
-      Clock: 'clk',
-      Design: 'gcd',
-      Die: { Area: 14400 },
-      'Frequency max [MHz]': 200,
-      'Max fanout': 24,
-      PDK: 'ics55',
-      'Top module': 'gcd_top',
+      clock: 'clk',
+      design: 'gcd',
+      die: { area: 14400 },
+      frequency_max: 200,
+      max_fanout: 24,
+      pdk: 'ics55',
+      top_module: 'gcd_top',
     },
     pdk: 'ics55',
     root: '/project/ws-a',
@@ -1088,6 +1088,377 @@ describe('BackendWorkspaceService', () => {
         },
       },
     })
+  })
+
+  it('keeps the previous Dashboard result visible while the current Revision is unstarted', async () => {
+    const stale = engineeringSnapshot()
+    stale.workspaceRevision = 1
+    const metric = engineeringMetric('instance_count', 298)
+    stale.flow = {
+      steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Success' }],
+    }
+    stale.artifacts = [
+      {
+        artifactId: 'layout-synthesis',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Synthesis.png',
+        reference: 'Synthesis_yosys/output/gcd_Synthesis.png',
+        sha256: '0'.repeat(64),
+        sizeBytes: 3,
+        stepId: 'Synthesis',
+      },
+    ] as never
+    stale.metrics = [metric]
+    stale.qorAssessment = {
+      status: 'ready',
+      score: { gate: 'pass', threshold: 60, value: 73.5 },
+      metrics: [metric],
+      steps: [
+        {
+          stepId: 'Synthesis',
+          name: 'Synthesis',
+          order: 0,
+          status: 'pass',
+          summaryMetricCount: 1,
+        },
+      ],
+    }
+    const current = structuredClone(stale)
+    current.workspaceRevision = 2
+    current.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Synthesis'],
+    }
+    current.flow = {
+      steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Unstart' }],
+    }
+    current.artifacts = []
+    current.metrics = []
+    current.qorAssessment = {
+      status: 'ready',
+      score: { gate: 'incomplete', threshold: 60, value: null },
+      metrics: [],
+      steps: [],
+    }
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        readEngineeringSnapshot: vi.fn().mockResolvedValue({
+          ...persistedSnapshotResult(current),
+          staleSnapshot: persistedSnapshotResult(stale),
+        }),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+
+    const result = await runWithWindowScope(53, () => service.getOverview())
+
+    expect(result.overview.revision).toMatchObject({
+      data: {
+        workspaceRevision: 2,
+        stalePredecessor: { workspaceRevision: 1, invalidatedStepIds: ['Synthesis'] },
+      },
+    })
+    expect(result.overview.resultFreshness).toEqual({
+      status: 'stale',
+      currentRevision: 2,
+      staleRevision: 1,
+      currentStepIds: [],
+      staleStepIds: ['Synthesis'],
+    })
+    expect(result.overview.qor).toMatchObject({
+      data: {
+        score: { value: 73.5 },
+        metrics: [{ id: 'instance_count', value: 298 }],
+      },
+    })
+    expect(result.overview.keyMetrics).toMatchObject({
+      data: {
+        items: expect.arrayContaining([
+          expect.objectContaining({ id: 'instances', value: 298 }),
+        ]),
+      },
+    })
+    expect(result.overview.artifacts).toMatchObject({
+      data: {
+        items: [
+          expect.objectContaining({ artifactId: 'layout-synthesis', sourceRevision: 1 }),
+        ],
+      },
+    })
+  })
+
+  it('replaces stale Dashboard results after each current-revision Step commit', async () => {
+    const stale = engineeringSnapshot()
+    stale.workspaceRevision = 1
+    const staleSynthesisMetric = engineeringMetric('instance_count', 298)
+    const staleSynthesisUtilization = engineeringMetric('core_utilization', 0.4)
+    const stalePlaceMetric = engineeringMetric('instance_count', 320)
+    const stalePlaceUtilization = engineeringMetric('core_utilization', 0.4)
+    stale.flow = {
+      steps: [
+        { name: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { name: 'Place', tool: 'dreamplace', state: 'Success' },
+      ],
+    }
+    stale.artifacts = [
+      {
+        artifactId: 'layout-synthesis-old',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Synthesis.png',
+        reference: 'Synthesis_yosys/output/gcd_Synthesis.png',
+        sha256: '0'.repeat(64),
+        sizeBytes: 3,
+        stepId: 'Synthesis',
+      },
+      {
+        artifactId: 'layout-place-old',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Place.png',
+        reference: 'Place_dreamplace/output/gcd_Place.png',
+        sha256: '1'.repeat(64),
+        sizeBytes: 3,
+        stepId: 'Place',
+      },
+    ] as never
+    stale.metrics = [
+      staleSynthesisMetric,
+      staleSynthesisUtilization,
+      stalePlaceMetric,
+      stalePlaceUtilization,
+    ]
+    stale.qorAssessment = {
+      status: 'ready',
+      score: { gate: 'pass', threshold: 60, value: 73.5 },
+      metrics: [
+        staleSynthesisMetric,
+        staleSynthesisUtilization,
+        stalePlaceMetric,
+        stalePlaceUtilization,
+      ],
+      steps: [
+        {
+          stepId: 'Synthesis',
+          name: 'Synthesis',
+          order: 0,
+          status: 'pass',
+          summaryMetricCount: 2,
+        },
+        {
+          stepId: 'Place',
+          name: 'Place',
+          order: 1,
+          status: 'pass',
+          summaryMetricCount: 2,
+        },
+      ],
+    }
+
+    const current = structuredClone(stale)
+    const currentSynthesisMetric = engineeringMetric('instance_count', 311)
+    const currentSynthesisUtilization = engineeringMetric('core_utilization', 0.58)
+    current.workspaceRevision = 4
+    current.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Synthesis', 'Place'],
+    }
+    current.flow = {
+      steps: [
+        { name: 'Synthesis', tool: 'yosys', state: 'Success' },
+        { name: 'Place', tool: 'dreamplace', state: 'Ongoing' },
+      ],
+    }
+    current.artifacts = [
+      {
+        artifactId: 'layout-synthesis-current',
+        availability: 'available',
+        kind: 'layout_image',
+        name: 'gcd_Synthesis.png',
+        reference: 'Synthesis_yosys/output/gcd_Synthesis.png',
+        sha256: '2'.repeat(64),
+        sizeBytes: 3,
+        stepId: 'Synthesis',
+      },
+    ] as never
+    current.metrics = [currentSynthesisMetric, currentSynthesisUtilization]
+    current.qorAssessment = {
+      status: 'ready',
+      score: { gate: 'incomplete', threshold: 60, value: null },
+      metrics: [currentSynthesisMetric, currentSynthesisUtilization],
+      steps: [
+        {
+          stepId: 'Synthesis',
+          name: 'Synthesis',
+          order: 0,
+          status: 'pass',
+          summaryMetricCount: 2,
+        },
+      ],
+    }
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        readEngineeringSnapshot: vi.fn().mockResolvedValue({
+          ...persistedSnapshotResult(current),
+          staleSnapshot: persistedSnapshotResult(stale),
+        }),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+
+    const result = await runWithWindowScope(55, () => service.getOverview())
+
+    expect(result.overview.resultFreshness).toEqual({
+      status: 'mixed',
+      currentRevision: 4,
+      staleRevision: 1,
+      currentStepIds: ['Synthesis'],
+      staleStepIds: ['Place'],
+    })
+    expect(result.overview.qor).toMatchObject({
+      data: {
+        metrics: [
+          { id: 'instance_count', stepId: 'Synth', value: 311 },
+          { id: 'core_utilization', stepId: 'Synth', value: 0.58 },
+          { id: 'instance_count', stepId: 'Place', value: 320 },
+          { id: 'core_utilization', stepId: 'Place', value: 0.4 },
+        ],
+      },
+    })
+    expect(result.overview.keyMetrics).toMatchObject({
+      data: {
+        items: expect.arrayContaining([
+          expect.objectContaining({ id: 'core-utilization', value: 0.58 }),
+          expect.objectContaining({ id: 'instances', value: 311 }),
+        ]),
+      },
+    })
+    expect(result.overview.flowInsights).toMatchObject({
+      data: {
+        trends: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'instance_count',
+            points: expect.arrayContaining([
+              expect.objectContaining({ stepId: 'Synthesis', value: 311 }),
+              expect.objectContaining({ stepId: 'Place', value: 320 }),
+            ]),
+          }),
+        ]),
+      },
+    })
+    expect(result.overview.artifacts).toMatchObject({
+      data: {
+        items: [
+          expect.objectContaining({
+            artifactId: 'layout-synthesis-current',
+          }),
+          expect.objectContaining({
+            artifactId: 'layout-place-old',
+            sourceRevision: 1,
+          }),
+        ],
+      },
+    })
+    const artifacts = result.overview.artifacts
+    expect(
+      artifacts?.status === 'ready' ? artifacts.data.items[0] : null,
+    ).not.toHaveProperty('sourceRevision')
+  })
+
+  it('matches invalidated flow aliases when current QoR covers the rerun', async () => {
+    const stale = engineeringSnapshot()
+    stale.workspaceRevision = 1
+    const metric = engineeringMetric('instance_count', 298)
+    stale.flow = { steps: [{ name: 'Floorplan', tool: 'ecc', state: 'Success' }] }
+    stale.metrics = [metric]
+    stale.qorAssessment = {
+      status: 'ready',
+      score: { gate: 'pass', threshold: 60, value: 73.5 },
+      metrics: [metric],
+      steps: [
+        {
+          stepId: 'Floorplan',
+          name: 'Floorplan',
+          order: 0,
+          status: 'pass',
+          summaryMetricCount: 1,
+        },
+      ],
+    }
+    const current = structuredClone(stale)
+    current.workspaceRevision = 2
+    current.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Floorplan'],
+    }
+    ;(current.qorAssessment.score as { value: number }).value = 80
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        readEngineeringSnapshot: vi.fn().mockResolvedValue({
+          ...persistedSnapshotResult(current),
+          staleSnapshot: persistedSnapshotResult(stale),
+        }),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+
+    const result = await runWithWindowScope(54, () => service.getOverview())
+
+    expect(result.overview.qor).toMatchObject({ data: { score: { value: 80 } } })
+    expect(result.overview.resultFreshness).toMatchObject({
+      status: 'current',
+      currentRevision: 2,
+      staleStepIds: [],
+    })
+  })
+
+  it('returns an empty Step detail when neither current nor stale results exist', async () => {
+    const stale = engineeringSnapshot()
+    stale.schemaVersion = 2
+    stale.workspaceRevision = 1
+    stale.flow = {
+      steps: [{ name: 'Floorplan', tool: 'ecc', state: 'Unstart' }],
+    }
+    const current = structuredClone(stale)
+    current.workspaceRevision = 2
+    current.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Floorplan'],
+    }
+    const readResult = persistedSnapshotResult(current)
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        readEngineeringSnapshot: vi.fn().mockResolvedValue({
+          ...readResult,
+          staleSnapshot: persistedSnapshotResult(stale),
+        }),
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(52, () => service.getOverview())
+
+    const detail = await runWithWindowScope(52, () =>
+      service.getStepDetail({
+        stepId: 'Floorplan',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 2,
+      }),
+    )
+
+    expect(detail.detail).toMatchObject({
+      status: 'ready',
+      data: {
+        analysis: { metrics: [], summary: null },
+        step: { state: 'not-started', stepId: 'Floorplan' },
+        subflow: { status: 'missing', steps: [] },
+      },
+    })
+    expect(detail.detail).not.toHaveProperty('data.staleEvidence')
   })
 
   it('returns bounded LVS detail from the committed analysis projection', async () => {

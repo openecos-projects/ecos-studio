@@ -100,9 +100,14 @@ describe('workspace desktop bridge', () => {
               fromStepId: 'Synthesis',
               throughStepId: 'Harden',
             },
-            parameters: expect.objectContaining({
+            parameters: {
+              core_margin: [0, 0],
+              core_utilization: 0.5,
               frequency_max: 100,
-            }),
+              max_fanout: 20,
+              target_density: 0.6,
+              target_overflow: 0.1,
+            },
           }),
         }),
       }),

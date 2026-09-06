@@ -132,4 +132,35 @@ describe('useFlowInsights', () => {
     )
     scope.stop()
   })
+
+  it('reads stale congestion bytes using the artifact source Revision', async () => {
+    testState.session!.projection.data.artifacts.data.items[0].sourceRevision = 8
+    testState.getArtifact.mockResolvedValue({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId: 'congestion-place',
+          bytes: new Uint8Array([1]),
+          kind: 'congestion_image',
+          mimeType: 'image/png',
+          name: 'place_egr_union_overflow.png',
+        },
+      },
+      generation: 0,
+      workspaceContextId: 'context-a',
+      workspaceRevision: 8,
+    })
+    const scope = effectScope()
+    const insights = scope.run(() => useFlowInsights())!
+
+    await insights.loadCongestion()
+
+    expect(testState.getArtifact).toHaveBeenCalledWith({
+      artifactId: 'congestion-place',
+      workspaceContextId: 'context-a',
+      workspaceRevision: 8,
+    })
+    scope.stop()
+  })
 })

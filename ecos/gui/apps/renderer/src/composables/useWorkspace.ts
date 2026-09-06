@@ -40,6 +40,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import {
   useWorkspaceLifecycle,
+  WORKSPACE_RESULT_INVALIDATION_SCOPES,
   type WorkspaceSession,
   type WorkspaceInvalidationScope,
 } from './useWorkspaceLifecycle'
@@ -1719,7 +1720,7 @@ export function useWorkspace() {
         })
       },
       onInvalidate: (step) => {
-        workspaceLifecycle.invalidate(['all'], {
+        workspaceLifecycle.invalidate(WORKSPACE_RESULT_INVALIDATION_SCOPES, {
           sessionId,
           reason: 'runtime-event',
           step,

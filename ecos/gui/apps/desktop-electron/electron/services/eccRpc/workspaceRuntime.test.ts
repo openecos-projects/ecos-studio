@@ -747,6 +747,79 @@ describe('EccWorkspaceRuntime', () => {
     ).toHaveLength(2)
   })
 
+  it('waits for terminal finalization before reading Step Configuration', async () => {
+    const { client, service, sidecarNotification } = createService()
+    const finalSnapshot = deferred<Record<string, unknown>>()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push(
+      finalSnapshot.promise,
+      {
+        directory: '/work/demo',
+        workspaceId: 'workspace-2',
+        workspaceRevision: 4,
+      },
+      {
+        options: { target_density: 0.49 },
+        status: 'available',
+        step: 'Legalization',
+        stepId: 'Legalization',
+        workspaceId: 'workspace-2',
+        workspaceRevision: 4,
+      },
+    )
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:2',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: {
+          result: { state: 'Success' },
+          sourceType: 'operation.completed',
+          state: 'succeeded',
+          step: 'Legalization',
+          tool: 'dreamplace',
+        },
+        sequence: 2,
+        timestamp: 2,
+        type: 'operation.changed',
+        workspaceId: 'workspace-1',
+      },
+    })
+
+    const configuration = service.readWorkspaceStepConfiguration({
+      step: 'Legalization',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+    const readStartedBeforeFinalization = client.calls.some(
+      (call) => call.method === 'workspace.step_configuration.read',
+    )
+
+    finalSnapshot.resolve({
+      directory: '/work/demo',
+      flow: { steps: [] },
+      home: {},
+      lastEventId: 'workspace-1:2',
+      operations: [],
+      parameters: {},
+    })
+
+    await expect(configuration).resolves.toMatchObject({
+      status: 'available',
+      workspaceId: 'workspace-2',
+    })
+    expect(readStartedBeforeFinalization).toBe(false)
+  })
+
   it('finalizes a failed operation before releasing its sidecar', async () => {
     const { client, service, sidecar, sidecarNotification } = createService('/work/demo')
     client.responses.push({ directory: '/work/demo', workspaceId: 'workspace-1' })

@@ -13,6 +13,14 @@ export const WORKSPACE_INVALIDATION_SCOPES = [
 
 export type WorkspaceInvalidationScope = (typeof WORKSPACE_INVALIDATION_SCOPES)[number]
 
+export const WORKSPACE_RESULT_INVALIDATION_SCOPES: WorkspaceInvalidationScope[] = [
+  'home',
+  'flow',
+  'step',
+  'maps',
+  'logs',
+]
+
 export type WorkspaceSessionState =
   | 'idle'
   | 'validating'

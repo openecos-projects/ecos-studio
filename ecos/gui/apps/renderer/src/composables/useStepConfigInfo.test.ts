@@ -1,7 +1,10 @@
 const testState = vi.hoisted(() => ({
   currentProject: null as import('vue').Ref<{ path: string } | null> | null,
-  readWorkspaceStepConfigurationApi: vi.fn(),
-  route: { path: '/workspace/floorplan' },
+  readWorkspaceStepConfiguration: vi.fn(),
+  route: {
+    path: '/workspace/floorplan',
+    query: { projectRoot: '/projects/gcd' } as Record<string, unknown>,
+  },
   updateWorkspaceStepConfigurationApi: vi.fn(),
 }))
 
@@ -13,8 +16,17 @@ vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({ currentProject: testState.currentProject }),
 }))
 vi.mock('@/api/workspace', () => ({
-  readWorkspaceStepConfigurationApi: testState.readWorkspaceStepConfigurationApi,
   updateWorkspaceStepConfigurationApi: testState.updateWorkspaceStepConfigurationApi,
+}))
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => ({
+    projectManagement: {
+      readWorkspaceStepConfiguration: testState.readWorkspaceStepConfiguration,
+    },
+  }),
+}))
+vi.mock('@/utils/projectManifestRegistration', () => ({
+  resolveProjectRouteContextForWorkspace: vi.fn().mockResolvedValue(null),
 }))
 
 import { useStepConfigInfo } from './useStepConfigInfo'
@@ -30,7 +42,7 @@ function available(options: Record<string, unknown>) {
     status: 'available',
     step: 'Floorplan',
     stepId: 'Floorplan',
-    workspaceId: 'workspace-demo',
+    workspaceId: 'engineering-workspace-demo',
     workspaceRevision: 1,
   }
 }
@@ -53,7 +65,7 @@ describe('useStepConfigInfo', () => {
     })
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.route.path = '/workspace/floorplan'
-    testState.readWorkspaceStepConfigurationApi.mockReset()
+    testState.readWorkspaceStepConfiguration.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockResolvedValue({
       workspaceRevision: 2,
@@ -64,7 +76,7 @@ describe('useStepConfigInfo', () => {
   afterEach(() => scope.stop())
 
   it('loads an ECC-owned Step configuration object', async () => {
-    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+    testState.readWorkspaceStepConfiguration.mockResolvedValue(
       available({ ifp: { thread_number: 16 } }),
     )
 
@@ -76,14 +88,15 @@ describe('useStepConfigInfo', () => {
     expect(result.stepConfigPathResolved.value).toBe('Floorplan options')
     expect(result.workspaceRevision.value).toBe(1)
     expect(result.isEmpty.value).toBe(false)
-    expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
+    expect(testState.readWorkspaceStepConfiguration).toHaveBeenCalledWith({
+      projectRoot: '/projects/gcd',
       step: 'Floorplan',
-      workspaceHandle: 'workspace-demo',
+      workspacePath: '/workspace/demo',
     })
   })
 
   it('saves Step Options through one Product Command and advances Revision', async () => {
-    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+    testState.readWorkspaceStepConfiguration.mockResolvedValue(
       available({ ifp: { thread_number: 16 } }),
     )
     const result = scope.run(() => useStepConfigInfo())!
@@ -104,7 +117,7 @@ describe('useStepConfigInfo', () => {
   })
 
   it('keeps Step configuration read-only while execution is active', async () => {
-    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+    testState.readWorkspaceStepConfiguration.mockResolvedValue(
       available({ ifp: { thread_number: 16 } }),
     )
     const result = scope.run(() => useStepConfigInfo())!
@@ -119,7 +132,7 @@ describe('useStepConfigInfo', () => {
 
   it('discards a response after the Workspace session changes', async () => {
     let resolveRequest!: (value: ReturnType<typeof available>) => void
-    testState.readWorkspaceStepConfigurationApi.mockReturnValue(
+    testState.readWorkspaceStepConfiguration.mockReturnValue(
       new Promise((resolve) => {
         resolveRequest = resolve
       }),
@@ -134,8 +147,7 @@ describe('useStepConfigInfo', () => {
 
     resolveRequest(available({ ifp: { thread_number: 8 } }))
 
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(result.loading.value).toBe(false))
     expect(result.stepConfigDraft.value).toBeNull()
   })
 })

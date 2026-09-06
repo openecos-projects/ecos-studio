@@ -261,7 +261,13 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(runner.isRunning.value).toBe(true)
     resolveOperation?.()
     await vi.waitFor(() => expect(runner.isRunning.value).toBe(false))
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith('all')
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith([
+      'home',
+      'flow',
+      'step',
+      'maps',
+      'logs',
+    ])
   })
 
   it('tracks flow activity independently per workspace', () => {

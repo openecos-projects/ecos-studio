@@ -1,12 +1,11 @@
 import { computed, nextTick, ref, unref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { StepEnum } from '@/api/type'
-import {
-  readWorkspaceStepConfigurationApi,
-  updateWorkspaceStepConfigurationApi,
-} from '@/api/workspace'
+import { updateWorkspaceStepConfigurationApi } from '@/api/workspace'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
+import { getDesktopApi } from '@/platform/desktop'
+import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 
 const stepEnumValues = Object.values(StepEnum)
@@ -104,7 +103,6 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   )
   let activeRefetchToken: symbol | null = null
   let lastLoadedStep: StepEnum | null = null
-  let revisionRetryCount = 0
 
   const currentStep = computed(() => {
     const explicitStep = unref(stepOverride)
@@ -116,8 +114,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
   const hasFlowStep = computed(() => currentStep.value !== undefined)
 
-  async function fetchStepConfiguration(retryingRevision = false): Promise<void> {
-    if (!retryingRevision) revisionRetryCount = 0
+  async function fetchStepConfiguration(): Promise<void> {
     const stepEnum = currentStep.value
     const sessionId = workspaceLifecycle.currentSessionId.value
     const refetchToken = Symbol('step-config-refetch')
@@ -137,7 +134,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       return
     }
 
-    loading.value = true
+    loading.value = lastLoadedStep !== stepEnum
     error.value = null
     workspaceRevision.value = null
     runtimeMessages.value = []
@@ -146,17 +143,23 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     }
 
     try {
-      const response = await workspaceLifecycle.runForSession(sessionId, () =>
-        readWorkspaceStepConfigurationApi({
+      const response = await workspaceLifecycle.runForSession(sessionId, async () => {
+        const workspacePath = currentProject.value?.path
+        if (!workspacePath) throw new Error('Workspace path is unavailable.')
+        const projectRoot =
+          routeString(route.query.projectRoot) ??
+          (await resolveProjectRouteContextForWorkspace(workspacePath))?.projectRoot
+        if (!projectRoot) throw new Error('Project context is unavailable.')
+        return await getProjectManagement().readWorkspaceStepConfiguration({
+          projectRoot,
           step: stepEnum,
-          workspaceHandle: workspaceLifecycle.session.value.workspaceId,
-        }),
-      )
+          workspacePath,
+        })
+      })
       if (!canApply() || !response) return
-      const currentSession = workspaceLifecycle.session.value
       if (
         (response.status === 'available' || response.status === 'missing') &&
-        (response.workspaceId !== currentSession.workspaceId ||
+        (typeof response.workspaceId !== 'string' ||
           typeof response.workspaceRevision !== 'number' ||
           !Number.isInteger(response.workspaceRevision) ||
           response.workspaceRevision < 1)
@@ -167,22 +170,6 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         clearFileState()
         return
       }
-      if (
-        typeof response.workspaceRevision === 'number' &&
-        response.workspaceRevision !== currentSession.workspaceRevision
-      ) {
-        if (revisionRetryCount < 1) {
-          revisionRetryCount += 1
-          void fetchStepConfiguration(true)
-          return
-        }
-        responseKind.value = 'error'
-        info.value = null
-        error.value = 'Workspace Revision changed while loading Step Configuration.'
-        clearFileState()
-        return
-      }
-
       if (response.status === 'available' && isRecord(response.options)) {
         const payload = {
           options: response.options,
@@ -217,7 +204,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       info.value = null
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
-      if (canApply()) {
+      if (isLatestRefetch()) {
         loading.value = false
       }
     }
@@ -308,7 +295,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   )
 
   watch(
-    () => [resourceVersions.value['step-config'], resourceVersions.value.all],
+    () => resourceVersions.value['step-config'],
     () => {
       void refetch()
     },
@@ -507,4 +494,16 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     resetStepConfig,
     reloadStepConfigFiles,
   }
+}
+
+function getProjectManagement() {
+  const api = getDesktopApi().projectManagement
+  if (!api)
+    throw new Error('Project management reads are unavailable in this desktop build.')
+  return api
+}
+
+function routeString(value: unknown): string | null {
+  const routeValue = Array.isArray(value) ? value[0] : value
+  return typeof routeValue === 'string' && routeValue.trim() ? routeValue : null
 }

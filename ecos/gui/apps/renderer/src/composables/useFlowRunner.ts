@@ -10,7 +10,10 @@ import {
   type RunStepResponse,
 } from '@/api/flow'
 import type { DesignTool } from '@ecos-studio/shared'
-import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
+import {
+  WORKSPACE_RESULT_INVALIDATION_SCOPES,
+  type WorkspaceInvalidationScope,
+} from './useWorkspaceLifecycle'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
   markHomeRunArtifactResetAwaitingBackendStart,
@@ -159,7 +162,7 @@ export function useFlowRunner() {
         // delivery was delayed or replayed. Reconcile resource-backed panels
         // before releasing the shared run lock.
         if (getCurrentWorkspacePath() === directory) {
-          invalidateWorkspaceResources('all')
+          invalidateWorkspaceResources(WORKSPACE_RESULT_INVALIDATION_SCOPES)
         }
       })
       .catch((reason: unknown) => {

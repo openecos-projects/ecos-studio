@@ -397,10 +397,11 @@ export class EccWorkspaceRuntime {
     return this.commands.workspaceInfo(request)
   }
 
-  readWorkspaceStepConfiguration(
+  async readWorkspaceStepConfiguration(
     request: EccWorkspaceStepConfigurationReadRequest,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
-    return this.commands.readWorkspaceStepConfiguration(request)
+    await this.sidecarLifecycle.waitForFinalSnapshot()
+    return await this.commands.readWorkspaceStepConfiguration(request)
   }
 
   async readWorkspaceStepConfigurationForDirectory(

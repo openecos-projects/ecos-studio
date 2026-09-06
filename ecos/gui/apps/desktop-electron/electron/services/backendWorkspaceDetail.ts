@@ -231,12 +231,14 @@ function rcxInsights(data: Record<string, unknown> | null): WorkspaceRcxInsights
 
 export function artifactDescriptor(
   artifact: EccEngineeringAnalysisArtifactRef,
+  sourceRevision?: number,
 ): WorkspaceArtifactDescriptor {
   return {
     artifactId: artifact.artifactId,
     availability: artifact.availability,
     kind: artifact.kind,
     name: artifact.name,
+    ...(sourceRevision === undefined ? {} : { sourceRevision }),
     ...(artifact.sizeBytes === undefined ? {} : { sizeBytes: artifact.sizeBytes }),
     ...(artifact.stepId ? { stepId: artifact.stepId } : {}),
   }
@@ -283,7 +285,15 @@ export function workspaceStepDetail(
   const artifacts = snapshot.sections.artifacts
   const invalidated = snapshot.snapshot.stalePredecessor?.invalidatedStepIds ?? []
   let staleEvidence: WorkspaceStepDetail['staleEvidence']
-  if (staleSnapshot && invalidated.some((candidate) => sameStep(candidate, stepId))) {
+  const staleAnalysis = staleSnapshot?.sections.qor
+  const hasStaleAnalysis =
+    staleAnalysis?.status === 'ready' &&
+    staleAnalysis.data.analysis.steps.some((step) => sameStep(step.stepId, stepId))
+  if (
+    staleSnapshot &&
+    hasStaleAnalysis &&
+    invalidated.some((candidate) => sameStep(candidate, stepId))
+  ) {
     const staleFlow = flowSection(staleSnapshot)
     const staleDetail = workspaceStepDetail(
       staleSnapshot,
@@ -299,7 +309,7 @@ export function workspaceStepDetail(
       }
     }
   }
-  if (!analysisStep && !staleEvidence) {
+  if (analysis.status !== 'ready' && !staleEvidence) {
     return {
       status: 'unavailable',
       issues: [{ code: 'WORKSPACE_STEP_DETAIL_UNAVAILABLE' }],

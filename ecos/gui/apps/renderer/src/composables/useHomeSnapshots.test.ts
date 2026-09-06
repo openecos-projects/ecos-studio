@@ -121,6 +121,48 @@ describe('useHomeSnapshots', () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1)
   })
 
+  it('reads stale layout bytes using the artifact source Revision', async () => {
+    testState.session!.projection.data.artifacts.data.items[0].sourceRevision = 8
+    testState.session!.projection.data.flow.data.steps[0].state = 'not-started'
+    testState.getArtifact.mockResolvedValue({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId: 'layout-place',
+          bytes: new Uint8Array([1, 2, 3]),
+          kind: 'layout_image',
+          mimeType: 'image/png',
+          name: 'gcd_Place.png',
+        },
+      },
+      generation: 0,
+      workspaceContextId: 'context-a',
+      workspaceRevision: 8,
+    })
+    const snapshots = scope.run(() => useHomeSnapshots())!
+
+    await vi.waitFor(() => expect(snapshots.layoutThumbnails.value).toHaveLength(1))
+
+    expect(testState.getArtifact).toHaveBeenCalledWith({
+      artifactId: 'layout-place',
+      workspaceContextId: 'context-a',
+      workspaceRevision: 8,
+    })
+  })
+
+  it('does not count a missing stale layout reference as a layout', async () => {
+    testState.session!.projection.data.artifacts.data.items[0].availability = 'missing'
+    testState.session!.projection.data.artifacts.data.items[0].sourceRevision = 8
+    testState.session!.projection.data.flow.data.steps[0].state = 'not-started'
+    const snapshots = scope.run(() => useHomeSnapshots())!
+
+    await vi.waitFor(() => expect(snapshots.loading.value).toBe(false))
+
+    expect(snapshots.layoutThumbnails.value).toEqual([])
+    expect(testState.getArtifact).not.toHaveBeenCalled()
+  })
+
   it('does not display an Artifact response from another revision', async () => {
     testState.getArtifact.mockResolvedValue({
       artifact: { status: 'ready', issues: [], data: {} },

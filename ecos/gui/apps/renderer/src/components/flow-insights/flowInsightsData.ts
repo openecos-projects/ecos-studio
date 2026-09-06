@@ -613,6 +613,7 @@ export interface CongestionMapTileModel {
   csvPath: string
   /** 网格 → die 坐标映射文件（与 png/csv 同目录） */
   layoutCsvPath: string
+  sourceRevision?: number
   stats: CongestionMapStats | null
 }
 

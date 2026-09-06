@@ -138,6 +138,37 @@ function parametersJson(overrides: Record<string, unknown> = {}): string {
   })
 }
 
+function workspaceSnapshotParameters(overrides: Record<string, unknown> = {}) {
+  return {
+    pdk: 'ics55',
+    design: 'demo',
+    top_module: 'chip_top',
+    die: { size: [100, 100], area: 10000 },
+    core: {
+      size: [80, 80],
+      area: 6400,
+      bounding_box: '(0,0) (80,80)',
+      utilitization: 0.5,
+      margin: [4, 4],
+      aspect_ratio: 1,
+    },
+    max_fanout: 20,
+    global_right_padding: 0,
+    dreamplace: {
+      target_density: 0.2,
+      stop_overflow: 0.07,
+      cell_padding_x: 300,
+      routability_opt_flag: 0,
+    },
+    clock: 'clk',
+    frequency_max: 100,
+    bottom_layer: 'MET2',
+    top_layer: 'MET5',
+    pdk_root: '/pdks/ics55',
+    ...overrides,
+  }
+}
+
 describe('useParameters desktop bridge integration', () => {
   beforeEach(() => {
     const lifecycle = useWorkspaceLifecycle()
@@ -263,7 +294,7 @@ describe('useParameters desktop bridge integration', () => {
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
-      parameters: JSON.parse(parametersJson()),
+      parameters: workspaceSnapshotParameters(),
       home: {},
     })
     const lifecycle = useWorkspaceLifecycle()
@@ -510,7 +541,7 @@ describe('useParameters desktop bridge integration', () => {
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }
     getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
-      parameters: JSON.parse(parametersJson()),
+      parameters: workspaceSnapshotParameters(),
       home: {},
     })
 
@@ -523,6 +554,10 @@ describe('useParameters desktop bridge integration', () => {
     expect(parameters.config.topModule).toBe('chip_top')
     expect(parameters.config.clock).toBe('clk')
     expect(parameters.config.die.area).toBe(10000)
+    expect(parameters.config.targetDensity).toBe(0.2)
+    expect(parameters.config.targetOverflow).toBe(0.07)
+    expect(parameters.config.cellPaddingX).toBe(300)
+    expect(parameters.config.routabilityOptFlag).toBe(false)
     expect(getWorkspaceRuntimeSnapshotApi).toHaveBeenCalledWith('workspace-demo')
     expect(readProjectTextFile).not.toHaveBeenCalled()
   })

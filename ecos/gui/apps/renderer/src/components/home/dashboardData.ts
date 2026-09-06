@@ -1,3 +1,5 @@
+import type { WorkspaceResultFreshness } from '@ecos-studio/shared'
+
 export type DashboardTone = 'good' | 'warn' | 'bad' | 'neutral'
 
 export interface DashboardPieSlice {
@@ -216,4 +218,17 @@ export function formatDashboardMetric(metric: DashboardMetric): string {
   const precision = Math.abs(metric.value) < 100 ? 3 : 0
   const value = metric.value.toFixed(precision).replace(/\.0+$/, '')
   return metric.unit ? `${value} ${metric.unit}` : value
+}
+
+export function workspaceResultFreshnessNotice(
+  freshness: WorkspaceResultFreshness | undefined,
+  executionActive: boolean,
+): string {
+  if (!freshness || freshness.status === 'current' || !freshness.staleRevision) return ''
+  if (freshness.status === 'mixed') {
+    return executionActive
+      ? `Completed steps show current results from Revision ${freshness.currentRevision}; remaining steps still show read-only results from Revision ${freshness.staleRevision} until they finish.`
+      : `Completed steps show current results from Revision ${freshness.currentRevision}; remaining steps still show read-only results from Revision ${freshness.staleRevision}. Use the green play control in Flow status to rerun them.`
+  }
+  return `Showing read-only results from Revision ${freshness.staleRevision}. Current Revision ${freshness.currentRevision} has newer configuration; use the green play control in Flow status to rerun the flow.`
 }

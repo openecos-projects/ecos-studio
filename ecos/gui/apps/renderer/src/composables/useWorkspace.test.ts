@@ -2048,7 +2048,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.backendRuntimeEvents.value).toHaveLength(1)
   })
 
-  it('invalidates all workspace resources when rtl2gds completes', async () => {
+  it('invalidates result resources without reloading Step Configuration when rtl2gds completes', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }
 
@@ -2062,8 +2062,11 @@ describe('useWorkspace openProject', () => {
       ),
     )
 
-    expect(workspace.resourceVersions.value.all).toBe(before.all + 1)
+    expect(workspace.resourceVersions.value.all).toBe(before.all)
+    expect(workspace.resourceVersions.value['step-config']).toBe(before['step-config'])
+    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
+    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
   })

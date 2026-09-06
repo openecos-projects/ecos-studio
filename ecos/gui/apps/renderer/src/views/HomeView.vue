@@ -6,7 +6,15 @@
     :nodes="flowNodes"
   >
     <template #left>
-      <main class="home-dashboard" aria-label="Workspace dashboard">
+      <main
+        class="home-dashboard"
+        :class="{ 'has-stale': staleRevision !== null }"
+        aria-label="Workspace dashboard"
+      >
+        <div v-if="staleRevision !== null" class="home-dashboard-stale" role="status">
+          <i class="ri-history-line" aria-hidden="true" />
+          {{ staleResultNotice }}
+        </div>
         <div class="home-dashboard-row home-dashboard-top">
           <section class="dashboard-section chip-card">
             <header class="dashboard-section-header">
@@ -572,6 +580,7 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
+  workspaceResultFreshnessNotice,
 } from '@/components/home/dashboardData'
 import {
   buildHomeQorDetailModel,
@@ -601,6 +610,13 @@ const { currentProject } = useWorkspace()
 const backendWorkspaceSession = useBackendWorkspaceSession()
 const workspaceOverview = computed(() => backendWorkspaceSession.projection.data)
 const workspaceIdentity = computed(() => workspaceOverview.value?.identity)
+const resultFreshness = computed(() => workspaceOverview.value?.resultFreshness)
+const staleRevision = computed(() => {
+  const freshness = resultFreshness.value
+  return freshness?.status === 'stale' || freshness?.status === 'mixed'
+    ? (freshness.staleRevision ?? null)
+    : null
+})
 const workspaceConfiguration = computed(() => {
   const section = workspaceOverview.value?.configuration
   return section?.status === 'ready' || section?.status === 'partial'
@@ -633,6 +649,12 @@ const {
   flowLogSegments,
   flowLogStepName,
 } = useBackendFlowLogs()
+const staleResultNotice = computed(() => {
+  return workspaceResultFreshnessNotice(
+    resultFreshness.value,
+    currentWorkspaceFlowExecutionActive.value,
+  )
+})
 const checklistItems = computed(() => {
   const section = workspaceOverview.value?.checklist
   return section?.status === 'ready' || section?.status === 'partial'
@@ -1052,6 +1074,23 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   min-width: 0;
   overflow: auto;
   padding: 8px;
+}
+
+.home-dashboard.has-stale {
+  grid-template-rows: auto repeat(3, minmax(0, 1fr));
+}
+
+.home-dashboard-stale {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--warning-color, #b7791f);
+  border-radius: 6px;
+  color: var(--text-primary);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
 }
 
 .home-dashboard-row {

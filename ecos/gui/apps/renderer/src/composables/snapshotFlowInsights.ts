@@ -252,6 +252,9 @@ export function congestionTilesFromArtifacts(
         pngPath: artifact.artifactId,
         csvPath: '',
         layoutCsvPath: '',
+        ...(artifact.sourceRevision === undefined
+          ? {}
+          : { sourceRevision: artifact.sourceRevision }),
         stats:
           statistics.find(
             (statistic) =>

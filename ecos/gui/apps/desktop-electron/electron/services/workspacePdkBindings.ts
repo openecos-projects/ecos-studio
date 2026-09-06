@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import {
   type EccWorkspaceCreateRequest,
   type EccWorkspaceOpenRequest,
+  type MpcSpecReadResult,
   type PdkBindRequest,
   type PdkBinding,
   type PdkInstallationSnapshot,
@@ -24,7 +25,7 @@ export interface WorkspacePdkBindingDependencies {
   }
   resourceManagerService?: {
     getResource(resourceId: string): Promise<unknown>
-    readMpcSpec(resourceId: string): Promise<unknown>
+    readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
   }
 }
 
@@ -60,11 +61,20 @@ export async function prepareWorkspaceCreateBinding(
     projectRoot,
     requirement,
   })
+  const requestedMpc = request.workspaceSpec.mpc
+  const mpcBinding =
+    requestedMpc === undefined
+      ? null
+      : await resolveMpcBinding(dependencies, requestedMpc)
+  if (requestedMpc !== undefined && !mpcBinding) {
+    throw new Error('Project MPC Requirement is unbound')
+  }
   const {
     pdkInstallationId: _pdkInstallationId,
     pdkRequirement: _pdkRequirement,
     ...runtimeRequest
   } = request
+  const { mpc: _mpc, ...workspaceBindings } = request.workspaceBindings
   const specPdk = isRecord(request.workspaceSpec.pdk) ? request.workspaceSpec.pdk : {}
   const bindingPdk = isRecord(request.workspaceBindings.pdk)
     ? request.workspaceBindings.pdk
@@ -72,13 +82,14 @@ export async function prepareWorkspaceCreateBinding(
   return {
     ...runtimeRequest,
     workspaceBindings: {
-      ...request.workspaceBindings,
+      ...workspaceBindings,
       pdk: {
         ...bindingPdk,
         root: installation.root,
         ...(requirement.version ? { version: requirement.version } : {}),
         ...manualPdkFiles(specPdk, requirement, installation.root),
       },
+      ...(mpcBinding ? { mpc: mpcBinding } : {}),
     },
     workspaceSpec: {
       ...request.workspaceSpec,
@@ -186,9 +197,8 @@ async function resolveMpcBinding(
     ) {
       return null
     }
-    const spec = validateMpcSpec(
-      await dependencies.resourceManagerService.readMpcSpec(resourceId),
-    )
+    const result = await dependencies.resourceManagerService.readMpcSpec(resourceId)
+    const spec = validateMpcSpec(result.spec)
     const design = spec.designs.find(
       (candidate) => candidate.design.design_name === designId,
     )

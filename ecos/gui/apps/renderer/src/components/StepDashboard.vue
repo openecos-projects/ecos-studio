@@ -24,8 +24,9 @@
     <template v-else>
       <div v-if="data.staleRevision" class="step-dashboard-stale" role="status">
         <i class="ri-history-line" aria-hidden="true" />
-        Showing read-only results from Revision {{ data.staleRevision }}. Rerun this step
-        to replace them with current results.
+        Showing read-only results from Revision {{ data.staleRevision }}. The current
+        configuration is newer; use the green play control in Flow status to rerun this
+        step.
       </div>
       <div class="step-dashboard-row step-dashboard-top">
         <section class="step-dashboard-card step-summary-card">

@@ -65,6 +65,8 @@ export interface ParametersData {
   sim_all_tests?: boolean
 }
 
+type ParameterRecord = Record<string, unknown>
+
 /** 前端编辑用（驼峰） */
 export interface FrontendConfigData {
   coreId: string
@@ -181,11 +183,11 @@ function firstResponseMessage(
 function normalizeDie(d: unknown): ParametersData['Die'] {
   if (!d || typeof d !== 'object') return { Size: [], Area: 0 }
   const o = d as Record<string, unknown>
-  const size = o.Size
+  const size = o.Size ?? o.size
   const arr = Array.isArray(size) ? size.map(Number) : []
   return {
     Size: arr,
-    Area: o.Area != null ? Number(o.Area) : 0,
+    Area: Number(o.Area ?? o.area ?? 0),
   }
 }
 
@@ -201,20 +203,20 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
     }
   }
   const o = c as Record<string, unknown>
-  const size = o.Size
+  const size = o.Size ?? o.size
   const arr = Array.isArray(size) ? size.map(Number) : []
-  const margin = o.Margin
+  const margin = o.Margin ?? o.margin
   let m: [number, number] = [2, 2]
   if (Array.isArray(margin) && margin.length >= 2) {
     m = [Number(margin[0]), Number(margin[1])]
   }
   return {
     Size: arr,
-    Area: o.Area != null ? Number(o.Area) : 0,
-    'Bounding box': String(o['Bounding box'] ?? ''),
-    Utilitization: Number(o.Utilitization ?? 0.4),
+    Area: Number(o.Area ?? o.area ?? 0),
+    'Bounding box': String(o['Bounding box'] ?? o.bounding_box ?? ''),
+    Utilitization: Number(o.Utilitization ?? o.utilitization ?? 0.4),
     Margin: m,
-    'Aspect ratio': Number(o['Aspect ratio'] ?? 1),
+    'Aspect ratio': Number(o['Aspect ratio'] ?? o.aspect_ratio ?? 1),
   }
 }
 
@@ -250,54 +252,107 @@ export function parametersHaveChipIdentity(
   return Number.isFinite(area) && area > 0
 }
 
-export function parseParametersData(fileContent: string): ParametersData {
-  const raw = JSON.parse(fileContent) as Record<string, unknown>
+function normalizeParametersData(raw: ParameterRecord | ParametersData): ParametersData {
+  const record = raw as ParameterRecord
+  const dreamplace =
+    record.dreamplace &&
+    typeof record.dreamplace === 'object' &&
+    !Array.isArray(record.dreamplace)
+      ? (record.dreamplace as ParameterRecord)
+      : {}
+
   return {
-    PDK: String(raw.PDK ?? ''),
-    Design: String(raw.Design ?? raw.design ?? ''),
-    design: raw.design != null ? String(raw.design) : undefined,
-    description: raw.description != null ? String(raw.description) : undefined,
-    'Design Tool': raw['Design Tool'] != null ? String(raw['Design Tool']) : undefined,
-    'Top module': String(raw['Top module'] ?? raw.top_module ?? ''),
-    top_module: raw.top_module != null ? String(raw.top_module) : undefined,
-    Die: normalizeDie(raw.Die),
-    Core: normalizeCore(raw.Core),
-    'Max fanout': Number(raw['Max fanout'] ?? 20),
-    'Target density': Number(raw['Target density'] ?? 0.3),
-    'Target overflow': Number(raw['Target overflow'] ?? 0.1),
-    'Global right padding': Number(raw['Global right padding'] ?? 0),
-    'Cell padding x': Number(raw['Cell padding x'] ?? 600),
-    'Routability opt flag': Number(raw['Routability opt flag'] ?? 1),
-    Clock: String(raw.Clock ?? raw.clock ?? ''),
-    clock: raw.clock != null ? String(raw.clock) : undefined,
-    'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100),
-    frequency_max: raw.frequency_max != null ? Number(raw.frequency_max) : undefined,
-    'Bottom layer': String(raw['Bottom layer'] ?? FIXED_BOTTOM_LAYER),
-    'Top layer': String(raw['Top layer'] ?? FIXED_TOP_LAYER),
-    'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined,
-    cpu_filelist: raw.cpu_filelist != null ? String(raw.cpu_filelist) : undefined,
-    soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
-    soc_variant: raw.soc_variant != null ? String(raw.soc_variant) : undefined,
-    soc_harness_id: raw.soc_harness_id != null ? String(raw.soc_harness_id) : undefined,
-    soc_wrapper_id: raw.soc_wrapper_id != null ? String(raw.soc_wrapper_id) : undefined,
+    PDK: String(record.PDK ?? record.pdk ?? ''),
+    Design: String(record.Design ?? record.design ?? ''),
+    design: record.design != null ? String(record.design) : undefined,
+    description: record.description != null ? String(record.description) : undefined,
+    'Design Tool':
+      record['Design Tool'] != null ? String(record['Design Tool']) : undefined,
+    'Top module': String(record['Top module'] ?? record.top_module ?? ''),
+    top_module: record.top_module != null ? String(record.top_module) : undefined,
+    Die: normalizeDie(record.Die ?? record.die),
+    Core: normalizeCore(record.Core ?? record.core),
+    'Max fanout': Number(record['Max fanout'] ?? record.max_fanout ?? 20),
+    'Target density': Number(
+      dreamplace.target_density ??
+        record['Target density'] ??
+        record.target_density ??
+        0.3,
+    ),
+    'Target overflow': Number(
+      dreamplace.stop_overflow ??
+        dreamplace.target_overflow ??
+        record['Target overflow'] ??
+        record.target_overflow ??
+        0.1,
+    ),
+    'Global right padding': Number(
+      record['Global right padding'] ?? record.global_right_padding ?? 0,
+    ),
+    'Cell padding x': Number(
+      dreamplace.cell_padding_x ??
+        record['Cell padding x'] ??
+        record.cell_padding_x ??
+        600,
+    ),
+    'Routability opt flag': Number(
+      dreamplace.routability_opt_flag ??
+        record['Routability opt flag'] ??
+        record.routability_opt_flag ??
+        1,
+    ),
+    Clock: String(record.Clock ?? record.clock ?? ''),
+    clock: record.clock != null ? String(record.clock) : undefined,
+    'Frequency max [MHz]': Number(
+      record['Frequency max [MHz]'] ?? record.frequency_max ?? 100,
+    ),
+    frequency_max:
+      record.frequency_max != null ? Number(record.frequency_max) : undefined,
+    'Bottom layer': String(
+      record['Bottom layer'] ?? record.bottom_layer ?? FIXED_BOTTOM_LAYER,
+    ),
+    'Top layer': String(record['Top layer'] ?? record.top_layer ?? FIXED_TOP_LAYER),
+    'PDK Root':
+      record['PDK Root'] != null || record.pdk_root != null
+        ? String(record['PDK Root'] ?? record.pdk_root)
+        : undefined,
+    cpu_filelist: record.cpu_filelist != null ? String(record.cpu_filelist) : undefined,
+    soc_filelist: record.soc_filelist != null ? String(record.soc_filelist) : undefined,
+    soc_variant: record.soc_variant != null ? String(record.soc_variant) : undefined,
+    soc_harness_id:
+      record.soc_harness_id != null ? String(record.soc_harness_id) : undefined,
+    soc_wrapper_id:
+      record.soc_wrapper_id != null ? String(record.soc_wrapper_id) : undefined,
     soc_wrapper_contract:
-      raw.soc_wrapper_contract != null ? String(raw.soc_wrapper_contract) : undefined,
+      record.soc_wrapper_contract != null
+        ? String(record.soc_wrapper_contract)
+        : undefined,
     frontend_core_id:
-      raw.frontend_core_id != null ? String(raw.frontend_core_id) : undefined,
-    core_id: raw.core_id != null ? String(raw.core_id) : undefined,
-    cpu_wrapper_id: raw.cpu_wrapper_id != null ? String(raw.cpu_wrapper_id) : undefined,
+      record.frontend_core_id != null ? String(record.frontend_core_id) : undefined,
+    core_id: record.core_id != null ? String(record.core_id) : undefined,
+    cpu_wrapper_id:
+      record.cpu_wrapper_id != null ? String(record.cpu_wrapper_id) : undefined,
     cpu_wrapper_contract:
-      raw.cpu_wrapper_contract != null ? String(raw.cpu_wrapper_contract) : undefined,
+      record.cpu_wrapper_contract != null
+        ? String(record.cpu_wrapper_contract)
+        : undefined,
     cpu_socket_contract:
-      raw.cpu_socket_contract != null ? String(raw.cpu_socket_contract) : undefined,
+      record.cpu_socket_contract != null ? String(record.cpu_socket_contract) : undefined,
     cpu_wrapper_top:
-      raw.cpu_wrapper_top != null ? String(raw.cpu_wrapper_top) : undefined,
-    toolchain_id: raw.toolchain_id != null ? String(raw.toolchain_id) : undefined,
-    test_suite_id: raw.test_suite_id != null ? String(raw.test_suite_id) : undefined,
-    input_filelist: raw.input_filelist != null ? String(raw.input_filelist) : undefined,
-    sim_program_names: normalizeStringArray(raw.sim_program_names),
-    sim_all_tests: Boolean(raw.sim_all_tests),
+      record.cpu_wrapper_top != null ? String(record.cpu_wrapper_top) : undefined,
+    toolchain_id: record.toolchain_id != null ? String(record.toolchain_id) : undefined,
+    test_suite_id:
+      record.test_suite_id != null ? String(record.test_suite_id) : undefined,
+    input_filelist:
+      record.input_filelist != null ? String(record.input_filelist) : undefined,
+    sim_program_names: normalizeStringArray(record.sim_program_names),
+    sim_all_tests: Boolean(record.sim_all_tests),
   }
+}
+
+export function parseParametersData(fileContent: string): ParametersData {
+  const raw = JSON.parse(fileContent) as ParameterRecord
+  return normalizeParametersData(raw)
 }
 
 export function transformParametersToConfig(data: ParametersData): ConfigData {
@@ -503,10 +558,13 @@ export function useParameters() {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
   }
 
-  function applyParametersData(parametersData: ParametersData): boolean {
-    console.log('Loaded parameters data:', parametersData)
+  function applyParametersData(
+    parametersData: ParameterRecord | ParametersData,
+  ): boolean {
+    const normalizedParameters = normalizeParametersData(parametersData)
+    console.log('Loaded parameters data:', normalizedParameters)
 
-    const transformedConfig = transformParametersToConfig(parametersData)
+    const transformedConfig = transformParametersToConfig(normalizedParameters)
     const nextConfigSnapshot = JSON.stringify(transformedConfig)
     if (nextConfigSnapshot === originalConfig) {
       hasChanges.value = false
@@ -514,7 +572,7 @@ export function useParameters() {
     }
 
     if (
-      !parametersHaveChipIdentity(parametersData) &&
+      !parametersHaveChipIdentity(normalizedParameters) &&
       originalConfig &&
       parametersHaveChipIdentity(JSON.parse(originalConfig) as ConfigData)
     ) {
@@ -559,7 +617,7 @@ export function useParameters() {
           parametersHaveChipIdentity(snapshot.parameters) &&
           loadResourceToken === parametersResourceToken
         ) {
-          applyParametersData(snapshot.parameters as unknown as ParametersData)
+          applyParametersData(snapshot.parameters)
           return true
         }
         if (!keepLastParametersDuringFlowReload()) {
@@ -660,7 +718,7 @@ export function useParameters() {
         ) {
           if (loadResourceToken !== parametersResourceToken) return
           resolvedParametersPath = parametersPath
-          applyParametersData(snapshot.parameters as unknown as ParametersData)
+          applyParametersData(snapshot.parameters)
           return
         }
         throw new Error('ECC Workspace Parameters are unavailable.')

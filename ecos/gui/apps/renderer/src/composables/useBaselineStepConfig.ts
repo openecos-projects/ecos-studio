@@ -223,7 +223,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
 
       if (
         result.status === 'available' &&
-        (result.workspaceId !== baseline.workspaceId ||
+        (typeof result.workspaceId !== 'string' ||
           typeof result.workspaceRevision !== 'number' ||
           !Number.isInteger(result.workspaceRevision) ||
           result.workspaceRevision < 1)
@@ -240,7 +240,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
       if (result.status === 'missing' || result.status === 'unavailable') {
         if (
           result.status === 'missing' &&
-          (result.workspaceId !== baseline.workspaceId ||
+          (typeof result.workspaceId !== 'string' ||
             typeof result.workspaceRevision !== 'number' ||
             !Number.isInteger(result.workspaceRevision) ||
             result.workspaceRevision < 1)

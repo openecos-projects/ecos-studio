@@ -17,6 +17,28 @@ function stringValue(record: Record<string, unknown> | null, key: string): strin
   return typeof value === 'string' ? value : ''
 }
 
+function firstStringValue(
+  record: Record<string, unknown> | null,
+  keys: readonly string[],
+): string {
+  for (const key of keys) {
+    const value = stringValue(record, key)
+    if (value) return value
+  }
+  return ''
+}
+
+function firstFiniteNumber(
+  record: Record<string, unknown> | null,
+  keys: readonly string[],
+): number | null {
+  for (const key of keys) {
+    const value = finiteNumber(record?.[key])
+    if (value !== null) return value
+  }
+  return null
+}
+
 function finiteNumber(value: unknown): number | null {
   if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) {
     return null
@@ -45,11 +67,11 @@ export function configurationSection(
     }
   }
   const parameters = snapshot.snapshot.parameters
-  const die = record(parameters.Die)
+  const die = record(parameters.die) ?? record(parameters.Die)
   const canonicalDie = record(parameters.die_area)
-  const core = record(parameters.Core) ?? record(parameters.core)
-  const mpc = record(parameters.MPC)
-  const template = record(mpc?.core_template)
+  const core = record(parameters.core) ?? record(parameters.Core)
+  const mpc = record(parameters.mpc) ?? record(parameters.MPC)
+  const template = record(mpc?.template) ?? record(mpc?.core_template)
   const ports = Array.isArray(template?.ports)
     ? template.ports.flatMap((value) => {
         const port = record(value)
@@ -70,17 +92,23 @@ export function configurationSection(
   return {
     status: 'ready',
     data: {
-      pdk: stringValue(parameters, 'PDK'),
-      design: stringValue(parameters, 'Design'),
-      topModule: stringValue(parameters, 'Top module'),
-      dieArea: finiteNumber(die?.Area),
+      pdk: firstStringValue(parameters, ['pdk', 'PDK']),
+      design: firstStringValue(parameters, ['design', 'Design']),
+      topModule: firstStringValue(parameters, ['top_module', 'Top module']),
+      dieArea:
+        firstFiniteNumber(die, ['area', 'Area']) ??
+        firstFiniteNumber(canonicalDie, ['area', 'Area']) ??
+        finiteNumber(parameters.die_area),
       coreUtilization:
-        finiteNumber(canonicalDie?.utilitization) ??
-        finiteNumber(core?.Utilitization) ??
-        finiteNumber(core?.utilitization),
-      maxFanout: finiteNumber(parameters['Max fanout']),
-      clock: stringValue(parameters, 'Clock'),
-      frequencyMaxMhz: finiteNumber(parameters['Frequency max [MHz]']),
+        firstFiniteNumber(canonicalDie, ['utilization', 'utilitization']) ??
+        firstFiniteNumber(core, ['utilization', 'utilitization', 'Utilitization']) ??
+        finiteNumber(parameters.core_utilization),
+      maxFanout: firstFiniteNumber(parameters, ['max_fanout', 'Max fanout']),
+      clock: firstStringValue(parameters, ['clock', 'Clock']),
+      frequencyMaxMhz: firstFiniteNumber(parameters, [
+        'frequency_max',
+        'Frequency max [MHz]',
+      ]),
       mpcDisplayName: stringValue(mpc, 'display_name').trim() || null,
       mpcConstraints: template
         ? {

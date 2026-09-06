@@ -73,6 +73,7 @@ import {
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
   type ResourceJob,
+  type MpcSpecReadResult,
   type PdkBinding,
   type PdkBindRequest,
   type PdkImportRequest,
@@ -344,7 +345,7 @@ export interface DesktopBridgeServices {
   resourceManagerService: {
     listResources(): Promise<unknown>
     getResource(resourceId: string): Promise<unknown>
-    readMpcSpec(resourceId: string): Promise<unknown>
+    readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
     installResource(
       resourceId: string,
       version?: string,

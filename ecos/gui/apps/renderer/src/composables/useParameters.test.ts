@@ -8,6 +8,54 @@ import {
 } from './useParameters'
 
 describe('useParameters helpers', () => {
+  it('parses ECC canonical parameters used by managed Workspaces', () => {
+    const parsed = parseParametersData(
+      JSON.stringify({
+        pdk: 'ics55',
+        design: 'gcd',
+        top_module: 'gcd',
+        die: { size: [], area: 0 },
+        core: {
+          size: [],
+          area: 0,
+          bounding_box: '',
+          utilitization: 0.3,
+          margin: [2, 2],
+          aspect_ratio: 1,
+        },
+        max_fanout: 32,
+        global_right_padding: 0,
+        dreamplace: {
+          target_density: 0.2,
+          stop_overflow: 0.07,
+          cell_padding_x: 300,
+          routability_opt_flag: 0,
+        },
+        clock: 'clk',
+        frequency_max: 50,
+        bottom_layer: 'MET2',
+        top_layer: 'MET5',
+        pdk_root: '/pdks/ics55',
+      }),
+    )
+
+    expect(transformParametersToConfig(parsed)).toMatchObject({
+      pdk: 'ics55',
+      pdkRoot: '/pdks/ics55',
+      design: 'gcd',
+      topModule: 'gcd',
+      die: { Size: [], area: 0 },
+      core: { utilization: 0.3, margin: [2, 2], aspectRatio: 1 },
+      maxFanout: 32,
+      targetDensity: 0.2,
+      targetOverflow: 0.07,
+      cellPaddingX: 300,
+      routabilityOptFlag: false,
+      clock: 'clk',
+      frequencyMax: 50,
+    })
+  })
+
   it('parses the current parameters schema into normalized data', () => {
     const parsed = parseParametersData(
       JSON.stringify({

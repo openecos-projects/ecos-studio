@@ -299,13 +299,17 @@ export class WorkspaceRuntimeCommands {
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
     const client = await this.context.ensureStarted()
     const workspaceId = await this.context.resolveEccWorkspaceId(request.workspaceHandle)
-    return await client.call<EccWorkspaceStepConfigurationReadResult>(
+    const result = await client.call<EccWorkspaceStepConfigurationReadResult>(
       'workspace.step_configuration.read',
       {
         step: request.step,
         workspaceId,
       },
     )
+    if (result.workspaceId && result.workspaceId !== workspaceId) {
+      throw new Error('ECC Step Configuration response belongs to another Workspace.')
+    }
+    return result
   }
 
   refreshConfig(

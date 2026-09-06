@@ -4,6 +4,7 @@ import {
   checklistStatusSummary,
   formatDashboardMetric,
   qorStatusSummary,
+  workspaceResultFreshnessNotice,
 } from './dashboardData'
 
 describe('dashboard data presentation', () => {
@@ -72,5 +73,34 @@ describe('dashboard data presentation', () => {
         value: 0.4,
       }),
     ).toBe('40.0%')
+  })
+
+  it('distinguishes stale and mixed Dashboard results', () => {
+    expect(
+      workspaceResultFreshnessNotice(
+        {
+          status: 'stale',
+          currentRevision: 4,
+          staleRevision: 1,
+          currentStepIds: [],
+          staleStepIds: ['Synthesis', 'Place'],
+        },
+        false,
+      ),
+    ).toContain('Showing read-only results from Revision 1')
+    expect(
+      workspaceResultFreshnessNotice(
+        {
+          status: 'mixed',
+          currentRevision: 4,
+          staleRevision: 1,
+          currentStepIds: ['Synthesis'],
+          staleStepIds: ['Place'],
+        },
+        true,
+      ),
+    ).toBe(
+      'Completed steps show current results from Revision 4; remaining steps still show read-only results from Revision 1 until they finish.',
+    )
   })
 })
