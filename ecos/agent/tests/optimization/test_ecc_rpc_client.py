@@ -79,7 +79,12 @@ def test_stdio_client_queues_only_terminal_events_and_keeps_step_ack(
         "payload": {"state": "succeeded"},
     }
 
-    client._handle_message(json.dumps({"method": "runtime.event", "params": step}).encode())
+    client._handle_message(
+        json.dumps({"method": "runtime.event", "params": step}).encode()
+    )
+    client._handle_message(
+        json.dumps({"method": "runtime.event", "params": step}).encode()
+    )
     client._handle_message(
         json.dumps(
             {
@@ -110,6 +115,41 @@ def test_stdio_client_queues_only_terminal_events_and_keeps_step_ack(
     ]
     assert client._events.get_nowait() == terminal
     assert client._events.empty()
+
+
+def test_stdio_client_deduplicates_step_ack_per_operation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    sent = []
+    monkeypatch.setattr(client, "_send", sent.append)
+
+    def event(operation_id: str) -> dict[str, object]:
+        return {
+            "type": "step.completed",
+            "eventId": "event-1",
+            "operationId": operation_id,
+            "payload": {
+                "state": "Success",
+                "stepCommitId": f"{operation_id}:step:1",
+                "workspaceRevision": 1,
+            },
+        }
+
+    client._handle_message(
+        json.dumps({"method": "runtime.event", "params": event("operation-1")}).encode()
+    )
+    client._handle_message(
+        json.dumps({"method": "runtime.event", "params": event("operation-2")}).encode()
+    )
+
+    assert [item["params"]["operationId"] for item in sent] == [
+        "operation-1",
+        "operation-2",
+    ]
 
 
 def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:

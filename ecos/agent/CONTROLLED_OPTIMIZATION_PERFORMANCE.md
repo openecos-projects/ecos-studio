@@ -1,6 +1,6 @@
 # ECOS Agent 受控自动优化性能剖析与修复
 
-日期：2026-09-05
+日期：2026-09-05，复查：2026-09-06
 
 ## 1. 结论
 
@@ -256,3 +256,109 @@ Agent workspace/chat/flow IPC `51 passed`。普通 GUI/Quick Start 的 Agent run
 
 因此在当前 GCD 工作负载和 Agent-only 修改边界内停止继续优化。该结论不等价于所有设计、所有 PDK
 或成功 Harden 路径均无性能问题；后续只有在新 profile 显示新的 Agent-owned hotspot 时再扩展修复。
+
+## 11. 2026-09-06 复查补充
+
+### 11.1 Sizer 可用后的完整 GCD candidate
+
+使用 `CHIPCOMPILER_ECC_SIZER_ROOT=/tmp/ecc-sizer-official-31361700161/ecc-sizer`
+复跑同一个 GCD `place -> Harden` candidate，路径仍为：
+
+```text
+ecos_agent optimization -> EccContentLengthRpcClient -> ecc-agent-rpc -> candidate.rerun
+```
+
+结果：
+
+| 指标 | 数值 |
+|---|---:|
+| candidate wait | 230.19 s |
+| driver total | 231.48 s |
+| max RSS | 2,513,708 KiB |
+| runtime events | 160 |
+| `operation.status` | 58 |
+| `operation.ack_step_rendered` | 22 |
+| terminal outcome | `execution_succeeded` |
+
+阶段证据显示，`sta` 从约 50.99 s 持续到 219.33 s，约 168.34 s；`Harden` 约 12.11 s。
+这两段合计约占 candidate wait 的 78.4%。它们是 Sizer/STA/Harden 原生工具执行时间，不是
+Agent 等待队列、知识检索、clone 或展示图开销。
+
+该完整成功路径仍没有恢复 candidate 展示图：candidate root 中只有前序 Floorplan 已存在 PNG、
+DREAMPlace/Sizer 内部少量 iteration PNG；target 及后续 step 的 `analysis/*.png` 展示图仍被跳过。
+
+### 11.2 RPC step ACK 重复
+
+复查完整 GCD stdout 发现每个 successful `step.completed` 事件成对出现，11 个成功 step 产生
+22 次 `operation.ack_step_rendered`。这些 ACK 不是主要 wall-time 热点，但属于可消除的 RPC 放大。
+
+修复：
+
+- `ecos/agent/src/ecos_agent/optimization/ecc/rpc_client.py`：按
+  `(operationId, eventId)` 对 step-render ACK 做幂等去重；仍保留不同 operation 复用同一
+  eventId 时各自 ACK，避免跨 operation 漏确认。
+- `ecos/agent/tests/optimization/test_ecc_rpc_client.py`：新增重复 step 事件只 ACK 一次、不同
+  operation 同 eventId 仍分别 ACK 的回归覆盖。
+
+### 11.3 `params.toml` 兼容性阻塞
+
+七参数 GCD pilot 的 canonical baseline 完整跑到 Harden 后失败在 Agent observation：
+
+```text
+OptimizationObservationError: workspace evidence path is unsafe or unavailable
+missing: home/parameters.json
+```
+
+原因：当前 ECC workspace 已落 `home/params.toml`，而 Agent terminal/candidate observation 仍固定读取
+legacy `home/parameters.json`。这不是性能热点，但会阻断后续七参数性能剖析与 acceptance evidence。
+
+修复：
+
+- `ecos/agent/src/ecos_agent/workspace/parameters.py`：新增 workspace 参数读取单一入口，按 ECC 语义优先
+  `home/params.toml`，fallback legacy `home/parameters.json`；canonical TOML 存在但为 symlink/不可安全读取时
+  fail-closed，不静默 fallback。
+- `ecos/agent/src/ecos_agent/optimization/observations.py`：参数证据支持
+  `home/parameters.json` 和 `home/params.toml`，manifest 绑定实际存在的参数文件；Design/MPC 信息从
+  `params.toml [params]` / `[params.mpc]` 读取。
+- `ecos/agent/src/ecos_agent/optimization/runtime.py`：受控优化 runtime 的 design id、PDK evidence、
+  current-values 和 parent manifest 同样改为绑定实际参数文件，避免 episode 启动路径再次硬依赖
+  legacy JSON。
+- `ecos/agent/tests/optimization/test_terminal_observations.py`：覆盖只存在 `params.toml` 的 terminal
+  observation。
+- `ecos/agent/tests/optimization/test_candidate_observations.py`：覆盖 candidate root 只存在
+  `params.toml` 的 terminal observation。
+- `ecos/agent/tests/workspace/test_parameters.py` 和
+  `ecos/agent/tests/optimization/test_runtime_artifacts.py`：覆盖 canonical TOML 优先级、legacy fallback、
+  symlink fail-closed 和 runtime helper。
+
+在失败现场 workspace 上直接重建 observation 已通过：
+
+```text
+terminal-Harden harden_artifacts_complete=True evaluation_metrics_complete=True
+```
+
+### 11.4 Sizer preflight 前移
+
+ECC Agent RPC 侧已有 Sizer runtime preflight，用于在进入 `Timing optimization` 前给出明确的
+Sizer availability 错误。但复查发现 preflight 位于 candidate clone 之后：当 Sizer 不可用时，仍会先复制
+candidate workspace，再失败。
+
+修复：
+
+- `ecc/agent/workspace_api.py`：先从 parent workspace 的持久化 flow 数据按
+  `targetStep/endStep/executionScope` 计算 candidate step range 并执行 Sizer preflight；不构建或修改
+  parent flow。preflight 失败则不 clone、不 materialize candidate；旧 fake workspace 缺少持久化 flow
+  数据时，保留 clone 后 preflight fallback，不改变原有错误优先级。
+- `ecc/agent/test/test_workspace_api.py`：覆盖 Sizer preflight 失败不会调用 candidate clone。
+
+该修复只影响 `ecc-agent-rpc` 的 candidate rerun 路径；普通 GUI Quick Start 仍按原 flow 执行。
+
+### 11.5 复查停止条件
+
+截至 2026-09-06 复查，仍未发现新的、收益显著且属于 Agent 所有权边界的性能热点：
+
+- Sizer 可用后完整 candidate 已成功，剩余主要时间在原生 STA/Harden；
+- RPC 非终态队列放大和 duplicate ACK 已消除或幂等化；
+- observation 的 `params.toml` 阻塞已修复，未削弱 hash-bound evidence；
+- 继续削减 STA/Harden、DREAMPlace/Sizer 内部 iteration PNG 或 full-flow baseline 时间需要进入
+  native 工具/普通 GUI 行为边界，本轮不扩散。
