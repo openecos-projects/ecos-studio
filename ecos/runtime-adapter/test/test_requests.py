@@ -24,6 +24,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
     WorkspaceMutationRequest,
+    WorkspaceOpenRequest,
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
     WorkspaceStepConfigurationReadRequest,
@@ -106,6 +107,14 @@ def test_workspace_configuration_update_maps_canonical_payload():
     assert request.command_id == "configuration-1"
     assert request.expected_workspace_revision == 3
     assert request.configuration["parameters"] == {"frequency_max": 200}
+
+
+def test_workspace_configuration_read_maps_directory():
+    request = _parse_runtime_request(
+        "workspace.configuration.read", {"directory": "/work/ws"}
+    )
+
+    assert request == WorkspaceOpenRequest(directory="/work/ws")
 
 
 def test_workspace_step_configuration_update_maps_canonical_payload():

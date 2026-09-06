@@ -87,6 +87,9 @@ function createReadService(
     workspacePath: string,
     step: string,
   ) => Promise<import('@ecos-studio/shared').EccWorkspaceStepConfigurationReadResult>,
+  readWorkspaceConfiguration?: (
+    workspacePath: string,
+  ) => Promise<import('./projectManagementReadService').ProjectWorkspaceConfiguration>,
 ): ProjectManagementReadService {
   return new ProjectManagementReadService(
     {
@@ -100,6 +103,7 @@ function createReadService(
         ),
     },
     readStepConfiguration,
+    readWorkspaceConfiguration,
   )
 }
 
@@ -163,6 +167,40 @@ describe('ProjectManagementReadService', () => {
 
     await expect(createReadService().readManifest(projectRoot)).resolves.toMatchObject({
       root_path: projectRoot,
+    })
+  })
+
+  it('reuses canonical design defaults from an existing Project Workspace', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const readWorkspaceConfiguration = vi.fn().mockResolvedValue({
+      workspaceSpec: {
+        design: { name: 'gcd', topModule: 'gcd_top', clockPort: 'clk_i' },
+        inputs: [
+          { inputId: 'rtl-main', role: 'rtl' },
+          { inputId: 'rtl-helper', role: 'rtl' },
+          { inputId: 'constraints', role: 'sdc' },
+        ],
+      },
+      workspaceBindings: {
+        inputs: {
+          'rtl-main': `${workspaceRoot}/origin/gcd.v`,
+          'rtl-helper': `${workspaceRoot}/origin/helper.sv`,
+          constraints: `${workspaceRoot}/origin/gcd.sdc`,
+        },
+      },
+    })
+
+    const manifest = await createReadService(
+      undefined,
+      readWorkspaceConfiguration,
+    ).readManifest(projectRoot)
+
+    expect(readWorkspaceConfiguration).toHaveBeenCalledWith(workspaceRoot)
+    expect(manifest?.base_design).toMatchObject({
+      clock: 'clk_i',
+      rtl_list: [`${workspaceRoot}/origin/gcd.v`, `${workspaceRoot}/origin/helper.sv`],
+      sdc: `${workspaceRoot}/origin/gcd.sdc`,
+      top_module: 'gcd_top',
     })
   })
 

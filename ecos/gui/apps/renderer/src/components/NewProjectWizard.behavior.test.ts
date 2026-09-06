@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
+import type { ProjectManifest } from '@ecos-studio/shared'
 import { describe, expect, it, vi } from 'vitest'
 import NewProjectWizard from './NewProjectWizard.vue'
 
@@ -12,7 +13,9 @@ const wizardMocks = vi.hoisted(() => ({
   locatePdk: vi.fn(),
   showToast: vi.fn(),
   loadProjectHistory: vi.fn(async () => []),
-  readProjectManagementManifest: vi.fn(async () => null),
+  readProjectManagementManifest: vi.fn<() => Promise<ProjectManifest | null>>(
+    async () => null,
+  ),
   resolveBinding: vi.fn(),
   scanPdkDirectory: vi.fn(),
   getWorkspaceCreationModel: vi.fn(async () => ({
@@ -297,6 +300,67 @@ describe('NewProjectWizard behavior', () => {
     expect(wrapper.text()).toContain('Unverified')
     expect(wizard.canProceed).toBe(false)
     expect(wizard.stepFiveBlockedReason).toContain('Tech LEF, Cell LEF, Liberty')
+    wrapper.unmount()
+  })
+
+  it('reuses design files and chip identity from the selected Project', async () => {
+    wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
+      schema_version: 1,
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      description: '',
+      root_path: '/projects/gcd',
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+      base_design: {
+        rtl_list: ['/projects/gcd/ws_0001/origin/gcd.v'],
+        sdc: '/projects/gcd/ws_0001/origin/gcd.sdc',
+        top_module: 'gcd_top',
+        clock: 'clk_i',
+        parameters: { design: 'gcd' },
+      },
+      objectives: { primary: 'timing', directions: {} },
+      workspaces: [],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: null,
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/gcd/ws_0002',
+          lockWorkspaceDirectory: true,
+          managedWorkspaceRoot: '/projects/gcd',
+          parameters: { design: 'gcd' },
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_gcd',
+            project_name: 'gcd',
+            project_root: '/projects/gcd',
+            project_json_path: '/projects/gcd/project.json',
+          },
+        },
+      },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+
+    await flushPromises()
+
+    const wizard = wrapper.vm as unknown as {
+      config: {
+        parameters: Record<string, unknown>
+        rtl_list: string[]
+        sdc?: string
+      }
+    }
+    expect(wizard.config).toMatchObject({
+      parameters: { top_module: 'gcd_top', clock: 'clk_i' },
+      rtl_list: ['/projects/gcd/ws_0001/origin/gcd.v'],
+      sdc: '/projects/gcd/ws_0001/origin/gcd.sdc',
+    })
     wrapper.unmount()
   })
 })

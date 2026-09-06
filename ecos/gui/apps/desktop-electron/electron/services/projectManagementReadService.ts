@@ -62,6 +62,62 @@ export interface ProjectManifestReader {
   load(projectRoot: string): Promise<ProjectManifest>
 }
 
+export interface ProjectWorkspaceConfiguration {
+  workspaceBindings: Record<string, unknown>
+  workspaceSpec: Record<string, unknown>
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function inputPaths(
+  configuration: ProjectWorkspaceConfiguration,
+  role: string,
+): string[] {
+  const inputs = Array.isArray(configuration.workspaceSpec.inputs)
+    ? configuration.workspaceSpec.inputs
+    : []
+  const bindings = isRecord(configuration.workspaceBindings.inputs)
+    ? configuration.workspaceBindings.inputs
+    : {}
+  return inputs.flatMap((value) => {
+    if (!isRecord(value) || value.role !== role) return []
+    const path = stringValue(bindings[stringValue(value.inputId)])
+    return path ? [path] : []
+  })
+}
+
+function applyWorkspaceDesignDefaults(
+  manifest: ProjectManifest,
+  configuration: ProjectWorkspaceConfiguration,
+): ProjectManifest {
+  const design = isRecord(configuration.workspaceSpec.design)
+    ? configuration.workspaceSpec.design
+    : {}
+  const rtlList = inputPaths(configuration, 'rtl')
+  const filelist = inputPaths(configuration, 'filelist')[0]
+  const sdc = inputPaths(configuration, 'sdc')[0]
+  const originVerilog = inputPaths(configuration, 'netlist')[0]
+  const originDef = inputPaths(configuration, 'def')[0]
+
+  return {
+    ...manifest,
+    base_design: {
+      ...manifest.base_design,
+      ...(filelist ? { filelist } : {}),
+      ...(originDef ? { origin_def: originDef } : {}),
+      ...(originVerilog ? { origin_verilog: originVerilog } : {}),
+      ...(rtlList.length ? { rtl_list: rtlList } : {}),
+      ...(sdc ? { sdc } : {}),
+      ...(stringValue(design.clockPort) ? { clock: stringValue(design.clockPort) } : {}),
+      ...(stringValue(design.topModule)
+        ? { top_module: stringValue(design.topModule) }
+        : {}),
+    },
+  }
+}
+
 function pathsEqual(leftPath: string, rightPath: string): boolean {
   return relative(resolve(leftPath), resolve(rightPath)) === ''
 }
@@ -109,6 +165,9 @@ export class ProjectManagementReadService {
       workspacePath: string,
       step: string,
     ) => Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>,
+    private readonly readWorkspaceConfiguration?: (
+      workspacePath: string,
+    ) => Promise<ProjectWorkspaceConfiguration>,
   ) {}
 
   async readManifest(projectRoot: string): Promise<ProjectManifest | null> {
@@ -117,7 +176,33 @@ export class ProjectManagementReadService {
       join(root, 'project.json'),
       PROJECT_MANIFEST_MAX_BYTES,
     )
-    return content ? await this.projectManifestReader.load(root) : null
+    if (!content) return null
+    const manifest = await this.projectManifestReader.load(root)
+    if (!this.readWorkspaceConfiguration) return manifest
+
+    const sourceWorkspace =
+      manifest.workspaces.find(
+        (workspace) =>
+          workspace.workspace_id === manifest.qor_baseline?.workspace_id &&
+          workspace.status !== 'archived',
+      ) ?? manifest.workspaces.find((workspace) => workspace.status !== 'archived')
+    if (!sourceWorkspace) return manifest
+    const sourceWorkspacePath = resolve(root, sourceWorkspace.workspace_path)
+    if (
+      pathsEqual(sourceWorkspacePath, root) ||
+      !isPathWithinRoot(sourceWorkspacePath, root)
+    ) {
+      return manifest
+    }
+
+    try {
+      return applyWorkspaceDesignDefaults(
+        manifest,
+        await this.readWorkspaceConfiguration(sourceWorkspacePath),
+      )
+    } catch {
+      return manifest
+    }
   }
 
   async discoverProject(directory: string): Promise<ProjectManifest | null> {

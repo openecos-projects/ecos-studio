@@ -909,6 +909,26 @@ def test_step_configuration_directory_read_does_not_create_session(
         api.sessions.get_session("workspace-1")
 
 
+def test_workspace_configuration_read_does_not_create_session(monkeypatch, tmp_path):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "chipcompiler.engine.read_workspace_configuration",
+        lambda workspace: {
+            "workspaceSpec": {
+                "design": {"topModule": "gcd_top", "clockPort": "clk"}
+            },
+            "workspaceBindings": {"inputs": {"rtl-main": str(ws / "origin/gcd.v")}},
+        },
+    )
+    api = WorkspaceRuntimeApi()
+
+    result = api.read_workspace_configuration(WorkspaceOpenRequest(directory=str(ws)))
+
+    assert result["workspaceSpec"]["design"]["topModule"] == "gcd_top"
+    with pytest.raises(WorkspaceSessionNotFound):
+        api.sessions.get_session("workspace-1")
+
+
 def test_refresh_and_reset_flow_use_session(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     refreshed = []

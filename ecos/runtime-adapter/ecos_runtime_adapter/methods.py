@@ -26,6 +26,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
     WorkspaceMutationRequest,
+    WorkspaceOpenRequest,
     WorkspaceRecoverInterruptedRequest,
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
@@ -95,6 +96,11 @@ RUNTIME_METHODS: Final[tuple[RuntimeMethodSpec[Any], ...]] = (
         method_name="workspace.configuration.update",
         request_model=WorkspaceConfigurationUpdateRequest,
         handler_name="update_workspace_configuration",
+    ),
+    RuntimeMethodSpec(
+        method_name="workspace.configuration.read",
+        request_model=WorkspaceOpenRequest,
+        handler_name="read_workspace_configuration",
     ),
     RuntimeMethodSpec(
         method_name="workspace.step_configuration.update",

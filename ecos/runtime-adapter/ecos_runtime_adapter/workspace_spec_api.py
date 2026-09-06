@@ -46,6 +46,11 @@ class WorkspaceSpecRuntimeMixin:
         except (OSError, ValueError) as exc:
             raise RuntimeApiError("workspace_descriptor_invalid", str(exc)) from exc
 
+    def read_workspace_configuration(self, request: WorkspaceOpenRequest) -> dict:
+        from chipcompiler.engine import read_workspace_configuration
+
+        return read_workspace_configuration(self._load_workspace(request.directory))
+
     def discover_project(self, request: ProjectManifestDiscoverRequest) -> dict | None:
         from chipcompiler.project import discover_project_manifest
 

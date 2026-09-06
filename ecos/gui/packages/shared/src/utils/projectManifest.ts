@@ -29,9 +29,11 @@ export type ProjectManifestWorkspaceStatus =
   | 'archived'
 
 export interface ProjectManifestBaseDesign {
+  filelist?: string
   pdk?: string
   pdk_root?: string
   pdk_requirement?: PdkRequirement
+  sdc?: string
   top_module?: string
   clock?: string
   rtl_list?: string[]

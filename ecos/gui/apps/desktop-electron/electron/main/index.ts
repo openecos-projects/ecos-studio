@@ -38,7 +38,10 @@ import {
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
-import { ProjectManagementReadService } from '../services/projectManagementReadService'
+import {
+  ProjectManagementReadService,
+  type ProjectWorkspaceConfiguration,
+} from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
@@ -254,6 +257,11 @@ function getDesktopServices() {
     projectManifestService,
     (directory, step) =>
       eccRuntimeService.readWorkspaceStepConfigurationForDirectory(directory, step),
+    (directory) =>
+      eccRuntimeService.callRuntime<ProjectWorkspaceConfiguration>(
+        'workspace.configuration.read',
+        { directory },
+      ),
   )
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,
