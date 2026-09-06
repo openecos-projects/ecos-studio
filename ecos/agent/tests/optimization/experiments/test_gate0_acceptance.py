@@ -34,6 +34,9 @@ from ecos_agent.optimization.experiments.gate0 import (
     run_pilot_candidate,
 )
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from tests.optimization.experiments.equal_budget_support import (
+    _terminal_observation as _complete_terminal,
+)
 
 HASH = "sha256:" + "a" * 64
 
@@ -266,6 +269,66 @@ def test_design_candidates_use_parallel_independent_rpc_sessions(
     ]
     assert len(created) == 9
     assert all(client.closed for client in created)
+
+
+@pytest.mark.parametrize(
+    ("evaluation_complete", "require_eligible", "expected_error"),
+    (
+        (True, False, None),
+        (True, True, "canonical baseline is not terminal eligible"),
+        (False, False, "canonical baseline terminal evidence is incomplete"),
+    ),
+)
+def test_canonical_baseline_terminal_requirements(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    evaluation_complete: bool,
+    require_eligible: bool,
+    expected_error: str | None,
+) -> None:
+    snapshot = tmp_path / "input.v"
+    snapshot.write_text("module gcd(input clk); endmodule\n", encoding="utf-8")
+    config_path = tmp_path / "pilot.json"
+    config = gate0.Gate0Config.model_validate(
+        _config(snapshot, file_sha256(snapshot))
+    )
+    complete = _complete_terminal()
+    terminal = complete.model_copy(
+        update={
+            "signoff_gates": complete.signoff_gates.model_copy(
+                update={"drc_clean": GateResult.FAIL}
+            ),
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 2.0})
+                if item.metric_id == "drc_count"
+                else item
+                for item in complete.evaluation_metrics
+            ),
+            "evaluation_metrics_complete": evaluation_complete,
+        }
+    )
+    responses = iter(({"workspaceId": "workspace-1"}, {"operationId": "operation-1"}))
+    monkeypatch.setattr(gate0, "_pilot_request", lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setattr(gate0, "_wait_operation", lambda *_args: {"state": "succeeded"})
+    monkeypatch.setattr(gate0, "build_terminal_observation", lambda _path: terminal)
+    output = tmp_path / "output"
+    output.mkdir()
+
+    args = (
+        config_path,
+        config,
+        config.designs[0],
+        tmp_path / "workspace",
+        output,
+        object(),
+        {"pdk": {"root": str(tmp_path / "pdk"), "site_width_dbu": 200}},
+    )
+    if expected_error is not None:
+        with pytest.raises(Gate0Error, match=expected_error):
+            gate0._run_canonical(*args, require_eligible=require_eligible)
+    else:
+        result = gate0._run_canonical(*args, require_eligible=require_eligible)
+        assert result["observation"] == terminal
 
 
 def test_noise_profile_and_comparison_use_default_replay_range() -> None:
