@@ -182,24 +182,29 @@ def test_design_id_comes_from_workspace_parameters_and_fails_closed(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "home").mkdir()
-    parameters = tmp_path / "home" / "parameters.json"
-    parameters.write_text(json.dumps({"Design": "aes_core"}), encoding="utf-8")
+    parameters = tmp_path / "home" / "params.toml"
+    parameters.write_text('[params]\ndesign = "aes_core"\n', encoding="utf-8")
     assert _design_id(tmp_path) == "aes_core"
 
-    parameters.write_text(json.dumps({"Design": "../other"}), encoding="utf-8")
+    parameters.write_text('[params]\ndesign = "../other"\n', encoding="utf-8")
     with pytest.raises(OptimizationRuntimeError, match="identifier is invalid"):
         _design_id(tmp_path)
+
+
+def test_design_id_supports_legacy_parameters_json(tmp_path: Path) -> None:
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "parameters.json").write_text(
+        json.dumps({"Design": "legacy_core"}), encoding="utf-8"
+    )
+
+    assert _design_id(tmp_path) == "legacy_core"
 
 
 def test_current_values_read_the_seven_runtime_knob_surfaces(tmp_path: Path) -> None:
     (tmp_path / "home").mkdir()
     (tmp_path / "config").mkdir()
-    (tmp_path / "home" / "parameters.json").write_text(
-        json.dumps(
-            {
-                "Core": {"Utilitization": 0.6, "Aspect ratio": 1.33},
-            }
-        ),
+    (tmp_path / "home" / "params.toml").write_text(
+        "[params.core]\nutilitization = 0.6\naspect_ratio = 1.33\n",
         encoding="utf-8",
     )
     (tmp_path / "config" / "dreamplace_ecc.json").write_text(
@@ -311,6 +316,10 @@ def test_knowledge_case_pool_root_accepts_only_real_absolute_directories(
 def test_parent_manifest_binds_terminal_evidence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "params.toml").write_text(
+        '[params]\ndesign = "tiny"\n', encoding="utf-8"
+    )
     monkeypatch.setattr(
         "ecos_agent.optimization.runtime.build_optimization_artifact_manifest",
         lambda *_args: SimpleNamespace(manifest_sha256=_HASH),
@@ -343,8 +352,9 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
     tech_lef.parent.mkdir(parents=True)
     tech_lef.write_text("VERSION 5.8 ;\n", encoding="utf-8")
     (tmp_path / "home").mkdir()
-    (tmp_path / "home" / "parameters.json").write_text(
-        json.dumps({"Design": "design-a", "PDK Root": str(pdk)}), encoding="utf-8"
+    (tmp_path / "home" / "params.toml").write_text(
+        f'[design]\nname = "design-a"\n[pdk]\nroot = "{pdk}"\n',
+        encoding="utf-8",
     )
     (tmp_path / "home" / "flow.json").write_text("{}\n", encoding="utf-8")
 

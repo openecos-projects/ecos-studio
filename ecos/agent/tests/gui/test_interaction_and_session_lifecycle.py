@@ -6,12 +6,23 @@ import pytest
 from ecos_agent.workspace.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.gui.messages import home_ready_prompt
 from ecos_agent.gui.provider import EcosAgentProvider
+from ecos_agent.gui.provider_common import _design_id_for_workspace
 
 from .provider_support import (
     last_event as _last_event,
     proposal as _proposal,
     send_session_input as _send,
 )
+
+
+def test_workspace_design_id_reads_canonical_params_toml(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "params.toml").write_text(
+        '[design]\nname = "gcd"\n', encoding="utf-8"
+    )
+
+    assert _design_id_for_workspace(str(tmp_path)) == "gcd"
 
 
 def test_operation_choice_uses_interaction_request_and_dedicated_answer() -> None:

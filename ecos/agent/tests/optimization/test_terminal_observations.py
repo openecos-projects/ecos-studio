@@ -85,6 +85,9 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
         ObjectiveMetric.STA_TYPICAL_LEAKAGE_POWER: 0.267,
         ObjectiveMetric.STA_WORST_DYNAMIC_POWER: 105.2,
         ObjectiveMetric.STA_WORST_LEAKAGE_POWER: 89.1,
+        ObjectiveMetric.DRC_COUNT: 0.0,
+        ObjectiveMetric.STA_SETUP_VIOLATION_COUNT: 0.0,
+        ObjectiveMetric.STA_HOLD_VIOLATION_COUNT: 0.0,
     }
     assert by_id[("ppa", "sta_typical_dynamic_power", "TYP_25/TYPICAL")].value == 66.8
     assert by_id[("ppa", "sta_typical_leakage_power", "TYP_25/TYPICAL")].value == 0.267
@@ -629,6 +632,31 @@ def test_terminal_observation_keeps_configured_mpc_fail_closed(
     assert observation.signoff_gates.mpc_minimum_area.value == "pass"
     assert observation.signoff_gates.mpc_maximum_area.value == "unavailable"
     assert observation.eligible_for_incumbent is False
+
+
+def test_terminal_observation_accepts_canonical_params_toml(
+    frozen_workspace: Path,
+) -> None:
+    (frozen_workspace / "home/parameters.json").write_text(
+        '{"Design":"stale"}\n', encoding="utf-8"
+    )
+    (frozen_workspace / "home/params.toml").write_text(
+        """
+[params]
+design = "tiny"
+
+[params.mpc.core_template]
+minimum_area = 1
+maximum_area = 2
+""".strip(),
+        encoding="utf-8",
+    )
+
+    observation = build_terminal_observation(frozen_workspace)
+
+    assert observation.harden_artifacts_complete is True
+    assert observation.signoff_gates.mpc_minimum_area.value == "pass"
+    assert observation.signoff_gates.mpc_maximum_area.value == "pass"
 
 
 def test_terminal_observation_keeps_evidence_but_marks_missing_harden_outputs_incomplete(

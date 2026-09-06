@@ -25,6 +25,10 @@ from ecos_agent.optimization.runtime import (
     _ecc_executable,
     _optimization_rerun_runtime_seconds,
 )
+from ecos_agent.workspace.parameters import (
+    WorkspaceParametersError,
+    read_workspace_parameters,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SETUP_METHODS = frozenset({"workspace.create", "operation.start_flow"})
@@ -281,17 +285,20 @@ def _verify_workspace_inputs(
 def _verify_workspace_parameters(
     manifest: ExperimentManifest, design: DesignSpec, workspace: Path
 ) -> None:
-    parameters = _workspace_json(workspace, "home/parameters.json")
+    try:
+        _parameters_ref, parameters = read_workspace_parameters(workspace)
+    except WorkspaceParametersError as exc:
+        raise ValueError("Phase 8 workspace parameters are invalid") from exc
     dreamplace = _workspace_json(workspace, "config/dreamplace_ecc.json")
     cts = _workspace_json(workspace, "config/cts_ecc.json")
     floorplan = _workspace_json(workspace, "config/floorplan_ecc.json")
     baseline = manifest.baseline
     site_width = _site_width_dbu_from_pdk(manifest.pdk_root)
     expected_parameters = {
-        "Design": design.design_id,
-        "Top module": design.top_module,
-        "Clock": design.clock_name,
-        "Frequency max [MHz]": baseline["frequency_mhz"],
+        "design": design.design_id,
+        "top_module": design.top_module,
+        "clock": design.clock_name,
+        "frequency_max": baseline["frequency_mhz"],
     }
     expected_dreamplace = {
         "target_density": baseline["target_density"],
@@ -303,7 +310,7 @@ def _verify_workspace_parameters(
     die_util = floorplan.get("die_builder", {}).get("die_util", {})
     if (
         any(parameters.get(key) != value for key, value in expected_parameters.items())
-        or Path(str(parameters.get("PDK Root"))).resolve() != manifest.pdk_root
+        or Path(str(parameters.get("pdk_root"))).resolve() != manifest.pdk_root
         or any(dreamplace.get(key) != value for key, value in expected_dreamplace.items())
         or cts.get("max_fanout") != baseline["max_fanout"]
         or die_util.get("utilization") != baseline["core_utilization"]

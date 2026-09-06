@@ -38,6 +38,11 @@ from ecos_agent.optimization.metrics.extraction import (
     metric_record,
     required_nonnegative_metric,
 )
+from ecos_agent.optimization.parameter_config import (
+    harden_output_paths,
+    mpc_configured,
+    read_workspace_parameters,
+)
 
 _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -104,7 +109,6 @@ _REQUIRED_TERMINAL_QOR_FILES = tuple(
 )
 _TERMINAL_FILES = (
     "home/flow.json",
-    "home/parameters.json",
     *_REQUIRED_TERMINAL_QOR_FILES,
     "drc_ecc/checklist.json",
     "lvs_ecc/checklist.json",
@@ -126,7 +130,7 @@ def build_stage_observation(
     canonical_stage = _canonical_stage(stage)
     flow = _read_json(root, "home/flow.json")
     _require_successful_stage(flow, canonical_stage)
-    _read_json(root, "home/parameters.json")
+    parameters_ref, _parameters = read_workspace_parameters(root)
     metrics_path = f"{_STAGE_DIRECTORIES[canonical_stage]}/analysis/qor_metrics.json"
     metrics_payload = _read_json(root, metrics_path)
     metrics = _qor_metrics(metrics_payload)
@@ -140,7 +144,7 @@ def build_stage_observation(
     )
     manifest_paths = (
         "home/flow.json",
-        "home/parameters.json",
+        parameters_ref,
         metrics_path,
         *evidence_paths,
     )
@@ -224,6 +228,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     """Build the fixed terminal optimization observation without running ECC."""
     root = _workspace_root(workspace_root)
     files = {path: _read_json(root, path) for path in _TERMINAL_FILES}
+    parameters_ref, parameters = read_workspace_parameters(root)
     flow = files["home/flow.json"]
     for stage in (*_AREA_EVIDENCE_STEPS, *_TERMINAL_FLOW_STEPS):
         _require_successful_stage(flow, stage)
@@ -246,8 +251,8 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         for metric in TIMING_GUARDRAIL_ORDER
     }
     harden_metrics = metrics_by_path["Harden_ecc/analysis/qor_metrics.json"]
-    output_paths = _harden_output_paths(files["home/parameters.json"])
-    mpc_configured = _mpc_configured(files["home/parameters.json"])
+    output_paths = harden_output_paths(parameters)
+    has_mpc = mpc_configured(parameters)
     complete_outputs = all(_is_nonempty_file(root, path) for path in output_paths)
     missing_artifacts = harden_metrics.get("harden_artifact_missing_count")
     harden_complete = complete_outputs and missing_artifacts == 0
@@ -259,6 +264,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
     )
     manifest_paths = (
         *_TERMINAL_FILES,
+        parameters_ref,
         *(path for path in metrics_by_path if path not in _REQUIRED_TERMINAL_QOR_FILES),
         *corner_paths,
         *(path for path in output_paths if _is_file(root, path)),
@@ -286,10 +292,10 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
                 files["sta_ecc/checklist.json"], "quality.sta.hold_closed"
             ),
             mpc_minimum_area=_optional_mpc_gate(
-                files["Harden_ecc/checklist.json"], "quality.mpc.minimum_area", mpc_configured
+                files["Harden_ecc/checklist.json"], "quality.mpc.minimum_area", has_mpc
             ),
             mpc_maximum_area=_optional_mpc_gate(
-                files["Harden_ecc/checklist.json"], "quality.mpc.maximum_area", mpc_configured
+                files["Harden_ecc/checklist.json"], "quality.mpc.maximum_area", has_mpc
             ),
         ),
         metrics=terminal_metrics,
@@ -333,11 +339,11 @@ def build_candidate_terminal_observation(
     artifacts = payload.get("artifacts", {})
     if not isinstance(artifacts, dict):
         raise OptimizationObservationError("candidate artifact manifest is invalid")
-    parameters = _read_json(candidate_root, "home/parameters.json")
+    _parameters_ref, parameters = read_workspace_parameters(candidate_root)
     harden_refs = dict(
         zip(
             ("harden_gds", "harden_lef", "harden_lib"),
-            _harden_output_paths(parameters),
+            harden_output_paths(parameters),
             strict=True,
         )
     )
@@ -768,14 +774,6 @@ def _required_timing_metric(metrics: dict[str, float], metric_id: str) -> float:
         ) from exc
 
 
-def _harden_output_paths(parameters: dict[str, Any]) -> tuple[str, str, str]:
-    design = parameters.get("Design")
-    if not isinstance(design, str) or not _DESIGN_ID.fullmatch(design):
-        raise OptimizationObservationError("workspace design identifier is invalid")
-    prefix = f"Harden_ecc/output/{design}_Harden"
-    return (f"{prefix}.gds", f"{prefix}.lef", f"{prefix}.lib")
-
-
 def _checklist_gate(payload: dict[str, Any], gate_id: str) -> GateResult:
     if payload.get("status") not in {"ready", "blocked"} or not isinstance(
         payload.get("checklist"), list
@@ -798,8 +796,3 @@ def _optional_mpc_gate(
     if not configured:
         return GateResult.NOT_APPLICABLE
     return _checklist_gate(payload, gate_id)
-
-
-def _mpc_configured(parameters: dict[str, Any]) -> bool:
-    mpc = parameters.get("MPC")
-    return isinstance(mpc, dict) and isinstance(mpc.get("core_template"), dict)

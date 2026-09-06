@@ -66,6 +66,10 @@ from ecos_agent.optimization.knowledge.retrieval import (
 )
 from ecos_agent.optimization.rules import freeze_routability_objective
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
+from ecos_agent.workspace.parameters import (
+    WorkspaceParametersError,
+    read_workspace_parameters,
+)
 
 
 class OptimizationRuntimeError(ValueError):
@@ -500,11 +504,12 @@ def _wait_for_terminal_receipt(
 
 
 def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> str:
+    parameters_ref, _parameters = _runtime_parameters(workspace)
     checkpoint_manifest = build_optimization_artifact_manifest(
         workspace,
         (
             "home/flow.json",
-            "home/parameters.json",
+            parameters_ref,
             "place_dreamplace/analysis/qor_metrics.json",
         ),
     )
@@ -556,13 +561,11 @@ def _optimization_execution_context(
             hashes[0] if len(hashes) == 1 else canonical_sha256({"files": hashes})
         )
     try:
-        parameters = json.loads(
-            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
-        )
-        pdk_root = Path(parameters["PDK Root"])
+        parameters = _runtime_parameters(workspace)[1]
+        pdk_root = Path(parameters["pdk_root"])
         tech_lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
         pdk_sha256 = file_sha256(tech_lef)
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError(
             "optimization PDK evidence is unavailable"
         ) from exc
@@ -629,15 +632,8 @@ def _incumbent_workspace(workspace: Path, candidate_root_ref: str | None) -> Pat
 
 
 def _design_id(workspace: Path) -> str:
-    try:
-        payload = json.loads(
-            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as exc:
-        raise OptimizationRuntimeError(
-            "workspace design identifier is unavailable"
-        ) from exc
-    value = payload.get("Design")
+    payload = _runtime_parameters(workspace)[1]
+    value = payload.get("design")
     if not isinstance(value, str) or not _DESIGN_ID.fullmatch(value):
         raise OptimizationRuntimeError("workspace design identifier is invalid")
     return value
@@ -689,9 +685,7 @@ def _current_values(
     workspace: Path, site_width_dbu: int
 ) -> dict[str, bool | int | float]:
     try:
-        parameters = json.loads(
-            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
-        )
+        parameters = _runtime_parameters(workspace)[1]
         dreamplace = json.loads(
             (workspace / "config" / "dreamplace_ecc.json").read_text(encoding="utf-8")
         )
@@ -701,10 +695,10 @@ def _current_values(
             "place.cell_padding_x": dreamplace["cell_padding_x"] / site_width_dbu,
             "place.routability_opt": bool(dreamplace["routability_opt_flag"]),
             "place.density_weight": dreamplace["density_weight"],
-            "floorplan.core_util": parameters["Core"]["Utilitization"],
-            "floorplan.aspect_ratio": parameters["Core"]["Aspect ratio"],
+            "floorplan.core_util": parameters["core"]["utilitization"],
+            "floorplan.aspect_ratio": parameters["core"]["aspect_ratio"],
         }
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError("optimization parameters are invalid") from exc
     if not isinstance(values["place.target_density"], (int, float)) or isinstance(
         values["place.target_density"], bool
@@ -745,13 +739,11 @@ def _ecc_executable() -> Path:
 
 def _site_width_dbu(workspace: Path) -> int:
     try:
-        params = json.loads(
-            (workspace / "home" / "parameters.json").read_text(encoding="utf-8")
-        )
-        pdk_root = Path(params["PDK Root"])
+        params = _runtime_parameters(workspace)[1]
+        pdk_root = Path(params["pdk_root"])
         lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
         text = lef.read_text(encoding="utf-8")
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
         raise OptimizationRuntimeError("PDK technology LEF is unavailable") from exc
     units_match = re.search(r"DATABASE\s+MICRONS\s+(\d+)", text, re.IGNORECASE)
     site_match = re.search(
@@ -770,6 +762,13 @@ def _site_width_dbu(workspace: Path) -> int:
     if width <= 0:
         raise OptimizationRuntimeError("PDK site width is invalid")
     return width
+
+
+def _runtime_parameters(workspace: Path) -> tuple[str, dict[str, Any]]:
+    try:
+        return read_workspace_parameters(workspace)
+    except WorkspaceParametersError as exc:
+        raise OptimizationRuntimeError("workspace parameters are unavailable") from exc
 
 
 def _terminal_timeout_seconds() -> float:
