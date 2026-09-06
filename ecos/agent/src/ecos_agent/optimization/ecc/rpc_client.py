@@ -337,8 +337,11 @@ def _terminal_event(
         "state": state,
     }
     payload = event.get("payload")
-    if isinstance(payload, Mapping) and isinstance(payload.get("result"), Mapping):
-        terminal["result"] = dict(payload["result"])
+    if isinstance(payload, Mapping):
+        if isinstance(payload.get("error"), Mapping):
+            terminal["error"] = dict(payload["error"])
+        if isinstance(payload.get("result"), Mapping):
+            terminal["result"] = dict(payload["result"])
     return terminal
 
 

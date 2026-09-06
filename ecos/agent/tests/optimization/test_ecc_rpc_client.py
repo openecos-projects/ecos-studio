@@ -11,6 +11,7 @@ from ecos_agent.optimization.ecc.adapter import (
     EccContentLengthRpcClient,
     OptimizationEccAdapterError,
     _step_render_ack,
+    _terminal_event,
 )
 
 HASH = "sha256:" + "a" * 64
@@ -150,6 +151,29 @@ def test_stdio_client_deduplicates_step_ack_per_operation(
         "operation-1",
         "operation-2",
     ]
+
+
+def test_terminal_event_preserves_failure_error() -> None:
+    terminal = _terminal_event(
+        {
+            "type": "operation.failed",
+            "operationId": "operation-1",
+            "workspaceId": "workspace-1",
+            "payload": {
+                "error": {"code": "command_failed", "message": "Sizer failed"},
+                "result": {"candidateId": "candidate-1"},
+            },
+        },
+        "operation-1",
+    )
+
+    assert terminal == {
+        "operationId": "operation-1",
+        "workspaceId": "workspace-1",
+        "state": "failed",
+        "error": {"code": "command_failed", "message": "Sizer failed"},
+        "result": {"candidateId": "candidate-1"},
+    }
 
 
 def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
