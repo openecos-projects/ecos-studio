@@ -64,6 +64,8 @@ class EccContentLengthRpcClient:
     def start(self) -> None:
         if self._process is not None:
             return
+        environment = os.environ.copy()
+        environment["ECOS_AGENT_SKIP_DISPLAY_PLOTS"] = "1"
         try:
             self._process = subprocess.Popen(
                 self.command,
@@ -71,6 +73,7 @@ class EccContentLengthRpcClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 bufsize=0,
+                env=environment,
             )
         except OSError as exc:
             raise OptimizationEccAdapterError("failed to start ECC RPC") from exc
