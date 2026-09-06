@@ -189,6 +189,29 @@ def test_stdio_client_requires_an_absolute_executable_path(tmp_path) -> None:
     assert client.command == (str(executable),)
 
 
+def test_stdio_client_enables_headless_agent_plots(tmp_path: Path) -> None:
+    marker = tmp_path / "env.txt"
+    executable = tmp_path / "fake-ecc"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import os\n"
+        "import time\n"
+        f"open({str(marker)!r}, 'w').write(os.environ['ECOS_AGENT_SKIP_DISPLAY_PLOTS'])\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    client.start()
+    for _ in range(20):
+        if marker.exists():
+            break
+        time.sleep(0.01)
+    client.close()
+
+    assert marker.read_text(encoding="utf-8") == "1"
+
+
 def test_stdio_client_exposes_ecc_revision(monkeypatch, tmp_path: Path) -> None:
     executable = tmp_path / "ecc"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
