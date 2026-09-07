@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict
+from ecos_agent.context_status import StatusSnapshots
 
 from ecos_agent.codex.rpc import (
     CodexProviderError,
@@ -166,6 +167,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         self._planning_envelope: PlanningProviderEnvelope | None = None
         self._interrupted = False
         self._state_lock = threading.Lock()
+        self._status_snapshots = StatusSnapshots()
 
     def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
         payload = _optimization_planning_payload(context)
@@ -515,8 +517,21 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         output_schema: dict[str, Any],
         tool_policy: ToolPolicy = "none",
     ) -> dict[str, Any]:
+        with self._state_lock:
+            if self._interrupted:
+                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
+        thread_id = self._ensure_thread(self._ensure_client())
+        status = self._status_snapshots.build(user, thread_id)
+        prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
+        with self._state_lock:
+            if self._planning_envelope is not None:
+                envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
+                envelope["prompt"] = prompt
+                self._planning_envelope = PlanningProviderEnvelope(
+                    **envelope, envelope_sha256=canonical_sha256(envelope)
+                )
         text = self._run_turn(
-            _build_prompt(system, user, tool_policy=tool_policy),
+            prompt,
             output_schema,
             tool_policy=tool_policy,
         )
