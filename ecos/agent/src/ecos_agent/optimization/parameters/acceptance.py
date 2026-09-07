@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import re
 import subprocess
 from pathlib import Path
@@ -57,17 +56,7 @@ _SUCCESSFUL_TRACE_OUTCOMES = frozenset(
 
 
 def _receipt_is_effective(receipt: dict) -> bool:
-    if receipt.get("application_status") != "applied":
-        return False
-    activation = receipt.get("activation", {})
-    if activation.get("status") == "used":
-        return True
-    requested = receipt.get("requested", {})
-    return (
-        requested.get("knob_id") == "place.routability_opt"
-        and requested.get("value") is False
-        and activation.get("status") == "not_activated"
-    )
+    return receipt.get("status") == "effective"
 
 
 def _validate_native_receipt(
@@ -94,6 +83,13 @@ def _validate_native_receipt(
         issues.append("native receipt tool source does not match current card")
     if runtime_payload.get("tool") != receipt.tool.model_dump(mode="json"):
         issues.append("runtime report tool binding mismatch")
+    if (
+        runtime_payload.get("knob_id") != knob_id
+        or runtime_payload.get("written_value") != receipt.materialization.written_value
+        or isinstance(runtime_payload.get("written_value"), bool)
+        != isinstance(receipt.materialization.written_value, bool)
+    ):
+        issues.append("runtime report materialization binding mismatch")
     expected_materialization_sha256 = canonical_sha256(
         {
             key: value
@@ -112,14 +108,7 @@ def _validate_native_receipt(
     ):
         issues.append("native receipt candidate binding mismatch")
     dumped = receipt.model_dump(mode="json", by_alias=True)
-    runtime_fields = (
-        "application_status",
-        "effective_initial",
-        "effective_final",
-        "activation",
-        "transitions",
-        "consumer_observation",
-    )
+    runtime_fields = ("status", "actual_value", "reason", "observation")
     if any(runtime_payload.get(field) != dumped.get(field) for field in runtime_fields):
         issues.append("native receipt does not match runtime report")
     return receipt, issues
@@ -156,42 +145,6 @@ def _validate_candidate_artifact_binding(
     except (OptimizationEccAdapterError, TypeError, ValueError, KeyError) as exc:
         return f"candidate artifact binding failed: {exc}"
     return None
-
-
-def _has_native_density_floor_override(receipt: dict) -> bool:
-    if receipt.get("requested", {}).get("knob_id") != "place.target_density":
-        return False
-    requested = receipt.get("requested", {}).get("value")
-    effective = receipt.get("effective_initial", {}).get("value")
-    final = receipt.get("effective_final", {}).get("value")
-    observation = receipt.get("consumer_observation") or {}
-    if (
-        type(requested) not in {int, float}
-        or type(effective) not in {int, float}
-        or requested >= effective
-        or final != effective
-        or observation.get("effective_target_density") != effective
-        or not _same_number(observation.get("density_tensor_value"), effective)
-        or observation.get("density_operator_call_count", 0) <= 0
-    ):
-        return False
-    return any(
-        transition.get("to") == "overridden"
-        and transition.get("rule_id") == "dreamplace.target_density.utilization_floor"
-        and transition.get("value") == effective
-        and bool(transition.get("evidence_ref"))
-        and bool(transition.get("evidence_sha256"))
-        for transition in receipt.get("transitions", [])
-        if isinstance(transition, dict)
-    )
-
-
-def _same_number(left: object, right: object) -> bool:
-    return (
-        type(left) in {int, float}
-        and type(right) in {int, float}
-        and math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-7)
-    )
 
 
 def _state_sha256(root: Path) -> str:
@@ -524,22 +477,6 @@ def _validate_replay(
     return replay_payload
 
 
-def _validate_requested_value(knob_id: str, receipt_payload: dict, issues: list[str]) -> None:
-    requested = receipt_payload.get("requested", {})
-    effective = receipt_payload.get("effective_initial", {})
-    expected_unit = (
-        "objective_weight" if knob_id.endswith("density_weight") else requested.get("unit")
-    )
-    if requested.get("unit") != expected_unit:
-        issues.append(f"native receipt unit mismatch; expected {expected_unit}")
-    if (
-        requested.get("value") != effective.get("value")
-        and knob_id != "place.cell_padding_x"
-        and not _has_native_density_floor_override(receipt_payload)
-    ):
-        issues.append("effective initial does not match requested value")
-
-
 def _match_trace(
     episode_replays: tuple[dict, ...],
     evidence: CandidateExecutionEvidence,
@@ -643,7 +580,6 @@ def _candidate_entry(
         issues=issues,
     )
     replay_payload = _validate_replay(workspace, paths, payload, issues)
-    _validate_requested_value(knob_id, receipt_payload, issues)
     card_sha256 = canonical_sha256(card_by_id[knob_id].model_dump(mode="json"))
     terminal_sha256 = canonical_sha256(observation.model_dump(mode="json"))
     trace_episode = _match_trace(

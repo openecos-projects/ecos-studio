@@ -131,13 +131,6 @@ def _replay_entries(
                     "terminal outcome does not match one pending intervention"
                 )
             start = starts[payload.intervention_id]
-            if payload.application_receipt is not None and (
-                start.requested is None
-                or payload.application_receipt.requested != start.requested
-            ):
-                raise OptimizationLedgerIntegrityError(
-                    "terminal application receipt does not match intervention request"
-                )
             if payload.parameter_application_receipt is not None:
                 requested = payload.parameter_application_receipt.requested
                 if (
@@ -187,7 +180,7 @@ def _entry_sha256(
 ) -> str:
     return canonical_sha256(
         {
-            "schema_version": "ecos.optimization_ledger_entry.v1",
+            "schema_version": "ecos.optimization_ledger_entry.v2",
             "sequence": sequence,
             "previous_entry_sha256": previous_entry_sha256,
             "payload": payload.model_dump(mode="json"),

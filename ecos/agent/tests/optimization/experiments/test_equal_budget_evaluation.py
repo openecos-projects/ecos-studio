@@ -27,8 +27,6 @@ from ecos_agent.optimization.metrics.contracts import (
     TerminalEvaluationMetric,
 )
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
     ToolRef,
@@ -57,7 +55,7 @@ def _load_experiment_execution():
     return knowledge_treatment_execution
 
 
-def test_equal_budget_counts_receipts_and_aliases() -> None:
+def test_equal_budget_counts_parameter_status_and_receipts() -> None:
     traces = [
         CandidateTrace(
             design_id="gcd",
@@ -66,11 +64,7 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
             planning_mode="receipt-aware",
             terminal_success=True,
             terminal_utility=10.0,
-            activation_status="used",
-            application_signature="a1",
-            response_signature="r1",
-            alias=True,
-            alias_valid=True,
+            parameter_status="effective",
             proposal_outcome="repair",
             runtime_seconds=2.0,
             peak_memory_mb=4.0,
@@ -81,9 +75,7 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
             started=True,
             planning_mode="receipt-aware",
             terminal_success=False,
-            activation_status="not_activated",
-            application_signature="a2",
-            response_signature="r2",
+            parameter_status="inactive",
             receipt_status="missing",
             proposal_outcome="reject",
             runtime_seconds=3.0,
@@ -95,8 +87,6 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
             started=False,
             planning_mode="receipt-aware",
             terminal_success=False,
-            alias=True,
-            alias_valid=False,
         ),
     ]
     summary = evaluate_equal_budget(
@@ -107,47 +97,23 @@ def test_equal_budget_counts_receipts_and_aliases() -> None:
     )
     assert summary.started_candidates == 2
     assert summary.terminal_successes == 1
-    assert summary.aliases_saved == 1
-    assert summary.wrong_prunes == 1
-    assert summary.alias_unassessed == 0
-    assert summary.not_activated == 1
-    assert summary.overridden_rate == 0.0
-    assert summary.ignored_rate == 0.0
-    assert summary.not_activated_rate == 0.5
+    assert summary.effective == 1
+    assert summary.inactive == 1
+    assert summary.unknown == 0
+    assert summary.effective_rate == 0.5
+    assert summary.inactive_rate == 0.5
     assert summary.receipt_missing == 1
     assert summary.wall_time_limit_seconds == 44.0
     assert summary.peak_memory_mb == 8.0
 
 
-def test_requested_only_does_not_claim_alias_savings() -> None:
+def test_equal_budget_rejects_unknown_status_vocabulary() -> None:
     trace = CandidateTrace(
-        design_id="gcd",
-        candidate_id="c1",
-        started=False,
-        terminal_success=False,
-        planning_mode="requested-only",
-        alias=True,
+        design_id="gcd", candidate_id="c1", started=True,
+        terminal_success=True, planning_mode="receipt-aware", parameter_status="used",
     )
-    summary = evaluate_equal_budget([trace], mode="requested-only")
-    assert summary.aliases_saved == 0
-    assert summary.wrong_prunes == 0
-
-
-def test_receipt_aware_does_not_claim_unverified_aliases() -> None:
-    trace = CandidateTrace(
-        design_id="gcd",
-        candidate_id="c1",
-        started=False,
-        terminal_success=False,
-        planning_mode="receipt-aware",
-        alias=True,
-    )
-
-    summary = evaluate_equal_budget([trace], mode="receipt-aware")
-
-    assert summary.aliases_saved == 0
-    assert summary.wrong_prunes == 0
-    assert summary.alias_unassessed == 1
+    with pytest.raises(ValueError, match="parameter status is invalid"):
+        evaluate_equal_budget((trace,), mode="receipt-aware")
 
 
 def test_equal_budget_reports_terminal_metrics_and_regret() -> None:
@@ -234,21 +200,10 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
             written_value=0.2,
             unit="ratio",
         ),
-        "effective_initial": EffectiveValue(value=0.8, unit="ratio"),
-        "transitions": (),
-        "application_status": "applied",
-        "activation": ActivationEvidence(
-            status="used",
-            consumers=(
-                {
-                    "consumer_id": "dreamplace.density_objective",
-                    "outcome": "entered",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": HASH,
-                },
-            ),
-        ),
-        "effective_final": EffectiveValue(value=0.8, unit="ratio"),
+        "actual_value": 0.8,
+        "status": "effective",
+        "reason": None,
+        "observation": {},
     }
     receipt = ParameterApplicationReceipt.model_construct(
         **receipt_payload,
@@ -288,9 +243,9 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
     assert trace.drc == 0.0
     assert trace.timing == 0.0
     assert trace.congestion == 3.0
-    assert trace.activation_status == "used"
-    assert trace.application_signature is not None
-    assert trace.response_signature is not None
+    assert trace.parameter_status == "effective"
+    assert trace.actual_value == 0.8
+    assert trace.requested_value == 0.2
     assert trace.receipt_status == "ok"
 
 

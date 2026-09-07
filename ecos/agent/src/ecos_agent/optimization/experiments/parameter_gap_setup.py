@@ -1,4 +1,4 @@
-"""Frozen configuration and readiness gates for the RQ1 gap screen."""
+"""Frozen configuration and readiness gates for the seven-knob status screen."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import platform
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,7 +22,6 @@ from ecos_agent.optimization.experiments.gate0 import (
     _pdk_site_width_dbu,
     _snapshot_path,
 )
-from ecos_agent.optimization.experiments.parameter_gap import KnobGapSummary
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, load_parameter_cards
 
@@ -216,15 +215,6 @@ def screen_values(
             value for value in selected if value is not None and value != current
         )
     )
-
-
-def overall_verdict(summaries: Iterable[KnobGapSummary]) -> str:
-    verdicts = {item.verdict for item in summaries}
-    if "gap_confirmed" in verdicts:
-        return "gap_confirmed_on_gcd"
-    if verdicts == {"no_gap_observed"}:
-        return "no_gap_observed_on_gcd_at_fixed_context"
-    return "indeterminate"
 
 
 def readiness_report(config_path: Path) -> dict[str, Any]:

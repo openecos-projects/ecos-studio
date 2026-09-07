@@ -2,6 +2,10 @@
 
 日期：2026-09-06
 
+> 历史实验记录：本文保留当时的 v1 参数状态和 gap 定义，不代表当前实现。
+> 当前采用请求值、实际使用值及 effective/inactive/unknown 三态；特别是 target_overflow
+> 以最终 overflow 严格小于实际阈值判断生效。下述历史分类未按新定义重新计算。
+
 ## 1. 审计结论
 
 本轮在 ICS55 GCD 上完成了 3 次 canonical baseline 和 76 个正式 parameter-gap

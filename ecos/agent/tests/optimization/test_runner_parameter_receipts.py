@@ -25,33 +25,32 @@ _TIMING_GUARDRAIL = {metric: 0.0 for metric in TimingMetric}
 
 from tests.optimization.runner_support import _native_receipt
 
-def test_false_routability_receipt_is_effective_without_branch_activation() -> None:
+def test_disabled_controls_are_effective_without_special_cases() -> None:
     assert native_receipt_is_effective(
         _native_receipt(
-            "place.routability_opt", False, activation_status="not_activated"
+            "place.routability_opt", False, status="effective"
         )
     )
     assert not native_receipt_is_effective(
         _native_receipt(
-            "place.routability_opt", True, activation_status="not_activated"
+            "place.routability_opt", True, status="inactive"
         )
     )
+    assert native_receipt_is_effective(_native_receipt("place.cell_padding_x", 0))
 
 
-def test_native_receipt_coordinates_use_requested_density_weight_and_effective_padding() -> (
+def test_native_receipt_coordinates_use_actual_parameter_units() -> (
     None
 ):
     assert (
         coordinate_value_from_native_receipt(
-            _native_receipt("place.density_weight", 0.001, effective_value=0.0817526),
-            site_width_dbu=200,
+            _native_receipt("place.density_weight", 0.001),
         )
         == 0.001
     )
     assert (
         coordinate_value_from_native_receipt(
-            _native_receipt("place.cell_padding_x", 2, effective_value=200),
-            site_width_dbu=200,
+            _native_receipt("place.cell_padding_x", 2, effective_value=1),
         )
         == 1
     )

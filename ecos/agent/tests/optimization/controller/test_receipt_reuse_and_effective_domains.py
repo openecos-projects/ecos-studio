@@ -170,7 +170,7 @@ def test_same_execution_context_reuses_eligible_receipt_across_episodes(
         "effective_anchor": None,
     }
     assert density_domain.thresholds[0].value == 0.8
-    assert density_domain.observed_response_signatures
+    assert density_domain.thresholds[0].evidence_refs
     assert 0.8 not in density_domain.allowed_requested_values
 
 
@@ -342,7 +342,7 @@ def test_completed_terminal_receipt_is_bound_to_promoted_incumbent(
     assert density_domain.current_coordinate is not None
     assert density_domain.current_coordinate["surface_value"] == planned.requested.value
     assert density_domain.current_coordinate["effective_anchor"] == 0.8
-    assert density_domain.observed_response_signatures
+    assert density_domain.thresholds[0].evidence_refs
 
 
 def test_episode_identity_does_not_change_execution_contract_fingerprint(

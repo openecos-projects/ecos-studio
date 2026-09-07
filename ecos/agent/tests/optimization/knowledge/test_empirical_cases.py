@@ -32,9 +32,6 @@ from ecos_agent.optimization.ledger import (
     OptimizationTerminalOutcome,
 )
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    ConsumerEvidence,
-    EffectiveValue,
     MaterializationRef,
     NumericProposalActionV2,
     OptimizationProposalV2,
@@ -53,7 +50,7 @@ def _domain() -> EffectiveDomainSnapshot:
     payload = {
         "knob_id": OptimizationKnob.TARGET_DENSITY,
         "context_sha256": HASH,
-        "current_coordinate": {"requested": 0.8, "effective": 0.8},
+        "current_coordinate": {"requested": 0.8, "actual_value": 0.8},
         "surface_values": (0.8, 0.85),
         "allowed_requested_values": (0.85,),
     }
@@ -94,12 +91,6 @@ def _proposal(domain: EffectiveDomainSnapshot) -> OptimizationProposalV2:
 
 
 def _receipt(*, receipt_id: str = "receipt-1") -> ParameterApplicationReceipt:
-    consumer = ConsumerEvidence(
-        consumer_id="dreamplace.density_objective",
-        outcome="entered",
-        evidence_ref="analysis/runtime.json",
-        evidence_sha256=HASH,
-    )
     payload = {
         "receipt_id": receipt_id,
         "tool": ToolRef(
@@ -126,16 +117,15 @@ def _receipt(*, receipt_id: str = "receipt-1") -> ParameterApplicationReceipt:
             written_value=0.85,
             unit="ratio",
         ),
-        "effective_initial": EffectiveValue(value=0.85, unit="ratio"),
-        "application_status": "applied",
-        "activation": ActivationEvidence(status="used", consumers=(consumer,)),
-        "effective_final": EffectiveValue(value=0.85, unit="ratio"),
+        "actual_value": 0.85,
+        "status": "effective",
+        "reason": None,
+        "observation": {},
     }
     draft = ParameterApplicationReceipt.model_construct(
         **payload, evidence_sha256=HASH
     )
     digest_payload = draft.model_dump(mode="json", exclude={"evidence_sha256"})
-    digest_payload.pop("consumer_observation", None)
     return ParameterApplicationReceipt(
         **payload, evidence_sha256=canonical_sha256(digest_payload)
     )
@@ -188,8 +178,8 @@ def _case(
         binding_id=binding,
         toolchain_ref=toolchain,
         requested_value=0.85,
-        effective_initial=0.85,
-        activation_status="used",
+        actual_value=0.85,
+        parameter_status="effective",
         proposal_sha256=HASH,
         effective_domain_sha256=DOMAIN_HASH,
         parameter_card_sha256=CARD_HASH,
@@ -204,7 +194,7 @@ def _case(
     )
 
 
-def test_builder_binds_complete_l0_to_l3_chain() -> None:
+def test_builder_binds_receipt_and_terminal_outcome() -> None:
     domain = _domain()
     proposal = _proposal(domain)
     receipt = _receipt()
@@ -223,6 +213,8 @@ def test_builder_binds_complete_l0_to_l3_chain() -> None:
     )
 
     assert case.claim_id == "claim.one"
+    assert case.requested_value == case.actual_value == 0.85
+    assert case.parameter_status == "effective"
     assert case.binding_id == "binding.one"
     assert case.toolchain_ref == TOOLCHAIN_HASH
     assert case.proposal_sha256 == canonical_sha256(proposal.model_dump(mode="json"))

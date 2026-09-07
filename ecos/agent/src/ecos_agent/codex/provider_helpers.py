@@ -79,8 +79,8 @@ _MODEL_EMPIRICAL_CASE_KEYS = (
     "context_fingerprint",
     "toolchain_ref",
     "evidence_status",
-    "effective_initial",
-    "activation_status",
+    "actual_value",
+    "parameter_status",
     "guardrail_status",
     "outcome_class",
 )

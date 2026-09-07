@@ -75,8 +75,8 @@ class EmpiricalCaseAuditRecoveryRequired(EmpiricalCaseAuditError):
 class TerminalEmpiricalCase(_Model):
     """An immutable, terminal-closed overlay; it is never source evidence."""
 
-    schema_version: Literal["ecos.terminal_empirical_case.v2"] = (
-        "ecos.terminal_empirical_case.v2"
+    schema_version: Literal["ecos.terminal_empirical_case.v3"] = (
+        "ecos.terminal_empirical_case.v3"
     )
     case_id: str
     context_fingerprint: str
@@ -84,8 +84,8 @@ class TerminalEmpiricalCase(_Model):
     binding_id: str
     toolchain_ref: str
     requested_value: Scalar
-    effective_initial: Scalar | None = None
-    activation_status: Literal["used", "not_activated", "unknown"]
+    actual_value: Scalar | None = None
+    parameter_status: Literal["effective", "inactive", "unknown"]
     proposal_sha256: str
     effective_domain_sha256: str
     parameter_card_sha256: str
@@ -132,10 +132,10 @@ class TerminalEmpiricalCase(_Model):
     @model_validator(mode="after")
     def validate_semantics(self) -> "TerminalEmpiricalCase":
         if self.outcome_class == EmpiricalOutcome.SUPPORTED and (
-            self.activation_status != "used" or self.guardrail_status != "pass"
+            self.parameter_status != "effective" or self.guardrail_status != "pass"
         ):
             raise ValueError(
-                "supported empirical cases require used activation and passing guardrails"
+                "supported empirical cases require effective parameter status and passing guardrails"
             )
         return self
 
@@ -398,8 +398,8 @@ def build_terminal_empirical_case(
         case_id=case_id,
         **derived,
         requested_value=requested,
-        effective_initial=receipt.effective_initial.value,
-        activation_status=receipt.activation.status,
+        actual_value=receipt.actual_value,
+        parameter_status=receipt.status,
         proposal_sha256=canonical_sha256(proposal.model_dump(mode="json")),
         effective_domain_sha256=effective_domain.snapshot_sha256,
         parameter_card_sha256=parameter_card_sha256,
@@ -562,7 +562,7 @@ def _case_is_selectable(case: TerminalEmpiricalCase) -> bool:
     return (
         _case_chain_complete(case)
         and case.evidence_status == "current"
-        and case.activation_status == "used"
+        and case.parameter_status == "effective"
         and case.split != "held_out"
     )
 

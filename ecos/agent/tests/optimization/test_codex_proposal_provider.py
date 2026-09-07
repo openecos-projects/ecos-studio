@@ -36,8 +36,6 @@ from ecos_agent.optimization.controller import (
 )
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
 )
@@ -77,15 +75,15 @@ def test_prompt_policy_partitions_control_from_user_and_evidence_data() -> None:
 
 def test_prompt_compacts_empirical_cases_without_mutating_audit_payload() -> None:
     case = {
-        "schema_version": "ecos.terminal_empirical_case.v2",
+        "schema_version": "ecos.terminal_empirical_case.v3",
         "case_id": "case-1",
         "context_fingerprint": HASH,
         "claim_id": "claim-1",
         "binding_id": "binding-1",
         "toolchain_ref": HASH,
         "requested_value": 0.2,
-        "effective_initial": 0.8,
-        "activation_status": "used",
+        "actual_value": 0.8,
+        "parameter_status": "effective",
         "proposal_sha256": HASH,
         "effective_domain_sha256": HASH,
         "parameter_card_sha256": HASH,
@@ -120,8 +118,8 @@ def test_prompt_compacts_empirical_cases_without_mutating_audit_payload() -> Non
                 "context_fingerprint": HASH,
                 "toolchain_ref": HASH,
                 "evidence_status": "current",
-                "effective_initial": 0.8,
-                "activation_status": "used",
+                "actual_value": 0.8,
+                "parameter_status": "effective",
                 "guardrail_status": "pass",
                 "outcome_class": "supported",
             }
@@ -151,28 +149,15 @@ def _context() -> OptimizationPlanningContext:
             written_value=0.2,
             unit="ratio",
         ),
-        "effective_initial": EffectiveValue(value=0.8, unit="ratio"),
-        "application_status": "applied",
-        "activation": ActivationEvidence(
-            status="used",
-            consumers=(
-                {
-                    "consumer_id": "dreamplace.density_objective",
-                    "outcome": "entered",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": HASH,
-                },
-            ),
-        ),
-        "consumer_observation": {
-            "requested_target_density": 0.2,
-            "effective_target_density": 0.8,
+        "actual_value": 0.8,
+        "status": "effective",
+        "reason": None,
+        "observation": {
+            "target_density": 0.8,
             "density_tensor_value": 0.8,
             "density_operator_call_count": 1,
-            "placement_iteration_count": 4,
-            "evidence_complete": True,
+            "utilization_floor": 0.8,
         },
-        "effective_final": EffectiveValue(value=0.8, unit="ratio"),
     }
     draft = ParameterApplicationReceipt.model_construct(
         **receipt_payload, evidence_sha256=HASH
@@ -268,7 +253,7 @@ def _proposal(context: OptimizationPlanningContext) -> dict[str, object]:
 
 def _domain() -> EffectiveDomainSnapshot:
     payload = {
-        "schema_version": "ecos.effective_domain.v1",
+        "schema_version": "ecos.effective_domain.v3",
         "knob_id": "place.target_density",
         "context_sha256": HASH,
         "current_coordinate": {"surface_value": 0.2, "effective_anchor": None},
@@ -276,8 +261,6 @@ def _domain() -> EffectiveDomainSnapshot:
         "excluded_aliases": (0.2,),
         "allowed_requested_values": (0.25, 0.3, 0.85),
         "thresholds": (),
-        "observed_application_signatures": (),
-        "observed_response_signatures": (),
     }
     return EffectiveDomainSnapshot(
         **payload,
@@ -357,8 +340,8 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
     assert "effective values" in captured["system"]
     assert "excluded_surface_values" in captured["system"]
     assert captured["user"]["history"][0]["parameter_application_receipt"][
-        "effective_initial"
-    ]["value"] == 0.8
+        "actual_value"
+    ] == 0.8
     schema = captured["output_schema"]
     assert schema["required"] == [
         "schema_version",

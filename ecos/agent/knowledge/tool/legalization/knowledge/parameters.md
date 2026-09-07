@@ -118,9 +118,9 @@
 <a id="parameter.legalization.cell_padding_x"></a>
 ## parameter.legalization.cell_padding_x
 
-**Meaning:** The standard-cell padding along X.
+**Meaning:** The standard-cell padding along X, in sites.
 
-**Role:** DREAMPlace quantizes and may cap the padding, then expands movable-cell and pin geometry during placement. A zero effective value means the geometry expansion was not activated; legalization later restores the representation.
+**Role:** DREAMPlace quantizes and may cap the padding before expanding movable-cell and pin geometry. A requested zero is effective when confirmed as zero; a positive request clipped to zero is inactive. The actual value remains the placement padding in sites, not the geometry restored for legalization.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -136,9 +136,9 @@
 <a id="parameter.legalization.density_weight"></a>
 ## parameter.legalization.density_weight
 
-**Meaning:** The initial density-penalty weight.
+**Meaning:** The initial density-penalty coefficient.
 
-**Role:** It scales density-weight initialization before the placement objective consumes the weight. DREAMPlace updates the internal weight during optimization and may reinitialize it after routability-driven area adjustment, so the final weight is not an admission alias for the request.
+**Role:** The actual value is the coefficient consumed by density-weight initialization, not the internal tensor that DREAMPlace updates during optimization or reinitializes after routability-driven area adjustment.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -642,7 +642,7 @@
 
 **Meaning:** The routability-optimization switch.
 
-**Role:** Enabling it constructs routing-utilization operators and permits routing-driven area adjustment. The flag alone does not prove activation; a positive native routability-round count does.
+**Role:** A false request is effective when the algorithm is confirmed disabled. A true request requires an executed routability round to be effective; enabling the flag without executing a round is inactive after placement completes.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
@@ -732,7 +732,7 @@
 
 **Meaning:** The acceptable global-placement overflow threshold.
 
-**Role:** NonLinearPlace evaluates it in convergence and divergence predicates, and PlaceObj uses it in conditional density-weight updates. Runtime iterations and final overflow are required to prove that the predicate was evaluated.
+**Role:** The parameter is effective when the final global-placement overflow is strictly below the actual threshold. A known final overflow at or above the threshold is inactive; missing or negative sentinel overflow is unknown. No stopping-cause trace is required.
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 

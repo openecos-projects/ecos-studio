@@ -3,11 +3,8 @@ from __future__ import annotations
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
-    RuntimeTransition,
     ToolRef,
 )
 from ecos_agent.optimization.parameters.effective_domain import build_context_fingerprint
@@ -69,24 +66,10 @@ def density_receipt(
     }
     receipt_context["context_sha256"] = build_context_fingerprint(context)
     observation = {
-        "requested_target_density": 0.2,
-        "effective_target_density": 0.8,
+        "target_density": 0.8,
         "density_tensor_value": 0.8,
         "density_operator_call_count": 1,
-        "placement_iteration_count": 4,
-        "evidence_complete": True,
-    }
-    consumer_evidence = {
-        "consumer_id": "dreamplace.density_objective",
-        "outcome": "entered",
-        "evidence_ref": "analysis/density.json",
-        "evidence_sha256": canonical_sha256(
-            {
-                "consumer_id": "dreamplace.density_objective",
-                "outcome": "entered",
-                "consumer_observation": observation,
-            }
-        ),
+        "utilization_floor": 0.8 if with_runtime_trigger else None,
     }
     payload = dict(
         receipt_id="parameter-receipt-1",
@@ -109,25 +92,10 @@ def density_receipt(
             written_value=0.2,
             unit="ratio",
         ),
-        effective_initial=EffectiveValue(value=0.8, unit="ratio"),
-        transitions=(
-            RuntimeTransition(
-                sequence=0,
-                **{"from": "materialized"},
-                to="overridden",
-                value=0.8,
-                reason="utilization lower bound",
-                rule_id="dreamplace.target_density.utilization_floor",
-                evidence_ref=consumer_evidence["evidence_ref"],
-                evidence_sha256=consumer_evidence["evidence_sha256"],
-            ),
-        )
-        if with_runtime_trigger
-        else (),
-        application_status="applied",
-        activation=ActivationEvidence(status="used", consumers=(consumer_evidence,)),
-        consumer_observation=observation,
-        effective_final=EffectiveValue(value=0.8, unit="ratio"),
+        actual_value=0.8,
+        status="effective",
+        reason=None,
+        observation=observation,
     )
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
     return ParameterApplicationReceipt(
@@ -138,21 +106,14 @@ def density_receipt(
     )
 
 
-def routability_false_receipt(
-    *, with_consumer: bool = True, with_observation: bool = True
-) -> ParameterApplicationReceipt:
+def routability_false_receipt() -> ParameterApplicationReceipt:
     card = load_parameter_cards()[OptimizationKnob.ROUTABILITY_OPT]
     observation = {
+        "configured_routability_opt": False,
         "branch_round_count": 0,
-        "evidence_complete": True,
+        "placement_completed": True,
+        "place_object_count": 1,
     }
-    evidence_sha256 = canonical_sha256(
-        {
-            "consumer_id": "dreamplace.routability_branch",
-            "outcome": "evaluated",
-            "consumer_observation": observation,
-        }
-    )
     payload = dict(
         receipt_id="parameter-receipt-routability-false",
         tool=ToolRef(
@@ -178,29 +139,13 @@ def routability_false_receipt(
             written_value=False,
             unit="boolean",
         ),
-        effective_initial=EffectiveValue(value=False, unit="boolean"),
-        application_status="applied",
-        activation=ActivationEvidence(
-            status="not_activated",
-            consumers=(
-                {
-                    "consumer_id": "dreamplace.routability_branch",
-                    "outcome": "evaluated",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": evidence_sha256,
-                },
-            )
-            if with_consumer
-            else (),
-        ),
-        effective_final=EffectiveValue(value=False, unit="boolean"),
+        actual_value=False,
+        status="effective",
+        reason=None,
+        observation=observation,
     )
-    if with_observation:
-        payload["consumer_observation"] = observation
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
     hash_payload = draft.model_dump(mode="json", exclude={"evidence_sha256"})
-    if not with_observation:
-        hash_payload.pop("consumer_observation", None)
     return ParameterApplicationReceipt(
         **payload,
         evidence_sha256=canonical_sha256(hash_payload),

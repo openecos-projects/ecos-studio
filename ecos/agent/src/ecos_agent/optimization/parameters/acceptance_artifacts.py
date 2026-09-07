@@ -16,8 +16,8 @@ def candidate_paths(workspace: Path, candidate_id: str) -> dict[str, Path]:
         "root": root,
         "manifest": analysis / "candidate_workspace.v1.json",
         "materialization": analysis / "candidate_materialization.v1.json",
-        "receipt": analysis / "parameter_application_receipt.v1.json",
-        "runtime_report": analysis / "parameter_runtime_report.v1.json",
+        "receipt": analysis / "parameter_application_receipt.v2.json",
+        "runtime_report": analysis / "parameter_runtime_report.v2.json",
         "replay": analysis / "candidate_execution_receipt.v1.json",
     }
 
@@ -76,7 +76,10 @@ def build_entry_payload(
         "native_receipt_sha256": (
             file_sha256(paths["receipt"]) if paths["receipt"].is_file() else None
         ),
-        "activation_status": receipt_payload.get("activation", {}).get("status"),
+        "requested": receipt_payload.get("requested", {}).get("value"),
+        "actual_value": receipt_payload.get("actual_value"),
+        "status": receipt_payload.get("status"),
+        "reason": receipt_payload.get("reason"),
         "issues": issues,
         "terminal_observation_ref": observation_path.relative_to(output).as_posix(),
         "terminal_observation_sha256": terminal_sha256,
@@ -105,7 +108,7 @@ def write_acceptance_outputs(
     ignored_knobs: tuple[str, ...],
 ) -> dict:
     manifest = {
-        "schema_version": "ecos.parameter_acceptance_manifest.v1",
+        "schema_version": "ecos.parameter_acceptance_manifest.v2",
         "workspace": str(workspace),
         "candidate_count": len(entries),
         "ignored_knobs": list(ignored_knobs),
@@ -113,11 +116,11 @@ def write_acceptance_outputs(
         "entries": entries,
     }
     manifest["manifest_sha256"] = canonical_sha256(manifest)
-    (output / "acceptance-manifest.v1.json").write_text(
+    (output / "acceptance-manifest.v2.json").write_text(
         json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
     report = {
-        "schema_version": "ecos.parameter_acceptance_report.v1",
+        "schema_version": "ecos.parameter_acceptance_report.v2",
         "ignored_knobs": list(ignored_knobs),
         "classification": (
             "Engineering Complete"
@@ -129,19 +132,13 @@ def write_acceptance_outputs(
             entry["knob_id"]
             for entry in entries
             if not entry["issues"]
-            and (
-                entry["activation_status"] == "used"
-                or (
-                    entry["knob_id"] == "place.routability_opt"
-                    and entry["activation_status"] == "not_activated"
-                )
-            )
+            and entry["status"] == "effective"
         ],
         "entries": entries,
         "provenance": provenance,
         "manifest_sha256": manifest["manifest_sha256"],
     }
-    (output / "acceptance-report.v1.json").write_text(
+    (output / "acceptance-report.v2.json").write_text(
         json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
     return manifest

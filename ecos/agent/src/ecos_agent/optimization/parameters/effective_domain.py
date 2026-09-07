@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -20,7 +20,11 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ParameterSemanticsCard,
 )
-from ecos_agent.optimization.parameters.semantics import card_hash, requested_lattice
+from ecos_agent.optimization.parameters.semantics import (
+    card_hash,
+    requested_lattice,
+    validate_application_receipt,
+)
 
 
 class EffectiveDomainError(ValueError):
@@ -66,7 +70,7 @@ class DomainThreshold(_Model):
 
 
 class EffectiveDomainSnapshot(_Model):
-    schema_version: str = "ecos.effective_domain.v2"
+    schema_version: Literal["ecos.effective_domain.v3"] = "ecos.effective_domain.v3"
     knob_id: OptimizationKnob
     context_sha256: str
     current_coordinate: dict[str, Any] | None = None
@@ -74,8 +78,6 @@ class EffectiveDomainSnapshot(_Model):
     excluded_aliases: tuple[bool | int | float, ...] = ()
     allowed_requested_values: tuple[bool | int | float, ...]
     thresholds: tuple[DomainThreshold, ...] = ()
-    observed_application_signatures: tuple[str, ...] = ()
-    observed_response_signatures: tuple[str, ...] = ()
     snapshot_sha256: str
 
     @field_validator("context_sha256", "snapshot_sha256")
@@ -145,31 +147,6 @@ def _receipt_matches_context(
         return False
     receipt_sha = receipt.context.get("context_sha256")
     return receipt_sha == context_sha256
-
-
-def application_signature(receipt: ParameterApplicationReceipt) -> str:
-    return canonical_sha256(
-        {
-            "requested": receipt.requested,
-            "written": receipt.materialization.written_value,
-            "effective_initial": receipt.effective_initial.model_dump(mode="json"),
-            "context": receipt.context,
-        }
-    )
-
-
-def response_signature(receipt: ParameterApplicationReceipt) -> str:
-    return canonical_sha256(
-        {
-            "application": application_signature(receipt),
-            "transitions": [
-                item.model_dump(mode="json", by_alias=True)
-                for item in receipt.transitions
-            ],
-            "activation": receipt.activation.model_dump(mode="json"),
-            "effective_final": receipt.effective_final.model_dump(mode="json"),
-        }
-    )
 
 
 _CANDIDATES_PER_DIRECTION = 3
@@ -334,10 +311,10 @@ def compile_effective_domain(
     current_matching = []
     current_value = bound_context["current_values"].get(card.knob_id.value)
     for receipt in current_receipts:
+        if receipt.status != "effective":
+            continue
         try:
-            receipt_coordinate = coordinate_value_from_native_receipt(
-                receipt, site_width_dbu=bound_context["site_width_dbu"]
-            )
+            receipt_coordinate = coordinate_value_from_native_receipt(receipt)
         except ValueError:
             continue
         if (
@@ -355,59 +332,41 @@ def compile_effective_domain(
     aliases: set[Any] = set()
     thresholds: list[DomainThreshold] = []
     for receipt in matching:
-        if receipt.activation.status != "used":
+        if receipt.status != "effective":
             continue
-        requested = receipt.requested.get("value")
-        effective = receipt.effective_initial.value
-        matched_rule = False
-        for rule in card.resolution_rules:
-            rule_id = rule.get("rule_id")
-            trigger = next(
-                (
-                    transition
-                    for transition in receipt.transitions
-                    if transition.rule_id == rule_id
-                    and transition.to in {"normalized", "clamped", "overridden"}
-                    and transition.evidence_ref is not None
-                    and transition.evidence_sha256 is not None
-                ),
-                None,
+        validate_application_receipt(receipt, {card.knob_id: card})
+        requested = receipt.requested["value"]
+        actual = receipt.actual_value
+        floor = receipt.observation.get("utilization_floor")
+        if (
+            card.knob_id == OptimizationKnob.TARGET_DENSITY
+            and type(floor) in {int, float}
+            and floor > requested
+            and math.isclose(floor, actual, rel_tol=1e-6, abs_tol=1e-7)
+        ):
+            rule_id = "dreamplace.target_density.utilization_floor"
+            thresholds.append(
+                DomainThreshold(
+                    threshold_id=f"{card.knob_id.value.replace('.', '-')}-{rule_id}",
+                    kind="admission_floor",
+                    value=float(floor),
+                    rule_id=rule_id,
+                    evidence_refs=(
+                        {
+                            "kind": "parameter_card",
+                            "ref": f"optimization/{card.knob_id.value}.json",
+                            "sha256": card_hash(card),
+                        },
+                        {
+                            "kind": "application_receipt",
+                            "ref": receipt.receipt_id,
+                            "sha256": receipt.evidence_sha256,
+                        },
+                    ),
+                )
             )
-            if (
-                rule.get("kind") == "admission_floor"
-                and isinstance(rule_id, str)
-                and isinstance(requested, (int, float))
-                and isinstance(effective, (int, float))
-                and effective > requested
-                and trigger is not None
-            ):
-                matched_rule = True
-                thresholds.append(
-                    DomainThreshold(
-                        threshold_id=f"{card.knob_id.value.replace('.', '-')}-{rule_id}",
-                        kind="admission_floor",
-                        value=float(effective),
-                        rule_id=rule_id,
-                        evidence_refs=(
-                            {
-                                "kind": "parameter_card",
-                                "ref": f"optimization/{card.knob_id.value}.json",
-                                "sha256": card_hash(card),
-                            },
-                            {
-                                "kind": "application_receipt",
-                                "ref": receipt.receipt_id,
-                                "sha256": receipt.evidence_sha256,
-                            },
-                        ),
-                    )
-                )
-                aliases.update(
-                    value
-                    for value in lattice
-                    if isinstance(value, (int, float)) and value <= effective
-                )
-        if not matched_rule and requested != effective:
+            aliases.update(value for value in lattice if value <= floor)
+        elif requested != actual:
             aliases.add(requested)
     aliases.update(item.value for item in attempted if item.knob_id == card.knob_id)
     coordinate = None
@@ -415,8 +374,7 @@ def compile_effective_domain(
         latest = current_matching[-1]
         coordinate = {
             "surface_value": latest.requested.get("value"),
-            "effective_anchor": latest.effective_initial.value,
-            "response_signature_sha256": response_signature(latest),
+            "effective_anchor": latest.actual_value,
             "source_ref": latest.receipt_id,
             "source_sha256": latest.evidence_sha256,
         }
@@ -435,7 +393,7 @@ def compile_effective_domain(
         dict.fromkeys((*lattice, *sorted(aliases, key=str), *allowed))
     )
     payload = {
-        "schema_version": "ecos.effective_domain.v2",
+        "schema_version": "ecos.effective_domain.v3",
         "knob_id": card.knob_id,
         "context_sha256": context_sha,
         "current_coordinate": coordinate,
@@ -443,10 +401,6 @@ def compile_effective_domain(
         "excluded_aliases": tuple(sorted(aliases, key=str)),
         "allowed_requested_values": allowed,
         "thresholds": [item.model_dump(mode="json") for item in thresholds],
-        "observed_application_signatures": tuple(
-            application_signature(r) for r in matching
-        ),
-        "observed_response_signatures": tuple(response_signature(r) for r in matching),
     }
     return EffectiveDomainSnapshot(**payload, snapshot_sha256=canonical_sha256(payload))
 

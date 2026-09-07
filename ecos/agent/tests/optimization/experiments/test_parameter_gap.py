@@ -18,22 +18,14 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.experiments.parameter_gap import (
     ProbeResult,
-    classify_receipt,
-    semantic_application_signature,
-    semantic_response_signature,
     summarize_knob,
 )
 from ecos_agent.optimization.experiments.parameter_gap_runner import (
-    overall_verdict,
     screen_values,
 )
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    ConsumerEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
-    RuntimeTransition,
     ToolRef,
 )
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, load_parameter_cards
@@ -49,38 +41,14 @@ def _receipt(
     requested: bool | int | float,
     *,
     written: bool | int | float | None = None,
-    effective: bool | int | float | None = None,
-    final: bool | int | float | None = None,
-    activation: str = "used",
-    transition: str | None = None,
-    rule_id: str | None = None,
+    actual: bool | int | float | None = None,
+    status: str = "effective",
     receipt_id: str = "receipt-1",
-    evidence_ref: str = "analysis/report-1.json",
     observation: dict[str, Any] | None = None,
 ) -> ParameterApplicationReceipt:
     card = load_parameter_cards()[OptimizationKnob(knob_id)]
     written = requested if written is None else written
-    effective = written if effective is None else effective
-    final = effective if final is None else final
-    consumer = card.consumers[0]
-    consumer_evidence = ConsumerEvidence(
-        consumer_id=consumer.consumer_id,
-        outcome=consumer.event if activation == "used" else "evaluated",
-        evidence_ref=evidence_ref,
-        evidence_sha256=HASH,
-    )
-    transitions = (
-        RuntimeTransition(
-            sequence=0,
-            **{"from": "materialized"},
-            to=transition,
-            value=effective,
-            reason="tool admission",
-            rule_id=rule_id,
-            evidence_ref=evidence_ref,
-            evidence_sha256=HASH,
-        ),
-    ) if transition else ()
+    actual = requested if actual is None and status == "effective" else actual
     payload = {
         "receipt_id": receipt_id,
         "tool": ToolRef(
@@ -106,21 +74,10 @@ def _receipt(
             written_value=written,
             unit="dbu" if knob_id == "place.cell_padding_x" else card.surface.unit,
         ),
-        "effective_initial": EffectiveValue(
-            value=effective,
-            unit="dbu" if knob_id == "place.cell_padding_x" else card.surface.unit,
-        ),
-        "transitions": transitions,
-        "application_status": "applied",
-        "activation": ActivationEvidence(
-            status=activation,
-            consumers=(consumer_evidence,),
-        ),
-        "consumer_observation": observation or {"iterations": 7},
-        "effective_final": EffectiveValue(
-            value=final,
-            unit="dbu" if knob_id == "place.cell_padding_x" else card.surface.unit,
-        ),
+        "actual_value": actual,
+        "status": status,
+        "reason": None if status == "effective" else "Consumer did not run.",
+        "observation": observation or {},
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
     return ParameterApplicationReceipt(
@@ -145,94 +102,26 @@ def _result(
         terminal_closed=terminal_closed,
         runtime_seconds=1.0,
         error=error,
-        site_width_dbu=200,
     )
 
 
-def test_padding_unit_mapping_alone_is_not_a_gap() -> None:
-    receipt = _receipt("place.cell_padding_x", 2, written=400, effective=400)
+def test_status_summary_preserves_actual_values_without_gap_classification() -> None:
+    padded = _result("padding", _receipt("place.cell_padding_x", 2, written=400, actual=2))
+    assert padded.requested_value == padded.actual_value == 2
+    assert padded.status == "effective"
+    assert "gap_kinds" not in padded.to_dict()
 
-    assert classify_receipt(receipt, site_width_dbu=200) == ("mapping_only",)
-
-
-def test_adoption_and_activation_gaps_are_distinct() -> None:
-    receipt = _receipt(
-        "place.target_density",
-        0.2,
-        effective=0.8,
-        activation="not_activated",
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
+    results = (
+        _result("effective", _receipt("place.target_density", 0.2, actual=0.8)),
+        _result("inactive", _receipt("place.target_density", 0.2, status="inactive")),
+        _result("missing", None, terminal_closed=False, error="timeout"),
     )
-
-    assert classify_receipt(receipt, site_width_dbu=200) == (
-        "adoption_gap",
-        "activation_gap",
-    )
-
-
-def test_semantic_signatures_ignore_request_and_evidence_identity() -> None:
-    left = _receipt(
-        "place.target_density",
-        0.1,
-        effective=0.8,
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
-        receipt_id="receipt-left",
-        evidence_ref="analysis/left.json",
-    )
-    right = _receipt(
-        "place.target_density",
-        0.2,
-        effective=0.8,
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
-        receipt_id="receipt-right",
-        evidence_ref="analysis/right.json",
-    )
-
-    assert semantic_application_signature(left) == semantic_application_signature(right)
-    assert semantic_response_signature(left) == semantic_response_signature(right)
-
-
-def test_gap_requires_two_of_three_terminal_closed_repeats() -> None:
-    gap = _receipt(
-        "place.target_density",
-        0.2,
-        effective=0.8,
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
-    )
-    direct = _receipt("place.target_density", 0.2)
-
-    confirmed = summarize_knob(
-        OptimizationKnob.TARGET_DENSITY,
-        (_result("a", gap), _result("b", gap), _result("c", direct)),
-    )
-    unconfirmed = summarize_knob(
-        OptimizationKnob.TARGET_DENSITY,
-        (_result("a", gap), _result("b", direct), _result("c", direct)),
-    )
-
-    assert confirmed.verdict == "gap_confirmed"
-    assert confirmed.confirmed_gap_kinds == ("adoption_gap",)
-    assert unconfirmed.verdict == "gap_unconfirmed"
-
-
-def test_missing_terminal_or_failed_probe_makes_negative_result_indeterminate() -> None:
-    direct = _receipt("floorplan.aspect_ratio", 1.0)
-    report = summarize_knob(
-        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
-        (
-            _result("ok", direct),
-            _result("missing-terminal", direct, terminal_closed=False),
-            _result("failed", None, terminal_closed=False, error="timeout"),
-        ),
-        lattice_complete=True,
-    )
-
-    assert report.verdict == "indeterminate"
-    assert report.failed_candidates == ("failed",)
+    report = summarize_knob(OptimizationKnob.TARGET_DENSITY, results, lattice_complete=True)
+    assert report.status_counts == {"effective": 1, "inactive": 1, "unknown": 1}
+    assert report.terminal_closed_count == 2
+    assert report.failed_candidates == ("missing",)
+    assert report.ineligible_candidates == ("missing",)
+    assert report.lattice_complete is True
 
 
 @pytest.mark.parametrize(
@@ -324,29 +213,6 @@ def test_gap_baselines_request_complete_terminal_without_signoff(
     assert calls == [False]
 
 
-def test_typed_alias_requires_distinct_requests_and_card_rule() -> None:
-    left = _receipt(
-        "place.target_density",
-        0.1,
-        effective=0.8,
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
-    )
-    right = _receipt(
-        "place.target_density",
-        0.2,
-        effective=0.8,
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
-    )
-    report = summarize_knob(
-        OptimizationKnob.TARGET_DENSITY,
-        (_result("left", left), _result("right", right)),
-    )
-
-    assert report.typed_alias_groups == ((0.1, 0.2),)
-
-
 def test_screen_values_use_boundaries_and_neighbors_without_noop() -> None:
     cards = load_parameter_cards()
 
@@ -429,35 +295,7 @@ def test_resume_readiness_rejects_source_config_hash_drift(monkeypatch, tmp_path
         gap_setup.resume_readiness_report(config_path, Path("resume.json"))
 
 
-def test_overall_verdict_has_only_preregistered_outcomes() -> None:
-    direct = _receipt("floorplan.aspect_ratio", 1.0)
-    no_gap = summarize_knob(
-        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
-        (_result("ok", direct),),
-        lattice_complete=True,
-    )
-    uncertain = summarize_knob(
-        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
-        (_result("ok", direct),),
-    )
-    gap_receipt = _receipt(
-        "place.target_density",
-        0.2,
-        effective=0.8,
-        transition="overridden",
-        rule_id="dreamplace.target_density.utilization_floor",
-    )
-    gap = summarize_knob(
-        OptimizationKnob.TARGET_DENSITY,
-        tuple(_result(str(index), gap_receipt) for index in range(3)),
-    )
-
-    assert overall_verdict((no_gap,)) == "no_gap_observed_on_gcd_at_fixed_context"
-    assert overall_verdict((uncertain,)) == "indeterminate"
-    assert overall_verdict((no_gap, gap)) == "gap_confirmed_on_gcd"
-
-
-def test_gap_screen_repeats_positive_probe_then_skips_expansion(
+def test_status_screen_tests_each_request_once(
     monkeypatch, tmp_path
 ) -> None:
     requested: list[float] = []
@@ -469,9 +307,7 @@ def test_gap_screen_repeats_positive_probe_then_skips_expansion(
             _receipt(
                 "place.target_density",
                 value,
-                effective=0.8,
-                transition="overridden",
-                rule_id="dreamplace.target_density.utilization_floor",
+                actual=0.8,
             )
             if value == 0.1
             else _receipt("place.target_density", value)
@@ -493,10 +329,11 @@ def test_gap_screen_repeats_positive_probe_then_skips_expansion(
         tmp_path,
     )
 
-    assert requested == [0.1, 0.1, 0.1, 0.45, 0.55, 0.95]
-    assert len(results) == sequence == 6
-    assert summary.verdict == "gap_confirmed"
-    assert summary.lattice_complete is False
+    expected = set(card.requested_domain.values) - {0.5}
+    assert set(requested) == expected
+    assert len(results) == sequence == len(expected)
+    assert summary.status_counts["effective"] == len(expected)
+    assert summary.lattice_complete is True
 
 
 def test_parent_candidate_ref_comes_from_recorded_evidence(tmp_path) -> None:
@@ -537,7 +374,7 @@ def test_resume_finds_materialized_workspace_from_recorded_evidence(tmp_path) ->
 
 def test_resume_reuses_completed_smoke_result(tmp_path) -> None:
     result = _result("candidate-001", _receipt("place.target_density", 0.6))
-    path = tmp_path / "probes/candidate-001/probe-result.v1.json"
+    path = tmp_path / "probes/candidate-001/probe-result.v2.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(result.to_dict()), encoding="utf-8")
 
@@ -713,7 +550,7 @@ def test_resume_imports_only_terminal_closed_probe_artifacts(tmp_path) -> None:
         terminal_closed=False,
     )
     for result in (complete, incomplete):
-        path = previous_root / "probes" / result.candidate_id / "probe-result.v1.json"
+        path = previous_root / "probes" / result.candidate_id / "probe-result.v2.json"
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(result.to_dict()), encoding="utf-8")
     resume = gap_setup.ParameterGapResumeConfig.model_construct(
@@ -735,7 +572,7 @@ def test_resume_imports_only_terminal_closed_probe_artifacts(tmp_path) -> None:
     assert set(imported["candidate_artifact_sha256"]) == {"candidate-001"}
     assert (
         run_root
-        / "resumes/parallel-resume/probes/candidate-001/probe-result.v1.json"
+        / "resumes/parallel-resume/probes/candidate-001/probe-result.v2.json"
     ).is_file()
     assert not (run_root / "resumes/parallel-resume/probes/candidate-002").exists()
 
@@ -752,7 +589,7 @@ def test_resume_import_rejects_symlinked_probe_artifact(tmp_path) -> None:
     probe = previous_root / "probes/candidate-001"
     probe.mkdir(parents=True)
     result = _result("candidate-001", _receipt("place.target_density", 0.6))
-    (probe / "probe-result.v1.json").write_text(
+    (probe / "probe-result.v2.json").write_text(
         json.dumps(result.to_dict()), encoding="utf-8"
     )
     (probe / "unsafe").symlink_to(tmp_path / "outside")
@@ -770,7 +607,7 @@ def test_resume_import_rejects_existing_destination(tmp_path) -> None:
     probe = previous_root / "probes/candidate-001"
     probe.mkdir(parents=True)
     result = _result("candidate-001", _receipt("place.target_density", 0.6))
-    (probe / "probe-result.v1.json").write_text(
+    (probe / "probe-result.v2.json").write_text(
         json.dumps(result.to_dict()), encoding="utf-8"
     )
     destination = tmp_path / "resume/probes/candidate-001"

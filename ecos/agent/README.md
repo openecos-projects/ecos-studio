@@ -198,21 +198,25 @@ validator 同时检查知识支持关系、domain hash、方向和有界搜索�
 controller 在参考值中选择。两个 lane 的执行权都保留在 controller，知识模块只消费
 Parameter Effectiveness 的公开合同，不复制其能力。
 
-### 如何阅读参数和结果证据
+### 如何阅读参数状态
 
-实现保留四类参数证据字段，但它们不是四个并列功能：
+7 个 knob 统一使用请求值、实际使用值和三态结论，不再划分参数证据等级：
 
 | 字段 | 含义 |
 |---|---|
-| `requested` | Agent 提议的请求值，只代表动作意图 |
-| `materialization.written_value` | L1 实际写入工具输入的值，包含单位映射 |
-| `effective_initial/final` | 工具经过准入、归一化、裁剪、覆盖或运行期调整后采用的值 |
-| `activation.status` | 参数是否进入真实 branch、operator 或 consumer |
+| `requested` | Agent 请求的 knob、值和单位 |
+| `actual_value` | 实际使用的参数值，与请求值单位一致；无法确认或未使用时可为空 |
+| `status` | `effective` 已生效、`inactive` 未生效、`unknown` 未确认 |
+| `reason` | 未生效或未确认的简短原因 |
 
-`tool.parameter_application_receipt.v1` 是 ECC/tool adapter 基于原生运行观测生成的参数应用回执；
-Agent 不从配置文本或日志推断缺失事实。L3 terminal observation 则证明候选是否完整到达 `Harden`
-并留下可验证的 signoff、manifest 和产物。前者回答参数实际发生了什么，后者回答完整候选最终得到
-什么；二者均不单独证明 QoR 改善。
+`tool.parameter_application_receipt.v2` 保留最少运行观测及候选、配置和来源的哈希绑定；
+不接受旧版参数回执。`routability_opt=false` 和 `cell_padding_x=0` 确认关闭后均为已生效。
+`target_overflow` 只在最终 placement overflow 严格小于实际阈值时生效，不追踪退出原因；
+缺少最终值时为未确认。Padding 实际值使用 site，density_weight 使用参与初始化的配置系数，
+Floorplan 使用几何求解的输入参数；内部自适应权重和实现几何指标不作为参数实际值。
+
+参数生效不代表候选成功或 QoR 改善。独立的 terminal observation、signoff、manifest、
+ledger 和回放仍用于验证完整候选的执行结果与归属，不作为参数状态等级。
 
 `ecos.supported_action_view.v2` 的 `pass/weak/blocked/unknown` 是机器可检查的动作支持关系：它只
 说明当前状态、工具版本、知识 binding 和有效参数域是否允许某个动作，不代表知识正确或有收益。
@@ -267,8 +271,8 @@ uv run pytest -q tests/codex tests/gui/test_codex_provider_integration.py tests/
 ## 当前实现与证据边界
 
 - **Parameter Engineering Implementation Complete**：7 个冻结的单参数 knob 已接入
-  effective-domain exact-value 提案；L0-L3 证据链包含原生参数回执、终态观测、ledger
-  和确定性回放。
+  effective-domain exact-value 提案和统一三态回执；终态观测、ledger 和确定性回放
+  独立记录候选执行结果。
 - **Knowledge Engineering Implementation Partial**：state-conditioned 双层知识、
   post-match top-3 和 zero-shot knowledge treatment 门禁已接入；显式 objective/current-toolchain
   compatibility、冻结 state-rule manifest、noise-aware trend 和真实 episode replay 验收仍待完成。

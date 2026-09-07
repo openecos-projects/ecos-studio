@@ -9,7 +9,6 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable, Literal
 
-from ecos_agent.optimization.parameters.effective_domain import application_signature, response_signature
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
@@ -68,13 +67,9 @@ class CandidateTrace:
     timing: float | None = None
     congestion: float | None = None
     requested_value: str | float | int | bool | None = None
-    application_status: str | None = None
-    activation_status: str | None = None
-    application_signature: str | None = None
-    response_signature: str | None = None
-    transition_status: str | None = None
-    alias: bool = False
-    alias_valid: bool | None = None
+    actual_value: float | int | bool | None = None
+    parameter_status: Literal["effective", "inactive", "unknown"] = "unknown"
+    parameter_reason: str | None = None
     stale_rule: bool = False
     fail_closed: bool = False
     proposal_outcome: str | None = None
@@ -102,19 +97,11 @@ class EqualBudgetSummary:
     drc: tuple[float, ...]
     timing: tuple[float, ...]
     congestion: tuple[float, ...]
-    overridden: int
-    overridden_rate: float
-    ignored: int
-    ignored_rate: float
-    not_activated: int
-    not_activated_rate: float
+    effective: int
+    effective_rate: float
+    inactive: int
+    inactive_rate: float
     unknown: int
-    effective_unique_rate: float
-    application_signature_count: int
-    response_signature_count: int
-    aliases_saved: int
-    wrong_prunes: int
-    alias_unassessed: int
     stale_rule: int
     fail_closed: int
     proposal_reject: int
@@ -152,13 +139,6 @@ def build_candidate_trace(
         OptimizationOutcomeKind.TRADEOFF,
     }
     evaluation = terminal_observation.evaluation_metrics if terminal_observation else ()
-    transition_status = None
-    if receipt is not None and receipt.transitions:
-        transition_status = (
-            "overridden"
-            if any(item.to == "overridden" for item in receipt.transitions)
-            else receipt.transitions[-1].to
-        )
     return CandidateTrace(
         design_id=design_id,
         candidate_id=candidate_id,
@@ -197,11 +177,9 @@ def build_candidate_trace(
             else None
         ),
         requested_value=(receipt.requested.get("value") if receipt else None),
-        application_status=(receipt.application_status if receipt else None),
-        activation_status=(receipt.activation.status if receipt else None),
-        application_signature=(application_signature(receipt) if receipt else None),
-        response_signature=(response_signature(receipt) if receipt else None),
-        transition_status=transition_status,
+        actual_value=(receipt.actual_value if receipt else None),
+        parameter_status=(receipt.status if receipt else "unknown"),
+        parameter_reason=(receipt.reason if receipt else "Parameter receipt is missing."),
         receipt_status="ok" if receipt else "missing",
         runtime_seconds=runtime_seconds,
         peak_memory_mb=peak_memory_mb,
@@ -299,12 +277,12 @@ def export_episode_traces(
                 ),
             )
         )
-    traces.extend(_planning_event_traces(design_id, episode_id, mode, planning, decisions))
+    traces.extend(_planning_event_traces(design_id, episode_id, mode, decisions))
     return tuple(traces), len(planning.entries), mode
 
 
 def _verified_episode_state(episode_root: Path) -> dict[str, object]:
-    path = episode_root / "optimization-episode-state.v7.json"
+    path = episode_root / "optimization-episode-state.v8.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         state_hash = payload.pop("state_sha256")
@@ -344,36 +322,10 @@ def _planning_event_traces(
     design_id: str,
     episode_id: str,
     mode: Mode,
-    planning,
     decisions,
 ) -> tuple[CandidateTrace, ...]:
     traces: list[CandidateTrace] = []
-    seen_aliases: set[tuple[str, str]] = set()
-    for planning_entry, decision in zip(
-        planning.entries, decisions.entries, strict=True
-    ):
-        prior_requests = {
-            (item.requested.knob_id.value, json.dumps(item.requested.value))
-            for item in decisions.entries
-            if item.sequence < decision.sequence and item.requested is not None
-        }
-        for domain in planning_entry.effective_domains:
-            for value in domain.excluded_aliases:
-                key = (domain.knob_id.value, json.dumps(value))
-                if key in prior_requests or key in seen_aliases:
-                    continue
-                seen_aliases.add(key)
-                traces.append(
-                    CandidateTrace(
-                        design_id=design_id,
-                        candidate_id=f"{episode_id}.alias-{len(seen_aliases)}",
-                        started=False,
-                        terminal_success=False,
-                        planning_mode=mode,
-                        requested_value=value,
-                        alias=True,
-                    )
-                )
+    for decision in decisions.entries:
         if decision.validation_result == "rejected":
             reason = decision.rejection_reason or ""
             traces.append(
@@ -456,6 +408,8 @@ def evaluate_equal_budget(
         raise ValueError("planning calls exceed the frozen budget")
     selected = list(traces)
     for item in selected:
+        if item.parameter_status not in {"effective", "inactive", "unknown"}:
+            raise ValueError("candidate parameter status is invalid")
         if item.planning_mode != mode:
             raise ValueError("candidate trace planning mode does not match evaluation mode")
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", item.design_id) or not item.candidate_id:
@@ -482,21 +436,8 @@ def evaluate_equal_budget(
     started = [item for item in selected if item.started]
     if len(started) > config.candidate_limit:
         raise ValueError("started candidate traces exceed the frozen budget")
-    app_signatures = {item.application_signature for item in started if item.application_signature}
-    response_signatures = {item.response_signature for item in started if item.response_signature}
-    effective = [
-        item
-        for item in started
-        if item.activation_status == "used"
-        or (
-            item.requested_value is False
-            and item.application_status == "applied"
-            and item.activation_status == "not_activated"
-        )
-    ]
-    aliases_saved = sum(item.alias and item.alias_valid is True for item in selected)
-    wrong_prunes = sum(item.alias and item.alias_valid is False for item in selected)
-    alias_unassessed = sum(item.alias and item.alias_valid is None for item in selected)
+    effective = sum(item.parameter_status == "effective" for item in started)
+    inactive = sum(item.parameter_status == "inactive" for item in started)
     receipt_missing = sum(item.receipt_status == "missing" for item in selected)
     parser_failure = sum(item.receipt_status == "parser_failure" for item in selected)
     producer_failure = sum(item.receipt_status == "producer_failure" for item in selected)
@@ -535,49 +476,11 @@ def evaluate_equal_budget(
         drc=tuple(item.drc for item in started if item.drc is not None),
         timing=tuple(item.timing for item in started if item.timing is not None),
         congestion=tuple(item.congestion for item in started if item.congestion is not None),
-        overridden=sum(item.transition_status == "overridden" for item in started),
-        overridden_rate=(
-            sum(item.transition_status == "overridden" for item in started) / len(started)
-            if started
-            else 0.0
-        ),
-        ignored=sum(
-            item.application_status == "ignored" or item.activation_status == "ignored"
-            for item in started
-        ),
-        ignored_rate=(
-            sum(
-                item.application_status == "ignored" or item.activation_status == "ignored"
-                for item in started
-            )
-            / len(started)
-            if started
-            else 0.0
-        ),
-        not_activated=sum(item.activation_status == "not_activated" for item in started),
-        not_activated_rate=(
-            sum(item.activation_status == "not_activated" for item in started) / len(started)
-            if started
-            else 0.0
-        ),
-        unknown=sum(item.activation_status in (None, "unknown") for item in started),
-        effective_unique_rate=(
-            len(
-                {
-                    (item.application_signature, item.response_signature)
-                    for item in effective
-                    if item.application_signature or item.response_signature
-                }
-            )
-            / len(started)
-            if started
-            else 0.0
-        ),
-        application_signature_count=len(app_signatures),
-        response_signature_count=len(response_signatures),
-        aliases_saved=aliases_saved if mode == "receipt-aware" else 0,
-        wrong_prunes=wrong_prunes if mode == "receipt-aware" else 0,
-        alias_unassessed=alias_unassessed if mode == "receipt-aware" else 0,
+        effective=effective,
+        effective_rate=effective / len(started) if started else 0.0,
+        inactive=inactive,
+        inactive_rate=inactive / len(started) if started else 0.0,
+        unknown=sum(item.parameter_status == "unknown" for item in started),
         stale_rule=sum(item.stale_rule for item in selected),
         fail_closed=sum(item.fail_closed for item in selected),
         proposal_reject=sum(item.proposal_outcome == "reject" for item in selected),

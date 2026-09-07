@@ -166,7 +166,7 @@ def run_experiment(
             for treatment, path in gate_trace_paths.items()
         },
     }
-    gate_path = run_root / "zero-shot-gate.v1.json"
+    gate_path = run_root / "zero-shot-gate.v2.json"
     _write_json(gate_path, gate_report)
     gate_receipt = {
         "artifact_ref": gate_path.name,
@@ -240,7 +240,7 @@ def run_experiment(
         "elapsed_wall_time_seconds_by_treatment": evidence["elapsed_wall_time"],
         "episode_evidence": evidence["episode_evidence"],
     }
-    _write_json(output / "knowledge-treatment-report.v2.json", report)
+    _write_json(output / "knowledge-treatment-report.v3.json", report)
     _write_run_manifest(
         run_root,
         report,
@@ -562,7 +562,7 @@ def _snapshot_case_pool(source: Path, destination: Path) -> tuple[Path, dict[str
 
 def _episode_evidence(workspace: Path, episode_root: Path) -> dict[str, object]:
     state = _verified_episode_state(episode_root)
-    state_path = episode_root / "optimization-episode-state.v7.json"
+    state_path = episode_root / "optimization-episode-state.v8.json"
     chain_names = (
         "ledger",
         "planning_audit",

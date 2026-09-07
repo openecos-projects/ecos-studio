@@ -180,7 +180,7 @@ def test_phase8_blocks_few_shot_until_zero_shot_gate_passes(
 
     def run_treatment(*_args, treatment, **_kwargs):
         if treatment == module.FEW_SHOT_TREATMENT:
-            assert (tmp_path / "output/runs/run/zero-shot-gate.v1.json").is_file()
+            assert (tmp_path / "output/runs/run/zero-shot-gate.v2.json").is_file()
         calls.append(treatment.treatment)
         return {
             "traces": (),
@@ -199,7 +199,7 @@ def test_phase8_blocks_few_shot_until_zero_shot_gate_passes(
         module,
         "build_zero_shot_gate_report",
         lambda *_args, **_kwargs: {
-            "schema_version": "ecos.optimization_zero_shot_gate.v1",
+            "schema_version": "ecos.optimization_zero_shot_gate.v2",
             "decision": decision,
             "few_shot_authorized": decision == "pass",
         },
@@ -208,7 +208,7 @@ def test_phase8_blocks_few_shot_until_zero_shot_gate_passes(
         module,
         "build_knowledge_treatment_report",
         lambda *_args, **_kwargs: {
-            "schema_version": "ecos.optimization_knowledge_treatment_report.v2",
+            "schema_version": "ecos.optimization_knowledge_treatment_report.v3",
             "evaluation_status": "completed",
             "research_claim": "supported",
         },
@@ -233,13 +233,13 @@ def test_phase8_blocks_few_shot_until_zero_shot_gate_passes(
     if runs_few_shot:
         expected.append(module.FEW_SHOT_TREATMENT.treatment)
     assert calls == expected
-    assert (tmp_path / "output/runs/run/zero-shot-gate.v1.json").is_file()
+    assert (tmp_path / "output/runs/run/zero-shot-gate.v2.json").is_file()
     if runs_few_shot:
-        assert result["schema_version"].endswith("treatment_report.v2")
-        assert (tmp_path / "output/knowledge-treatment-report.v2.json").is_file()
+        assert result["schema_version"].endswith("treatment_report.v3")
+        assert (tmp_path / "output/knowledge-treatment-report.v3.json").is_file()
     else:
         assert result["decision"] == decision
-        assert not (tmp_path / "output/knowledge-treatment-report.v2.json").exists()
+        assert not (tmp_path / "output/knowledge-treatment-report.v3.json").exists()
 
 
 def test_phase8_runner_rejects_workspace_input_drift(tmp_path) -> None:

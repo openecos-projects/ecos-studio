@@ -207,7 +207,6 @@ class OptimizationEpisodeRunner:
         value = (
             coordinate_value_from_native_receipt(
                 receipt.parameter_application_receipt,
-                site_width_dbu=self._site_width_dbu,
             )
             if self._controller.receipt_aware_planning
             else requested.value

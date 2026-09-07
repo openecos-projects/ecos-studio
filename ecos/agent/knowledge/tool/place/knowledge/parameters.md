@@ -71,9 +71,9 @@
 <a id="parameter.dreamplace.density_weight"></a>
 ## parameter.dreamplace.density_weight
 
-**Meaning:** The initial density-penalty weight.
+**Meaning:** The initial density-penalty coefficient.
 
-**Role:** It scales density-weight initialization before the placement objective consumes the weight. DREAMPlace updates the internal weight during optimization and may reinitialize it after routability-driven area adjustment, so the final weight is not an admission alias for the request.
+**Role:** The actual value is the coefficient consumed by density-weight initialization, not the internal tensor that DREAMPlace updates during optimization or reinitializes after routability-driven area adjustment.
 
 <a id="parameter.dreamplace.random_seed"></a>
 ## parameter.dreamplace.random_seed
@@ -164,7 +164,7 @@
 
 **Meaning:** The acceptable global-placement overflow threshold.
 
-**Role:** NonLinearPlace evaluates it in convergence and divergence predicates, and PlaceObj uses it in conditional density-weight updates. Runtime iterations and final overflow are required to prove that the predicate was evaluated.
+**Role:** The parameter is effective when the final global-placement overflow is strictly below the actual threshold. A known final overflow at or above the threshold is inactive; missing or negative sentinel overflow is unknown. No stopping-cause trace is required.
 
 <a id="parameter.dreamplace.dtype"></a>
 ## parameter.dreamplace.dtype
@@ -283,7 +283,7 @@
 
 **Meaning:** The routability-optimization switch.
 
-**Role:** Enabling it constructs routing-utilization operators and permits routing-driven area adjustment. The flag alone does not prove activation; a positive native routability-round count does.
+**Role:** A false request is effective when the algorithm is confirmed disabled. A true request requires an executed routability round to be effective; enabling the flag without executing a round is inactive after placement completes.
 
 <a id="parameter.dreamplace.macro_place_flag"></a>
 ## parameter.dreamplace.macro_place_flag
@@ -477,9 +477,9 @@
 <a id="parameter.dreamplace.cell_padding_x"></a>
 ## parameter.dreamplace.cell_padding_x
 
-**Meaning:** The standard-cell padding along X.
+**Meaning:** The standard-cell padding along X, in sites.
 
-**Role:** DREAMPlace quantizes and may cap the padding, then expands movable-cell and pin geometry during placement. A zero effective value means the geometry expansion was not activated; legalization later restores the representation.
+**Role:** DREAMPlace quantizes and may cap the padding before expanding movable-cell and pin geometry. A requested zero is effective when confirmed as zero; a positive request clipped to zero is inactive. The actual value remains the placement padding in sites, not the geometry restored for legalization.
 
 <a id="parameter.dreamplace.bndry_padding_x"></a>
 ## parameter.dreamplace.bndry_padding_x

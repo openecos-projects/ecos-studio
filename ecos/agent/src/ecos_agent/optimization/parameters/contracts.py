@@ -166,23 +166,11 @@ class CardInteraction(_Model):
     source_span_ids: tuple[str, ...] = Field(min_length=1)
 
 
-class CardInvalidationRule(_Model):
-    kind: Literal[
-        "global_place_disabled",
-        "no_consumer_observation",
-        "zero_effective_value",
-        "no_routability_round",
-    ]
-    result: Literal["unknown", "not_activated"]
-    source_span_ids: tuple[str, ...] = Field(min_length=1)
-
-
 class CardRuntimeSemantics(_Model):
     mechanism: str
     source_span_ids: tuple[str, ...] = Field(min_length=1)
     metric_relevance: tuple[CardMetricRelevance, ...] = ()
     interactions: tuple[CardInteraction, ...] = ()
-    invalidation_rules: tuple[CardInvalidationRule, ...] = ()
 
 
 class ParameterSemanticsCard(_Model):
@@ -234,7 +222,6 @@ class ParameterSemanticsCard(_Model):
             for item in (
                 *self.runtime_semantics.metric_relevance,
                 *self.runtime_semantics.interactions,
-                *self.runtime_semantics.invalidation_rules,
             ):
                 references.update(item.source_span_ids)
         if references - set(span_ids):
@@ -387,89 +374,11 @@ class MaterializationRef(_Model):
         return self
 
 
-class RuntimeTransition(_Model):
-    sequence: StrictInt = Field(ge=0)
-    from_state: str = Field(alias="from")
-    to: Literal[
-        "accepted",
-        "materialized",
-        "normalized",
-        "clamped",
-        "overridden",
-        "applied",
-        "adjusted",
-        "superseded",
-        "restored",
-        "unknown",
-    ]
-    value: Scalar | None = None
-    reason: str
-    rule_id: str | None = None
-    iteration: StrictInt | None = Field(default=None, ge=0)
-    evidence_ref: str | None = None
-    evidence_sha256: str | None = None
-
-    @field_validator("from_state", "reason")
-    @classmethod
-    def nonempty(cls, value: str) -> str:
-        if not value.strip() or len(value) > 256:
-            raise ValueError("transition text is invalid")
-        return value
-
-    @field_validator("evidence_sha256")
-    @classmethod
-    def evidence_hash(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA256.fullmatch(value):
-            raise ValueError("transition evidence hash is invalid")
-        return value
-
-
-class ConsumerEvidence(_Model):
-    consumer_id: str
-    outcome: Literal["entered", "evaluated", "geometry_constructed", "updated"]
-    evidence_ref: str
-    evidence_sha256: str
-
-    @field_validator("consumer_id", "evidence_ref")
-    @classmethod
-    def valid_text(cls, value: str) -> str:
-        if not value.strip() or len(value) > 256:
-            raise ValueError("consumer evidence field is invalid")
-        return value
-
-    @field_validator("evidence_sha256")
-    @classmethod
-    def valid_hash(cls, value: str) -> str:
-        if not _SHA256.fullmatch(value):
-            raise ValueError("consumer evidence hash is invalid")
-        return value
-
-
-class ActivationEvidence(_Model):
-    status: Literal["used", "not_activated", "unknown"] = Field(
-        description=(
-            "Whether an allowlisted runtime branch, operator, or consumer used the parameter."
-        )
-    )
-    consumers: tuple[ConsumerEvidence, ...] = ()
-
-    @model_validator(mode="after")
-    def require_consumer(self) -> "ActivationEvidence":
-        if self.status == "used" and not self.consumers:
-            raise ValueError("used activation requires consumer evidence")
-        return self
-
-
-class EffectiveValue(_Model):
-    value: Scalar | None
-    unit: str
-
-
 class ParameterApplicationReceipt(_Model):
     """Tool-observed parameter evidence; this alone does not prove QoR improvement."""
 
-    schema_version: Literal["tool.parameter_application_receipt.v1"] = (
-        "tool.parameter_application_receipt.v1"
+    schema_version: Literal["tool.parameter_application_receipt.v2"] = (
+        "tool.parameter_application_receipt.v2"
     )
     receipt_id: str
     tool: ToolRef
@@ -480,20 +389,10 @@ class ParameterApplicationReceipt(_Model):
         )
     )
     materialization: MaterializationRef
-    effective_initial: EffectiveValue = Field(
-        description=(
-            "The value the tool accepted after admission, normalization, clamping, or override."
-        )
-    )
-    transitions: tuple[RuntimeTransition, ...] = ()
-    application_status: Literal[
-        "rejected", "unsupported", "ignored", "applied", "unknown"
-    ]
-    activation: ActivationEvidence
-    consumer_observation: dict[str, Any] | None = None
-    effective_final: EffectiveValue = Field(
-        description="The value remaining after all recorded runtime adjustments."
-    )
+    actual_value: Scalar | None = Field(description="Actual value in the requested unit.")
+    status: Literal["effective", "inactive", "unknown"]
+    reason: str | None = None
+    observation: dict[str, Any] = Field(default_factory=dict)
     evidence_sha256: str
 
     @field_validator("receipt_id")
@@ -525,29 +424,31 @@ class ParameterApplicationReceipt(_Model):
             "unit"
         ):
             raise ValueError("receipt requested unit is invalid")
-        if (
-            self.materialization.written_value != self.requested.get("value")
-            and knob != OptimizationKnob.CELL_PADDING_X.value
+        requested = self.requested["value"]
+        written = self.materialization.written_value
+        if isinstance(written, float) and not math.isfinite(written):
+            raise ValueError("materialization written value must be finite")
+        if knob == OptimizationKnob.CELL_PADDING_X.value and (
+            isinstance(written, bool) or written < 0
+        ):
+            raise ValueError("materialization padding value is invalid")
+        if knob != OptimizationKnob.CELL_PADDING_X.value and (
+            written != requested
+            or isinstance(written, bool) != isinstance(requested, bool)
         ):
             raise ValueError("materialization written value does not match request")
-        sequences = [item.sequence for item in self.transitions]
-        if sequences != list(range(len(sequences))):
-            raise ValueError("runtime transition sequence is not contiguous")
-        hash_payloads = (
-            self.model_dump(mode="json", exclude={"evidence_sha256"}),
-            self.model_dump(
-                mode="json",
-                by_alias=True,
-                exclude_unset=True,
-                exclude={"evidence_sha256"},
-            ),
-        )
-        if self.consumer_observation is None:
-            for payload in hash_payloads:
-                payload.pop("consumer_observation", None)
-        if self.evidence_sha256 not in {
-            canonical_sha256(payload) for payload in hash_payloads
-        }:
+        if self.actual_value is not None:
+            if isinstance(self.actual_value, bool) != isinstance(requested, bool):
+                raise ValueError("actual parameter value type does not match request")
+            if isinstance(self.actual_value, float) and not math.isfinite(self.actual_value):
+                raise ValueError("actual parameter value must be finite")
+        if self.status == "effective" and self.actual_value is None:
+            raise ValueError("effective parameter requires an actual value")
+        if self.status == "unknown" and self.actual_value is not None:
+            raise ValueError("unknown parameter cannot claim an actual value")
+        if self.evidence_sha256 != canonical_sha256(
+            self.model_dump(mode="json", exclude={"evidence_sha256"})
+        ):
             raise ValueError("receipt evidence hash does not match content")
         return self
 

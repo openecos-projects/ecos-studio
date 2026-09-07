@@ -33,7 +33,7 @@ CHUNK_HASH = "b" * 64
 
 def _domain() -> EffectiveDomainSnapshot:
     payload = {
-        "schema_version": "ecos.effective_domain.v1",
+        "schema_version": "ecos.effective_domain.v3",
         "knob_id": "place.target_density",
         "context_sha256": HASH,
         "current_coordinate": {"surface_value": 0.85, "effective_anchor": None},
@@ -41,8 +41,6 @@ def _domain() -> EffectiveDomainSnapshot:
         "excluded_aliases": (),
         "allowed_requested_values": (0.65, 0.75, 0.95),
         "thresholds": (),
-        "observed_application_signatures": (),
-        "observed_response_signatures": (),
     }
     return EffectiveDomainSnapshot(
         **payload, snapshot_sha256=canonical_sha256(payload)

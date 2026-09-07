@@ -28,13 +28,6 @@ from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricRole,
     TerminalEvaluationMetric,
 )
-from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
-    MaterializationRef,
-    ParameterApplicationReceipt,
-    ToolRef,
-)
 
 HASH = "sha256:" + "a" * 64
 

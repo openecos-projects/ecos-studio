@@ -164,7 +164,7 @@ def write_trace(
     ledger_replay = ledger.verify()
     decision_replay = OptimizationDecisionAudit(episode_root).verify()
     state = {
-        "schema_version": "ecos.optimization_episode_state.v7",
+        "schema_version": "ecos.optimization_episode_state.v8",
         "episode_id": scope.episode_id,
         "checkpoint_id": scope.checkpoint_id,
         "objective": {"contract_sha256": scope.objective_contract_sha256},
@@ -179,14 +179,14 @@ def write_trace(
         "task_memory_scope_sha256": scope.scope_sha256,
     }
     state["state_sha256"] = canonical_sha256(state)
-    write_json(episode_root / "optimization-episode-state.v7.json", state)
+    write_json(episode_root / "optimization-episode-state.v8.json", state)
     store.synchronize()
     return episode_root
 
 
 def domain_for(knob: OptimizationKnob, context_sha256: str) -> EffectiveDomainSnapshot:
     payload = {
-        "schema_version": "ecos.effective_domain.v1",
+        "schema_version": "ecos.effective_domain.v3",
         "knob_id": knob,
         "context_sha256": context_sha256,
         "current_coordinate": None,
@@ -194,8 +194,6 @@ def domain_for(knob: OptimizationKnob, context_sha256: str) -> EffectiveDomainSn
         "excluded_aliases": (),
         "allowed_requested_values": (0.2, 0.65),
         "thresholds": (),
-        "observed_application_signatures": (),
-        "observed_response_signatures": (),
     }
     return EffectiveDomainSnapshot(
         **payload, snapshot_sha256=canonical_sha256(payload)
@@ -211,7 +209,7 @@ def build_acceptance(
         (
             workspace
             / ".agent/candidates/candidate-acceptance-test/analysis"
-            / "parameter_application_receipt.v1.json"
+            / "parameter_application_receipt.v2.json"
         ).read_text(encoding="utf-8")
     )
     return acceptance.build_acceptance(
@@ -273,22 +271,19 @@ def write_padding_candidate(
     workspace: Path,
     *,
     written_value: int = 4000,
-    effective_value: int = 4000,
+    actual_value: int | float = 2,
 ) -> dict[str, Path]:
     return write_candidate(
         workspace,
         knob=OptimizationKnob.CELL_PADDING_X,
         requested_value=2,
         written_value=written_value,
-        effective_value=effective_value,
+        actual_value=actual_value,
         requested_unit="site",
         written_unit="dbu",
         config_field="cell_padding_x",
-        consumer_id="dreamplace.cell_size_expansion",
         observation_payload={
-            "evidence_complete": True,
-            "effective_padding_dbu": effective_value,
-            "movable_node_count": 10,
+            "padding_sites": actual_value,
             "geometry_apply_count": 1,
         },
     )

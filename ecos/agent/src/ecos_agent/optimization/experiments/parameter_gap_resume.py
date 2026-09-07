@@ -74,7 +74,7 @@ def resume_parameter_gap(
     resume_root = run_root / "resumes" / resume.resume_id
     if not run_root.is_dir():
         raise ParameterGapError("parameter gap resume directory state is invalid")
-    source_report = _read_json_object(run_root / "gcd-gap-report.v1.json")
+    source_report = _read_json_object(run_root / "gcd-status-report.v2.json")
     _validate_resume_source(source_report, resume, run_root)
     source_results = _load_source_results(run_root, source_report["candidate_count"])
     with _exclusive_resume_lock(resume_root):
@@ -137,10 +137,10 @@ def _resume_parameter_gap_locked(
             {
                 "completed_at": timestamp(),
                 "candidate_id": candidate_id,
-                "report_sha256": file_sha256(resume_root / "gcd-gap-report.v1.json"),
+                "report_sha256": file_sha256(resume_root / "gcd-status-report.v2.json"),
                 **preservation,
                 "terminal_closed_count": report["terminal_closed_count"],
-                "verdict": report["verdict"],
+                "status_counts": report["status_counts"],
             },
         )
         return report
@@ -210,8 +210,8 @@ def _run_resume_candidates(
     )
     report.update(
         {
-            "schema_version": "ecos.rq1_parameter_gap_resume_report.v1",
-            "source_report_sha256": file_sha256(run_root / "gcd-gap-report.v1.json"),
+            "schema_version": "ecos.rq1_parameter_gap_resume_report.v2",
+            "source_report_sha256": file_sha256(run_root / "gcd-status-report.v2.json"),
             "resume_id": resume_root.name,
             "max_workers": max_workers,
         }
@@ -239,7 +239,7 @@ def _prepare_resume_root(
                 run_root,
                 resume_root,
                 resume,
-                file_sha256(run_root / "gcd-gap-report.v1.json"),
+                file_sha256(run_root / "gcd-status-report.v2.json"),
                 source_candidate_ids,
             )
             write_json(
@@ -264,7 +264,7 @@ def _prepare_resume_root(
         "expected_previous_manifest_sha256": (
             resume.expected_previous_manifest_sha256
         ),
-        "source_report_sha256": file_sha256(run_root / "gcd-gap-report.v1.json"),
+        "source_report_sha256": file_sha256(run_root / "gcd-status-report.v2.json"),
     }
     manifest_readiness = manifest.get("readiness")
     if any(manifest.get(key) != value for key, value in expected.items()) or any(
@@ -448,9 +448,8 @@ def _run_probe(
         terminal_closed=terminal_closed,
         runtime_seconds=time.monotonic() - started,
         error=error,
-        site_width_dbu=readiness["site_width_dbu"],
     )
-    write_json(output / "probe-result.v1.json", result.to_dict())
+    write_json(output / "probe-result.v2.json", result.to_dict())
     return result
 
 

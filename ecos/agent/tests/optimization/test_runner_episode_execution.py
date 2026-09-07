@@ -63,7 +63,7 @@ from tests.optimization.runner_support import (
     _terminal_observation,
 )
 
-def test_runner_accepts_false_routability_candidate_with_not_activated_branch(
+def test_runner_accepts_false_routability_candidate_with_disabled_optimization(
     tmp_path: Path,
 ) -> None:
     planner = _RoutabilityPlanner()

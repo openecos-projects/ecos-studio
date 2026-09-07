@@ -130,7 +130,7 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v7.json"
+_STATE_FILE = "optimization-episode-state.v8.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
@@ -161,8 +161,8 @@ class OptimizationControlResult:
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["ecos.optimization_episode_state.v7"] = (
-        "ecos.optimization_episode_state.v7"
+    schema_version: Literal["ecos.optimization_episode_state.v8"] = (
+        "ecos.optimization_episode_state.v8"
     )
     episode_id: str
     checkpoint_id: str

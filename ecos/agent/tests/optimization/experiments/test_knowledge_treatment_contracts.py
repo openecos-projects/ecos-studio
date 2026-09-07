@@ -14,6 +14,7 @@ from ecos_agent.optimization.experiments.knowledge_treatments import (
     KnowledgeTreatment,
     build_knowledge_treatment_report,
     build_zero_shot_gate_report,
+    _diagnostics,
 )
 
 
@@ -34,10 +35,7 @@ def _trace(
         terminal_utility=utility,
         reference_utility=10.0,
         requested_value=0.7,
-        application_status="applied",
-        activation_status="used" if effective else "not_activated",
-        application_signature=f"app.{treatment.value}.{design_id}",
-        response_signature=f"response.{treatment.value}.{design_id}",
+        parameter_status="effective" if effective else "inactive",
         receipt_status="ok",
     )
 
@@ -57,6 +55,14 @@ def test_frozen_knowledge_treatments_map_to_bounded_runtime_modes() -> None:
     ]
     assert [item.knowledge_case_shots for item in KNOWLEDGE_TREATMENTS] == [0, 0, 0, 3]
     assert all(item.receipt_aware_planning for item in KNOWLEDGE_TREATMENTS)
+
+
+def test_unknown_parameter_is_not_counted_as_inactive() -> None:
+    trace = _trace(KnowledgeTreatment.LLM_NO_KNOWLEDGE, "d0", 10.0, effective=False)
+    diagnostics = _diagnostics((replace(trace, parameter_status="unknown"),))
+    assert diagnostics["inactive_candidates"] == 0
+    assert diagnostics["effective_interventions"] == 0
+    assert diagnostics["unknown_candidates"] == 1
 
 
 def test_zero_shot_gate_requires_audited_positive_signal() -> None:
@@ -103,7 +109,7 @@ def test_zero_shot_gate_requires_audited_positive_signal() -> None:
         },
     )
 
-    assert report["schema_version"] == "ecos.optimization_zero_shot_gate.v1"
+    assert report["schema_version"] == "ecos.optimization_zero_shot_gate.v2"
     assert report["decision"] == "pass"
     assert report["few_shot_authorized"] is True
     assert all(report["criteria"].values())
@@ -203,7 +209,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
         },
     )
 
-    assert report["schema_version"] == "ecos.optimization_knowledge_treatment_report.v2"
+    assert report["schema_version"] == "ecos.optimization_knowledge_treatment_report.v3"
     assert report["evaluation_status"] == "completed"
     assert report["go_no_go"]["decision"] == "go"
     assert all(report["go_no_go"]["criteria"].values())
@@ -218,7 +224,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
     assert report["zero_shot_gate"]["decision"] == "pass"
     assert report["diagnostics"][full.value]["effective_intervention_rate"] == 1.0
     assert (
-        report["diagnostics"][no_knowledge.value]["ineffective_candidate_rate"]
+        report["diagnostics"][no_knowledge.value]["inactive_candidate_rate"]
         == 1.0
     )
 

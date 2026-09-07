@@ -43,8 +43,6 @@ def write_json(path: Path, payload: dict) -> None:
 
 def receipt_hash_payload(receipt: dict) -> dict:
     payload = {key: value for key, value in receipt.items() if key != "evidence_sha256"}
-    if payload.get("consumer_observation") is None:
-        payload.pop("consumer_observation", None)
     return payload
 
 
@@ -54,22 +52,22 @@ def write_candidate(
     knob: OptimizationKnob = OptimizationKnob.TARGET_DENSITY,
     requested_value: float = 0.65,
     written_value: int | float | None = None,
-    effective_value: int | float = 0.65,
+    actual_value: int | float | bool | None = 0.65,
     requested_unit: str = "ratio",
     written_unit: str = "ratio",
     config_key: str = "dreamplace",
     config_field: str = "target_density",
-    consumer_id: str = "dreamplace.density_objective",
     observation_payload: dict | None = None,
-    transitions: list[dict] | None = None,
+    status: str = "effective",
+    reason: str | None = None,
 ) -> dict[str, Path]:
     candidate_id = "candidate-acceptance-test"
     candidate_ref = f".agent/candidates/{candidate_id}"
     candidate_root = workspace / candidate_ref
     analysis = candidate_root / "analysis"
     materialization_path = analysis / "candidate_materialization.v1.json"
-    receipt_path = analysis / "parameter_application_receipt.v1.json"
-    runtime_path = analysis / "parameter_runtime_report.v1.json"
+    receipt_path = analysis / "parameter_application_receipt.v2.json"
+    runtime_path = analysis / "parameter_runtime_report.v2.json"
     manifest_path = analysis / "candidate_workspace.v1.json"
     replay_path = analysis / "candidate_execution_receipt.v1.json"
     config_path = candidate_root / "config/dreamplace_ecc.json"
@@ -114,35 +112,22 @@ def write_candidate(
     write_json(materialization_path, materialization)
     parameter_card = card_for(knob)
     observation = observation_payload or {
-        "evidence_complete": True,
-        "effective_target_density": effective_value,
-        "density_tensor_value": effective_value,
+        "target_density": actual_value,
+        "density_tensor_value": actual_value,
         "density_operator_call_count": 1,
-    }
-    evidence = {
-        "consumer_id": consumer_id,
-        "outcome": "entered",
-        "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-        "evidence_sha256": canonical_sha256(
-            {
-                "consumer_id": consumer_id,
-                "outcome": "entered",
-                "consumer_observation": observation,
-            }
-        ),
     }
     runtime = {
         "tool": parameter_card.tool.model_dump(mode="json"),
-        "application_status": "applied",
-        "activation": {"status": "used", "consumers": [evidence]},
-        "effective_initial": {"value": effective_value, "unit": written_unit},
-        "effective_final": {"value": effective_value, "unit": written_unit},
-        "transitions": transitions or [],
-        "consumer_observation": observation,
+        "knob_id": knob.value,
+        "written_value": written,
+        "status": status,
+        "actual_value": actual_value,
+        "reason": reason,
+        "observation": observation,
     }
     write_json(runtime_path, runtime)
     receipt = {
-        "schema_version": "tool.parameter_application_receipt.v1",
+        "schema_version": "tool.parameter_application_receipt.v2",
         "receipt_id": "parameter-receipt-acceptance-test",
         "tool": parameter_card.tool.model_dump(mode="json"),
         "context": {
@@ -181,12 +166,10 @@ def write_candidate(
             "parent_manifest_sha256": None,
             "parent_state_sha256": HASH,
         },
-        "effective_initial": runtime["effective_initial"],
-        "transitions": runtime["transitions"],
-        "application_status": runtime["application_status"],
-        "activation": runtime["activation"],
-        "consumer_observation": runtime["consumer_observation"],
-        "effective_final": runtime["effective_final"],
+        "status": runtime["status"],
+        "actual_value": runtime["actual_value"],
+        "reason": runtime["reason"],
+        "observation": runtime["observation"],
     }
     receipt["evidence_sha256"] = canonical_sha256(receipt_hash_payload(receipt))
     write_json(receipt_path, receipt)
@@ -212,11 +195,11 @@ def write_candidate(
                 "sha256": file_sha256(materialization_path),
             },
             "parameter_application_receipt": {
-                "ref": "analysis/parameter_application_receipt.v1.json",
+                "ref": "analysis/parameter_application_receipt.v2.json",
                 "sha256": file_sha256(receipt_path),
             },
             "parameter_runtime_report": {
-                "ref": "analysis/parameter_runtime_report.v1.json",
+                "ref": "analysis/parameter_runtime_report.v2.json",
                 "sha256": file_sha256(runtime_path),
             },
         },
