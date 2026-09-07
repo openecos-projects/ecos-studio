@@ -168,7 +168,7 @@ def _objective() -> OptimizationObjectiveContract:
         OptimizationObjectiveProposal(
             primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
             preserve_metrics=(
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+                ObjectiveMetric.DRC_COUNT,
                 ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
             ),
             rationale_summary="Wirelength is primary; routing quality remains constrained.",

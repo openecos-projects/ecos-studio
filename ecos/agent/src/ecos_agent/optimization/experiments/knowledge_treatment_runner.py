@@ -589,10 +589,10 @@ def _objective():
         OptimizationObjectiveProposal(
             primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
             preserve_metrics=(
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+                ObjectiveMetric.DRC_COUNT,
                 ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
             ),
-            rationale_summary="Use the frozen lexicographic routing objective.",
+            rationale_summary="Minimize wirelength while preserving final DRC and global-routing overflow.",
         ),
     )
 

@@ -32,8 +32,10 @@ from ecos_agent.optimization.objective_alignment import (
 from ecos_agent.optimization.rules import (
     IncumbentDecision,
     IncumbentComparison,
+    compare_incumbent,
     compare_recovery_incumbent,
     freeze_optimization_objective,
+    freeze_routability_objective,
     terminal_candidate_is_promotable,
 )
 
@@ -265,3 +267,56 @@ def test_alignment_does_not_exempt_ineligible_candidate_after_recovery() -> None
         objective_alignment=alignment,
         recovery_active=False,
     )
+
+
+@pytest.mark.parametrize("metric", tuple(TimingMetric))
+@pytest.mark.parametrize("drop, accepted", [(0.005, True), (0.1, False)])
+def test_recovery_keeps_timing_within_existing_tolerance(
+    metric: TimingMetric, drop: float, accepted: bool,
+) -> None:
+    incumbent = _terminal(drc=9).model_copy(
+        update={"timing_guardrail": {item: 1.0 for item in TimingMetric}}
+    )
+    candidate = _terminal(drc=0).model_copy(
+        update={"timing_guardrail": {
+            item: 1.0 - drop if item == metric else 1.0 for item in TimingMetric
+        }}
+    )
+    alignment = build_objective_alignment(_objective(), incumbent)
+    comparison = compare_recovery_incumbent(
+        incumbent=incumbent, candidate=candidate, alignment=alignment
+    )
+    assert comparison.decision == (
+        IncumbentDecision.CANDIDATE_BETTER if accepted else IncumbentDecision.INCUMBENT_RETAINED
+    )
+    assert comparison.decisive_metric == (ObjectiveMetric.DRC_COUNT if accepted else metric)
+
+
+def test_final_drc_recovery_returns_to_requested_wirelength() -> None:
+    objective = freeze_optimization_objective(
+        "reduce routed wirelength while preserving DRC and timing",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.DRC_COUNT, ObjectiveMetric.STA_SETUP_WNS),
+            rationale_summary="Reduce wirelength with DRC and timing protection.",
+        ),
+    )
+    baseline = _terminal(drc=9)
+    baseline.metrics[ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT] = 0
+    alignment = build_objective_alignment(objective, baseline)
+    assert build_active_objective(alignment, objective, baseline).active_primary_metric == ObjectiveMetric.DRC_COUNT
+    recovered = build_active_objective(alignment, objective, _terminal())
+    assert recovered.recovery_stage == "original"
+    assert recovered.active_primary_metric == ObjectiveMetric.ROUTE_WIRELENGTH
+    assert recovered.active_preserve_metrics == (ObjectiveMetric.DRC_COUNT,)
+    for drc, expected in (
+        (0, IncumbentDecision.CANDIDATE_BETTER),
+        (1, IncumbentDecision.CANDIDATE_INELIGIBLE),
+    ):
+        comparison = compare_incumbent(
+            incumbent=_terminal(),
+            candidate=_terminal(drc=drc, wirelength=90),
+            objective=freeze_routability_objective(_terminal()),
+            semantic_objective=objective,
+        )
+        assert comparison.decision == expected

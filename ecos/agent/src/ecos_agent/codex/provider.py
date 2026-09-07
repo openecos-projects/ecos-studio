@@ -267,6 +267,13 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 "Return one JSON object matching ecos.optimization_objective_proposal.v1. "
                 "Interpret only the user's optimization goal. Output only the whitelisted "
                 "primary_metric, preserve_metrics, and rationale fields defined by the schema. "
+                "Use drc_count for final DRC; route_dr_total_violation_count is only a "
+                "routing-stage statistic, not final DRC cleanliness. "
+                "Setup/hold WNS and TNS are always protected by local timing tolerances "
+                "and setup/hold violation counts by recovery/signoff gates, "
+                "so omit these redundant preserve_metrics. Keep the user's original primary "
+                "objective; local baseline validation selects DRC/setup/hold recovery first "
+                "when needed and requires user confirmation before execution. "
                 "Do not return parameter values, paths, commands, tools, workspaces, RPC methods, "
                 "or execution instructions. Local ECOS validation freezes the objective and owns execution."
             ),
