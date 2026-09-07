@@ -283,6 +283,10 @@ import {
   type QuickStartResourceSnapshot,
 } from '@/composables/quickStartController'
 import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
+import {
+  runQuickStartFlow,
+  type QuickStartFlowResult,
+} from '@/composables/quickStartFlow'
 import { createProjectManifestMpcSnapshot, parseMpcSpecDesigns } from '@/utils/mpcSpec'
 import {
   requestOpenStepConfigAfterCreate,
@@ -503,6 +507,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
     desktopApi.value = api
     const versions = await api.app.getVersions()
     const resources = await resolveQuickStartResources(api)
+    let completedFlow: QuickStartFlowResult | undefined
     const host = {
       appVersion: versions.gui,
       listResources: async () => resources,
@@ -720,20 +725,31 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
       },
       startFlow: async (input: { project: any; workspace: any }) => {
         narrate('现在正在启动完整 RTL 到 GDS 流程。')
-        const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })
-        if (!flowResult) throw new Error('Run All Flow did not start.')
-        await writeQuickStartRunRecord(api, input.workspace.path, {
-          flow: {
-            operation_id: flowResult.operationId,
-            plan: (input.workspace as { config?: WorkspaceConfig }).config?.flow_config,
+        completedFlow = await runQuickStartFlow({
+          api,
+          workspaceHandle: workspaceSession.value.workspaceId,
+          workspacePath: input.workspace.path,
+          narrate,
+          signal,
+          start: () => runAllFlow({ rerun: false, runtimeTarget: 'agent' }),
+          onStarted: async (flowResult) => {
+            await writeQuickStartRunRecord(api, input.workspace.path, {
+              flow: {
+                operation_id: flowResult.operationId,
+                plan: (input.workspace as { config?: WorkspaceConfig }).config
+                  ?.flow_config,
+              },
+              started_at: new Date().toISOString(),
+              status: 'flow_running',
+            })
           },
-          started_at: new Date().toISOString(),
-          status: 'flow_running',
         })
-        return flowResult
+        return completedFlow
       },
     }
     await runQuickStartWorkflow(host, onEvent, signal)
+    if (!completedFlow) throw new Error('Quick Start did not return a flow result.')
+    return completedFlow
   } finally {
     quickStartCursor.visible = false
     if (signal?.aborted) {

@@ -44,6 +44,7 @@ import { electronLogger } from '../logger'
 
 import { normalizeWorkspacePath } from '../workspacePath'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
+import { reconcileQuickStartOperationReceipt } from './quickStartRunReceipt'
 import {
   EccWorkspaceRuntime,
   type EccRpcRuntimeClient,
@@ -346,10 +347,14 @@ export class EccRpcRuntimeService {
   async waitForOperation(
     request: EccRuntimeOperationRequest,
   ): Promise<EccRuntimeOperation> {
+    const directory = this.requireDirectory(request.workspaceHandle)
     try {
-      return await this.runForRequest(request, (runtime, runtimeRequest) =>
+      const operation = await this.runForRequest(request, (runtime, runtimeRequest) =>
         runtime.waitForOperation(runtimeRequest),
       )
+      // The terminal event can arrive before Quick Start saves its running receipt.
+      await reconcileQuickStartOperationReceipt(operation, directory)
+      return operation
     } finally {
       this.releaseAgentOperation(request.operationId)
     }

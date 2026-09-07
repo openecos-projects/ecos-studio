@@ -1,4 +1,7 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -185,6 +188,84 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it.each([
+    ['operation.completed', 'flow_completed', undefined],
+    ['operation.failed', 'flow_failed', 'Sizer failed'],
+    ['operation.cancelled', 'flow_failed', 'ECC operation cancelled.'],
+  ] as const)(
+    'reconciles a late Quick Start receipt before returning %s from waitForOperation',
+    async (type, status, error) => {
+      const directory = await mkdtemp(join(tmpdir(), 'ecos-quick-start-wait-'))
+      try {
+        const pool = createPool()
+        const workspace = await pool.service.openWorkspace({ directory })
+        pool.clientFor(directory).responses.push({
+          kind: 'flow',
+          operationId: 'quick-start-operation',
+          state: 'running',
+          workspaceId: `id-${directory}`,
+        })
+        await pool.service.startFlowOperation({
+          idempotencyKey: 'quick-start',
+          runtimeTarget: 'agent',
+          workspaceHandle: workspace.workspaceHandle,
+        })
+        pool.sidecarNotification(directory, {
+          jsonrpc: '2.0',
+          method: 'runtime.event',
+          params: {
+            eventId: 'quick-start-terminal',
+            kind: 'flow',
+            operationId: 'quick-start-operation',
+            origin: 'gui',
+            payload:
+              type === 'operation.failed'
+                ? { error: { code: 'failed', message: error } }
+                : {},
+            sequence: 2,
+            timestamp: 1700000001,
+            type,
+            workspaceId: `id-${directory}`,
+          },
+        })
+        const receiptPath = join(directory, 'quick_start_run.json')
+        await writeFile(
+          receiptPath,
+          JSON.stringify({
+            flow: { operation_id: 'quick-start-operation' },
+            status: 'flow_running',
+            keep: 'existing data',
+          }),
+        )
+
+        const waitRequest = {
+          operationId: 'quick-start-operation',
+          workspaceHandle: workspace.workspaceHandle,
+          directory: join(directory, 'untrusted-renderer-directory'),
+        }
+        await pool.service.waitForOperation(waitRequest)
+
+        expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+          flow: { operation_id: 'quick-start-operation' },
+          status,
+          keep: 'existing data',
+          ...(error
+            ? { error, failed_at: '2023-11-14T22:13:21.000Z' }
+            : { completed_at: '2023-11-14T22:13:21.000Z' }),
+        })
+        const unrelatedReceipt = JSON.stringify({
+          flow: { operation_id: 'another-operation' },
+          status: 'flow_running',
+        })
+        await writeFile(receiptPath, unrelatedReceipt)
+        await pool.service.waitForOperation(waitRequest)
+        expect(await readFile(receiptPath, 'utf8')).toBe(unrelatedReceipt)
+      } finally {
+        await rm(directory, { force: true, recursive: true })
+      }
+    },
+  )
+
   it('keeps ordinary workspace calls on the default runtime', async () => {
     const pool = createPool()
     const workspace = await pool.service.openWorkspace({ directory: '/work/demo' })

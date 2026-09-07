@@ -247,15 +247,20 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
         message = _required_message(request.get("message"))
+        quick_start_result = message.startswith("quick_start_result:")
         with session.state_lock:
-            if session.pending_interaction is not None:
+            if session.pending_interaction is not None and not quick_start_result:
                 raise ValueError("An interaction answer is required for this session.")
-            session.interaction_undo.clear()
+            if not quick_start_result:
+                session.interaction_undo.clear()
             optimization_active = self._optimization_thread_active(session)
             if not optimization_active:
                 self._reserve_turn_locked(session)
         if optimization_active:
-            self._handle_optimization_control(session, message)
+            if quick_start_result:
+                self._handle_quick_start_result(session, message)
+            else:
+                self._handle_optimization_control(session, message)
             return {
                 "messageId": uuid.uuid4().hex,
                 "sessionId": session.session_id,
@@ -560,9 +565,12 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
         }
 
     def resume_session(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        from ecos_agent.gui.quick_start import QUICK_START_PHASES, quick_start_prompt
+
         session = self._session(request)
         self._emit_status(session, self._resting_status(session))
-        self._emit(session, "message", _prompt_for_phase(session))
+        prompt = quick_start_prompt(session) if session.phase in QUICK_START_PHASES else _prompt_for_phase(session)
+        self._emit(session, "message", prompt)
         self._emit_phase_choice(session, reuse_pending=True)
         return {
             "sessionId": session.session_id,

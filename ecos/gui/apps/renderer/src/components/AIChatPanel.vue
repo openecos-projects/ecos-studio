@@ -292,7 +292,12 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
-import { quickStartRunnerKey, type QuickStartRunner } from '@/composables/quickStartUi'
+import {
+  isQuickStartChoice,
+  isQuickStartNextChoice,
+  quickStartRunnerKey,
+  type QuickStartRunner,
+} from '@/composables/quickStartUi'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import {
@@ -319,7 +324,6 @@ const props = withDefaults(
 )
 
 const AGENT_PROVIDER_ID = 'ecos_agent'
-const QUICK_START_OPTION_ID = 'quick_start'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
@@ -341,8 +345,7 @@ const interactionCompanionIds = computed(
 )
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const quickStartRunner = inject<QuickStartRunner>(quickStartRunnerKey)
-const quickStartRunning = ref(false)
-let quickStartAbortController: AbortController | null = null
+const quickStartRunning = computed(() => activeUi.value.isQuickStartRunning)
 const router = useRouter()
 const route = useRoute()
 const {
@@ -590,6 +593,7 @@ const contractPanelBind = computed(() => ({
 const isRunning = computed(
   () =>
     isAgentRequestPending.value ||
+    quickStartRunning.value ||
     isWorkspaceCreationPending.value ||
     isWorkspaceRerunPending.value ||
     isWorkspaceContinuePending.value ||
@@ -597,33 +601,7 @@ const isRunning = computed(
     isWorkspaceSignoffPending.value ||
     agentRunStatus.value === 'running',
 )
-const pendingInteraction = computed(() => {
-  const interaction = interactionPresentation.value.interaction
-  if (
-    props.shell !== 'home' ||
-    !quickStartRunner ||
-    interaction?.interaction.kind !== 'choice' ||
-    interaction.title !== 'Get started'
-  ) {
-    return interaction
-  }
-  return {
-    ...interaction,
-    interaction: {
-      ...interaction.interaction,
-      options:
-        interaction.interaction.options.length >= 3
-          ? interaction.interaction.options
-          : [
-              {
-                id: QUICK_START_OPTION_ID,
-                label: 'Quick Start: run the built-in GCD RTL-to-GDS example',
-              },
-              ...interaction.interaction.options,
-            ],
-    },
-  }
-})
+const pendingInteraction = computed(() => interactionPresentation.value.interaction)
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
 const interactionCardRef = ref<{
   setFieldValue(fieldId: string, value: string): void
@@ -635,6 +613,16 @@ watch(
   (sessionId, previousSessionId) => {
     if (sessionId !== previousSessionId) interactionExpanded.value = false
   },
+)
+
+watch(
+  () => pendingInteraction.value?.requestId,
+  () => {
+    const interaction = pendingInteraction.value
+    if (interaction && isQuickStartNextChoice(interaction))
+      interactionExpanded.value = true
+  },
+  { immediate: true },
 )
 
 function syncInteractionExpanded(event: Event): void {
@@ -1143,6 +1131,10 @@ async function flushPendingGuiActionForActiveTab(): Promise<void> {
   const pending = ui.pendingGuiAction
   if (!pending) return
   ui.pendingGuiAction = undefined
+  if (pending.type === 'quick_start') {
+    await startQuickStart(sessionId)
+    return
+  }
   if (pending.type === 'rerun') {
     await executeWorkspaceRerun(pending.contract, pending.token, sessionId)
     return
@@ -1573,8 +1565,15 @@ async function handleInteraction(
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
   const sessionId = agentSessionId.value
-  if (!agent || !sessionId || isAgentRequestPending.value || !isActiveGuiOwner(sessionId))
+  if (
+    !agent ||
+    !sessionId ||
+    isAgentRequestPending.value ||
+    quickStartRunning.value ||
+    !isActiveGuiOwner(sessionId)
+  )
     return
+  const ownerUi = sessionUi(sessionId)
   const interaction = messages.value.find(
     (message) => message.interaction?.requestId === requestId,
   )?.interaction
@@ -1584,9 +1583,8 @@ async function handleInteraction(
     Boolean(quickStartRunner) &&
     kind === 'choice' &&
     'optionId' in answer &&
-    interaction?.interaction.kind === 'choice' &&
-    (interaction.interaction.options[0]?.id === answer.optionId ||
-      answer.optionId === QUICK_START_OPTION_ID)
+    interaction !== undefined &&
+    isQuickStartChoice(interaction, answer.optionId)
   if (
     !interaction ||
     !messageStore.answerInteraction(
@@ -1596,7 +1594,7 @@ async function handleInteraction(
   )
     return
   if (textMessage) messageStore.addMessage(textMessage)
-  isAgentRequestPending.value = true
+  ownerUi.isRequestPending = true
   let accepted = false
   try {
     const request =
@@ -1618,18 +1616,25 @@ async function handleInteraction(
             sessionId,
           }
     const result = await agent.answerInteraction(request)
-    activeUi.value.undoInteraction =
+    ownerUi.undoInteraction =
       result.canUndo && !startsQuickStart ? { kind, requestId } : undefined
     markContractInteractionAnswered(sessionId, requestId)
     accepted = true
   } catch (error) {
     messageStore.restoreInteraction(requestId)
-    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
   } finally {
-    isAgentRequestPending.value = false
-    messageStore.finishStreamingMessages()
+    ownerUi.isRequestPending = false
+    messageStore.finishStreamingMessages(sessionId)
   }
-  if (startsQuickStart && accepted) await startQuickStart()
+  if (
+    startsQuickStart &&
+    accepted &&
+    agentShell.tabs.some((tab) => tab.id === sessionId)
+  ) {
+    if (isActiveGuiOwner(sessionId)) await startQuickStart(sessionId)
+    else deferGuiAction(sessionId, { type: 'quick_start' })
+  }
 }
 
 async function browseInteractionRtl(fieldId: string): Promise<void> {
@@ -1700,11 +1705,13 @@ function sendSuggestion(suggestion: { label: string; value: string }): void {
   void sendAgentMessage(suggestion.value, false)
 }
 
-async function startQuickStart(): Promise<void> {
-  if (!quickStartRunner || quickStartRunning.value) return
-  const sessionId = agentSessionId.value
-  quickStartRunning.value = true
-  quickStartAbortController = new AbortController()
+async function startQuickStart(sessionId: string): Promise<void> {
+  if (!quickStartRunner || !isActiveGuiOwner(sessionId)) return
+  const ownerUi = sessionUi(sessionId)
+  if (ownerUi.isQuickStartRunning) return
+  ownerUi.isQuickStartRunning = true
+  const quickStartAbortController = new AbortController()
+  ownerUi.quickStartAbortController = quickStartAbortController
   if (sessionId) messageStore.addMessage('Quick Start · GCD 示例流程')
   const narrationMessageId = sessionId
     ? messageStore.addAssistantMessage(
@@ -1720,13 +1727,20 @@ async function startQuickStart(): Promise<void> {
   const startedAtByStep = new Map<string, number>()
   const turnId = `quick-start-${Date.now()}`
   try {
-    await quickStartRunner(
+    const result = await quickStartRunner(
       (event) => {
         if (!sessionId) return
         if (event.status === 'running' && event.stepId === 'preflight') {
           appendNarration('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
         }
         const now = Date.now()
+        const output = event.output as { state?: string } | undefined
+        const status =
+          event.stepId === 'run-flow' &&
+          event.status === 'completed' &&
+          (output?.state === 'failed' || output?.state === 'cancelled')
+            ? 'failed'
+            : event.status
         const startedAt = startedAtByStep.get(event.stepId) ?? now
         if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
         messageStore.upsertAgentEvent({
@@ -1743,7 +1757,7 @@ async function startQuickStart(): Promise<void> {
             result: event.status === 'completed' ? event.detailKey : undefined,
             schema_version: 'flow-agent.activity.v1',
             startedAt,
-            status: event.status,
+            status,
             tool: event.labelKey,
             turnId,
             turnStartedAt: startedAt,
@@ -1757,23 +1771,41 @@ async function startQuickStart(): Promise<void> {
       quickStartAbortController.signal,
       appendNarration,
     )
-    appendNarration('Quick Start 已完成，完整 RTL 到 GDS 流程已经启动。')
+    appendNarration(
+      result.state === 'succeeded'
+        ? 'Quick Start 的完整 RTL 到 GDS 流程已执行完成。检查结果与时序指标请以实际报告为准。'
+        : result.state === 'cancelled'
+          ? 'Quick Start 流程已取消。'
+          : `Quick Start 流程未完成：${result.error ?? '请查看失败阶段的日志。'}`,
+    )
+    if (sessionId && agentShell.tabs.some((tab) => tab.id === sessionId)) {
+      const agent = getOptionalDesktopApi()?.agent
+      if (!agent) throw new Error('ECOS Agent is unavailable for the next-step guide.')
+      await agent.sendMessage({
+        providerId: AGENT_PROVIDER_ID,
+        sessionId,
+        message: `quick_start_result:${JSON.stringify({
+          workspace: result.workspacePath,
+          operation_id: result.operationId,
+        })}`,
+      })
+    }
   } catch (error) {
     if (!sessionId) return
-    if (isQuickStartAbort(error)) {
+    if (quickStartAbortController.signal.aborted || isQuickStartAbort(error)) {
       appendNarration('Quick Start 已停止。')
     } else {
       messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
     }
   } finally {
     messageStore.finishStreamingMessages(sessionId ?? undefined)
-    quickStartRunning.value = false
-    quickStartAbortController = null
+    ownerUi.isQuickStartRunning = false
+    ownerUi.quickStartAbortController = undefined
   }
 }
 
 function stopQuickStart(): void {
-  quickStartAbortController?.abort()
+  activeUi.value.quickStartAbortController?.abort()
 }
 
 function isQuickStartAbort(error: unknown): boolean {

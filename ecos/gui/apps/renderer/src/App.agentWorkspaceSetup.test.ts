@@ -181,6 +181,10 @@ describe('quick start resources', () => {
       'writeQuickStartRunRecord(api, input.workspace.path',
     )
     expect(startFlowSource).toContain("status: 'flow_running'")
+    expect(startFlowSource).toContain('await runQuickStartFlow({')
+    expect(startFlowSource).toContain(
+      'workspaceHandle: workspaceSession.value.workspaceId',
+    )
     expect(startFlowSource).not.toContain('waitForRuntimeOperation')
     expect(startFlowSource).not.toContain("status: 'flow_completed'")
     expect(startFlowSource).not.toContain("status: 'flow_failed'")

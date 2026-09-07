@@ -128,6 +128,10 @@ def _allowed_operation_ids(value: object) -> list[str]:
             "2",
             "3",
             "4",
+            "optimize_current",
+            "manual_rerun",
+            "create_flow",
+            "continue_flow",
         }:
             raise CodexProviderError(
                 "GUI chat request has invalid operation id",
