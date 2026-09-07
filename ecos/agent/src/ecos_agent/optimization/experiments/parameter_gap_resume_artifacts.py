@@ -50,11 +50,14 @@ def _validate_resume_source(
     source: dict[str, Any], resume: ParameterGapResumeConfig, run_root: Path
 ) -> None:
     readiness = source.get("readiness")
+    baselines = source.get("baseline_observations")
     if (
         source.get("schema_version") != "ecos.rq1_parameter_gap_report.v2"
         or source.get("run_id") != resume.source_run_id
         or not isinstance(readiness, dict)
         or readiness.get("config_sha256") != resume.source_config_sha256
+        or not isinstance(baselines, list)
+        or len(baselines) not in (1, 3)
         or not (run_root / "baseline-1/workspace").is_dir()
     ):
         raise ParameterGapError("source parameter gap run binding is invalid")
@@ -90,7 +93,7 @@ def _resume_manifest(
             f"baseline-{index}": file_sha256(
                 run_root / f"baseline-{index}" / "flow-terminal-result.v1.json"
             )
-            for index in range(1, 4)
+            for index in range(1, len(source_report["baseline_observations"]) + 1)
         },
     }
 
