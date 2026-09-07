@@ -94,6 +94,15 @@ is_portable_sizer_runtime() {
     -f "$root/src/sizer_os.tcl" ]]
 }
 
+validate_sizer_startup() {
+  local output
+  if ! output="$(env -u LD_LIBRARY_PATH -u LD_PRELOAD timeout 10 \
+    "$1/bin/Sizer" -env /dev/null -f /dev/null 2>&1)"; then
+    printf 'Sizer runtime startup failed at %s:\n%s\n' "$1" "$output" >&2
+    return 1
+  fi
+}
+
 prepare_sizer_runtime() {
   local source_root="${CHIPCOMPILER_ECC_SIZER_ROOT:-}"
   local download_dir="$REPO_ROOT/ecc/dist/ecc-sizer-download"
@@ -137,6 +146,7 @@ prepare_sizer_runtime() {
     printf 'Invalid portable Sizer runtime at %s.\n' "${source_root:-<empty>}" >&2
     return 1
   fi
+  validate_sizer_startup "$source_root"
 
   if [[ -d "$stage_dir" ]]; then
     find "$stage_dir" -type d -exec chmod u+w {} +
@@ -146,6 +156,17 @@ prepare_sizer_runtime() {
   cp -a "$source_root/." "$stage_dir/"
   find "$stage_dir" -type d -exec chmod u+w {} +
   SIZER_RUNTIME_ROOT="$stage_dir"
+}
+
+stage_sizer_runtime() {
+  local target="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/binaries/sizer"
+  if [[ -d "$target" ]]; then
+    find "$target" -type d -exec chmod u+w {} +
+  fi
+  rm -rf "$target"
+  mkdir -p "$(dirname "$target")"
+  cp -a "$SIZER_RUNTIME_ROOT" "$target"
+  validate_sizer_startup "$target"
 }
 
 validate_packaged_binaries() {
@@ -194,6 +215,12 @@ validate_packaged_binaries() {
   fi
 }
 
+if [[ "${1:-}" == "--sizer-only" ]]; then
+  prepare_sizer_runtime
+  stage_sizer_runtime
+  exit 0
+fi
+
 build_ecc
 build_chip_viewer
 build_agent_provider
@@ -207,7 +234,7 @@ rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/{agent,binaries}
 cp -a ecc/dist/ecc/. ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
-cp -a "$SIZER_RUNTIME_ROOT" ecos/gui/apps/desktop-electron/resources/binaries/sizer
+stage_sizer_runtime
 cp ecos/agent/dist/ecos-agent ecos/gui/apps/desktop-electron/resources/agent
 cp ecos/agent/agent-provider.packaged.json ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 validate_packaged_binaries
