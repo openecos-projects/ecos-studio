@@ -13,7 +13,9 @@ from ecos_agent.optimization.contracts import (
     RequestedKnobValue,
     requested_reference_values,
 )
-from ecos_agent.optimization.parameters.contracts import CardManifest, ParameterSemanticsCard
+from ecos_agent.optimization.parameters.contracts import (
+    CardManifest, ParameterSemanticsCard, RequestedValueBounds,
+)
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 
 _PACKAGE_CARD_ROOT = (
@@ -121,7 +123,7 @@ def _load_card_entry(
     if (
         len(expected_values) != EXPECTED_LATTICE_COUNTS[card.knob_id]
         or expected_values != requested_reference_values(card.knob_id)
-        or tuple(card.requested_domain.values) != expected_values
+        or tuple(card.requested_domain.reference_values) != expected_values
     ):
         raise ParameterSemanticsError(
             "parameter card lattice does not match the frozen contract"
@@ -129,6 +131,18 @@ def _load_card_entry(
     spec = knob_spec(knob_id)
     target = spec.evidence_target
     expected_type, expected_unit = _EXPECTED_SURFACES[card.knob_id]
+    bounds = RequestedValueBounds(
+        type={"bool": "boolean", "int": "integer", "float": "number"}[expected_type],
+        minimum=None if expected_type == "bool" else min(expected_values),
+        maximum=None if expected_type == "bool" else max(expected_values),
+    )
+    if card.knob_id == OptimizationKnob.TARGET_OVERFLOW:
+        bounds = RequestedValueBounds(
+            type="number", minimum=0.0, maximum=1.0,
+            exclusive_minimum=True, exclusive_maximum=True,
+        )
+    if card.requested_domain.model_dump(exclude={"reference_values"}) != bounds.model_dump():
+        raise ParameterSemanticsError("parameter card bounds do not match execution contract")
     if (
         card.surface.file != target.file
         or tuple(card.surface.json_path) != tuple(target.json_path)
@@ -407,7 +421,7 @@ def card_hash(card: ParameterSemanticsCard) -> str:
 def requested_lattice(card: ParameterSemanticsCard) -> tuple[RequestedKnobValue, ...]:
     return tuple(
         RequestedKnobValue(knob_id=card.knob_id, value=value)
-        for value in card.requested_domain.values
+        for value in card.requested_domain.reference_values
     )
 
 
@@ -415,8 +429,9 @@ def narrative_view(card: ParameterSemanticsCard) -> dict[str, object]:
     return {
         "knob_id": card.knob_id.value,
         "stage": card.stage,
-        "conditions": [
-            item.model_dump(mode="json") for item in card.activation_conditions
+        "requested_domain": card.requested_domain.model_dump(mode="json"),
+        "effectiveness_conditions": [
+            item.model_dump(mode="json") for item in card.effectiveness_conditions
         ],
         "consumers": [item.model_dump(mode="json") for item in card.consumers],
         "runtime_semantics": (

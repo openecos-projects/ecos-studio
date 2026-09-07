@@ -7,9 +7,11 @@ from pathlib import Path
 
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
+from ecos_agent.optimization.knowledge.compiler import GeneralDomainClaim, VersionBoundToolBinding
 
 from .steps import (
     AGENT_ROOT,
+    ECOS_ROOT,
     STAGES,
     _add,
     _json,
@@ -35,25 +37,12 @@ GENERAL_SOURCE_PATHS = {
 }
 GENERAL_KNOWLEDGE_METRICS = tuple(GENERAL_SOURCE_PATHS)
 _ALLOWED_STAGES = {stage.slug for stage in STAGES}
-_DIRECTION = {
-    "increase": "increase",
-    "decrease": "decrease",
-    "set_true": "set true",
-    "set_false": "set false",
-}
 _CONTRACT_DIRECTION = {
     "increase": "increase",
     "decrease": "decrease",
     "set_true": "enable",
     "set_false": "disable",
 }
-_UNSUPPORTED_BOUND_KNOBS = frozenset(
-    {
-        "floorplan.global_right_padding",
-        "floorplan.utilitization",
-        "legalization.cell_padding_x",
-    }
-)
 
 
 def _load_jsonl(metric: str, name: str) -> list[dict[str, object]]:
@@ -65,26 +54,59 @@ def _load_jsonl(metric: str, name: str) -> list[dict[str, object]]:
     ]
 
 
-def _analog(binding: dict[str, object] | None) -> str:
-    if binding is None or not binding.get("knobs"):
+def _analog(binding: dict[str, object] | None, actions: list[dict[str, object]]) -> str:
+    if binding is None or not actions:
         return "No authorized knob. Do not invent one."
-    parts = []
-    for knob in binding["knobs"]:
-        if isinstance(knob, dict):
-            direction = _DIRECTION[str(knob["direction"])]
-            parts.append(f"{direction} `{knob['knob_id']}`")
+    parts = [f"{action['direction']} `{action['knob_id']}`" for action in actions]
     return f"{'; '.join(parts)} ({binding.get('analog_quality', 'coarse')} analog)"
 
 
-def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, list[str]]]:
+def _validate_evidence(statement: dict[str, object]) -> dict[str, str]:
+    paths = {}
+    for evidence in statement["evidence"]:
+        if _sha256(evidence["span"].encode("utf-8")) != evidence["span_sha256"]:
+            raise ValueError("general evidence span hash does not match")
+        if not evidence["source_id"].startswith("source."):
+            continue
+        try:
+            relative = Path(evidence["source_path"])
+            path = (ECOS_ROOT / relative).resolve()
+            path.relative_to(ECOS_ROOT.resolve())
+            start, end = evidence["start"], evidence["end"]
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if relative.is_absolute() or ".." in relative.parts or (
+                type(start) is not int or type(end) is not int
+                or not 1 <= start <= end <= len(lines)
+            ):
+                raise ValueError("invalid source range")
+            span = "\n".join(lines[start - 1:end]) + "\n"
+            if span != evidence["span"]:
+                raise ValueError("source span changed")
+        except (KeyError, OSError, ValueError, TypeError) as exc:
+            raise ValueError("general source evidence is unavailable or stale") from exc
+        source_id = evidence["source_id"]
+        if source_id in paths and paths[source_id] != str(relative):
+            raise ValueError("general source evidence identity is ambiguous")
+        paths[source_id] = str(relative)
+    return paths
+
+
+def _strategy_entries(metric: str) -> tuple[
+    list[dict[str, object]], dict[str, list[str]], dict[str, str]
+]:
     bindings = {
         str(item["action_intent"]): item for item in _load_jsonl(metric, "bindings.jsonl")
     }
-    source_ids = tuple(GENERAL_SOURCE_PATHS[metric])
+    sources = dict(GENERAL_SOURCE_PATHS[metric])
     cards = {card.knob_id.value: card for card in load_parameter_cards().values()}
     entries: list[dict[str, object]] = []
     documents: dict[str, list[str]] = {}
     for statement in _load_jsonl(metric, "statements.jsonl"):
+        native_sources = _validate_evidence(statement)
+        for source_id, source_path in native_sources.items():
+            if source_id in sources and sources[source_id] != source_path:
+                raise ValueError("general source evidence identity is ambiguous")
+            sources[source_id] = source_path
         intent = str(statement["action_intent"])
         diagnosis = statement["diagnosis"]
         if not isinstance(diagnosis, dict):
@@ -95,6 +117,15 @@ def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, l
         statement_metric = str(statement["id"]).split(".")[1]
         if statement_metric != metric:
             raise ValueError(f"invalid metric: {statement['id']}")
+        binding = bindings.get(intent)
+        actions = _binding_actions(binding, cards) if binding else []
+        if any(cards[action["knob_id"]].stage.casefold() not in stages for action in actions):
+            raise ValueError(f"binding stage is outside claim scope: {statement['id']}")
+        if actions and not any(
+            predicate.get("op") != "present"
+            for predicate in statement.get("state_predicates", ())
+        ):
+            raise ValueError(f"actionable claim lacks semantic state predicates: {statement['id']}")
         effects = "; ".join(
             f"{item['metric']} {item['direction']}"
             for item in statement["effects"]
@@ -111,8 +142,10 @@ def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, l
                 f"**Action intent:** {intent.replace('_', ' ')} (`{intent}`).",
                 f"**Effects:** {effects}.",
                 f"**Anti-conditions:** {', '.join(str(item) for item in statement['anti_conditions'])}.",
-                f"**ECOS analog:** {_analog(bindings.get(intent))}",
-                f"**Paper sources:** {', '.join(dict.fromkeys(str(item['source_id']) for item in statement['evidence'] if isinstance(item, dict)))}.",
+                f"**ECOS analog:** {_analog(binding, actions)}",
+                f"**Binding limits:** {(binding or {}).get('note') or 'Subject to current stage, evidence, and legal action constraints.'}",
+                f"**Review status:** {statement['review_status']}.",
+                f"**Evidence sources:** {', '.join(dict.fromkeys(str(item['source_id']) for item in statement['evidence'] if isinstance(item, dict)))}.",
             ]
         )
         _add(
@@ -123,31 +156,29 @@ def _strategy_entries(metric: str) -> tuple[list[dict[str, object]], dict[str, l
             aliases=(),
             document="strategies.md",
             body=body,
-            evidence=source_ids,
+            evidence=(*GENERAL_SOURCE_PATHS[metric], *native_sources),
             stages=stages,
         )
         entries[-1]["metric"] = statement_metric
         entries[-1]["support"] = _support_contract(
-            statement, bindings.get(intent), entries[-1], cards
+            statement, binding, entries[-1], actions
         )
-    return entries, documents
+    return entries, documents, sources
 
 
 def _support_contract(
     statement: dict[str, object],
     binding: dict[str, object] | None,
     entry: dict[str, object],
-    cards: dict[str, ParameterSemanticsCard],
+    actions: list[dict[str, object]],
 ) -> dict[str, object]:
     diagnosis = statement["diagnosis"]
     if not isinstance(diagnosis, dict):
         raise ValueError(f"invalid diagnosis: {statement['id']}")
     claim_sha256 = "sha256:" + _sha256(_json(statement).encode("utf-8"))
     claim = _claim_contract(statement, entry, diagnosis, claim_sha256)
-    if binding is None or not binding.get("knobs"):
-        return {"claim": claim, "binding": None}
-    actions = _binding_actions(binding, cards)
-    if not actions:
+    GeneralDomainClaim.model_validate(claim)
+    if binding is None or not actions:
         return {"claim": claim, "binding": None}
     binding_payload = {**binding, "actions": actions}
     binding_sha256 = "sha256:" + _sha256(_json(binding_payload).encode("utf-8"))
@@ -156,22 +187,21 @@ def _support_contract(
             {"binding_sha256": binding_sha256, "source_paths": GENERAL_SOURCE_PATHS}
         ).encode("utf-8")
     )
-    return {
-        "claim": claim,
-        "binding": {
-            "schema_version": "ecos.version_bound_tool_binding.v1",
-            "binding_id": binding["id"],
-            "binding_sha256": binding_sha256,
-            "claim_id": statement["id"],
-            "claim_sha256": claim_sha256,
-            "toolchain_ref": toolchain_ref,
-            "actions": actions,
-            "consumer_ids": _action_ids(actions, "consumer_ids"),
-            "activation_predicate_ids": _action_ids(
-                actions, "activation_predicate_ids"
-            ),
-        },
+    contract = {
+        "schema_version": "ecos.version_bound_tool_binding.v1",
+        "binding_id": binding["id"],
+        "binding_sha256": binding_sha256,
+        "claim_id": statement["id"],
+        "claim_sha256": claim_sha256,
+        "toolchain_ref": toolchain_ref,
+        "analog_quality": binding.get("analog_quality", "coarse"),
+        "limitations": binding.get("note", ""),
+        "actions": actions,
+        "consumer_ids": _action_ids(actions, "consumer_ids"),
+        "activation_predicate_ids": _action_ids(actions, "activation_predicate_ids"),
     }
+    VersionBoundToolBinding.model_validate(contract)
+    return {"claim": claim, "binding": contract}
 
 
 def _claim_contract(
@@ -187,6 +217,11 @@ def _claim_contract(
             "chunk_sha256": entry["chunk_sha256"],
         },
         "claim_sha256": claim_sha256,
+        "evidence_kind": (
+            "source_derived_hypothesis"
+            if statement["review_status"] == "source_derived_hypothesis"
+            else "literature"
+        ),
         "stages": statement["scope"]["stages"],
         "state_predicates": statement.get("state_predicates")
         or [
@@ -231,8 +266,6 @@ def _binding_actions(
     for knob in binding["knobs"]:
         card = cards.get(knob["knob_id"])
         if card is None:
-            if knob["knob_id"] in _UNSUPPORTED_BOUND_KNOBS:
-                continue
             raise ValueError(f"binding parameter card is unavailable: {knob['knob_id']}")
         if str(knob.get("step", "")).casefold() != card.stage.casefold():
             raise ValueError(f"binding stage does not match parameter card: {knob['knob_id']}")
@@ -332,7 +365,7 @@ REGRESSION_CASES = {
 def build_general_bundle(output: Path, metric: str) -> None:
     if metric not in GENERAL_KNOWLEDGE_METRICS:
         raise ValueError(f"unsupported general knowledge metric: {metric}")
-    entries, documents = _strategy_entries(metric)
+    entries, documents, sources = _strategy_entries(metric)
     knowledge = output / "knowledge"
     knowledge.mkdir(parents=True, exist_ok=True)
     for name, chunks in documents.items():
@@ -351,7 +384,7 @@ def build_general_bundle(output: Path, metric: str) -> None:
     (output / "sources.json").write_text(
         _json(
             _source_inventory(
-                _referenced_sources(GENERAL_SOURCE_PATHS[metric], entries),
+                _referenced_sources(sources, entries),
                 "ecos-general-sources.v1",
             )
         )

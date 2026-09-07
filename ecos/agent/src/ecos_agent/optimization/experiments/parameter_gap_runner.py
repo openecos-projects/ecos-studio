@@ -191,7 +191,7 @@ def _run_knob(
         sequence,
         run_root,
     )
-    required = set(card.requested_domain.values) - {current}
+    required = set(card.requested_domain.reference_values) - {current}
     if knob == OptimizationKnob.ROUTABILITY_OPT:
         required.add(current)
     summary = summarize_knob(knob, results, lattice_complete=required <= tested)
@@ -260,7 +260,7 @@ def _expand_knob(
     run_root: Path,
 ) -> int:
     remaining = tuple(
-        value for value in card.requested_domain.values
+        value for value in card.requested_domain.reference_values
         if value != current and value not in tested
     )
     for value in remaining:
