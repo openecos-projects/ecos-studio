@@ -196,7 +196,11 @@ def test_fake_runner_completes_two_replanning_turns_with_bounded_history(
     assert controller.incumbent is not None
     assert controller.incumbent.observation_id == "terminal-execution-2"
     assert controller.incumbent_candidate_root_ref == ".agent/candidates/execution-2"
-    assert runner._current_values["place.target_density"] == 0.8
+    assert runner._current_values["place.target_density"] == 0.15
+    assert second.execution.requested is None
+    assert controller.ledger.replay().terminal_outcomes[-1].parameter_application_receipt.actual_value == 0.8
+    assert controller._case_audit.verify().diagnostics == ()
+    assert controller._case_audit.verify().cases == ()
     assert (
         planner.contexts[0].context_ref.input_sha256
         != planner.contexts[1].context_ref.input_sha256

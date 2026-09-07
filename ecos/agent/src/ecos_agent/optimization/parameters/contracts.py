@@ -467,7 +467,6 @@ class NumericProposalActionV2(_Model):
     direction: StrategyDirection
     requested_value: Scalar
     effective_domain_sha256: str
-    threshold_refs: tuple[str, ...] = ()
     expected_effects: tuple[ExpectedEffectV2, ...] = Field(min_length=1, max_length=3)
 
     @field_validator("claim_id", "binding_id")
@@ -515,8 +514,8 @@ class NumericProposalActionV2(_Model):
 
 
 class OptimizationProposalV2(_Model):
-    schema_version: Literal["ecos.optimization_proposal.v2"] = (
-        "ecos.optimization_proposal.v2"
+    schema_version: Literal["ecos.optimization_proposal.v3"] = (
+        "ecos.optimization_proposal.v3"
     )
     context_ref: ProposalContextRef
     decision: Literal["continue", "propose", "stop", "escalate"]
@@ -533,7 +532,7 @@ class OptimizationProposalV2(_Model):
     @model_validator(mode="after")
     def action_consistency(self) -> "OptimizationProposalV2":
         if self.decision == "propose" and self.action is None:
-            raise ValueError("v2 propose requires an action")
+            raise ValueError("v3 propose requires an action")
         if self.decision != "propose" and self.action is not None:
-            raise ValueError("non-propose v2 decisions cannot contain an action")
+            raise ValueError("non-propose v3 decisions cannot contain an action")
         return self

@@ -271,8 +271,6 @@ def export_episode_traces(
                 proposal_outcome=(
                     "repair"
                     if decision.planner_source == "repair"
-                    else "fallback"
-                    if decision.planner_source == "local_fallback"
                     else None
                 ),
             )
@@ -282,7 +280,7 @@ def export_episode_traces(
 
 
 def _verified_episode_state(episode_root: Path) -> dict[str, object]:
-    path = episode_root / "optimization-episode-state.v8.json"
+    path = episode_root / "optimization-episode-state.v9.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         state_hash = payload.pop("state_sha256")

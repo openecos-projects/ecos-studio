@@ -1,14 +1,12 @@
 import copy
 import json
 
-import pytest
-
 from ecos_agent.context_status import MAX_STATUS_BYTES, StatusSnapshots, bounded_status
 from ecos_agent.codex.provider_helpers import _build_prompt
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.planning import planning_context_payload
 from tests.optimization.test_codex_proposal_provider import (
-    _context, _domain, _proposal, _proposal_v2, _provider,
+    _context, _domain, _proposal_v2, _provider,
 )
 
 
@@ -37,16 +35,12 @@ def test_status_is_bounded_without_mutating_authoritative_input():
     assert status == before
 
 
-@pytest.mark.parametrize("v2", [False, True])
-def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_business_hash(tmp_path, v2):
+def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_business_hash(tmp_path):
     provider = _provider(tmp_path)
     context = _context()
     domain = _domain()
     expected = planning_context_payload(context)
-    if v2:
-        expected["effective_domain"] = domain.model_dump(mode="json")
-    else:
-        expected.pop("effective_domains", None)
+    expected["effective_domain"] = domain.model_dump(mode="json")
     sent = []
 
     class Client:
@@ -60,7 +54,7 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
         def wait_for_turn_details(self, *args, **kwargs):
             # Late telemetry must not rewrite the frozen request or its envelope.
             provider._runtime_status.last_turn = {"thread_id": "thread-1", "usage": {"input_tokens": 999}}
-            response = _proposal_v2(context, domain) if v2 else _proposal(context)
+            response = _proposal_v2(context, domain)
             return json.dumps(response), {"input_tokens": 5}
 
         def record_turn_completion(self, **kwargs):
@@ -68,10 +62,7 @@ def test_sent_prompt_equals_audit_envelope_and_telemetry_does_not_change_busines
 
     provider._client = Client()
     for index in range(2):
-        if v2:
-            provider.propose_v2(context, domain)
-        else:
-            provider.propose(context)
+        provider.propose_v2(context, domain)
         evidence = provider.consume_planning_evidence()
         assert evidence.envelope.prompt == sent[-1]["input"][0]["text"]
         assert evidence.envelope.output_schema == sent[-1]["outputSchema"]

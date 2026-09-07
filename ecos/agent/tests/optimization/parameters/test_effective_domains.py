@@ -2,239 +2,170 @@ from __future__ import annotations
 
 import pytest
 
-from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobValue
-from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainError,
+    EffectiveDomainSnapshot,
+    RequestedValueBounds,
     build_context_fingerprint,
     compile_effective_domain,
 )
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
-from tests.optimization.parameters.effectiveness_support import (
-    density_receipt,
-    domain_context,
-)
+from tests.optimization.parameters.effectiveness_support import domain_context
 
 
-@pytest.mark.parametrize("anchor", (0.0, 0.01, 0.1, 0.9, 1.0))
-def test_overflow_candidates_exclude_endpoints_without_truncating_interior(anchor) -> None:
-    card = load_parameter_cards()[OptimizationKnob.TARGET_OVERFLOW]
+def make_domain(knob=OptimizationKnob.TARGET_DENSITY, current=0.2, attempted=()):
+    card = load_parameter_cards()[knob]
     context = domain_context(
-        current_values={"place.target_overflow": anchor},
-        parameter_card_sha256=card_hash(card),
-    )
-    domain = compile_effective_domain(card, context=context, baseline_surface_value=anchor)
-    assert domain.allowed_requested_values
-    assert all(0 < value < 1 for value in domain.allowed_requested_values)
-    assert all(0 < value < 1 for value in card.requested_domain.values)
-    if 0 < anchor < 1:
-        assert any(value < anchor for value in domain.allowed_requested_values)
-        assert any(value > anchor for value in domain.allowed_requested_values)
-
-
-def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
-    cards = load_parameter_cards()
-    card = cards[OptimizationKnob.TARGET_DENSITY]
-    context = domain_context()
-    receipt = density_receipt(context)
-    domain = compile_effective_domain(
-        card,
-        context=context,
-        receipts=(receipt,),
-        current_receipts=(receipt,),
-    )
-    assert domain.allowed_requested_values == (0.825, 0.875, 0.95)
-    assert domain.current_coordinate["effective_anchor"] == 0.8
-    assert domain.thresholds[0].evidence_refs == (
-        {
-            "kind": "parameter_card",
-            "ref": "optimization/place.target_density.json",
-            "sha256": card_hash(card),
-        },
-        {
-            "kind": "application_receipt",
-            "ref": receipt.receipt_id,
-            "sha256": receipt.evidence_sha256,
-        },
-    )
-
-
-def test_density_floor_without_runtime_trigger_excludes_only_observed_request() -> None:
-    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    context = domain_context()
-    receipt = density_receipt(context, with_runtime_trigger=False)
-
-    domain = compile_effective_domain(
-        card,
-        context=context,
-        receipts=(receipt,),
-        current_receipts=(receipt,),
-    )
-
-    assert domain.excluded_aliases == (0.2,)
-    assert 0.5 in domain.allowed_requested_values
-    assert 0.2 not in domain.allowed_requested_values
-
-
-@pytest.mark.parametrize("status", ("inactive", "unknown"))
-def test_unconfirmed_or_inactive_receipt_cannot_teach_a_density_floor(status) -> None:
-    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    context = domain_context()
-    payload = density_receipt(context).model_dump(mode="json", exclude={"evidence_sha256"})
-    payload.update(status=status, actual_value=None)
-    receipt = ParameterApplicationReceipt(**payload, evidence_sha256=canonical_sha256(payload))
-
-    domain = compile_effective_domain(
-        card, context=context, receipts=(receipt,), current_receipts=(receipt,)
-    )
-
-    assert domain.current_coordinate is None
-    assert domain.excluded_aliases == ()
-    assert domain.thresholds == ()
-
-
-def test_rules_empty_does_not_infer_aliases() -> None:
-    cards = load_parameter_cards()
-    card = cards[OptimizationKnob.FLOORPLAN_ASPECT_RATIO]
-    context = domain_context(
-        stage="Floorplan",
+        stage=card.stage,
         tool_revision=card.tool.revision,
         tool_source_sha256=card.tool.source_sha256,
         parameter_card_sha256=card_hash(card),
-    )
-    domain = compile_effective_domain(card, context=context, baseline_surface_value=1.0)
-    assert domain.excluded_aliases == ()
-    assert domain.allowed_requested_values == (0.2, 0.6, 0.75, 1.33, 3.0, 5.0)
-
-
-def test_dynamic_allowlist_refines_the_largest_unexplored_interval() -> None:
-    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    context = domain_context(current_values={"place.target_density": 0.7})
-
-    initial = compile_effective_domain(
-        card,
-        context=context,
-        baseline_surface_value=0.7,
-    )
-    refined = compile_effective_domain(
-        card,
-        context=context,
-        attempted=(
-            RequestedKnobValue(knob_id="place.target_density", value=0.825),
-        ),
-        baseline_surface_value=0.7,
-    )
-
-    assert initial.schema_version == "ecos.effective_domain.v3"
-    assert initial.allowed_requested_values == (0.1, 0.4, 0.65, 0.75, 0.825, 0.95)
-    assert refined.allowed_requested_values == (0.1, 0.4, 0.65, 0.75, 0.7625, 0.95)
-    assert compile_effective_domain(
-        card,
-        context=context,
-        attempted=(
-            RequestedKnobValue(knob_id="place.target_density", value=0.825),
-        ),
-        baseline_surface_value=0.7,
-    ) == refined
-
-
-def test_dynamic_allowlist_uses_log_midpoint_for_density_weight() -> None:
-    card = load_parameter_cards()[OptimizationKnob.DENSITY_WEIGHT]
-    context = domain_context(
-        current_values={"place.density_weight": 0.001},
-        parameter_card_sha256=card_hash(card),
         unit=card.surface.unit,
+        current_values={knob.value: current},
+    )
+    return compile_effective_domain(
+        card, context=context, baseline_surface_value=current, attempted=attempted
     )
 
-    domain = compile_effective_domain(
-        card,
-        context=context,
-        baseline_surface_value=0.001,
-    )
 
-    assert 0.00316227766017 in domain.allowed_requested_values
-
-
-def test_dynamic_allowlist_generates_integer_values_between_references() -> None:
-    card = load_parameter_cards()[OptimizationKnob.CELL_PADDING_X]
-    context = domain_context(
-        current_values={"place.cell_padding_x": 2},
-        parameter_card_sha256=card_hash(card),
-        unit=card.surface.unit,
-    )
-
-    domain = compile_effective_domain(
-        card,
-        context=context,
-        baseline_surface_value=2,
-    )
-
-    assert 9 in domain.allowed_requested_values
-    assert 9 not in card.requested_domain.values
+def test_domain_preserves_full_static_range_without_sampling_or_floor_rules():
+    domain = make_domain(current=0.1)
+    assert domain.schema_version == "ecos.effective_domain.v4"
+    assert domain.current_coordinate == {"surface_value": 0.1}
+    assert domain.value_bounds.json_schema() == {
+        "type": "number", "minimum": 0.1, "maximum": 0.95
+    }
+    assert all(domain.accepts(value) for value in (0.15, 0.25, 0.6678, 0.7779, 0.9137))
+    assert set(domain.model_dump()) == {
+        "schema_version", "knob_id", "context_sha256", "current_coordinate",
+        "value_bounds", "attempted_values", "snapshot_sha256",
+    }
 
 
-def test_dynamic_allowlist_stays_within_bounds_when_current_value_is_outside() -> None:
+def test_attempt_history_excludes_exact_request_not_an_interval():
+    attempted = (RequestedKnobValue(knob_id="place.target_density", value=0.15),)
+    domain = make_domain(current=0.1, attempted=attempted)
+    assert domain.attempted_values == (0.15,)
+    assert not domain.accepts(0.15)
+    assert domain.accepts(0.150001)
+    assert domain.accepts(0.25)
+    assert domain == make_domain(current=0.1, attempted=attempted)
+    assert domain.snapshot_sha256 != make_domain(current=0.1).snapshot_sha256
+
+
+def test_domain_no_longer_accepts_receipts_as_search_constraints():
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    context = domain_context(current_values={"place.target_density": 1.0})
+    with pytest.raises(TypeError, match="receipts"):
+        compile_effective_domain(card, context=domain_context(), receipts=())
 
-    domain = compile_effective_domain(
-        card,
-        context=context,
-        baseline_surface_value=1.0,
+
+@pytest.mark.parametrize("anchor", (0.0, 0.01, 0.1, 0.9, 1.0))
+def test_overflow_bounds_preserve_entire_open_interval(anchor):
+    domain = make_domain(OptimizationKnob.TARGET_OVERFLOW, anchor)
+    assert domain.value_bounds.json_schema() == {
+        "type": "number", "exclusiveMinimum": 0.0, "exclusiveMaximum": 1.0
+    }
+    assert domain.accepts(0.000001) and domain.accepts(0.999999)
+    assert not domain.accepts(0.0) and not domain.accepts(1.0)
+
+
+@pytest.mark.parametrize(
+    "value", (True, "0.5", None, float("inf"), float("nan"), 10**400)
+)
+def test_numeric_bounds_reject_invalid_types_and_nonfinite_values(value):
+    assert not make_domain().accepts(value)
+
+
+def test_integer_and_boolean_bounds_are_strict():
+    integer = make_domain(OptimizationKnob.CELL_PADDING_X, 2)
+    assert integer.accepts(9)
+    assert not integer.accepts(9.0)
+    assert not integer.accepts(True)
+    boolean = make_domain(OptimizationKnob.ROUTABILITY_OPT, False)
+    assert boolean.accepts(True)
+    assert not boolean.accepts(1)
+    assert boolean.direction_schema("enable") == {"type": "boolean", "enum": [True]}
+    assert boolean.direction_schema("disable") is None
+
+
+@pytest.mark.parametrize("current", (2.0, 1.5))
+def test_integer_requests_allow_unit_converted_fractional_baseline(current):
+    domain = make_domain(OptimizationKnob.CELL_PADDING_X, current)
+    assert domain.current_coordinate == {"surface_value": current}
+    assert domain.direction_schema("increase") == {
+        "type": "integer", "exclusiveMinimum": current, "maximum": 16
+    }
+    assert domain.direction_schema("decrease") == {
+        "type": "integer", "minimum": 0, "exclusiveMaximum": current
+    }
+    assert domain.accepts(2)
+    assert not domain.accepts(2.0)
+    assert not domain.accepts(current)
+
+
+@pytest.mark.parametrize("current", (True, float("inf"), float("nan")))
+def test_integer_baseline_rejects_boolean_and_nonfinite_values(current):
+    with pytest.raises(EffectiveDomainError, match="current coordinate"):
+        make_domain(OptimizationKnob.CELL_PADDING_X, current)
+
+
+def test_direction_schema_uses_requested_coordinate_and_static_bounds():
+    domain = make_domain(current=0.2)
+    assert domain.direction_schema("increase") == {
+        "type": "number", "exclusiveMinimum": 0.2, "maximum": 0.95
+    }
+    assert domain.direction_schema("decrease") == {
+        "type": "number", "minimum": 0.1, "exclusiveMaximum": 0.2
+    }
+    assert make_domain(current=1.0).direction_schema("increase") is None
+    assert make_domain(current=0.0).direction_schema("decrease") is None
+    assert make_domain(OptimizationKnob.CELL_PADDING_X, 0).direction_schema("decrease") is None
+
+
+def test_integer_direction_is_unavailable_when_every_value_was_attempted():
+    domain = make_domain(
+        OptimizationKnob.CELL_PADDING_X,
+        2,
+        attempted=tuple(
+            RequestedKnobValue(knob_id="place.cell_padding_x", value=value)
+            for value in (0, 1)
+        ),
     )
+    assert domain.direction_schema("decrease") is None
+    assert domain.direction_schema("increase") is not None
 
-    assert domain.allowed_requested_values
-    assert all(0.1 <= value <= 0.95 for value in domain.allowed_requested_values)
+
+def test_domain_hash_prevents_range_tampering():
+    payload = make_domain().model_dump(mode="json")
+    payload["value_bounds"]["maximum"] = 1.0
+    with pytest.raises(ValueError, match="snapshot hash"):
+        EffectiveDomainSnapshot.model_validate(payload)
 
 
-def test_context_fingerprint_ignores_run_id_but_binds_inputs() -> None:
+@pytest.mark.parametrize("bounds", (
+    {"type": "number", "minimum": float("nan")},
+    {"type": "number", "minimum": 2, "maximum": 1},
+    {"type": "boolean", "minimum": 0},
+    {"type": "number", "exclusive_minimum": True},
+))
+def test_invalid_bounds_are_rejected(bounds):
+    with pytest.raises(ValueError):
+        RequestedValueBounds.model_validate(bounds)
+
+
+def test_context_fingerprint_ignores_run_id_but_binds_inputs():
     context = domain_context(run_id="candidate-1")
     assert build_context_fingerprint(context) == build_context_fingerprint(
         {**context, "run_id": "candidate-2"}
     )
-    assert build_context_fingerprint(context) != build_context_fingerprint(
-        {**context, "site_width_dbu": 400}
-    )
-    assert build_context_fingerprint(context) != build_context_fingerprint(
-        {**context, "incumbent_state_sha256": "sha256:" + "b" * 64}
-    )
-    assert build_context_fingerprint(context) != build_context_fingerprint(
-        {**context, "ecc_revision": "0.1.0-alpha.12"}
-    )
+    for key, value in (("site_width_dbu", 400), ("incumbent_state_sha256", "sha256:" + "b" * 64),
+                       ("ecc_revision", "0.1.0-alpha.12")):
+        assert build_context_fingerprint(context) != build_context_fingerprint({**context, key: value})
 
 
-def test_context_fingerprint_requires_every_binding_field() -> None:
+def test_context_fingerprint_requires_every_binding_field():
     context = domain_context()
-
     for key in tuple(context):
         with pytest.raises(EffectiveDomainError, match="missing binding fields"):
-            build_context_fingerprint(
-                {name: value for name, value in context.items() if name != key}
-            )
-
-
-def test_effective_domain_rejects_partial_or_mismatched_receipt_context() -> None:
-    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
-    context = domain_context()
-    receipt = density_receipt(context)
-    partial = receipt.model_dump(mode="json", exclude={"evidence_sha256"})
-    partial["context"].pop("pdk_sha256")
-    partial_receipt = ParameterApplicationReceipt(
-        **partial, evidence_sha256=canonical_sha256(partial)
-    )
-    mismatched = receipt.model_dump(mode="json", exclude={"evidence_sha256"})
-    mismatched["context"]["seed"] = 1
-    mismatched_receipt = ParameterApplicationReceipt(
-        **mismatched, evidence_sha256=canonical_sha256(mismatched)
-    )
-    unbound = receipt.model_dump(mode="json", exclude={"evidence_sha256"})
-    unbound["context"].pop("context_sha256")
-    unbound_receipt = ParameterApplicationReceipt(
-        **unbound, evidence_sha256=canonical_sha256(unbound)
-    )
-
-    for candidate in (partial_receipt, mismatched_receipt, unbound_receipt):
-        domain = compile_effective_domain(card, context=context, receipts=(candidate,))
-        assert domain.current_coordinate is None
-        assert domain.thresholds == ()
+            build_context_fingerprint({name: value for name, value in context.items() if name != key})

@@ -101,12 +101,14 @@ def _recovery_terminal(
 class _RecoveryPlanner(_FakePlanner):
     def propose(self, context):
         self.contexts.append(context)
-        return _proposal(
+        proposal = _proposal(
             context,
             "place.target_density",
             StrategyDirection.DECREASE,
             history_refs=[item.reference.model_dump() for item in context.history],
         )
+        proposal["action"]["requested_value"] = round(context.current_values["place.target_density"] - 0.01, 12)
+        return proposal
 
 def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) -> None:
     planner = _FakePlanner()
@@ -357,7 +359,8 @@ def test_runner_promotes_progressive_recovery_and_switches_to_original_objective
     assert executor.requests[1].parent_candidate_root_ref == (
         ".agent/candidates/execution-1"
     )
-    assert planner.contexts[1].current_values["place.target_density"] == 0.8
+    assert planner.contexts[1].current_values["place.target_density"] == 0.19
+    assert planner.contexts[1].parameter_trajectories[0].parameter_application_receipt.actual_value == 0.8
     assert controller.incumbent == turns[-1].terminal_observation
     assert runner.recovery_incomplete is False
     outcomes = controller.ledger.replay().terminal_outcomes

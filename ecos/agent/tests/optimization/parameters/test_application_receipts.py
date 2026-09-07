@@ -11,7 +11,6 @@ from ecos_agent.optimization.parameters.semantics import (
     validate_application_receipt,
 )
 from ecos_agent.optimization.rules import (
-    coordinate_value_from_native_receipt,
     native_receipt_is_effective,
 )
 from tests.optimization.parameters.effectiveness_support import (
@@ -133,7 +132,7 @@ def test_routability_false_is_effective_without_a_special_downstream_state() -> 
     receipt = routability_false_receipt()
     validate_application_receipt(receipt, load_parameter_cards())
     assert native_receipt_is_effective(receipt)
-    assert coordinate_value_from_native_receipt(receipt) is False
+    assert receipt.actual_value is False
 
 
 def test_routability_true_requires_an_optimization_round() -> None:
@@ -163,7 +162,7 @@ def test_padding_actual_value_uses_sites_including_intentional_zero(requested, a
     )
     validate_application_receipt(receipt, load_parameter_cards())
     assert receipt.materialization.unit == "dbu"
-    assert coordinate_value_from_native_receipt(receipt) == actual
+    assert receipt.actual_value == actual
     assert native_receipt_is_effective(receipt)
 
 
@@ -182,7 +181,7 @@ def test_density_weight_actual_value_is_the_initialization_coefficient() -> None
         {"configured_density_weight": 0.001, "initialization_count": 1},
     )
     validate_application_receipt(receipt, load_parameter_cards())
-    assert coordinate_value_from_native_receipt(receipt) == 0.001
+    assert receipt.actual_value == 0.001
 
 
 @pytest.mark.parametrize("knob,value", (
@@ -195,7 +194,7 @@ def test_floorplan_actual_value_is_the_geometry_input(knob, value) -> None:
         "init_fp_call_count": 1, "run_fp_call_count": 1, "geometry_constructed": True,
     })
     validate_application_receipt(receipt, load_parameter_cards())
-    assert coordinate_value_from_native_receipt(receipt) == value
+    assert receipt.actual_value == value
 
 
 @pytest.mark.parametrize("knob,requested,observation,expected,actual", (

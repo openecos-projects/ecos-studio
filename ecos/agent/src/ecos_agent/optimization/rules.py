@@ -120,15 +120,6 @@ ACTIVE_OPTIMIZATION_KNOBS = tuple(
 )
 
 
-def coordinate_value_from_native_receipt(
-    receipt: ParameterApplicationReceipt,
-) -> bool | int | float:
-    value = receipt.actual_value
-    if type(value) not in {bool, int, float}:
-        raise ValueError("native receipt effective value is unavailable")
-    return value
-
-
 def native_receipt_is_effective(receipt: ParameterApplicationReceipt) -> bool:
     """Return whether a native receipt is a valid optimization intervention."""
     return receipt.status == "effective"
@@ -259,15 +250,13 @@ def legal_actions(
     *,
     current_values: Mapping[str, bool | int | float],
     attempted: Iterable[RequestedKnobValue],
-    known_aliases: Iterable[RequestedKnobValue] = (),
 ) -> tuple[LegalAction, ...]:
     """Return every direction that still maps to a concrete local value."""
     attempted_values = tuple(attempted)
-    aliases = tuple(known_aliases)
     actions = []
     for coordinate in CONTROLLED_COORDINATE_ORDER:
         current = _current_value(coordinate.knob_id, current_values)
-        if _next_requested_value(coordinate, current_values, attempted_values, aliases) is None:
+        if _next_requested_value(coordinate, current_values, attempted_values) is None:
             continue
         direction = (
             StrategyDirection.ENABLE
@@ -467,7 +456,6 @@ def next_coordinate_selection(
     *,
     current_values: Mapping[str, bool | int | float],
     attempted: Iterable[RequestedKnobValue],
-    known_aliases: Iterable[RequestedKnobValue] = (),
     start_action_index: int = 0,
 ) -> CoordinateSelection | None:
     if not 0 <= start_action_index < len(CONTROLLED_COORDINATE_ORDER):
@@ -475,11 +463,10 @@ def next_coordinate_selection(
     for knob_id in ACTIVE_OPTIMIZATION_KNOBS:
         _current_value(knob_id, current_values)
     attempted_values = tuple(attempted)
-    aliases = tuple(known_aliases)
     for offset in range(len(CONTROLLED_COORDINATE_ORDER)):
         index = (start_action_index + offset) % len(CONTROLLED_COORDINATE_ORDER)
         action = CONTROLLED_COORDINATE_ORDER[index]
-        requested = _next_requested_value(action, current_values, attempted_values, aliases)
+        requested = _next_requested_value(action, current_values, attempted_values)
         if requested is not None:
             return CoordinateSelection(
                 action,
@@ -494,19 +481,17 @@ def select_requested_value(
     *,
     current_values: Mapping[str, bool | int | float],
     attempted: Iterable[RequestedKnobValue] = (),
-    known_aliases: Iterable[RequestedKnobValue] = (),
 ) -> RequestedKnobValue | None:
     """Select the next frozen value for one validated strategy direction."""
     if action.knob_id not in ACTIVE_OPTIMIZATION_KNOBS:
         return None
     current = _current_value(action.knob_id, current_values)
     attempted_values = tuple(attempted)
-    aliases = tuple(known_aliases)
     if action.knob_id == OptimizationKnob.ROUTABILITY_OPT:
         desired = action.direction == StrategyDirection.ENABLE
         if current == desired:
             return None
-        return _unexcluded_request(action.knob_id, desired, attempted_values, aliases)
+        return _unexcluded_request(action.knob_id, desired, attempted_values)
     direction = (
         CoordinateDirection.INCREASE
         if action.direction == StrategyDirection.INCREASE
@@ -514,9 +499,9 @@ def select_requested_value(
     )
     coordinate_action = CoordinateAction(action.knob_id, direction)
     for value in _directional_lattice_values(
-        coordinate_action, current, (*attempted_values, *aliases)
+        coordinate_action, current, attempted_values
     ):
-        request = _unexcluded_request(action.knob_id, value, attempted_values, aliases)
+        request = _unexcluded_request(action.knob_id, value, attempted_values)
         if request is not None:
             return request
     return None
@@ -526,16 +511,15 @@ def _next_requested_value(
     action: CoordinateAction,
     current_values: Mapping[str, bool | int | float],
     attempted: tuple[RequestedKnobValue, ...],
-    aliases: tuple[RequestedKnobValue, ...],
 ) -> RequestedKnobValue | None:
     current = _current_value(action.knob_id, current_values)
     if action.direction == CoordinateDirection.TOGGLE:
         if any(item.knob_id == action.knob_id for item in attempted):
             return None
-        return _unexcluded_request(action.knob_id, not current, attempted, aliases)
-    candidates = _directional_lattice_values(action, current, (*attempted, *aliases))
+        return _unexcluded_request(action.knob_id, not current, attempted)
+    candidates = _directional_lattice_values(action, current, attempted)
     for value in candidates:
-        request = _unexcluded_request(action.knob_id, value, attempted, aliases)
+        request = _unexcluded_request(action.knob_id, value, attempted)
         if request is not None:
             return request
     return None
@@ -599,7 +583,6 @@ def _unexcluded_request(
     knob_id: OptimizationKnob,
     value: bool | int | float,
     attempted: tuple[RequestedKnobValue, ...],
-    aliases: tuple[RequestedKnobValue, ...],
 ) -> RequestedKnobValue | None:
     request = RequestedKnobValue(knob_id=knob_id, value=value)
-    return None if request in {*attempted, *aliases} else request
+    return None if request in attempted else request

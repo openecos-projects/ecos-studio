@@ -164,7 +164,7 @@ def write_trace(
     ledger_replay = ledger.verify()
     decision_replay = OptimizationDecisionAudit(episode_root).verify()
     state = {
-        "schema_version": "ecos.optimization_episode_state.v8",
+        "schema_version": "ecos.optimization_episode_state.v9",
         "episode_id": scope.episode_id,
         "checkpoint_id": scope.checkpoint_id,
         "objective": {"contract_sha256": scope.objective_contract_sha256},
@@ -179,21 +179,25 @@ def write_trace(
         "task_memory_scope_sha256": scope.scope_sha256,
     }
     state["state_sha256"] = canonical_sha256(state)
-    write_json(episode_root / "optimization-episode-state.v8.json", state)
+    write_json(episode_root / "optimization-episode-state.v9.json", state)
     store.synchronize()
     return episode_root
 
 
 def domain_for(knob: OptimizationKnob, context_sha256: str) -> EffectiveDomainSnapshot:
     payload = {
-        "schema_version": "ecos.effective_domain.v3",
+        "schema_version": "ecos.effective_domain.v4",
         "knob_id": knob,
         "context_sha256": context_sha256,
         "current_coordinate": None,
-        "surface_values": (0.2, 0.65),
-        "excluded_aliases": (),
-        "allowed_requested_values": (0.2, 0.65),
-        "thresholds": (),
+        "value_bounds": {
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 0.95,
+            "exclusive_minimum": False,
+            "exclusive_maximum": False,
+        },
+        "attempted_values": (),
     }
     return EffectiveDomainSnapshot(
         **payload, snapshot_sha256=canonical_sha256(payload)

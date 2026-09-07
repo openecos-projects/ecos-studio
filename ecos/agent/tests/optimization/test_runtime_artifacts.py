@@ -536,7 +536,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     episode_root = workspace / ".agent" / "optimization" / "episode-new"
     assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()
     state = json.loads(
-        (episode_root / "optimization-episode-state.v8.json").read_text(
+        (episode_root / "optimization-episode-state.v9.json").read_text(
             encoding="utf-8"
         )
     )

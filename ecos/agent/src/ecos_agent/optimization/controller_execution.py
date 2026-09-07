@@ -105,9 +105,7 @@ from ecos_agent.optimization.rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
     IncumbentComparison,
     IncumbentDecision,
-    legal_actions,
     native_receipt_is_effective,
-    select_requested_value,
     terminal_candidate_is_promotable,
 )
 from ecos_agent.optimization.parameters.contracts import (
@@ -122,14 +120,6 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v8.json"
-_LEGACY_STATE_FILES = (
-    "optimization-episode-state.v2.json",
-    "optimization-episode-state.v3.json",
-    "optimization-episode-state.v4.json",
-    "optimization-episode-state.v5.json",
-    "optimization-episode-state.v6.json",
-)
 
 
 from ecos_agent.optimization.controller_models import (
@@ -589,6 +579,9 @@ class ControllerExecutionMixin:
         terminal: TerminalObservation | None,
     ) -> None:
         proposal = self._pending_v2_proposal
+        if proposal is not None and proposal.action is not None and proposal.action.claim_id is None:
+            # Unclaimed probes remain episode evidence, not claim-bound empirical cases.
+            return
         if proposal is None or receipt is None or terminal is None:
             self._append_case_diagnostic(
                 "missing_terminal_case_evidence", outcome, receipt, terminal

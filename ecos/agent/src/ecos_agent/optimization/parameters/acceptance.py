@@ -339,7 +339,7 @@ def _memory_matches(
     return (
         start is not None
         and decision is not None
-        and decision.validation_result in {"accepted", "fallback"}
+        and decision.validation_result == "accepted"
         and decision.proposal is not None
         and decision.planning_entry_sha256 == evidence.planning_entry_sha256
         and decision.planning_entry_sha256 in replay["planning"]

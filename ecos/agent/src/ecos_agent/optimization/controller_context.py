@@ -41,6 +41,7 @@ from ecos_agent.optimization.contracts import (
     RequestedKnobValue,
     SelectionMetric,
     StageObservation,
+    StrategyDirection,
     TerminalObservation,
 )
 from ecos_agent.optimization.decision_audit import (
@@ -108,9 +109,7 @@ from ecos_agent.optimization.rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
     IncumbentComparison,
     IncumbentDecision,
-    legal_actions,
     native_receipt_is_effective,
-    select_requested_value,
     terminal_candidate_is_promotable,
 )
 from ecos_agent.optimization.parameters.contracts import (
@@ -125,14 +124,6 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v8.json"
-_LEGACY_STATE_FILES = (
-    "optimization-episode-state.v2.json",
-    "optimization-episode-state.v3.json",
-    "optimization-episode-state.v4.json",
-    "optimization-episode-state.v5.json",
-    "optimization-episode-state.v6.json",
-)
 
 
 from ecos_agent.optimization.controller_models import (
@@ -149,19 +140,23 @@ class ControllerContextMixin:
         retrieval: OptimizationRetrievalResult,
         current_values: Mapping[str, bool | int | float],
     ) -> OptimizationPlanningContext:
-        history = self._history(include_receipts=self.receipt_aware_planning)
+        trajectories = self._history(include_receipts=self.receipt_aware_planning)
+        history = trajectories[-6:]
         attempted = self._attempted_requests()
         active_values = {
             knob_id.value: current_values[knob_id.value]
             for knob_id in ACTIVE_OPTIMIZATION_KNOBS
         }
         cards = load_parameter_cards()
-        native_receipts = self._native_receipts() if self.receipt_aware_planning else ()
-        # Retained candidates inform thresholds, but only promoted candidates own coordinates.
-        current_receipts = (
-            self._native_receipts(promoted_only=True)
-            if self.receipt_aware_planning
-            else ()
+        parameter_knowledge = (
+            tuple(cards[knob_id] for knob_id in ACTIVE_OPTIMIZATION_KNOBS)
+            if self.mode != OptimizationAgentMode.LLM_NO_KNOWLEDGE else ()
+        )
+        prior_decisions = self._decision_audit.replay().entries
+        planning_feedback = (
+            (prior_decisions[-1].rejection_reason,)
+            if prior_decisions and prior_decisions[-1].validation_result == "rejected"
+            and prior_decisions[-1].rejection_reason else ()
         )
         effective_domains = tuple(
             compile_effective_domain(
@@ -174,17 +169,10 @@ class ControllerContextMixin:
                     cards[knob_id].surface.unit,
                     card_hash(cards[knob_id]),
                 ),
-                receipts=native_receipts,
-                current_receipts=current_receipts,
                 attempted=attempted,
                 baseline_surface_value=active_values.get(knob_id.value),
             )
             for knob_id in ACTIVE_OPTIMIZATION_KNOBS
-        )
-        ineffective_requests = tuple(
-            RequestedKnobValue(knob_id=domain.knob_id, value=value)
-            for domain in effective_domains
-            for value in domain.excluded_aliases
         )
         task_memory = (
             self._task_memory_supplier()
@@ -206,13 +194,11 @@ class ControllerContextMixin:
                 "task memory snapshot does not match the episode"
             )
         available_actions = tuple(
-            action
-            for action in legal_actions(
-                current_values=active_values,
-                attempted=self._attempted_requests(),
-                known_aliases=ineffective_requests,
-            )
-            if candidate_target_step(action.knob_id) == observation.stage.value
+            LegalAction(knob_id=domain.knob_id, direction=direction)
+            for domain in effective_domains
+            for direction in StrategyDirection
+            if candidate_target_step(domain.knob_id) == observation.stage.value
+            and domain.direction_schema(direction) is not None
         )
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,
@@ -372,9 +358,13 @@ class ControllerContextMixin:
                     "history": [
                         optimization_history_payload(item) for item in history
                     ],
-                    "excluded_surface_values": [
-                        item.model_dump(mode="json") for item in ineffective_requests
+                    "parameter_knowledge": [
+                        card.model_dump(mode="json") for card in parameter_knowledge
                     ],
+                    "parameter_trajectories": [
+                        optimization_history_payload(item) for item in trajectories
+                    ],
+                    "planning_feedback": planning_feedback,
                     "task_memory": (
                         task_memory.model_dump(mode="json")
                         if task_memory is not None
@@ -399,13 +389,15 @@ class ControllerContextMixin:
             available_actions,
             self._objective,
             task_memory,
-            ineffective_requests,
             effective_domains,
             supported_action_view,
             empirical_cases,
             empirical_case_audit,
             self._objective_alignment,
             active_objective,
+            parameter_knowledge,
+            trajectories,
+            planning_feedback,
         )
 
     def _design_id(self) -> str | None:
@@ -504,76 +496,6 @@ class ControllerContextMixin:
             )
         return revision.strip()
 
-    def _native_receipts(
-        self, *, promoted_only: bool = False
-    ) -> tuple[ParameterApplicationReceipt, ...]:
-        ledger_parent = self.ledger.root.parent.resolve()
-        roots = set()
-        for path in ledger_parent.glob("*/optimization-outcomes.v1.jsonl"):
-            root = path.parent
-            if path.is_symlink() or root.is_symlink():
-                continue
-            try:
-                resolved = root.resolve(strict=True)
-            except OSError:
-                continue
-            if resolved.parent == ledger_parent:
-                roots.add(resolved)
-        roots.add(self.ledger.root)
-        reusable_outcomes = {
-            OptimizationOutcomeKind.IMPROVED,
-            OptimizationOutcomeKind.DEGRADED,
-            OptimizationOutcomeKind.TRADEOFF,
-            OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
-        }
-        receipts = []
-        for root in sorted(roots):
-            for outcome in OptimizationLedger(root).replay().terminal_outcomes:
-                terminal = outcome.terminal_observation
-                aligned_current_recovery = False
-                if (
-                    promoted_only
-                    and root == self.ledger.root
-                    and terminal is not None
-                    and self._objective_alignment is not None
-                    and outcome.objective_alignment_sha256
-                    == self._objective_alignment.alignment_contract_sha256
-                ):
-                    try:
-                        recovery_violation_counts(terminal)
-                        aligned_current_recovery = True
-                    except ObjectiveAlignmentError:
-                        pass
-                if (
-                    outcome.outcome in reusable_outcomes
-                    and terminal is not None
-                    and terminal.schema_version == "ecos.terminal_observation.v3"
-                    and (terminal.eligible_for_incumbent or aligned_current_recovery)
-                    and outcome.parameter_application_receipt is not None
-                    and native_receipt_is_effective(
-                        outcome.parameter_application_receipt
-                    )
-                    and (
-                        not promoted_only
-                        or (
-                            outcome.incumbent_decision
-                            in {
-                                IncumbentDecision.INITIALIZED,
-                                IncumbentDecision.CANDIDATE_BETTER,
-                            }
-                            and self._incumbent_candidate_root_ref is not None
-                            and outcome.candidate_root_ref
-                            == self._incumbent_candidate_root_ref
-                            and outcome.candidate_manifest_ref
-                            == self._incumbent_candidate_manifest_ref
-                            and outcome.candidate_manifest_sha256
-                            == self._incumbent_candidate_manifest_sha256
-                        )
-                    )
-                ):
-                    receipts.append(outcome.parameter_application_receipt)
-        return tuple(receipts)
-
     def _append_planning_audit(
         self, context: OptimizationPlanningContext
     ) -> OptimizationPlanningAuditEntry:
@@ -606,11 +528,21 @@ class ControllerContextMixin:
             for entry in replay.entries
             if isinstance(entry.payload, OptimizationInterventionStart)
         }
+        decisions = {
+            canonical_sha256(entry.proposal.model_dump(mode="json")): entry
+            for entry in self._decision_audit.replay().entries
+            if entry.validation_result == "accepted" and entry.proposal is not None
+        }
+        planning = {
+            entry.entry_sha256: entry for entry in self._planning_audit.replay().entries
+        }
         history = []
         for outcome in replay.terminal_outcomes:
             start = starts[outcome.intervention_id]
             if start.proposal_action is None or start.requested is None:
                 continue
+            decision = decisions.get(start.proposal_sha256)
+            prior = planning.get(decision.planning_entry_sha256) if decision else None
             history.append(
                 OptimizationHistory(
                     reference=HistoryReference(
@@ -628,9 +560,18 @@ class ControllerContextMixin:
                         if include_receipts
                         else None
                     ),
+                    rationale_summary=decision.proposal.rationale_summary if decision else None,
+                    planning_values=(
+                        {
+                            domain.knob_id.value: domain.current_coordinate["surface_value"]
+                            for domain in prior.effective_domains
+                            if domain.current_coordinate is not None
+                        }
+                        if prior else None
+                    ),
                 )
             )
-        return tuple(history[-6:])
+        return tuple(history)
 
     def _record_planning_provider_evidence(
         self,

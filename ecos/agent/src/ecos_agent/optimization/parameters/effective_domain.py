@@ -1,4 +1,4 @@
-"""Context-bound dynamic allowlist compilation and exact-value validation."""
+"""Context-bound legal ranges and exact-value proposal validation."""
 
 from __future__ import annotations
 
@@ -6,25 +6,19 @@ import math
 import re
 from typing import Any, Iterable, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt,
+    field_validator, model_validator,
+)
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
-    OptimizationKnob,
-    RequestedKnobValue,
-    StrategyDirection,
+    OptimizationKnob, RequestedKnobValue, StrategyDirection,
 )
-from ecos_agent.optimization.rules import coordinate_value_from_native_receipt
 from ecos_agent.optimization.parameters.contracts import (
-    OptimizationProposalV2,
-    ParameterApplicationReceipt,
-    ParameterSemanticsCard,
+    OptimizationProposalV2, ParameterSemanticsCard, Scalar,
 )
-from ecos_agent.optimization.parameters.semantics import (
-    card_hash,
-    requested_lattice,
-    validate_application_receipt,
-)
+from ecos_agent.optimization.parameters.semantics import card_hash
 
 
 class EffectiveDomainError(ValueError):
@@ -35,49 +29,80 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-_EXECUTION_CONTEXT_KEYS = {
-    "design_sha256",
-    "rtl_sha256",
-    "filelist_sha256",
-    "sdc_sha256",
-    "pdk_sha256",
-    "parent_lineage_sha256",
-    "stage",
-    "backend",
-    "ecc_revision",
-    "tool_revision",
-    "lattice_version",
-    "unit",
-    "site_width_dbu",
-    "seed",
-}
-_DOMAIN_CONTEXT_KEYS = _EXECUTION_CONTEXT_KEYS | {
-    "incumbent_state_sha256",
-    "parameter_card_sha256",
-    "parent_manifest_sha256",
-    "terminal_execution_contract_sha256",
-    "current_values",
-    "tool_source_sha256",
+_DOMAIN_CONTEXT_KEYS = {
+    "design_sha256", "rtl_sha256", "filelist_sha256", "sdc_sha256", "pdk_sha256",
+    "parent_lineage_sha256", "stage", "backend", "ecc_revision", "tool_revision",
+    "lattice_version", "unit", "site_width_dbu", "seed", "incumbent_state_sha256",
+    "parameter_card_sha256", "parent_manifest_sha256", "terminal_execution_contract_sha256",
+    "current_values", "tool_source_sha256",
 }
 
 
-class DomainThreshold(_Model):
-    threshold_id: str
-    kind: str
-    value: float
-    rule_id: str
-    evidence_refs: tuple[dict[str, str], ...] = ()
+class RequestedValueBounds(_Model):
+    type: Literal["boolean", "integer", "number"]
+    minimum: StrictInt | StrictFloat | None = None
+    maximum: StrictInt | StrictFloat | None = None
+    exclusive_minimum: StrictBool = False
+    exclusive_maximum: StrictBool = False
+
+    @model_validator(mode="after")
+    def valid_bounds(self) -> "RequestedValueBounds":
+        if any(
+            type(value) is float and not math.isfinite(value)
+            for value in (self.minimum, self.maximum)
+        ):
+            raise ValueError("requested value bounds must be finite")
+        if self.type == "boolean" and (
+            self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("boolean bounds cannot contain numeric endpoints")
+        if (self.exclusive_minimum and self.minimum is None) or (
+            self.exclusive_maximum and self.maximum is None
+        ):
+            raise ValueError("exclusive bounds require endpoints")
+        if self.minimum is not None and self.maximum is not None and (
+            self.minimum > self.maximum
+            or (
+                self.minimum == self.maximum
+                and (self.exclusive_minimum or self.exclusive_maximum)
+            )
+        ):
+            raise ValueError("requested value bounds are empty")
+        return self
+
+    def contains(self, value: Any) -> bool:
+        if self.type == "boolean":
+            return type(value) is bool
+        if type(value) not in ({int} if self.type == "integer" else {int, float}):
+            return False
+        if type(value) is float and not math.isfinite(value):
+            return False
+        if self.minimum is not None and (
+            value < self.minimum or (self.exclusive_minimum and value == self.minimum)
+        ):
+            return False
+        if self.maximum is not None and (
+            value > self.maximum or (self.exclusive_maximum and value == self.maximum)
+        ):
+            return False
+        return True
+
+    def json_schema(self) -> dict[str, Any]:
+        schema: dict[str, Any] = {"type": self.type}
+        if self.minimum is not None:
+            schema["exclusiveMinimum" if self.exclusive_minimum else "minimum"] = self.minimum
+        if self.maximum is not None:
+            schema["exclusiveMaximum" if self.exclusive_maximum else "maximum"] = self.maximum
+        return schema
 
 
 class EffectiveDomainSnapshot(_Model):
-    schema_version: Literal["ecos.effective_domain.v3"] = "ecos.effective_domain.v3"
+    schema_version: Literal["ecos.effective_domain.v4"] = "ecos.effective_domain.v4"
     knob_id: OptimizationKnob
     context_sha256: str
     current_coordinate: dict[str, Any] | None = None
-    surface_values: tuple[bool | int | float, ...]
-    excluded_aliases: tuple[bool | int | float, ...] = ()
-    allowed_requested_values: tuple[bool | int | float, ...]
-    thresholds: tuple[DomainThreshold, ...] = ()
+    value_bounds: RequestedValueBounds
+    attempted_values: tuple[Scalar, ...] = ()
     snapshot_sha256: str
 
     @field_validator("context_sha256", "snapshot_sha256")
@@ -94,13 +119,63 @@ class EffectiveDomainSnapshot(_Model):
         )
         if expected != self.snapshot_sha256:
             raise ValueError("effective domain snapshot hash does not match")
-        if any(
-            value not in self.surface_values for value in self.allowed_requested_values
-        ):
-            raise ValueError("effective domain contains an unbound candidate value")
-        if set(self.allowed_requested_values) & set(self.excluded_aliases):
-            raise ValueError("effective domain aliases are still allowed")
         return self
+
+    def accepts(self, value: Any) -> bool:
+        return self.value_bounds.contains(value) and value not in self.attempted_values
+
+    def direction_schema(
+        self, direction: StrategyDirection | str
+    ) -> dict[str, Any] | None:
+        """Intersect a direction with static bounds without selecting probe values."""
+        current = (self.current_coordinate or {}).get("surface_value")
+        if self.value_bounds.type == "boolean":
+            if direction not in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
+                return None
+            value = direction == StrategyDirection.ENABLE
+            if value is current or not self.accepts(value):
+                return None
+            return {"type": "boolean", "enum": [value]}
+        if direction not in {StrategyDirection.INCREASE, StrategyDirection.DECREASE}:
+            return None
+        bounds = self.value_bounds.model_dump()
+        if current is not None:
+            if type(current) not in {int, float} or (
+                type(current) is float and not math.isfinite(current)
+            ):
+                raise EffectiveDomainError("effective domain current coordinate is invalid")
+            if direction == StrategyDirection.INCREASE and (
+                bounds["minimum"] is None or current >= bounds["minimum"]
+            ):
+                bounds.update(minimum=current, exclusive_minimum=True)
+            if direction == StrategyDirection.DECREASE and (
+                bounds["maximum"] is None or current <= bounds["maximum"]
+            ):
+                bounds.update(maximum=current, exclusive_maximum=True)
+        try:
+            directional = RequestedValueBounds(**bounds)
+        except ValueError:
+            return None
+        if (
+            directional.type == "integer"
+            and directional.minimum is not None
+            and directional.maximum is not None
+        ):
+            lower = (
+                math.floor(directional.minimum) + 1
+                if directional.exclusive_minimum else math.ceil(directional.minimum)
+            )
+            upper = (
+                math.ceil(directional.maximum) - 1
+                if directional.exclusive_maximum else math.floor(directional.maximum)
+            )
+            attempted_count = len({
+                value for value in self.attempted_values
+                if type(value) is int and lower <= value <= upper
+            })
+            if lower > upper or attempted_count == upper - lower + 1:
+                return None
+        return directional.json_schema()
 
 
 def build_context_fingerprint(context: Mapping[str, Any]) -> str:
@@ -108,299 +183,69 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
     if not isinstance(context, Mapping) or not context:
         raise EffectiveDomainError("effective-domain context is empty")
     missing = sorted(
-        key
-        for key in _DOMAIN_CONTEXT_KEYS
-        if key not in context or context[key] is None
+        key for key in _DOMAIN_CONTEXT_KEYS if key not in context or context[key] is None
     )
     if missing:
         raise EffectiveDomainError(
             f"effective-domain context is missing binding fields: {', '.join(missing)}"
         )
-    # run_id identifies one execution, while the domain is reusable across the
-    # same design/tool/parent context. Keep it in the receipt, out of the key.
-    stable = {key: context[key] for key in _DOMAIN_CONTEXT_KEYS}
-    return canonical_sha256(dict(sorted(stable.items(), key=lambda item: item[0])))
-
-
-def _receipt_matches_execution_context(
-    receipt: ParameterApplicationReceipt,
-    context: Mapping[str, Any],
-) -> bool:
-    if any(
-        key not in receipt.context or key not in context
-        for key in _EXECUTION_CONTEXT_KEYS
-    ):
-        return False
-    if any(receipt.context[key] != context[key] for key in _EXECUTION_CONTEXT_KEYS):
-        return False
-    if receipt.tool.source_sha256 != context["tool_source_sha256"]:
-        return False
-    return True
-
-
-def _receipt_matches_context(
-    receipt: ParameterApplicationReceipt,
-    context: Mapping[str, Any],
-    context_sha256: str,
-) -> bool:
-    if not _receipt_matches_execution_context(receipt, context):
-        return False
-    receipt_sha = receipt.context.get("context_sha256")
-    return receipt_sha == context_sha256
-
-
-_CANDIDATES_PER_DIRECTION = 3
-_LOG_SCALE_KNOBS = frozenset({OptimizationKnob.DENSITY_WEIGHT})
-
-
-def _stable_float(value: float) -> float:
-    return float(f"{value:.12g}")
-
-
-def _gap_midpoint(
-    knob_id: OptimizationKnob,
-    lower: float,
-    upper: float,
-    anchor: float,
-    excluded: set[bool | int | float],
-) -> int | float | None:
-    points = sorted(
-        {
-            lower,
-            upper,
-            *(float(value) for value in excluded if lower < value < upper),
-        }
-    )
-    if len(points) < 2 or lower >= upper:
-        return None
-    log_scale = knob_id in _LOG_SCALE_KNOBS
-    transform = math.log10 if log_scale else lambda value: value
-    left, right = max(
-        zip(points, points[1:]),
-        key=lambda pair: (
-            transform(pair[1]) - transform(pair[0]),
-            -min(abs(anchor - pair[0]), abs(anchor - pair[1])),
-        ),
-    )
-    if knob_id == OptimizationKnob.CELL_PADDING_X:
-        midpoint = int((left + right) // 2)
-        return midpoint if left < midpoint < right else None
-    midpoint = (
-        10 ** ((transform(left) + transform(right)) / 2)
-        if log_scale
-        else (left + right) / 2
-    )
-    return _stable_float(midpoint)
-
-
-def _direction_candidates(
-    knob_id: OptimizationKnob,
-    references: tuple[bool | int | float, ...],
-    anchor: float,
-    boundary: float,
-    excluded: set[bool | int | float],
-    floor: float | None,
-) -> tuple[int | float, ...]:
-    lower, upper = sorted((anchor, boundary))
-    if floor is not None:
-        lower = max(lower, floor)
-    if lower >= upper:
-        return ()
-    decreasing = boundary < anchor
-    reference_lower = float(min(references))
-    reference_upper = float(max(references))
-
-    def available(value: bool | int | float) -> bool:
-        numeric = float(value)
-        return (
-            type(value) is not bool
-            and value not in excluded
-            and (
-                0 < numeric < 1
-                if knob_id == OptimizationKnob.TARGET_OVERFLOW
-                else reference_lower <= numeric <= reference_upper
-            )
-            and lower <= numeric <= upper
-            and (floor is None or numeric > floor)
-            and ((numeric < anchor) if decreasing else (numeric > anchor))
-        )
-
-    ordered_references = sorted(
-        (value for value in references if available(value)),
-        key=lambda value: (abs(float(value) - anchor), float(value)),
-    )
-    candidates: list[int | float] = []
-    for value in (
-        ordered_references[0] if ordered_references else None,
-        _gap_midpoint(knob_id, lower, upper, anchor, excluded),
-        int(boundary) if knob_id == OptimizationKnob.CELL_PADDING_X else boundary,
-        *ordered_references[1:],
-    ):
-        if value is not None and available(value) and value not in candidates:
-            candidates.append(value)
-        if len(candidates) == _CANDIDATES_PER_DIRECTION:
-            break
-    return tuple(candidates)
-
-
-def _dynamic_requested_values(
-    card: ParameterSemanticsCard,
-    anchor: bool | int | float,
-    excluded: set[bool | int | float],
-    thresholds: Iterable[DomainThreshold],
-) -> tuple[bool | int | float, ...]:
-    references = tuple(card.requested_domain.values)
-    if type(anchor) is bool:
-        return tuple(
-            value
-            for value in references
-            if type(value) is bool and value not in excluded
-        )
-    floor = max(
-        (item.value for item in thresholds if item.kind == "admission_floor"),
-        default=None,
-    )
-    lower, upper = float(min(references)), float(max(references))
-    if card.knob_id == OptimizationKnob.TARGET_OVERFLOW:
-        # Open endpoints are virtual anchors for midpoint search, never candidates.
-        lower, upper = 0.0, 1.0
-    candidates = (
-        *_direction_candidates(
-            card.knob_id, references, float(anchor), lower, excluded, floor
-        ),
-        *_direction_candidates(
-            card.knob_id, references, float(anchor), upper, excluded, floor
-        ),
-    )
-    return tuple(sorted(dict.fromkeys(candidates), key=float))
+    # A run identifier is evidence provenance, not a change of execution context.
+    return canonical_sha256({key: context[key] for key in sorted(_DOMAIN_CONTEXT_KEYS)})
 
 
 def compile_effective_domain(
     card: ParameterSemanticsCard,
     *,
     context: Mapping[str, Any],
-    receipts: Iterable[ParameterApplicationReceipt] = (),
-    current_receipts: Iterable[ParameterApplicationReceipt] = (),
     attempted: Iterable[RequestedKnobValue] = (),
     baseline_surface_value: bool | int | float | None = None,
 ) -> EffectiveDomainSnapshot:
-    attempted = tuple(attempted)
     bound_context = dict(context)
-    card_bindings = {
+    for key, expected in {
         "parameter_card_sha256": card_hash(card),
         "tool_source_sha256": card.tool.source_sha256,
-    }
-    for key, expected in card_bindings.items():
+    }.items():
         if key in bound_context and bound_context[key] != expected:
             raise EffectiveDomainError(
                 f"effective-domain {key} does not match parameter card"
             )
         bound_context[key] = expected
     context_sha = build_context_fingerprint(bound_context)
-    lattice = tuple(item.value for item in requested_lattice(card))
-    matching = []
-    for receipt in receipts:
-        if receipt.requested.get("knob_id") != card.knob_id.value:
-            continue
-        if not _receipt_matches_context(receipt, bound_context, context_sha):
-            continue
-        matching.append(receipt)
-    matching_keys = {
-        (receipt.receipt_id, receipt.evidence_sha256) for receipt in matching
-    }
-    current_matching = []
-    current_value = bound_context["current_values"].get(card.knob_id.value)
-    for receipt in current_receipts:
-        if receipt.status != "effective":
-            continue
-        try:
-            receipt_coordinate = coordinate_value_from_native_receipt(receipt)
-        except ValueError:
-            continue
-        if (
-            receipt.requested.get("knob_id") != card.knob_id.value
-            or current_value
-            not in (receipt.requested.get("value"), receipt_coordinate)
-            or not _receipt_matches_execution_context(receipt, bound_context)
-        ):
-            continue
-        current_matching.append(receipt)
-        key = (receipt.receipt_id, receipt.evidence_sha256)
-        if key not in matching_keys:
-            matching.append(receipt)
-            matching_keys.add(key)
-    aliases: set[Any] = set()
-    thresholds: list[DomainThreshold] = []
-    for receipt in matching:
-        if receipt.status != "effective":
-            continue
-        validate_application_receipt(receipt, {card.knob_id: card})
-        requested = receipt.requested["value"]
-        actual = receipt.actual_value
-        floor = receipt.observation.get("utilization_floor")
-        if (
-            card.knob_id == OptimizationKnob.TARGET_DENSITY
-            and type(floor) in {int, float}
-            and floor > requested
-            and math.isclose(floor, actual, rel_tol=1e-6, abs_tol=1e-7)
-        ):
-            rule_id = "dreamplace.target_density.utilization_floor"
-            thresholds.append(
-                DomainThreshold(
-                    threshold_id=f"{card.knob_id.value.replace('.', '-')}-{rule_id}",
-                    kind="admission_floor",
-                    value=float(floor),
-                    rule_id=rule_id,
-                    evidence_refs=(
-                        {
-                            "kind": "parameter_card",
-                            "ref": f"optimization/{card.knob_id.value}.json",
-                            "sha256": card_hash(card),
-                        },
-                        {
-                            "kind": "application_receipt",
-                            "ref": receipt.receipt_id,
-                            "sha256": receipt.evidence_sha256,
-                        },
-                    ),
-                )
-            )
-            aliases.update(value for value in lattice if value <= floor)
-        elif requested != actual:
-            aliases.add(requested)
-    aliases.update(item.value for item in attempted if item.knob_id == card.knob_id)
-    coordinate = None
-    if current_matching:
-        latest = current_matching[-1]
-        coordinate = {
-            "surface_value": latest.requested.get("value"),
-            "effective_anchor": latest.actual_value,
-            "source_ref": latest.receipt_id,
-            "source_sha256": latest.evidence_sha256,
-        }
-    elif baseline_surface_value is not None:
-        coordinate = {"surface_value": baseline_surface_value, "effective_anchor": None}
-    if coordinate is None:
-        anchor = current_value
-    else:
-        anchor = coordinate.get("effective_anchor")
-        if anchor is None:
-            anchor = coordinate.get("surface_value")
-    if type(anchor) not in {bool, int, float}:
-        raise EffectiveDomainError("effective domain current coordinate is invalid")
-    allowed = _dynamic_requested_values(card, anchor, aliases, thresholds)
-    surface_values = tuple(
-        dict.fromkeys((*lattice, *sorted(aliases, key=str), *allowed))
+    scalar_type = {"bool": "boolean", "int": "integer", "float": "number"}.get(
+        card.surface.type
     )
+    if scalar_type is None:
+        raise EffectiveDomainError("parameter card is not a scalar optimization parameter")
+    bounds: dict[str, Any] = {"type": scalar_type}
+    if scalar_type != "boolean":
+        bounds.update(
+            minimum=min(card.requested_domain.values),
+            maximum=max(card.requested_domain.values),
+        )
+    if card.knob_id == OptimizationKnob.TARGET_OVERFLOW:
+        bounds.update(
+            minimum=0.0, maximum=1.0, exclusive_minimum=True, exclusive_maximum=True
+        )
+    current = baseline_surface_value
+    if current is None:
+        current = bound_context["current_values"].get(card.knob_id.value)
+    coordinate_types = {
+        "boolean": {bool}, "integer": {int, float}, "number": {int, float}
+    }
+    if type(current) not in coordinate_types[scalar_type] or (
+        type(current) is float and not math.isfinite(current)
+    ):
+        raise EffectiveDomainError("effective domain current coordinate is invalid")
+    attempted_values = tuple(dict.fromkeys(
+        item.value for item in attempted if item.knob_id == card.knob_id
+    ))
     payload = {
-        "schema_version": "ecos.effective_domain.v3",
+        "schema_version": "ecos.effective_domain.v4",
         "knob_id": card.knob_id,
         "context_sha256": context_sha,
-        "current_coordinate": coordinate,
-        "surface_values": surface_values,
-        "excluded_aliases": tuple(sorted(aliases, key=str)),
-        "allowed_requested_values": allowed,
-        "thresholds": [item.model_dump(mode="json") for item in thresholds],
+        "current_coordinate": {"surface_value": current},
+        "value_bounds": RequestedValueBounds(**bounds).model_dump(mode="json"),
+        "attempted_values": attempted_values,
     }
     return EffectiveDomainSnapshot(**payload, snapshot_sha256=canonical_sha256(payload))
 
@@ -419,51 +264,32 @@ def validate_numeric_proposal(
         or action.effective_domain_sha256 != domain.snapshot_sha256
     ):
         raise EffectiveDomainError("proposal domain does not match current context")
-    if action.requested_value not in domain.allowed_requested_values:
-        raise EffectiveDomainError("proposal value is not in the allowlist")
-    if any(
+    if not domain.value_bounds.contains(action.requested_value):
+        raise EffectiveDomainError("proposal value is outside the legal bounds or type")
+    if action.requested_value in domain.attempted_values or any(
         item.knob_id == domain.knob_id and item.value == action.requested_value
         for item in attempted
     ):
         raise EffectiveDomainError("proposal value was already attempted")
-    threshold_ids = {threshold.threshold_id for threshold in domain.thresholds}
-    if (
-        set(action.threshold_refs) != threshold_ids
-        or len(action.threshold_refs) != len(threshold_ids)
-    ):
-        raise EffectiveDomainError("proposal threshold references do not match domain")
-    current = domain.current_coordinate
-    if type(action.requested_value) is bool:
-        if action.direction not in {
-            StrategyDirection.ENABLE,
-            StrategyDirection.DISABLE,
-        }:
-            raise EffectiveDomainError("boolean proposal direction is invalid")
-        expected = action.direction == StrategyDirection.ENABLE
-        if action.requested_value is not expected:
-            raise EffectiveDomainError(
-                "boolean proposal value does not match direction"
-            )
-        if current and action.requested_value is current.get("surface_value"):
-            raise EffectiveDomainError("boolean proposal is a no-op")
+    schema = domain.direction_schema(action.direction)
+    if schema is None:
+        raise EffectiveDomainError("proposal direction has no legal values or is a no-op")
+    if domain.value_bounds.type == "boolean":
+        if action.requested_value not in schema["enum"]:
+            raise EffectiveDomainError("boolean proposal value does not match direction")
         return
-    if action.direction in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
-        raise EffectiveDomainError(
-            "boolean proposal direction requires a boolean value"
-        )
-    if current and current.get("surface_value") is not None:
-        anchor = current.get("effective_anchor")
-        baseline = anchor if anchor is not None else current["surface_value"]
-        if (
+    current = (domain.current_coordinate or {}).get("surface_value")
+    if current is not None and (
+        (
             action.direction == StrategyDirection.INCREASE
-            and action.requested_value <= baseline
-        ):
-            raise EffectiveDomainError("increase proposal is not increasing")
-        if (
+            and action.requested_value <= current
+        )
+        or (
             action.direction == StrategyDirection.DECREASE
-            and action.requested_value >= baseline
-        ):
-            raise EffectiveDomainError("decrease proposal is not decreasing")
+            and action.requested_value >= current
+        )
+    ):
+        raise EffectiveDomainError("proposal value does not match direction")
 
 
 def validate_optimization_proposal_v2(
@@ -474,11 +300,11 @@ def validate_optimization_proposal_v2(
     attempted: Iterable[RequestedKnobValue] = (),
     supported_action: Mapping[str, Any] | None = None,
 ) -> OptimizationProposalV2:
-    """Parse and validate one exact-value proposal without granting execution authority."""
+    """Validate one range-bound proposal without granting execution authority."""
     try:
         proposal = OptimizationProposalV2.model_validate(payload)
     except (TypeError, ValueError) as exc:
-        raise EffectiveDomainError("optimization proposal v2 is invalid") from exc
+        raise EffectiveDomainError("optimization proposal v3 is invalid") from exc
     if proposal.context_ref.model_dump(mode="json") != dict(context_ref):
         raise EffectiveDomainError("proposal context does not match planning turn")
     validate_numeric_proposal(proposal, domain, attempted=attempted)
@@ -494,9 +320,8 @@ def _validate_supported_action(
     if action is None:
         raise EffectiveDomainError("proposal action is missing")
     claim_ref = supported_action.get("claim_ref")
-    claim_id = claim_ref.get("entity_id") if isinstance(claim_ref, Mapping) else None
     expected = {
-        "claim_id": claim_id,
+        "claim_id": claim_ref.get("entity_id") if isinstance(claim_ref, Mapping) else None,
         "claim_sha256": supported_action.get("claim_sha256"),
         "binding_id": supported_action.get("binding_id"),
         "binding_sha256": supported_action.get("binding_sha256"),
@@ -504,17 +329,14 @@ def _validate_supported_action(
         "direction": supported_action.get("direction"),
         "effective_domain_sha256": supported_action.get("effective_domain_sha256"),
     }
-    actual = {
-        "claim_id": action.claim_id,
-        "claim_sha256": action.claim_sha256,
-        "binding_id": action.binding_id,
-        "binding_sha256": action.binding_sha256,
-        "knob_id": action.knob_id.value,
-        "direction": action.direction.value,
-        "effective_domain_sha256": action.effective_domain_sha256,
-    }
-    allowed = supported_action.get("allowed_requested_values")
-    if actual != expected or not isinstance(allowed, (tuple, list)):
+    actual = {key: getattr(action, key) for key in expected}
+    if actual != expected:
         raise EffectiveDomainError("proposal does not match compiled knowledge support")
-    if action.requested_value not in allowed:
+    try:
+        bounds = RequestedValueBounds.model_validate(
+            supported_action.get("requested_value_bounds")
+        )
+    except ValueError as exc:
+        raise EffectiveDomainError("proposal does not match compiled knowledge support") from exc
+    if not bounds.contains(action.requested_value):
         raise EffectiveDomainError("proposal value is not supported by knowledge action")

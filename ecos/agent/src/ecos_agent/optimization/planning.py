@@ -41,6 +41,7 @@ from ecos_agent.optimization.objective_alignment import (
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
+    ParameterSemanticsCard,
 )
 
 
@@ -60,13 +61,15 @@ class OptimizationPlanningContext:
     legal_actions: tuple[LegalAction, ...] = ()
     objective: OptimizationObjectiveContract | None = None
     task_memory: OptimizationTaskMemorySnapshot | None = None
-    excluded_surface_values: tuple[RequestedKnobValue, ...] = ()
     effective_domains: tuple[EffectiveDomainSnapshot, ...] = ()
     supported_action_view: SupportedActionView | None = None
     empirical_cases: tuple[TerminalEmpiricalCase, ...] = ()
     empirical_case_audit: EmpiricalCaseAudit | None = None
     objective_alignment: OptimizationObjectiveAlignment | None = None
     active_objective: ActiveOptimizationObjective | None = None
+    parameter_knowledge: tuple[ParameterSemanticsCard, ...] = ()
+    parameter_trajectories: tuple["OptimizationHistory", ...] = ()
+    planning_feedback: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,8 @@ class OptimizationHistory:
     requested: RequestedKnobValue
     terminal_observation: TerminalObservation | None = None
     parameter_application_receipt: ParameterApplicationReceipt | None = None
+    rationale_summary: str | None = None
+    planning_values: Mapping[str, bool | int | float] | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,10 @@ def optimization_history_payload(item: OptimizationHistory) -> dict[str, object]
         payload["parameter_application_receipt"] = (
             item.parameter_application_receipt.model_dump(mode="json")
         )
+    if item.rationale_summary is not None:
+        payload["rationale_summary"] = item.rationale_summary
+    if item.planning_values is not None:
+        payload["planning_values"] = dict(item.planning_values)
     return payload
 
 
@@ -153,9 +162,13 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
     payload["legal_actions"] = [
         item.model_dump(mode="json") for item in context.legal_actions
     ]
-    payload["excluded_surface_values"] = [
-        item.model_dump(mode="json") for item in context.excluded_surface_values
+    payload["parameter_knowledge"] = [
+        card.model_dump(mode="json") for card in context.parameter_knowledge
     ]
+    payload["parameter_trajectories"] = [
+        optimization_history_payload(item) for item in context.parameter_trajectories
+    ]
+    payload["planning_feedback"] = list(context.planning_feedback)
     if context.effective_domains:
         payload["effective_domains"] = [
             item.model_dump(mode="json") for item in context.effective_domains
@@ -174,7 +187,11 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
 
 
 class OptimizationProposalPlanner(Protocol):
-    def propose(self, context: OptimizationPlanningContext) -> object: ...
+    def propose_v2(
+        self,
+        context: OptimizationPlanningContext,
+        domains: tuple[EffectiveDomainSnapshot, ...],
+    ) -> object: ...
 
 
 def v2_domains(
@@ -184,7 +201,7 @@ def v2_domains(
     return tuple(
         domain
         for domain in context.effective_domains
-        if domain.knob_id in legal_knobs and domain.allowed_requested_values
+        if domain.knob_id in legal_knobs
     )
 
 
@@ -207,7 +224,6 @@ def validate_v2_proposal(
     context: OptimizationPlanningContext,
     *,
     attempted: tuple[RequestedKnobValue, ...],
-    require_knowledge_support: bool,
 ) -> OptimizationProposalV2:
     domains = v2_domains(context)
     if not domains:
@@ -226,7 +242,7 @@ def validate_v2_proposal(
         attempted=attempted,
         supported_action=(
             _supported_v2_action(context, proposal)
-            if require_knowledge_support
+            if proposal.action.claim_id is not None
             else None
         ),
     )
@@ -240,6 +256,7 @@ def validate_v2_proposal(
 
 
 def v2_to_v1(proposal: OptimizationProposalV2) -> OptimizationProposal:
+    """Project the validated probe into the execution ledger's action summary."""
     payload = proposal.model_dump(mode="json")
     payload["schema_version"] = "ecos.optimization_proposal.v1"
     try:
@@ -262,7 +279,6 @@ def validate_planner_proposal(
     proposal: OptimizationProposal,
     context: OptimizationPlanningContext,
     *,
-    require_knowledge: bool,
     forbid_knowledge: bool,
 ) -> str | None:
     if proposal.context_ref != context.context_ref:
@@ -271,7 +287,7 @@ def validate_planner_proposal(
         return "observation_reference"
     available_history = {
         (item.reference.intervention_id, item.reference.outcome_sha256)
-        for item in context.history
+        for item in (*context.history, *context.parameter_trajectories)
     }
     if any(
         (item.intervention_id, item.outcome_sha256) not in available_history
@@ -293,8 +309,6 @@ def validate_planner_proposal(
         return "task_memory_reference"
     if proposal.decision != OptimizationDecision.PROPOSE:
         return None
-    if require_knowledge and not proposed_knowledge:
-        return "knowledge_reference"
     if proposal.action is None:
         return "proposal_action"
     if not any(
@@ -303,18 +317,6 @@ def validate_planner_proposal(
         for action in context.legal_actions
     ):
         return "proposal_action"
-    if require_knowledge and not any(
-        item.knob_id == proposal.action.knob_id
-        and item.direction == proposal.action.direction
-        and (item.claim_ref.entity_id, item.claim_ref.chunk_sha256)
-        in proposed_knowledge
-        for item in (
-            context.supported_action_view.actions
-            if context.supported_action_view is not None
-            else ()
-        )
-    ):
-        return "knowledge_action_support"
     return None
 
 

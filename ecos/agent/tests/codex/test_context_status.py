@@ -6,7 +6,7 @@ from ecos_agent.context_status import StatusSnapshots, gui_status_context
 from ecos_agent.gui.session import ProviderSession
 from ecos_agent.optimization.contracts import BudgetSnapshot, EpisodeBudget
 from ecos_agent.optimization.planning import planning_context_payload
-from tests.optimization.test_codex_proposal_provider import _context, _proposal, _provider
+from tests.optimization.test_codex_proposal_provider import _context, _domain, _proposal_v2, _provider
 
 
 def test_status_projects_gui_state_without_inventing_completion():
@@ -55,10 +55,10 @@ def test_both_provider_lanes_receive_status(tmp_path, monkeypatch):
 
     def run(prompt, schema, **kwargs):
         prompts.append(prompt)
-        return json.dumps(_proposal(context))
+        return json.dumps(_proposal_v2(context, _domain()))
 
     monkeypatch.setattr(provider, "_run_turn", run)
-    provider.propose(context)
+    provider.propose_v2(context, _domain())
     planning = json.loads(prompts[-1].split("USER AND EVIDENCE CONTEXT JSON\n")[1])
     assert planning["agent_status"]["phase"] == "optimization_planning"
     provider._request_json(

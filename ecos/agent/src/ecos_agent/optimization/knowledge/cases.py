@@ -342,7 +342,7 @@ def build_terminal_empirical_case(
         raise ValueError("proposal effective domain does not match")
     if action.knob_id != effective_domain.knob_id:
         raise ValueError("proposal knob does not match effective domain")
-    if action.requested_value not in effective_domain.allowed_requested_values:
+    if not effective_domain.accepts(action.requested_value):
         raise ValueError("proposal value is outside the effective domain")
     if receipt.context.get("context_sha256") != effective_domain.context_sha256:
         raise ValueError("native receipt context does not match effective domain")

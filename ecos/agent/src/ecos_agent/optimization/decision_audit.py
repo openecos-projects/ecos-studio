@@ -20,8 +20,8 @@ from ecos_agent.optimization.contracts import (
     RequestedKnobValue,
 )
 
-DecisionValidationResult = Literal["accepted", "rejected", "fallback"]
-PlannerSource = Literal["llm", "local_fallback", "repair"]
+DecisionValidationResult = Literal["accepted", "rejected"]
+PlannerSource = Literal["llm", "repair"]
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 

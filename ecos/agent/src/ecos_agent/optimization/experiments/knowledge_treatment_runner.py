@@ -426,7 +426,6 @@ def _run_treatment(
     if episode_root.exists():
         raise ValueError("Phase 8 treatment episode already exists")
     env = dict(os.environ)
-    env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
     provider = provider_factory(
         cwd=workspace,
         env=env,
@@ -562,7 +561,7 @@ def _snapshot_case_pool(source: Path, destination: Path) -> tuple[Path, dict[str
 
 def _episode_evidence(workspace: Path, episode_root: Path) -> dict[str, object]:
     state = _verified_episode_state(episode_root)
-    state_path = episode_root / "optimization-episode-state.v8.json"
+    state_path = episode_root / "optimization-episode-state.v9.json"
     chain_names = (
         "ledger",
         "planning_audit",

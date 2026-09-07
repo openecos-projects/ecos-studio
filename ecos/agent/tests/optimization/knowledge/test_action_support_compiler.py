@@ -33,14 +33,18 @@ CHUNK_HASH = "b" * 64
 
 def _domain() -> EffectiveDomainSnapshot:
     payload = {
-        "schema_version": "ecos.effective_domain.v3",
+        "schema_version": "ecos.effective_domain.v4",
         "knob_id": "place.target_density",
         "context_sha256": HASH,
-        "current_coordinate": {"surface_value": 0.85, "effective_anchor": None},
-        "surface_values": (0.65, 0.75, 0.85, 0.95),
-        "excluded_aliases": (),
-        "allowed_requested_values": (0.65, 0.75, 0.95),
-        "thresholds": (),
+        "current_coordinate": {"surface_value": 0.85},
+        "value_bounds": {
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 0.95,
+            "exclusive_minimum": False,
+            "exclusive_maximum": False,
+        },
+        "attempted_values": (),
     }
     return EffectiveDomainSnapshot(
         **payload, snapshot_sha256=canonical_sha256(payload)
@@ -188,12 +192,20 @@ def test_compiler_matches_current_metric_and_spatial_evidence() -> None:
     )
 
     assert view.state.schema_version == "ecos.optimization_state_evidence_request.v1"
-    assert view.schema_version == "ecos.supported_action_view.v2"
+    assert view.schema_version == "ecos.supported_action_view.v3"
     assert view.actions[0].applicability == KnowledgeApplicability.PASS
     assert view.actions[0].knob_id == "place.target_density"
     assert view.actions[0].direction == "decrease"
     assert view.actions[0].effective_domain_sha256 == _domain().snapshot_sha256
-    assert view.actions[0].allowed_requested_values == (0.65, 0.75)
+    bounds = view.actions[0].requested_value_bounds
+    assert bounds.json_schema() == {
+        "type": "number", "minimum": 0.05, "maximum": 0.95
+    }
+    assert bounds.contains(0.7778)
+    assert bounds.contains(0.1)
+    assert _domain().direction_schema(view.actions[0].direction) == {
+        "type": "number", "minimum": 0.05, "exclusiveMaximum": 0.85
+    }
     assert view.actions[0].claim_sha256 == HASH
     assert view.view_sha256.startswith("sha256:")
 

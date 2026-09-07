@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ecos_agent.optimization.contracts import OptimizationKnob
+from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobValue
 from ecos_agent.optimization.parameters.contracts import (
     NumericProposalActionV2,
     OptimizationProposalV2,
@@ -16,16 +16,14 @@ from ecos_agent.optimization.parameters.effective_domain import (
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 from tests.optimization.parameters.effectiveness_support import (
     HASH,
-    density_receipt,
     domain_context,
 )
 
 
-def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
+def test_proposal_accepts_llm_probe_without_threshold_authority() -> None:
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     context = domain_context()
-    receipt = density_receipt(context)
-    domain = compile_effective_domain(card, context=context, receipts=(receipt,))
+    domain = compile_effective_domain(card, context=context)
     proposal = OptimizationProposalV2(
         context_ref={
             "episode_id": "episode-1",
@@ -39,7 +37,7 @@ def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
         action=NumericProposalActionV2(
             knob_id=card.knob_id,
             direction="increase",
-            requested_value=0.875,
+            requested_value=0.7779,
             effective_domain_sha256=domain.snapshot_sha256,
             expected_effects=(
                 {"metric_id": "route_wirelength", "direction": "decrease"},
@@ -47,17 +45,16 @@ def test_v2_proposal_must_bind_every_effective_domain_threshold() -> None:
         ),
     )
 
-    with pytest.raises(EffectiveDomainError, match="threshold references do not match"):
-        validate_numeric_proposal(proposal, domain)
-
-    bound = proposal.model_copy(
-        update={
-            "action": proposal.action.model_copy(
-                update={"threshold_refs": (domain.thresholds[0].threshold_id,)}
-            )
-        }
-    )
-    validate_numeric_proposal(bound, domain)
+    validate_numeric_proposal(proposal, domain)
+    assert proposal.schema_version == "ecos.optimization_proposal.v3"
+    payload = proposal.model_dump(mode="json")
+    payload["schema_version"] = "ecos.optimization_proposal.v2"
+    with pytest.raises(ValueError):
+        OptimizationProposalV2.model_validate(payload)
+    payload["schema_version"] = "ecos.optimization_proposal.v3"
+    payload["action"]["threshold_refs"] = []
+    with pytest.raises(ValueError):
+        OptimizationProposalV2.model_validate(payload)
 
 
 def test_v2_proposal_expected_effect_uses_controller_objective_metrics() -> None:
@@ -94,7 +91,7 @@ def test_v2_validator_binds_action_to_compiled_knowledge_support() -> None:
         "knob_id": card.knob_id.value,
         "direction": "increase",
         "effective_domain_sha256": domain.snapshot_sha256,
-        "allowed_requested_values": list(domain.allowed_requested_values),
+        "requested_value_bounds": domain.value_bounds.model_dump(mode="json"),
     }
     payload = {
         "context_ref": context_ref,
@@ -159,7 +156,7 @@ def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
     )
     validate_numeric_proposal(proposal, domain)
     invalid = proposal.model_copy(
-        update={"action": proposal.action.model_copy(update={"requested_value": 0.85})}
+        update={"action": proposal.action.model_copy(update={"requested_value": 0.96})}
     )
     try:
         validate_numeric_proposal(invalid, domain)
@@ -167,6 +164,23 @@ def test_v2_validator_rejects_value_outside_hash_bound_domain() -> None:
         pass
     else:
         raise AssertionError("out-of-domain proposal was accepted")
+
+    for value, error in ((True, "type"), (float("inf"), "bounds"), (0.1, "direction")):
+        invalid = proposal.model_copy(
+            update={"action": proposal.action.model_copy(update={"requested_value": value})}
+        )
+        with pytest.raises(EffectiveDomainError, match=error):
+            validate_numeric_proposal(invalid, domain)
+    with pytest.raises(EffectiveDomainError, match="already attempted"):
+        validate_numeric_proposal(
+            proposal, domain,
+            attempted=(RequestedKnobValue(knob_id=card.knob_id, value=0.575),),
+        )
+    stale = proposal.model_copy(
+        update={"action": proposal.action.model_copy(update={"effective_domain_sha256": HASH})}
+    )
+    with pytest.raises(EffectiveDomainError, match="current context"):
+        validate_numeric_proposal(stale, domain)
 
 
 @pytest.mark.parametrize(

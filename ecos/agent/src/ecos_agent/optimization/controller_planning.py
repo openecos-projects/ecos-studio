@@ -2,94 +2,28 @@
 
 from __future__ import annotations
 
-import json
-import math
-import os
-import re
-import tempfile
-from dataclasses import dataclass
-from enum import StrEnum
-from pathlib import Path
-from typing import Callable, Literal, Mapping
+from typing import Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import ValidationError
 
 from ecos_agent.errors import ProposalProviderError
-from ecos_agent.optimization.parameters.effective_domain import (
-    EffectiveDomainError,
-    compile_effective_domain,
-)
-from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainError
 from ecos_agent.optimization.contracts import (
-    BudgetSnapshot,
-    ExpectedEffect,
-    ExpectedEffectDirection,
-    HistoryReference,
-    KnowledgeReference,
-    LegalAction,
-    ObjectiveMetric,
-    ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
-    OptimizationKnob,
-    OptimizationObjectiveContract,
     OptimizationProposal,
-    PlanningProviderEvidence,
-    ProposalAction,
-    ProposalContextRef,
-    ProposalReason,
     RequestedKnobValue,
-    SelectionMetric,
     StageObservation,
-    TerminalObservation,
 )
 from ecos_agent.optimization.decision_audit import (
     DecisionValidationResult,
-    OptimizationDecisionAudit,
-    OptimizationDecisionAuditReplay,
-)
-from ecos_agent.optimization.execution import (
-    CANDIDATE_END_STEP,
-    CANDIDATE_EXECUTION_SCOPE,
-    CandidateExecutionEvidence,
-    CandidateExecutionReceipt,
-    CandidateExecutionRequest,
-    OptimizationExecutionAdapter,
-    candidate_target_step,
-)
-from ecos_agent.optimization.knowledge.compiler import (
-    build_state_evidence_request,
-    compile_supported_action_view,
-)
-from ecos_agent.optimization.knowledge.cases import (
-    EmpiricalCaseAuditReplay,
-    EmpiricalCaseAuditStore,
-    EmpiricalCaseDiagnostic,
-    EmpiricalOutcome,
-    build_empirical_case_audit,
-    build_terminal_empirical_case,
-    select_empirical_cases,
 )
 from ecos_agent.optimization.ledger import (
-    OptimizationInterventionStart,
-    OptimizationLedger,
-    OptimizationLedgerReplay,
-    OptimizationOutcomeKind,
-    OptimizationPlanningAudit,
     OptimizationPlanningAuditEntry,
-    OptimizationPlanningAuditReplay,
-    OptimizationPlanningProviderEvidenceAudit,
-    OptimizationPlanningProviderEvidenceReplay,
-    OptimizationTerminalOutcome,
 )
-from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
 from ecos_agent.optimization.planning import (
-    OptimizationHistory,
     OptimizationPlannerTurn,
     OptimizationPlanningContext,
-    OptimizationProposalPlanner,
-    optimization_history_payload,
-    planning_context_payload,
     v2_domains,
     v2_provider_payload_sha256,
     v2_to_v1,
@@ -97,37 +31,10 @@ from ecos_agent.optimization.planning import (
     validate_v2_proposal,
 )
 from ecos_agent.optimization.knowledge.retrieval import (
-    KnowledgeChannel,
     OptimizationRetrievalResult,
-)
-from ecos_agent.optimization.rules import (
-    ACTIVE_OPTIMIZATION_KNOBS,
-    IncumbentComparison,
-    IncumbentDecision,
-    legal_actions,
-    native_receipt_is_effective,
-    select_requested_value,
-    terminal_candidate_is_promotable,
 )
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
-    ParameterApplicationReceipt,
-)
-from ecos_agent.optimization.parameters.semantics import (
-    LATTICE_VERSION,
-    card_hash,
-    load_parameter_cards,
-)
-
-_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
-_SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v8.json"
-_LEGACY_STATE_FILES = (
-    "optimization-episode-state.v2.json",
-    "optimization-episode-state.v3.json",
-    "optimization-episode-state.v4.json",
-    "optimization-episode-state.v5.json",
-    "optimization-episode-state.v6.json",
 )
 
 
@@ -168,20 +75,19 @@ class ControllerPlanningMixin:
         context = self._planning_context(observation, retrieval, current_values)
         planning_entry = self._append_planning_audit(context)
         self._persist()
-        planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
+        planner_source: Literal["llm", "repair"] = "llm"
         planner_turn: OptimizationPlannerTurn | None = None
         provider_payload_sha256 = None
-        if self._v2_enabled():
-            try:
-                provider_payload_sha256 = v2_provider_payload_sha256(context)
-            except EffectiveDomainError:
-                return self._defer_or_fallback(
-                    planning_entry,
-                    context,
-                    proposal=None,
-                    reason="v2_domain_unavailable",
-                    immediate_fallback=True,
-                )
+        try:
+            provider_payload_sha256 = v2_provider_payload_sha256(context)
+        except EffectiveDomainError:
+            return self._defer_or_escalate(
+                planning_entry,
+                context,
+                proposal=None,
+                reason="parameter_domain_unavailable",
+                immediate_escalation=True,
+            )
         try:
             planner_turn = self._invoke_planner(context)
         except (ProposalProviderError, TypeError, ValidationError, ValueError) as exc:
@@ -194,18 +100,13 @@ class ControllerPlanningMixin:
                 planning_entry,
                 expected_payload_sha256=provider_payload_sha256,
             )
-            if not self._v2_enabled():
-                return self._defer_or_fallback(
-                    planning_entry,
-                    context,
-                    proposal=None,
-                    reason="proposal_schema",
-                )
             self._decision_audit.append(
                 planning_entry_sha256=planning_entry.entry_sha256,
                 proposal=None,
                 validation_result="rejected",
-                rejection_reason="proposal_schema",
+                rejection_reason=(
+                    str(exc) if isinstance(exc, EffectiveDomainError) else "proposal_schema"
+                ),
                 requested=None,
                 state=self._state,
                 objective_contract_sha256=(
@@ -220,12 +121,12 @@ class ControllerPlanningMixin:
                 self._budget.remaining_planning_calls == 0
                 or self._budget.remaining_wall_time_seconds == 0
             ):
-                return self._defer_or_fallback(
+                return self._defer_or_escalate(
                     planning_entry,
                     context,
                     proposal=None,
                     reason="planning_budget_exhausted",
-                    immediate_fallback=True,
+                    immediate_escalation=True,
                 )
             self._budget = self._consume(planning_calls=1)
             context = self._planning_context(observation, retrieval, current_values)
@@ -249,27 +150,13 @@ class ControllerPlanningMixin:
                     planning_entry,
                     expected_payload_sha256=provider_payload_sha256,
                 )
-                self._decision_audit.append(
-                    planning_entry_sha256=planning_entry.entry_sha256,
-                    proposal=None,
-                    validation_result="rejected",
-                    rejection_reason="v2_repair_failed",
-                    requested=None,
-                    state=self._state,
-                    objective_contract_sha256=(
-                        self._objective.contract_sha256
-                        if self._objective is not None
-                        else None
-                    ),
-                    planner_source="repair",
-                )
-                self._persist()
-                return self._defer_or_fallback(
+                return self._defer_or_escalate(
                     planning_entry,
                     context,
                     proposal=None,
-                    reason="v2_repair_failed",
-                    immediate_fallback=True,
+                    reason="proposal_repair_failed",
+                    planner_source="repair",
+                    immediate_escalation=True,
                 )
             planner_source = "repair"
             self._record_planning_provider_evidence(
@@ -289,11 +176,10 @@ class ControllerPlanningMixin:
         rejection_reason = validate_planner_proposal(
             proposal,
             context,
-            require_knowledge=self.mode == OptimizationAgentMode.FULL_AGENT,
             forbid_knowledge=self.mode == OptimizationAgentMode.LLM_NO_KNOWLEDGE,
         )
         if rejection_reason is not None:
-            return self._defer_or_fallback(
+            return self._defer_or_escalate(
                 planning_entry,
                 context,
                 proposal=proposal,
@@ -328,7 +214,7 @@ class ControllerPlanningMixin:
                 if proposal.decision == OptimizationDecision.STOP
                 else "planner_continue"
             )
-            return self._defer_or_fallback(
+            return self._defer_or_escalate(
                 planning_entry,
                 context,
                 proposal=proposal,
@@ -336,14 +222,9 @@ class ControllerPlanningMixin:
                 planner_source=planner_source,
             )
         assert proposal.action is not None
-        requested = planner_turn.requested or select_requested_value(
-            proposal.action,
-            current_values=current_values,
-            attempted=self._attempted_requests(),
-            known_aliases=context.excluded_surface_values,
-        )
+        requested = planner_turn.requested
         if requested is None:
-            return self._defer_or_fallback(
+            return self._defer_or_escalate(
                 planning_entry,
                 context,
                 proposal=proposal,
@@ -362,41 +243,24 @@ class ControllerPlanningMixin:
             None,
             planner_source=planner_source,
         )
-    def _parse_proposal(self, payload: object) -> OptimizationProposal:
-        if isinstance(payload, OptimizationProposal):
-            return payload
-        return OptimizationProposal.model_validate(payload)
-
-    def _v2_enabled(self) -> bool:
-        configured = getattr(self.planner, "optimization_proposal_v2_enabled", None)
-        enabled = (
-            configured
-            if isinstance(configured, bool)
-            else os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1") == "1"
-        )
-        return enabled
 
     def _invoke_planner(
         self, context: OptimizationPlanningContext
     ) -> OptimizationPlannerTurn:
-        if not self._v2_enabled():
-            return OptimizationPlannerTurn(
-                self._parse_proposal(self.planner.propose(context))
-            )
         domains = v2_domains(context)
         if not domains:
-            raise EffectiveDomainError("v2 planning domain is unavailable")
+            raise EffectiveDomainError("parameter planning domain is unavailable")
         propose_v2 = getattr(self.planner, "propose_v2", None)
         if not callable(propose_v2):
             raise ProposalProviderError(
-                "optimization v2 planner does not implement propose_v2",
+                "optimization planner does not implement propose_v2",
                 failure_class="unsupported",
             )
         raw = propose_v2(context, domains)
         try:
             parsed = OptimizationProposalV2.model_validate(raw)
         except (TypeError, ValueError) as exc:
-            raise EffectiveDomainError("optimization proposal v2 is invalid") from exc
+            raise EffectiveDomainError("optimization proposal v3 is invalid") from exc
         if parsed.action is None:
             return OptimizationPlannerTurn(
                 v2_to_v1(parsed),
@@ -407,7 +271,6 @@ class ControllerPlanningMixin:
             parsed,
             context,
             attempted=self._attempted_requests(),
-            require_knowledge_support=self.mode == OptimizationAgentMode.FULL_AGENT,
         )
         return OptimizationPlannerTurn(
             v2_to_v1(proposal),
@@ -423,15 +286,15 @@ class ControllerPlanningMixin:
             proposal,
         )
 
-    def _defer_or_fallback(
+    def _defer_or_escalate(
         self,
         planning_entry: OptimizationPlanningAuditEntry,
         context: OptimizationPlanningContext,
         *,
         proposal: OptimizationProposal | None,
         reason: str,
-        planner_source: Literal["llm", "local_fallback", "repair"] = "llm",
-        immediate_fallback: bool = False,
+        planner_source: Literal["llm", "repair"] = "llm",
+        immediate_escalation: bool = False,
     ) -> OptimizationControlResult:
         self._planning_only_turns += 1
         self._proposal = None
@@ -440,11 +303,14 @@ class ControllerPlanningMixin:
         if not context.legal_actions:
             self._state = OptimizationEpisodeState.STOPPED
             return self._finish_planning(
-                planning_entry, proposal, "rejected", "no_legal_candidate"
+                planning_entry, proposal, "rejected", "no_legal_candidate",
+                planner_source=planner_source,
             )
         if (
-            not immediate_fallback
+            not immediate_escalation
             and self._planning_only_turns < self._budget.budget.max_planning_only_turns
+            and self._budget.remaining_planning_calls > 0
+            and self._budget.remaining_wall_time_seconds > 0
         ):
             self._state = OptimizationEpisodeState.PLANNING
             return self._finish_planning(
@@ -455,66 +321,13 @@ class ControllerPlanningMixin:
                 planner_source=planner_source,
             )
 
-        attempted_knobs = {item.knob_id for item in self._attempted_requests()}
-        action = next(
-            (
-                item
-                for item in context.legal_actions
-                if item.knob_id not in attempted_knobs
-            ),
-            context.legal_actions[0],
-        )
-        fallback = self._fallback_proposal(context, action)
-        assert fallback.action is not None
-        requested = select_requested_value(
-            fallback.action,
-            current_values=context.current_values or {},
-            attempted=self._attempted_requests(),
-            known_aliases=context.excluded_surface_values,
-        )
-        if requested is None:
-            raise OptimizationEpisodeControllerError(
-                "local fallback has no legal value"
-            )
-        self._proposal = fallback
-        self._requested = requested
-        self._planning_only_turns = 0
-        self._state = OptimizationEpisodeState.AWAITING_EXECUTION
+        self._state = OptimizationEpisodeState.ESCALATED
         return self._finish_planning(
             planning_entry,
-            fallback,
-            "fallback",
-            reason if immediate_fallback else "controlled_coordinate_fallback",
-            planner_source="local_fallback",
-        )
-
-    @staticmethod
-    def _fallback_proposal(
-        context: OptimizationPlanningContext,
-        action: LegalAction,
-    ) -> OptimizationProposal:
-        return OptimizationProposal(
-            context_ref=context.context_ref,
-            decision=OptimizationDecision.PROPOSE,
-            reason_code=ProposalReason.INSUFFICIENT_EVIDENCE,
-            rationale_summary="Local controlled-coordinate fallback after bounded planning-only turns.",
-            observation_refs=(context.observation_ref,),
-            history_refs=tuple(item.reference for item in context.history),
-            knowledge_refs=(),
-            action=ProposalAction(
-                knob_id=action.knob_id,
-                direction=action.direction,
-                expected_effects=(
-                    ExpectedEffect(
-                        metric_id=(
-                            context.active_objective.active_primary_metric
-                            if context.active_objective is not None
-                            else ObjectiveMetric.ROUTE_WIRELENGTH
-                        ),
-                        direction=ExpectedEffectDirection.UNKNOWN,
-                    ),
-                ),
-            ),
+            proposal,
+            "rejected",
+            reason,
+            planner_source=planner_source,
         )
 
     def _finish_planning(
@@ -524,7 +337,7 @@ class ControllerPlanningMixin:
         validation_result: DecisionValidationResult,
         rejection_reason: str | None,
         *,
-        planner_source: Literal["llm", "local_fallback", "repair"] = "llm",
+        planner_source: Literal["llm", "repair"] = "llm",
     ) -> OptimizationControlResult:
         self._decision_audit.append(
             planning_entry_sha256=planning_entry.entry_sha256,
