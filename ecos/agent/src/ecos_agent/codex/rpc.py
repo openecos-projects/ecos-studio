@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ecos_agent.codex.activity import CodexActivityProjector
+from ecos_agent.codex.telemetry import TurnTelemetry
 from ecos_agent.errors import ProposalProviderError
 
 
@@ -58,6 +59,7 @@ class _JsonLineRpcProcessClient:
         self._diagnostics = (
             _RpcDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         )
+        self.turn_telemetry: TurnTelemetry | None = None
 
     def start(self) -> None:
         if self._process is not None:
@@ -175,6 +177,8 @@ class _JsonLineRpcProcessClient:
     ) -> tuple[str, dict[str, int] | None]:
         self._record("turn_wait_started")
         activity_projector = CodexActivityProjector(turn_id, activity_callback)
+        telemetry = TurnTelemetry(thread_id, turn_id)
+        self.turn_telemetry = telemetry
         idle_deadline = time.monotonic() + self.timeout_seconds
         deltas: list[str] = []
         completed_items: list[str] = []
@@ -188,6 +192,7 @@ class _JsonLineRpcProcessClient:
                 if time.monotonic() < idle_deadline:
                     continue
                 self._record("turn_wait_timeout")
+                telemetry.status = "failed"
                 activity_projector.finish("failed")
                 raise CodexProviderError(
                     f"Timed out waiting for Codex turn {turn_id} completion",
@@ -207,11 +212,16 @@ class _JsonLineRpcProcessClient:
             )
             if method == "thread/tokenUsage/updated" and self._notification_matches_thread(
                 params, thread_id
-            ):
-                token_usage = self._token_usage(params)
+            ) and self._usage_matches_turn_or_is_thread_only(params, turn_id):
+                usage = self._token_usage(params)
+                if usage is not None:
+                    token_usage = usage
+                    telemetry.usage = usage
+                    telemetry.usage_source = "thread_latest"
             if not matches_turn:
                 continue
             idle_deadline = time.monotonic() + self.timeout_seconds
+            telemetry.observe(method, params)
             activity_projector.handle(method, params)
             if method == "error":
                 will_retry = params.get("willRetry") is True
@@ -242,19 +252,28 @@ class _JsonLineRpcProcessClient:
             if method == "turn/completed":
                 turn = params.get("turn")
                 completed_turn = turn if isinstance(turn, dict) else params
-                token_usage = self._completed_turn_usage(completed_turn) or token_usage
+                usage = self._completed_turn_usage(completed_turn)
+                if usage is not None:
+                    token_usage = usage
+                    telemetry.usage = usage
+                    telemetry.usage_source = "completed_turn"
                 text = (
                     "".join(deltas).strip()
                     or "".join(completed_items).strip()
                     or self._completed_turn_text(completed_turn).strip()
                 )
+                if telemetry.status in {"failed", "interrupted"}:
+                    raise _completed_turn_failure(telemetry.status)
                 if not text:
+                    if telemetry.status not in {"failed", "interrupted"}:
+                        telemetry.status = "failed"
                     activity_projector.finish("failed")
                     raise CodexProviderError(
                         "Codex turn completed without assistant text",
                         failure_class="parse_error",
                     )
                 return text, token_usage
+        telemetry.status = "failed"
         raise CodexProviderError(
             f"Timed out waiting for Codex turn {turn_id} completion",
             failure_class="timeout",
@@ -339,6 +358,15 @@ class _JsonLineRpcProcessClient:
         )
 
     @staticmethod
+    def _usage_matches_turn_or_is_thread_only(
+        params: Mapping[str, Any], turn_id: str
+    ) -> bool:
+        explicit = _read_nested_string(
+            params, (("turn", "id"), ("turnId",), ("turn_id",), ("id",))
+        )
+        return explicit is None or explicit == turn_id
+
+    @staticmethod
     def _token_usage(params: Mapping[str, Any]) -> dict[str, int] | None:
         usage = params.get("tokenUsage")
         if not isinstance(usage, Mapping):
@@ -403,10 +431,26 @@ def _normalized_token_usage(usage: object) -> dict[str, int] | None:
         "output_tokens": "outputTokens",
         "reasoning_output_tokens": "reasoningOutputTokens",
     }
-    result = {key: usage.get(source) for key, source in fields.items()}
-    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in result.values()):
+    result = {
+        key: value
+        for key, source in fields.items()
+        if isinstance((value := usage.get(source)), int)
+        and not isinstance(value, bool)
+        and value >= 0
+    }
+    if not result:
         return None
     return {key: int(value) for key, value in result.items()}
+
+
+def _completed_turn_failure(status: str) -> CodexProviderError:
+    if status == "interrupted":
+        return CodexProviderError(
+            "Codex turn interrupted", failure_class="interrupted"
+        )
+    return CodexProviderError(
+        "Codex turn completed with failed status", failure_class="tool_error"
+    )
 
 
 def _read_nested_string(

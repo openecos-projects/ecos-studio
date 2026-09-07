@@ -24,6 +24,7 @@ def gui_status_context(session: ProviderSession) -> dict[str, Any]:
             "objective": copy.deepcopy(session.optimization_objective),
             "active_objective": copy.deepcopy(session.optimization_active_objective),
             "pending": [pending["request"]["requestId"]] if pending else [],
+            "local_activity": session.local_telemetry.snapshot(),
         }
 
 
@@ -118,6 +119,7 @@ class StatusSnapshots:
                 "blockers": blockers,
             },
             "last_action": last_action,
+            "local_activity": copy.deepcopy(gui.get("local_activity")),
             "budget": budget,
             "environment": {
                 "baseline": "first_snapshot" if first else "previous_request",

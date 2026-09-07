@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Callable
+from ecos_agent.runtime_status import LocalActivityTelemetry
 
 from ecos_agent.codex.provider import CodexAppServerProposalProvider
 from ecos_agent.workspace.contracts import GuiWorkspaceSetupProposal
@@ -116,6 +117,7 @@ class ProviderSession:
     active_turn_id: str | None = None
     active_turn_started_at: int | None = None
     active_local_activities: dict[str, dict[str, Any]] = field(default_factory=dict)
+    local_telemetry: LocalActivityTelemetry = field(default_factory=LocalActivityTelemetry)
     interrupt_requested: bool = False
     running: bool = False
     optimization_phase: OptimizationUiPhase = OptimizationUiPhase.IDLE

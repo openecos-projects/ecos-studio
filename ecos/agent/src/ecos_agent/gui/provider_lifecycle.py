@@ -203,7 +203,10 @@ from ecos_agent.gui.provider_common import (
 )
 
 
-class ProviderLifecycleMixin:
+from ecos_agent.gui.provider_turn import ProviderTurnMixin
+
+
+class ProviderLifecycleMixin(ProviderTurnMixin):
     def start_session(self, request: Mapping[str, Any]) -> dict[str, Any]:
         session_id = _optional_text(request.get("sessionId")) or uuid.uuid4().hex
         session = self.sessions.setdefault(session_id, _Session(session_id=session_id))
@@ -292,55 +295,6 @@ class ProviderLifecycleMixin:
     def _finish_turn(session: _Session) -> None:
         with session.state_lock:
             session.running = False
-
-    def _run_turn(
-        self,
-        session: _Session,
-        message: str,
-        handler: Callable[[_Session, str], None] | None = None,
-        *,
-        turn_reserved: bool = False,
-    ) -> dict[str, str]:
-        if not turn_reserved:
-            self._reserve_turn(session)
-        if not session.language_locked:
-            session.language = language_for_text(message)
-            session.language_locked = True
-        turn_id = uuid.uuid4().hex
-        session.active_turn_id = turn_id
-        session.active_turn_started_at = round(time.time() * 1000)
-        session.active_local_activities.clear()
-        session.active_tool_message_id = f"{turn_id}-tool"
-        session.interrupt_requested = False
-        self._emit_status(session, "running")
-        interrupted = False
-        try:
-            (handler or self._handle_input)(session, message)
-            self._check_interrupted(session)
-            if session.phase in _INTERACTION_UNDO_BARRIER_PHASES:
-                session.interaction_undo.clear()
-        except CodexProviderError as exc:
-            if exc.failure_class != "interrupted":
-                self._emit_status(session, "error")
-                raise
-            interrupted = True
-            self._emit(session, "message", "The current Agent turn was interrupted.")
-            self._emit_status(session, "interrupted")
-        except Exception:
-            self._emit_status(session, "error")
-            raise
-        finally:
-            session.active_interrupt = None
-            if session.codex_provider is not None:
-                session.codex_provider.clear_interrupted()
-            session.active_tool_message_id = None
-            session.active_turn_id = None
-            session.active_turn_started_at = None
-            session.active_local_activities.clear()
-            self._finish_turn(session)
-        if not interrupted:
-            self._emit_status(session, self._resting_status(session))
-        return {"messageId": turn_id, "sessionId": session.session_id, "turnId": turn_id}
 
     def answer_interaction(
         self, request: Mapping[str, Any], *, defer: bool = False
