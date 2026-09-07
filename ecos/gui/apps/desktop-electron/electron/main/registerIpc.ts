@@ -492,8 +492,8 @@ async function resolveWorkspacePdkContext(
   services: DesktopBridgeServices,
   requestedProjectId: string,
   projectRoot: string,
-  requested: PdkRequirement,
-): Promise<{ projectId: string; requirement: PdkRequirement }> {
+  requested: PdkRequirement | undefined,
+): Promise<{ projectId: string; requirement: PdkRequirement | undefined }> {
   if (!projectRoot || !services.projectManagementReadService) {
     return { projectId: requestedProjectId, requirement: requested }
   }
@@ -511,10 +511,6 @@ async function prepareEccWorkspaceCreateRequest(
   services: DesktopBridgeServices,
   request: EccWorkspaceCreateRequest,
 ): Promise<EccWorkspaceCreateRequest> {
-  if (!request.pdkRequirement) {
-    throw new Error('PDK Requirement is required for backend workspace creation')
-  }
-
   const projectRoot = request.projectRoot ?? ''
   const context = await resolveWorkspacePdkContext(
     services,
@@ -522,6 +518,9 @@ async function prepareEccWorkspaceCreateRequest(
     projectRoot,
     request.pdkRequirement,
   )
+  if (!context.requirement) {
+    throw new Error('PDK Requirement is required for backend workspace creation')
+  }
   const { projectId, requirement } = context
   const binding = await services.pdkInventoryService.resolveBinding({
     projectId,
