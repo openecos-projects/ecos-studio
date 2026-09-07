@@ -80,7 +80,7 @@ def _config(snapshot: Path, sha256: str) -> dict[str, object]:
             "max_fanout": 32,
             "utilitization": 0.4,
             "target_density": 0.2,
-            "target_overflow": 0,
+            "target_overflow": 0.1,
             "cell_padding_sites": 2,
             "routability_opt": True,
         },
@@ -122,6 +122,14 @@ def _config(snapshot: Path, sha256: str) -> dict[str, object]:
             }
         ],
     }
+
+
+@pytest.mark.parametrize("value", (0, 0.0, 1, 1.0))
+def test_baseline_config_rejects_overflow_endpoints(tmp_path: Path, value) -> None:
+    config = _config(tmp_path / "input.v", HASH)
+    config["baseline"]["target_overflow"] = value
+    with pytest.raises(ValueError, match="target_overflow"):
+        gate0.Gate0Config.model_validate(config)
 
 
 def test_config_hash_locks_every_input(tmp_path: Path) -> None:

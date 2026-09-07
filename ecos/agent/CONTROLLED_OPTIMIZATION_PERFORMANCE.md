@@ -502,6 +502,11 @@ hash，并分别严格绑定 knob、数值语义、patch/receipt hash、config �
 - `target_overflow=0` 的 receipt 校验通过，但 native place 在 1000 iterations 后仍未达到
   zero overflow，按真实执行失败保留。
 
+2026-09-07 起，ECOS Agent 受控优化请求及实验基线配置改为严格的 `0 < target_overflow < 1`；参考表移除
+`0/1`，保留 21 个内部参考值，动态搜索仍可生成参考表之外的区间内部值。普通 Workspace
+参数范围和原生工具不变。以上 v12 结果仍是旧策略的历史证据；新请求/receipt 校验不再接受
+这两个边界值，重放旧边界候选需使用原冻结版本，不能直接混入新策略实验。
+
 ### 11.9 report 前提与内存指标
 
 正式 v12 的 3 个 baseline 都有完整 terminal evidence，但 DRC count 为 4，不满足 signoff

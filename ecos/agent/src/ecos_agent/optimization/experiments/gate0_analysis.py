@@ -102,7 +102,7 @@ class Gate0Baseline(_Model):
     max_fanout: StrictInt = Field(gt=0)
     utilitization: StrictFloat = Field(gt=0, le=1)
     target_density: StrictFloat = Field(ge=0.1, le=0.95)
-    target_overflow: StrictInt | StrictFloat = Field(ge=0, le=1)
+    target_overflow: StrictInt | StrictFloat = Field(gt=0, lt=1)
     cell_padding_sites: StrictInt = Field(ge=1, le=2)
     routability_opt: StrictBool
 

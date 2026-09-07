@@ -37,7 +37,7 @@ EXPECTED_LATTICE_COUNTS = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: 16,
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: 13,
     OptimizationKnob.TARGET_DENSITY: 21,
-    OptimizationKnob.TARGET_OVERFLOW: 23,
+    OptimizationKnob.TARGET_OVERFLOW: 21,
     OptimizationKnob.CELL_PADDING_X: 12,
     OptimizationKnob.ROUTABILITY_OPT: 2,
     OptimizationKnob.DENSITY_WEIGHT: 18,

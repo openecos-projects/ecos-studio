@@ -216,6 +216,17 @@ def test_natural_language_objective_rejects_primary_preserve_overlap() -> None:
         )
 
 
+@pytest.mark.parametrize("value", (0, 0.0, -0.0, 1, 1.0, -1e-13, 1 + 1e-13))
+def test_target_overflow_rejects_closed_boundaries(value: int | float) -> None:
+    with pytest.raises(ValidationError, match="bounded search domain"):
+        RequestedKnobValue(knob_id="place.target_overflow", value=value)
+
+
+@pytest.mark.parametrize("value", (1e-13, 0.01, 0.1, 0.9, 1 - 1e-13))
+def test_target_overflow_accepts_open_interval(value: float) -> None:
+    assert RequestedKnobValue(knob_id="place.target_overflow", value=value).value == value
+
+
 def test_requested_domain_accepts_dynamic_values_within_reference_bounds() -> None:
     assert RequestedKnobValue(knob_id="place.target_density", value=0.15).value == 0.15
     assert RequestedKnobValue(knob_id="place.target_overflow", value=0.08).value == 0.08

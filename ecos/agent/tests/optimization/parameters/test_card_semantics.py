@@ -112,7 +112,7 @@ def test_cards_are_exactly_the_frozen_seven() -> None:
         18,
         2,
         21,
-        23,
+        21,
     ]
 
 
