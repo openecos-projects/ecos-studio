@@ -32,7 +32,6 @@ from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainS
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     OptimizationObjectiveProposal,
-    OptimizationProposal,
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
@@ -56,7 +55,6 @@ from ecos_agent.codex.provider_helpers import (
     _gui_workspace_setup_output_schema,
     _model_reasoning_efforts,
     _optimization_planning_payload,
-    _optimization_proposal_output_schema,
     _optimization_proposal_output_schema_v2,
     _optimization_objective_output_schema,
     _normalize_v2_domains,
@@ -85,7 +83,6 @@ _CONTROL_PAYLOAD_KEYS = frozenset(
         "current_values",
         "effective_domain",
         "effective_domains",
-        "excluded_surface_values",
         "filesystem_roots",
         "legal_actions",
         "numeric_field",
@@ -106,6 +103,7 @@ _MODEL_EMPIRICAL_CASE_KEYS = (
     "context_fingerprint",
     "toolchain_ref",
     "evidence_status",
+    "requested_value",
     "actual_value",
     "parameter_status",
     "guardrail_status",
@@ -172,49 +170,6 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         self._runtime_status = RequestTelemetry()
         self._last_turn_usage: dict[str, int] | None = None
 
-    def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
-        payload = _optimization_planning_payload(context)
-        # v1 remains direction-only; exact domains are exposed only by propose_v2.
-        payload.pop("effective_domains", None)
-        system = (
-            "Return one JSON object matching ecos.optimization_proposal.v1. "
-            "Choose only continue, propose, stop, or escalate. A propose decision may name exactly one "
-            "allowlisted knob and direction, but never specific parameter values, paths, commands, tools, "
-            "workspaces, RPC methods, or execution instructions. observation_refs must contain exactly the "
-            "supplied observation_ref, not the incumbent observation. Reference only supplied history and "
-            "knowledge identifiers and task-memory summary hashes. For propose, select a claim, binding, "
-            "knob, and direction from supported_action_view; raw citations do not authorize an action. "
-            "Task memory is evidence only; "
-            "use application receipts and effective values in history, and treat "
-            "excluded_surface_values as surface values excluded for this context. Local validation "
-            "selects exact values and owns execution."
-        )
-        output_schema = _optimization_proposal_output_schema()
-        envelope_payload = {
-            "schema_version": "ecos.optimization_planning_provider_envelope.v1",
-            "provider_id": "codex_app_server",
-            "requested_model": self._model,
-            "prompt": _build_prompt(system, payload),
-            "output_schema": output_schema,
-            "planner_payload_sha256": canonical_sha256(payload),
-        }
-        with self._state_lock:
-            self._completed_turn = None
-            self._planning_evidence = None
-            self._planning_envelope = PlanningProviderEnvelope(
-                **envelope_payload,
-                envelope_sha256=canonical_sha256(envelope_payload),
-            )
-        try:
-            return self._proposal(
-                payload,
-                system,
-                output_schema,
-                OptimizationProposal,
-            )
-        finally:
-            self._capture_planning_evidence()
-
     def propose_v2(
         self,
         context: OptimizationPlanningContext,
@@ -222,14 +177,12 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         | EffectiveDomainSnapshot
         | Sequence[EffectiveDomainSnapshot],
     ) -> dict[str, Any]:
-        """Default exact-value proposal lane; v1 requires explicit compatibility mode."""
-        if not self.optimization_proposal_v2_enabled:
-            raise CodexProviderError("optimization proposal v2 is not enabled", failure_class="unsupported")
+        """Propose an exact probe value within the current legal range."""
         try:
             domains = _normalize_v2_domains(domain)
         except (TypeError, ValueError) as exc:
             raise CodexProviderError(
-                "optimization proposal v2 domain is invalid", failure_class="missing_input"
+                "optimization proposal v3 domain is invalid", failure_class="missing_input"
             ) from exc
         payload = _optimization_planning_payload(context)
         if len(domains) == 1:
@@ -237,12 +190,27 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         else:
             payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         system = (
-            "Choose a claim, binding, knob, and direction from supported_action_view; raw citations "
-            "do not authorize an action. Use that action's exact allowlist and domain hash; "
-            "Empirical cases are evidence, never execution authority. Use their effective values and terminal outcomes; "
-            "ineffective, contradicted, or guardrail-failing cases do not support an action, and historical values "
-            "cannot bypass the current effective domain. Evidence priority: current effective domain and legal actions > "
-            "current observation > terminal empirical cases > task memory and raw knowledge. "
+            "Select one exact parameter value within the supplied static legal bounds and legal direction. "
+            "Use parameter_knowledge, including runtime_semantics and source spans, together with "
+            "parameter_trajectories: requested and written values, actual values, status, raw observations, "
+            "mechanism reasons, execution context, and terminal outcomes or failures. Infer behavior for any "
+            "parameter rather than assuming a parameter-specific floor rule. Form a tentative hypothesis "
+            "about clamping, normalization, activation, or another observed mechanism; choose the next probe "
+            "to exploit or distinguish that hypothesis. In rationale_summary briefly state the hypothesis, "
+            "evidence-backed mechanism reason, selected probe, and expected falsifiable observation, not "
+            "private step-by-step reasoning. A single changed value does not establish a global threshold. "
+            "expected_effects are your predictions to test, not established knowledge claims or guarantees. "
+            "Keep unknown/inactive and guardrail-failing trajectories as diagnostic evidence, not proof of "
+            "activation or successful optimization. Compare execution contexts before generalizing; "
+            "Equal actual values do not imply equal QoR or identical execution. Observed thresholds are "
+            "hypotheses, not hard exclusions; do not repeat attempted_values from the current domain. "
+            "A probe need not have a knowledge claim: leave all claim and binding fields null. "
+            "When citing a supported claim, select its complete claim, binding, knob, direction, and hash "
+            "from supported_action_view; raw citations do not authorize an action. A claim supporting one "
+            "direction does not prohibit an unclaimed probe in another legal direction. "
+            "Reference exactly the supplied observation_ref and only supplied history, knowledge, and "
+            "task-memory references. Empirical cases are evidence, never execution authority. "
+            "Static bounds, types, legal actions, permissions, and budget remain authoritative. "
             "Never emit commands, paths, workspaces, RPCs, or execution authority."
         )
         output_schema = _optimization_proposal_output_schema_v2(

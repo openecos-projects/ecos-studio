@@ -115,13 +115,15 @@ def test_coordinate_search_bisects_the_largest_unexplored_density_interval() -> 
     assert selection.next_action_index == 5
 
 
-def test_coordinate_search_uses_attempted_and_alias_values_to_refine_the_interval() -> None:
+def test_coordinate_search_uses_attempted_values_to_refine_the_interval() -> None:
     selection = next_coordinate_selection(
         current_values=_expanded_current(
             **{"place.cell_padding_x": 1, "place.routability_opt": False}
         ),
-        attempted=(RequestedKnobValue(knob_id="place.target_density", value=0.45),),
-        known_aliases=(RequestedKnobValue(knob_id="place.target_density", value=0.4),),
+        attempted=(
+            RequestedKnobValue(knob_id="place.target_density", value=0.45),
+            RequestedKnobValue(knob_id="place.target_density", value=0.4),
+        ),
         start_action_index=4,
     )
 

@@ -31,7 +31,6 @@ from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainS
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     OptimizationObjectiveProposal,
-    OptimizationProposal,
     PlanningProviderEnvelope,
     PlanningProviderEvidence,
     ProposalReason,
@@ -58,7 +57,6 @@ _CONTROL_PAYLOAD_KEYS = frozenset(
         "current_values",
         "effective_domain",
         "effective_domains",
-        "excluded_surface_values",
         "filesystem_roots",
         "legal_actions",
         "numeric_field",
@@ -79,6 +77,7 @@ _MODEL_EMPIRICAL_CASE_KEYS = (
     "context_fingerprint",
     "toolchain_ref",
     "evidence_status",
+    "requested_value",
     "actual_value",
     "parameter_status",
     "guardrail_status",
@@ -334,15 +333,6 @@ def _optimization_planning_payload(
     return planning_context_payload(context)
 
 
-def _optimization_proposal_output_schema() -> dict[str, Any]:
-    schema = OptimizationProposal.model_json_schema()
-    schema["$defs"]["OptimizationKnob"]["enum"] = [
-        knob.value for knob in ACTIVE_OPTIMIZATION_KNOBS
-    ]
-    _require_all_schema_properties(schema)
-    return schema
-
-
 def _normalize_v2_domains(
     domain: Mapping[str, Any]
     | EffectiveDomainSnapshot
@@ -361,202 +351,107 @@ def _normalize_v2_domains(
         )
     except (TypeError, ValueError) as exc:
         raise CodexProviderError(
-            "optimization proposal v2 domain is invalid", failure_class="missing_input"
+            "optimization proposal v3 domain is invalid", failure_class="missing_input"
         ) from exc
     if not normalized or len({item.knob_id for item in normalized}) != len(normalized):
         raise CodexProviderError(
-            "optimization proposal v2 domains are invalid", failure_class="missing_input"
+            "optimization proposal v3 domains are invalid", failure_class="missing_input"
         )
     return normalized
 
 
 def _optimization_proposal_output_schema_v2(
-    domains: Sequence[EffectiveDomainSnapshot]
-    | EffectiveDomainSnapshot,
-    legal_directions: Sequence[tuple[str, tuple[str, ...]]]
-    | tuple[str, ...],
+    domains: Sequence[EffectiveDomainSnapshot] | EffectiveDomainSnapshot,
+    legal_directions: Sequence[tuple[str, tuple[str, ...]]] | tuple[str, ...],
     supported_actions: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Schema for the opt-in exact-value proposal contract."""
+    """Pair every legal probe range with its knob, direction, and context hash."""
     domains = _normalize_v2_domains(domains)
-    if legal_directions and isinstance(legal_directions[0], str):
-        direction_map = {domains[0].knob_id.value: tuple(legal_directions)}
-    else:
-        direction_map = dict(legal_directions)
-    allowed_by_knob = {
-        domain.knob_id.value: [
-            value
-            for value in domain.allowed_requested_values
-            if value != (
-                domain.current_coordinate.get("surface_value")
-                if isinstance(domain.current_coordinate, dict)
-                else None
-            )
-        ]
-        for domain in domains
-    }
-    if any(
-        not values or not direction_map.get(knob)
-        for knob, values in allowed_by_knob.items()
-    ):
-        raise CodexProviderError(
-            "optimization proposal v2 domain has no legal output",
-            failure_class="missing_input",
-        )
+    direction_map = (
+        {domains[0].knob_id.value: tuple(legal_directions)}
+        if legal_directions and isinstance(legal_directions[0], str)
+        else dict(legal_directions)
+    )
     schema = OptimizationProposalV2.model_json_schema()
     schema["properties"]["reason_code"].update(
         enum=[reason.value for reason in ProposalReason],
         description="Select one bounded reason for the proposal decision.",
     )
-    schema["properties"]["observation_refs"]["description"] = (
-        "Reference the supplied current observation and no invented observations."
-    )
-    schema["properties"]["history_refs"]["description"] = (
-        "Reference only supplied history records used in the rationale."
-    )
-    schema["properties"]["knowledge_refs"]["description"] = (
-        "Reference only supplied knowledge evidence used in the rationale."
-    )
-    schema["properties"]["task_memory_refs"]["description"] = (
-        "Reference only supplied task-memory summaries used in the rationale."
-    )
+    for field, description in (
+        ("observation_refs", "Reference the supplied current observation and no invented observations."),
+        ("history_refs", "Reference only supplied history or parameter trajectory records used in the rationale."),
+        ("knowledge_refs", "Reference only supplied knowledge evidence used in the rationale."),
+        ("task_memory_refs", "Reference only supplied task-memory summaries used in the rationale."),
+    ):
+        schema["properties"][field]["description"] = description
+    schema["$defs"]["OptimizationKnob"]["enum"] = [domain.knob_id.value for domain in domains]
+    schema["$defs"]["StrategyDirection"]["enum"] = sorted({
+        direction for directions in direction_map.values() for direction in directions
+    })
     action_schema = schema["$defs"]["NumericProposalActionV2"]
-    action_descriptions = {
-        "knob_id": "Select one knob from the effective domain.",
-        "direction": "Select a legal direction for that knob.",
-        "requested_value": "Select one allowed requested value for that knob.",
-        "effective_domain_sha256": "Use the hash of that knob's effective domain.",
-    }
-    schema["$defs"]["OptimizationKnob"]["description"] = action_descriptions["knob_id"]
-    schema["$defs"]["StrategyDirection"]["description"] = action_descriptions[
-        "direction"
-    ]
-    for field in ("requested_value", "effective_domain_sha256"):
-        action_schema["properties"][field]["description"] = action_descriptions[field]
-    schema["$defs"]["OptimizationKnob"]["enum"] = list(allowed_by_knob)
-    schema["$defs"]["StrategyDirection"]["enum"] = sorted(
-        {direction for directions in direction_map.values() for direction in directions}
-    )
-    if supported_actions:
-        domains_by_knob = {domain.knob_id.value: domain for domain in domains}
-        action_variants: list[dict[str, Any]] = []
-        for supported in supported_actions:
-            knob_id = supported.get("knob_id")
-            direction = supported.get("direction")
-            domain = domains_by_knob.get(knob_id)
-            allowed = supported.get("allowed_requested_values")
-            if (
-                domain is None
-                or direction not in direction_map.get(knob_id, ())
-                or not isinstance(allowed, (tuple, list))
-            ):
+    claim_fields = ("claim_id", "claim_sha256", "binding_id", "binding_sha256")
+    variants: list[dict[str, Any]] = []
+    for domain in domains:
+        knob_id = domain.knob_id.value
+        for direction in direction_map.get(knob_id, ()):
+            value_schema = domain.direction_schema(direction)
+            if value_schema is None:
                 continue
-            values = [value for value in allowed_by_knob[knob_id] if value in allowed]
-            if not values:
-                continue
-            claim_ref = supported.get("claim_ref")
-            claim_id = (
-                claim_ref.get("entity_id") if isinstance(claim_ref, Mapping) else None
-            )
             variant = copy.deepcopy(action_schema)
             for field, value in (
-                ("claim_id", claim_id),
-                ("claim_sha256", supported.get("claim_sha256")),
-                ("binding_id", supported.get("binding_id")),
-                ("binding_sha256", supported.get("binding_sha256")),
                 ("knob_id", knob_id),
                 ("direction", direction),
                 ("effective_domain_sha256", domain.snapshot_sha256),
             ):
                 variant["properties"][field] = {"type": "string", "const": value}
             variant["properties"]["requested_value"] = {
-                "type": (
-                    "boolean"
-                    if all(type(value) is bool for value in values)
-                    else "integer"
-                    if all(type(value) is int for value in values)
-                    else "number"
-                ),
-                "enum": values,
-                "description": action_descriptions["requested_value"],
+                **value_schema,
+                "description": "Choose an exact probe value in this range, excluding attempted_values.",
             }
-            threshold_ids = [threshold.threshold_id for threshold in domain.thresholds]
-            variant["properties"]["threshold_refs"] = {
-                "type": "array",
-                "items": {
-                    "type": "string",
-                    **({"enum": threshold_ids} if threshold_ids else {}),
-                },
-                "minItems": len(threshold_ids),
-                "maxItems": len(threshold_ids),
-            }
-            action_variants.append(variant)
-        if not action_variants:
-            raise CodexProviderError(
-                "optimization proposal v2 has no compiled action output",
-                failure_class="missing_input",
-            )
-        schema["properties"]["action"] = {
-            "anyOf": [*action_variants, {"type": "null"}],
-            "description": "Use one fully paired compiled action, or null.",
-        }
-        _require_all_schema_properties(schema)
-        return schema
-    value_schema = schema["$defs"]["NumericProposalActionV2"]["properties"][
-        "requested_value"
-    ]
-    if len(domains) == 1:
-        value_schema["enum"] = allowed_by_knob[domains[0].knob_id.value]
-        value_schema["type"] = (
-            "boolean"
-            if all(type(value) is bool for value in value_schema["enum"])
-            else "integer"
-            if all(type(value) is int for value in value_schema["enum"])
-            else "number"
+            for field in claim_fields:
+                variant["properties"][field] = {"type": "null"}
+            variants.append(variant)
+
+    # Knowledge supports a claim; it does not remove unclaimed legal probes.
+    unclaimed = tuple(variants)
+    for supported in supported_actions:
+        domain = next(
+            (item for item in domains if item.knob_id.value == supported.get("knob_id")),
+            None,
         )
-        value_schema.pop("anyOf", None)
-        action_schema["properties"]["effective_domain_sha256"] = {
-            "type": "string",
-            "const": domains[0].snapshot_sha256,
-            "description": action_descriptions["effective_domain_sha256"],
-        }
-        _require_all_schema_properties(schema)
-        return schema
-    action_variants: list[dict[str, Any]] = []
-    for domain in domains:
-        knob_id = domain.knob_id.value
-        values = allowed_by_knob[knob_id]
-        variant = copy.deepcopy(action_schema)
-        variant["properties"]["knob_id"] = {
-            "type": "string",
-            "const": knob_id,
-            "description": action_descriptions["knob_id"],
-        }
-        variant["properties"]["direction"] = {
-            "type": "string",
-            "enum": list(direction_map[knob_id]),
-            "description": action_descriptions["direction"],
-        }
-        variant["properties"]["requested_value"] = {
-            "type": (
-                "boolean"
-                if all(type(value) is bool for value in values)
-                else "integer"
-                if all(type(value) is int for value in values)
-                else "number"
-            ),
-            "enum": values,
-            "description": action_descriptions["requested_value"],
-        }
-        variant["properties"]["effective_domain_sha256"] = {
-            "type": "string",
-            "const": domain.snapshot_sha256,
-            "description": action_descriptions["effective_domain_sha256"],
-        }
-        action_variants.append(variant)
+        claim_ref = supported.get("claim_ref")
+        claim_values = (
+            claim_ref.get("entity_id") if isinstance(claim_ref, Mapping) else None,
+            supported.get("claim_sha256"),
+            supported.get("binding_id"),
+            supported.get("binding_sha256"),
+        )
+        if (
+            domain is None
+            or supported.get("effective_domain_sha256") != domain.snapshot_sha256
+            or supported.get("requested_value_bounds") != domain.value_bounds.model_dump(mode="json")
+            or not all(isinstance(value, str) and value for value in claim_values)
+        ):
+            continue
+        for probe in unclaimed:
+            properties = probe["properties"]
+            if (
+                properties["knob_id"]["const"] != supported.get("knob_id")
+                or properties["direction"]["const"] != supported.get("direction")
+            ):
+                continue
+            variant = copy.deepcopy(probe)
+            for field, value in zip(claim_fields, claim_values):
+                variant["properties"][field] = {"type": "string", "const": value}
+            variants.append(variant)
+    if not variants:
+        raise CodexProviderError(
+            "optimization proposal v3 domain has no legal output",
+            failure_class="missing_input",
+        )
     schema["properties"]["action"] = {
-        "anyOf": [*action_variants, {"type": "null"}],
-        "description": "Use one fully paired action from a current effective domain, or null.",
+        "anyOf": [*variants, {"type": "null"}],
+        "description": "Select a range-bound probe, optionally with a paired supported claim, or null.",
     }
     _require_all_schema_properties(schema)
     return schema

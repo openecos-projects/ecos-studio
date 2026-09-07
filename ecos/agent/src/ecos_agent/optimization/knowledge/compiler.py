@@ -21,7 +21,7 @@ from pydantic import (
 )
 
 from ecos_agent.ecc_contracts import ECCStepName
-from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
+from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot, RequestedValueBounds
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.knowledge.bundle import KnowledgeBundle
 from ecos_agent.optimization.contracts import (
@@ -381,7 +381,7 @@ class SupportedKnowledgeAction(KnowledgeMatch):
     consumer_ids: tuple[str, ...] = ()
     activation_predicate_ids: tuple[str, ...] = ()
     effective_domain_sha256: str
-    allowed_requested_values: tuple[StrictBool | StrictInt | StrictFloat, ...]
+    requested_value_bounds: RequestedValueBounds
     expected_effects: tuple[str, ...]
     guardrails: tuple[str, ...]
     anti_conditions: tuple[str, ...]
@@ -395,8 +395,8 @@ class SupportedKnowledgeAction(KnowledgeMatch):
 
 
 class SupportedActionView(_Model):
-    schema_version: Literal["ecos.supported_action_view.v2"] = (
-        "ecos.supported_action_view.v2"
+    schema_version: Literal["ecos.supported_action_view.v3"] = (
+        "ecos.supported_action_view.v3"
     )
     state: OptimizationStateEvidenceRequest
     catalog_sha256: str
@@ -478,7 +478,6 @@ from ecos_agent.optimization.knowledge.compiler_runtime import (  # noqa: E402
     _add_delta_features,
     _add_trend_features,
     _append_supported_action,
-    _directional_values,
     _evaluate,
     _evaluate_bindings,
     _match_claim,

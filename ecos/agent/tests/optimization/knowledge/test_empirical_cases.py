@@ -48,18 +48,21 @@ MATERIALIZATION_HASH = "sha256:" + "e" * 64
 
 def _domain() -> EffectiveDomainSnapshot:
     payload = {
+        "schema_version": "ecos.effective_domain.v4",
         "knob_id": OptimizationKnob.TARGET_DENSITY,
         "context_sha256": HASH,
-        "current_coordinate": {"requested": 0.8, "actual_value": 0.8},
-        "surface_values": (0.8, 0.85),
-        "allowed_requested_values": (0.85,),
+        "current_coordinate": {"surface_value": 0.8},
+        "value_bounds": {
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 0.95,
+            "exclusive_minimum": False,
+            "exclusive_maximum": False,
+        },
+        "attempted_values": (),
     }
-    draft = EffectiveDomainSnapshot.model_construct(**payload, snapshot_sha256=HASH)
     return EffectiveDomainSnapshot(
-        **payload,
-        snapshot_sha256=canonical_sha256(
-            draft.model_dump(mode="json", exclude={"snapshot_sha256"})
-        ),
+        **payload, snapshot_sha256=canonical_sha256(payload)
     )
 
 

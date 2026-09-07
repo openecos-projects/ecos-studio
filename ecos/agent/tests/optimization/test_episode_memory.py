@@ -202,7 +202,7 @@ def _write_state(root: Path, scope, ledger: OptimizationLedger) -> None:
     replay = ledger.replay()
     decisions = OptimizationDecisionAudit(root).replay()
     value = {
-        "schema_version": "ecos.optimization_episode_state.v8",
+        "schema_version": "ecos.optimization_episode_state.v9",
         "episode_id": scope.episode_id,
         "checkpoint_id": scope.checkpoint_id,
         "objective": {"contract_sha256": scope.objective_contract_sha256},
@@ -217,7 +217,7 @@ def _write_state(root: Path, scope, ledger: OptimizationLedger) -> None:
         "task_memory_scope_sha256": scope.scope_sha256,
     }
     value["state_sha256"] = canonical_sha256(value)
-    (root / "optimization-episode-state.v8.json").write_text(
+    (root / "optimization-episode-state.v9.json").write_text(
         json.dumps(value, sort_keys=True), encoding="utf-8"
     )
 
@@ -642,7 +642,7 @@ def test_snapshot_rejects_missing_source_evidence(tmp_path: Path) -> None:
     )
     source = _episode(store, _scope("episode-source"))
     store.synchronize()
-    (source / "optimization-episode-state.v8.json").unlink()
+    (source / "optimization-episode-state.v9.json").unlink()
 
     with pytest.raises(OptimizationTaskMemoryIntegrityError, match="unavailable"):
         store.snapshot()

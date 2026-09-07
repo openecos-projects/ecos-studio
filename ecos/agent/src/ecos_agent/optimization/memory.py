@@ -54,7 +54,7 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _STORE_FILE = "task-memory.v1.jsonl"
 _SCOPE_FILE = "optimization-task-memory-scope.v1.json"
-_STATE_FILE = "optimization-episode-state.v8.json"
+_STATE_FILE = "optimization-episode-state.v9.json"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MAX_RECORDS = 6
@@ -457,7 +457,7 @@ def _derive_candidates(episode_root: Path) -> tuple[_Candidate, ...]:
     accepted = {
         canonical_sha256(entry.proposal.model_dump(mode="json")): entry
         for entry in decisions.entries
-        if entry.validation_result in {"accepted", "fallback"}
+        if entry.validation_result == "accepted"
         and entry.proposal is not None
     }
     starts = {
@@ -528,7 +528,7 @@ def _verified_state(path: Path) -> dict[str, object]:
 def _verify_source_trace(scope, state, ledger, decisions) -> None:
     objective = state.get("objective")
     if (
-        state.get("schema_version") != "ecos.optimization_episode_state.v8"
+        state.get("schema_version") != "ecos.optimization_episode_state.v9"
         or state.get("episode_id") != scope.episode_id
         or state.get("checkpoint_id") != scope.checkpoint_id
         or state.get("parent_manifest_sha256") != scope.workspace_manifest_sha256

@@ -26,7 +26,6 @@ from ecos_agent.optimization.objective_alignment import ActiveOptimizationObject
 from ecos_agent.optimization.rules import (
     IncumbentComparison,
     classify_terminal_candidate,
-    coordinate_value_from_native_receipt,
 )
 
 
@@ -204,14 +203,8 @@ class OptimizationEpisodeRunner:
     ) -> None:
         if not promote or requested is None or receipt.parameter_application_receipt is None:
             return
-        value = (
-            coordinate_value_from_native_receipt(
-                receipt.parameter_application_receipt,
-            )
-            if self._controller.receipt_aware_planning
-            else requested.value
-        )
-        self._current_values[requested.knob_id.value] = value
+        # Native normalization is evidence, not a replacement for the request coordinate.
+        self._current_values[requested.knob_id.value] = requested.value
 
     def _indeterminate_turn(
         self,

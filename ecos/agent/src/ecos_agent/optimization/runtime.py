@@ -296,10 +296,10 @@ def _recover_or_create_controller(
     execution_context: Mapping[str, object],
     knowledge_case_pool_root: Path | None,
 ) -> OptimizationEpisodeController:
-    state_path = ledger_root / "optimization-episode-state.v8.json"
+    state_path = ledger_root / "optimization-episode-state.v9.json"
     legacy_state_paths = tuple(
         ledger_root / f"optimization-episode-state.v{version}.json"
-        for version in range(2, 7)
+        for version in range(2, 9)
     )
     if state_path.is_file():
         return _recover_controller(

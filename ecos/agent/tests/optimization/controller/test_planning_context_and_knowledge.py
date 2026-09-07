@@ -138,7 +138,7 @@ def test_full_agent_exposes_state_matched_claim_outside_raw_top_three(
     assert view.exposed_claim_refs == (hidden_ref,)
 
 
-def test_full_agent_rejects_retrieved_claim_that_does_not_support_action(
+def test_full_agent_allows_parameter_probe_outside_general_claim_direction(
     tmp_path: Path,
 ) -> None:
     retrieval = _retrieval()
@@ -171,8 +171,8 @@ def test_full_agent_rejects_retrieved_claim_that_does_not_support_action(
         _observation(), retrieval, CURRENT_VALUES
     )
 
-    assert rejected.rejection_reason == "knowledge_action_support"
-    assert rejected.proposal is None
+    assert rejected.rejection_reason is None
+    assert rejected.requested == RequestedKnobValue(knob_id="place.cell_padding_x", value=1)
     assert ecc.start_calls == []
 
 
@@ -300,9 +300,7 @@ def test_planning_context_compiles_hash_bound_domain_for_active_knobs(
         item for item in context.effective_domains if item.knob_id == supported.knob_id
     )
     assert supported.effective_domain_sha256 == domain.snapshot_sha256
-    assert set(supported.allowed_requested_values) <= set(
-        domain.allowed_requested_values
-    )
+    assert supported.requested_value_bounds == domain.value_bounds
     payload = planning_context_payload(context)
     assert payload["supported_action_view"] == context.supported_action_view.planner_payload()
     assert len(payload["effective_domains"]) == 7
@@ -348,7 +346,8 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
     assert context.task_memory is None
     assert not hasattr(context.history[0], "application_receipt")
     assert context.history[0].parameter_application_receipt is None
-    assert all(not domain.thresholds for domain in context.effective_domains)
+    assert all("thresholds" not in domain.model_dump() for domain in context.effective_domains)
+    assert context.parameter_trajectories[0].parameter_application_receipt is None
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
     assert state["receipt_aware_planning"] is False
 
@@ -392,8 +391,8 @@ def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
         for item in context.effective_domains
         if item.knob_id.value == "place.target_density"
     )
-    assert 0.85 in density.excluded_aliases
-    assert 0.85 not in density.allowed_requested_values
+    assert 0.85 in density.attempted_values
+    assert not density.accepts(0.85)
     assert result.requested != RequestedKnobValue(
         knob_id="place.target_density", value=0.75
     )
@@ -432,7 +431,7 @@ def test_contract_mutations_are_rejected_before_fake_ecc_side_effects(
     tmp_path: Path,
     mutation: Callable[[object], dict[str, object]],
 ) -> None:
-    codex = _FakeCodex(mutation)
+    codex = _FakeCodex(mutation, mutation)
     ecc = _FakeEcc()
     controller = _controller(tmp_path, codex, ecc)
 
@@ -440,8 +439,8 @@ def test_contract_mutations_are_rejected_before_fake_ecc_side_effects(
 
     assert rejected.proposal is None
     assert rejected.rejection_reason is not None
-    assert rejected.state == OptimizationEpisodeState.PLANNING
-    assert controller.budget.consumed_planning_calls == 1
+    assert rejected.state in {OptimizationEpisodeState.PLANNING, OptimizationEpisodeState.ESCALATED}
+    assert controller.budget.consumed_planning_calls == len(codex.contexts)
     assert controller.budget.consumed_candidates == 0
     assert ecc.start_calls == []
 
@@ -477,13 +476,13 @@ def test_no_knowledge_mode_hides_chunks_and_rejects_knowledge_references(
 def test_raw_rag_rejects_action_from_a_stage_that_was_not_observed(
     tmp_path: Path,
 ) -> None:
-    codex = _FakeCodex(
-        lambda context: _proposal(
+    def wrong_stage(context):
+        return _proposal(
             context,
             knob_id="floorplan.core_util",
             direction=StrategyDirection.DECREASE,
         )
-    )
+    codex = _FakeCodex(wrong_stage, wrong_stage)
     controller = _controller(
         tmp_path,
         codex,
@@ -499,7 +498,8 @@ def test_raw_rag_rejects_action_from_a_stage_that_was_not_observed(
         action.knob_id.value.split(".", 1)[0]
         for action in codex.contexts[0].legal_actions
     } == {"place"}
-    assert result.rejection_reason == "proposal_action"
+    assert result.rejection_reason == "proposal_repair_failed"
+    assert result.state == OptimizationEpisodeState.ESCALATED
 
 
 def test_floorplan_observation_exposes_only_floorplan_actions(tmp_path: Path) -> None:

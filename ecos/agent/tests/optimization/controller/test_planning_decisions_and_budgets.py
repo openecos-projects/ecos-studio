@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -89,7 +88,7 @@ def test_non_action_decisions_never_reach_fake_ecc(
     assert ecc.start_calls == []
 
 
-def test_controller_defers_early_stop_then_uses_local_fallback(tmp_path: Path) -> None:
+def test_controller_defers_early_stop_then_escalates_without_selecting_value(tmp_path: Path) -> None:
     def stop(context: object) -> dict[str, object]:
         proposal = _proposal(context)
         proposal.update(
@@ -107,12 +106,12 @@ def test_controller_defers_early_stop_then_uses_local_fallback(tmp_path: Path) -
 
     assert first.state == OptimizationEpisodeState.PLANNING
     assert first.rejection_reason == "minimum_candidates_not_met"
-    assert second.state == OptimizationEpisodeState.AWAITING_EXECUTION
-    assert second.requested is not None
-    assert second.rejection_reason == "controlled_coordinate_fallback"
+    assert second.state == OptimizationEpisodeState.ESCALATED
+    assert second.requested is None
+    assert second.rejection_reason == "minimum_candidates_not_met"
 
 
-def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) -> None:
+def test_controller_escalates_after_codex_parse_and_repair_errors(tmp_path: Path) -> None:
     controller = _controller(
         tmp_path,
         _AuditedFakeCodex(
@@ -126,6 +125,7 @@ def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) 
                 ],
             ),
             CodexProviderError("schema validation", failure_class="parse_error"),
+            CodexProviderError("schema validation", failure_class="parse_error"),
         ),
         _FakeEcc(_started()),
     )
@@ -134,22 +134,16 @@ def test_controller_uses_local_fallback_after_codex_parse_error(tmp_path: Path) 
     second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert first.rejection_reason == "observation_reference"
-    assert second.state == OptimizationEpisodeState.AWAITING_EXECUTION
-    assert second.rejection_reason == "controlled_coordinate_fallback"
+    assert second.state == OptimizationEpisodeState.ESCALATED
+    assert second.requested is None
+    assert second.rejection_reason == "proposal_repair_failed"
 
 
 class _V2FakeCodex(_FakeCodex):
-    @property
-    def optimization_proposal_v2_enabled(self) -> bool:
-        return os.environ.get("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1") == "1"
-
     def __init__(self, *responses: object) -> None:
         super().__init__()
         self.v2_responses = list(responses)
         self.v2_calls = []
-
-    def propose(self, context: object) -> object:
-        raise AssertionError("v1 planner must not be used when v2 is enabled")
 
     def propose_v2(self, context: object, domain: object) -> object:
         self.v2_calls.append((context, domain))
@@ -160,59 +154,36 @@ class _V2FakeCodex(_FakeCodex):
 def _v2_proposal(
     context: object, domain: object, *, value: object = None
 ) -> dict[str, object]:
-    action = context.legal_actions[0]
+    supported = next(
+        item for item in context.supported_action_view.actions
+        if any(
+            action.knob_id == item.knob_id and action.direction == item.direction
+            for action in context.legal_actions
+        )
+    )
+    action = supported
     if isinstance(domain, tuple):
         domain = next(item for item in domain if item.knob_id == action.knob_id)
-    current = context.current_values[action.knob_id.value]
-    if value is None:
-        candidates = (
-            item
-            for item in domain.allowed_requested_values
-            if item > current
-            if action.direction == StrategyDirection.INCREASE
-        )
-        value = next(candidates, None)
-        if value is None:
-            value = next(
-                item for item in domain.allowed_requested_values if item < current
-            )
-    supported = next(
-        item
-        for item in context.supported_action_view.actions
-        if item.knob_id == action.knob_id
-        and item.direction == action.direction
-        and item.effective_domain_sha256 == domain.snapshot_sha256
+    proposal = _proposal(
+        context,
+        knob_id=action.knob_id.value,
+        direction=action.direction,
+        requested_value=value,
     )
-    return {
-        "schema_version": "ecos.optimization_proposal.v2",
-        "context_ref": context.context_ref.model_dump(mode="json"),
-        "decision": "propose",
-        "reason_code": "observation",
-        "rationale_summary": "Use one exact bounded value.",
-        "observation_refs": [context.observation_ref.model_dump(mode="json")],
-        "knowledge_refs": [
-            item.model_dump(mode="json") for item in context.knowledge_refs
-        ],
-        "action": {
+    proposal["action"].update(
+        {
             "claim_id": supported.claim_ref.entity_id,
             "claim_sha256": supported.claim_sha256,
             "binding_id": supported.binding_id,
             "binding_sha256": supported.binding_sha256,
-            "knob_id": action.knob_id.value,
-            "direction": action.direction.value,
-            "requested_value": value,
-            "effective_domain_sha256": domain.snapshot_sha256,
-            "expected_effects": [
-                {"metric_id": "route_wirelength", "direction": "decrease"}
-            ],
-        },
-    }
+        }
+    )
+    return proposal
 
 
 def test_full_agent_v2_rejects_mismatched_compiled_binding(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
 
     def mismatched(context: object, domains: object) -> dict[str, object]:
         proposal = _v2_proposal(context, domains)
@@ -227,13 +198,12 @@ def test_full_agent_v2_rejects_mismatched_compiled_binding(
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert result.rejection_reason == "v2_repair_failed"
+    assert result.rejection_reason == "proposal_repair_failed"
 
 
 def test_controller_uses_exact_v2_value_by_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", raising=False)
     planner = _V2FakeCodex(_v2_proposal)
     executor = _FakeEcc(_started())
     controller = _controller(tmp_path, planner, executor)
@@ -246,8 +216,8 @@ def test_controller_uses_exact_v2_value_by_default(
     selected_domain = next(
         item for item in domain if item.knob_id == result.requested.knob_id
     )
-    assert result.requested.value in selected_domain.allowed_requested_values
-    assert result.requested.knob_id == context.legal_actions[0].knob_id
+    assert selected_domain.accepts(result.requested.value)
+    assert result.requested.knob_id == context.supported_action_view.actions[0].knob_id
     assert result.planner_source == "llm"
 
     controller.execute()
@@ -260,10 +230,31 @@ def test_controller_uses_exact_v2_value_by_default(
     assert executor.start_calls[0].seed == 0
 
 
+def test_controller_executes_exact_llm_probe_without_a_knowledge_claim(tmp_path: Path) -> None:
+    planner = _FakeCodex(
+        lambda context: _proposal(
+            context,
+            knob_id="place.target_density",
+            requested_value=0.731234,
+            knowledge_refs=[],
+        )
+    )
+    executor = _FakeEcc(_started())
+    controller = _controller(tmp_path, planner, executor)
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
+    assert result.requested == RequestedKnobValue(
+        knob_id="place.target_density", value=0.731234
+    )
+    controller.execute()
+    assert executor.start_calls[0].requested == result.requested
+
+
 def test_v2_terminal_case_is_persisted_and_injected_on_next_turn(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
     planner = _V2FakeCodex(_v2_proposal, _v2_proposal)
     controller = _controller(
         tmp_path,
@@ -306,19 +297,26 @@ def test_v2_terminal_case_is_persisted_and_injected_on_next_turn(
     assert planner.v2_calls[-1][0].empirical_case_audit is not None
 
 
-def test_controller_v1_requires_explicit_compatibility_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("schema_version", ["ecos.optimization_proposal.v1", "ecos.optimization_proposal.v2"])
+def test_controller_rejects_old_proposal_schemas(
+    tmp_path: Path, schema_version: str,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "0")
-    controller = _controller(tmp_path, _V2FakeCodex(_v2_proposal), _FakeEcc())
+    def old_proposal(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal["schema_version"] = schema_version
+        return proposal
 
-    assert controller._v2_enabled() is False
+    controller = _controller(tmp_path, _FakeCodex(old_proposal, old_proposal), _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.requested is None
+    assert result.rejection_reason == "proposal_repair_failed"
 
 
 def test_controller_fails_closed_when_default_v2_planner_lacks_interface(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", raising=False)
 
     class MissingV2Planner:
         def propose(self, context: object) -> object:
@@ -331,9 +329,8 @@ def test_controller_fails_closed_when_default_v2_planner_lacks_interface(
 
 
 def test_controller_accepts_llm_selected_non_first_knob(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
 
     def choose_aspect_ratio(
         context: object, domains: tuple[object, ...]
@@ -390,9 +387,8 @@ def test_controller_accepts_llm_selected_non_first_knob(
 
 
 def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
 
     def invalid(context: object, domain: object) -> dict[str, object]:
         return _v2_proposal(context, domain, value=999)
@@ -411,15 +407,18 @@ def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value
     assert len(planning) == 2
     assert len(decisions) == 2
     assert decisions[0].validation_result == "rejected"
+    assert decisions[0].rejection_reason == "proposal value is outside the legal bounds or type"
+    assert planner.v2_calls[1][0].planning_feedback == (
+        "proposal value is outside the legal bounds or type",
+    )
     assert decisions[0].planning_entry_sha256 == planning[0].entry_sha256
     assert decisions[-1].planner_source == "repair"
     assert decisions[-1].planning_entry_sha256 == planning[-1].entry_sha256
 
 
 def test_v2_repair_refreshes_wall_time_and_planning_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
     clock = _Clock()
 
     def invalid(context: object, domain: object) -> dict[str, object]:
@@ -440,9 +439,8 @@ def test_v2_repair_refreshes_wall_time_and_planning_context(
 
 
 def test_v2_repair_does_not_exceed_planning_call_budget(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
     planner = _V2FakeCodex(
         lambda context, domain: _v2_proposal(context, domain, value=999)
     )
@@ -461,10 +459,9 @@ def test_v2_repair_does_not_exceed_planning_call_budget(
     assert len(OptimizationPlanningAudit(tmp_path / "episode").replay().entries) == 1
 
 
-def test_controller_falls_back_immediately_after_v2_repair_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_controller_escalates_immediately_after_v2_repair_failure(
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", "1")
     planner = _V2FakeCodex(
         lambda context, domain: _v2_proposal(context, domain, value=999),
         lambda context, domain: _v2_proposal(context, domain, value=999),
@@ -473,21 +470,20 @@ def test_controller_falls_back_immediately_after_v2_repair_failure(
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert result.state == OptimizationEpisodeState.AWAITING_EXECUTION
-    assert result.rejection_reason == "v2_repair_failed"
-    assert result.planner_source == "local_fallback"
+    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.requested is None
+    assert result.rejection_reason == "proposal_repair_failed"
+    assert result.planner_source == "repair"
     decision = OptimizationDecisionAudit(tmp_path / "episode").replay().entries[-1]
-    assert decision.planner_source == "local_fallback"
+    assert decision.planner_source == "repair"
     decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
     assert [entry.planner_source for entry in decisions] == [
         "llm",
         "repair",
-        "local_fallback",
     ]
     assert [entry.validation_result for entry in decisions] == [
         "rejected",
         "rejected",
-        "fallback",
     ]
 
 

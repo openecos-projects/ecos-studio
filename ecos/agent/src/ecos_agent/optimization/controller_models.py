@@ -113,9 +113,7 @@ from ecos_agent.optimization.rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
     IncumbentComparison,
     IncumbentDecision,
-    legal_actions,
     native_receipt_is_effective,
-    select_requested_value,
     terminal_candidate_is_promotable,
 )
 from ecos_agent.optimization.parameters.contracts import (
@@ -130,14 +128,6 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v8.json"
-_LEGACY_STATE_FILES = (
-    "optimization-episode-state.v2.json",
-    "optimization-episode-state.v3.json",
-    "optimization-episode-state.v4.json",
-    "optimization-episode-state.v5.json",
-    "optimization-episode-state.v6.json",
-)
 
 class OptimizationEpisodeControllerError(ValueError):
     """An episode cannot safely make the requested state transition."""
@@ -155,14 +145,14 @@ class OptimizationControlResult:
     proposal: OptimizationProposal | None = None
     requested: RequestedKnobValue | None = None
     rejection_reason: str | None = None
-    planner_source: Literal["llm", "local_fallback", "repair"] = "llm"
+    planner_source: Literal["llm", "repair"] = "llm"
 
 
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["ecos.optimization_episode_state.v8"] = (
-        "ecos.optimization_episode_state.v8"
+    schema_version: Literal["ecos.optimization_episode_state.v9"] = (
+        "ecos.optimization_episode_state.v9"
     )
     episode_id: str
     checkpoint_id: str

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,12 +22,9 @@ from ecos_agent.optimization.contracts import (
     LegalAction,
     ObjectiveMetric,
     ObservationReference,
-    OptimizationDecision,
     OptimizationKnob,
-    OptimizationProposal,
     ProposalAction,
     ProposalContextRef,
-    ProposalReason,
     RequestedKnobValue,
     StrategyDirection,
 )
@@ -118,6 +116,7 @@ def test_prompt_compacts_empirical_cases_without_mutating_audit_payload() -> Non
                 "context_fingerprint": HASH,
                 "toolchain_ref": HASH,
                 "evidence_status": "current",
+                "requested_value": 0.2,
                 "actual_value": 0.8,
                 "parameter_status": "effective",
                 "guardrail_status": "pass",
@@ -207,60 +206,22 @@ def _context() -> OptimizationPlanningContext:
                 direction=StrategyDirection.INCREASE,
             ),
         ),
-        excluded_surface_values=tuple(
-            RequestedKnobValue(knob_id="place.target_density", value=value)
-            for value in (
-                0.1,
-                0.15,
-                0.2,
-                0.25,
-                0.3,
-                0.35,
-                0.4,
-                0.45,
-                0.5,
-                0.55,
-                0.6,
-                0.65,
-                0.7,
-                0.75,
-            )
-        ),
+        parameter_knowledge=(card,),
+        parameter_trajectories=(history,),
     )
-
-
-def _proposal(context: OptimizationPlanningContext) -> dict[str, object]:
-    return OptimizationProposal(
-        context_ref=context.context_ref,
-        decision=OptimizationDecision.PROPOSE,
-        reason_code=ProposalReason.OBSERVATION,
-        rationale_summary="Use one bounded congestion strategy.",
-        observation_refs=(context.observation_ref,),
-        history_refs=(context.history[0].reference,),
-        knowledge_refs=context.knowledge_refs,
-        action=ProposalAction(
-            knob_id="place.target_density",
-            direction=StrategyDirection.DECREASE,
-            expected_effects=(
-                {
-                    "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
-                    "direction": ExpectedEffectDirection.DECREASE,
-                },
-            ),
-        ),
-    ).model_dump(mode="json")
 
 
 def _domain() -> EffectiveDomainSnapshot:
     payload = {
-        "schema_version": "ecos.effective_domain.v3",
+        "schema_version": "ecos.effective_domain.v4",
         "knob_id": "place.target_density",
         "context_sha256": HASH,
-        "current_coordinate": {"surface_value": 0.2, "effective_anchor": None},
-        "surface_values": (0.2, 0.25, 0.3, 0.85),
-        "excluded_aliases": (0.2,),
-        "allowed_requested_values": (0.25, 0.3, 0.85),
-        "thresholds": (),
+        "current_coordinate": {"surface_value": 0.2},
+        "value_bounds": {
+            "type": "number", "minimum": 0.1, "maximum": 0.95,
+            "exclusive_minimum": False, "exclusive_maximum": False,
+        },
+        "attempted_values": (0.2,),
     }
     return EffectiveDomainSnapshot(
         **payload,
@@ -272,21 +233,27 @@ def _proposal_v2(
     context: OptimizationPlanningContext, domain: EffectiveDomainSnapshot
 ) -> dict[str, object]:
     return {
-        "schema_version": "ecos.optimization_proposal.v2",
+        "schema_version": "ecos.optimization_proposal.v3",
         "context_ref": context.context_ref.model_dump(mode="json"),
         "decision": "propose",
         "reason_code": "observation",
-        "rationale_summary": "Use the next bounded exact value.",
+        "rationale_summary": (
+            "The request was raised to 0.8, consistent with the recorded utilization "
+            "floor. Probe 0.8137 and check whether the density consumer uses that value."
+        ),
         "observation_refs": [context.observation_ref.model_dump(mode="json")],
-        "history_refs": [],
+        "history_refs": [context.history[0].reference.model_dump(mode="json")],
         "knowledge_refs": [item.model_dump(mode="json") for item in context.knowledge_refs],
         "task_memory_refs": [],
         "action": {
+            "claim_id": None,
+            "claim_sha256": None,
+            "binding_id": None,
+            "binding_sha256": None,
             "knob_id": "place.target_density",
             "direction": "increase",
-            "requested_value": 0.85,
+            "requested_value": 0.8137,
             "effective_domain_sha256": domain.snapshot_sha256,
-            "threshold_refs": [],
             "expected_effects": [
                 {
                     "metric_id": "route_la_total_overflow",
@@ -297,275 +264,157 @@ def _proposal_v2(
     }
 
 
-def test_optimization_planner_sends_only_bounded_context_and_validates_output(
+def test_planner_exposes_parameter_knowledge_and_unfiltered_trajectories(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     provider = _provider(tmp_path)
     context = _context()
+    first = context.history[0]
+    uncertain = first.parameter_application_receipt.model_copy(
+        update={"status": "unknown", "reason": "consumer evidence unavailable"}
+    )
+    context = replace(context,
+        parameter_trajectories=(
+            first,
+            replace(first, parameter_application_receipt=uncertain),
+        ),
+    )
     captured: dict[str, object] = {}
 
-    def request(
-        system: str,
-        user: dict[str, object],
-        output_schema: dict[str, object],
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        captured.update(system=system, user=user, output_schema=output_schema)
-        return _proposal(context)
+    def request(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return _proposal_v2(context, _domain())
 
     monkeypatch.setattr(provider, "_request_json", request)
+    result = provider.propose_v2(context, _domain())
 
-    proposal = provider.propose(context)
-
-    assert proposal == _proposal(context)
-    assert set(captured["user"]) == {
-        "context_ref",
-        "observation_ref",
-        "incumbent",
-        "history",
-        "knowledge_refs",
-        "knowledge_chunks",
-        "supported_action_view",
-        "empirical_cases",
-        "empirical_case_audit",
-        "legal_actions",
-        "excluded_surface_values",
-        "objective",
-        "objective_alignment",
-        "active_objective",
-    }
-    assert "workspace" not in captured["user"]
-    assert "specific parameter values" in captured["system"]
-    assert "exactly the supplied observation_ref" in captured["system"]
-    assert "effective values" in captured["system"]
-    assert "excluded_surface_values" in captured["system"]
-    assert captured["user"]["history"][0]["parameter_application_receipt"][
-        "actual_value"
-    ] == 0.8
-    schema = captured["output_schema"]
-    assert schema["required"] == [
-        "schema_version",
-        "context_ref",
-        "decision",
-        "reason_code",
-        "rationale_summary",
-        "observation_refs",
-        "history_refs",
-        "knowledge_refs",
-        "task_memory_refs",
-        "action",
+    assert result["action"]["requested_value"] == 0.8137
+    payload = captured["user"]
+    assert payload["parameter_knowledge"] == [
+        card.model_dump(mode="json") for card in context.parameter_knowledge
     ]
-    assert schema["$defs"]["OptimizationKnob"]["enum"] == [
-        "place.target_density",
-        "place.target_overflow",
-        "place.cell_padding_x",
-        "place.routability_opt",
-        "place.density_weight",
-        "floorplan.core_util",
-        "floorplan.aspect_ratio",
-    ]
+    trajectories = payload["parameter_trajectories"]
+    assert len(trajectories) == 2
+    assert trajectories[0]["requested"]["value"] == 0.2
+    receipt = trajectories[0]["parameter_application_receipt"]
+    assert receipt["actual_value"] == 0.8
+    assert receipt["observation"]["utilization_floor"] == 0.8
+    assert trajectories[1]["parameter_application_receipt"]["status"] == "unknown"
+    assert "excluded_surface_values" not in payload
+    assert "runtime_semantics" in captured["system"]
+    assert "source spans" in captured["system"]
+    assert "hypothesis" in captured["system"]
+    assert "falsifiable" in captured["system"]
+    assert "unknown/inactive" in captured["system"]
+    assert "Equal actual values do not imply equal QoR" in captured["system"]
+    prompt_evidence = json.loads(
+        _build_prompt(captured["system"], payload).split(
+            "USER AND EVIDENCE CONTEXT JSON\n", maxsplit=1
+        )[1]
+    )
+    assert prompt_evidence["parameter_trajectories"] == trajectories
+    assert prompt_evidence["parameter_knowledge"] == payload["parameter_knowledge"]
 
 
-def test_optimization_planner_fails_closed_on_invalid_codex_proposal(
+def test_planner_fails_closed_on_invalid_proposal(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     provider = _provider(tmp_path)
-    context = _context()
-    invalid = _proposal(context)
+    invalid = _proposal_v2(_context(), _domain())
     invalid["action"] = None
     monkeypatch.setattr(provider, "_request_json", lambda **_kwargs: invalid)
 
     with pytest.raises(CodexProviderError, match="schema validation") as error:
-        provider.propose(context)
+        provider.propose_v2(_context(), _domain())
 
     assert error.value.failure_class == "parse_error"
 
 
-def test_optimization_planner_exposes_one_consumable_turn_evidence(
+def test_planner_has_only_exact_value_lane(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     provider = _provider(tmp_path)
-    context = _context()
+    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "0"
+    monkeypatch.setattr(
+        provider, "_request_json", lambda **_kwargs: _proposal_v2(_context(), _domain())
+    )
+    assert not hasattr(provider, "propose")
+    assert not hasattr(provider, "optimization_proposal_v2_enabled")
+    assert provider.propose_v2(_context(), _domain())["schema_version"] == (
+        "ecos.optimization_proposal.v3"
+    )
+
+
+def test_planner_binds_domain_and_consumable_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    context, domain = _context(), _domain()
     captured: dict[str, object] = {}
 
     def request(**kwargs: object) -> dict[str, object]:
         captured.update(kwargs)
         provider._completed_turn = ("thread-1", "turn-1", HASH)
-        return _proposal(context)
+        return _proposal_v2(context, domain)
 
     monkeypatch.setattr(provider, "_request_json", request)
+    provider.propose_v2(context, domain)
 
-    provider.propose(context)
-
+    assert captured["user"]["effective_domain"] == domain.model_dump(mode="json")
     evidence = provider.consume_planning_evidence()
     assert evidence is not None
-    assert evidence.provider_id == "codex_app_server"
     assert evidence.thread_id == "thread-1"
     assert evidence.turn_id == "turn-1"
     assert evidence.response_sha256 == HASH
-    assert evidence.diagnostics_sha256 is None
-    assert evidence.envelope.requested_model is None
-    assert evidence.envelope.prompt == _build_prompt(
-        captured["system"], captured["user"]
-    )
-    assert evidence.envelope.output_schema == captured["output_schema"]
+    assert evidence.envelope.prompt == _build_prompt(captured["system"], captured["user"])
     assert evidence.envelope.planner_payload_sha256 == canonical_sha256(captured["user"])
+    assert evidence.envelope.output_schema == captured["output_schema"]
     assert evidence.envelope.envelope_sha256 == canonical_sha256(
         evidence.envelope.model_dump(mode="json", exclude={"envelope_sha256"})
     )
     assert provider.consume_planning_evidence() is None
 
 
-def test_optimization_planner_v2_is_enabled_by_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    provider = _provider(tmp_path)
-    provider.env.pop("ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2", None)
-    context = _context()
-    called = False
-
-    def request(**_kwargs: object) -> dict[str, object]:
-        nonlocal called
-        called = True
-        return _proposal_v2(context, _domain())
-
-    monkeypatch.setattr(provider, "_request_json", request)
-
-    result = provider.propose_v2(context, _domain())
-
-    assert provider.optimization_proposal_v2_enabled is True
-    assert result["schema_version"] == "ecos.optimization_proposal.v2"
-    assert called is True
-
-
-def test_optimization_planner_v1_requires_explicit_compatibility_flag(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    provider = _provider(tmp_path)
-    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "0"
-    called = False
-
-    def request(**_kwargs: object) -> dict[str, object]:
-        nonlocal called
-        called = True
-        return _proposal_v2(_context(), _domain())
-
-    monkeypatch.setattr(provider, "_request_json", request)
-
-    with pytest.raises(CodexProviderError, match="not enabled") as error:
-        provider.propose_v2(_context(), _domain())
-
-    assert provider.optimization_proposal_v2_enabled is False
-    assert error.value.failure_class == "unsupported"
-    assert called is False
-
-
-def test_optimization_planner_v2_binds_domain_and_planning_evidence(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    provider = _provider(tmp_path)
-    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
-    context = _context()
+def test_planner_schema_is_closed_and_allows_unsampled_values() -> None:
     domain = _domain()
-    captured: dict[str, object] = {}
-
-    def request(**kwargs: object) -> dict[str, object]:
-        captured.update(kwargs)
-        provider._completed_turn = ("thread-v2", "turn-v2", HASH)
-        return _proposal_v2(context, domain)
-
-    monkeypatch.setattr(provider, "_request_json", request)
-
-    result = provider.propose_v2(context, domain)
-
-    assert result["schema_version"] == "ecos.optimization_proposal.v2"
-    assert "raw citations do not authorize an action" in captured["system"]
-    assert "Empirical cases are evidence, never execution authority" in captured["system"]
-    assert "effective values and terminal outcomes" in captured["system"]
-    assert (
-        "Evidence priority: current effective domain and legal actions > current observation > "
-        "terminal empirical cases > task memory and raw knowledge"
-    ) in captured["system"]
-    assert "Return one JSON object matching" not in captured["system"]
-    assert captured["user"]["effective_domain"] == domain.model_dump(mode="json")
-    schema = captured["output_schema"]
-    assert schema["$defs"]["OptimizationKnob"]["enum"] == [
-        "place.target_density"
-    ]
-    assert schema["$defs"]["StrategyDirection"]["enum"] == ["increase"]
-    assert schema["$defs"]["NumericProposalActionV2"]["properties"][
-        "requested_value"
-    ]["enum"] == [0.25, 0.3, 0.85]
-    evidence = provider.consume_planning_evidence()
-    assert evidence is not None
-    assert evidence.thread_id == "thread-v2"
-    assert evidence.turn_id == "turn-v2"
-    assert evidence.envelope.planner_payload_sha256 == canonical_sha256(
-        captured["user"]
-    )
-    assert evidence.envelope.output_schema == captured["output_schema"]
-    assert provider.consume_planning_evidence() is None
-
-
-def test_optimization_planner_v2_uses_closed_object_schema(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    provider = _provider(tmp_path)
-    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
-    context = _context()
-    domain = _domain()
-    captured: dict[str, object] = {}
-
-    def request(**kwargs: object) -> dict[str, object]:
-        captured.update(kwargs)
-        return _proposal_v2(context, domain)
-
-    monkeypatch.setattr(provider, "_request_json", request)
-    provider.propose_v2(context, domain)
-
-    pending = [captured["output_schema"]]
+    schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))
+    increase, decrease = schema["properties"]["action"]["anyOf"][:-1]
+    value = increase["properties"]["requested_value"]
+    assert value["type"] == "number"
+    assert value["exclusiveMinimum"] == 0.2
+    assert value["maximum"] == 0.95
+    assert "enum" not in value
+    assert domain.accepts(0.8137)
+    assert not domain.accepts(0.951)
+    assert decrease["properties"]["requested_value"]["minimum"] == 0.1
+    assert decrease["properties"]["requested_value"]["exclusiveMaximum"] == 0.2
+    assert "threshold_refs" not in increase["properties"]
+    pending = [schema]
     while pending:
-        value = pending.pop()
-        if isinstance(value, dict):
-            if "$ref" in value:
-                assert set(value) == {"$ref"}
-            if value.get("type") == "object":
-                assert value.get("additionalProperties") is False
-            pending.extend(value.values())
-        elif isinstance(value, list):
-            pending.extend(value)
+        item = pending.pop()
+        if isinstance(item, dict):
+            if "$ref" in item:
+                assert set(item) == {"$ref"}
+            if item.get("type") == "object":
+                assert item.get("additionalProperties") is False
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
 
 
-def test_optimization_planner_v2_schema_excludes_the_current_coordinate() -> None:
-    payload = _domain().model_dump(mode="json", exclude={"snapshot_sha256"})
-    payload["excluded_aliases"] = []
-    payload["allowed_requested_values"] = [0.2, 0.25]
-    domain = EffectiveDomainSnapshot(
-        **payload,
-        snapshot_sha256=canonical_sha256(payload),
-    )
-
-    schema = _optimization_proposal_output_schema_v2(domain, ("increase",))
-
-    assert schema["$defs"]["NumericProposalActionV2"]["properties"][
-        "requested_value"
-    ]["enum"] == [0.25]
-
-
-def test_optimization_planner_v2_schema_exposes_all_domains() -> None:
+def test_planner_schema_exposes_all_domains() -> None:
     first = _domain()
     payload = first.model_dump(mode="json", exclude={"snapshot_sha256"})
     payload.update(
         knob_id="floorplan.aspect_ratio",
-        current_coordinate={"surface_value": 1.0, "effective_anchor": None},
-        surface_values=[0.5, 1.0],
-        allowed_requested_values=[0.5],
+        current_coordinate={"surface_value": 1.0},
+        value_bounds={
+            "type": "number", "minimum": 0.5, "maximum": 2.0,
+            "exclusive_minimum": False, "exclusive_maximum": False,
+        },
+        attempted_values=[],
     )
-    second = EffectiveDomainSnapshot(
-        **payload,
-        snapshot_sha256=canonical_sha256(payload),
-    )
-
+    second = EffectiveDomainSnapshot(**payload, snapshot_sha256=canonical_sha256(payload))
     schema = _optimization_proposal_output_schema_v2(
         (first, second),
         (
@@ -573,44 +422,20 @@ def test_optimization_planner_v2_schema_exposes_all_domains() -> None:
             ("floorplan.aspect_ratio", ("decrease",)),
         ),
     )
-
-    action_variants = schema["properties"]["action"]["anyOf"][:-1]
-    assert [variant["properties"]["knob_id"]["const"] for variant in action_variants] == [
-        "place.target_density",
-        "floorplan.aspect_ratio",
+    variants = schema["properties"]["action"]["anyOf"][:-1]
+    assert [item["properties"]["knob_id"]["const"] for item in variants] == [
+        "place.target_density", "floorplan.aspect_ratio",
     ]
-    assert action_variants[0]["properties"]["direction"]["enum"] == ["increase"]
-    assert action_variants[0]["properties"]["requested_value"]["enum"] == [
-        0.25,
-        0.3,
-        0.85,
-    ]
-    assert action_variants[0]["properties"]["effective_domain_sha256"]["const"] == (
-        first.snapshot_sha256
-    )
-    assert action_variants[1]["properties"]["direction"]["enum"] == ["decrease"]
-    assert action_variants[1]["properties"]["requested_value"]["enum"] == [0.5]
-    assert action_variants[1]["properties"]["effective_domain_sha256"]["const"] == (
-        second.snapshot_sha256
-    )
-    assert schema["properties"]["reason_code"]["enum"] == [
-        "observation",
-        "negative_history",
-        "budget_exhausted",
-        "no_legal_candidate",
-        "insufficient_evidence",
-        "human_review_required",
-    ]
-    assert "supplied current observation" in schema["properties"]["observation_refs"][
-        "description"
-    ]
+    assert variants[0]["properties"]["effective_domain_sha256"]["const"] == first.snapshot_sha256
+    assert variants[1]["properties"]["effective_domain_sha256"]["const"] == second.snapshot_sha256
+    assert variants[1]["properties"]["requested_value"]["exclusiveMaximum"] == 1.0
 
 
-def test_optimization_planner_v2_schema_keeps_compiled_action_binding_atomic() -> None:
+def test_knowledge_binding_does_not_block_opposite_direction_probe() -> None:
     domain = _domain()
     schema = _optimization_proposal_output_schema_v2(
         domain,
-        ("increase",),
+        ("increase", "decrease"),
         (
             {
                 "claim_ref": {"entity_id": "strategy-1", "chunk_sha256": CHUNK_HASH},
@@ -618,35 +443,28 @@ def test_optimization_planner_v2_schema_keeps_compiled_action_binding_atomic() -
                 "binding_id": "binding-1",
                 "binding_sha256": HASH,
                 "knob_id": "place.target_density",
-                "direction": "increase",
+                "direction": "decrease",
                 "effective_domain_sha256": domain.snapshot_sha256,
-                "allowed_requested_values": (0.25,),
+                "requested_value_bounds": domain.value_bounds.model_dump(mode="json"),
             },
         ),
     )
-
-    action = schema["properties"]["action"]["anyOf"][0]["properties"]
+    increase, decrease, supported = schema["properties"]["action"]["anyOf"][:-1]
+    assert increase["properties"]["direction"]["const"] == "increase"
+    assert increase["properties"]["claim_id"] == {"type": "null"}
+    assert decrease["properties"]["claim_id"] == {"type": "null"}
+    action = supported["properties"]
     assert action["claim_id"]["const"] == "strategy-1"
     assert action["claim_sha256"]["const"] == HASH
     assert action["binding_id"]["const"] == "binding-1"
     assert action["binding_sha256"]["const"] == HASH
-    assert action["knob_id"]["const"] == "place.target_density"
-    assert action["direction"]["const"] == "increase"
-    assert action["requested_value"]["enum"] == [0.25]
+    assert action["direction"]["const"] == "decrease"
     assert action["effective_domain_sha256"]["const"] == domain.snapshot_sha256
-    assert action["threshold_refs"] == {
-        "type": "array",
-        "items": {"type": "string"},
-        "minItems": 0,
-        "maxItems": 0,
-    }
+    assert action["requested_value"]["exclusiveMaximum"] == 0.2
 
 
-def test_optimization_planner_v2_rejects_untrusted_domain(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_planner_rejects_untrusted_domain(tmp_path: Path) -> None:
     provider = _provider(tmp_path)
-    provider.env["ECOS_ENABLE_OPTIMIZATION_PROPOSAL_V2"] = "1"
     with pytest.raises(CodexProviderError, match="domain is invalid") as error:
         provider.propose_v2(_context(), {"knob_id": "place.target_density"})
     assert error.value.failure_class == "missing_input"

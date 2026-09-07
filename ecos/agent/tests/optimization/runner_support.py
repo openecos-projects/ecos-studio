@@ -54,7 +54,6 @@ from ecos_agent.optimization.knowledge.retrieval import (
 )
 from ecos_agent.optimization.rules import (
     IncumbentDecision,
-    coordinate_value_from_native_receipt,
     freeze_routability_objective,
     native_receipt_is_effective,
 )
@@ -104,10 +103,11 @@ class _Clock:
 
 
 class _FakePlanner:
-    optimization_proposal_v2_enabled = False
-
     def __init__(self) -> None:
         self.contexts: list[OptimizationPlanningContext] = []
+
+    def propose_v2(self, context: OptimizationPlanningContext, domains: object) -> object:
+        return self.propose(context)
 
     def propose(self, context: OptimizationPlanningContext) -> object:
         self.contexts.append(context)
@@ -336,7 +336,18 @@ def _proposal(
     *,
     history_refs: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
+    domain = next(item for item in context.effective_domains if item.knob_id == knob_id)
+    if direction in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
+        value = direction == StrategyDirection.ENABLE
+    else:
+        step = 1 if knob_id == "place.cell_padding_x" else 0.05
+        value = round(
+            context.current_values[knob_id]
+            + step * (1 if direction == StrategyDirection.INCREASE else -1),
+            12,
+        )
     return {
+        "schema_version": "ecos.optimization_proposal.v3",
         "context_ref": context.context_ref.model_dump(),
         "decision": OptimizationDecision.PROPOSE,
         "reason_code": ProposalReason.OBSERVATION,
@@ -349,6 +360,8 @@ def _proposal(
         "action": {
             "knob_id": knob_id,
             "direction": direction,
+            "requested_value": value,
+            "effective_domain_sha256": domain.snapshot_sha256,
             "expected_effects": [
                 {
                     "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,

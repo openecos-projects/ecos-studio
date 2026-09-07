@@ -268,8 +268,7 @@ def _append_supported_action(
     if (action.knob_id, action.direction) not in legal:
         return
     domain = domains.get(action.knob_id)
-    allowed_values = _directional_values(domain, action.direction)
-    if domain is None or not allowed_values:
+    if domain is None or domain.direction_schema(action.direction) is None:
         return
     actions.append(
         SupportedKnowledgeAction(
@@ -287,33 +286,12 @@ def _append_supported_action(
             consumer_ids=action.consumer_ids,
             activation_predicate_ids=action.activation_predicate_ids,
             effective_domain_sha256=domain.snapshot_sha256,
-            allowed_requested_values=allowed_values,
+            requested_value_bounds=domain.value_bounds,
             expected_effects=claim.expected_effects,
             guardrails=claim.guardrails,
             anti_conditions=tuple(item.feature_id for item in claim.anti_predicates),
         )
     )
-
-
-def _directional_values(
-    domain: EffectiveDomainSnapshot | None,
-    direction: StrategyDirection,
-) -> tuple[bool | int | float, ...]:
-    if domain is None or domain.current_coordinate is None:
-        return ()
-    values = domain.allowed_requested_values
-    if direction == StrategyDirection.ENABLE:
-        return tuple(value for value in values if value is True)
-    if direction == StrategyDirection.DISABLE:
-        return tuple(value for value in values if value is False)
-    anchor = domain.current_coordinate.get("effective_anchor")
-    if anchor is None:
-        anchor = domain.current_coordinate.get("surface_value")
-    if type(anchor) not in {int, float}:
-        return ()
-    if direction == StrategyDirection.INCREASE:
-        return tuple(value for value in values if type(value) in {int, float} and value > anchor)
-    return tuple(value for value in values if type(value) in {int, float} and value < anchor)
 
 
 def _match_claim(

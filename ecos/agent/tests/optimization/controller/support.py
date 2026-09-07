@@ -32,6 +32,7 @@ from ecos_agent.optimization.controller import (
     planning_context_payload,
 )
 from ecos_agent.optimization.parameters.effective_domain import build_context_fingerprint
+from ecos_agent.optimization.planning import v2_provider_payload_sha256
 from ecos_agent.optimization.ledger import (
     OptimizationLedger,
     OptimizationOutcomeKind,
@@ -96,13 +97,11 @@ class _Clock:
 
 
 class _FakeCodex:
-    optimization_proposal_v2_enabled = False
-
     def __init__(self, *responses: object) -> None:
         self.responses = list(responses)
         self.contexts = []
 
-    def propose(self, context: object) -> object:
+    def propose_v2(self, context: object, domains: object) -> object:
         self.contexts.append(context)
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
@@ -120,9 +119,7 @@ class _AuditedFakeCodex(_FakeCodex):
             "requested_model": "test-model",
             "prompt": "bounded test prompt",
             "output_schema": {"type": "object"},
-            "planner_payload_sha256": canonical_sha256(
-                planning_context_payload(self.contexts[-1])
-            ),
+            "planner_payload_sha256": v2_provider_payload_sha256(self.contexts[-1]),
         }
         return PlanningProviderEvidence(
             provider_id="codex_app_server",
@@ -224,15 +221,34 @@ def _proposal(
     task_memory_refs: list[dict[str, str]] | None = None,
     knob_id: str = "place.cell_padding_x",
     direction: StrategyDirection = StrategyDirection.INCREASE,
+    requested_value: bool | int | float | None = None,
+    rationale_summary: str = "Placement congestion remains high.",
 ) -> dict[str, object]:
     expected_context = getattr(context, "context_ref")
     expected_observation = getattr(context, "observation_ref")
     expected_knowledge = getattr(context, "knowledge_refs")
+    domain = next(item for item in context.effective_domains if item.knob_id == knob_id)
+    if requested_value is None:
+        if direction in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
+            requested_value = direction == StrategyDirection.ENABLE
+        else:
+            step = 1 if knob_id == "place.cell_padding_x" else 0.05
+            current = context.current_values[knob_id]
+            requested_value = round(
+                current + step * (1 if direction == StrategyDirection.INCREASE else -1),
+                12,
+            )
+            while requested_value in domain.attempted_values:
+                requested_value = round(
+                    requested_value + step * (1 if direction == StrategyDirection.INCREASE else -1),
+                    12,
+                )
     return {
+        "schema_version": "ecos.optimization_proposal.v3",
         "context_ref": context_ref or expected_context.model_dump(),
         "decision": OptimizationDecision.PROPOSE,
         "reason_code": ProposalReason.OBSERVATION,
-        "rationale_summary": "Placement congestion remains high.",
+        "rationale_summary": rationale_summary,
         "observation_refs": observation_refs or [expected_observation.model_dump()],
         "history_refs": [],
         "knowledge_refs": (
@@ -244,6 +260,8 @@ def _proposal(
         "action": {
             "knob_id": knob_id,
             "direction": direction,
+            "requested_value": requested_value,
+            "effective_domain_sha256": domain.snapshot_sha256,
             "expected_effects": [
                 {
                     "metric_id": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,

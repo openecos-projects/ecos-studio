@@ -109,7 +109,7 @@ class PublicPlanningRecord(_ReplicationModel):
     envelope: PublicPlanningEnvelope
     proposal: OptimizationProposal | None
     source_proposal_sha256: str | None
-    validation_result: Literal["accepted", "rejected", "fallback"]
+    validation_result: Literal["accepted", "rejected"]
     rejection_reason: str | None
     state: OptimizationEpisodeState
     planner_source: PlannerSource = Field(

@@ -186,17 +186,30 @@ ECOS Agent 通过 `codex app-server` 使用 Codex CLI。Codex 负责语言理解
 `ecos.optimization_state_evidence_request.v1`，用 observation hash 绑定当前指标、相对
 reference/incumbent 的 delta、历史 trend、current values 和可用的 spatial evidence。
 确定性 compiler 扫描当前 stage 兼容的全部 structured claims，将其与 hash-locked tool
-binding 和当轮 legal actions 求交，再只把 `ecos.supported_action_view.v2` 中稳定排序后的
+binding 和当轮 legal actions 求交，再只把 `ecos.supported_action_view.v3` 中稳定排序后的
 最多 3 条 `pass` / `weak` claim-action 关系交给 planner。完整候选、匹配和截断结果留在内部
 审计 view；planner payload 只含 exposed claims 和完整审计 hash。
 缺观测、anti-condition、stale binding 或 unsupported action 均 fail closed。
 
-默认 `ecos.optimization_proposal.v2` 从 compiled view 支持的 knob/direction 及匹配的
-dynamic effective-domain allowlist 中选择 exact value。现有人工离散值仅作为参考锚点；
-controller 根据当前值、已尝试值和 receipt 阈值，确定性生成每个方向最多 3 个候选。
-validator 同时检查知识支持关系、domain hash、方向和有界搜索域。兼容的 v1 lane 仍由本地
-controller 在参考值中选择。两个 lane 的执行权都保留在 controller，知识模块只消费
-Parameter Effectiveness 的公开合同，不复制其能力。
+唯一提案协议为 `ecos.optimization_proposal.v3`。LLM 从七参数的静态合法范围内自主选择
+具体探测值，不再从程序生成的有限候选中选择。`ecos.effective_domain.v4` 只绑定参数卡、
+执行上下文、类型、上下界、当前请求坐标和已尝试值；不会根据 receipt 推断 floor、别名
+或自动收缩搜索区间。方向相对于当前规划坐标判定，实际使用值单独作为轨迹证据。
+
+`parameter_knowledge` 提供带源码引用的参数机制、单位及 consumer 知识；
+`parameter_trajectories` 提供本 episode 全部已结束尝试的请求、实际使用值、状态、
+原始观测、运行上下文、前次理由及 terminal 结果，不受最近六条普通 history 窗口限制。
+失败、`inactive`、`unknown` 和未通过 signoff 的轨迹不会因此被删除，也不成为硬约束。
+LLM 在 `rationale_summary` 中简述行为假设、知识支持的原因、下一探测值及可证伪的预期；
+`expected_effects` 仅表示模型待验证的预测，不是引用知识已证明的事实或效果保证。
+上下文变化和运行时自适应不能被误当作固定阈值，实际值相同也不等于 QoR 相同。
+
+参数探测可不绑定 general claim；显式引用 claim 时仍须匹配 compiled view 中的完整
+binding、方向和 hash。后端继续校验参数白名单、数值范围、类型、方向、重复尝试、证据
+引用、预算和权限，执行值必须等于已验证的模型请求。模型输出失败仅有限重试后升级处理，
+不再由本地算法替模型选值。`planning_feedback` 将最近一次拒绝原因交给下一次规划。
+episode state 已升为 v9；旧提案、旧 domain 和旧 episode 不兼容，需新建优化 episode。
+这些机制的回归测试证明数据和执行链路，不代表真实 LLM 的参数推断质量或 QoR 收益。
 
 ### 如何阅读参数状态
 

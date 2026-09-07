@@ -426,7 +426,3 @@ def narrative_view(card: ParameterSemanticsCard) -> dict[str, object]:
         ),
         "source_spans": [item.model_dump(mode="json") for item in card.source_spans],
     }
-
-
-def typed_rules(card: ParameterSemanticsCard) -> tuple[dict[str, object], ...]:
-    return tuple(card.resolution_rules)
