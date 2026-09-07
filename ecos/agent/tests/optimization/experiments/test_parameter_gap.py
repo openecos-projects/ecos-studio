@@ -32,6 +32,7 @@ from ecos_agent.optimization.parameters.semantics import CARD_ROOT, load_paramet
 from tests.optimization.experiments.equal_budget_support import (
     _terminal_observation as _complete_terminal,
 )
+from tests.optimization.experiments.test_gate0_acceptance import _config as _gate0_config
 
 HASH = "sha256:" + "a" * 64
 
@@ -168,9 +169,30 @@ def test_successful_probe_is_terminal_closed_even_when_signoff_is_ineligible(
     assert error is None
 
 
+@pytest.mark.parametrize("replays", [None, 1, 3])
 def test_gap_baselines_request_complete_terminal_without_signoff(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, replays: int | None
 ) -> None:
+    pilot = _gate0_config(Path("input.v"), HASH)
+    payload = {
+        "schema_version": "ecos.rq1_parameter_gap_config.v1",
+        "expected_ecos_revision": "a" * 40,
+        "expected_ecc_revision": "b" * 40,
+        "expected_ecc_runtime_version": "0.1.0",
+        "expected_pdk_revision": "c" * 40,
+        "expected_ecc_executable_sha256": HASH,
+        "pdk_root": "../../pdk",
+        "terminal_timeout_seconds": 60,
+        "baseline": pilot["baseline"],
+        "design": pilot["designs"][0],
+    }
+    if replays is not None:
+        payload["baseline_replays"] = replays
+    config = gap_setup.ParameterGapConfig.model_validate(payload)
+    expected_count = replays or 1
+    assert config.baseline_replays == expected_count
+    with pytest.raises(ValueError):
+        gap_setup.ParameterGapConfig.model_validate({**payload, "baseline_replays": 0})
     complete = _complete_terminal()
     terminal = complete.model_copy(
         update={
@@ -204,13 +226,14 @@ def test_gap_baselines_request_complete_terminal_without_signoff(
     monkeypatch.setattr(gap_runner, "_run_canonical", run_canonical)
     observations = gap_runner._run_baselines(
         tmp_path / "config.json",
-        SimpleNamespace(baseline_replays=1, design=object()),
+        config,
         {"ecc_executable": str(tmp_path / "ecc")},
         tmp_path,
     )
 
-    assert observations == (terminal,)
-    assert calls == [False]
+    assert observations == (terminal,) * expected_count
+    assert calls == [False] * expected_count
+    assert len(list(tmp_path.glob("baseline-*"))) == expected_count
 
 
 def test_screen_values_use_boundaries_and_neighbors_without_noop() -> None:

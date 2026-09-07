@@ -49,7 +49,7 @@ class ParameterGapConfig(_Model):
     expected_ecc_executable_sha256: str
     pdk_root: str
     seed: Literal[0] = 0
-    baseline_replays: Literal[3] = 3
+    baseline_replays: Literal[1, 3] = 1
     terminal_timeout_seconds: int | float = Field(gt=0)
     max_workers: Literal[1] = 1
     baseline: Gate0Baseline

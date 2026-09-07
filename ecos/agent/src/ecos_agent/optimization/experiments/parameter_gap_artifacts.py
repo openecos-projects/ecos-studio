@@ -37,7 +37,11 @@ def build_report(
         "research_scope": "rq1_testability_gate_only",
         "utility_claim": "not_assessed",
         "readiness": readiness,
-        "baseline_noise": noise_profile(baselines, require_eligible=False),
+        "baseline_noise": (
+            None if len(baselines) == 1
+            else noise_profile(baselines, require_eligible=False)
+        ),
+        "baseline_noise_status": "not_assessed" if len(baselines) == 1 else "measured",
         "baseline_observations": [item.model_dump(mode="json") for item in baselines],
         "current_values": dict(sorted(current.items())),
         "candidate_count": len(results),
@@ -64,6 +68,7 @@ def write_outputs(
         f"- Status counts: {report['status_counts']}",
         f"- Candidates: {report['candidate_count']}",
         f"- Terminal closed: {report['terminal_closed_count']}",
+        f"- Baseline noise: `{report['baseline_noise_status']}`",
         "- Utility claim: `not_assessed`",
         "",
         "| Knob | Effective | Inactive | Unknown | Tested requests |",
