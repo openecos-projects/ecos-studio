@@ -35,7 +35,6 @@ from ecos_agent.optimization.contracts import (
     SelectionMetric,
     TerminalObservation,
 )
-from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
 from ecos_agent.optimization.objective_alignment import ActiveOptimizationObjective
 from ecos_agent.optimization.rules import IncumbentDecision
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
@@ -204,7 +203,6 @@ class OptimizationTerminalOutcome(_LedgerModel):
     receipt_sha256: str | None = None
     terminal_observation_sha256: str | None = None
     terminal_observation: TerminalObservation | None = None
-    application_receipt: KnobApplicationReceipt | None = None
     parameter_application_receipt: ParameterApplicationReceipt | None = None
     parameter_card_sha256: str | None = None
     materialization_receipt_sha256: str | None = None
@@ -299,8 +297,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
         if self.parameter_application_receipt is not None:
             receipt = self.parameter_application_receipt
             requested = receipt.requested.get("knob_id")
-            if self.application_receipt is not None or requested is None:
-                raise ValueError("terminal receipt fields are ambiguous")
+            if requested is None:
+                raise ValueError("terminal parameter receipt knob is missing")
             if self.receipt_sha256 != receipt.evidence_sha256:
                 raise ValueError("terminal parameter receipt hash does not match")
             if self.parameter_card_sha256 is None:
@@ -365,8 +363,8 @@ OptimizationLedgerPayload = Annotated[
 
 
 class OptimizationLedgerEntry(_LedgerModel):
-    schema_version: Literal["ecos.optimization_ledger_entry.v1"] = (
-        "ecos.optimization_ledger_entry.v1"
+    schema_version: Literal["ecos.optimization_ledger_entry.v2"] = (
+        "ecos.optimization_ledger_entry.v2"
     )
     sequence: StrictInt = Field(ge=1)
     previous_entry_sha256: str | None = None
@@ -629,10 +627,6 @@ class OptimizationLedger:
     def append_terminal(
         self, outcome: OptimizationTerminalOutcome
     ) -> OptimizationLedgerEntry:
-        if outcome.application_receipt is not None:
-            raise OptimizationLedgerStateError(
-                "legacy application receipt is read-only"
-            )
         with self._exclusive_lock():
             replay = self._verify_locked()
             if outcome.intervention_id not in replay.pending_intervention_ids:

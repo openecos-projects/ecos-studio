@@ -82,7 +82,7 @@ def validate_candidate_artifacts(
     written_value: object = requested.value
     if requested.knob_id == OptimizationKnob.CELL_PADDING_X:
         written_value = requested.value * site_width_dbu
-    _validate_l1_artifact(
+    _validate_materialization_artifact(
         candidate,
         manifest,
         receipt,
@@ -141,7 +141,7 @@ def _validate_candidate_manifest(
         raise OptimizationEccAdapterError("application receipt candidate manifest is incomplete")
 
 
-def _validate_l1_artifact(
+def _validate_materialization_artifact(
     candidate: Path,
     manifest: Mapping[str, object],
     receipt: ParameterApplicationReceipt,
@@ -176,7 +176,7 @@ def _validate_l1_artifact(
         raise OptimizationEccAdapterError(
             "application receipt materialization manifest is invalid"
         )
-    _validate_l1_payload(
+    _validate_materialization_payload(
         payload,
         receipt,
         candidate.name,
@@ -185,10 +185,10 @@ def _validate_l1_artifact(
         target_step,
         expected_config_ref,
     )
-    _validate_l1_files(candidate, payload, receipt, config_json_path)
+    _validate_materialization_files(candidate, payload, receipt, config_json_path)
 
 
-def _validate_l1_payload(
+def _validate_materialization_payload(
     payload: Mapping[str, object],
     receipt: ParameterApplicationReceipt,
     candidate_id: str,
@@ -236,7 +236,7 @@ def _same_numeric_value(left: object, right: object) -> bool:
     return left == right
 
 
-def _validate_l1_files(
+def _validate_materialization_files(
     candidate: Path,
     payload: Mapping[str, object],
     receipt: ParameterApplicationReceipt,

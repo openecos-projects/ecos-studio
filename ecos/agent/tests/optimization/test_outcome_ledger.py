@@ -4,7 +4,6 @@ import pytest
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
-    AppliedKnobValue,
     ExpectedEffect,
     ExpectedEffectDirection,
     ObjectiveMetric,
@@ -25,17 +24,12 @@ from ecos_agent.optimization.ledger import (
     OptimizationPlanningProviderAuditIntegrityError,
     OptimizationPlanningProviderEvidenceAudit,
     OptimizationTerminalOutcome,
-    _canonical_json,
-    _new_entry,
     build_optimization_artifact_manifest,
     load_optimization_artifact_manifest,
     verify_optimization_artifact_manifest,
     write_optimization_artifact_manifest,
 )
-from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
     ToolRef,
@@ -72,18 +66,9 @@ def _terminal(
     )
 
 
-def _application_receipt() -> KnobApplicationReceipt:
-    return KnobApplicationReceipt(
-        receipt_id="receipt-1",
-        requested=RequestedKnobValue(knob_id="place.target_density", value=0.65),
-        written=AppliedKnobValue(knob_id="place.target_density", value=0.65),
-        effective_initial=AppliedKnobValue(knob_id="place.target_density", value=0.65),
-        effective_final=AppliedKnobValue(knob_id="place.target_density", value=0.65),
-        evidence_sha256=HASH,
-    )
-
-
-def _native_application_receipt() -> ParameterApplicationReceipt:
+def _native_application_receipt(
+    status: str = "effective", actual_value: float | None = 0.65
+) -> ParameterApplicationReceipt:
     payload = {
         "receipt_id": "parameter-receipt-1",
         "tool": ToolRef(name="DREAMPlace", revision="test", source_sha256=HASH),
@@ -105,17 +90,15 @@ def _native_application_receipt() -> ParameterApplicationReceipt:
             written_value=0.65,
             unit="ratio",
         ),
-        "effective_initial": EffectiveValue(value=0.65, unit="ratio"),
-        "transitions": (),
-        "application_status": "applied",
-        "activation": ActivationEvidence(status="not_activated"),
-        "effective_final": EffectiveValue(value=0.65, unit="ratio"),
+        "actual_value": actual_value,
+        "status": status,
+        "reason": None if status == "effective" else "No parameter use observed.",
+        "observation": {},
     }
     draft = ParameterApplicationReceipt.model_construct(
         **payload, evidence_sha256=HASH
     )
     hash_payload = draft.model_dump(mode="json", exclude={"evidence_sha256"})
-    hash_payload.pop("consumer_observation", None)
     return ParameterApplicationReceipt(
         **payload,
         evidence_sha256=canonical_sha256(hash_payload),
@@ -185,7 +168,6 @@ def test_terminal_outcome_requires_embedded_parameter_card_binding() -> None:
     hash_payload = {
         key: value for key, value in receipt_payload.items() if key != "evidence_sha256"
     }
-    hash_payload.pop("consumer_observation", None)
     receipt_payload["evidence_sha256"] = canonical_sha256(hash_payload)
     receipt = ParameterApplicationReceipt.model_validate(receipt_payload)
     payload = _terminal().model_dump(mode="json")
@@ -203,11 +185,17 @@ def test_terminal_outcome_requires_embedded_parameter_card_binding() -> None:
         OptimizationTerminalOutcome.model_validate(payload)
 
 
-def test_ledger_rejects_new_legacy_effective_value_receipts(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "status,actual_value", (("effective", 0.65), ("inactive", None), ("unknown", None))
+)
+def test_ledger_replays_simple_parameter_status(
+    tmp_path, status: str, actual_value: float | None
+) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(
         _start().model_copy(
             update={
+                "requested": RequestedKnobValue(knob_id="place.target_density", value=0.65),
                 "proposal_action": ProposalAction(
                     knob_id="place.target_density",
                     direction=StrategyDirection.INCREASE,
@@ -218,30 +206,31 @@ def test_ledger_rejects_new_legacy_effective_value_receipts(tmp_path) -> None:
                         ),
                     ),
                 ),
-                "requested": RequestedKnobValue(
-                    knob_id="place.target_density", value=0.65
-                ),
             }
         )
     )
-    terminal = _terminal()
-    terminal = terminal.model_copy(
-        update={"application_receipt": _application_receipt()}
+    receipt = _native_application_receipt(status, actual_value)
+    payload = _terminal().model_dump(mode="json")
+    payload.update(
+        receipt_sha256=receipt.evidence_sha256,
+        parameter_application_receipt=receipt.model_dump(mode="json"),
+        parameter_application_receipt_id=receipt.receipt_id,
+        parameter_card_sha256=HASH,
+        materialization_receipt_sha256=receipt.materialization.receipt_sha256,
     )
-    with pytest.raises(
-        OptimizationLedgerStateError, match="legacy application receipt"
-    ):
-        ledger.append_terminal(terminal)
+    ledger.append_terminal(OptimizationTerminalOutcome.model_validate(payload))
 
-    replay = ledger.replay()
-    legacy_entry = _new_entry(2, replay.chain_head_sha256, terminal)
-    with ledger.ledger_path.open("ab") as stream:
-        stream.write(_canonical_json(legacy_entry.model_dump(mode="json")) + b"\n")
+    replay = OptimizationLedger(ledger.root).replay()
+    assert replay.terminal_outcomes[0].parameter_application_receipt == receipt
+    assert replay.entries[-1].schema_version == "ecos.optimization_ledger_entry.v2"
+    assert "application_receipt" not in replay.terminal_outcomes[0].model_dump()
 
-    assert (
-        ledger.replay().terminal_outcomes[0].application_receipt
-        == _application_receipt()
-    )
+
+def test_terminal_outcome_rejects_removed_receipt_field() -> None:
+    payload = _terminal().model_dump(mode="json")
+    payload["application_receipt"] = None
+    with pytest.raises(ValueError, match="Extra inputs"):
+        OptimizationTerminalOutcome.model_validate(payload)
 
 
 def test_ledger_rejects_terminal_execution_contract_drift(tmp_path) -> None:

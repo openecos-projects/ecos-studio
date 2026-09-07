@@ -197,7 +197,7 @@ def test_adapter_reruns_from_the_incumbent_candidate_workspace() -> None:
     )
 
 
-def test_adapter_sends_padding_in_surface_sites_for_l1_materialization() -> None:
+def test_adapter_sends_padding_in_surface_sites_for_materialization_materialization() -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(
         rpc, workspace_id="workspace-1", site_width_dbu=200

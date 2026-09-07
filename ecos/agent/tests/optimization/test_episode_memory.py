@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
-    AppliedKnobValue,
     BudgetSnapshot,
     EpisodeBudget,
     ExpectedEffectDirection,
@@ -33,10 +32,7 @@ from ecos_agent.optimization.ledger import (
     OptimizationOutcomeKind,
     OptimizationPlanningAudit,
     OptimizationTerminalOutcome,
-    _canonical_json,
-    _new_entry,
 )
-from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
 from ecos_agent.optimization.memory import (
     OptimizationTaskMemoryIntegrityError,
     OptimizationTaskMemoryStore,
@@ -50,8 +46,6 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
 )
@@ -127,22 +121,8 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
     card = load_parameter_cards()["place.cell_padding_x"]
     effective = value * 200
     observation = {
-        "effective_padding_dbu": effective,
-        "movable_node_count": 1,
+        "padding_sites": value,
         "geometry_apply_count": 1,
-        "evidence_complete": True,
-    }
-    consumer = {
-        "consumer_id": "dreamplace.cell_size_expansion",
-        "outcome": "entered",
-        "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-        "evidence_sha256": canonical_sha256(
-            {
-                "consumer_id": "dreamplace.cell_size_expansion",
-                "outcome": "entered",
-                "consumer_observation": observation,
-            }
-        ),
     }
     payload = {
         "receipt_id": f"parameter-receipt-padding-{value}",
@@ -169,14 +149,10 @@ def _parameter_application_receipt(value: int) -> ParameterApplicationReceipt:
             written_value=effective,
             unit="dbu",
         ),
-        "effective_initial": EffectiveValue(value=effective, unit="dbu"),
-        "application_status": "applied",
-        "activation": ActivationEvidence(
-            status="used",
-            consumers=(consumer,),
-        ),
-        "consumer_observation": observation,
-        "effective_final": EffectiveValue(value=effective, unit="dbu"),
+        "actual_value": value,
+        "status": "effective",
+        "reason": None,
+        "observation": observation,
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
     return ParameterApplicationReceipt(
@@ -226,7 +202,7 @@ def _write_state(root: Path, scope, ledger: OptimizationLedger) -> None:
     replay = ledger.replay()
     decisions = OptimizationDecisionAudit(root).replay()
     value = {
-        "schema_version": "ecos.optimization_episode_state.v7",
+        "schema_version": "ecos.optimization_episode_state.v8",
         "episode_id": scope.episode_id,
         "checkpoint_id": scope.checkpoint_id,
         "objective": {"contract_sha256": scope.objective_contract_sha256},
@@ -241,7 +217,7 @@ def _write_state(root: Path, scope, ledger: OptimizationLedger) -> None:
         "task_memory_scope_sha256": scope.scope_sha256,
     }
     value["state_sha256"] = canonical_sha256(value)
-    (root / "optimization-episode-state.v7.json").write_text(
+    (root / "optimization-episode-state.v8.json").write_text(
         json.dumps(value, sort_keys=True), encoding="utf-8"
     )
 
@@ -253,7 +229,6 @@ def _append_intervention(
     index: int,
     outcome: OptimizationOutcomeKind = OptimizationOutcomeKind.IMPROVED,
     terminal: bool = True,
-    application_receipt: KnobApplicationReceipt | None = None,
     include_native_receipt: bool = True,
     parameter_application_receipt: ParameterApplicationReceipt | None = None,
     observation: TerminalObservation | None = None,
@@ -322,7 +297,7 @@ def _append_intervention(
     if terminal:
         observation = observation or _terminal(f"terminal-{index}", float(index))
         native_receipt = None
-        if include_native_receipt and application_receipt is None:
+        if include_native_receipt:
             native_receipt = parameter_application_receipt or (
                 _parameter_application_receipt(requested.value)
             )
@@ -346,7 +321,6 @@ def _append_intervention(
                 observation.model_dump(mode="json")
             ),
             terminal_observation=observation,
-            application_receipt=application_receipt,
             parameter_application_receipt=native_receipt,
             parameter_card_sha256=(
                 card_hash(load_parameter_cards()[requested.knob_id])
@@ -363,17 +337,7 @@ def _append_intervention(
             ),
             outcome_details_sha256=HASH,
         )
-        if application_receipt is None:
-            ledger.append_terminal(terminal_outcome)
-        else:
-            replay = ledger.replay()
-            entry = _new_entry(
-                len(replay.entries) + 1,
-                replay.chain_head_sha256,
-                terminal_outcome,
-            )
-            with ledger.ledger_path.open("ab") as stream:
-                stream.write(_canonical_json(entry.model_dump(mode="json")) + b"\n")
+        ledger.append_terminal(terminal_outcome)
     _write_state(root, scope, ledger)
 
 
@@ -384,18 +348,6 @@ def _episode(
     store.ensure_episode_scope(root, scope)
     _append_intervention(root, scope, index=1, terminal=terminal)
     return root
-
-
-def _application_receipt(value: int) -> KnobApplicationReceipt:
-    applied = AppliedKnobValue(knob_id="place.cell_padding_x", value=value * 200)
-    return KnobApplicationReceipt(
-        receipt_id=f"receipt-padding-{value}",
-        requested=RequestedKnobValue(knob_id="place.cell_padding_x", value=value),
-        written=applied,
-        effective_initial=applied,
-        effective_final=applied,
-        evidence_sha256=HASH,
-    )
 
 
 def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
@@ -511,23 +463,28 @@ def test_snapshot_is_bounded_compressed_deterministic_and_updates(
     assert sum(len(item.evidence_refs) for item in updated.summaries) == 6
 
 
-def test_task_memory_rejects_legacy_application_receipts(
-    tmp_path: Path,
-) -> None:
+def test_task_memory_roundtrips_requested_and_actual_parameter_values(tmp_path: Path) -> None:
     store = OptimizationTaskMemoryStore(
         tmp_path / "optimization", _scope("episode-current")
     )
     source_scope = _scope("episode-source")
     root = store.root / source_scope.episode_id
     store.ensure_episode_scope(root, source_scope)
-    receipt = _application_receipt(1)
-    _append_intervention(root, source_scope, index=1, application_receipt=receipt)
+    receipt = _parameter_application_receipt(1)
+    _append_intervention(root, source_scope, index=1, parameter_application_receipt=receipt)
 
     replay = store.synchronize()
     snapshot = store.snapshot()
 
-    assert replay.entries == ()
-    assert snapshot.summaries == ()
+    entry = replay.entries[0]
+    assert entry.schema_version == "ecos.optimization_task_memory_entry.v2"
+    assert entry.parameter_application_receipt == receipt
+    assert entry.parameter_application_receipt.actual_value == 1
+    assert entry.parameter_application_receipt.requested["unit"] == "site"
+    assert snapshot.schema_version == "ecos.optimization_task_memory_snapshot.v2"
+    assert snapshot.summaries[0].parameter_application_receipts == (receipt,)
+    assert "application_receipt" not in entry.model_dump()
+    assert "application_receipts" not in snapshot.summaries[0].model_dump()
     assert store.replay() == replay
 
 
@@ -633,8 +590,14 @@ def test_task_memory_requires_eligible_v3_terminal_observation(tmp_path: Path) -
             }
         },
         {
-            "application_status": "ignored",
-            "activation": ActivationEvidence(status="unknown"),
+            "status": "inactive",
+            "actual_value": None,
+            "reason": "Padding was not applied.",
+        },
+        {
+            "status": "unknown",
+            "actual_value": None,
+            "reason": "Padding application was not observed.",
         },
     ),
 )
@@ -679,7 +642,7 @@ def test_snapshot_rejects_missing_source_evidence(tmp_path: Path) -> None:
     )
     source = _episode(store, _scope("episode-source"))
     store.synchronize()
-    (source / "optimization-episode-state.v7.json").unlink()
+    (source / "optimization-episode-state.v8.json").unlink()
 
     with pytest.raises(OptimizationTaskMemoryIntegrityError, match="unavailable"):
         store.snapshot()

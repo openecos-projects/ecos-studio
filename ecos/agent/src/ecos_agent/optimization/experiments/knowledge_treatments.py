@@ -188,6 +188,7 @@ def build_zero_shot_gate_report(
     )
     assessed = (
         coverage_complete
+        and all(item["unknown_candidates"] == 0 for item in diagnostics.values())
         and rule_scores is not None
         and zero_shot_audit_complete
         and all(
@@ -206,7 +207,7 @@ def build_zero_shot_gate_report(
         else "not_assessed"
     )
     return {
-        "schema_version": "ecos.optimization_zero_shot_gate.v1",
+        "schema_version": "ecos.optimization_zero_shot_gate.v2",
         "evaluation_status": "completed" if assessed else "incomplete",
         "decision": decision,
         "few_shot_authorized": decision == "pass",
@@ -400,6 +401,7 @@ def build_knowledge_treatment_report(
     )
     completed = (
         coverage_complete
+        and all(item["unknown_candidates"] == 0 for item in diagnostics.values())
         and zero_shot_gate["decision"] == "pass"
         and few_shot_complete
         and all(value is not None for value in criteria.values())
@@ -419,7 +421,7 @@ def build_knowledge_treatment_report(
         else "not_assessed"
     )
     return {
-        "schema_version": "ecos.optimization_knowledge_treatment_report.v2",
+        "schema_version": "ecos.optimization_knowledge_treatment_report.v3",
         "evaluation_status": "completed" if completed else "incomplete",
         "research_claim": (
             "supported"
@@ -530,21 +532,20 @@ def _rule_guided_scores(
 def _diagnostics(traces: Sequence[CandidateTrace]) -> dict[str, float | int]:
     started = tuple(item for item in traces if item.started)
     effective = sum(
-        item.activation_status == "used"
-        or (
-            item.requested_value is False
-            and item.application_status == "applied"
-            and item.activation_status == "not_activated"
-        )
+        item.parameter_status == "effective"
         for item in started
     )
+    inactive = sum(item.parameter_status == "inactive" for item in started)
+    unknown = sum(item.parameter_status == "unknown" for item in started)
     count = len(started)
     return {
         "started_candidates": count,
         "effective_interventions": effective,
         "effective_intervention_rate": effective / count if count else 0.0,
-        "ineffective_candidates": count - effective,
-        "ineffective_candidate_rate": (count - effective) / count if count else 0.0,
+        "inactive_candidates": inactive,
+        "inactive_candidate_rate": inactive / count if count else 0.0,
+        "unknown_candidates": unknown,
+        "unknown_candidate_rate": unknown / count if count else 0.0,
     }
 
 
@@ -596,12 +597,12 @@ def _zero_shot_gate_criteria(
         KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG,
     )
     effective = float(diagnostics[zero_shot]["effective_intervention_rate"])
-    ineffective = float(diagnostics[zero_shot]["ineffective_candidate_rate"])
+    ineffective = float(diagnostics[zero_shot]["inactive_candidate_rate"])
     reference_effective = [
         float(diagnostics[item]["effective_intervention_rate"]) for item in references
     ]
     reference_ineffective = [
-        float(diagnostics[item]["ineffective_candidate_rate"]) for item in references
+        float(diagnostics[item]["inactive_candidate_rate"]) for item in references
     ]
     rule_comparison = comparisons.get("zero_shot_vs_rule_guided")
     return {
@@ -624,7 +625,7 @@ def _zero_shot_gate_criteria(
             for design_id in scores[zero_shot]
         )
         >= 2,
-        "effective_intervention_improved_or_ineffective_reduced": (
+        "effective_intervention_improved_or_inactive_reduced": (
             effective >= max(reference_effective)
             and effective > min(reference_effective)
         )
@@ -656,13 +657,13 @@ def _go_no_go_criteria(
         KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG,
     )
     full_effective = float(diagnostics[full]["effective_intervention_rate"])
-    full_ineffective = float(diagnostics[full]["ineffective_candidate_rate"])
+    full_ineffective = float(diagnostics[full]["inactive_candidate_rate"])
     reference_effective = [
         float(diagnostics[item]["effective_intervention_rate"])
         for item in references
     ]
     reference_ineffective = [
-        float(diagnostics[item]["ineffective_candidate_rate"])
+        float(diagnostics[item]["inactive_candidate_rate"])
         for item in references
     ]
     improved_effectiveness = (
@@ -693,7 +694,7 @@ def _go_no_go_criteria(
             else None
         ),
         "gain_spans_multiple_designs": multi_design_gain,
-        "effective_intervention_improved_or_ineffective_reduced": (
+        "effective_intervention_improved_or_inactive_reduced": (
             improved_effectiveness
         ),
         "frozen_ten_design_coverage_complete": coverage_complete,

@@ -54,11 +54,8 @@ from ecos_agent.optimization.knowledge.retrieval import (
 )
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
-    RuntimeTransition,
 )
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
@@ -315,48 +312,20 @@ def _native_receipt(
     card = load_parameter_cards()[requested.knob_id]
     effective_value = requested.value if effective_value is None else effective_value
     is_padding = requested.knob_id.value == "place.cell_padding_x"
-    unit = "site" if is_padding else "ratio"
-    consumer_id = (
-        "dreamplace.cell_size_expansion"
-        if is_padding
-        else "dreamplace.density_objective"
-    )
-    consumer_observation = (
+    unit = card.surface.unit
+    observation = (
         {
-            "requested_padding_site": requested.value,
-            "effective_padding_dbu": effective_value,
-            "movable_node_count": 12,
+            "padding_sites": effective_value,
             "geometry_apply_count": 1,
-            "placement_iteration_count": 4,
-            "evidence_complete": True,
         }
         if is_padding
         else {
-            "requested_target_density": requested.value,
-            "effective_target_density": effective_value,
+            "target_density": effective_value,
             "density_tensor_value": effective_value,
             "density_operator_call_count": 1,
-            "placement_iteration_count": 4,
-            "evidence_complete": True,
+            "utilization_floor": effective_value if effective_value > requested.value else None,
         }
     )
-    transitions = ()
-    if (
-        requested.knob_id.value == "place.target_density"
-        and effective_value != requested.value
-    ):
-        transitions = (
-            RuntimeTransition(
-                sequence=0,
-                **{"from": "materialized"},
-                to="clamped",
-                value=effective_value,
-                reason="utilization floor",
-                rule_id="dreamplace.target_density.utilization_floor",
-                evidence_ref="analysis/parameter_runtime_report.v1.json",
-                evidence_sha256=HASH,
-            ),
-        )
     domain_context = {
         **_execution_context(),
         "incumbent_state_sha256": canonical_sha256(None),
@@ -403,26 +372,14 @@ def _native_receipt(
             candidate_ref="candidate-1",
             workspace_ref="candidate-1",
             config_before_sha256=HASH,
-            config_after_sha256=HASH,
-            written_value=requested.value,
-            unit=unit,
+            config_after_sha256="sha256:" + "b" * 64,
+            written_value=requested.value * 200 if is_padding else requested.value,
+            unit="dbu" if is_padding else unit,
         ),
-        "effective_initial": EffectiveValue(value=effective_value, unit=unit),
-        "transitions": transitions,
-        "application_status": "applied",
-        "activation": ActivationEvidence(
-            status="used",
-            consumers=(
-                {
-                    "consumer_id": consumer_id,
-                    "outcome": "entered",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": HASH,
-                },
-            ),
-        ),
-        "consumer_observation": consumer_observation,
-        "effective_final": EffectiveValue(value=effective_value, unit=unit),
+        "actual_value": effective_value,
+        "status": "effective",
+        "reason": None,
+        "observation": observation,
     }
     draft = ParameterApplicationReceipt.model_construct(**payload, evidence_sha256=HASH)
     return ParameterApplicationReceipt(

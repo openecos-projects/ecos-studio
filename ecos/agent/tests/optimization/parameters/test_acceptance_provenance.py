@@ -33,7 +33,7 @@ def test_acceptance_rejects_planning_domain_receipt_context_mismatch(
     build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
-        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+        (output / "acceptance-report.v2.json").read_text(encoding="utf-8")
     )
     assert report["classification"] == "Engineering Incomplete"
     assert any(
@@ -61,7 +61,7 @@ def test_acceptance_is_not_current_when_ecc_gitlink_differs(
     build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
-        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+        (output / "acceptance-report.v2.json").read_text(encoding="utf-8")
     )
     assert report["classification"] == "Engineering Incomplete"
     assert report["provenance"]["current"] is False

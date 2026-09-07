@@ -60,11 +60,8 @@ from ecos_agent.optimization.rules import (
 )
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.optimization.parameters.contracts import (
-    ActivationEvidence,
-    EffectiveValue,
     MaterializationRef,
     ParameterApplicationReceipt,
-    ToolRef,
 )
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
 
@@ -237,7 +234,7 @@ class _RoutabilityFalseExecutor(_SuccessfulExecutor):
                     parameter_application_receipt=_native_receipt(
                         "place.routability_opt",
                         False,
-                        activation_status="not_activated",
+                        status="effective",
                     ),
                 ),
             )
@@ -259,51 +256,40 @@ def _native_receipt(
     value: object,
     *,
     effective_value: object | None = None,
-    activation_status: str = "used",
+    status: str = "effective",
 ) -> ParameterApplicationReceipt:
     effective_value = value if effective_value is None else effective_value
-    unit = "site" if knob_id.endswith("cell_padding_x") else "ratio"
-    consumer_id = {
-        "place.target_density": "dreamplace.density_objective",
-        "place.target_overflow": "dreamplace.overflow_predicate",
-        "place.cell_padding_x": "dreamplace.cell_size_expansion",
-        "place.routability_opt": "dreamplace.routability_branch",
-        "place.density_weight": "dreamplace.density_preconditioner",
-    }[knob_id]
-    consumer_observation = {
+    card = load_parameter_cards()[OptimizationKnob(knob_id)]
+    unit = card.surface.unit
+    observation = {
         "place.target_density": {
-            "effective_target_density": effective_value,
+            "target_density": effective_value,
             "density_tensor_value": effective_value,
             "density_operator_call_count": 1,
-            "placement_iteration_count": 4,
+            "utilization_floor": None,
         },
         "place.target_overflow": {
-            "effective_stop_overflow": effective_value,
+            "stop_overflow": effective_value,
             "final_overflow": 0.08,
-            "threshold_read_count": 1,
-            "placement_iteration_count": 4,
         },
         "place.cell_padding_x": {
-            "effective_padding_dbu": effective_value,
-            "movable_node_count": 12,
+            "padding_sites": effective_value,
             "geometry_apply_count": 1,
-            "placement_iteration_count": 4,
         },
         "place.routability_opt": {
-            "branch_round_count": 1 if activation_status == "used" else 0,
+            "configured_routability_opt": value,
+            "branch_round_count": 1 if value is True and status == "effective" else 0,
+            "placement_completed": True,
+            "place_object_count": 1,
         },
         "place.density_weight": {
             "configured_density_weight": value,
-            "internal_initial_density_weight": effective_value,
-            "final_internal_density_weight": effective_value,
-            "final_objective": 12.5,
-            "placement_iteration_count": 4,
+            "initialization_count": 1,
         },
     }[knob_id]
-    consumer_observation["evidence_complete"] = True
     payload = {
         "receipt_id": f"parameter-receipt-{knob_id.replace('.', '-')}-{value}",
-        "tool": ToolRef(name="DREAMPlace", revision="bound"),
+        "tool": card.tool,
         "context": {
             "stage": "place",
             "parameter_card_sha256": card_hash(
@@ -319,27 +305,14 @@ def _native_receipt(
             candidate_ref="candidate-1",
             workspace_ref="candidate-1",
             config_before_sha256=_HASH,
-            config_after_sha256=_HASH,
-            written_value=value,
-            unit=unit,
+            config_after_sha256="sha256:" + "b" * 64,
+            written_value=value * 200 if unit == "site" else value,
+            unit="dbu" if unit == "site" else unit,
         ),
-        "effective_initial": EffectiveValue(value=effective_value, unit=unit),
-        "application_status": "applied",
-        "activation": ActivationEvidence(
-            status=activation_status,
-            consumers=(
-                {
-                    "consumer_id": consumer_id,
-                    "outcome": "entered"
-                    if activation_status == "used"
-                    else "evaluated",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": _HASH,
-                },
-            ),
-        ),
-        "consumer_observation": consumer_observation,
-        "effective_final": EffectiveValue(value=effective_value, unit=unit),
+        "actual_value": effective_value if status == "effective" else None,
+        "status": status,
+        "reason": None if status == "effective" else "Parameter did not take effect",
+        "observation": observation,
     }
     draft = ParameterApplicationReceipt.model_construct(
         **payload, evidence_sha256=_HASH

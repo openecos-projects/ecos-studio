@@ -88,15 +88,13 @@ def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
     assert schema["$defs"]["MaterializationRef"]["properties"]["written_value"][
         "description"
     ] == "The value actually written to the tool input, after unit mapping."
-    assert schema["properties"]["effective_initial"]["description"] == (
-        "The value the tool accepted after admission, normalization, clamping, or override."
+    assert schema["properties"]["actual_value"]["description"] == (
+        "Actual value in the requested unit."
     )
-    assert schema["properties"]["effective_final"]["description"] == (
-        "The value remaining after all recorded runtime adjustments."
+    assert schema["properties"]["status"]["enum"] == ["effective", "inactive", "unknown"]
+    assert not {"activation", "effective_initial", "effective_final", "transitions"} & set(
+        schema["properties"]
     )
-    assert schema["$defs"]["ActivationEvidence"]["properties"]["status"][
-        "description"
-    ] == "Whether an allowlisted runtime branch, operator, or consumer used the parameter."
     assert schema["description"] == (
         "Tool-observed parameter evidence; this alone does not prove QoR improvement."
     )
@@ -196,7 +194,7 @@ def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -
         item["source_span_ids"] = [report_span]
     semantics = card["runtime_semantics"]
     semantics["source_span_ids"] = [report_span]
-    for key in ("metric_relevance", "interactions", "invalidation_rules"):
+    for key in ("metric_relevance", "interactions"):
         for item in semantics[key]:
             item["source_span_ids"] = [report_span]
     card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
@@ -219,7 +217,6 @@ def test_loader_rejects_dreamplace_card_without_runtime_report_producer(
         for span in card["source_spans"]
         if span.get("role") != "runtime_report_producer"
     ]
-    card["runtime_semantics"]["invalidation_rules"] = []
     card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
     _refresh_card_manifest(root)
 

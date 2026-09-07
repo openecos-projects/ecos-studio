@@ -77,6 +77,23 @@ def test_density_floor_without_runtime_trigger_excludes_only_observed_request() 
     assert 0.2 not in domain.allowed_requested_values
 
 
+@pytest.mark.parametrize("status", ("inactive", "unknown"))
+def test_unconfirmed_or_inactive_receipt_cannot_teach_a_density_floor(status) -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
+    context = domain_context()
+    payload = density_receipt(context).model_dump(mode="json", exclude={"evidence_sha256"})
+    payload.update(status=status, actual_value=None)
+    receipt = ParameterApplicationReceipt(**payload, evidence_sha256=canonical_sha256(payload))
+
+    domain = compile_effective_domain(
+        card, context=context, receipts=(receipt,), current_receipts=(receipt,)
+    )
+
+    assert domain.current_coordinate is None
+    assert domain.excluded_aliases == ()
+    assert domain.thresholds == ()
+
+
 def test_rules_empty_does_not_infer_aliases() -> None:
     cards = load_parameter_cards()
     card = cards[OptimizationKnob.FLOORPLAN_ASPECT_RATIO]
@@ -109,7 +126,7 @@ def test_dynamic_allowlist_refines_the_largest_unexplored_interval() -> None:
         baseline_surface_value=0.7,
     )
 
-    assert initial.schema_version == "ecos.effective_domain.v2"
+    assert initial.schema_version == "ecos.effective_domain.v3"
     assert initial.allowed_requested_values == (0.1, 0.4, 0.65, 0.75, 0.825, 0.95)
     assert refined.allowed_requested_values == (0.1, 0.4, 0.65, 0.75, 0.7625, 0.95)
     assert compile_effective_domain(
@@ -220,4 +237,4 @@ def test_effective_domain_rejects_partial_or_mismatched_receipt_context() -> Non
     for candidate in (partial_receipt, mismatched_receipt, unbound_receipt):
         domain = compile_effective_domain(card, context=context, receipts=(candidate,))
         assert domain.current_coordinate is None
-        assert domain.observed_application_signatures == ()
+        assert domain.thresholds == ()

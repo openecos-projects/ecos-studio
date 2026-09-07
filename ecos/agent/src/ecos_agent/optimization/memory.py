@@ -43,7 +43,6 @@ from ecos_agent.optimization.ledger import (
     _validate_relative_path,
     _write_json_atomic,
 )
-from ecos_agent.optimization.legacy_reader import KnobApplicationReceipt
 from ecos_agent.optimization.rules import native_receipt_is_effective
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 from ecos_agent.optimization.parameters.semantics import (
@@ -55,7 +54,7 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _STORE_FILE = "task-memory.v1.jsonl"
 _SCOPE_FILE = "optimization-task-memory-scope.v1.json"
-_STATE_FILE = "optimization-episode-state.v7.json"
+_STATE_FILE = "optimization-episode-state.v8.json"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MAX_RECORDS = 6
@@ -161,8 +160,8 @@ class OptimizationTaskMemoryEvidence(_MemoryModel):
 
 
 class OptimizationTaskMemoryEntry(_MemoryModel):
-    schema_version: Literal["ecos.optimization_task_memory_entry.v1"] = (
-        "ecos.optimization_task_memory_entry.v1"
+    schema_version: Literal["ecos.optimization_task_memory_entry.v2"] = (
+        "ecos.optimization_task_memory_entry.v2"
     )
     sequence: StrictInt = Field(ge=1)
     previous_entry_sha256: str | None = None
@@ -172,9 +171,6 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
     outcome: OptimizationOutcomeKind
     terminal_observation: TerminalObservation
     evidence: OptimizationTaskMemoryEvidence
-    application_receipt: KnobApplicationReceipt | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
     parameter_application_receipt: ParameterApplicationReceipt | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -193,15 +189,8 @@ class OptimizationTaskMemoryEntry(_MemoryModel):
             raise ValueError("task memory action and requested knob do not match")
         if self.evidence.source_episode_id != self.scope.episode_id:
             raise ValueError("task memory evidence does not match its scope")
-        if (
-            self.application_receipt is not None
-            and self.application_receipt.requested != self.requested
-        ):
-            raise ValueError("task memory receipt does not match requested value")
         if self.parameter_application_receipt is not None:
             requested = self.parameter_application_receipt.requested
-            if self.application_receipt is not None:
-                raise ValueError("task memory receipt fields are ambiguous")
             if requested.get("knob_id") != self.requested.knob_id.value or requested.get("value") != self.requested.value:
                 raise ValueError("task memory parameter receipt does not match requested value")
         expected = _entry_sha256(
@@ -246,9 +235,6 @@ class OptimizationTaskMemorySummary(_MemoryModel):
     evidence_refs: tuple[OptimizationTaskMemoryEvidence, ...] = Field(
         min_length=1, max_length=_MAX_RECORDS
     )
-    application_receipts: tuple[KnobApplicationReceipt, ...] = Field(
-        default=(), max_length=_MAX_RECORDS, exclude_if=lambda value: not value
-    )
     parameter_application_receipts: tuple[ParameterApplicationReceipt, ...] = Field(
         default=(), max_length=_MAX_RECORDS, exclude_if=lambda value: not value
     )
@@ -256,8 +242,8 @@ class OptimizationTaskMemorySummary(_MemoryModel):
     @model_validator(mode="after")
     def validate_summary_hash(self) -> "OptimizationTaskMemorySummary":
         if any(
-            receipt.requested.knob_id != self.knob_id
-            for receipt in self.application_receipts
+            receipt.requested.get("knob_id") != self.knob_id.value
+            for receipt in self.parameter_application_receipts
         ):
             raise ValueError("task memory summary receipt knob does not match")
         expected = canonical_sha256(
@@ -269,8 +255,8 @@ class OptimizationTaskMemorySummary(_MemoryModel):
 
 
 class OptimizationTaskMemorySnapshot(_MemoryModel):
-    schema_version: Literal["ecos.optimization_task_memory_snapshot.v1"] = (
-        "ecos.optimization_task_memory_snapshot.v1"
+    schema_version: Literal["ecos.optimization_task_memory_snapshot.v2"] = (
+        "ecos.optimization_task_memory_snapshot.v2"
     )
     scope: OptimizationTaskMemoryScope
     source_event_count: StrictInt = Field(ge=0)
@@ -411,7 +397,7 @@ class OptimizationTaskMemoryStore:
         selected = matching[-_MAX_RECORDS:]
         summaries = _summaries(tuple(selected))
         value = {
-            "schema_version": "ecos.optimization_task_memory_snapshot.v1",
+            "schema_version": "ecos.optimization_task_memory_snapshot.v2",
             "scope": self.scope.model_dump(mode="json"),
             "source_event_count": len(matching),
             "source_evidence_sha256": (
@@ -542,7 +528,7 @@ def _verified_state(path: Path) -> dict[str, object]:
 def _verify_source_trace(scope, state, ledger, decisions) -> None:
     objective = state.get("objective")
     if (
-        state.get("schema_version") != "ecos.optimization_episode_state.v7"
+        state.get("schema_version") != "ecos.optimization_episode_state.v8"
         or state.get("episode_id") != scope.episode_id
         or state.get("checkpoint_id") != scope.checkpoint_id
         or state.get("parent_manifest_sha256") != scope.workspace_manifest_sha256
@@ -610,7 +596,7 @@ def _eligible(start, terminal) -> bool:
 
 def _build_entry(sequence: int, previous: str | None, candidate: _Candidate):
     payload = {
-        "schema_version": "ecos.optimization_task_memory_entry.v1",
+        "schema_version": "ecos.optimization_task_memory_entry.v2",
         "scope": candidate.scope.model_dump(mode="json"),
         "action": candidate.action.model_dump(mode="json"),
         "requested": candidate.requested.model_dump(mode="json"),
@@ -631,7 +617,7 @@ def _build_entry(sequence: int, previous: str | None, candidate: _Candidate):
 def _entry_sha256(sequence: int, previous: str | None, payload: object) -> str:
     return canonical_sha256(
         {
-            "schema_version": "ecos.optimization_task_memory_entry.v1",
+            "schema_version": "ecos.optimization_task_memory_entry.v2",
             "sequence": sequence,
             "previous_entry_sha256": previous,
             "payload": payload,

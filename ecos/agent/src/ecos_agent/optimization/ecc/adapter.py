@@ -393,15 +393,14 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("application receipt cannot be bound")
         if state not in _TERMINAL_STATES:
             raise OptimizationEccAdapterError("application receipt is non-terminal")
-        normalized = _normalize_receipt_payload(raw)
         try:
             if (
-                not isinstance(normalized, Mapping)
-                or normalized.get("schema_version")
-                != "tool.parameter_application_receipt.v1"
+                not isinstance(raw, Mapping)
+                or raw.get("schema_version")
+                != "tool.parameter_application_receipt.v2"
             ):
-                raise ValueError("legacy application receipt is read-only")
-            receipt = ParameterApplicationReceipt.model_validate(normalized)
+                raise ValueError("application receipt schema is invalid")
+            receipt = ParameterApplicationReceipt.model_validate(raw)
         except (TypeError, ValueError) as exc:
             raise OptimizationEccAdapterError("application receipt is invalid") from exc
         if (
@@ -481,7 +480,7 @@ class EccCandidateRerunAdapter:
             )
         if (
             candidate_ref is None
-            or ref != f"{candidate_ref}/analysis/parameter_application_receipt.v1.json"
+            or ref != f"{candidate_ref}/analysis/parameter_application_receipt.v2.json"
         ):
             raise OptimizationEccAdapterError(
                 "application receipt reference does not match"
@@ -547,22 +546,6 @@ class EccCandidateRerunAdapter:
         if require_workspace and response.get("workspaceId") != self._workspace_id:
             raise OptimizationEccAdapterError("operation workspace does not match")
         return operation_id, state
-
-
-def _normalize_receipt_payload(value: object) -> object:
-    if isinstance(value, Mapping):
-        normalized: dict[str, object] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ValueError("application receipt field name is invalid")
-            snake_key = re.sub(r"(?<!^)([A-Z])", r"_\1", key).lower()
-            if snake_key in normalized:
-                raise ValueError("application receipt contains duplicate fields")
-            normalized[snake_key] = _normalize_receipt_payload(item)
-        return normalized
-    if isinstance(value, (list, tuple)):
-        return [_normalize_receipt_payload(item) for item in value]
-    return value
 
 
 from ecos_agent.optimization.ecc.rpc_client import (  # noqa: E402

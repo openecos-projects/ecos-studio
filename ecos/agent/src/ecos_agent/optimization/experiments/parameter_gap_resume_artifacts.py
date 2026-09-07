@@ -11,7 +11,7 @@ from typing import Any
 from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob, TerminalObservation
 from ecos_agent.optimization.experiments.parameter_gap import (
-    KnobGapSummary,
+    KnobStatusSummary,
     ProbeResult,
     summarize_knob,
 )
@@ -51,7 +51,7 @@ def _validate_resume_source(
 ) -> None:
     readiness = source.get("readiness")
     if (
-        source.get("schema_version") != "ecos.rq1_parameter_gap_report.v1"
+        source.get("schema_version") != "ecos.rq1_parameter_gap_report.v2"
         or source.get("run_id") != resume.source_run_id
         or not isinstance(readiness, dict)
         or readiness.get("config_sha256") != resume.source_config_sha256
@@ -80,7 +80,7 @@ def _resume_manifest(
         ),
         "previous_resume": previous_resume,
         "started_at": started_at,
-        "source_report_sha256": file_sha256(run_root / "gcd-gap-report.v1.json"),
+        "source_report_sha256": file_sha256(run_root / "gcd-status-report.v2.json"),
         "source_candidate_count": source_report["candidate_count"],
         "source_terminal_closed_count": source_report["terminal_closed_count"],
         "resume_step_counts": _resume_step_counts(run_root),
@@ -141,7 +141,7 @@ def _copy_completed_probes(
     source_candidate_ids: frozenset[str],
 ) -> dict[str, str]:
     imported: dict[str, str] = {}
-    paths = sorted((previous_root / "probes").glob("*/probe-result.v1.json"))
+    paths = sorted((previous_root / "probes").glob("*/probe-result.v2.json"))
     for result_path in paths:
         candidate_id = result_path.parent.name
         if candidate_id not in source_candidate_ids:
@@ -259,7 +259,7 @@ def _resume_step_counts(run_root: Path) -> dict[str, int]:
 
 def _load_source_results(run_root: Path, expected_count: int) -> tuple[ProbeResult, ...]:
     paths = sorted(
-        (run_root / "probes").glob("*/probe-result.v1.json"),
+        (run_root / "probes").glob("*/probe-result.v2.json"),
         key=lambda path: _candidate_sequence(path.parent.name),
     )
     if len(paths) != expected_count:
@@ -268,7 +268,7 @@ def _load_source_results(run_root: Path, expected_count: int) -> tuple[ProbeResu
 
 
 def _completed_resume_result(resume_root: Path, candidate_id: str) -> ProbeResult | None:
-    path = resume_root / "probes" / candidate_id / "probe-result.v1.json"
+    path = resume_root / "probes" / candidate_id / "probe-result.v2.json"
     if not path.is_file():
         return None
     result = _read_probe_result(path)
@@ -277,17 +277,14 @@ def _completed_resume_result(resume_root: Path, candidate_id: str) -> ProbeResul
 
 def _read_probe_result(path: Path) -> ProbeResult:
     payload = _read_json_object(path)
-    payload.pop("peak_child_memory_mb", None)
+    payload.pop("flow_peak_memory_mb", None)
     if set(payload) != set(ProbeResult.__dataclass_fields__):
         raise ParameterGapError("source probe result is invalid")
     candidate_id = payload.get("candidate_id")
     if not isinstance(candidate_id, str) or not _CANDIDATE_ID.fullmatch(candidate_id):
         raise ParameterGapError("source probe result is invalid")
-    for key in ("gap_kinds", "typed_rule_ids"):
-        value = payload.get(key)
-        if not isinstance(value, list):
-            raise ParameterGapError("source probe result is invalid")
-        payload[key] = tuple(value)
+    if payload.get("status") not in {"effective", "inactive", "unknown"}:
+        raise ParameterGapError("source probe status is invalid")
     try:
         return ProbeResult(**payload)
     except TypeError as exc:
@@ -296,7 +293,7 @@ def _read_probe_result(path: Path) -> ProbeResult:
 
 def _resume_summaries(
     results: tuple[ProbeResult, ...], source_report: dict[str, Any]
-) -> tuple[KnobGapSummary, ...]:
+) -> tuple[KnobStatusSummary, ...]:
     summaries = []
     offset = 0
     for source in source_report["knobs"]:

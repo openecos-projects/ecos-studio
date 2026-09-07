@@ -639,7 +639,7 @@ def test_external_case_pool_requires_explicit_training_split(tmp_path: Path) -> 
             binding_id="binding.one",
             toolchain_ref=HASH,
             requested_value=0.7,
-            activation_status="used",
+            parameter_status="effective",
             proposal_sha256=HASH,
             effective_domain_sha256=HASH,
             parameter_card_sha256=HASH,

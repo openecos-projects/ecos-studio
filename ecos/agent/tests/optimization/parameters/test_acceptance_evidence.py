@@ -22,38 +22,22 @@ from tests.optimization.parameters.acceptance_trace_support import (
 )
 
 
-def test_density_floor_override_accepts_float32_tensor_rounding() -> None:
-    receipt = {
-        "requested": {"knob_id": "place.target_density", "value": 0.2},
-        "effective_initial": {"value": 0.65},
-        "effective_final": {"value": 0.65},
-        "consumer_observation": {
-            "effective_target_density": 0.65,
-            "density_tensor_value": 0.6499999761581421,
-            "density_operator_call_count": 1,
-        },
-        "transitions": [
-            {
-                "to": "overridden",
-                "rule_id": "dreamplace.target_density.utilization_floor",
-                "value": 0.65,
-                "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                "evidence_sha256": HASH,
-            }
-        ],
-    }
-
-    assert acceptance._has_native_density_floor_override(receipt) is True
+@pytest.mark.parametrize("status", ("effective", "inactive", "unknown"))
+def test_acceptance_uses_unified_parameter_status(status: str) -> None:
+    assert acceptance._receipt_is_effective({"status": status}) is (status == "effective")
 
 
 @pytest.mark.parametrize(
     ("case", "classification", "issue"),
     [
         ("valid", "Engineering Complete", None),
+        ("inactive", "Engineering Incomplete", "native receipt is not effective"),
+        ("unknown", "Engineering Incomplete", "native receipt is not effective"),
         ("outside_lattice", "Engineering Incomplete", "receipt contract"),
         ("ineligible_terminal", "Engineering Incomplete", "terminal observation"),
         ("tampered_runtime", "Engineering Incomplete", "runtime report"),
         ("foreign_runtime_tool", "Engineering Incomplete", "runtime report tool"),
+        ("foreign_runtime_written", "Engineering Incomplete", "runtime report materialization"),
         ("missing_runtime", "Engineering Incomplete", "runtime report"),
         ("missing_card_source", "Engineering Incomplete", "tool source"),
         ("unbound_replay", "Engineering Incomplete", "replay candidate manifest"),
@@ -69,7 +53,12 @@ def test_acceptance_fails_closed_on_unbound_evidence(
 ) -> None:
     workspace = tmp_path / "workspace"
     output = tmp_path / "output"
-    paths = write_candidate(workspace)
+    paths = write_candidate(
+        workspace,
+        status=case if case in {"inactive", "unknown"} else "effective",
+        actual_value=None if case in {"inactive", "unknown"} else 0.65,
+        reason="No density computation observed." if case in {"inactive", "unknown"} else None,
+    )
     monkeypatch.setattr(
         acceptance,
         "load_parameter_cards",
@@ -101,10 +90,9 @@ def test_acceptance_fails_closed_on_unbound_evidence(
             lambda receipt: (
                 receipt["requested"].update(value=0.05),
                 receipt["materialization"].update(written_value=0.05),
-                receipt["effective_initial"].update(value=0.05),
-                receipt["effective_final"].update(value=0.05),
-                receipt["consumer_observation"].update(
-                    effective_target_density=0.05,
+                receipt.update(actual_value=0.05),
+                receipt["observation"].update(
+                    target_density=0.05,
                     density_tensor_value=0.05,
                 ),
             ),
@@ -114,6 +102,10 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     elif case == "foreign_runtime_tool":
         runtime = json.loads(paths["runtime"].read_text(encoding="utf-8"))
         runtime["tool"]["source_sha256"] = "sha256:" + "f" * 64
+        write_json(paths["runtime"], runtime)
+    elif case == "foreign_runtime_written":
+        runtime = json.loads(paths["runtime"].read_text(encoding="utf-8"))
+        runtime["written_value"] = 0.7
         write_json(paths["runtime"], runtime)
     elif case == "missing_runtime":
         paths["runtime"].unlink()
@@ -135,7 +127,7 @@ def test_acceptance_fails_closed_on_unbound_evidence(
     build_acceptance(workspace, output, (episode_root,))
 
     report = json.loads(
-        (output / "acceptance-report.v1.json").read_text(encoding="utf-8")
+        (output / "acceptance-report.v2.json").read_text(encoding="utf-8")
     )
     assert report["classification"] == classification
     issues = report["entries"][0]["issues"]

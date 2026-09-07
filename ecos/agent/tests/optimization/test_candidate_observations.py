@@ -162,7 +162,7 @@ def test_candidate_terminal_observation_rejects_tampered_artifact_hash(
     shutil.copytree(source_copy, candidate_root)
     manifest_ref = ".agent/candidates/candidate-1/analysis/candidate_workspace.v1.json"
     manifest_path = frozen_workspace / manifest_ref
-    runtime_report = candidate_root / "analysis/parameter_runtime_report.v1.json"
+    runtime_report = candidate_root / "analysis/parameter_runtime_report.v2.json"
     runtime_report.parent.mkdir(parents=True, exist_ok=True)
     runtime_report.write_text("{}\n", encoding="utf-8")
     _write_json(
@@ -178,7 +178,7 @@ def test_candidate_terminal_observation_rejects_tampered_artifact_hash(
             "artifacts": {
                 **_harden_manifest_artifacts(candidate_root),
                 "parameter_runtime_report": {
-                    "ref": "analysis/parameter_runtime_report.v1.json",
+                    "ref": "analysis/parameter_runtime_report.v2.json",
                     "sha256": "sha256:" + "0" * 64,
                 }
             },

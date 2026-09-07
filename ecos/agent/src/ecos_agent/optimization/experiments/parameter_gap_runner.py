@@ -1,4 +1,4 @@
-"""Run the preregistered seven-knob requested/effective/activation gap screen."""
+"""Run the reproducible seven-knob requested and actual value screen."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from ecos_agent.optimization.experiments.parameter_gap_artifacts import (
     write_outputs,
 )
 from ecos_agent.optimization.experiments.parameter_gap import (
-    KnobGapSummary,
+    KnobStatusSummary,
     ProbeResult,
     summarize_knob,
 )
@@ -42,7 +42,6 @@ from ecos_agent.optimization.experiments.parameter_gap_setup import (
     ParameterGapConfig,
     ParameterGapError,
     load_parameter_gap_config,
-    overall_verdict,
     readiness_report,
     resume_readiness_report,
     screen_values,
@@ -143,10 +142,10 @@ def _run_knobs(
     baseline: TerminalObservation,
     current: dict[str, bool | int | float],
     run_root: Path,
-) -> tuple[tuple[ProbeResult, ...], tuple[KnobGapSummary, ...]]:
+) -> tuple[tuple[ProbeResult, ...], tuple[KnobStatusSummary, ...]]:
     cards = load_parameter_cards()
     all_results: list[ProbeResult] = []
-    summaries: list[KnobGapSummary] = []
+    summaries: list[KnobStatusSummary] = []
     sequence = 0
     for knob in OptimizationKnob:
         knob_results, summary, sequence = _run_knob(
@@ -175,24 +174,23 @@ def _run_knob(
     current: bool | int | float,
     sequence: int,
     run_root: Path,
-) -> tuple[list[ProbeResult], KnobGapSummary, int]:
+) -> tuple[list[ProbeResult], KnobStatusSummary, int]:
     results, tested, sequence = _screen_knob(
         config, readiness, workspace, baseline, knob, card, current, sequence, run_root
     )
-    if summarize_knob(knob, results).verdict != "gap_confirmed":
-        sequence = _expand_knob(
-            config,
-            readiness,
-            workspace,
-            baseline,
-            knob,
-            card,
-            current,
-            results,
-            tested,
-            sequence,
-            run_root,
-        )
+    sequence = _expand_knob(
+        config,
+        readiness,
+        workspace,
+        baseline,
+        knob,
+        card,
+        current,
+        results,
+        tested,
+        sequence,
+        run_root,
+    )
     required = set(card.requested_domain.values) - {current}
     if knob == OptimizationKnob.ROUTABILITY_OPT:
         required.add(current)
@@ -232,10 +230,6 @@ def _screen_knob(
         )
         results.append(result)
         tested.add(value)
-        sequence = _repeat_gap(
-            config, readiness, workspace, observation, knob, value, parent_value,
-            result, results, sequence, run_root, parent,
-        )
     return results, tested, sequence
 
 
@@ -284,59 +278,6 @@ def _expand_knob(
         )
         results.append(result)
         tested.add(value)
-        sequence = _repeat_gap(
-            config,
-            readiness,
-            workspace,
-            baseline,
-            knob,
-            value,
-            current,
-            result,
-            results,
-            sequence,
-            run_root,
-            None,
-        )
-        if summarize_knob(knob, results).verdict == "gap_confirmed":
-            break
-    return sequence
-
-
-def _repeat_gap(
-    config: ParameterGapConfig,
-    readiness: dict[str, Any],
-    workspace: Path,
-    baseline: TerminalObservation,
-    knob: OptimizationKnob,
-    value: bool | int | float,
-    parent_value: bool | int | float,
-    first: ProbeResult,
-    results: list[ProbeResult],
-    sequence: int,
-    run_root: Path,
-    parent: str | None,
-) -> int:
-    if not set(first.gap_kinds) - {"mapping_only"}:
-        return sequence
-    for _ in range(2):
-        sequence += 1
-        results.append(
-            _execute_probe(
-                config,
-                readiness,
-                workspace,
-                baseline,
-                knob,
-                value,
-                parent_value,
-                sequence,
-                run_root,
-                parent_candidate_root_ref=(
-                    _read_candidate_root_ref(run_root, parent) if parent else None
-                ),
-            )
-        )
     return sequence
 
 
@@ -383,10 +324,9 @@ def _execute_probe(
         terminal_closed=terminal_closed,
         runtime_seconds=time.monotonic() - started,
         error=error,
-        site_width_dbu=readiness["site_width_dbu"],
     )
     payload = {**result.to_dict(), "flow_peak_memory_mb": flow_peak_memory_mb(output)}
-    write_json(output / "probe-result.v1.json", payload)
+    write_json(output / "probe-result.v2.json", payload)
     return result
 
 
@@ -458,10 +398,9 @@ def _record_unavailable_parent(
         terminal_closed=False,
         runtime_seconds=0.0,
         error=f"parent_unavailable: {error}",
-        site_width_dbu=1,
     )
     output = run_root / "probes" / candidate_id
-    write_json(output / "probe-result.v1.json", result.to_dict())
+    write_json(output / "probe-result.v2.json", result.to_dict())
     return result
 
 

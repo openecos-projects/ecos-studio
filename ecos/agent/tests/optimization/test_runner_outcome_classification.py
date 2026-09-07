@@ -283,25 +283,20 @@ def test_runner_promotes_progressive_recovery_and_switches_to_original_objective
         CandidateExecutionReceipt(execution_id=f"execution-{index}", started=True)
         for index in range(1, 5)
     )
-    requested_values = (0.15, 0.75, 0.7, 0.65)
-    effective_values = (0.8, 0.75, 0.7, 0.65)
-    executor.terminal_receipts = iter(
-        CandidateExecutionReceipt(
-            execution_id=f"execution-{index}",
+
+    def terminal_receipt(execution_id):
+        requested = executor.requests[-1].requested.value
+        return CandidateExecutionReceipt(
+            execution_id=execution_id,
             started=True,
             outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
-            evidence=_evidence(f"execution-{index}"),
+            evidence=_evidence(execution_id),
             parameter_application_receipt=_native_receipt(
                 "place.target_density",
                 requested,
-                effective_value=effective,
+                effective_value=0.8 if execution_id == "execution-1" else requested,
             ),
         )
-        for index, (requested, effective) in enumerate(
-            zip(requested_values, effective_values, strict=True),
-            start=1,
-        )
-    )
     baseline = _recovery_terminal("execution-0", drc=4, setup=2, hold=1)
     objective = freeze_optimization_objective(
         "reduce routed wirelength",
@@ -338,7 +333,7 @@ def test_runner_promotes_progressive_recovery_and_switches_to_original_objective
         observation_supplier=_observation,
         retrieval_supplier=_retrieval,
         current_values=_CURRENT_VALUES,
-        terminal_waiter=executor.wait_for_terminal,
+        terminal_waiter=terminal_receipt,
         terminal_observation_supplier=terminal_observation,
         objective=freeze_routability_objective(
             baseline, objective_alignment=alignment

@@ -12,6 +12,7 @@ from ecos_agent.optimization.contracts import (
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    OptimizationKnob,
     OptimizationProposal,
     OptimizationTaskMemoryReference,
     PlanningProviderEnvelope,
@@ -93,20 +94,19 @@ def _episode(
         )
     )
     domain_payload = {
-        "schema_version": "ecos.effective_domain.v1",
-        "knob_id": "place.target_density",
+        "schema_version": "ecos.effective_domain.v3",
+        "knob_id": OptimizationKnob.TARGET_DENSITY,
         "context_sha256": HASH,
         "current_coordinate": None,
         "surface_values": (0.2, 0.3),
-        "excluded_aliases": (),
         "allowed_requested_values": (0.3,),
-        "thresholds": (),
-        "observed_application_signatures": (),
-        "observed_response_signatures": (),
     }
+    draft = EffectiveDomainSnapshot.model_construct(**domain_payload)
     domain = EffectiveDomainSnapshot(
         **domain_payload,
-        snapshot_sha256=canonical_sha256(domain_payload),
+        snapshot_sha256=canonical_sha256(
+            draft.model_dump(mode="json", exclude={"snapshot_sha256"})
+        ),
     )
     planning = OptimizationPlanningAudit(root).append(
         context_ref=context_ref,

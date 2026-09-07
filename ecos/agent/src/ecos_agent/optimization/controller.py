@@ -132,7 +132,7 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v7.json"
+_STATE_FILE = "optimization-episode-state.v8.json"
 _LEGACY_STATE_FILES = (
     "optimization-episode-state.v2.json",
     "optimization-episode-state.v3.json",
@@ -565,7 +565,7 @@ class OptimizationEpisodeController(
         decision_audit = self._decision_audit.replay()
         case_audit = self._case_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v7",
+            "schema_version": "ecos.optimization_episode_state.v8",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,

@@ -150,9 +150,8 @@ def test_controller_persists_native_receipt_in_terminal_ledger(tmp_path: Path) -
     )
 
     outcome = controller.ledger.replay().terminal_outcomes[0]
-    assert outcome.application_receipt is None
     assert outcome.parameter_application_receipt is not None
-    assert outcome.parameter_application_receipt.effective_final.value == 2
+    assert outcome.parameter_application_receipt.actual_value == 2
 
 
 def test_candidate_execution_receipt_exposes_only_native_parameter_receipts() -> None:

@@ -51,10 +51,10 @@ def test_dreamplace_tunable_parameters_describe_native_consumption_boundaries() 
     knowledge = _load_place_knowledge()
     expected = {
         "parameter.dreamplace.target_density": "utilization-derived floor",
-        "parameter.dreamplace.stop_overflow": "convergence and divergence predicates",
-        "parameter.dreamplace.cell_padding_x": "expands movable-cell and pin geometry",
-        "parameter.dreamplace.routability_opt_flag": "positive native routability-round count",
-        "parameter.dreamplace.density_weight": "updates the internal weight",
+        "parameter.dreamplace.stop_overflow": "final global-placement overflow is strictly below the actual threshold",
+        "parameter.dreamplace.cell_padding_x": "positive request clipped to zero is inactive",
+        "parameter.dreamplace.routability_opt_flag": "false request is effective when the algorithm is confirmed disabled",
+        "parameter.dreamplace.density_weight": "coefficient consumed by density-weight initialization",
     }
 
     for entity_id, text in expected.items():

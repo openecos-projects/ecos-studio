@@ -133,21 +133,6 @@ def _candidate_call(rpc: _FakeEccRpc) -> tuple[str, dict[str, object]]:
     return next(call for call in rpc.calls if call[0] == "candidate.rerun")
 
 
-def _application_receipt_payload(
-    *, requested: object = 0.65, written: object = 0.65
-) -> dict[str, object]:
-    value = {"knobId": "place.target_density", "value": written}
-    return {
-        "receiptId": "receipt-1",
-        "requested": {"knobId": "place.target_density", "value": requested},
-        "written": value,
-        "effectiveInitial": value,
-        "runtimeAdjustments": [],
-        "effectiveFinal": value,
-        "evidenceSha256": HASH,
-    }
-
-
 def _native_receipt_payload(
     candidate_ref: str,
     materialization: dict[str, object],
@@ -158,7 +143,7 @@ def _native_receipt_payload(
     snapshot = materialization["snapshots"][0]
     card = load_parameter_cards()[OptimizationKnob.TARGET_DENSITY]
     payload = {
-        "schema_version": "tool.parameter_application_receipt.v1",
+        "schema_version": "tool.parameter_application_receipt.v2",
         "receipt_id": "parameter-receipt-native-1",
         "tool": {
             "name": card.tool.name,
@@ -201,42 +186,15 @@ def _native_receipt_payload(
             "parent_manifest_sha256": None,
             "parent_state_sha256": HASH,
         },
-        "effective_initial": {"value": 0.65, "unit": "ratio"},
-        "transitions": [],
-        "application_status": "applied",
-        "activation": {
-            "status": "used",
-            "consumers": [
-                {
-                    "consumer_id": "dreamplace.density_objective",
-                    "outcome": "entered",
-                    "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-                    "evidence_sha256": canonical_sha256(
-                        {
-                            "consumer_id": "dreamplace.density_objective",
-                            "outcome": "entered",
-                            "consumer_observation": {
-                                "requested_target_density": 0.65,
-                                "effective_target_density": 0.65,
-                                "density_tensor_value": 0.65,
-                                "density_operator_call_count": 1,
-                                "placement_iteration_count": 4,
-                                "evidence_complete": True,
-                            },
-                        }
-                    ),
-                }
-            ],
-        },
-        "consumer_observation": {
-            "requested_target_density": 0.65,
-            "effective_target_density": 0.65,
+        "actual_value": 0.65,
+        "status": "effective",
+        "reason": None,
+        "observation": {
+            "target_density": 0.65,
             "density_tensor_value": 0.65,
             "density_operator_call_count": 1,
-            "placement_iteration_count": 4,
-            "evidence_complete": True,
+            "utilization_floor": 0.3,
         },
-        "effective_final": {"value": 0.65, "unit": "ratio"},
     }
     payload["evidence_sha256"] = canonical_sha256(payload)
     return payload
@@ -326,7 +284,7 @@ def _write_candidate_evidence(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
-    receipt_path = analysis / "parameter_application_receipt.v1.json"
+    receipt_path = analysis / "parameter_application_receipt.v2.json"
     receipt_path.write_text(json.dumps(native), encoding="utf-8")
     manifest = analysis / "candidate_workspace.v1.json"
     manifest_payload = {

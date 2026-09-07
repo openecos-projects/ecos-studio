@@ -18,8 +18,8 @@ from ecos_agent.optimization.ecc.adapter import (
 )
 from ecos_agent.optimization.ecc.evidence import (
     _same_numeric_value,
-    _validate_l1_files,
-    _validate_l1_payload,
+    _validate_materialization_files,
+    _validate_materialization_payload,
 )
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
@@ -27,7 +27,6 @@ from ecos_agent.optimization.parameters.contracts import ParameterApplicationRec
 from tests.optimization.ecc_adapter_support import (
     HASH,
     _FakeEccRpc,
-    _application_receipt_payload,
     _request,
     _running_operation,
     _write_candidate_evidence,
@@ -67,7 +66,7 @@ def test_adapter_rejects_application_receipt_from_foreign_parameter_card(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
-    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v1.json")
+    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v2.json")
     receipt_path.write_text(json.dumps(native), encoding="utf-8")
     evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
@@ -153,48 +152,6 @@ def test_adapter_requires_workspace_root_to_verify_receipt_file(tmp_path: Path) 
         adapter.wait_for_terminal("operation-1")
 
 
-def test_adapter_accepts_receipt_file_with_transition_alias(tmp_path: Path) -> None:
-    native, evidence, paths = _write_candidate_evidence(tmp_path)
-    native["transitions"] = [
-        {
-            "sequence": 0,
-            "from": "materialized",
-            "to": "applied",
-            "value": 0.65,
-            "reason": "alias regression coverage",
-            "evidence_ref": "analysis/parameter_runtime_report.v1.json",
-            "evidence_sha256": HASH,
-        }
-    ]
-    native["evidence_sha256"] = canonical_sha256(
-        {key: value for key, value in native.items() if key != "evidence_sha256"}
-    )
-    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v1.json")
-    receipt_path.write_text(json.dumps(native), encoding="utf-8")
-    evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
-    rpc = _FakeEccRpc(
-        _running_operation(),
-        terminal_response={
-            "operationId": "operation-1",
-            "workspaceId": "workspace-1",
-            "state": "succeeded",
-            "result": {**evidence, "parameterApplicationReceipt": native},
-        },
-    )
-    adapter = EccCandidateRerunAdapter(
-        rpc, workspace_id="workspace-1", site_width_dbu=200, workspace_root=tmp_path
-    )
-    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
-
-    receipt = adapter.wait_for_terminal("operation-1")
-
-    assert receipt.parameter_application_receipt is not None
-    assert (
-        receipt.parameter_application_receipt.transitions[0].from_state
-        == "materialized"
-    )
-
-
 def test_adapter_waits_for_terminal_cancel_receipt() -> None:
     rpc = _FakeEccRpc(
         _running_operation(),
@@ -263,30 +220,24 @@ def test_adapter_retains_valid_candidate_manifest_evidence() -> None:
     assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
 
 
-def test_adapter_binds_and_returns_effective_value_receipt() -> None:
-    rpc = _FakeEccRpc(
-        _running_operation(),
-        terminal_response={
-            "operationId": "operation-1",
-            "workspaceId": "workspace-1",
-            "state": "succeeded",
-            "result": {"knobApplicationReceipt": _application_receipt_payload()},
-        },
-    )
-    adapter = EccCandidateRerunAdapter(
-        rpc, workspace_id="workspace-1", site_width_dbu=200
-    )
-
-    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
-    receipt = adapter.wait_for_terminal("operation-1")
-
-    assert receipt.parameter_application_receipt is None
-
-
-def test_adapter_binds_native_receipt_to_candidate_materialization(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "status,contradictory",
+    (("effective", False), ("unknown", False), ("inactive", True), ("unknown", True)),
+)
+def test_adapter_validates_native_receipt_bound_to_candidate_materialization(
+    tmp_path: Path, status: str, contradictory: bool,
 ) -> None:
-    native, evidence, _ = _write_candidate_evidence(tmp_path)
+    native, evidence, paths = _write_candidate_evidence(tmp_path)
+    if status != "effective":
+        native.update(status=status, actual_value=None, reason="No density use observed.")
+        if not contradictory:
+            native["observation"] = {}
+        native["evidence_sha256"] = canonical_sha256(
+            {key: value for key, value in native.items() if key != "evidence_sha256"}
+        )
+        receipt_path = paths["manifest"].with_name("parameter_application_receipt.v2.json")
+        receipt_path.write_text(json.dumps(native), encoding="utf-8")
+        evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
         _running_operation(),
         terminal_response={
@@ -301,9 +252,17 @@ def test_adapter_binds_native_receipt_to_candidate_materialization(
     )
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
 
+    if contradictory:
+        with pytest.raises(OptimizationEccAdapterError, match="card binding") as error:
+            adapter.wait_for_terminal("operation-1")
+        assert "contradicts observation" in str(error.value.__cause__)
+        return
     receipt = adapter.wait_for_terminal("operation-1")
 
     assert receipt.parameter_application_receipt is not None
+    assert receipt.parameter_application_receipt.status == status
+    assert receipt.parameter_application_receipt.actual_value == native["actual_value"]
+    assert receipt.parameter_application_receipt.requested["value"] == 0.65
 
 
 def test_adapter_binds_candidate_parent_manifest(tmp_path: Path) -> None:
@@ -331,7 +290,7 @@ def test_adapter_binds_candidate_parent_manifest(tmp_path: Path) -> None:
     assert adapter.wait_for_terminal("operation-1").parameter_application_receipt
 
 
-def test_l1_evidence_reads_canonical_workspace_parameters_toml(tmp_path: Path) -> None:
+def test_materialization_evidence_reads_canonical_workspace_parameters_toml(tmp_path: Path) -> None:
     native, _evidence, _paths = _write_candidate_evidence(tmp_path)
     candidate = tmp_path / native["materialization"]["candidate_ref"]
     config = candidate / "home/params.toml"
@@ -379,7 +338,7 @@ def test_l1_evidence_reads_canonical_workspace_parameters_toml(tmp_path: Path) -
         ],
     }
 
-    _validate_l1_files(candidate, payload, receipt, ("core", "utilitization"))
+    _validate_materialization_files(candidate, payload, receipt, ("core", "utilitization"))
 
 
 @pytest.mark.parametrize(
@@ -391,7 +350,7 @@ def test_l1_evidence_reads_canonical_workspace_parameters_toml(tmp_path: Path) -
         ("floorplan.aspect_ratio", 5),
     ),
 )
-def test_l1_numeric_representation_preserves_requested_domain(
+def test_materialization_numeric_representation_preserves_requested_domain(
     tmp_path: Path, knob_id: str, requested: int
 ) -> None:
     native, _evidence, paths = _write_candidate_evidence(tmp_path)
@@ -409,8 +368,7 @@ def test_l1_numeric_representation_preserves_requested_domain(
     native["materialization"]["written_value"] = float(requested)
     native["requested"]["knob_id"] = knob_id
     native["requested"]["value"] = float(requested)
-    native["effective_initial"]["value"] = float(requested)
-    native["effective_final"]["value"] = float(requested)
+    native["actual_value"] = float(requested)
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
@@ -421,7 +379,7 @@ def test_l1_numeric_representation_preserves_requested_domain(
     receipt = ParameterApplicationReceipt.model_validate(native)
     candidate = tmp_path / native["materialization"]["candidate_ref"]
 
-    _validate_l1_payload(
+    _validate_materialization_payload(
         materialization,
         receipt,
         candidate.name,
@@ -438,7 +396,7 @@ def test_numeric_receipt_comparison_does_not_alias_booleans_and_integers() -> No
     assert not _same_numeric_value(True, 1)
 
 
-def test_adapter_retains_l1_l2_evidence_on_failed_terminal(tmp_path: Path) -> None:
+def test_adapter_retains_parameter_receipt_on_failed_terminal(tmp_path: Path) -> None:
     native, evidence, _ = _write_candidate_evidence(tmp_path, terminal_state="failed")
     rpc = _FakeEccRpc(
         _running_operation(),
@@ -461,7 +419,7 @@ def test_adapter_retains_l1_l2_evidence_on_failed_terminal(tmp_path: Path) -> No
     assert receipt.parameter_application_receipt is not None
 
 
-def test_adapter_retains_l1_l2_evidence_on_cancelled_terminal(tmp_path: Path) -> None:
+def test_adapter_retains_parameter_receipt_on_cancelled_terminal(tmp_path: Path) -> None:
     native, evidence, _ = _write_candidate_evidence(
         tmp_path, terminal_state="succeeded"
     )
@@ -528,7 +486,7 @@ def test_adapter_rejects_parent_flow_hash_drift(tmp_path: Path) -> None:
         ("receipt", "target_step"),
     ],
 )
-def test_adapter_fails_closed_when_l1_binding_field_is_missing(
+def test_adapter_fails_closed_when_materialization_binding_field_is_missing(
     tmp_path: Path, artifact: str, key: str
 ) -> None:
     native, evidence, paths = _write_candidate_evidence(tmp_path)
@@ -561,7 +519,7 @@ def test_adapter_fails_closed_when_l1_binding_field_is_missing(
 
 
 @pytest.mark.parametrize("artifact", ["config", "before_snapshot", "after_snapshot"])
-def test_adapter_rejects_tampered_l1_files(tmp_path: Path, artifact: str) -> None:
+def test_adapter_rejects_tampered_materialization_files(tmp_path: Path, artifact: str) -> None:
     native, evidence, paths = _write_candidate_evidence(tmp_path)
     paths[artifact].write_text("{}", encoding="utf-8")
     rpc = _FakeEccRpc(
@@ -592,7 +550,7 @@ def test_adapter_rejects_foreign_candidate_even_when_receipts_agree(
     native["evidence_sha256"] = canonical_sha256(
         {key: value for key, value in native.items() if key != "evidence_sha256"}
     )
-    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v1.json")
+    receipt_path = paths["manifest"].with_name("parameter_application_receipt.v2.json")
     receipt_path.write_text(json.dumps(native), encoding="utf-8")
     evidence["parameterApplicationReceiptSha256"] = file_sha256(receipt_path)
     rpc = _FakeEccRpc(
@@ -639,53 +597,6 @@ def test_adapter_does_not_build_a_missing_success_receipt_from_candidate_artifac
     adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
     receipt = adapter.wait_for_terminal("operation-1")
 
-    assert receipt.parameter_application_receipt is None
-
-
-def test_adapter_rejects_an_application_receipt_with_wrong_request_or_written_value() -> (
-    None
-):
-    for payload in (
-        _application_receipt_payload(requested=0.7),
-        _application_receipt_payload(written=0.7),
-    ):
-        rpc = _FakeEccRpc(
-            _running_operation(),
-            terminal_response={
-                "operationId": "operation-1",
-                "workspaceId": "workspace-1",
-                "state": "succeeded",
-                "result": {"knobApplicationReceipt": payload},
-            },
-        )
-        adapter = EccCandidateRerunAdapter(
-            rpc, workspace_id="workspace-1", site_width_dbu=200
-        )
-        adapter.start(
-            _request("place.target_density", 0.65, StrategyDirection.INCREASE)
-        )
-        receipt = adapter.wait_for_terminal("operation-1")
-        assert receipt.parameter_application_receipt is None
-
-
-def test_adapter_rejects_a_malformed_application_receipt() -> None:
-    payload = _application_receipt_payload()
-    del payload["effectiveFinal"]
-    rpc = _FakeEccRpc(
-        _running_operation(),
-        terminal_response={
-            "operationId": "operation-1",
-            "workspaceId": "workspace-1",
-            "state": "succeeded",
-            "result": {"knobApplicationReceipt": payload},
-        },
-    )
-    adapter = EccCandidateRerunAdapter(
-        rpc, workspace_id="workspace-1", site_width_dbu=200
-    )
-    adapter.start(_request("place.target_density", 0.65, StrategyDirection.INCREASE))
-
-    receipt = adapter.wait_for_terminal("operation-1")
     assert receipt.parameter_application_receipt is None
 
 

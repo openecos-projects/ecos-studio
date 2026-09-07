@@ -121,32 +121,17 @@ ACTIVE_OPTIMIZATION_KNOBS = tuple(
 
 
 def coordinate_value_from_native_receipt(
-    receipt: ParameterApplicationReceipt, *, site_width_dbu: int
+    receipt: ParameterApplicationReceipt,
 ) -> bool | int | float:
-    if type(site_width_dbu) is not int or site_width_dbu <= 0:
-        raise ValueError("site width is invalid")
-    knob_id = OptimizationKnob(receipt.requested["knob_id"])
-    value = (
-        receipt.requested["value"]
-        if knob_id == OptimizationKnob.DENSITY_WEIGHT
-        else receipt.effective_final.value
-    )
+    value = receipt.actual_value
     if type(value) not in {bool, int, float}:
         raise ValueError("native receipt effective value is unavailable")
-    return value / site_width_dbu if knob_id == OptimizationKnob.CELL_PADDING_X else value
+    return value
 
 
 def native_receipt_is_effective(receipt: ParameterApplicationReceipt) -> bool:
     """Return whether a native receipt is a valid optimization intervention."""
-    if receipt.application_status != "applied":
-        return False
-    if receipt.activation.status == "used":
-        return True
-    return (
-        receipt.requested.get("knob_id") == OptimizationKnob.ROUTABILITY_OPT.value
-        and receipt.requested.get("value") is False
-        and receipt.activation.status == "not_activated"
-    )
+    return receipt.status == "effective"
 
 
 def terminal_quality_outcome(
