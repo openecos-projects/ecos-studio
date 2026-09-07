@@ -110,6 +110,8 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
         return json.dumps(_chat_response(answer="Hello.", evidence_ids=["source-1"]))
 
     monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: object())
+    monkeypatch.setattr(provider, "_ensure_thread", lambda client: "thread-test")
     response = provider.respond_to_gui_chat(
         {
             "allowed_operations": [],
@@ -233,6 +235,8 @@ def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypa
         )
 
     monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: object())
+    monkeypatch.setattr(provider, "_ensure_thread", lambda client: "thread-test")
     response = provider.propose_source_search(
         {
             "natural_language_request": "How is stop_overflow consumed?",
@@ -274,6 +278,8 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
         )
 
     monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: object())
+    monkeypatch.setattr(provider, "_ensure_thread", lambda client: "thread-test")
     response = provider.propose_stage_routing(
         {
             "natural_language_request": "What objective guides cell locations?",

@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from ecos_agent.context_status import gui_status_context
 from ecos_agent.codex.provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
@@ -679,6 +680,7 @@ class ProviderChatMixin:
             "allowed_operations": allowed_options,
             "workspace": session.rerun_workspace_path or "",
             "project_root": session.project_root or "",
+            "session_state": gui_status_context(session),
             "_progress_callback": lambda text: self._progress(session, text),
             "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
         }

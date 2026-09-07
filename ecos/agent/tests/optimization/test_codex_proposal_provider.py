@@ -341,13 +341,15 @@ def test_optimization_planner_sends_only_bounded_context_and_validates_output(
         "incumbent",
         "history",
         "knowledge_refs",
-            "knowledge_chunks",
-            "supported_action_view",
-            "empirical_cases",
-            "empirical_case_audit",
-            "legal_actions",
+        "knowledge_chunks",
+        "supported_action_view",
+        "empirical_cases",
+        "empirical_case_audit",
+        "legal_actions",
         "excluded_surface_values",
         "objective",
+        "objective_alignment",
+        "active_objective",
     }
     assert "workspace" not in captured["user"]
     assert "specific parameter values" in captured["system"]

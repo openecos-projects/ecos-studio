@@ -450,6 +450,8 @@ def test_workspace_discovery_uses_read_only_tool_policy(
         return json.dumps(_proposal().model_dump(mode="json"))
 
     monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: object())
+    monkeypatch.setattr(provider, "_ensure_thread", lambda client: "thread-test")
 
     provider.propose_gui_workspace_path_discovery(
         {"filesystem_roots": [str(tmp_path)]}
