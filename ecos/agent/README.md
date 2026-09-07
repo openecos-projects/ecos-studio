@@ -224,6 +224,34 @@ Workspace 设置/路径发现只有这两类调用启用 `read_only_workspace` t
 做本地 literal search，Codex 只选择固定文本查询和引用返回的 evidence ID。Codex 不可用、
 超时、触发越权 activity 或返回不符合 schema 的内容时，当前提案失败，不会因此调用 ECC。
 
+### 模型上下文状态摘要
+
+每次模型请求在发送前生成 `ecos.agent_status.v1`，以 `agent_status` 放入 prompt 的
+USER AND EVIDENCE 区域。聊天从 Session 投影，优化规划从既有 planning context 投影；
+摘要不维护第二套目标、执行状态或预算，也不改变提案 schema、allowlist 和用户确认。
+
+- 包含作用域、快照序号、当前阶段、优化目标与 active objective、待交互项、已记录的
+  候选结果引用、上次结果、剩余预算及受控字段变化。已记录结果不等于成功；GUI 缺少
+  可用执行终态时，完成状态和上次执行结果保持未知，不从阶段或活动消息推断。
+- Provider 记录本地线程观测窗口内的请求数、工具 item 数和服务端重试；GUI 本地活动
+  单独按 Session 计数，不等于 ECC 执行次数。`/new`、`/fork`、`/resume` 重置线程统计，
+  不声称恢复远端完整历史。失败后重建线程仅保留明确标注的旧线程失败引用，不混入新计数。
+- usage 缺失字段不填零；`completed_turn` 可归属当前 turn，`thread_latest` 明确标为
+  未归属某个 turn 的线程最近快照。二者都不是上下文窗口占用或剩余 token 容量。
+- 摘要最多 8192 UTF-8 字节，业务列表最多 6 项，字符串最多 256 UTF-8 字节；截断通过
+  `truncation` 或 `events_truncated` 标记。事件只保留类型、状态和哈希引用，不回注参数、
+  命令输出或错误原文。当前请求产生的遥测在后续请求可见。
+- 实际发送 prompt 与优化审计 envelope 使用同一冻结文本；原业务 payload 哈希不含
+  新增遥测。摘要仍随 turn 追加，不删除旧消息，不自动触发 `/compact`。
+
+这些是上下文呈现与审计保障，不证明循环减少、缓存成本下降或 QoR 改善。未增加通用任务树、
+GUI 状态栏或自动上下文压缩策略。聚焦回归：
+
+```bash
+cd ecos/agent
+uv run pytest -q tests/codex tests/gui/test_codex_provider_integration.py tests/optimization/test_codex_proposal_provider.py
+```
+
 ### 边界靠什么保证
 
 真正的执行边界是**类型化提案链路**：只有受 schema 约束且通过本地 allowlist、状态、

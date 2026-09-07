@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import math
 from typing import Any, Mapping, TYPE_CHECKING
 
 from ecos_agent.hashing import canonical_sha256
@@ -10,6 +12,128 @@ from ecos_agent.optimization.contracts import BudgetSnapshot
 
 if TYPE_CHECKING:
     from ecos_agent.gui.session import ProviderSession
+
+MAX_STATUS_BYTES = 8192
+_MAX_STATUS_ITEMS = 6
+_MAX_STATUS_TEXT_BYTES = 256
+
+
+def bounded_status(status: Mapping[str, Any]) -> dict[str, Any]:
+    """Bound the presentation only; never shorten authoritative control payloads."""
+    shortened: set[str] = set()
+    nodes = 0
+
+    def visit(value: Any, path: str, depth: int = 0) -> Any:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 256 or depth > 6:
+            shortened.add(path)
+            return None
+        if value is None or isinstance(value, bool):
+            return value
+        if isinstance(value, (float, int)):
+            if (isinstance(value, float) and math.isfinite(value)) or (
+                isinstance(value, int) and value.bit_length() <= 64
+            ):
+                return value
+            shortened.add(path)
+            return None
+        if isinstance(value, str):
+            encoded = value.encode("utf-8")
+            if len(encoded) > _MAX_STATUS_TEXT_BYTES:
+                shortened.add(path)
+                return encoded[:_MAX_STATUS_TEXT_BYTES - 3].decode("utf-8", errors="ignore") + "..."
+            return value
+        if isinstance(value, (list, tuple)):
+            if len(value) > _MAX_STATUS_ITEMS:
+                shortened.add(path)
+            return [visit(item, f"{path}[{index}]", depth + 1) for index, item in enumerate(value[:_MAX_STATUS_ITEMS])]
+        if isinstance(value, Mapping):
+            keys = sorted(key for key in value if isinstance(key, str))
+            if len(keys) > 16 or len(keys) != len(value):
+                shortened.add(path)
+            return {key: visit(value[key], f"{path}.{key}", depth + 1) for key in keys[:16]}
+        shortened.add(path)
+        return None
+
+    result = visit(status, "agent_status")
+
+    def encoded_size() -> int:
+        result["truncation"] = {
+            "applied": bool(shortened),
+            "fields": sorted(shortened)[:12],
+            "details_complete": len(shortened) <= 12,
+        }
+        return len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    # Keep decision-critical state; detailed history and activity remain in their owners.
+    for path in (
+        ("progress", "completed"), ("local_activity", "events"),
+        ("runtime", "last_turn", "events"), ("environment", "changed_fields"),
+    ):
+        if encoded_size() <= MAX_STATUS_BYTES:
+            break
+        parent = result
+        for key in path[:-1]:
+            parent = _mapping(parent.get(key))
+        if path[-1] in parent:
+            parent[path[-1]] = []
+            shortened.add("agent_status." + ".".join(path))
+    if encoded_size() > MAX_STATUS_BYTES:
+        return _minimal_status(status)
+    return result
+
+
+def _minimal_status(status: Mapping[str, Any]) -> dict[str, Any]:
+    def scalar(value: Any) -> Any:
+        if isinstance(value, str):
+            encoded = value.encode("utf-8")
+            text = value if len(encoded) <= 96 else encoded[:93].decode("utf-8", errors="ignore") + "..."
+            while len(json.dumps(text, ensure_ascii=False).encode("utf-8")) > 128:
+                text = text[:-1]
+            return text
+        if value is None or isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value.bit_length() <= 64:
+            return value
+        if isinstance(value, float) and math.isfinite(value):
+            return value
+        return None
+
+    def fields(value: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+        source = _mapping(value)
+        return {key: scalar(source[key]) for key in keys if key in source}
+
+    progress = _mapping(status.get("progress"))
+    runtime = _mapping(status.get("runtime"))
+    last = _mapping(status.get("last_action"))
+    return {
+        "schema_version": "ecos.agent_status.v1",
+        "scope": fields(status.get("scope"), ("thread_id", "session_id", "episode_id", "workspace_ref", "lane")),
+        "snapshot_seq": scalar(status.get("snapshot_seq")),
+        "phase": scalar(status.get("phase")),
+        "objective": fields(status.get("objective"), ("primary_metric", "contract_sha256")),
+        "active_objective": fields(status.get("active_objective"), ("active_primary_metric", "recovery_stage")),
+        "progress": {
+            "completed": None,
+            "completed_scope": "omitted",
+            **{key: [scalar(item) for item in progress[key][:_MAX_STATUS_ITEMS]]
+               if isinstance(progress.get(key), list) else None
+               for key in ("pending", "blockers")},
+        },
+        "last_action": {
+            "outcome": scalar(last.get("outcome")),
+            "reference": fields(last.get("reference"), ("intervention_id", "outcome_sha256")),
+        } if last else None,
+        "budget": fields(status.get("budget"), (
+            "remaining_candidates", "remaining_planning_calls", "remaining_wall_time_seconds", "exhausted",
+        )),
+        "runtime": {
+            key: fields(runtime.get(key), ("thread_id", "turn_id", "failure_class"))
+            for key in ("last_turn", "previous_thread_failure")
+        },
+        "truncation": {"applied": True, "fields": ["agent_status"], "details_complete": False},
+    }
 
 
 def gui_status_context(session: ProviderSession) -> dict[str, Any]:
@@ -38,11 +162,11 @@ def _fields(value: object, keys: tuple[str, ...]) -> dict[str, Any]:
 
 
 class StatusSnapshots:
-    """Only the previous environment is retained; business state stays with its owner."""
+    """One prior environment per fixed lane; business state stays with its owner."""
 
     def __init__(self) -> None:
-        self._scope: dict[str, Any] | None = None
-        self._environment: dict[str, Any] | None = None
+        self._thread_id: str | None = None
+        self._previous: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         self._sequence = 0
 
     def build(self, payload: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
@@ -69,13 +193,17 @@ class StatusSnapshots:
             "objective_sha256": canonical_sha256(objective),
             "active_objective_sha256": canonical_sha256(active),
         }
-        first = self._scope != scope or self._environment is None
+        if self._thread_id != thread_id:
+            self._thread_id = thread_id
+            self._previous.clear()
+            self._sequence = 0
+        old_scope, old_environment = self._previous.get(scope["lane"], ({}, {}))
+        first = old_scope != scope
         changed = [] if first else sorted(
-            key for key in environment if environment[key] != self._environment.get(key)
+            key for key in environment if environment[key] != old_environment.get(key)
         )
-        self._sequence = 1 if first else self._sequence + 1
-        self._scope = copy.deepcopy(scope)
-        self._environment = copy.deepcopy(environment)
+        self._sequence += 1
+        self._previous[scope["lane"]] = (copy.deepcopy(scope), copy.deepcopy(environment))
         budget = None
         if planning and payload.get("budget") is not None:
             snapshot = BudgetSnapshot.model_validate(payload["budget"])
@@ -104,6 +232,12 @@ class StatusSnapshots:
         pending = copy.deepcopy(gui.get("pending", []))
         if pending:
             blockers.append("awaiting_interaction")
+        local = _fields(gui.get("local_activity"), (
+            "scope", "observed_activities", "counts_complete", "events_truncated",
+        ))
+        events = _mapping(gui.get("local_activity")).get("events", [])
+        if isinstance(events, list):
+            local["events"] = [_fields(event, ("item_ref", "status")) for event in events[-6:]]
         return {
             "schema_version": "ecos.agent_status.v1",
             "scope": scope,
@@ -119,7 +253,7 @@ class StatusSnapshots:
                 "blockers": blockers,
             },
             "last_action": last_action,
-            "local_activity": copy.deepcopy(gui.get("local_activity")),
+            "local_activity": local if gui.get("local_activity") is not None else None,
             "budget": budget,
             "environment": {
                 "baseline": "first_snapshot" if first else "previous_request",
