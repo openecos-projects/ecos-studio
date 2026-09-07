@@ -71,8 +71,8 @@ def test_general_bundles_keep_congestion_and_wirelength_separate() -> None:
 
     assert congestion_catalog["publication"]["metrics"] == ["congestion"]
     assert wirelength_catalog["publication"]["metrics"] == ["wirelength"]
-    assert len(congestion.entities) == 18
-    assert len(wirelength.entities) == 6
+    assert len(congestion.entities) == 21
+    assert len(wirelength.entities) == 9
     assert all(entity_id.startswith("strategy.congestion.") for entity_id in congestion.entity_ids)
     assert all(entity_id.startswith("strategy.wirelength.") for entity_id in wirelength.entity_ids)
     assert not (CONGESTION_ROOT / "regression" / "wirelength_questions.jsonl").exists()
@@ -97,16 +97,17 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
         item for item in catalog.bindings if item.claim_id == spreading.claim_ref.entity_id
     )
 
-    assert len(catalog.claims) == 24
+    assert len(catalog.claims) == 30
     assert spreading.claim_sha256.startswith("sha256:")
     assert spreading.required_evidence == ("overflow_map", "cell_density_map")
     assert spreading.action_intents == ("decrease_packing_density",)
     assert spreading.evidence_refs
-    assert {predicate.feature_id for predicate in spreading.state_predicates} == {
+    assert {predicate.feature_id for predicate in spreading.state_predicates} > {
         "overflow_map",
         "cell_density_map",
     }
-    assert all(not predicate.required for predicate in spreading.anti_predicates)
+    assert any(predicate.op != "present" for predicate in spreading.state_predicates)
+    assert all(predicate.required for predicate in spreading.anti_predicates)
     assert ("place.target_density", "decrease") in {
         (action.knob_id, action.direction.value) for action in binding.actions
     }
@@ -201,22 +202,17 @@ def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
     assert spreading["review_status"] == "source_grounded"
     assert spreading["knobs"] == [
         {
-            "bounds": [0.1, 0.95],
             "direction": "increase",
-            "kind": "ranged",
             "knob_id": "place.target_density",
             "step": "place",
         },
         {
-            "bounds": [0, None],
             "direction": "decrease",
-            "kind": "zero_based_integer",
             "knob_id": "place.cell_padding_x",
             "step": "place",
         },
         {
             "direction": "set_false",
-            "kind": "boolean",
             "knob_id": "place.routability_opt",
             "step": "place",
         },

@@ -198,7 +198,7 @@ def load_parameter_gap_resume_config(path: Path) -> ParameterGapResumeConfig:
 def screen_values(
     card: ParameterSemanticsCard, current: bool | int | float
 ) -> tuple[bool | int | float, ...]:
-    lattice = tuple(card.requested_domain.values)
+    lattice = tuple(card.requested_domain.reference_values)
     if isinstance(current, bool):
         return (not current,)
     numeric = tuple(value for value in lattice if not isinstance(value, bool))

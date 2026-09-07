@@ -87,6 +87,27 @@ def build_state_evidence_request(
             value=True,
             evidence_sha256=observation_ref.sha256,
         )
+    configured_sha256 = canonical_sha256({
+        "observation_sha256": observation_ref.sha256,
+        "current_values": dict(current_values),
+    })
+    configured = {}
+    ratio = current_values.get("floorplan.aspect_ratio")
+    if type(ratio) in {int, float} and math.isfinite(ratio) and ratio > 0:
+        configured["floorplan_aspect_ratio_offset"] = ratio - 1
+    padding = current_values.get("place.cell_padding_x")
+    routability = current_values.get("place.routability_opt")
+    padding_known = type(padding) in {int, float} and math.isfinite(padding) and padding >= 0
+    if (padding_known and padding > 0) or routability is True:
+        configured["routability_relief_configured"] = True
+    elif padding_known and routability is False:
+        configured["routability_relief_configured"] = False
+    for feature_id, value in configured.items():
+        if feature_id in features:
+            raise ValueError("observation duplicates a configured knowledge feature")
+        features[feature_id] = StateEvidenceFeature(
+            feature_id=feature_id, value=value, evidence_sha256=configured_sha256,
+        )
     if reference_metrics is not None and (
         reference_sha256 is None or not _SHA256.fullmatch(reference_sha256)
     ):
@@ -279,6 +300,9 @@ def _append_supported_action(
             binding_id=binding.binding_id,
             binding_sha256=binding.binding_sha256,
             toolchain_ref=binding.toolchain_ref,
+            evidence_kind=claim.evidence_kind,
+            analog_quality=binding.analog_quality,
+            limitations=binding.limitations,
             knob_id=OptimizationKnob(action.knob_id),
             direction=action.direction,
             parameter_card_ref=action.parameter_card_ref,

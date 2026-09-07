@@ -210,6 +210,27 @@ def test_compiler_matches_current_metric_and_spatial_evidence() -> None:
     assert view.view_sha256.startswith("sha256:")
 
 
+def test_planner_keeps_source_hypothesis_and_analog_limits() -> None:
+    base = _catalog()
+    catalog = base.model_copy(update={
+        "claims": (base.claims[0].model_copy(update={
+            "evidence_kind": "source_derived_hypothesis",
+        }),),
+        "bindings": (base.bindings[0].model_copy(update={
+            "analog_quality": "coarse", "limitations": "No guaranteed QoR improvement.",
+        }),),
+    })
+    view = _compile(
+        StateEvidenceFeature(feature_id="local_cell_density_hotspot", value=True, evidence_sha256=HASH),
+        StateEvidenceFeature(feature_id="long_net_pressure_dominant", value=False, evidence_sha256=HASH),
+        catalog=catalog,
+    )
+    action = view.planner_payload()["actions"][0]
+    assert action["evidence_kind"] == "source_derived_hypothesis"
+    assert action["analog_quality"] == "coarse"
+    assert action["limitations"] == "No guaranteed QoR improvement."
+
+
 def test_compiler_fails_closed_on_missing_and_anti_condition_evidence() -> None:
     missing = _compile()
     blocked = _compile(
@@ -344,6 +365,26 @@ def test_state_evidence_derives_reference_delta_and_history_trend() -> None:
 
     assert features["delta.route_la_total_overflow"] == 2.0
     assert features["trend.route_la_total_overflow"] == "increasing"
+
+
+def test_state_evidence_distinguishes_configured_controls_from_runtime_use() -> None:
+    state = build_state_evidence_request(
+        task_id="task-1", retrieval_request_sha256=HASH,
+        observation=_observation(), current_values={
+            "floorplan.aspect_ratio": 1.5,
+            "place.cell_padding_x": 2,
+            "place.routability_opt": False,
+        },
+    )
+    features = {item.feature_id: item.value for item in state.features}
+    assert features["floorplan_aspect_ratio_offset"] == 0.5
+    assert features["routability_relief_configured"] is True
+    assert not any(key.startswith("parameter_effective") for key in features)
+    incomplete = build_state_evidence_request(
+        task_id="task-1", retrieval_request_sha256=HASH,
+        observation=_observation(), current_values={"place.routability_opt": False},
+    )
+    assert "routability_relief_configured" not in {item.feature_id for item in incomplete.features}
 
 
 def test_state_predicate_rejects_unknown_or_mismatched_frozen_rule() -> None:

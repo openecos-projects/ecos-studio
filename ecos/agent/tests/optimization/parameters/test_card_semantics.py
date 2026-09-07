@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 import pytest
+from pydantic import ValidationError
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import OptimizationKnob
@@ -68,7 +69,7 @@ def test_single_card_loader_ignores_unrelated_invalid_card(tmp_path) -> None:
     shutil.copytree(CARD_ROOT, root)
     card_path = root / "place.target_overflow.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
-    card["requested_domain"]["values"][0] = 0.117
+    card["requested_domain"]["reference_values"][0] = 0.117
     card_path.write_text(json.dumps(card), encoding="utf-8")
     _refresh_card_manifest(root)
 
@@ -103,7 +104,7 @@ def test_parameter_receipt_schema_explains_evidence_boundaries() -> None:
 def test_cards_are_exactly_the_frozen_seven() -> None:
     cards = load_parameter_cards()
     assert {knob.value for knob in cards} == {item.value for item in OptimizationKnob}
-    assert [len(card.requested_domain.values) for card in cards.values()] == [
+    assert [len(card.requested_domain.reference_values) for card in cards.values()] == [
         13,
         16,
         12,
@@ -112,6 +113,68 @@ def test_cards_are_exactly_the_frozen_seven() -> None:
         21,
         21,
     ]
+
+
+def test_cards_distinguish_requested_ranges_from_reference_probes() -> None:
+    cards = load_parameter_cards()
+    density = cards[OptimizationKnob.TARGET_DENSITY]
+    overflow = cards[OptimizationKnob.TARGET_OVERFLOW]
+    padding = cards[OptimizationKnob.CELL_PADDING_X]
+
+    for card in cards.values():
+        assert card.schema_version == "ecos.parameter_semantics_card.v2"
+        assert card.effectiveness_conditions
+        assert not {"activation_conditions", "resolution_rules"} & card.model_dump().keys()
+        assert "values" not in card.requested_domain.model_dump()
+    assert 0.517 not in density.requested_domain.reference_values
+    assert density.requested_domain.contains(0.517)
+    assert overflow.requested_domain.contains(0.001)
+    assert overflow.requested_domain.contains(0.999)
+    assert not overflow.requested_domain.contains(0)
+    assert not overflow.requested_domain.contains(1)
+    assert padding.requested_domain.contains(9)
+    assert not padding.requested_domain.contains(9.5)
+    assert not padding.requested_domain.contains(True)
+
+
+def test_loader_rejects_expanded_requested_bounds(tmp_path) -> None:
+    root = tmp_path / "cards"
+    shutil.copytree(CARD_ROOT, root)
+    card_path = root / "place.target_density.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["requested_domain"]["maximum"] = 1.0
+    card_path.write_text(json.dumps(card), encoding="utf-8")
+    _refresh_card_manifest(root)
+
+    with pytest.raises(ParameterSemanticsError, match="bounds"):
+        load_parameter_cards(root)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"minimum": None},
+        {"minimum": float("nan")},
+        {"maximum": 0.0},
+        {"reference_values": [True]},
+        {"reference_values": [0.99]},
+        {"values": [0.5]},
+    ],
+)
+def test_requested_domain_rejects_invalid_bounds_and_reference_values(change) -> None:
+    card = load_parameter_card(OptimizationKnob.TARGET_DENSITY).model_dump(mode="json")
+    card["requested_domain"].update(change)
+
+    with pytest.raises(ValidationError):
+        ParameterSemanticsCard.model_validate(card)
+
+
+def test_parameter_card_v1_requires_explicit_migration() -> None:
+    card = load_parameter_card(OptimizationKnob.TARGET_DENSITY).model_dump(mode="json")
+    card["schema_version"] = "ecos.parameter_semantics_card.v1"
+
+    with pytest.raises(ValidationError):
+        ParameterSemanticsCard.model_validate(card)
 
 
 @pytest.mark.parametrize(
@@ -149,7 +212,7 @@ def test_dreamplace_cards_bind_typed_runtime_semantics_to_native_sources() -> No
         referenced = (
             {
                 span_id
-                for condition in card.activation_conditions
+                for condition in card.effectiveness_conditions
                 for span_id in condition.source_span_ids
             }
             | {
@@ -190,7 +253,7 @@ def test_loader_rejects_dreamplace_card_without_native_consumer_span(tmp_path) -
         if span.get("role") == "runtime_report_producer"
     ]
     report_span = card["source_spans"][0]["span_id"]
-    for item in (*card["activation_conditions"], *card["consumers"]):
+    for item in (*card["effectiveness_conditions"], *card["consumers"]):
         item["source_span_ids"] = [report_span]
     semantics = card["runtime_semantics"]
     semantics["source_span_ids"] = [report_span]
@@ -259,7 +322,7 @@ def test_loader_rejects_changed_frozen_lattice(tmp_path) -> None:
     shutil.copytree(CARD_ROOT, root)
     card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
-    card["requested_domain"]["values"][0] = 0.11
+    card["requested_domain"]["reference_values"][0] = 0.11
     card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
     _refresh_card_manifest(root)
 

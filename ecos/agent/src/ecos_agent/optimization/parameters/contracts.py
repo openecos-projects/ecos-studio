@@ -76,10 +76,71 @@ class SurfaceRef(_Model):
         return value
 
 
-class RequestedDomain(_Model):
-    values: tuple[Scalar, ...] = Field(min_length=1)
+class RequestedValueBounds(_Model):
+    type: Literal["boolean", "integer", "number"]
+    minimum: StrictInt | StrictFloat | None = None
+    maximum: StrictInt | StrictFloat | None = None
+    exclusive_minimum: StrictBool = False
+    exclusive_maximum: StrictBool = False
 
-    @field_validator("values")
+    @model_validator(mode="after")
+    def valid_bounds(self) -> "RequestedValueBounds":
+        if any(
+            type(value) is float and not math.isfinite(value)
+            for value in (self.minimum, self.maximum)
+        ):
+            raise ValueError("requested value bounds must be finite")
+        if self.type == "boolean" and (
+            self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("boolean bounds cannot contain numeric endpoints")
+        if (self.exclusive_minimum and self.minimum is None) or (
+            self.exclusive_maximum and self.maximum is None
+        ):
+            raise ValueError("exclusive bounds require endpoints")
+        if self.minimum is not None and self.maximum is not None and (
+            self.minimum > self.maximum
+            or (
+                self.minimum == self.maximum
+                and (self.exclusive_minimum or self.exclusive_maximum)
+            )
+        ):
+            raise ValueError("requested value bounds are empty")
+        return self
+
+    def contains(self, value: Any) -> bool:
+        if self.type == "boolean":
+            return type(value) is bool
+        if type(value) not in ({int} if self.type == "integer" else {int, float}):
+            return False
+        if type(value) is float and not math.isfinite(value):
+            return False
+        if self.minimum is not None and (
+            value < self.minimum or (self.exclusive_minimum and value == self.minimum)
+        ):
+            return False
+        if self.maximum is not None and (
+            value > self.maximum or (self.exclusive_maximum and value == self.maximum)
+        ):
+            return False
+        return True
+
+    def json_schema(self) -> dict[str, Any]:
+        schema: dict[str, Any] = {"type": self.type}
+        if self.minimum is not None:
+            schema["exclusiveMinimum" if self.exclusive_minimum else "minimum"] = self.minimum
+        if self.maximum is not None:
+            schema["exclusiveMaximum" if self.exclusive_maximum else "maximum"] = self.maximum
+        return schema
+
+
+class RequestedDomain(RequestedValueBounds):
+    reference_values: tuple[Scalar, ...] = Field(
+        min_length=1,
+        description="Reviewed experiment probes, not an exhaustive list of legal requests.",
+    )
+
+    @field_validator("reference_values")
     @classmethod
     def finite(cls, values: tuple[Scalar, ...]) -> tuple[Scalar, ...]:
         if len(set(values)) != len(values):
@@ -87,6 +148,14 @@ class RequestedDomain(_Model):
         if any(isinstance(v, float) and not math.isfinite(v) for v in values):
             raise ValueError("requested domain contains a non-finite value")
         return values
+
+    @model_validator(mode="after")
+    def valid_references(self) -> "RequestedDomain":
+        if self.type != "boolean" and (self.minimum is None or self.maximum is None):
+            raise ValueError("requested domain requires explicit numeric bounds")
+        if any(not self.contains(value) for value in self.reference_values):
+            raise ValueError("reference value is outside the requested domain")
+        return self
 
 
 class CardSourceSpan(_Model):
@@ -131,7 +200,7 @@ class CardSourceSpan(_Model):
         return self
 
 
-class CardActivationCondition(_Model):
+class CardEffectivenessCondition(_Model):
     kind: str
     predicate: str | None = None
     source_span_ids: tuple[str, ...] = ()
@@ -174,8 +243,8 @@ class CardRuntimeSemantics(_Model):
 
 
 class ParameterSemanticsCard(_Model):
-    schema_version: Literal["ecos.parameter_semantics_card.v1"] = (
-        "ecos.parameter_semantics_card.v1"
+    schema_version: Literal["ecos.parameter_semantics_card.v2"] = (
+        "ecos.parameter_semantics_card.v2"
     )
     knob_id: OptimizationKnob
     tool: ToolRef
@@ -183,8 +252,7 @@ class ParameterSemanticsCard(_Model):
     surface: SurfaceRef
     requested_domain: RequestedDomain
     write_mapping: dict[str, Any]
-    resolution_rules: tuple[dict[str, Any], ...] = ()
-    activation_conditions: tuple[CardActivationCondition, ...] = ()
+    effectiveness_conditions: tuple[CardEffectivenessCondition, ...] = ()
     consumers: tuple[CardConsumer, ...] = ()
     runtime_probe_ids: tuple[str, ...] = ()
     source_spans: tuple[CardSourceSpan, ...] = ()
@@ -214,7 +282,7 @@ class ParameterSemanticsCard(_Model):
             raise ValueError("parameter card source span ids must be unique")
         references = {
             source_id
-            for item in (*self.activation_conditions, *self.consumers)
+            for item in (*self.effectiveness_conditions, *self.consumers)
             for source_id in item.source_span_ids
         }
         if self.runtime_semantics is not None:

@@ -150,6 +150,7 @@ class GeneralDomainClaim(_Model):
     schema_version: Literal["ecos.general_domain_claim.v1"] = "ecos.general_domain_claim.v1"
     claim_ref: KnowledgeReference
     claim_sha256: str
+    evidence_kind: Literal["literature", "source_derived_hypothesis"] = "literature"
     stages: tuple[str, ...] = Field(min_length=1)
     state_predicates: tuple[StatePredicate, ...] = Field(min_length=1)
     anti_predicates: tuple[StatePredicate, ...] = ()
@@ -254,6 +255,8 @@ class VersionBoundToolBinding(_Model):
     claim_id: str
     claim_sha256: str
     toolchain_ref: str
+    analog_quality: Literal["exact", "coarse"] = "coarse"
+    limitations: str = ""
     actions: tuple[BoundKnowledgeAction, ...] = Field(min_length=1)
     consumer_ids: tuple[str, ...] = ()
     activation_predicate_ids: tuple[str, ...] = ()
@@ -374,6 +377,9 @@ class SupportedKnowledgeAction(KnowledgeMatch):
     binding_id: str
     binding_sha256: str
     toolchain_ref: str
+    evidence_kind: Literal["literature", "source_derived_hypothesis"] = "literature"
+    analog_quality: Literal["exact", "coarse"] = "coarse"
+    limitations: str = ""
     knob_id: OptimizationKnob
     direction: StrategyDirection
     parameter_card_ref: str | None = None

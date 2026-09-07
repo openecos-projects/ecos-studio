@@ -39,6 +39,7 @@ from ecos_agent.optimization.metrics.extraction import (
     required_nonnegative_metric,
 )
 from ecos_agent.optimization.parameter_config import (
+    floorplan_mode_state_evidence,
     harden_output_paths,
     mpc_configured,
     read_workspace_parameters,
@@ -138,6 +139,7 @@ def build_stage_observation(
     state_evidence = (
         *_hotspot_state_evidence(root, hotspots_path),
         *_place_map_state_evidence(root, canonical_stage),
+        *floorplan_mode_state_evidence(root, canonical_stage),
     )
     evidence_paths = tuple(
         dict.fromkeys(item.evidence_ref.partition("#")[0] for item in state_evidence)

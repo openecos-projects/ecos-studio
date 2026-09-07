@@ -165,3 +165,21 @@ def test_stage_observation_rejects_incomplete_and_unsafe_workspace_evidence(
 
     with pytest.raises(OptimizationObservationError, match="unsafe"):
         build_stage_observation(frozen_workspace, "place", budget=_budget())
+
+
+@pytest.mark.parametrize("mode,expected", [("die_util", True), ("die_size", False)])
+def test_floorplan_mode_is_configuration_evidence_not_parameter_effectiveness(
+    frozen_workspace: Path, mode: str, expected: bool,
+) -> None:
+    relative = "config/floorplan_ecc.json"
+    _write_json(frozen_workspace / relative, {"die_builder": {"mode": mode}})
+    observation = build_stage_observation(frozen_workspace, "Floorplan", budget=_budget())
+    feature = next(item for item in observation.state_evidence if item.feature_id == "floorplan_die_util_mode")
+    assert feature.value is expected
+    assert feature.evidence_ref == relative
+    assert feature.evidence_sha256 == file_sha256(frozen_workspace / relative)
+
+
+def test_absent_floorplan_mode_remains_unknown(frozen_workspace: Path) -> None:
+    observation = build_stage_observation(frozen_workspace, "Floorplan", budget=_budget())
+    assert not any(item.feature_id == "floorplan_die_util_mode" for item in observation.state_evidence)

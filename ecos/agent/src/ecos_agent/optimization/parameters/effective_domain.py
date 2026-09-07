@@ -7,7 +7,7 @@ import re
 from typing import Any, Iterable, Literal, Mapping
 
 from pydantic import (
-    BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt,
+    BaseModel, ConfigDict,
     field_validator, model_validator,
 )
 
@@ -16,7 +16,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationKnob, RequestedKnobValue, StrategyDirection,
 )
 from ecos_agent.optimization.parameters.contracts import (
-    OptimizationProposalV2, ParameterSemanticsCard, Scalar,
+    OptimizationProposalV2, ParameterSemanticsCard, RequestedValueBounds, Scalar,
 )
 from ecos_agent.optimization.parameters.semantics import card_hash
 
@@ -36,64 +36,6 @@ _DOMAIN_CONTEXT_KEYS = {
     "parameter_card_sha256", "parent_manifest_sha256", "terminal_execution_contract_sha256",
     "current_values", "tool_source_sha256",
 }
-
-
-class RequestedValueBounds(_Model):
-    type: Literal["boolean", "integer", "number"]
-    minimum: StrictInt | StrictFloat | None = None
-    maximum: StrictInt | StrictFloat | None = None
-    exclusive_minimum: StrictBool = False
-    exclusive_maximum: StrictBool = False
-
-    @model_validator(mode="after")
-    def valid_bounds(self) -> "RequestedValueBounds":
-        if any(
-            type(value) is float and not math.isfinite(value)
-            for value in (self.minimum, self.maximum)
-        ):
-            raise ValueError("requested value bounds must be finite")
-        if self.type == "boolean" and (
-            self.minimum is not None or self.maximum is not None
-        ):
-            raise ValueError("boolean bounds cannot contain numeric endpoints")
-        if (self.exclusive_minimum and self.minimum is None) or (
-            self.exclusive_maximum and self.maximum is None
-        ):
-            raise ValueError("exclusive bounds require endpoints")
-        if self.minimum is not None and self.maximum is not None and (
-            self.minimum > self.maximum
-            or (
-                self.minimum == self.maximum
-                and (self.exclusive_minimum or self.exclusive_maximum)
-            )
-        ):
-            raise ValueError("requested value bounds are empty")
-        return self
-
-    def contains(self, value: Any) -> bool:
-        if self.type == "boolean":
-            return type(value) is bool
-        if type(value) not in ({int} if self.type == "integer" else {int, float}):
-            return False
-        if type(value) is float and not math.isfinite(value):
-            return False
-        if self.minimum is not None and (
-            value < self.minimum or (self.exclusive_minimum and value == self.minimum)
-        ):
-            return False
-        if self.maximum is not None and (
-            value > self.maximum or (self.exclusive_maximum and value == self.maximum)
-        ):
-            return False
-        return True
-
-    def json_schema(self) -> dict[str, Any]:
-        schema: dict[str, Any] = {"type": self.type}
-        if self.minimum is not None:
-            schema["exclusiveMinimum" if self.exclusive_minimum else "minimum"] = self.minimum
-        if self.maximum is not None:
-            schema["exclusiveMaximum" if self.exclusive_maximum else "maximum"] = self.maximum
-        return schema
 
 
 class EffectiveDomainSnapshot(_Model):
@@ -211,21 +153,8 @@ def compile_effective_domain(
             )
         bound_context[key] = expected
     context_sha = build_context_fingerprint(bound_context)
-    scalar_type = {"bool": "boolean", "int": "integer", "float": "number"}.get(
-        card.surface.type
-    )
-    if scalar_type is None:
-        raise EffectiveDomainError("parameter card is not a scalar optimization parameter")
-    bounds: dict[str, Any] = {"type": scalar_type}
-    if scalar_type != "boolean":
-        bounds.update(
-            minimum=min(card.requested_domain.values),
-            maximum=max(card.requested_domain.values),
-        )
-    if card.knob_id == OptimizationKnob.TARGET_OVERFLOW:
-        bounds.update(
-            minimum=0.0, maximum=1.0, exclusive_minimum=True, exclusive_maximum=True
-        )
+    scalar_type = card.requested_domain.type
+    bounds = card.requested_domain.model_dump(exclude={"reference_values"})
     current = baseline_surface_value
     if current is None:
         current = bound_context["current_values"].get(card.knob_id.value)

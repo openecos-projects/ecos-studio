@@ -352,7 +352,7 @@ def test_status_screen_tests_each_request_once(
         tmp_path,
     )
 
-    expected = set(card.requested_domain.values) - {0.5}
+    expected = set(card.requested_domain.reference_values) - {0.5}
     assert set(requested) == expected
     assert len(results) == sequence == len(expected)
     assert summary.status_counts["effective"] == len(expected)
