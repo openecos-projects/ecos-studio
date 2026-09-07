@@ -64,14 +64,15 @@ def test_adapter_starts_only_fixed_full_flow_candidate_rerun() -> None:
     ]
 
 
-def test_adapter_resumes_only_the_bound_existing_candidate() -> None:
+@pytest.mark.parametrize("knob_id", ["place.target_density", "floorplan.core_util"])
+def test_adapter_resumes_only_the_bound_existing_candidate(knob_id: str) -> None:
     rpc = _FakeEccRpc(_running_operation())
     adapter = EccCandidateRerunAdapter(
         rpc, workspace_id="workspace-1", site_width_dbu=200
     )
 
     receipt = adapter.resume(
-        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+        _request(knob_id, 0.65, StrategyDirection.INCREASE)
     )
 
     assert receipt.execution_id == "operation-1"
@@ -84,7 +85,9 @@ def test_adapter_resumes_only_the_bound_existing_candidate() -> None:
                 "candidateId": "candidate-0c4c4b249d945101-intervention-1",
                 "idempotencyKey": "episode-1.intervention-1.resume",
                 "contextSha256": HASH,
-                "parameterCardSha256": CARD_HASH,
+                "parameterCardSha256": card_hash(
+                    load_parameter_cards()[OptimizationKnob(knob_id)]
+                ),
                 "seed": 17,
             },
         ),
@@ -154,6 +157,25 @@ def test_adapter_routes_each_knob_from_its_own_stage(
     assert candidate_call[1]["targetStep"] == target_step
     assert candidate_call[1]["endStep"] == "Harden"
     assert candidate_call[1]["patch"] == [{"knob_id": knob_id, "value": value}]
+    assert candidate_call[1].get("floorplanMode") == (
+        "die_util" if target_step == "Floorplan" else None
+    )
+
+
+def test_floorplan_candidate_selects_die_util_even_with_a_parent() -> None:
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+    adapter.start(
+        replace(
+            _request("floorplan.core_util", 0.6, StrategyDirection.INCREASE),
+            parent_candidate_root_ref=".agent/candidates/fixed-size-parent",
+        )
+    )
+    params = _candidate_call(rpc)[1]
+    assert params["floorplanMode"] == "die_util"
+    assert params["parentCandidateRootRef"] == ".agent/candidates/fixed-size-parent"
 
 
 def test_adapter_reruns_from_the_incumbent_candidate_workspace() -> None:
