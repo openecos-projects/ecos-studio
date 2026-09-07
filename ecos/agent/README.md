@@ -9,6 +9,18 @@
 ECOS Studio 负责 workspace、合同、执行和结果记录，使交互效率与过程可追溯性同时
 得到保证。
 
+## 受控优化的 Floorplan 模式
+
+受控闭环的 Floorplan 候选默认发送 `floorplanMode: "die_util"`，使
+`floorplan.core_util` 和 `floorplan.aspect_ratio` 参与几何生成，即使父候选原先
+使用 `die_size`。该覆盖只作用于隔离候选，不修改源 workspace 或普通 ECC 流程。
+运行时需要支持隔离模式切换的 ECC Agent（`a4b3d02` 或包含该功能的后续版本）。
+
+place 候选仍从 place 重跑并继承父候选模式；resume 保留原候选记录的模式，
+不会切换历史候选。已完成设计的 baseline 和 objective alignment 不自动重建。
+因此首次从固定尺寸切换的比较包含模式变化，不能归因于单个 knob；单参数效果
+实验应先使用同为 `die_util` 的 baseline。历史实验记录及 denominator 保持不变。
+
 ## 使用前准备
 
 Linux 打包版 ECOS Studio 已包含 Agent 的 Python 运行时，但**不包含 Codex CLI、
