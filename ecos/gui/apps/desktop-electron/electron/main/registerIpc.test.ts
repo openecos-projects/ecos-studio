@@ -1261,6 +1261,74 @@ describe('registerIpc', () => {
     })
   })
 
+  it('uses the persisted Project Requirement when the request omits it', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const persistedRequirement = {
+      familyId: 'ics55',
+      version: null,
+      manualConfig: null,
+    }
+    const result = { directory: '/tmp/workspace', workspaceHandle: 'workspace-handle' }
+    services.projectManagementReadService.readManifest.mockResolvedValue(
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'proj_demo',
+        name: 'demo',
+        design_name: 'demo',
+        root_path: '/tmp/project',
+        base_design: { pdk_requirement: persistedRequirement, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: [],
+        best_workspace: null,
+      }),
+    )
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.createWorkspace.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceCreate)?.(event, {
+        designTool: 'backend',
+        payload: {
+          directory: '/tmp/workspace',
+          pdk: 'ics55',
+          pdkRoot: '/tmp/vendor-pdk',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
+        },
+      }),
+    ).resolves.toEqual(result)
+    expect(services.pdkInventoryService.resolveBinding).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+      requirement: persistedRequirement,
+    })
+    expect(services.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+      requirement: persistedRequirement,
+    })
+    expect(services.eccRuntimeService.createWorkspace).toHaveBeenCalledWith({
+      directory: '/tmp/workspace',
+      pdk: 'ics55',
+      pdkRoot: '/canonical/pdk',
+    })
+  })
+
   it('waits for a runtime operation through the main-process tracker', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
