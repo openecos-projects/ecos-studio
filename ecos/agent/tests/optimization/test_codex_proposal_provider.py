@@ -521,6 +521,9 @@ def test_optimization_objective_parser_sends_only_bounded_request(
     }
     assert "primary_metric" in captured["system"]
     assert "commands" in captured["system"]
+    assert "drc_count for final DRC" in captured["system"]
+    assert "omit these redundant preserve_metrics" in captured["system"]
+    assert "requires user confirmation" in captured["system"]
     assert captured["output_schema"]["required"] == [
         "schema_version",
         "primary_metric",

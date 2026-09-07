@@ -191,20 +191,56 @@ def test_terminal_metrics_are_allowed_objectives(metric: ObjectiveMetric) -> Non
     assert proposal.primary_metric == metric
 
 
-def test_drc_goal_is_locally_bound_to_detail_route_violations() -> None:
+@pytest.mark.parametrize(
+    "preserve",
+    [
+        (),
+        (ObjectiveMetric.STA_SETUP_WNS, ObjectiveMetric.STA_HOLD_WNS),
+        (ObjectiveMetric.DRC_COUNT, ObjectiveMetric.STA_SETUP_TNS),
+        (ObjectiveMetric.STA_SETUP_VIOLATION_COUNT, ObjectiveMetric.STA_HOLD_VIOLATION_COUNT),
+    ],
+)
+def test_drc_goal_is_locally_bound_to_final_drc(
+    preserve: tuple[ObjectiveMetric, ...],
+) -> None:
     contract = freeze_optimization_objective(
         "reduce routed wirelength while preserving DRC and timing",
         OptimizationObjectiveProposal(
             primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=preserve,
             rationale_summary="Reduce wirelength without DRC or timing regressions.",
         ),
     )
 
     assert contract.preserve_metrics == (
-        ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+        ObjectiveMetric.DRC_COUNT,
     )
     assert contract.contract_sha256.startswith("sha256:")
     assert OptimizationObjectiveContract.model_validate(contract.model_dump()) == contract
+
+
+def test_drc_binding_preserves_explicit_route_metric_and_rejects_other_overflow() -> None:
+    contract = freeze_optimization_objective(
+        "reduce wirelength while preserving DRC and route violations",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,),
+            rationale_summary="Preserve both final and routing-stage checks.",
+        ),
+    )
+    assert contract.preserve_metrics == (
+        ObjectiveMetric.DRC_COUNT,
+        ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,
+    )
+    with pytest.raises(ValueError, match="too many metrics"):
+        freeze_optimization_objective(
+            "reduce wirelength while preserving DRC, area and power",
+            OptimizationObjectiveProposal(
+                primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+                preserve_metrics=(ObjectiveMetric.DIE_AREA, ObjectiveMetric.STA_WORST_DYNAMIC_POWER),
+                rationale_summary="Do not silently drop independent constraints.",
+            ),
+        )
 
 
 def test_natural_language_objective_rejects_primary_preserve_overlap() -> None:

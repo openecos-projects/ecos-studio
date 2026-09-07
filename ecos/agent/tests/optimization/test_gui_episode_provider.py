@@ -482,6 +482,83 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
     assert progress["primary_metric"] == "route_wirelength"
 
 
+@pytest.mark.parametrize(
+    "preserve_metrics",
+    [
+        ["drc_count", "sta_setup_wns"],
+        ["sta_setup_wns", "sta_hold_wns"],
+    ],
+)
+def test_gui_drc_and_timing_goal_requires_drc_recovery_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    preserve_metrics: list[str],
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    goal = "reduce routed wirelength while preserving DRC and timing"
+    baseline = _baseline(drc=9)
+    assert baseline.metrics["route_dr_total_violation_count"] == 0
+    monkeypatch.setattr(
+        "ecos_agent.gui.provider_optimization.build_terminal_observation",
+        lambda _workspace: baseline,
+    )
+    fake_provider = _FakeCodexProvider()
+
+    def propose_objective(request: str) -> dict[str, object]:
+        assert request == goal
+        return {
+            "schema_version": "ecos.optimization_objective_proposal.v1",
+            "primary_metric": "route_wirelength",
+            "preserve_metrics": preserve_metrics,
+            "rationale_summary": goal,
+        }
+
+    fake_provider.propose_optimization_objective = propose_objective
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: fake_provider,
+        optimization_runner_factory=lambda context, _planner: (
+            contexts.append(context) or _CompletedRunner()
+        ),
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+
+    _send(provider, session_id, "3")
+    _send(provider, session_id, goal)
+
+    session = provider.sessions[session_id]
+    assert session.phase == "optimization_authorization"
+    authorization = next(
+        event["optimization"]
+        for event in events
+        if event.get("optimization", {}).get("schema_version")
+        == "ecos.optimization_authorization.v2"
+    )
+    assert authorization["original_primary_metric"] == "route_wirelength"
+    assert authorization["active_primary_metric"] == "drc_count"
+    assert authorization["recovery_stage"] == "drc"
+    assert authorization["violation_counts"] == {
+        "drc_count": 9,
+        "sta_setup_violation_count": 0,
+        "sta_hold_violation_count": 0,
+    }
+    assert any(
+        event["type"] == "message"
+        and "route_wirelength" in str(event["text"])
+        and "drc_count=9" in str(event["text"])
+        for event in events
+    )
+    assert not any(event["type"] == "error" for event in events)
+    assert session.pending_interaction is not None
+    assert session.optimization_thread is None
+    assert contexts == []
+
+
 def test_gui_authorizes_recovery_then_original_objective_with_one_confirmation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

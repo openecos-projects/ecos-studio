@@ -13,6 +13,7 @@ from ecos_agent.optimization.contracts import (
     REQUIRED_SIGNOFF_GATES,
     ROUTABILITY_OBJECTIVE_ORDER,
     TIMING_GUARDRAIL_ORDER,
+    TIMING_OBJECTIVE_ORDER,
     LegalAction,
     MetricReference,
     ObjectiveMetric,
@@ -293,9 +294,18 @@ def freeze_optimization_objective(
 def _effective_preserve_metrics(
     goal_text: str, proposal: OptimizationObjectiveProposal
 ) -> tuple[ObjectiveMetric, ...]:
-    preserve_metrics = list(proposal.preserve_metrics)
+    # Timing is protected by shared WNS/TNS tolerances and recovery/signoff count gates.
+    preserve_metrics = [
+        metric
+        for metric in proposal.preserve_metrics
+        if metric not in (
+            *TIMING_OBJECTIVE_ORDER,
+            ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
+            ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
+        )
+    ]
     mentions_drc = any(marker in goal_text.casefold() for marker in _DRC_GOAL_MARKERS)
-    drc_metric = ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
+    drc_metric = ObjectiveMetric.DRC_COUNT
     if (
         mentions_drc
         and proposal.primary_metric != drc_metric
@@ -360,13 +370,9 @@ def compare_incumbent(
             return IncumbentComparison(
                 IncumbentDecision.CANDIDATE_INELIGIBLE, metric_id
             )
-    for metric_id in TIMING_GUARDRAIL_ORDER:
-        incumbent_value = incumbent.timing_guardrail[metric_id]
-        candidate_value = candidate.timing_guardrail[metric_id]
-        if candidate_value < incumbent_value and _meaningful_metric_change(
-            incumbent_value, candidate_value
-        ):
-            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+    timing_regression = _timing_regression(incumbent, candidate)
+    if timing_regression is not None:
+        return timing_regression
     if semantic_objective is not None:
         for metric_id in semantic_objective.preserve_metrics:
             incumbent_value = incumbent_objectives[metric_id]
@@ -435,12 +441,28 @@ def compare_recovery_incumbent(
     for metric in alignment.recovery_order:
         if metric != active and candidate_counts[metric] > incumbent_counts[metric]:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric)
+    timing_regression = _timing_regression(incumbent, candidate)
+    if timing_regression is not None:
+        return timing_regression
     decision = (
         IncumbentDecision.CANDIDATE_BETTER
         if candidate_counts[active] < incumbent_counts[active]
         else IncumbentDecision.INCUMBENT_RETAINED
     )
     return IncumbentComparison(decision, active)
+
+
+def _timing_regression(
+    incumbent: TerminalObservation, candidate: TerminalObservation
+) -> IncumbentComparison | None:
+    for metric_id in TIMING_GUARDRAIL_ORDER:
+        incumbent_value = incumbent.timing_guardrail[metric_id]
+        candidate_value = candidate.timing_guardrail[metric_id]
+        if candidate_value < incumbent_value and _meaningful_metric_change(
+            incumbent_value, candidate_value
+        ):
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+    return None
 
 
 def _meaningful_metric_change(reference: float, candidate: float) -> bool:

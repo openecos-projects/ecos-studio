@@ -329,11 +329,11 @@ def test_semantic_objective_preserves_guardrails_before_primary_metric() -> None
 
 def test_comparator_allows_one_percent_timing_and_preserve_metric_noise() -> None:
     semantic = freeze_optimization_objective(
-        "reduce wirelength while preserving DRC and timing",
+        "reduce wirelength while preserving detail route violations and timing",
         OptimizationObjectiveProposal(
             primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
             preserve_metrics=(ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT,),
-            rationale_summary="Keep DRC and timing within tolerance.",
+            rationale_summary="Keep routing-stage statistics and timing within tolerance.",
         ),
     )
     comparison = compare_incumbent(
