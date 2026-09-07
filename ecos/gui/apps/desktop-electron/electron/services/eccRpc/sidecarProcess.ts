@@ -241,13 +241,15 @@ export class EccRpcSidecarProcess {
       })
     })
 
-    child.once('error', (error) => {
+    const handleError = (error: unknown): void => {
       const sidecarError =
         error instanceof Error ? error : new Error(`ECC RPC sidecar error: ${error}`)
       this.launchError = sidecarError.message
       this.captureOutput(`[sidecar] ${sidecarError.message}\n`)
       client.rejectPending(sidecarError)
-    })
+    }
+    child.once('error', handleError)
+    child.stdin?.on('error', handleError)
 
     child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
       this.clearForceKillTimer()

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
+import { installProcessDiagnostics } from './processDiagnostics'
 import { registerIpc } from './registerIpc'
 import { installRuntimeQuitGuard } from './runtimeQuitGuard'
 import { handleSecondInstance } from '../services/appSecondInstance'
@@ -101,6 +102,7 @@ configureGpuMode({
 
 const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
 configureElectronLoggerFile(mainLogFile)
+installProcessDiagnostics(app)
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
 registerSurferProtocolSchemes(protocol)

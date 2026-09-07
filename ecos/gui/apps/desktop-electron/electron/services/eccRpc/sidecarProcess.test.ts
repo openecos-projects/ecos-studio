@@ -1,4 +1,5 @@
-import { EventEmitter } from 'node:events'
+import { spawn } from 'node:child_process'
+import { EventEmitter, once } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -55,6 +56,42 @@ describe('EccRpcSidecarProcess', () => {
   afterEach(() => {
     vi.useRealTimers()
     electronLogger.error.mockReset()
+  })
+
+  it('handles broken stdin without throwing into the desktop process', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const client = await sidecar.start()
+    const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })
+    const pending = client.call('rpc.ping').catch((failure: unknown) => failure)
+
+    try {
+      expect(() => child.stdin.emit('error', error)).not.toThrow()
+      expect(await pending).toBe(error)
+      expect(readFileSync(sidecar.logFile!, 'utf8')).toContain('write EPIPE')
+    } finally {
+      client.rejectPending(error)
+      await pending
+    }
+  })
+
+  it('rejects EPIPE from a real child that closes its input while still alive', async () => {
+    const child = spawn(process.execPath, [
+      '-e',
+      "require('node:fs').closeSync(0); process.stdout.write('ready'); setInterval(() => {}, 1000)",
+    ])
+    const ready = once(child.stdout, 'data')
+    const closed = once(child, 'close')
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    try {
+      const client = await sidecar.start()
+      await ready
+      await expect(client.call('rpc.ping')).rejects.toMatchObject({ code: 'EPIPE' })
+      expect(readFileSync(sidecar.logFile!, 'utf8')).toContain('EPIPE')
+    } finally {
+      child.kill()
+      await closed
+    }
   })
 
   it('spawns ECC with persistent DB support for GUI edit sessions', async () => {
