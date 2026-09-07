@@ -106,9 +106,15 @@ export class EccJsonRpcClient {
         }, timeoutMs)
       }
       this.pending.set(id, pending)
+      try {
+        this.options.writeFrame(encodeContentLengthFrame(JSON.stringify(request)))
+      } catch (error) {
+        this.pending.delete(id)
+        this.clearTimer(pending)
+        reject(error)
+      }
     })
 
-    this.options.writeFrame(encodeContentLengthFrame(JSON.stringify(request)))
     return promise
   }
 
