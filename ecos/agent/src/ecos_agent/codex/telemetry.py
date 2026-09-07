@@ -31,6 +31,7 @@ class TurnTelemetry:
         self._item_status: dict[str, str] = {}
         self._tool_counts_complete = True
         self._events: list[dict[str, str]] = []
+        self._events_truncated = False
 
     def observe(self, method: object, params: Mapping[str, Any]) -> None:
         if not isinstance(method, str):
@@ -78,6 +79,7 @@ class TurnTelemetry:
             "tool_counts_complete": self._tool_counts_complete,
             "server_retries": self.server_retries,
             "events": list(self._events),
+            "events_truncated": self._events_truncated,
             "usage": dict(self.usage) if self.usage is not None else None,
             "usage_source": self.usage_source,
             "usage_attribution": "current_turn" if self.usage_source == "completed_turn"
@@ -94,6 +96,7 @@ class TurnTelemetry:
         if self._events[-1:] == [event]:
             return
         if len(self._events) >= _MAX_EVENTS:
+            self._events_truncated = True
             self._events.pop(0)
         self._events.append(event)
 

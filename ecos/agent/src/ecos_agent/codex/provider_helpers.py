@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
+from ecos_agent.context_status import bounded_status
 from ecos_agent.codex.rpc import (
     CodexProviderError,
     _JsonLineRpcProcessClient,
@@ -260,7 +261,7 @@ def _build_prompt(
     evidence.pop("session_state", None)
     evidence.pop("agent_status", None)
     if agent_status is not None:
-        evidence["agent_status"] = agent_status
+        evidence["agent_status"] = bounded_status(agent_status)
     empirical_cases = evidence.get("empirical_cases")
     if isinstance(empirical_cases, list) and all(
         isinstance(case, Mapping) for case in empirical_cases

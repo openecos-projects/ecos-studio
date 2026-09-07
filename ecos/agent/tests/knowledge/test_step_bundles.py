@@ -323,12 +323,30 @@ def test_provider_clarifies_ambiguous_cts_request_without_changing_operation_sta
 
 def test_short_stage_acronyms_do_not_match_an_operation_request() -> None:
     events: list[dict[str, object]] = []
-    provider = EcosAgentProvider(emit=events.append)
+    contexts: list[dict[str, object]] = []
+
+    def clarify(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return {
+            "schema_version": "flow-agent.gui_chat_response.v1",
+            "operation": None,
+            "answer": None,
+            "clarification": {
+                "title": "Which flow would you like to start?",
+                "options": [{"label": option["label"]} for option in context["allowed_operations"]],
+            },
+        }
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=clarify)
     session_id = provider.start_session({"mode": "home"})["sessionId"]
     provider.sessions[session_id].pending_interaction = None
 
     provider.send_message({"sessionId": session_id, "message": "start the flow"})
 
+    assert len(contexts) == 1
+    assert [option["id"] for option in contexts[0]["allowed_operations"]] == ["1", "2", "3"]
+    assert contexts[0]["session_state"]["phase"] == "home_ready"
+    assert provider.sessions[session_id].phase == "home_ready"
     assert not any("contract" in event for event in events)
 
 

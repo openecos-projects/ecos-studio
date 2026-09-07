@@ -71,6 +71,7 @@ class LocalActivityTelemetry:
         self._events: deque[dict[str, Any]] = deque(maxlen=6)
         self.count = 0
         self.complete = True
+        self.events_truncated = False
 
     def observe(self, turn_id: str | None, item_id: str, status: str) -> None:
         if self.turn_id != turn_id:
@@ -87,6 +88,7 @@ class LocalActivityTelemetry:
         if status not in {"running", "completed", "failed", "interrupted", "declined"}:
             status = "unknown"
         if self._items.get(item_id) != status:
+            self.events_truncated |= len(self._events) == self._events.maxlen
             self._events.append({
                 "item_ref": canonical_sha256([turn_id, item_id]),
                 "status": status,
@@ -99,6 +101,7 @@ class LocalActivityTelemetry:
             "observed_activities": self.count,
             "counts_complete": self.complete,
             "events": copy.deepcopy(list(self._events)),
+            "events_truncated": self.events_truncated,
         }
 
     def finish(self, turn_id: str, status: str) -> None:
