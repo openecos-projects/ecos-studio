@@ -11,35 +11,37 @@ describe('AIChatPanel flow contracts', () => {
   })
 
   it('keeps Quick Start on Home and exposes setup cancellation in the activity view', () => {
-    expect(source).toContain("props.shell !== 'home'")
+    expect(source).toContain("props.shell === 'home'")
     expect(source).toContain('class="quick-start-stop"')
     expect(source).toContain('stopQuickStart()')
     expect(source).toContain('await quickStartRunner(')
     expect(source).toContain("schema_version: 'flow-agent.activity.v1'")
-    expect(source).toContain('interaction.interaction.options[0]?.id === answer.optionId')
+    expect(source).toContain('isQuickStartChoice(interaction, answer.optionId)')
+    expect(source).not.toContain(
+      'interaction.interaction.options[0]?.id === answer.optionId',
+    )
     expect(source).not.toContain('index === 2')
-    expect(source).toContain('? interaction.interaction.options')
-    expect(source).toContain('Quick Start: run the built-in GCD RTL-to-GDS example')
     expect(source).toMatch(/label: 'Run your own RTL-to-GDS flow',\s*value: '2'/)
     expect(source).toMatch(/label: 'Optimize a completed design',\s*value: '3'/)
     expect(source).not.toContain('class="quick-start-suggestion"')
-    expect(source).toContain('await startQuickStart()')
+    expect(source).toContain('await startQuickStart(sessionId)')
     expect(source).toContain('const narrationMessageId = sessionId')
     expect(source).toContain('messageStore.appendToMessage(narrationMessageId')
     expect(source).toContain('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
-    expect(source).toContain('Quick Start 已完成，完整 RTL 到 GDS 流程已经启动。')
+    expect(source).toContain('Quick Start 的完整 RTL 到 GDS 流程已执行完成。')
+    expect(source).toContain('quick_start_result:')
+    expect(source).toContain('operation_id: result.operationId')
+    expect(source).toContain('ownerUi.isQuickStartRunning = false')
     expect(source).toContain('quickStartAbortController.signal')
     expect(source).toContain('appendNarration,')
     expect(source).toContain(
       'messageStore.finishStreamingMessages(sessionId ?? undefined)',
     )
-    expect(source).toContain("interaction.title !== 'Get started'")
-    expect(source).toContain('if (startsQuickStart && accepted) await startQuickStart()')
+    expect(source).toContain("else deferGuiAction(sessionId, { type: 'quick_start' })")
+    expect(source).toContain('ownerUi.isRequestPending = false')
     expect(
       source.indexOf('const result = await agent.answerInteraction(request)'),
-    ).toBeLessThan(
-      source.indexOf('if (startsQuickStart && accepted) await startQuickStart()'),
-    )
+    ).toBeLessThan(source.search(/if\s*\(\s*startsQuickStart\s*&&\s*accepted/))
   })
 
   it('renders centered turns with visually distinct user messages', () => {

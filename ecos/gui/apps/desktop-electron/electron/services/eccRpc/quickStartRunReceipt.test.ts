@@ -36,6 +36,30 @@ async function readReceipt(workspace: string) {
 }
 
 describe('reconcileQuickStartRunReceipt', () => {
+  it('serializes duplicate terminal events without replacing the first terminal receipt', async () => {
+    await withWorkspace(async (workspace) => {
+      await writeReceipt(workspace)
+      const event: EccRuntimeEvent = {
+        method: 'flow.run',
+        operationId: 'op-1',
+        type: 'operation.completed',
+        workspaceDirectory: workspace,
+      }
+
+      await expect(
+        Promise.all([
+          reconcileQuickStartRunReceipt(event, { now: () => new Date(0) }),
+          reconcileQuickStartRunReceipt(event, { now: () => new Date(1000) }),
+        ]),
+      ).resolves.toEqual([true, false])
+      await expect(readReceipt(workspace)).resolves.toMatchObject({
+        completed_at: '1970-01-01T00:00:00.000Z',
+        keep: 'me',
+        status: 'flow_completed',
+      })
+    })
+  })
+
   it('marks a matching protocol completion as flow_completed', async () => {
     await withWorkspace(async (workspace) => {
       await writeReceipt(workspace)

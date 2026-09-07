@@ -326,6 +326,7 @@ _NUMERIC_FIELDS = {
 
 _INTERACTION_UNDO_FIELDS = (
     "phase",
+    "mode",
     "language",
     "language_locked",
     "project_root",

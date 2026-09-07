@@ -56,7 +56,9 @@ class GuiChatResponseProposal(BaseModel):
     schema_version: Literal["flow-agent.gui_chat_response.v1"] = (
         "flow-agent.gui_chat_response.v1"
     )
-    operation: Literal["1", "2", "3", "4"] | None = None
+    operation: Literal[
+        "1", "2", "3", "4", "optimize_current", "manual_rerun", "create_flow", "continue_flow"
+    ] | None = None
     answer: str | None = None
     clarification: GuiClarificationProposal | None = None
     evidence_ids: tuple[str, ...] = ()

@@ -24,6 +24,8 @@ from ecos_agent.workspace.setup import (
 
 class GuiPhase(StrEnum):
     HOME_READY = "home_ready"
+    QUICK_START_COMPLETED = "quick_start_completed"
+    QUICK_START_RECOVERY = "quick_start_recovery"
     OPERATION = "operation"
     RERUN_DESIGN = "rerun_design"
     RERUN_SOURCE_RUN = "rerun_source_run"
@@ -97,6 +99,7 @@ class ProviderSession:
     rerun_stage: str | None = None
     rerun_resolver: GuiWorkspaceRerunResolver | None = None
     rerun_workspace_path: str | None = None
+    quick_start_results: set[tuple[str, str]] = field(default_factory=set)
     rerun_discovery: GuiWorkspaceRerunDiscovery | None = None
     rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)
     workspace_rerun_contract: GuiWorkspaceRerunContract | None = None

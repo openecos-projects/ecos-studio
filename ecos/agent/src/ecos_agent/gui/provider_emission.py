@@ -281,7 +281,10 @@ class ProviderEmissionMixin:
         session.pending_interaction = None
         prompt_id = uuid.uuid4().hex
         choice = None
-        if session.phase == "home_ready":
+        if session.phase in {"quick_start_completed", "quick_start_recovery"}:
+            from ecos_agent.gui.quick_start import quick_start_choice
+            choice = quick_start_choice(session, prompt_id)
+        elif session.phase == "home_ready":
             choice = home_ready_choice(session.language, prompt_id)
         elif session.phase == "operation":
             choice = operation_choice(
@@ -443,6 +446,12 @@ class ProviderEmissionMixin:
         request_id = uuid.uuid4().hex
         options = choice["options"]
         option_ids = {option["id"]: f"option-{uuid.uuid4().hex}" for option in options}
+        if session.phase == "home_ready":
+            for option in options:
+                if option["value"] == "1":
+                    option_ids[option["id"]] = "quick_start"
+        elif session.phase in {"quick_start_completed", "quick_start_recovery"}:
+            option_ids = {option["id"]: option["value"] for option in options}
         values = {option_ids[option["id"]]: option["value"] for option in options}
         if session.phase in {
             "workspace_confirmation",
@@ -459,6 +468,8 @@ class ProviderEmissionMixin:
             kind = "confirm"
         elif choice.get("allowFreeText") and session.phase not in {
             "home_ready",
+            "quick_start_completed",
+            "quick_start_recovery",
             "operation",
             "workspace_project_root",
             "workspace_filelist",
@@ -722,6 +733,8 @@ class ProviderEmissionMixin:
             if session.phase
             in {
                 "home_ready",
+                "quick_start_completed",
+                "quick_start_recovery",
                 "operation",
                 "workspace_project_mode",
                 "rerun_source_run",

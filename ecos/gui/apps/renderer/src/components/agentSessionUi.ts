@@ -15,6 +15,7 @@ export type AgentContractSurface =
   | 'signoff'
 
 export type PendingGuiAction =
+  | { type: 'quick_start' }
   | {
       type: 'rerun'
       contract: NonNullable<DesktopAgentEvent['workspaceRerun']>
@@ -42,6 +43,8 @@ export interface AgentSessionUiState {
   queuedMessage: string
   isConnecting: boolean
   isRequestPending: boolean
+  isQuickStartRunning: boolean
+  quickStartAbortController?: AbortController
   isInterruptPending: boolean
   isWorkspaceCreationPending: boolean
   isWorkspaceRerunPending: boolean
@@ -87,6 +90,7 @@ export function createAgentSessionUiState(): AgentSessionUiState {
     queuedMessage: '',
     isConnecting: false,
     isRequestPending: false,
+    isQuickStartRunning: false,
     isInterruptPending: false,
     isWorkspaceCreationPending: false,
     isWorkspaceRerunPending: false,

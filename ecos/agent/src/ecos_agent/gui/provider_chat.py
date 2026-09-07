@@ -166,6 +166,10 @@ from ecos_agent.optimization.contracts import (
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.gui.session import ProviderSession
+from ecos_agent.gui.quick_start import (
+    ProviderQuickStartMixin, QUICK_START_PHASES, QUICK_START_RESULT_PREFIX,
+    quick_start_operation, quick_start_options,
+)
 
 
 
@@ -204,10 +208,18 @@ from ecos_agent.gui.provider_common import (
 )
 
 
-class ProviderChatMixin:
+class ProviderChatMixin(ProviderQuickStartMixin):
     def _handle_input(self, session: _Session, message: str) -> None:
+        if message.startswith(QUICK_START_RESULT_PREFIX):
+            self._handle_quick_start_result(session, message)
+            return
         if re.match(r"^/[A-Za-z][A-Za-z0-9_-]*(?:\s|$)", message):
             self._handle_slash_command(session, message)
+            return
+        if session.phase in QUICK_START_PHASES:
+            self._handle_idle_input(session, message)
+            if session.phase in QUICK_START_PHASES and session.pending_interaction is None:
+                self._emit_phase_choice(session)
             return
         handlers = {
             "home_ready": self._select_home_ready,
@@ -271,6 +283,8 @@ class ProviderChatMixin:
         if choice is not None:
             if session.phase == "home_ready":
                 self._select_home_ready(session, message, choice)
+            elif session.phase in QUICK_START_PHASES:
+                self._select_quick_start_next(session, message, choice)
             else:
                 self._select_operation(session, message, choice)
             return
@@ -535,6 +549,8 @@ class ProviderChatMixin:
             return
 
     def _resolve_operation_choice(self, session: _Session, message: str) -> str | None:
+        if session.phase in QUICK_START_PHASES:
+            return quick_start_operation(session, message)
         resolve_mode = "home" if session.phase == "home_ready" else session.mode
         allowed_options = _allowed_operation_options(
             session.language,
@@ -648,11 +664,15 @@ class ProviderChatMixin:
         self._complete_answer_validation(session, "operation", 0)
         if session.phase == "home_ready":
             self._select_home_ready(session, message, response.operation)
+        elif session.phase in QUICK_START_PHASES:
+            self._select_quick_start_next(session, message, response.operation)
         else:
             self._select_operation(session, message, response.operation)
 
     @staticmethod
     def _chat_allowed_operations(session: _Session) -> list[dict[str, str]]:
+        if session.phase in QUICK_START_PHASES:
+            return quick_start_options(session)
         if session.phase not in {"home_ready", "operation"}:
             return []
         return _allowed_operation_options(
