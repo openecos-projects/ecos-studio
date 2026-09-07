@@ -238,7 +238,11 @@ def _direction_candidates(
         return (
             type(value) is not bool
             and value not in excluded
-            and reference_lower <= numeric <= reference_upper
+            and (
+                0 < numeric < 1
+                if knob_id == OptimizationKnob.TARGET_OVERFLOW
+                else reference_lower <= numeric <= reference_upper
+            )
             and lower <= numeric <= upper
             and (floor is None or numeric > floor)
             and ((numeric < anchor) if decreasing else (numeric > anchor))
@@ -280,6 +284,9 @@ def _dynamic_requested_values(
         default=None,
     )
     lower, upper = float(min(references)), float(max(references))
+    if card.knob_id == OptimizationKnob.TARGET_OVERFLOW:
+        # Open endpoints are virtual anchors for midpoint search, never candidates.
+        lower, upper = 0.0, 1.0
     candidates = (
         *_direction_candidates(
             card.knob_id, references, float(anchor), lower, excluded, floor

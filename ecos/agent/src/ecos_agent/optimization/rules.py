@@ -29,6 +29,7 @@ from ecos_agent.optimization.contracts import (
     TimingGuardrailContract,
     TimingReference,
     objective_metric_utility,
+    requested_reference_values,
 )
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 from ecos_agent.optimization.objective_alignment import (
@@ -42,7 +43,7 @@ _DENSITY_VALUES = tuple(round(0.1 + 0.05 * i, 2) for i in range(14)) + (0.8, 0.8
 _PADDING_VALUES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
 _LATTICE_VALUES = {
     OptimizationKnob.TARGET_DENSITY: _DENSITY_VALUES,
-    OptimizationKnob.TARGET_OVERFLOW: (0.0, 0.02, 0.04, 0.06, 0.07, 0.08, 0.085, 0.09, 0.095, 0.1, 0.105, 0.11, 0.115, 0.12, 0.13, 0.14, 0.16, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0),
+    OptimizationKnob.TARGET_OVERFLOW: requested_reference_values(OptimizationKnob.TARGET_OVERFLOW),
     OptimizationKnob.CELL_PADDING_X: _PADDING_VALUES,
     OptimizationKnob.DENSITY_WEIGHT: (0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.00065, 0.00075, 0.00085, 0.001, 0.00125, 0.0015, 0.002, 0.0025, 0.0035, 0.005, 0.0075, 0.01),
     OptimizationKnob.FLOORPLAN_CORE_UTIL: tuple(round(0.2 + 0.05 * i, 2) for i in range(16)),

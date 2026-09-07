@@ -17,6 +17,22 @@ from tests.optimization.parameters.effectiveness_support import (
 )
 
 
+@pytest.mark.parametrize("anchor", (0.0, 0.01, 0.1, 0.9, 1.0))
+def test_overflow_candidates_exclude_endpoints_without_truncating_interior(anchor) -> None:
+    card = load_parameter_cards()[OptimizationKnob.TARGET_OVERFLOW]
+    context = domain_context(
+        current_values={"place.target_overflow": anchor},
+        parameter_card_sha256=card_hash(card),
+    )
+    domain = compile_effective_domain(card, context=context, baseline_surface_value=anchor)
+    assert domain.allowed_requested_values
+    assert all(0 < value < 1 for value in domain.allowed_requested_values)
+    assert all(0 < value < 1 for value in card.requested_domain.values)
+    if 0 < anchor < 1:
+        assert any(value < anchor for value in domain.allowed_requested_values)
+        assert any(value > anchor for value in domain.allowed_requested_values)
+
+
 def test_density_floor_excludes_only_values_supported_by_typed_rule() -> None:
     cards = load_parameter_cards()
     card = cards[OptimizationKnob.TARGET_DENSITY]

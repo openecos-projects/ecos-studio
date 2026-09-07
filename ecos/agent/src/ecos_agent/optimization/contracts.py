@@ -688,7 +688,6 @@ _REQUESTED_LATTICES = {
     OptimizationKnob.TARGET_DENSITY: tuple(round(0.1 + 0.05 * i, 2) for i in range(14))
     + (0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95),
     OptimizationKnob.TARGET_OVERFLOW: (
-        0.0,
         0.02,
         0.04,
         0.06,
@@ -710,7 +709,6 @@ _REQUESTED_LATTICES = {
         0.4,
         0.5,
         0.75,
-        1.0,
     ),
     OptimizationKnob.CELL_PADDING_X: (0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16),
     OptimizationKnob.ROUTABILITY_OPT: (False, True),
@@ -756,6 +754,8 @@ _REQUESTED_LATTICES = {
 
 
 def _is_requested_domain_value(knob_id: OptimizationKnob, value: float) -> bool:
+    if knob_id == OptimizationKnob.TARGET_OVERFLOW:
+        return 0 < value < 1
     references = _REQUESTED_LATTICES[knob_id]
     return math.isfinite(value) and (
         min(references) <= value <= max(references)
