@@ -2,16 +2,88 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
 
 from ecos_agent.codex.provider_helpers import (
     _model_reasoning_efforts,
     _read_only_thread_config,
+    _build_prompt,
+    ToolPolicy,
 )
-from ecos_agent.codex.rpc import CodexProviderError, _read_nested_string
+from ecos_agent.codex.rpc import CodexProviderError, _read_nested_string, _JsonLineRpcProcessClient
+from ecos_agent.context_status import StatusSnapshots
+from ecos_agent.runtime_status import RequestTelemetry
+from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.contracts import PlanningProviderEnvelope
 
 
 class CodexThreadManagementMixin:
+    def _request_json(
+        self,
+        *,
+        system: str,
+        user: dict[str, Any],
+        output_schema: dict[str, Any],
+        tool_policy: ToolPolicy = "none",
+    ) -> dict[str, Any]:
+        with self._state_lock:
+            if self._interrupted:
+                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
+        thread_id = self._ensure_thread(self._ensure_client())
+        status = self._status_snapshots.build(user, thread_id)
+        status["runtime"] = self._runtime_status.snapshot(thread_id)
+        prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
+        with self._state_lock:
+            if self._planning_envelope is not None:
+                envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
+                envelope["prompt"] = prompt
+                self._planning_envelope = PlanningProviderEnvelope(
+                    **envelope, envelope_sha256=canonical_sha256(envelope)
+                )
+        text = self._run_turn(prompt, output_schema, tool_policy=tool_policy)
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            self._runtime_status.validation(False)
+            raise CodexProviderError(
+                "Codex assistant content is not valid JSON", failure_class="parse_error"
+            ) from exc
+        if not isinstance(payload, dict):
+            self._runtime_status.validation(False)
+            raise CodexProviderError(
+                "Codex assistant JSON must be an object", failure_class="parse_error"
+            )
+        return payload
+
+    def _start_and_wait(
+        self, client: _JsonLineRpcProcessClient, thread_id: str,
+        method: str, params: dict[str, Any], *, tool_policy: ToolPolicy = "none",
+    ) -> str:
+        self._runtime_status.begin(thread_id)
+        self._last_turn_usage = None
+        failure = None
+        turn_id = None
+        try:
+            response = client.request(method, params)
+            turn_id = _read_nested_string(response, (("turn", "id"), ("turnId",), ("id",)))
+            return self._wait_for_turn(client, thread_id, response, tool_policy=tool_policy)
+        except Exception as exc:
+            failure = "interrupted" if self._interrupted else getattr(exc, "failure_class", "tool_error")
+            raise
+        finally:
+            observed = {
+                "thread_id": thread_id, "turn_id": turn_id,
+                "tool_calls": None, "tool_counts_complete": False,
+                "usage": self._last_turn_usage, "usage_source": None,
+            }
+            telemetry = getattr(client, "turn_telemetry", None)
+            if telemetry is not None:
+                details = telemetry.snapshot()
+                if turn_id is not None and details.get("turn_id") == turn_id and details.get("thread_id") == thread_id:
+                    observed = details
+            self._runtime_status.finish(observed, failure)
+
     def close(self) -> None:
         if self._client is not None:
             self._client.close()
@@ -52,6 +124,8 @@ class CodexThreadManagementMixin:
                 )
             self._thread_id = None
             self._interrupted = False
+            self._status_snapshots = StatusSnapshots()
+            self._runtime_status = RequestTelemetry()
 
     @property
     def thread_id(self) -> str | None:
@@ -203,6 +277,8 @@ class CodexThreadManagementMixin:
                 "Codex thread/fork response missing thread id", failure_class="tool_error"
             )
         self._thread_id = fork_id
+        self._status_snapshots = StatusSnapshots()
+        self._runtime_status = RequestTelemetry()
         return fork_id
 
     def list_threads(self) -> list[dict[str, Any]]:
@@ -239,20 +315,21 @@ class CodexThreadManagementMixin:
                 "Codex thread/resume response missing thread id", failure_class="tool_error"
             )
         self._thread_id = resumed_id
+        self._status_snapshots = StatusSnapshots()
+        self._runtime_status = RequestTelemetry()
         return resumed_id
 
     def review_uncommitted_changes(self) -> str:
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
-        response = client.request(
-            "review/start",
+        return self._start_and_wait(
+            client, thread_id, "review/start",
             {
                 "threadId": thread_id,
                 "target": {"type": "uncommittedChanges"},
                 "delivery": "inline",
             },
         )
-        return self._wait_for_turn(client, thread_id, response)
 
     def _thread_request(self, method: str, **params: Any) -> dict[str, Any]:
         client = self._ensure_client()

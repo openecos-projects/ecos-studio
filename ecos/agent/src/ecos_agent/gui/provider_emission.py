@@ -652,6 +652,8 @@ class ProviderEmissionMixin:
         error: str | None = None,
     ) -> None:
         key = _activity_identifier(f"local-{item_id}")
+        with session.state_lock:
+            session.local_telemetry.observe(session.active_turn_id, key, status)
         now = round(time.time() * 1000)
         activity = session.active_local_activities.setdefault(
             key,

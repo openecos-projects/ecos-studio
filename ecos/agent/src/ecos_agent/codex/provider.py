@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict
 from ecos_agent.context_status import StatusSnapshots
+from ecos_agent.runtime_status import RequestTelemetry
 
 from ecos_agent.codex.rpc import (
     CodexProviderError,
@@ -168,6 +169,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         self._interrupted = False
         self._state_lock = threading.Lock()
         self._status_snapshots = StatusSnapshots()
+        self._runtime_status = RequestTelemetry()
+        self._last_turn_usage: dict[str, int] | None = None
 
     def propose(self, context: OptimizationPlanningContext) -> dict[str, Any]:
         payload = _optimization_planning_payload(context)
@@ -493,7 +496,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         tool_policy: ToolPolicy = "none",
     ) -> dict[str, Any]:
         try:
-            return model.model_validate(
+            result = model.model_validate(
                 self._request_json(
                     system=system,
                     user=context,
@@ -501,51 +504,16 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                     tool_policy=tool_policy,
                 )
             ).model_dump(mode="json")
+            self._runtime_status.validation(True)
+            return result
         except CodexProviderError:
             raise
         except Exception as exc:
+            self._runtime_status.validation(False)
             raise CodexProviderError(
                 "Codex GUI proposal failed schema validation",
                 failure_class="parse_error",
             ) from exc
-
-    def _request_json(
-        self,
-        *,
-        system: str,
-        user: dict[str, Any],
-        output_schema: dict[str, Any],
-        tool_policy: ToolPolicy = "none",
-    ) -> dict[str, Any]:
-        with self._state_lock:
-            if self._interrupted:
-                raise CodexProviderError("Codex turn interrupted", failure_class="interrupted")
-        thread_id = self._ensure_thread(self._ensure_client())
-        status = self._status_snapshots.build(user, thread_id)
-        prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
-        with self._state_lock:
-            if self._planning_envelope is not None:
-                envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
-                envelope["prompt"] = prompt
-                self._planning_envelope = PlanningProviderEnvelope(
-                    **envelope, envelope_sha256=canonical_sha256(envelope)
-                )
-        text = self._run_turn(
-            prompt,
-            output_schema,
-            tool_policy=tool_policy,
-        )
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise CodexProviderError(
-                "Codex assistant content is not valid JSON", failure_class="parse_error"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise CodexProviderError(
-                "Codex assistant JSON must be an object", failure_class="parse_error"
-            )
-        return payload
 
     def _run_turn(
         self,
@@ -561,8 +529,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 )
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
-        response = client.request(
-            "turn/start",
+        return self._start_and_wait(
+            client, thread_id, "turn/start",
             {
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": prompt, "text_elements": []}],
@@ -590,10 +558,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 "personality": None,
                 "outputSchema": output_schema,
                 "collaborationMode": None,
-            },
-        )
-        return self._wait_for_turn(
-            client, thread_id, response, tool_policy=tool_policy
+            }, tool_policy=tool_policy,
         )
 
     def _wait_for_turn(
@@ -625,9 +590,10 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 )
 
         try:
-            text, _ = client.wait_for_turn_details(
+            text, usage = client.wait_for_turn_details(
                 turn_id, thread_id=thread_id, activity_callback=report_activity
             )
+            self._last_turn_usage = usage
         except CodexProviderError as exc:
             if self._interrupted:
                 raise CodexProviderError(
