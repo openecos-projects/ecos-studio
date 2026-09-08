@@ -71,6 +71,7 @@ export class SettingsRegistryService {
   }
 
   async list(): Promise<DesktopSettingState[]> {
+    await this.settlePendingApplies()
     const states: DesktopSettingState[] = []
     for (const descriptor of SETTINGS_REGISTRY) {
       states.push(await this.stateFor(descriptor))
@@ -145,6 +146,18 @@ export class SettingsRegistryService {
   }
 
   /**
+   * Run an operation serialized against the write transactions of one key.
+   * Out-of-registry writers of `agent.codexBin` (the legacy Codex IPC paths)
+   * use this so their persistence cannot interleave with registry writes.
+   */
+  async runExclusive<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    if (!isNonEmptyString(key)) {
+      throw new Error('设置项键名必须是非空字符串')
+    }
+    return await this.enqueueWrite(key, operation)
+  }
+
+  /**
    * Re-read and broadcast one key after an out-of-registry write (for example
    * the Codex dependency picker in the AI chat panel) so every window,
    * including the Preferences page, converges on the same value.
@@ -170,6 +183,49 @@ export class SettingsRegistryService {
       ),
     )
     return next
+  }
+
+  /**
+   * Finish deferred applies once the ECC pool drained: actually restart the
+   * idle runtimes, then clear the pending marker and broadcast the resulting
+   * state so open pages stop showing 'pending'. A failing apply becomes an
+   * error record so the failure is surfaced instead of silently timing out.
+   */
+  private async settlePendingApplies(): Promise<void> {
+    for (const key of Array.from(this.pendingApplyKeys)) {
+      if (this.isEccRuntimePoolBusy()) return
+      const descriptor = this.requireDescriptor(key)
+      const handler = this.handlers[key]
+      if (!descriptor || !handler) {
+        this.pendingApplyKeys.delete(key)
+        continue
+      }
+
+      await this.enqueueWrite(key, async () => {
+        if (!this.pendingApplyKeys.has(key)) return
+        if (this.isEccRuntimePoolBusy()) return
+        this.pendingApplyKeys.delete(key)
+        let status: DesktopSettingStatus
+        try {
+          const outcome = await handler.apply(await this.readStoredValue(key))
+          status = outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
+        } catch (error) {
+          status = { kind: 'error', error: errorFromException(error) }
+        }
+        if (status.kind === 'pending') {
+          this.pendingApplyKeys.add(key)
+        } else if (status.kind === 'error') {
+          this.applyFailures.set(key, {
+            error: status.error,
+            value: await this.readStoredValue(key),
+          })
+        } else {
+          this.applyFailures.delete(key)
+        }
+        const state = await this.stateFor(descriptor)
+        this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
+      })
+    }
   }
 
   private async finishWrite(
@@ -241,7 +297,14 @@ export class SettingsRegistryService {
     if (!handler) {
       return { kind: 'ok' }
     }
-    const validation = await handler.validate(value)
+    let validation
+    try {
+      validation = await handler.validate(value)
+    } catch (error) {
+      // A probing failure (unavailable inventory, IO error) flags only this
+      // entry instead of failing the whole list for every window.
+      return { kind: 'error', error: errorFromException(error) }
+    }
     return validation.ok
       ? okStatus(validation.displayInfo)
       : { kind: 'error', error: validation.error }

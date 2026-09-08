@@ -53,6 +53,13 @@ export async function resolveExecutablePath(
   }
 }
 
+/** Upper bound for captured child output so a chatty process cannot exhaust memory. */
+const MAX_CAPTURED_OUTPUT_CHARS = 8_192
+/** Grace period between SIGTERM and SIGKILL when the probe times out. */
+const KILL_GRACE_MS = 1_000
+/** Hard backstop that resolves the probe even if the child ignores SIGKILL. */
+const FORCE_RESOLVE_AFTER_KILL_MS = 3_000
+
 /**
  * Confirm a path points at an executable and probe it with a version flag so a
  * broken binary is rejected before it is persisted or used to launch a sidecar.
@@ -70,35 +77,62 @@ export async function probeExecutableVersion(
 
   return await new Promise<ExecutableProbeResult>((resolve) => {
     const child = spawnImpl(resolved, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const timeoutError: ExecutableProbeResult = {
+      ok: false,
+      error: `探测可执行文件超时 (${Math.round(options.timeoutMs / 1000)}s): ${pathValue}`,
+    }
     let stdout = ''
     let stderr = ''
     let settled = false
+    let timedOut = false
+    let killTimer: ReturnType<typeof setTimeout> | null = null
+    let forceResolveTimer: ReturnType<typeof setTimeout> | null = null
 
     const finish = (result: ExecutableProbeResult) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
+      if (forceResolveTimer) clearTimeout(forceResolveTimer)
       resolve(result)
     }
 
     const timer = setTimeout(() => {
+      timedOut = true
       child.kill()
-      finish({
-        ok: false,
-        error: `探测可执行文件超时 (${Math.round(options.timeoutMs / 1000)}s): ${pathValue}`,
-      })
+      // A child ignoring SIGTERM gets SIGKILL; a hard backstop keeps this
+      // promise bounded even when the process ignores every signal.
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL')
+      }, KILL_GRACE_MS)
+      forceResolveTimer = setTimeout(
+        () => finish(timeoutError),
+        FORCE_RESOLVE_AFTER_KILL_MS,
+      )
     }, options.timeoutMs)
 
+    const appendCapped = (target: string, chunk: Buffer | string): string => {
+      if (target.length >= MAX_CAPTURED_OUTPUT_CHARS) return target
+      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+      return `${target}${text.slice(0, MAX_CAPTURED_OUTPUT_CHARS - target.length)}`
+    }
+
     child.stdout?.on('data', (chunk: Buffer | string) => {
-      stdout += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+      stdout = appendCapped(stdout, chunk)
     })
     child.stderr?.on('data', (chunk: Buffer | string) => {
-      stderr += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+      stderr = appendCapped(stderr, chunk)
     })
     child.on('error', (error) => {
       finish({ ok: false, error: `无法执行 ${pathValue}: ${error.message}` })
     })
     child.on('close', (code) => {
+      // Resolve only on actual exit so a terminated probe cannot leak its
+      // child or its listeners.
+      if (timedOut) {
+        finish(timeoutError)
+        return
+      }
       if (code !== 0) {
         const detail = stderr.trim().split(/\r?\n/)[0] ?? ''
         finish({

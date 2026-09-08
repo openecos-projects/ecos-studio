@@ -154,6 +154,7 @@ export interface DesktopBridgeServices {
     list(): Promise<DesktopSettingState[]>
     notifyKeyChanged(key: string): Promise<void>
     reset(key: unknown): Promise<DesktopSettingWriteResult>
+    runExclusive<T>(key: string, operation: () => Promise<T>): Promise<T>
     set(key: unknown, value: unknown): Promise<DesktopSettingWriteResult>
   }
   appInfoService: {
@@ -2360,7 +2361,9 @@ export function registerIpc(
       }
     })
     try {
-      return await requireCodexDependencyService(services).install()
+      return await withCodexKeyTransaction(services, () =>
+        requireCodexDependencyService(services).install(),
+      )
     } finally {
       unsubscribe()
       await applyCodexBinEnv(services)
@@ -2369,7 +2372,9 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.agentCodexLogin, async () => {
-    const status = await requireCodexDependencyService(services).login()
+    const status = await withCodexKeyTransaction(services, () =>
+      requireCodexDependencyService(services).login(),
+    )
     await applyCodexBinEnv(services)
     await notifyCodexBinSettingChanged(services)
     return status
@@ -2377,7 +2382,9 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.agentCodexSetBinPath, async (_event, request) => {
     const pathValue = readCodexBinPathRequest(request)
-    const status = await requireCodexDependencyService(services).setBinPath(pathValue)
+    const status = await withCodexKeyTransaction(services, () =>
+      requireCodexDependencyService(services).setBinPath(pathValue),
+    )
     await applyCodexBinEnv(services)
     await notifyCodexBinSettingChanged(services)
     return status
@@ -2505,6 +2512,20 @@ function requireSettingsRegistryService(
  * legacy Codex IPC paths so the Preferences page converges when the AI chat
  * panel is the writer.
  */
+/**
+ * Run a legacy Codex write serialized against the settings-registry
+ * transactions of the same key, so a Preferences write cannot interleave with
+ * it and broadcast a mixed value/status.
+ */
+async function withCodexKeyTransaction<T>(
+  services: DesktopBridgeServices,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const registry = services.settingsRegistryService
+  if (!registry) return await operation()
+  return await registry.runExclusive(DESKTOP_CODEX_BIN_SETTING_KEY, operation)
+}
+
 async function notifyCodexBinSettingChanged(
   services: DesktopBridgeServices,
 ): Promise<void> {

@@ -128,4 +128,24 @@ describe('PathSettingInput', () => {
 
     expect(wrapper.emitted('commit')).toBeUndefined()
   })
+
+  it('preserves a draft the user is typing when an async write completes', async () => {
+    const wrapper = mountWidget(entryFixture('filePath', ''))
+
+    // The user commits value A...
+    await wrapper.find('input').setValue('/a/ecc')
+    await wrapper.find('input').trigger('keydown.enter')
+    expect(wrapper.emitted('commit')).toEqual([['/a/ecc']])
+
+    // ...the authoritative entry catches up with A...
+    await wrapper.setProps({ entry: entryFixture('filePath', '/a/ecc') })
+
+    // ...and the user starts typing B while the next write is in flight.
+    await wrapper.find('input').setValue('/ab/ecc')
+    // Another authoritative replace lands while B is being validated.
+    await wrapper.setProps({ entry: entryFixture('filePath', '/a/ecc') })
+
+    // The draft must not be reset back to the acknowledged value.
+    expect((wrapper.find('input').element as HTMLInputElement).value).toBe('/ab/ecc')
+  })
 })

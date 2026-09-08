@@ -127,6 +127,14 @@ export function createSettingHandlers(
         if (!probe.ok) {
           return { ok: false, error: probe.error }
         }
+        // Any binary can answer `--version`; require it to identify as ECC so
+        // an unrelated executable does not poison the sidecar launch.
+        if (!/ecc/i.test(probe.version)) {
+          return {
+            ok: false,
+            error: `所选路径不是 ECC 可执行文件 (版本输出: ${probe.version})`,
+          }
+        }
         return { ok: true, displayInfo: probe.version }
       },
     },
@@ -179,6 +187,17 @@ export function createSettingHandlers(
         const installation = installations.find((entry) => entry.id === trimmed)
         if (!installation) {
           return { ok: false, error: `未找到 ID 为 ${trimmed} 的 PDK 安装` }
+        }
+        // A default the wizard cannot use (missing/invalid installation) would
+        // silently preselect a broken PDK; only usable installs qualify.
+        if (
+          installation.readiness === 'missing' ||
+          installation.readiness === 'invalid'
+        ) {
+          return {
+            ok: false,
+            error: `PDK 安装 ${installation.displayName} 当前不可用 (${installation.readiness})`,
+          }
         }
         return { ok: true, displayInfo: installation.displayName }
       },

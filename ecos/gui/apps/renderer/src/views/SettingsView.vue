@@ -25,7 +25,13 @@
     </aside>
     <section class="settings-content">
       <h2 class="settings-heading">{{ activeCategory ?? 'Settings' }}</h2>
-      <div v-if="store.loading && store.entries.length === 0" class="settings-empty">
+      <div v-if="store.loadError" class="settings-empty">
+        <p>Failed to load settings: {{ store.loadError }}</p>
+        <button class="retry-btn" type="button" @click="() => void store.load()">
+          Retry
+        </button>
+      </div>
+      <div v-else-if="store.loading && store.entries.length === 0" class="settings-empty">
         Loading settings…
       </div>
       <div v-else-if="visibleEntries.length === 0" class="settings-empty">
@@ -199,5 +205,18 @@ onUnmounted(() => {
 .settings-empty {
   color: var(--p-text-muted-color, rgba(128, 128, 128, 0.9));
   padding: 2rem 0;
+}
+
+.retry-btn {
+  background: transparent;
+  border: 1px solid var(--p-content-border-color, rgba(128, 128, 128, 0.4));
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.35rem 0.9rem;
+}
+
+.retry-btn:hover {
+  background: var(--p-content-hover-background, rgba(128, 128, 128, 0.12));
 }
 </style>

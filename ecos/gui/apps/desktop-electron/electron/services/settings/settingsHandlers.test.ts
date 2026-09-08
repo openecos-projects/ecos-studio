@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -16,6 +16,9 @@ const tempRoots: string[] = []
 
 afterEach(async () => {
   vi.useRealTimers()
+  await Promise.all(
+    tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+  )
 })
 
 async function createTempRoot(): Promise<string> {
@@ -233,6 +236,18 @@ describe('settings handlers', () => {
         supportsEccDefaults: true,
         version: null,
       },
+      {
+        familyId: 'broken',
+        id: 'broken-1',
+        ownership: 'imported',
+        readiness: 'invalid',
+        reason: 'missing tech lef',
+        displayName: 'Broken PDK',
+        registrySha256: null,
+        root: '/pdk/broken',
+        supportsEccDefaults: false,
+        version: null,
+      },
     ]
     const dependencies = createDependencies({
       pdkInventory: {
@@ -247,6 +262,8 @@ describe('settings handlers', () => {
       ok: true,
     })
     await expect(handler.validate('gone-id')).resolves.toMatchObject({ ok: false })
+    // An unusable installation must not become the default.
+    await expect(handler.validate('broken-1')).resolves.toMatchObject({ ok: false })
 
     await handler.persist('sky130-1')
     expect(dependencies.settings.get('pdk.defaultInstallationId')).toBe('sky130-1')
@@ -361,7 +378,10 @@ describe('settings handlers', () => {
     const root = await createTempRoot()
     const eccPath = await createVersionExecutable(root, 'ecc', 'never prints')
     class HangingChild extends EventEmitter {
-      kill = vi.fn()
+      kill = vi.fn((signal?: NodeJS.Signals) => {
+        // A stubborn child ignores SIGTERM and only dies on SIGKILL.
+        if (signal === 'SIGKILL') this.emit('close', null, 'SIGKILL')
+      })
     }
     const child = new HangingChild()
     const spawn = vi.fn(() => child)
@@ -379,12 +399,13 @@ describe('settings handlers', () => {
       while (spawn.mock.calls.length === 0) {
         await new Promise((resolve) => setImmediate(resolve))
       }
-      await vi.advanceTimersByTimeAsync(ECC_VERSION_PROBE_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(ECC_VERSION_PROBE_TIMEOUT_MS + 1_000)
       await expect(probe).resolves.toMatchObject({
         error: expect.stringContaining('超时'),
         ok: false,
       })
-      expect(child.kill).toHaveBeenCalled()
+      expect(child.kill).toHaveBeenCalledWith()
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
     } finally {
       vi.useRealTimers()
     }

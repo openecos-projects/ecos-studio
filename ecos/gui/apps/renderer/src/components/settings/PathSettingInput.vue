@@ -35,11 +35,21 @@ const emit = defineEmits<{
 }>()
 
 const draftValue = ref(props.entry.value ?? '')
+/** True while the user typed something that has not been acknowledged yet. */
+const draftDirty = ref(false)
+
+watch(draftValue, (value) => {
+  draftDirty.value = value !== (props.entry.value ?? '')
+})
 
 watch(
   () => props.entry,
   (entry) => {
-    draftValue.value = entry.value ?? ''
+    // An authoritative/optimistic entry replace must not clobber a value the
+    // user is still typing (a slow validate can take seconds).
+    if (!draftDirty.value) {
+      draftValue.value = entry.value ?? ''
+    }
   },
 )
 

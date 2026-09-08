@@ -1664,4 +1664,64 @@ describe('EccWorkspaceRuntime', () => {
       }),
     ).rejects.toThrow('Workspace session not found')
   })
+
+  describe('restartForConfigChange', () => {
+    it('shuts down an idle runtime so the next start respawns it', async () => {
+      const { service, sidecar } = createService('/work/demo')
+      await expect(service.restartForConfigChange()).resolves.toBe(true)
+      expect(sidecar.shutdownCount).toBe(1)
+    })
+
+    it('postpones a queued shutdown until the in-flight flow completes', async () => {
+      const { client, service, sidecar } = createService('/work/demo')
+      client.responses.push(
+        { capabilities: [], eccVersion: '0.1.0', version: 1 },
+        { directory: '/work/demo', workspaceId: 'workspace-1' },
+      )
+      const workspace = await service.openWorkspace({ directory: '/work/demo' })
+      const gate = deferred<unknown>()
+      client.responses.push(gate.promise)
+      const flow = service
+        .runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+        .catch((error: unknown) => error)
+      await waitForQueuedOperation()
+
+      // The restart queues behind the flow; the running flow is untouched.
+      const restart = service.restartForConfigChange()
+      await waitForQueuedOperation()
+      expect(sidecar.shutdownCount).toBe(0)
+
+      gate.resolve({ rerun: false })
+      await flow
+      await expect(restart).resolves.toBe(true)
+      expect(sidecar.shutdownCount).toBe(1)
+    })
+
+    it('runs flows queued after the restart only once the sidecar shut down', async () => {
+      const { client, service, sidecar } = createService('/work/demo')
+      client.responses.push(
+        { capabilities: [], eccVersion: '0.1.0', version: 1 },
+        { directory: '/work/demo', workspaceId: 'workspace-1' },
+      )
+      const workspace = await service.openWorkspace({ directory: '/work/demo' })
+      expect(sidecar.shutdownCount).toBe(0)
+
+      const restart = service.restartForConfigChange()
+      // The flow queued behind the restart re-handshakes on a fresh sidecar
+      // start, which is where launch drift detection applies the new config.
+      client.responses.push(
+        { capabilities: [], eccVersion: '0.1.0', version: 1 },
+        { directory: '/work/demo', workspaceId: 'workspace-1' },
+        { rerun: false },
+      )
+      const flow = service
+        .runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+        .catch((error: unknown) => error)
+
+      await expect(restart).resolves.toBe(true)
+      expect(sidecar.shutdownCount).toBe(1)
+      await expect(flow).resolves.toEqual({ rerun: false })
+      expect(sidecar.startCount).toBe(2)
+    })
+  })
 })

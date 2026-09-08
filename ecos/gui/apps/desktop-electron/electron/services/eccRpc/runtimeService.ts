@@ -49,7 +49,6 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
-import { EccRpcShutdownDeferredError } from './sidecarProcess'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -140,13 +139,16 @@ export class EccRpcRuntimeService {
   }
 
   /**
-   * Shut down every runtime whose sidecar is idle so its next start() call
-   * respawns with the current launch configuration. Runtimes with pending work
-   * keep running; their next sidecar start picks up the new configuration via
-   * env/launch drift detection. Returns 'pending' when at least one runtime was
-   * left untouched because it still had active work. Unexpected shutdown
-   * failures are surfaced to the caller after every runtime was attempted, so
-   * the settings layer can report the apply failure instead of swallowing it.
+   * Restart every runtime so it picks up the current launch configuration.
+   * Runtimes with active work defer the restart to their next sidecar start
+   * (drift detection) instead of being interrupted. For idle runtimes the
+   * shutdown is enqueued on the runtime's own operation queue, so a flow
+   * queued after this call only starts once the sidecar has been shut down
+   * and respawns with the new configuration; a flow that raced in earlier
+   * completes first and defers the restart. Returns 'pending' when at least
+   * one runtime deferred. Unexpected shutdown failures are surfaced to the
+   * caller after every runtime was attempted, so the settings layer can
+   * report the apply failure instead of swallowing it.
    */
   async restartIdleRuntimes(): Promise<'applied' | 'pending'> {
     let deferred = false
@@ -157,12 +159,9 @@ export class EccRpcRuntimeService {
         continue
       }
       try {
-        await runtime.releaseIdleSidecar()
+        const restarted = await runtime.restartForConfigChange()
+        if (!restarted) deferred = true
       } catch (error) {
-        if (error instanceof EccRpcShutdownDeferredError) {
-          deferred = true
-          continue
-        }
         electronLogger.error(
           '[runtime] failed to restart an idle ECC sidecar after a settings change: %s',
           error instanceof Error ? error.message : String(error),

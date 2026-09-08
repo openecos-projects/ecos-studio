@@ -9,9 +9,9 @@
       v-for="installation in installations"
       :key="installation.id"
       :value="installation.id"
+      :disabled="isUnavailable(installation)"
     >
-      {{ installation.displayName
-      }}{{ installation.version ? ` (${installation.version})` : '' }}
+      {{ optionLabel(installation) }}
     </option>
   </select>
 </template>
@@ -43,6 +43,19 @@ onMounted(async () => {
 
 function onSelect(event: Event): void {
   emit('commit', (event.target as HTMLSelectElement).value)
+}
+
+/** Installations the wizard could not use must not become the default. */
+function isUnavailable(installation: PdkInstallationSnapshot): boolean {
+  return installation.readiness === 'missing' || installation.readiness === 'invalid'
+}
+
+function optionLabel(installation: PdkInstallationSnapshot): string {
+  const versionSuffix = installation.version ? ` (${installation.version})` : ''
+  if (isUnavailable(installation)) {
+    return `${installation.displayName}${versionSuffix} — unavailable`
+  }
+  return `${installation.displayName}${versionSuffix}`
 }
 </script>
 

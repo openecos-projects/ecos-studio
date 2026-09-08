@@ -1,7 +1,7 @@
-import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   DESKTOP_CODEX_BIN_SETTING_KEY,
@@ -253,6 +253,7 @@ describe('SettingsRegistryService', () => {
   it('rejects an ecc-sizer root that is missing both the sentinel and Sizer without persisting', async () => {
     const harness = createHarness()
     const bareRoot = await mkdtemp(join(tmpdir(), 'ecos-sizer-bare-'))
+    tempRoots.push(bareRoot)
 
     const setSpy = vi.spyOn(harness.dependencies.settingsStore, 'set')
     const result = await harness.service.set(RUNTIME_ECC_SIZER_ROOT_SETTING_KEY, bareRoot)
@@ -261,6 +262,26 @@ describe('SettingsRegistryService', () => {
     expect(setSpy).not.toHaveBeenCalled()
     expect(harness.dependencies.settings.size).toBe(0)
     expect(harness.broadcasted).toHaveLength(0)
+  })
+
+  it('isolates a handler validation exception as one error status instead of failing list()', async () => {
+    const harness = createHarness({
+      pdkInventory: {
+        listInstallations: vi.fn(async () => {
+          throw new Error('inventory unavailable')
+        }),
+      },
+    })
+    harness.dependencies.settings.set(PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY, 'sky130-1')
+
+    const states = await harness.service.list()
+    const pdkState = states.find(
+      (state) => state.descriptor.key === PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
+    )
+    expect(pdkState?.status).toEqual({ kind: 'error', error: 'inventory unavailable' })
+    // The other entries still load normally.
+    expect(states).toHaveLength(4)
+    expect(states.filter((state) => state.status.kind === 'ok')).toHaveLength(3)
   })
 
   it('keeps the pending status consistent across list() after a deferred reset', async () => {
@@ -363,7 +384,10 @@ describe('SettingsRegistryService', () => {
 
   it('defers the runtime apply while the ECC pool is busy and converges later', async () => {
     const harness = createHarness({
-      restartEccRuntimes: vi.fn(async () => 'pending' as const),
+      restartEccRuntimes: vi
+        .fn<() => Promise<'applied' | 'pending'>>()
+        .mockResolvedValueOnce('pending')
+        .mockResolvedValueOnce('applied'),
     })
     const root = await createTempEcc()
 
@@ -378,13 +402,14 @@ describe('SettingsRegistryService', () => {
         ?.status.kind,
     ).toBe('pending')
 
-    // Pool drained: the deferral resolves and the status reports ok.
+    // Pool drained: the deferred apply actually runs and the status reports ok.
     harness.setPoolBusy(false)
     states = await harness.service.list()
     const state = states.find(
       (state) => state.descriptor.key === RUNTIME_ECC_PATH_SETTING_KEY,
     )
     expect(state?.status.kind).toBe('ok')
+    expect(harness.broadcasted.length).toBeGreaterThanOrEqual(2)
   })
 
   it('writes agent.codexBin through CodexDependencyService only', async () => {
@@ -465,11 +490,20 @@ async function createTempEcc(): Promise<string> {
   return await createTempExecutable('bin/ecc', 'ecc 1.0')
 }
 
+const tempRoots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+  )
+})
+
 async function createTempExecutable(
   relativePath: string,
   version: string,
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'ecos-registry-'))
+  tempRoots.push(root)
   const executable = join(root, relativePath)
   await mkdir(dirname(executable), { recursive: true })
   await writeFile(executable, `#!/usr/bin/env bash\necho "${version}"\n`, 'utf8')

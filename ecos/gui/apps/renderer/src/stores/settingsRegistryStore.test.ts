@@ -335,6 +335,20 @@ describe('settingsRegistryStore', () => {
     expect(store.isValidating('runtime.eccPath')).toBe(false)
   })
 
+  it('records a load error and clears it on a successful retry', async () => {
+    const store = useSettingsRegistryStore()
+
+    listMock.mockRejectedValueOnce(new Error('inventory unavailable'))
+    await store.load()
+    expect(store.loadError).toBe('inventory unavailable')
+
+    const entries = [entryFixture('runtime.eccPath')]
+    listMock.mockResolvedValueOnce(entries)
+    await store.load()
+    expect(store.loadError).toBe('')
+    expect(store.entries).toEqual(entries)
+  })
+
   it('reset restores the default entry', async () => {
     const store = useSettingsRegistryStore()
     const initial = entryFixture('agent.codexBin', {

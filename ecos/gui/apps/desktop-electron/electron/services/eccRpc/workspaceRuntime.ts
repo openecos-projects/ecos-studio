@@ -41,6 +41,7 @@ import type {
 } from '@ecos-studio/shared'
 
 import { normalizeRuntimeError } from './errors'
+import { EccRpcShutdownDeferredError } from './sidecarProcess'
 import { electronLogger } from '../logger'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import {
@@ -593,6 +594,40 @@ export class EccWorkspaceRuntime {
   async releaseIdleSidecar(): Promise<void> {
     if (this.hasPendingRuntimeWork()) return
     await this.shutdown()
+  }
+
+  /**
+   * Restart this runtime so it picks up a changed launch configuration.
+   * Unlike releaseIdleSidecar, the idle check and shutdown run serialized on
+   * the runtime's own operation queue: a flow queued after this call can only
+   * start once the sidecar has been shut down, so it respawns with the new
+   * configuration instead of joining a dying process. Returns false when the
+   * runtime still had active work (or the sidecar deferred the shutdown) and
+   * the restart was deferred to its next sidecar start.
+   */
+  async restartForConfigChange(): Promise<boolean> {
+    return await this.runSerialized(async () => {
+      if (this.isActive() || this.sidecarLifecycle.hasFinalSnapshotTask()) {
+        return false
+      }
+      try {
+        await this.shutdown()
+      } catch (error) {
+        if (error instanceof EccRpcShutdownDeferredError) return false
+        throw error
+      }
+      return true
+    })
+  }
+
+  /** Append to the operation queue without wrapping in operation events. */
+  private runSerialized<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(operation, operation)
+    this.queue = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    return next
   }
 
   async cancelAtSafeShutdownBoundary(

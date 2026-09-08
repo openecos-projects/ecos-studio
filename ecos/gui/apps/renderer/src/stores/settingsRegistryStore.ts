@@ -35,6 +35,8 @@ interface WriteTicket {
 export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   const entries = ref<DesktopSettingState[]>([])
   const loading = ref(false)
+  /** Error from the last failed list fetch; empty once a load succeeds. */
+  const loadError = ref('')
   /** In-flight write count per key; any remaining write keeps the spinner up. */
   const validatingCounts = ref<Record<string, number>>({})
   /** Last rejected write per key, shown inline until the value changes again. */
@@ -96,11 +98,16 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     try {
       const result = await api.settingsRegistry.list()
       if (seq !== loadSeq) return
+      loadError.value = ''
       entries.value = result
       // Live updates that landed during the fetch may be newer than the
       // snapshot; if the snapshot already contains them the values match.
       for (const state of liveUpdatesDuringLoad.values()) {
         entries.value = replaceEntry(entries.value, state)
+      }
+    } catch (error) {
+      if (seq === loadSeq) {
+        loadError.value = error instanceof Error ? error.message : String(error)
       }
     } finally {
       if (seq === loadSeq) {
@@ -219,6 +226,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     errorFor,
     isValidating,
     load,
+    loadError,
     loading,
     reset,
     set,

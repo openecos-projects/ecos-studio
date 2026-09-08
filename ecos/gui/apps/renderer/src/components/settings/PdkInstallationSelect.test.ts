@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type DOMWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopSettingState, PdkInstallationSnapshot } from '@ecos-studio/shared'
 
@@ -43,6 +43,18 @@ const installations: PdkInstallationSnapshot[] = [
     supportsEccDefaults: true,
     version: null,
   },
+  {
+    displayName: 'Broken PDK',
+    familyId: 'broken',
+    id: 'pdk:broken',
+    ownership: 'imported',
+    readiness: 'invalid',
+    reason: 'missing tech lef',
+    registrySha256: null,
+    root: '/pdks/broken',
+    supportsEccDefaults: false,
+    version: null,
+  },
 ]
 
 function entryFixture(value: string | null): DesktopSettingState {
@@ -74,10 +86,24 @@ describe('PdkInstallationSelect', () => {
     await flushPromises()
 
     const options = wrapper.findAll('option')
-    expect(options).toHaveLength(3)
+    expect(options).toHaveLength(4)
     expect(options[0]?.text()).toBe('No default')
     expect(options[1]?.text()).toContain('SkyWater 130nm')
     expect(options[2]?.text()).toContain('ICS55')
+  })
+
+  it('disables and labels unavailable installations', async () => {
+    const wrapper = mount(PdkInstallationSelect, {
+      props: { entry: entryFixture(null) },
+    })
+    await flushPromises()
+
+    const options = wrapper.findAll('option')
+    const broken = options[options.length - 1] as DOMWrapper<Element>
+    const ready = options[1] as DOMWrapper<Element>
+    expect(broken.text()).toContain('unavailable')
+    expect((broken.element as HTMLOptionElement).disabled).toBe(true)
+    expect((ready.element as HTMLOptionElement).disabled).toBe(false)
   })
 
   it('commits the selected installation id', async () => {
