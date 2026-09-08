@@ -465,3 +465,32 @@ def test_a6_recovery_stage_change_rejudges_the_late_candidate(tmp_path):
     assert controller.objective == objective
     assert controller.objective_alignment == alignment
     runner.close()
+
+
+def test_paused_turn_collects_terminals_without_dispatching(tmp_path):
+    """Pause holds new dispatch but never strands in-flight evidence."""
+    planner = _ScriptedPlanner(
+        ("place.target_density", StrategyDirection.INCREASE, 0.6),
+        ("place.cell_padding_x", StrategyDirection.INCREASE, 4),
+    )
+    executor = _ConcurrentExecutor(
+        {
+            "execution-1": _terminal_receipt(
+                "execution-1", "place.target_density", 0.6
+            ),
+            "execution-2": _terminal_receipt("execution-2", "place.cell_padding_x", 4),
+        }
+    )
+    controller = _controller(tmp_path, planner, executor)
+    runner = _runner(controller, executor)
+
+    runner.run_turn()
+    assert len(executor.requests) == 2
+    assert len(planner.contexts) == 2
+    assert runner.pending_execution_ids == ("execution-2",)
+
+    runner.run_turn(paused=True)
+
+    assert len(executor.requests) == 2
+    assert len(planner.contexts) == 2
+    assert runner.pending_execution_ids == ()
