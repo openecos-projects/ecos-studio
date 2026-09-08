@@ -43,6 +43,7 @@ class _FakeEccRpc:
     candidate_response: dict[str, object]
     terminal_response: dict[str, object] | None = None
     ecc_version: str = "ecc-test-revision"
+    candidate_error: str | None = None
 
     def __post_init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
@@ -52,6 +53,8 @@ class _FakeEccRpc:
         if method == "rpc.hello":
             return {"eccVersion": self.ecc_version}
         if method in {"candidate.rerun", "candidate.resume"}:
+            if self.candidate_error is not None:
+                raise OptimizationEccAdapterError(self.candidate_error)
             return self.candidate_response
         if method == "operation.cancel":
             return {

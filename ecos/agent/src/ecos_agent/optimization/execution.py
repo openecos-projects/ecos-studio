@@ -24,9 +24,10 @@ CANDIDATE_EXECUTION_SCOPE = "full_flow"
 class CandidateExecutionBusy(RuntimeError):
     """The execution backend cannot start another isolated candidate now.
 
-    Raised when the backend still owns an active candidate operation for the
-    source workspace.  The coordinator keeps the approved proposal and waits
-    for an in-flight terminal instead of consuming budget or re-dispatching.
+    Raised when the source workspace still owns an active operation, so the
+    parent snapshot cannot be prepared exclusively.  The coordinator keeps the
+    approved proposal and waits for an in-flight terminal instead of
+    consuming budget or re-dispatching.
     """
 
 _CANDIDATE_TARGET_STEPS = {
