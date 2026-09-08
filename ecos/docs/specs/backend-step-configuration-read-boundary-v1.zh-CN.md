@@ -6,6 +6,8 @@ status: implemented
 
 状态：implemented
 
+> 后续契约说明：当前读取生命周期与零副作用要求继续有效；上游 ECC CLI 集成后的 Parameter Catalog、Descriptor、公开参数记录和 Step Option 存储以 [ECC Upstream CLI Integration v1](./ecc-upstream-cli-integration-v1.zh-CN.md) 为准。
+
 ## Problem Statement
 
 `c36cf8ad` 将 Backend Step Configuration 从 Renderer 直接读写配置文件迁移到了 ECC 领域命令，这是正确的 ownership 方向，但读取路径没有与产品运行时语义分开。当前 Backend `id=config` 请求被强制改写为 `workspace.info`，随后进入通用 Operation Queue 并发布 Operation lifecycle event。一个只读查询因此会表现成一次 Runtime Operation，可能触发 Project 或 Workspace 自失效，也会在不支持配置的 `Synthesis` Step 上产生 `Flow failed` 通知。
@@ -55,14 +57,14 @@ ECC 对没有可编辑配置的 Step 返回正常的 `unavailable` 领域结果�
 20. 作为 Studio 用户，我希望没有可编辑配置的 `Synthesis` Step 显示为没有配置，而不是 Flow failed，从而正常的能力差异不会制造错误通知。
 21. 作为 Studio 用户，我希望未知 Flow Step 被明确拒绝，从而拼写错误不会被当成配置缺失。
 22. 作为 Studio 用户，我希望配置文件损坏被明确报告，从而可以修复 Workspace，而不是看到空配置并误以为读取成功。
-23. 作为 Studio 用户，我希望完整有效配置包含默认值、Workspace Parameter 派生值和已提交 Step Options，从而编辑器不会丢失未修改字段。
+23. 作为 Studio 用户，我希望读取结果包含 catalog 默认值和 Descriptor 当前值，从而编辑器不会丢失未修改字段。
 24. 作为 Studio 用户，我希望 GUI 不需要知道 `config/*.json` 文件名或 JSON path，从而配置文件布局变化不会破坏界面。
 25. 作为 Studio 用户，我希望配置保存继续使用 Step identity、Workspace Handle、expected Revision 和 command identity，从而并发过期写入会被拒绝。
 26. 作为 ECC 维护者，我希望 Step Option 的归属和可编辑性继续由 ECC schema 决定，从而跨 Step 参数不会被 GUI 错误地局部失效。
 27. 作为 Runtime Adapter 维护者，我希望读请求和写 Operation 使用不同的接口，从而生命周期、取消和队列语义不会混入查询。
 28. 作为 Electron 维护者，我希望 Electron 负责窗口、Project 路径和 Workspace ownership 校验，从而 ECC 不承担产品安全边界。
 29. 作为 Renderer 维护者，我希望 Renderer 只接收类型化配置 DTO，从而不会读取磁盘、解析 Descriptor 或推断参数依赖。
-30. 作为 Agent 用户，我希望 Agent 读取 Step Options 与手动配置编辑使用同一个 ECC 领域结果，从而自动化和 GUI 不会出现不同配置解释。
+30. 作为 Agent 用户，我希望 Agent 与手动配置编辑使用同一组 canonical 参数，从而自动化和 GUI 不会出现不同配置解释。
 31. 作为 Agent 用户，我希望 Agent 的配置读取不通过通用 `workspace.info`，从而不会制造伪 Operation。
 32. 作为 Frontend 用户，我希望现有 Frontend 文件、日志和技术库读取继续工作，从而 Backend 配置清理不会误伤其他工具。
 33. 作为 Studio 维护者，我希望废弃 `workspace.syncConfig(configPath)` 完全移除，从而跨进程契约不再暴露文件路径和 JSON path。
@@ -83,11 +85,11 @@ ECC 对没有可编辑配置的 Step 返回正常的 `unavailable` 领域结果�
 - ECC 的纯读配置实现只执行受限的 Descriptor、Flow 和当前配置读取。它不得执行 migration、derived parameter 写入、配置刷新、目录创建、日志初始化或任何 Workspace 文件写入。
 - 纯读结果的 Workspace identity 和 Revision 必须来自已提交 Workspace/Snapshot 事实；如果 identity 或 Revision 不可验证，接口返回 unavailable，不得伪造当前版本。
 - 纯读实现缺少配置、配置文件损坏、格式不合法或权限不足时返回稳定领域结果；“Step 没有可编辑配置”是正常 unavailable，不是 Operation failure。
-- Electron 将领域 unavailable 映射为 `missing`，将可用结果映射为包含 `options`、`stepId`、`workspaceId` 和 `workspaceRevision` 的产品 DTO；Electron 不复制 ECC 的配置归属规则。
+- Electron 将领域 unavailable 映射为 `missing`，将可用结果映射为包含有序 `parameters`、`stepId`、`workspaceId` 和 `workspaceRevision` 的产品 DTO；Electron 不复制 ECC 的配置归属规则。
 - Renderer 只展示当前目标 Workspace 的最新 committed Configuration。配置区域应显示当前 Workspace Revision；stale 标记只属于工程结果，不属于配置历史。
 - 读取响应必须携带 Workspace identity 和 Revision。已有 session/generation 机制负责丢弃与当前上下文不匹配的响应；读取不需要重新进入写操作队列。
-- 配置更新继续通过 ECC-owned `workspace.updateStepConfiguration` 命令完成，携带 Step identity、bounded options patch、Workspace Handle、expected Revision 和 command identity。更新原子提交当前 Descriptor 和有效配置，并使目标 Step 及其下游工程结果 stale。
-- 配置更新后只保留当前有效配置；不新增旧 Step Options 历史、不把完整 Step Options 加入 Engineering Snapshot、不从 stale Snapshot 恢复配置。
+- 配置更新继续通过 ECC-owned `workspace.updateStepConfiguration` 命令完成，携带 Step identity、flat canonical parameter patch、Workspace Handle、expected Revision 和 command identity。更新原子提交当前 Descriptor，并从最早受影响 Step 起使工程结果 stale。
+- 配置更新后只保留 Descriptor 当前参数；不新增独立 Step Options 历史、不把参数全集加入 Engineering Snapshot、不从 stale Snapshot 恢复配置。
 - Engineering Snapshot 继续作为 Project Comparison 的 committed 工程事实来源。Project Comparison 不为读取配置而创建 Runtime Session；若产品场景需要 Baseline 当前配置，则使用 Baseline 纯读配置入口，并将它与 Snapshot 工程结果分开表达。
 - `workspace.info` 保留非配置 Runtime 信息。删除 `id=config` 的配置读取实现以及所有将其当作 Backend 配置读取入口的生产调用方、类型和 mock；协议层保留 fail-closed 拒绝，通用资源中的 `config` 仅供 Frontend 文件资源使用。
 - 删除 `workspace.syncConfig(configPath)`、Backend 配置文件路径型资源、Backend 配置的 GUI JSON path 读写和 `suppressEvents` 临时机制。通用文件读取保留给仍有消费者的 Frontend、日志、技术库和布局模块。
@@ -105,14 +107,14 @@ ECC 对没有可编辑配置的 Step 返回正常的 `unavailable` 领域结果�
 - Electron 读取模块测试验证当前 Workspace 和 Baseline Workspace 的入口分离、Project path containment、窗口 ownership、完整有效配置 DTO、Revision mismatch 丢弃/重读和 unavailable 到 `missing` 的映射。
 - Electron 回归测试验证不存在 `workspace.info(id=config)` 的产品路由、没有临时 open/info/close Baseline 读取，以及 `workspace.syncConfig`、Backend 配置路径资源和 `suppressEvents` 不再有生产消费者。
 - Renderer composable 测试验证当前配置更新后展示最新 Revision、迟到旧响应被丢弃、stale 工程结果仍只读可见并标注旧 Revision，以及 unavailable Step 不显示 Flow failed。
-- Agent contract 测试验证 Agent 读取和更新使用 canonical Step identity、完整 options 和 Revision，不携带文件名、JSON path 或旧同步命令。
+- Agent contract 测试验证 Agent 读取和更新使用 canonical Step identity、flat dotted parameters 和 Revision，不携带文件名、JSON path 或旧同步命令。
 - 保留 Project Comparison Snapshot-only 测试作为 prior art，继续断言比较查询不调用 Runtime Adapter workspace open/close、Workspace 专属 sidecar 或 lifecycle event。
 - 保留现有 Workspace Resource、Runtime lifecycle、Revision/stale、Product Command 和 Step Configuration 组件测试模式；新增测试应集中在这些既有 seams，而不是恢复旧模块测试。
 
 ## Out of Scope
 
 - 不保存旧 Revision 的 Step Configuration，不建设完整配置历史或配置版本浏览器。
-- 不把 Step Options 或工具配置全文加入 Engineering Snapshot；Snapshot 仍只承载 committed 工程事实。
+- 不把参数全集或工具配置全文加入 Engineering Snapshot；Snapshot 仍只承载 committed 工程事实。
 - 不改变旧工程结果的 stale 展示策略；本 Spec 只要求配置始终使用目标 Workspace 当前最新状态。
 - 不实现外部手工修改检测、配置语义 fingerprint、自动 reconcile、执行阻止或自动回滚。
 - 不删除仍被 Frontend、日志、技术库、布局和其他非 Backend Configuration 功能使用的通用文件 API。

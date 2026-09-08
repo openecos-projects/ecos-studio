@@ -2,6 +2,8 @@
 
 状态：proposed
 
+> 覆盖说明：涉及上游 ECC CLI 集成的 Workspace Descriptor 文件名与格式、参数身份与存储、legacy compatibility、Resolved Workspace Flow 和查询副作用边界时，以 [ECC Upstream CLI Integration v1](./ecc-upstream-cli-integration-v1.zh-CN.md) 为准；本文其余 Backend Architecture 与 GUI 集成决定继续有效。
+
 ## Problem Statement
 
 当前 Backend Architecture 重构分支需要吸收最新 `origin/main`，同时保持已经建立的 ECC headless domain、ECC Runtime Adapter、Workspace Descriptor、Engineering Snapshot 和 Backend Read Model 边界。直接接受 Git 的自动合并结果会重新引入 Studio 自己解析和写入 Workspace 参数文件的路径，并在新旧架构之间形成多个配置事实来源。

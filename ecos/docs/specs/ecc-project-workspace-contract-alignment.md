@@ -2,6 +2,8 @@
 
 Status: proposed
 
+> Supersession notice: for the upstream CLI integration, [ECC Upstream CLI Integration v1](./ecc-upstream-cli-integration-v1.zh-CN.md) takes precedence for the Workspace Descriptor filename and format, parameter vocabulary and persistence, legacy compatibility, Resolved Workspace Flow and query side-effect boundaries. The Project Manifest, headless ECC and Runtime Adapter ownership decisions in this document remain applicable.
+
 ## Problem Statement
 
 ECC origin now provides Project Manifest discovery, canonical parameter handling and TOML Workspace configuration, while the current ECOS Studio backend refactor independently introduced Workspace Spec persistence, Workspace metadata and Studio-owned Manifest mutations. Merging the two histories unchanged would create competing sources of truth, creator-dependent Projects, duplicated configuration files and conflicting runtime ownership.
