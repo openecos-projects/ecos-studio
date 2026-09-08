@@ -878,6 +878,35 @@ def test_step_configuration_update_releases_active_session_db(monkeypatch, tmp_p
     assert session.db_handle is None
 
 
+def test_workspace_update_maps_engine_io_errors_to_runtime_domain_error(
+    monkeypatch, tmp_path
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
+
+    def fail_update(*_args):
+        raise OSError("atomic workspace exchange failed")
+
+    monkeypatch.setattr("chipcompiler.engine.update_workspace_from_spec", fail_update)
+
+    with pytest.raises(RuntimeApiError) as exc_info:
+        api.update_workspace(
+            WorkspaceUpdateRequest(
+                command_id="update-io-error",
+                workspace_id=workspace_id,
+                expected_workspace_revision=1,
+                workspace_spec={},
+                workspace_bindings={},
+            )
+        )
+
+    assert exc_info.value.code == "workspace_update_failed"
+    assert "atomic workspace exchange failed" in exc_info.value.message
+
+
 def test_reset_flow_releases_active_session_db_before_prepare(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     prepared = []
@@ -1695,22 +1724,6 @@ def test_flow_run_step_initializes_db_before_direct_step(monkeypatch, tmp_path):
     assert not flow.engine_db.has_init()
     assert flow.engine_db.close_calls == 1
     assert api.sessions.get_session(workspace_id).db_handle is None
-
-
-def test_flow_run_step_preserves_warning_as_a_successful_result(monkeypatch, tmp_path):
-    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    DummyFlow.workspace_step_specs = ({"name": "lec", "tool": "yosys_lec"},)
-    DummyFlow.next_run_states = [StateEnum.Warning]
-    api = WorkspaceRuntimeApi()
-    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
-        "workspaceId"
-    ]
-
-    result = api.flow_run_step(
-        FlowRunStepRequest(workspace_id=workspace_id, step="lec", rerun=False)
-    )
-
-    assert result == {"step": "lec", "state": "Warning"}
 
 
 def test_flow_run_step_with_active_session_db_injects_and_captures_final_db(

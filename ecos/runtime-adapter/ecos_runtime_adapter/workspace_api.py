@@ -441,7 +441,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
 
             state_value = execution.state
             result = {"step": request.step, "state": state_value}
-            if state_value not in {"Success", "Warning"}:
+            if state_value != "Success":
                 raise RuntimeApiError(
                     "command_failed",
                     f"run step {request.step} failed with state {state_value}",

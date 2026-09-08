@@ -88,7 +88,7 @@ def test_cli_create_runtime_open_and_run(
         config.replace('root = ""', f'root = "{pdk_root}"')
     )
 
-    assert cli_main.run(["run", "--project", str(project), "--json"]) == 0
+    assert cli_main.run(["run", "--project", str(project), "--plain"]) == 0
     workspace = project / "default"
     api = WorkspaceRuntimeApi()
     opened = api.open_workspace(
@@ -134,6 +134,6 @@ def test_runtime_create_without_project_config_cli_discovers_opens_and_runs(
     )
 
     assert not (project / "ecc.toml").exists()
-    assert cli_main.run(["status", "--project", str(project), "--json"]) == 0
+    assert cli_main.run(["status", "--project", str(project), "--plain"]) == 0
     api.close_workspace(WorkspaceIdRequest(workspace_id=created["workspaceId"]))
-    assert cli_main.run(["run", "--project", str(project), "--json"]) == 0
+    assert cli_main.run(["run", "--project", str(project), "--plain"]) == 0

@@ -30,9 +30,7 @@ class WorkspaceSpecRuntimeMixin:
     def validate_workspace_spec(self, request: WorkspaceSpecValidateRequest) -> dict:
         from chipcompiler.engine import validate_workspace_spec
 
-        return validate_workspace_spec(
-            request.workspace_spec, request.workspace_bindings
-        )
+        return validate_workspace_spec(request.workspace_spec, request.workspace_bindings)
 
     def workspace_binding_requirement(self, request: WorkspaceSpecOpenRequest) -> dict:
         from chipcompiler.engine import describe_workspace_binding_requirement
@@ -90,20 +88,12 @@ class WorkspaceSpecRuntimeMixin:
                     request.project_root,
                     str(mutation.get("name") or "project"),
                     str(mutation.get("designName") or ""),
-                    mpc=(
-                        mutation.get("mpc")
-                        if isinstance(mutation.get("mpc"), dict)
-                        else None
-                    ),
+                    mpc=(mutation.get("mpc") if isinstance(mutation.get("mpc"), dict) else None),
                 )
             except (OSError, ValueError) as exc:
                 raise RuntimeApiError("project_manifest_invalid", str(exc)) from exc
         now = str(mutation.get("now") or datetime.now(UTC).isoformat())
-        source = (
-            mutation.get("input")
-            if isinstance(mutation.get("input"), dict)
-            else mutation
-        )
+        source = mutation.get("input") if isinstance(mutation.get("input"), dict) else mutation
         translated = {
             "type": str(kind).replace("-", "_"),
             **{
@@ -139,9 +129,7 @@ class WorkspaceSpecRuntimeMixin:
             }
         if translated["type"] == "register_workspace":
             workspace_path = str(translated.get("workspace_path") or "")
-            workspace_id = str(
-                translated.get("workspace_id") or Path(workspace_path).name
-            )
+            workspace_id = str(translated.get("workspace_id") or Path(workspace_path).name)
             translated.update(
                 {
                     "workspace_id": workspace_id,
@@ -207,9 +195,7 @@ class WorkspaceSpecRuntimeMixin:
         workspace = self._load_workspace(request.directory)
         snapshot = self._ensure_engineering_snapshot(workspace)
         bindings = (
-            request.workspace_bindings
-            if isinstance(request, WorkspaceSpecOpenRequest)
-            else None
+            request.workspace_bindings if isinstance(request, WorkspaceSpecOpenRequest) else None
         )
         if isinstance(request, WorkspaceSpecOpenRequest):
             from chipcompiler.engine import assess_execution_readiness
@@ -263,6 +249,8 @@ class WorkspaceSpecRuntimeMixin:
                 )
             except WorkspaceLifecycleError as exc:
                 raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+            except (OSError, ValueError) as exc:
+                raise RuntimeApiError("workspace_update_failed", str(exc)) from exc
             snapshot = self._read_engineering_snapshot(workspace)
             session.workspace = workspace
             session.workspace_revision = snapshot["workspaceRevision"]
@@ -276,9 +264,7 @@ class WorkspaceSpecRuntimeMixin:
             reject_active_operation=True,
         )
 
-    def update_workspace_configuration(
-        self, request: WorkspaceConfigurationUpdateRequest
-    ) -> dict:
+    def update_workspace_configuration(self, request: WorkspaceConfigurationUpdateRequest) -> dict:
         from chipcompiler.engine import (
             WorkspaceLifecycleError,
             update_workspace_configuration,
@@ -300,6 +286,8 @@ class WorkspaceSpecRuntimeMixin:
                 )
             except WorkspaceLifecycleError as exc:
                 raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+            except (OSError, ValueError) as exc:
+                raise RuntimeApiError("workspace_configuration_update_failed", str(exc)) from exc
             snapshot = self._read_engineering_snapshot(workspace)
             session.workspace = workspace
             session.workspace_revision = snapshot["workspaceRevision"]
@@ -337,6 +325,10 @@ class WorkspaceSpecRuntimeMixin:
                 )
             except WorkspaceLifecycleError as exc:
                 raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
+            except (OSError, ValueError) as exc:
+                raise RuntimeApiError(
+                    "workspace_step_configuration_update_failed", str(exc)
+                ) from exc
             snapshot = self._read_engineering_snapshot(workspace)
             session.workspace = workspace
             session.workspace_revision = snapshot["workspaceRevision"]
@@ -350,9 +342,7 @@ class WorkspaceSpecRuntimeMixin:
 
     def _load_workspace(self, directory: str):
         if not directory:
-            raise RuntimeApiError(
-                "invalid_request", "missing required field: directory"
-            )
+            raise RuntimeApiError("invalid_request", "missing required field: directory")
         if not os.path.isdir(directory):
             raise RuntimeApiError(
                 "invalid_request",
@@ -424,9 +414,7 @@ class WorkspaceSpecRuntimeMixin:
         try:
             return create_engineering_snapshot(workspace)
         except EngineeringSnapshotError as exc:
-            raise RuntimeApiError(
-                "engineering_snapshot_commit_failed", str(exc)
-            ) from exc
+            raise RuntimeApiError("engineering_snapshot_commit_failed", str(exc)) from exc
 
     @staticmethod
     def _read_engineering_snapshot(owner) -> dict:
@@ -477,9 +465,7 @@ class WorkspaceSpecRuntimeMixin:
                 cause=cause,
             )
         except EngineeringSnapshotError as exc:
-            raise RuntimeApiError(
-                "engineering_snapshot_commit_failed", str(exc)
-            ) from exc
+            raise RuntimeApiError("engineering_snapshot_commit_failed", str(exc)) from exc
         session.workspace_revision = snapshot["workspaceRevision"]
         return session.workspace_revision
 

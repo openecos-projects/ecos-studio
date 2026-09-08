@@ -72,6 +72,9 @@ build_ecc() {
 
 build_runtime_adapter() {
   cd "$REPO_ROOT/ecc"
+  # Runtime transport dependencies belong to the Studio adapter, even though
+  # the adapter is bundled with the ECC PyInstaller environment.
+  uv pip install --python .venv/bin/python -r "$REPO_ROOT/ecos/runtime-adapter/requirements.txt"
   if [ "${ECOS_USE_NIX:-}" = "1" ]; then
     nix develop "$REPO_ROOT" --command bash -lc \
       'ECOS_ECC_ENTRYPOINT="$REPO_ROOT/ecos/runtime-adapter/main.py" ECOS_ECC_BINARY_NAME="ecos-ecc-runtime-adapter" ECOS_PYINSTALLER_MODE="onefile" uv run pyinstaller ecc.spec --clean --noconfirm'
