@@ -1,13 +1,17 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { App } from 'electron'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { electronLogger } from '../services/logger'
-import { installProcessDiagnostics } from './processDiagnostics'
+import { installProcessDiagnostics, reportPreviousCrashDumps } from './processDiagnostics'
 
 vi.mock('../services/logger', () => ({
-  electronLogger: { error: vi.fn(), info: vi.fn() },
+  electronLogger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }))
 
+beforeEach(() => vi.clearAllMocks())
 afterEach(() => vi.restoreAllMocks())
 
 it('records process failures and normal quit without suppressing uncaught errors', () => {
@@ -45,5 +49,36 @@ it('records process failures and normal quit without suppressing uncaught errors
   expect(electronLogger.info).toHaveBeenCalledWith(
     '[desktop] Process exiting: code=%s',
     0,
+  )
+})
+
+it('writes termination signals synchronously before restoring the default disposition', () => {
+  const app = new EventEmitter()
+  const written: string[] = []
+  const on = vi.spyOn(process, 'on').mockReturnValue(process)
+  const removeAllListeners = vi.spyOn(process, 'removeAllListeners')
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true)
+  installProcessDiagnostics(app as App, {
+    syncWrite: (line) => written.push(line),
+  })
+
+  const sigterm = on.mock.calls.find(([name]) => name === 'SIGTERM')!
+  sigterm[1]('SIGTERM')
+  expect(written[0]).toContain('[desktop] Received SIGTERM at')
+  expect(removeAllListeners).toHaveBeenCalledWith('SIGTERM')
+  expect(kill).toHaveBeenCalledWith(process.pid, 'SIGTERM')
+})
+
+it('reports leftover native crash dumps from a previous session', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ecos-crashpad-'))
+  expect(() => reportPreviousCrashDumps(directory)).not.toThrow()
+  expect(electronLogger.error).not.toHaveBeenCalled()
+
+  writeFileSync(join(directory, 'electron-1.dmp'), 'dump')
+  reportPreviousCrashDumps(directory)
+  expect(electronLogger.error).toHaveBeenCalledWith(
+    '[desktop] %s native crash dump(s) from a previous session: %s',
+    1,
+    'electron-1.dmp',
   )
 })

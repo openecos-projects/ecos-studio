@@ -1,10 +1,10 @@
-import { app, BrowserWindow, ipcMain, protocol } from 'electron'
-import { readFileSync } from 'node:fs'
+import { app, BrowserWindow, crashReporter, ipcMain, protocol } from 'electron'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
-import { installProcessDiagnostics } from './processDiagnostics'
+import { installProcessDiagnostics, reportPreviousCrashDumps } from './processDiagnostics'
 import { registerIpc } from './registerIpc'
 import { installRuntimeQuitGuard } from './runtimeQuitGuard'
 import { handleSecondInstance } from '../services/appSecondInstance'
@@ -60,6 +60,10 @@ if (!gotSingleInstanceLock) {
   app.quit()
 }
 
+// Capture native crashes (browser/renderer/GPU) locally. Without this,
+// hard exits leave no trace: distro apport is bypassed when `ulimit -c` is 0.
+crashReporter.start({ uploadToServer: false })
+
 let ipcRegistered = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
@@ -102,7 +106,16 @@ configureGpuMode({
 
 const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
 configureElectronLoggerFile(mainLogFile)
-installProcessDiagnostics(app)
+installProcessDiagnostics(app, {
+  syncWrite: (line) => {
+    try {
+      appendFileSync(mainLogFile, `${line}\n`)
+    } catch {
+      // Best effort only: crash dumps are the durable native-crash record.
+    }
+  },
+})
+reportPreviousCrashDumps(join(app.getPath('userData'), 'Crashpad', 'reports'))
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
 registerSurferProtocolSchemes(protocol)
