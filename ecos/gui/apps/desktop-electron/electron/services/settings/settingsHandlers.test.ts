@@ -278,6 +278,61 @@ describe('settings handlers', () => {
     }
   })
 
+  it('validates and persists a tilde sizer root as the canonical absolute directory', async () => {
+    const root = await createTempRoot()
+    const sizerRoot = join(root, 'ecc-sizer')
+    await mkdir(join(sizerRoot, 'src'), { recursive: true })
+    await writeFile(join(sizerRoot, 'src', 'sizer_os.tcl'), '# sizer', 'utf8')
+    await mkdir(join(sizerRoot, 'bin'), { recursive: true })
+    await writeFile(join(sizerRoot, 'bin', 'Sizer'), '#!/usr/bin/env bash\n', {
+      mode: 0o755,
+    })
+
+    const previousHome = process.env.HOME
+    process.env.HOME = root
+    try {
+      const handlers = createSettingHandlers(createDependencies())
+
+      await expect(
+        handlers['runtime.eccSizerRoot'].validate('~/ecc-sizer'),
+      ).resolves.toMatchObject({ displayInfo: sizerRoot, ok: true })
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME
+      } else {
+        process.env.HOME = previousHome
+      }
+    }
+  })
+
+  it('persists a relative ECC path resolved against the working directory', async () => {
+    const root = await createTempRoot()
+    const binDir = join(root, 'working-dir-bin')
+    await mkdir(binDir, { recursive: true })
+    const executablePath = join(binDir, 'ecc')
+    await writeFile(executablePath, '#!/usr/bin/env bash\necho "relative ecc"\n', {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+
+    const previousCwd = process.cwd()
+    process.chdir(root)
+    try {
+      const dependencies = createDependencies()
+      const handlers = createSettingHandlers(dependencies)
+
+      await expect(
+        handlers['runtime.eccPath'].validate(join('working-dir-bin', 'ecc')),
+      ).resolves.toMatchObject({ displayInfo: 'relative ecc', ok: true })
+
+      await handlers['runtime.eccPath'].persist(join('working-dir-bin', 'ecc'))
+      const stored = dependencies.settings.get('runtime.eccPath') as string
+      expect(stored).toBe(executablePath)
+    } finally {
+      process.chdir(previousCwd)
+    }
+  })
+
   it('keeps the version probe timeout at an internal constant', () => {
     expect(ECC_VERSION_PROBE_TIMEOUT_MS).toBeGreaterThan(0)
   })

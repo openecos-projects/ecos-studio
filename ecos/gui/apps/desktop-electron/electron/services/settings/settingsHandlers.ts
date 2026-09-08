@@ -59,7 +59,9 @@ function sizerBinaryName(): string {
 }
 
 async function validateSizerRoot(rootValue: string): Promise<SettingValidation> {
-  const root = rootValue.trim()
+  // Canonicalize (trim, tilde expansion, absolute) before probing so a valid
+  // `~/ecc-sizer` input validates and the persisted value is spawn-ready.
+  const root = expandTildePath(rootValue)
   let info
   try {
     info = await stat(root)

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { access, stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 export type SpawnLike = typeof spawn
 
@@ -25,18 +26,22 @@ function joinUserPath(home: string, rest: string): string {
   return `${home.replace(/[\\/]+$/, '')}${separator}${trimmed}`
 }
 
+/**
+ * Canonicalize a user-supplied path: trim, expand a leading `~`, and resolve
+ * against the working directory so the stored value is spawnable as-is.
+ */
 export function expandTildePath(
   pathValue: string,
   resolveHome: () => string = () => process.env.HOME ?? process.env.USERPROFILE ?? '',
 ): string {
-  return expandUserPath(pathValue.trim(), resolveHome)
+  return resolve(expandUserPath(pathValue.trim(), resolveHome))
 }
 
 export async function resolveExecutablePath(
   pathValue: string,
   resolveHome: () => string = () => process.env.HOME ?? process.env.USERPROFILE ?? '',
 ): Promise<string | null> {
-  const expanded = expandUserPath(pathValue.trim(), resolveHome)
+  const expanded = expandTildePath(pathValue, resolveHome)
   try {
     await access(expanded)
     const info = await stat(expanded)
