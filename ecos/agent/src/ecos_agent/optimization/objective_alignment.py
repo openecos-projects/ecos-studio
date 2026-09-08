@@ -5,7 +5,15 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
@@ -26,6 +34,13 @@ RECOVERY_ORDER = (
     ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
     ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
 )
+# Acceptance semantics frozen per episode: the rule identity and the protection
+# tolerances are hash-bound into the alignment, so an episode cannot be resumed
+# under a different comparator, and drifting code constants refuse old episodes.
+INCUMBENT_ACCEPTANCE_RULE = "ecos.incumbent_acceptance.v2"
+PROTECTION_RELATIVE_TOLERANCE = 0.01
+PROTECTION_ABSOLUTE_TOLERANCE = 0.01
+PRIMARY_METRIC_RELATIVE_TOLERANCE = 1e-9
 _RECOVERY_GATES = {
     ObjectiveMetric.DRC_COUNT: "drc_clean",
     ObjectiveMetric.STA_SETUP_VIOLATION_COUNT: "sta_setup_closed",
@@ -63,6 +78,14 @@ class OptimizationObjectiveAlignment(BaseModel):
     sta_setup_violation_count: StrictInt = Field(ge=0)
     sta_hold_violation_count: StrictInt = Field(ge=0)
     recovery_order: tuple[ObjectiveMetric, ...]
+    acceptance_rule: Literal["ecos.incumbent_acceptance.v2"] = (
+        INCUMBENT_ACCEPTANCE_RULE
+    )
+    protection_relative_tolerance: StrictFloat = PROTECTION_RELATIVE_TOLERANCE
+    protection_absolute_tolerance: StrictFloat = PROTECTION_ABSOLUTE_TOLERANCE
+    primary_metric_relative_tolerance: StrictFloat = (
+        PRIMARY_METRIC_RELATIVE_TOLERANCE
+    )
     alignment_contract_sha256: str
 
     @field_validator(
@@ -87,6 +110,13 @@ class OptimizationObjectiveAlignment(BaseModel):
 
     @model_validator(mode="after")
     def validate_contract_hash(self) -> "OptimizationObjectiveAlignment":
+        if (
+            self.protection_relative_tolerance != PROTECTION_RELATIVE_TOLERANCE
+            or self.protection_absolute_tolerance != PROTECTION_ABSOLUTE_TOLERANCE
+            or self.primary_metric_relative_tolerance
+            != PRIMARY_METRIC_RELATIVE_TOLERANCE
+        ):
+            raise ValueError("objective alignment tolerances do not match the acceptance rule")
         expected = canonical_sha256(
             self.model_dump(mode="json", exclude={"alignment_contract_sha256"})
         )
@@ -162,6 +192,10 @@ def build_objective_alignment(
         ),
         **{metric.value: counts[metric] for metric in RECOVERY_ORDER},
         "recovery_order": [metric.value for metric in RECOVERY_ORDER],
+        "acceptance_rule": INCUMBENT_ACCEPTANCE_RULE,
+        "protection_relative_tolerance": PROTECTION_RELATIVE_TOLERANCE,
+        "protection_absolute_tolerance": PROTECTION_ABSOLUTE_TOLERANCE,
+        "primary_metric_relative_tolerance": PRIMARY_METRIC_RELATIVE_TOLERANCE,
     }
     return OptimizationObjectiveAlignment(
         **payload,

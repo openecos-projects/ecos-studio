@@ -85,6 +85,10 @@ class OptimizationHistory:
     parameter_application_receipt: ParameterApplicationReceipt | None = None
     rationale_summary: str | None = None
     planning_values: Mapping[str, bool | int | float] | None = None
+    incumbent_decision: str | None = None
+    decisive_metric: str | None = None
+    recovery_transition: str | None = None
+    layer_signal: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,14 @@ def optimization_history_payload(item: OptimizationHistory) -> dict[str, object]
         payload["rationale_summary"] = item.rationale_summary
     if item.planning_values is not None:
         payload["planning_values"] = dict(item.planning_values)
+    if item.incumbent_decision is not None:
+        payload["incumbent_decision"] = item.incumbent_decision
+    if item.decisive_metric is not None:
+        payload["decisive_metric"] = item.decisive_metric
+    if item.recovery_transition is not None:
+        payload["recovery_transition"] = item.recovery_transition
+    if item.layer_signal is not None:
+        payload["layer_signal"] = item.layer_signal
     return payload
 
 
