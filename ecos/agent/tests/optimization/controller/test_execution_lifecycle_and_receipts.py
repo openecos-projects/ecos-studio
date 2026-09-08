@@ -49,9 +49,10 @@ def test_missing_fake_ecc_receipt_is_charged_and_quarantined(tmp_path: Path) -> 
         == OptimizationOutcomeKind.INDETERMINATE
     )
     state = json.loads(controller.state_path.read_text(encoding="utf-8"))
-    assert state["attempted_requests"] == [
+    assert [probe["requested"] for probe in state["attempted_probes"]] == [
         {"knob_id": "place.cell_padding_x", "value": 3}
     ]
+    assert all(probe["parent_config_sha256"] for probe in state["attempted_probes"])
 
 
 def test_not_started_retries_once_without_consuming_a_candidate(tmp_path: Path) -> None:

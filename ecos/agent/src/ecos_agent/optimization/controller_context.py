@@ -89,12 +89,15 @@ from ecos_agent.optimization.objective_alignment import (
     recovery_violation_counts,
 )
 from ecos_agent.optimization.planning import (
+    InFlightExperiment,
     OptimizationHistory,
     OptimizationPlannerTurn,
     OptimizationPlanningContext,
     OptimizationProposalPlanner,
+    in_flight_payload,
     optimization_history_payload,
     planning_context_payload,
+    stage_evidence_payload,
     v2_domains,
     v2_provider_payload_sha256,
     v2_to_v1,
@@ -117,8 +120,10 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
 )
 from ecos_agent.optimization.knob_policy import (
+    KNOB_ROLES as _KNOB_ROLES,
     allowed_knobs,
     history_layer_signal,
+    layer_priority,
     policy_payload,
     select_search_actions,
 )
@@ -145,6 +150,7 @@ class ControllerContextMixin:
         observation: StageObservation,
         retrieval: OptimizationRetrievalResult,
         current_values: Mapping[str, bool | int | float],
+        stage_observations: Mapping[str, StageObservation] | None = None,
     ) -> OptimizationPlanningContext:
         trajectories = self._history(include_receipts=self.receipt_aware_planning)
         history = trajectories[-6:]
@@ -152,6 +158,7 @@ class ControllerContextMixin:
             knob_id.value: current_values[knob_id.value]
             for knob_id in ACTIVE_OPTIMIZATION_KNOBS if knob_id.value in current_values
         }
+        parent_config_sha256 = canonical_sha256(dict(sorted(active_values.items())))
         cards = load_parameter_cards()
         parameter_knowledge = (
             tuple(cards[knob_id] for knob_id in ACTIVE_OPTIMIZATION_KNOBS)
@@ -164,15 +171,30 @@ class ControllerContextMixin:
             and prior_decisions[-1].rejection_reason else ()
         )
         effective_domains = self._parameter_domains(observation, active_values)
-        search_layer, selected_actions = self._select_parameter_actions(effective_domains, observation)
-        selected_knobs = {action.knob_id for action in selected_actions}
-        if self._objective is not None:
-            effective_domains = tuple(
-                domain for domain in effective_domains if domain.knob_id in selected_knobs
-            )
+        search_layer, selected_actions = self._select_parameter_actions(
+            effective_domains, observation
+        )
+        # Cross-stage actions require the evidence of their own stage: the
+        # primary observation covers its stage, extra stages must be supplied.
+        stage_evidence = {observation.stage.value}
+        if stage_observations:
+            stage_evidence.update(stage_observations)
+        available_actions = tuple(
+            action for action in selected_actions
+            if candidate_target_step(action.knob_id) in stage_evidence
+        )
         parameter_policy = policy_payload(
             self._objective, search_layer,
             convergence_evidence=self._has_convergence_evidence(observation),
+            priority=layer_priority(
+                self._objective,
+                history=tuple(
+                    (item.requested.knob_id, item.layer_signal)
+                    for item in self._history()
+                    if item.layer_signal is not None
+                ),
+                recovering=self.recovery_incomplete,
+            ),
         )
         task_memory = (
             self._task_memory_supplier()
@@ -193,10 +215,7 @@ class ControllerContextMixin:
             raise OptimizationEpisodeControllerError(
                 "task memory snapshot does not match the episode"
             )
-        available_actions = tuple(
-            action for action in selected_actions
-            if candidate_target_step(action.knob_id) == observation.stage.value
-        )
+        in_flight = self._in_flight_experiments()
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,
             sha256=canonical_sha256(observation.model_dump(mode="json")),
@@ -363,6 +382,12 @@ class ControllerContextMixin:
                         optimization_history_payload(item) for item in trajectories
                     ],
                     "planning_feedback": planning_feedback,
+                    "in_flight": [in_flight_payload(item) for item in in_flight],
+                    "stage_evidence": stage_evidence_payload(
+                        observation.stage.value, observation_ref,
+                        stage_observations or {},
+                    ),
+                    "parent_config_sha256": parent_config_sha256,
                     "task_memory": (
                         task_memory.model_dump(mode="json")
                         if task_memory is not None
@@ -397,10 +422,33 @@ class ControllerContextMixin:
             trajectories,
             planning_feedback,
             parameter_policy,
+            in_flight,
+            dict(stage_observations or {}),
+            parent_config_sha256,
+        )
+
+    def _in_flight_experiments(self) -> tuple[InFlightExperiment, ...]:
+        return tuple(
+            InFlightExperiment(
+                intervention_id=record.intervention_id,
+                execution_id=record.execution_id,
+                requested=record.requested,
+                direction=record.proposal_v2.action.direction.value
+                if record.proposal_v2.action is not None
+                else record.proposal.action.direction.value
+                if record.proposal.action is not None
+                else "increase",
+                rationale_summary=record.proposal.rationale_summary,
+                parent_config_sha256=record.parent_config_sha256,
+            )
+            for record in self._pending_executions.values()
         )
 
     def _parameter_domains(self, observation, current_values):
         cards = load_parameter_cards()
+        parent_config_sha256 = canonical_sha256(
+            dict(sorted(current_values.items()))
+        )
         return tuple(
             compile_effective_domain(
                 cards[knob],
@@ -408,7 +456,7 @@ class ControllerContextMixin:
                     observation, current_values, knob, cards[knob].tool.revision,
                     cards[knob].surface.unit, card_hash(cards[knob]),
                 ),
-                attempted=self._attempted_requests(),
+                attempted=self._attempted_requests(parent_config_sha256),
                 baseline_surface_value=current_values.get(knob.value),
             )
             for knob in allowed_knobs(self._objective)
@@ -441,10 +489,21 @@ class ControllerContextMixin:
         )
 
     def planning_stage(self, observation, current_values):
-        """Select a nonempty task-permitted layer before requesting stage evidence."""
+        """Return the recommended layer's stage for the primary observation."""
         active_values = {knob.value: current_values[knob.value] for knob in ACTIVE_OPTIMIZATION_KNOBS if knob.value in current_values}
-        _, actions = self._select_parameter_actions(self._parameter_domains(observation, active_values), observation)
+        layer, actions = self._select_parameter_actions(self._parameter_domains(observation, active_values), observation)
+        for action in actions:
+            if _KNOB_ROLES.get(action.knob_id) == layer:
+                return candidate_target_step(action.knob_id)
         return candidate_target_step(actions[0].knob_id) if actions else "place"
+
+    def planning_stages(self, observation, current_values):
+        """Extra stages whose evidence cross-stage legal actions need."""
+        stages = {
+            candidate_target_step(knob) for knob in allowed_knobs(self._objective)
+        }
+        stages.discard(observation.stage.value)
+        return tuple(sorted(stages))
 
     def _design_id(self) -> str | None:
         value = self._execution_context.get("design_id")

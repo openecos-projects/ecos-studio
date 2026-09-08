@@ -35,24 +35,35 @@ def controller(tmp_path, *, goal=None, planner=None, executor=None):
                        incumbent=_eligible_terminal().model_copy(update={"geometry": geometry()}))
 
 
-def test_fixed_task_planning_only_exposes_primary_placement_layer(tmp_path):
+def test_fixed_task_exposes_every_permitted_layer_with_advisory_priority(tmp_path):
     instance = controller(tmp_path)
     result = instance.plan(_observation(), _retrieval(), CURRENT_VALUES)
     assert result.requested.knob_id == "place.cell_padding_x"
     context = instance.planner.contexts[0]
-    assert {d.knob_id for d in context.effective_domains} == {"place.target_density", "place.cell_padding_x"}
+    # Every task-permitted knob stays selectable; the rotation only advises.
+    assert {d.knob_id for d in context.effective_domains} == {
+        "place.target_density", "place.target_overflow",
+        "place.cell_padding_x", "place.routability_opt",
+    }
+    assert {a.knob_id for a in context.legal_actions} == {
+        "place.target_density", "place.cell_padding_x", "place.routability_opt",
+    }
     assert context.parameter_policy["active_layer"] == "physical"
+    assert context.parameter_policy["layer_priority_is_advisory"] is True
     assert instance.planning_stage(_observation(), CURRENT_VALUES) == "place"
 
 
-def test_area_task_selects_floorplan_and_increase_only(tmp_path):
+def test_area_task_recommends_floorplan_and_keeps_increase_only_policy(tmp_path):
     instance = controller(tmp_path, goal=objective("降低面积", ObjectiveMetric.DIE_AREA),
                           planner=_FakeCodex(lambda ctx: _proposal(ctx, knob_id="floorplan.core_util", requested_value=0.7)))
     assert instance.planning_stage(_observation(), CURRENT_VALUES) == "Floorplan"
     observation = _observation().model_copy(update={"stage": ECCStepName.FLOORPLAN})
     result = instance.plan(observation, _retrieval(), CURRENT_VALUES)
     assert result.requested.knob_id == "floorplan.core_util"
-    assert {a.direction.value for a in instance.planner.contexts[0].legal_actions} == {"increase"}
+    legal = instance.planner.contexts[0].legal_actions
+    assert {
+        a.direction.value for a in legal if a.knob_id == "floorplan.core_util"
+    } == {"increase"}
 
 
 @pytest.mark.parametrize("knob,value", [
@@ -72,7 +83,7 @@ def test_changed_exact_value_never_reaches_executor(tmp_path):
     instance = controller(tmp_path)
     instance.plan(_observation(), _retrieval(), CURRENT_VALUES)
     instance._requested = RequestedKnobValue(knob_id="place.cell_padding_x", value=4)
-    with pytest.raises(OptimizationEpisodeControllerError, match="approved planning decision"):
+    with pytest.raises(OptimizationEpisodeControllerError, match="execution request"):
         instance.execute()
     assert instance.executor.start_calls == []
 

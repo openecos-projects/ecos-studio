@@ -16,7 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Callable, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ecos_agent.errors import ProposalProviderError
 from ecos_agent.optimization.parameters.effective_domain import (
@@ -150,11 +150,66 @@ class OptimizationControlResult:
     planner_source: Literal["llm", "repair"] = "llm"
 
 
+class _PersistedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class AttemptedProbe(_PersistedModel):
+    """A dispatched request scoped to the parent configuration it probed."""
+
+    parent_config_sha256: str
+    requested: RequestedKnobValue
+
+    @field_validator("parent_config_sha256")
+    @classmethod
+    def _validate_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("attempted probe parent hash is invalid")
+        return value
+
+
+class ExecutionBinding(_PersistedModel):
+    """Stable execution-id to intervention mapping for idempotent merges."""
+
+    intervention_id: str
+    execution_id: str
+
+
+class PendingExecutionRecord(_PersistedModel):
+    """One immutable in-flight candidate bound to its parent snapshot."""
+
+    intervention_id: str
+    execution_id: str
+    proposal: OptimizationProposal
+    proposal_v2: OptimizationProposalV2
+    requested: RequestedKnobValue
+    context_sha256: str
+    planning_entry_sha256: str
+    parent_config_sha256: str
+    parent_incumbent_sha256: str | None = None
+    parent_candidate_root_ref: str | None = None
+    cancel_requested: bool = False
+
+    @field_validator("context_sha256", "planning_entry_sha256", "parent_config_sha256")
+    @classmethod
+    def _validate_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("pending execution hash is invalid")
+        return value
+
+    @field_validator("parent_incumbent_sha256")
+    @classmethod
+    def _validate_optional_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("pending execution parent hash is invalid")
+        return value
+
+
 class _PersistedEpisodeState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["ecos.optimization_episode_state.v9"] = (
-        "ecos.optimization_episode_state.v9"
+    schema_version: Literal["ecos.optimization_episode_state.v10"] = (
+        "ecos.optimization_episode_state.v10"
     )
     episode_id: str
     checkpoint_id: str
@@ -164,6 +219,9 @@ class _PersistedEpisodeState(BaseModel):
     )
     knowledge_case_shots: Literal[0, 3] = Field(
         default=0, exclude_if=lambda value: value == 0
+    )
+    max_in_flight_candidates: Literal[1, 2] = Field(
+        default=1, exclude_if=lambda value: value == 1
     )
     state: OptimizationEpisodeState
     budget: BudgetSnapshot
@@ -209,10 +267,18 @@ class _PersistedEpisodeState(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     requested: RequestedKnobValue | None = None
-    attempted_requests: tuple[RequestedKnobValue, ...] = ()
-    pending_intervention_id: str | None = None
-    pending_execution_id: str | None = None
-    cancel_requested: bool = False
+    approved_planning_entry_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    approved_parent_incumbent_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    approved_parent_config_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    attempted_probes: tuple[AttemptedProbe, ...] = ()
+    pending_executions: tuple[PendingExecutionRecord, ...] = ()
+    execution_bindings: tuple[ExecutionBinding, ...] = ()
     task_memory_scope_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )

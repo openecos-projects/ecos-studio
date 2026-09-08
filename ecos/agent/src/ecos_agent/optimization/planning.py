@@ -46,6 +46,60 @@ from ecos_agent.optimization.parameters.contracts import (
 
 
 @dataclass(frozen=True)
+class InFlightExperiment:
+    """A dispatched but unresolved candidate exposed to the next planner turn.
+
+    In-flight requests are hypotheses under test, never observations: the
+    planner must not count them as results and must not re-dispatch the same
+    request from the same parent configuration.
+    """
+
+    intervention_id: str
+    execution_id: str
+    requested: RequestedKnobValue
+    direction: str
+    rationale_summary: str | None = None
+    parent_config_sha256: str | None = None
+
+
+def in_flight_payload(item: InFlightExperiment) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "intervention_id": item.intervention_id,
+        "execution_id": item.execution_id,
+        "requested": item.requested.model_dump(mode="json"),
+        "direction": item.direction,
+    }
+    if item.rationale_summary is not None:
+        payload["rationale_summary"] = item.rationale_summary
+    if item.parent_config_sha256 is not None:
+        payload["parent_config_sha256"] = item.parent_config_sha256
+    return payload
+
+
+def stage_evidence_payload(
+    primary_stage: str,
+    primary_ref: ObservationReference,
+    stage_observations: Mapping[str, StageObservation],
+) -> list[dict[str, object]]:
+    """Per-stage observation references binding cross-stage legal actions."""
+    entries: list[dict[str, object]] = [
+        {"stage": primary_stage, "observation_ref": primary_ref.model_dump(mode="json")}
+    ]
+    entries.extend(
+        {
+            "stage": stage,
+            "observation_ref": {
+                "observation_id": observation.observation_id,
+                "sha256": canonical_sha256(observation.model_dump(mode="json")),
+            },
+        }
+        for stage, observation in sorted(stage_observations.items())
+        if stage != primary_stage
+    )
+    return entries
+
+
+@dataclass(frozen=True)
 class OptimizationPlanningContext:
     """The entire, intentionally small input surface exposed to the planner."""
 
@@ -71,6 +125,9 @@ class OptimizationPlanningContext:
     parameter_trajectories: tuple["OptimizationHistory", ...] = ()
     planning_feedback: tuple[str, ...] = ()
     parameter_policy: Mapping[str, object] | None = None
+    in_flight: tuple[InFlightExperiment, ...] = ()
+    stage_observations: Mapping[str, StageObservation] | None = None
+    parent_config_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +239,16 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         optimization_history_payload(item) for item in context.parameter_trajectories
     ]
     payload["planning_feedback"] = list(context.planning_feedback)
+    if context.in_flight:
+        payload["in_flight"] = [in_flight_payload(item) for item in context.in_flight]
+    if context.stage_observations is not None and context.observation is not None:
+        payload["stage_evidence"] = stage_evidence_payload(
+            context.observation.stage.value,
+            context.observation_ref,
+            context.stage_observations,
+        )
+    if context.parent_config_sha256 is not None:
+        payload["parent_config_sha256"] = context.parent_config_sha256
     if context.parameter_policy is not None:
         payload["parameter_policy"] = dict(context.parameter_policy)
     if context.effective_domains:

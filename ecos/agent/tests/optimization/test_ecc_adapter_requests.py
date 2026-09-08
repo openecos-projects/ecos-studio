@@ -262,3 +262,33 @@ def test_adapter_rejects_mismatched_request_or_foreign_operation() -> None:
                 context_sha256="sha256:invalid",
             )
         )
+
+def test_adapter_refuses_a_second_concurrent_start_until_terminal() -> None:
+    """The ECC backend owns one active operation per source workspace."""
+    from ecos_agent.optimization.execution import CandidateExecutionBusy
+
+    rpc = _FakeEccRpc(_running_operation())
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+    first = adapter.start(
+        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+    )
+    assert first.started is True
+
+    with pytest.raises(CandidateExecutionBusy):
+        adapter.start(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+        )
+
+    # Collecting the terminal releases the busy state for the next start.
+    rpc.terminal_response = {
+        "operationId": "operation-1",
+        "workspaceId": "workspace-1",
+        "state": "failed",
+    }
+    adapter.wait_for_terminal("operation-1")
+    second = adapter.start(
+        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+    )
+    assert second.started is True

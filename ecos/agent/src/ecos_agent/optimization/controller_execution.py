@@ -53,6 +53,7 @@ from ecos_agent.optimization.decision_audit import (
 from ecos_agent.optimization.execution import (
     CANDIDATE_END_STEP,
     CANDIDATE_EXECUTION_SCOPE,
+    CandidateExecutionBusy,
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
@@ -126,9 +127,11 @@ _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 from ecos_agent.optimization.controller_models import (
+    ExecutionBinding,
     OptimizationAgentMode,
     OptimizationControlResult,
     OptimizationEpisodeControllerError,
+    PendingExecutionRecord,
 )
 
 
@@ -144,58 +147,103 @@ class ControllerExecutionMixin:
                 "episode has no approved proposal to execute"
             )
         if self._budget.exhausted:
+            # B3: an exhausted budget only blocks new dispatch; in-flight
+            # candidates must still be collected before the episode may stop.
+            self._clear_approved_proposal()
+            if self._pending_executions:
+                self._state = OptimizationEpisodeState.EXECUTING
+                self._persist()
+                return self._result("budget_exhausted")
             self._state = OptimizationEpisodeState.STOPPED
-            self._proposal = None
-            self._pending_v2_proposal = None
-            self._requested = None
             self._persist()
             return self._result(
                 "recovery_incomplete" if self.recovery_incomplete else "budget_exhausted"
             )
+        # B1: the coordinator reserves the slot and the budget atomically;
+        # an over-limit dispatch is a caller bug, never a silent queue.
+        if self.free_candidate_slots <= 0:
+            raise OptimizationEpisodeControllerError(
+                "no free in-flight candidate slot"
+            )
+        # A4: a proposal planned against an older incumbent must be re-planned,
+        # not silently rebound to the current parent workspace.
+        current_parent = (
+            canonical_sha256(self._incumbent.model_dump(mode="json"))
+            if self._incumbent is not None
+            else None
+        )
+        if (
+            self._approved_parent_incumbent_sha256 is not None
+            and current_parent is not None
+            and self._approved_parent_incumbent_sha256 != current_parent
+        ):
+            self._clear_approved_proposal()
+            self._state = (
+                OptimizationEpisodeState.EXECUTING
+                if self._pending_executions
+                else OptimizationEpisodeState.PLANNING
+            )
+            self._persist()
+            return self._result("stale_proposal_parent_changed")
 
         if self._requested.knob_id not in allowed_knobs(self._objective):
             raise OptimizationEpisodeControllerError("requested knob is forbidden by the task parameter policy")
         violation = geometry_constraint_error(self._objective, self._baseline_geometry, self._incumbent)
         if violation is not None:
             raise OptimizationEpisodeControllerError(violation)
-        decisions = self._decision_audit.replay().entries
-        if (
-            not decisions or decisions[-1].validation_result != "accepted"
-            or decisions[-1].proposal != self._proposal
-            or decisions[-1].requested != self._requested
-        ):
-            raise OptimizationEpisodeControllerError("execution request does not match the approved planning decision")
         if self._pending_v2_proposal is None or self._pending_v2_proposal.action is None:
             raise OptimizationEpisodeControllerError("execution request has no validated exact-value proposal")
         action = self._pending_v2_proposal.action
         if action.knob_id != self._requested.knob_id or action.requested_value != self._requested.value:
             raise OptimizationEpisodeControllerError("execution request differs from the validated exact-value proposal")
-        intervention_id = self._next_intervention_id()
-        planning_entries = self._planning_audit.replay().entries
-        domain = (
-            next(
-                (
-                    item
-                    for item in planning_entries[-1].effective_domains
-                    if item.knob_id == self._requested.knob_id
-                ),
-                None,
+        if self._approved_planning_entry_sha256 is None or (
+            self._approved_parent_config_sha256 is None
+        ):
+            raise OptimizationEpisodeControllerError(
+                "approved proposal has no parent snapshot binding"
             )
-            if planning_entries
-            else None
+        decision = next(
+            (
+                entry for entry in reversed(self._decision_audit.replay().entries)
+                if entry.validation_result == "accepted"
+                and entry.proposal is not None
+                and canonical_sha256(entry.proposal.model_dump(mode="json"))
+                == canonical_sha256(self._proposal.model_dump(mode="json"))
+                and entry.requested == self._requested
+            ),
+            None,
+        )
+        planning_by_sha = {
+            entry.entry_sha256: entry
+            for entry in self._planning_audit.replay().entries
+        }
+        planning_entry = planning_by_sha.get(self._approved_planning_entry_sha256)
+        if (
+            decision is None
+            or planning_entry is None
+            or decision.planning_entry_sha256 != planning_entry.entry_sha256
+            or self._proposal.context_ref != planning_entry.context_ref
+        ):
+            raise OptimizationEpisodeControllerError("execution request does not match the approved planning decision")
+        domain = next(
+            (
+                item
+                for item in planning_entry.effective_domains
+                if item.knob_id == self._requested.knob_id
+            ),
+            None,
         )
         if domain is None:
             raise OptimizationEpisodeControllerError(
                 "approved proposal has no context-bound effective domain"
             )
         if (
-            decisions[-1].planning_entry_sha256 != planning_entries[-1].entry_sha256
-            or self._proposal.context_ref != planning_entries[-1].context_ref
-            or action.effective_domain_sha256 != domain.snapshot_sha256
+            action.effective_domain_sha256 != domain.snapshot_sha256
             or domain.direction_schema(action.direction) is None
             or not domain.accepts(self._requested.value)
         ):
             raise OptimizationEpisodeControllerError("execution request does not match the approved parameter domain")
+        intervention_id = self._next_intervention_id()
         request = CandidateExecutionRequest(
             intervention_id=intervention_id,
             episode_id=self.episode_id,
@@ -207,33 +255,48 @@ class ControllerExecutionMixin:
             ecc_revision=self._execution_revision(),
             parent_candidate_root_ref=self._incumbent_candidate_root_ref,
         )
+        parent_config_sha256 = self._approved_parent_config_sha256
         try:
             receipt = self._start_once_with_retry(request)
-        except OptimizationEpisodeControllerError:
-            self._budget = self._consume(candidates=1)
-            self._pending_intervention_id = intervention_id
-            self._pending_execution_id = "unknown-execution"
-            self._attempted_request_values = (
-                *self._attempted_request_values,
-                request.requested,
+        except CandidateExecutionBusy:
+            # The backend still owns an active candidate operation: keep the
+            # approved proposal for a later start and wait for an in-flight
+            # terminal.  No budget is consumed and nothing is re-dispatched.
+            self._state = (
+                OptimizationEpisodeState.AWAITING_EXECUTION
+                if self._pending_executions
+                else OptimizationEpisodeState.PLANNING
             )
-            self.ledger.append_start(self._ledger_start(request))
-            return self._quarantine_indeterminate()
+            self._persist()
+            return self._result("execution_backend_busy")
+        except OptimizationEpisodeControllerError:
+            record = self._register_started_candidate(
+                intervention_id=intervention_id,
+                execution_id="unknown-execution",
+                request=request,
+                planning_entry_sha256=planning_entry.entry_sha256,
+                parent_config_sha256=parent_config_sha256,
+            )
+            self.ledger.append_start(self._ledger_start(request, record))
+            return self._quarantine_indeterminate("unknown-execution")
         if receipt is None:
-            self._state = OptimizationEpisodeState.PLANNING
-            self._proposal = None
-            self._pending_v2_proposal = None
+            self._clear_approved_proposal()
+            self._state = (
+                OptimizationEpisodeState.EXECUTING
+                if self._pending_executions
+                else OptimizationEpisodeState.PLANNING
+            )
             self._persist()
             return self._result("execution_not_started")
 
-        self._budget = self._consume(candidates=1)
-        self._pending_intervention_id = intervention_id
-        self._pending_execution_id = receipt.execution_id
-        self._attempted_request_values = (
-            *self._attempted_request_values,
-            request.requested,
+        record = self._register_started_candidate(
+            intervention_id=intervention_id,
+            execution_id=receipt.execution_id,
+            request=request,
+            planning_entry_sha256=planning_entry.entry_sha256,
+            parent_config_sha256=parent_config_sha256,
         )
-        self.ledger.append_start(self._ledger_start(request))
+        self.ledger.append_start(self._ledger_start(request, record))
         if receipt.outcome in {
             None,
             OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
@@ -241,39 +304,98 @@ class ControllerExecutionMixin:
             self._state = OptimizationEpisodeState.EXECUTING
             self._persist()
             return self._result()
-        return self._complete(receipt.outcome, receipt)
+        return self._complete(receipt.outcome, receipt, record)
 
-    def timeout(self) -> OptimizationControlResult:
-        if (
-            self._state != OptimizationEpisodeState.EXECUTING
-            or self._pending_execution_id is None
-        ):
+    def _clear_approved_proposal(self) -> None:
+        self._proposal = None
+        self._pending_v2_proposal = None
+        self._requested = None
+        self._approved_planning_entry_sha256 = None
+        self._approved_parent_incumbent_sha256 = None
+        self._approved_parent_config_sha256 = None
+
+    def _register_started_candidate(
+        self,
+        *,
+        intervention_id: str,
+        execution_id: str,
+        request: CandidateExecutionRequest,
+        planning_entry_sha256: str,
+        parent_config_sha256: str,
+    ) -> PendingExecutionRecord:
+        """Consume budget, record the probe, and bind one immutable pending record."""
+        self._budget = self._consume(candidates=1)
+        self._record_attempted_probe(request.requested, parent_config_sha256)
+        record = PendingExecutionRecord(
+            intervention_id=intervention_id,
+            execution_id=execution_id,
+            proposal=request.proposal,
+            proposal_v2=self._pending_v2_proposal,
+            requested=request.requested,
+            context_sha256=request.context_sha256,
+            planning_entry_sha256=planning_entry_sha256,
+            parent_config_sha256=parent_config_sha256,
+            parent_incumbent_sha256=self._approved_parent_incumbent_sha256,
+            parent_candidate_root_ref=request.parent_candidate_root_ref,
+        )
+        self._pending_executions[record.intervention_id] = record
+        self._execution_bindings = (
+            *self._execution_bindings,
+            ExecutionBinding(
+                intervention_id=intervention_id, execution_id=execution_id
+            ),
+        )
+        self._clear_approved_proposal()
+        return record
+
+    def timeout(self, execution_id: str | None = None) -> OptimizationControlResult:
+        record = self._select_pending_execution(execution_id)
+        if record is None:
             raise OptimizationEpisodeControllerError(
                 "cancel already requested or no execution is pending"
             )
-        if self._cancel_requested:
+        if record.cancel_requested:
             raise OptimizationEpisodeControllerError("cancel already requested")
-        self._cancel_requested = True
+        record = record.model_copy(update={"cancel_requested": True})
+        self._pending_executions[record.intervention_id] = record
         self._persist()
         try:
-            receipt = self.executor.cancel(self._pending_execution_id)
+            receipt = self.executor.cancel(record.execution_id)
         except Exception:
-            return self._quarantine_indeterminate()
+            return self._quarantine_indeterminate(record.execution_id)
         if not isinstance(receipt, CandidateExecutionReceipt):
-            return self._quarantine_indeterminate()
+            return self._quarantine_indeterminate(record.execution_id)
         if receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED:
-            return self._complete(receipt.outcome, receipt)
-        return self._quarantine_indeterminate()
+            return self._complete(receipt.outcome, receipt, record)
+        return self._quarantine_indeterminate(record.execution_id)
+
+    def _select_pending_execution(
+        self, execution_id: str | None
+    ) -> PendingExecutionRecord | None:
+        if execution_id is not None:
+            return next(
+                (
+                    record
+                    for record in self._pending_executions.values()
+                    if record.execution_id == execution_id
+                ),
+                None,
+            )
+        if len(self._pending_executions) == 1:
+            return next(iter(self._pending_executions.values()))
+        return None
 
     def stop_before_execution(self) -> OptimizationControlResult:
         if self._state != OptimizationEpisodeState.AWAITING_EXECUTION:
             raise OptimizationEpisodeControllerError(
                 "episode has no unstarted execution to stop"
             )
-        self._proposal = None
-        self._pending_v2_proposal = None
-        self._requested = None
-        self._state = OptimizationEpisodeState.STOPPED
+        self._clear_approved_proposal()
+        self._state = (
+            OptimizationEpisodeState.EXECUTING
+            if self._pending_executions
+            else OptimizationEpisodeState.STOPPED
+        )
         self._persist()
         return self._result("stop_requested_before_execution")
 
@@ -287,23 +409,45 @@ class ControllerExecutionMixin:
         decisive_metric: SelectionMetric | None = None,
     ) -> OptimizationControlResult:
         """Record a terminal outcome produced from separately verified evidence."""
-        if (
-            self._state != OptimizationEpisodeState.EXECUTING
-            or self._pending_execution_id is None
-            or receipt.execution_id != self._pending_execution_id
-            or not receipt.started
-            or receipt.outcome is None
-        ):
+        record = next(
+            (
+                item
+                for item in self._pending_executions.values()
+                if item.execution_id == receipt.execution_id
+            ),
+            None,
+        )
+        if record is None:
+            # E3: replays of an already-merged terminal stay no-ops.
+            if self._execution_already_merged(receipt.execution_id):
+                return self._result()
+            raise OptimizationEpisodeControllerError(
+                "terminal receipt does not match pending execution"
+            )
+        if not receipt.started or receipt.outcome is None:
             raise OptimizationEpisodeControllerError(
                 "terminal receipt does not match pending execution"
             )
         return self._complete(
             outcome or receipt.outcome,
             receipt,
+            record,
             terminal_observation,
             incumbent_decision=incumbent_decision,
             decisive_metric=decisive_metric,
         )
+
+    def _execution_already_merged(self, execution_id: str) -> bool:
+        merged = {
+            outcome.intervention_id
+            for outcome in self.ledger.replay().terminal_outcomes
+        }
+        return any(
+            binding.execution_id == execution_id
+            and binding.intervention_id in merged
+            for binding in self._execution_bindings
+        )
+
     def _start_once_with_retry(
         self,
         request: CandidateExecutionRequest,
@@ -311,6 +455,8 @@ class ControllerExecutionMixin:
         for _ in range(2):
             try:
                 receipt = self.executor.start(request)
+            except CandidateExecutionBusy:
+                raise
             except Exception as exc:
                 raise OptimizationEpisodeControllerError(
                     "fake execution adapter failed"
@@ -324,7 +470,7 @@ class ControllerExecutionMixin:
         return None
 
     def _ledger_start(
-        self, request: CandidateExecutionRequest
+        self, request: CandidateExecutionRequest, record: PendingExecutionRecord
     ) -> OptimizationInterventionStart:
         proposal_sha256 = canonical_sha256(request.proposal.model_dump(mode="json"))
         target_step = candidate_target_step(request.requested.knob_id)
@@ -354,6 +500,8 @@ class ControllerExecutionMixin:
                 "requested": request.requested.model_dump(mode="json"),
                 "context_sha256": request.context_sha256,
                 "parent_candidate_root_ref": request.parent_candidate_root_ref,
+                "parent_config_sha256": record.parent_config_sha256,
+                "parent_incumbent_sha256": record.parent_incumbent_sha256,
                 "target_step": target_step,
                 "end_step": end_step,
                 "execution_scope": execution_scope,
@@ -384,6 +532,7 @@ class ControllerExecutionMixin:
                     "mode": self.mode.value,
                     "receipt_aware_planning": self.receipt_aware_planning,
                     "knowledge_case_shots": self.knowledge_case_shots,
+                    "max_in_flight_candidates": self.max_in_flight_candidates,
                 }
             ),
             objective_contract_sha256=(
@@ -400,34 +549,33 @@ class ControllerExecutionMixin:
             target_step=target_step,
             end_step=end_step,
             execution_scope=execution_scope,
+            parent_config_sha256=record.parent_config_sha256,
+            parent_incumbent_sha256=record.parent_incumbent_sha256,
         )
 
     def _complete(
         self,
         outcome: OptimizationOutcomeKind,
         receipt: CandidateExecutionReceipt,
+        record: PendingExecutionRecord,
         terminal_observation: TerminalObservation | None = None,
         *,
         incumbent_decision: str | None = None,
         decisive_metric: SelectionMetric | None = None,
     ) -> OptimizationControlResult:
-        if self._pending_intervention_id is None:
-            raise OptimizationEpisodeControllerError(
-                "terminal receipt has no pending intervention"
-            )
+        requested = record.requested
         if receipt.parameter_application_receipt is not None:
             native_requested = receipt.parameter_application_receipt.requested
             if (
-                self._requested is None
-                or native_requested.get("knob_id") != self._requested.knob_id.value
-                or native_requested.get("value") != self._requested.value
+                native_requested.get("knob_id") != requested.knob_id.value
+                or native_requested.get("value") != requested.value
             ):
                 raise OptimizationEpisodeControllerError(
                     "terminal parameter receipt does not match requested value"
                 )
-        if receipt.evidence is not None and self._requested is not None:
+        if receipt.evidence is not None:
             expected_contract = (
-                candidate_target_step(self._requested.knob_id),
+                candidate_target_step(requested.knob_id),
                 CANDIDATE_END_STEP,
                 CANDIDATE_EXECUTION_SCOPE,
             )
@@ -463,7 +611,7 @@ class ControllerExecutionMixin:
                 if comparison is None
                 else IncumbentComparison(comparison, decisive_metric)
             ),
-            requested=self._requested,
+            requested=requested,
             parameter_receipt=receipt.parameter_application_receipt,
             objective_alignment=self._objective_alignment,
             recovery_active=self.recovery_incomplete,
@@ -507,6 +655,11 @@ class ControllerExecutionMixin:
             details["incumbent_decision"] = incumbent_decision
         if decisive_metric is not None:
             details["decisive_metric"] = decisive_metric.value
+        # A2: the candidate's original parent snapshot stays recorded next to
+        # the merge-time decision so both comparisons remain replayable.
+        details["parent_config_sha256"] = record.parent_config_sha256
+        if record.parent_incumbent_sha256 is not None:
+            details["parent_incumbent_sha256"] = record.parent_incumbent_sha256
         if self._objective_alignment is not None:
             details["objective_alignment_sha256"] = (
                 self._objective_alignment.alignment_contract_sha256
@@ -516,7 +669,7 @@ class ControllerExecutionMixin:
                 mode="json"
             )
         terminal_outcome = OptimizationTerminalOutcome(
-            intervention_id=self._pending_intervention_id,
+            intervention_id=record.intervention_id,
             outcome=outcome,
             candidate_manifest_sha256=(
                 receipt.evidence.candidate_manifest_sha256
@@ -546,9 +699,8 @@ class ControllerExecutionMixin:
             terminal_observation=terminal_observation,
             parameter_application_receipt=receipt.parameter_application_receipt,
             parameter_card_sha256=(
-                card_hash(load_parameter_card(self._requested.knob_id))
+                card_hash(load_parameter_card(requested.knob_id))
                 if receipt.parameter_application_receipt is not None
-                and self._requested is not None
                 else None
             ),
             materialization_receipt_sha256=(
@@ -580,9 +732,7 @@ class ControllerExecutionMixin:
             ),
             constraint_violation=constraint_violation,
             outcome_details_sha256=canonical_sha256(details),
-            target_step=candidate_target_step(self._requested.knob_id)
-            if self._requested
-            else "place",
+            target_step=candidate_target_step(requested.knob_id),
             end_step=CANDIDATE_END_STEP,
             execution_scope=CANDIDATE_EXECUTION_SCOPE,
         )
@@ -592,179 +742,42 @@ class ControllerExecutionMixin:
                 terminal_outcome,
                 receipt.parameter_application_receipt,
                 terminal_observation,
+                record,
             )
         if promote:
             assert terminal_observation is not None
             self._set_incumbent(terminal_observation, receipt.evidence)
-        self._pending_intervention_id = None
-        self._pending_execution_id = None
-        self._cancel_requested = False
-        self._proposal = None
-        self._pending_v2_proposal = None
-        self._requested = None
-        self._state = (
-            OptimizationEpisodeState.QUARANTINED
-            if outcome == OptimizationOutcomeKind.INDETERMINATE
-            else OptimizationEpisodeState.PLANNING
-        )
+        self._pending_executions.pop(record.intervention_id, None)
+        # Serial merge: the next decision sees the state this merge produced.
+        if outcome == OptimizationOutcomeKind.INDETERMINATE:
+            self._state = OptimizationEpisodeState.QUARANTINED
+        elif self._proposal is not None:
+            self._state = OptimizationEpisodeState.AWAITING_EXECUTION
+        elif self._pending_executions:
+            self._state = OptimizationEpisodeState.EXECUTING
+        elif self._budget.exhausted:
+            self._state = OptimizationEpisodeState.STOPPED
+        else:
+            self._state = OptimizationEpisodeState.PLANNING
         self._persist()
         return self._result()
 
-    def _record_empirical_case(
-        self,
-        outcome: OptimizationTerminalOutcome,
-        receipt: ParameterApplicationReceipt | None,
-        terminal: TerminalObservation | None,
-    ) -> None:
-        proposal = self._pending_v2_proposal
-        if proposal is not None and proposal.action is not None and proposal.action.claim_id is None:
-            # Unclaimed probes remain episode evidence, not claim-bound empirical cases.
-            return
-        if proposal is None or receipt is None or terminal is None:
-            self._append_case_diagnostic(
-                "missing_terminal_case_evidence", outcome, receipt, terminal
+    def _quarantine_indeterminate(
+        self, execution_id: str | None = None
+    ) -> OptimizationControlResult:
+        record = self._select_pending_execution(execution_id)
+        if record is None:
+            record = next(iter(self._pending_executions.values()), None)
+        if record is None:
+            raise OptimizationEpisodeControllerError(
+                "indeterminate terminal has no pending execution"
             )
-            return
-        action = proposal.action
-        domain = next(
-            (
-                item
-                for item in self._planning_audit.replay().entries[-1].effective_domains
-                if action is not None
-                and item.snapshot_sha256 == action.effective_domain_sha256
-            ),
-            None,
-        )
-        if domain is None:
-            self._append_case_diagnostic(
-                "missing_effective_domain", outcome, receipt, terminal
-            )
-            return
-        try:
-            case = build_terminal_empirical_case(
-                case_id=f"case-{self.episode_id}-{outcome.intervention_id}",
-                proposal=proposal,
-                effective_domain=domain,
-                receipt=receipt,
-                terminal_outcome=outcome,
-                terminal=terminal,
-                outcome_class=self._empirical_outcome(
-                    outcome.outcome,
-                    receipt,
-                    terminal,
-                    incumbent=self._incumbent,
-                    expected_effects=(
-                        proposal.action.expected_effects
-                        if proposal.action is not None
-                        else ()
-                    ),
-                ),
-                guardrail_status="pass" if terminal.eligible_for_incumbent else "fail",
-                design_id=self._design_id(),
-            )
-        except ValueError:
-            self._append_case_diagnostic(
-                "terminal_case_chain_invalid", outcome, receipt, terminal
-            )
-            return
-        if not self._external_case_pool:
-            self._case_pool.append_case(case)
-        self._case_audit.append_case(case)
-
-    @staticmethod
-    def _empirical_outcome(
-        outcome: OptimizationOutcomeKind,
-        receipt: ParameterApplicationReceipt,
-        terminal: TerminalObservation,
-        *,
-        incumbent: TerminalObservation | None = None,
-        expected_effects: tuple[ExpectedEffectV2, ...] = (),
-    ) -> EmpiricalOutcome:
-        if not native_receipt_is_effective(receipt):
-            return EmpiricalOutcome.INEFFECTIVE
-        if not terminal.eligible_for_incumbent or outcome in {
-            OptimizationOutcomeKind.CANDIDATE_INELIGIBLE,
-            OptimizationOutcomeKind.INFEASIBLE,
-        }:
-            return EmpiricalOutcome.GUARDRAIL_FAILURE
-        if outcome in {
-            OptimizationOutcomeKind.IMPROVED,
-            OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
-        }:
-            # Promotion is not hypothesis support: at least one declared
-            # expected effect must be observed against the prior incumbent.
-            if (
-                incumbent is not None
-                and expected_effects
-                and not ControllerExecutionMixin._expected_effect_realized(
-                    expected_effects, incumbent, terminal
-                )
-            ):
-                return EmpiricalOutcome.CONTRADICTED
-            return EmpiricalOutcome.SUPPORTED
-        if outcome in {
-            OptimizationOutcomeKind.DEGRADED,
-            OptimizationOutcomeKind.TRADEOFF,
-        }:
-            return EmpiricalOutcome.CONTRADICTED
-        return EmpiricalOutcome.FAILURE
-
-    @staticmethod
-    def _expected_effect_realized(
-        expected_effects: tuple[ExpectedEffectV2, ...],
-        incumbent: TerminalObservation,
-        terminal: TerminalObservation,
-    ) -> bool:
-        # ponytail: any realized declared effect counts as support; per-effect
-        # verdicts would need a case schema extension.
-        before = incumbent.objective_metrics
-        after = terminal.objective_metrics
-        for effect in expected_effects:
-            if effect.metric_id not in before or effect.metric_id not in after:
-                continue
-            old_value = before[effect.metric_id]
-            new_value = after[effect.metric_id]
-            if effect.direction == "increase" and new_value > old_value:
-                return True
-            if effect.direction == "decrease" and new_value < old_value:
-                return True
-        return False
-
-    def _append_case_diagnostic(
-        self,
-        reason_code: str,
-        outcome: OptimizationTerminalOutcome,
-        receipt: ParameterApplicationReceipt | None,
-        terminal: TerminalObservation | None,
-    ) -> None:
-        self._case_audit.append_diagnostic(
-            EmpiricalCaseDiagnostic(
-                intervention_id=outcome.intervention_id,
-                reason_code=reason_code,
-                proposal_sha256=(
-                    canonical_sha256(self._pending_v2_proposal.model_dump(mode="json"))
-                    if self._pending_v2_proposal is not None
-                    else None
-                ),
-                receipt_sha256=(receipt.evidence_sha256 if receipt is not None else None),
-                terminal_outcome_sha256=canonical_sha256(
-                    outcome.model_dump(mode="json")
-                ),
-                terminal_observation_sha256=(
-                    canonical_sha256(terminal.model_dump(mode="json"))
-                    if terminal is not None
-                    else None
-                ),
-            )
-        )
-
-    def _quarantine_indeterminate(self) -> OptimizationControlResult:
         receipt = CandidateExecutionReceipt(
-            execution_id=self._pending_execution_id or "unknown-execution",
+            execution_id=record.execution_id,
             started=True,
             outcome=OptimizationOutcomeKind.INDETERMINATE,
         )
-        return self._complete(OptimizationOutcomeKind.INDETERMINATE, receipt)
+        return self._complete(OptimizationOutcomeKind.INDETERMINATE, receipt, record)
 
     def _next_intervention_id(self) -> str:
         return f"intervention-{len(self.ledger.replay().entries) + 1}"

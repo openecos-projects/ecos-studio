@@ -28,20 +28,26 @@ def test_fixed_shape_excludes_floorplan_and_advanced():
     assert not any(knob.value.startswith("floorplan.") for knob in knobs)
     assert OptimizationKnob.DENSITY_WEIGHT not in knobs
     layer, selected = select_search_actions(objective(), actions())
+    # The layer is advisory: every task-permitted action stays selectable.
     assert layer == "physical"
     assert {item.knob_id for item in selected} == {
         OptimizationKnob.TARGET_DENSITY, OptimizationKnob.CELL_PADDING_X,
+        OptimizationKnob.ROUTABILITY_OPT,
     }
 
 
-def test_area_first_probe_is_core_util_increase():
+def test_area_first_recommends_floorplan_area_with_increase_only_direction():
     layer, selected = select_search_actions(
         objective(ObjectiveMetric.DIE_AREA, geometry="variable"), actions(),
     )
     assert layer == "floorplan_area"
-    assert [(item.knob_id.value, item.direction.value) for item in selected] == [
-        ("floorplan.core_util", "increase"),
-    ]
+    assert [
+        (item.knob_id.value, item.direction.value)
+        for item in selected
+        if item.knob_id == OptimizationKnob.FLOORPLAN_CORE_UTIL
+    ] == [("floorplan.core_util", "increase")]
+    # Other layers stay legal; only the recommendation leads with area.
+    assert any(item.knob_id == OptimizationKnob.CELL_PADDING_X for item in selected)
 
 
 def test_empty_area_direction_falls_through_without_empty_planning_turn():
@@ -78,7 +84,9 @@ def test_stage_change_resets_the_layer_basis():
     history = ((OptimizationKnob.FLOORPLAN_ASPECT_RATIO, SearchLayerSignal.RESET),)
     layer, selected = select_search_actions(goal, actions(), history=history)
     assert layer == "floorplan_area"
-    assert all(item.knob_id != OptimizationKnob.FLOORPLAN_ASPECT_RATIO for item in selected)
+    # All layers stay selectable; the reset only moves the recommendation
+    # back to the area-first head of the advisory order.
+    assert any(item.knob_id == OptimizationKnob.FLOORPLAN_ASPECT_RATIO for item in selected)
 
 
 def test_layer_signal_uses_stage_identity_and_metric_change():

@@ -134,33 +134,31 @@ from ecos_agent.optimization.parameters.semantics import (
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-_STATE_FILE = "optimization-episode-state.v9.json"
-_LEGACY_STATE_FILES = (
-    "optimization-episode-state.v2.json",
-    "optimization-episode-state.v3.json",
-    "optimization-episode-state.v4.json",
-    "optimization-episode-state.v5.json",
-    "optimization-episode-state.v6.json",
-    "optimization-episode-state.v7.json",
-    "optimization-episode-state.v8.json",
-)
+_STATE_FILE = "optimization-episode-state.v10.json"
 
+from ecos_agent.optimization.controller_cases import ControllerCaseRecordingMixin
 from ecos_agent.optimization.controller_context import ControllerContextMixin
 from ecos_agent.optimization.controller_execution import ControllerExecutionMixin
-from ecos_agent.optimization.controller_helpers import _pending_tuple, _write_json_atomic
+from ecos_agent.optimization.controller_helpers import _write_json_atomic
 from ecos_agent.optimization.controller_models import (
+    AttemptedProbe,
+    ExecutionBinding,
+    PendingExecutionRecord,
     _PersistedEpisodeState,
     OptimizationAgentMode,
     OptimizationControlResult,
     OptimizationEpisodeControllerError,
 )
 from ecos_agent.optimization.controller_planning import ControllerPlanningMixin
+from ecos_agent.optimization.controller_recovery import ControllerRecoveryMixin
 
 
 class OptimizationEpisodeController(
     ControllerPlanningMixin,
     ControllerContextMixin,
     ControllerExecutionMixin,
+    ControllerCaseRecordingMixin,
+    ControllerRecoveryMixin,
 ):
     """Validate one proposal at a time and record fake execution outcomes."""
 
@@ -186,6 +184,7 @@ class OptimizationEpisodeController(
         receipt_aware_planning: bool = True,
         knowledge_case_shots: Literal[0, 3] = 0,
         knowledge_case_pool_root: Path | None = None,
+        max_in_flight_candidates: Literal[1, 2] = 1,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -197,6 +196,13 @@ class OptimizationEpisodeController(
                 "receipt-aware planning flag is invalid"
             )
         self.receipt_aware_planning = receipt_aware_planning
+        if type(max_in_flight_candidates) is not int or max_in_flight_candidates not in {
+            1, 2,
+        }:
+            raise OptimizationEpisodeControllerError(
+                "max in-flight candidates must be one or two"
+            )
+        self.max_in_flight_candidates = max_in_flight_candidates
         if type(knowledge_case_shots) is not int or knowledge_case_shots not in {0, 3}:
             raise OptimizationEpisodeControllerError(
                 "knowledge case shots must be zero or three"
@@ -276,10 +282,12 @@ class OptimizationEpisodeController(
         self._proposal: OptimizationProposal | None = None
         self._pending_v2_proposal: OptimizationProposalV2 | None = None
         self._requested: RequestedKnobValue | None = None
-        self._attempted_request_values: tuple[RequestedKnobValue, ...] = ()
-        self._pending_intervention_id: str | None = None
-        self._pending_execution_id: str | None = None
-        self._cancel_requested = False
+        self._approved_planning_entry_sha256: str | None = None
+        self._approved_parent_incumbent_sha256: str | None = None
+        self._approved_parent_config_sha256: str | None = None
+        self._attempted_probes: tuple[AttemptedProbe, ...] = ()
+        self._pending_executions: dict[str, PendingExecutionRecord] = {}
+        self._execution_bindings: tuple[ExecutionBinding, ...] = ()
         self._planning_only_turns = 0
         self._persist()
 
@@ -288,8 +296,33 @@ class OptimizationEpisodeController(
         return self._state
 
     @property
+    def pending_execution_ids(self) -> tuple[str, ...]:
+        return tuple(
+            record.execution_id
+            for record in self._pending_executions.values()
+        )
+
+    @property
+    def pending_intervention_ids(self) -> tuple[str, ...]:
+        return tuple(self._pending_executions)
+
+    @property
     def pending_execution_id(self) -> str | None:
-        return self._pending_execution_id
+        ids = self.pending_execution_ids
+        return ids[0] if len(ids) == 1 else None
+
+    @property
+    def free_candidate_slots(self) -> int:
+        return self.max_in_flight_candidates - len(self._pending_executions)
+
+    def pending_execution(self, execution_id: str) -> PendingExecutionRecord | None:
+        for record in self._pending_executions.values():
+            if record.execution_id == execution_id:
+                return record
+        return None
+
+    def _pending_by_intervention(self, intervention_id: str) -> PendingExecutionRecord | None:
+        return self._pending_executions.get(intervention_id)
 
     @property
     def incumbent(self) -> TerminalObservation | None:
@@ -389,159 +422,6 @@ class OptimizationEpisodeController(
     def state_path(self) -> Path:
         return self.ledger.root / _STATE_FILE
 
-    @classmethod
-    def recover(
-        cls,
-        *,
-        planner: OptimizationProposalPlanner,
-        executor: OptimizationExecutionAdapter,
-        ledger: OptimizationLedger,
-        clock: Callable[[], float],
-        task_memory_scope_sha256: str | None = None,
-        task_memory_supplier: Callable[[], OptimizationTaskMemorySnapshot]
-        | None = None,
-        execution_context: Mapping[str, object] | None = None,
-        receipt_aware_planning: bool = True,
-        knowledge_case_shots: Literal[0, 3] = 0,
-        knowledge_case_pool_root: Path | None = None,
-    ) -> "OptimizationEpisodeController":
-        path = ledger.root / _STATE_FILE
-        if not path.is_file() and any(
-            (ledger.root / name).is_file() for name in _LEGACY_STATE_FILES
-        ):
-            raise OptimizationEpisodeControllerError(
-                "pre-policy episode cannot be recovered; start a new optimization episode"
-            )
-        try:
-            snapshot = _PersistedEpisodeState.model_validate_json(path.read_bytes())
-        except (OSError, ValidationError, ValueError) as exc:
-            raise OptimizationEpisodeControllerError(
-                "episode state hash is invalid"
-            ) from exc
-        replay = ledger.recover()
-        planning_audit = OptimizationPlanningAudit(ledger.root)
-        audit_replay = planning_audit.verify()
-        planning_provider_audit = OptimizationPlanningProviderEvidenceAudit(ledger.root)
-        provider_audit_replay = planning_provider_audit.verify()
-        decision_audit = OptimizationDecisionAudit(ledger.root)
-        decision_audit_replay = decision_audit.verify()
-        case_audit = EmpiricalCaseAuditStore(ledger.root)
-        case_audit_replay = case_audit.verify()
-        cls._verify_snapshot_trace(
-            snapshot,
-            replay,
-            audit_replay,
-            provider_audit_replay,
-            decision_audit_replay,
-            case_audit_replay,
-        )
-        if snapshot.task_memory_scope_sha256 != task_memory_scope_sha256:
-            raise OptimizationEpisodeControllerError(
-                "task memory scope does not match the recovered episode"
-            )
-        recovered_execution_context = dict(execution_context or {})
-        if snapshot.execution_context_sha256 != canonical_sha256(
-            recovered_execution_context
-        ):
-            raise OptimizationEpisodeControllerError(
-                "execution context does not match the recovered episode"
-            )
-
-        controller = cls.__new__(cls)
-        controller.episode_id = snapshot.episode_id
-        controller.checkpoint_id = snapshot.checkpoint_id
-        controller.mode = snapshot.mode
-        if snapshot.knowledge_case_shots != knowledge_case_shots:
-            raise OptimizationEpisodeControllerError(
-                "knowledge case shots do not match the recovered episode"
-            )
-        controller.knowledge_case_shots = snapshot.knowledge_case_shots
-        if snapshot.receipt_aware_planning != receipt_aware_planning:
-            raise OptimizationEpisodeControllerError(
-                "receipt-aware planning mode does not match the recovered episode"
-            )
-        controller.receipt_aware_planning = snapshot.receipt_aware_planning
-        controller.planner = planner
-        controller.executor = executor
-        controller.ledger = ledger
-        controller._clock = clock
-        controller._started_at = snapshot.started_at
-        controller._budget = snapshot.budget
-        controller._incumbent = snapshot.incumbent
-        controller._objective = snapshot.objective
-        controller._baseline_geometry = snapshot.baseline_geometry
-        controller._objective_alignment = snapshot.objective_alignment
-        controller._frozen_objective = snapshot.frozen_objective
-        controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
-        controller._task_memory_scope_sha256 = snapshot.task_memory_scope_sha256
-        controller._task_memory_supplier = task_memory_supplier
-        controller._execution_context = recovered_execution_context
-        controller._planning_audit = planning_audit
-        controller._planning_provider_audit = planning_provider_audit
-        controller._decision_audit = decision_audit
-        controller._case_audit = case_audit
-        controller._external_case_pool = knowledge_case_pool_root is not None
-        controller._case_pool = EmpiricalCaseAuditStore(
-            knowledge_case_pool_root
-            if knowledge_case_pool_root is not None
-            else ledger.root.parent / "knowledge-case-pool",
-            read_only=knowledge_case_pool_root is not None,
-        )
-        pool = controller._case_pool.verify()
-        if controller._external_case_pool and any(
-            case.split != "train" for case in pool.cases
-        ):
-            raise OptimizationEpisodeControllerError(
-                "external knowledge case pool contains a non-training case"
-            )
-        if (
-            snapshot.external_case_pool != controller._external_case_pool
-            or snapshot.case_pool_event_count != pool.event_count
-            or snapshot.case_pool_chain_head_sha256 != pool.chain_head_sha256
-        ):
-            raise OptimizationEpisodeControllerError(
-                "knowledge case pool does not match the recovered episode"
-            )
-        controller._case_pool_event_count = pool.event_count
-        controller._case_pool_chain_head_sha256 = pool.chain_head_sha256
-        controller._state = snapshot.state
-        controller._proposal = snapshot.proposal
-        controller._pending_v2_proposal = snapshot.pending_v2_proposal
-        controller._requested = snapshot.requested
-        controller._attempted_request_values = snapshot.attempted_requests
-        controller._pending_intervention_id = snapshot.pending_intervention_id
-        controller._pending_execution_id = snapshot.pending_execution_id
-        controller._cancel_requested = snapshot.cancel_requested
-        controller._planning_only_turns = snapshot.planning_only_turns
-        controller._incumbent_candidate_root_ref = snapshot.incumbent_candidate_root_ref
-        controller._incumbent_candidate_manifest_ref = (
-            snapshot.incumbent_candidate_manifest_ref
-        )
-        controller._incumbent_candidate_manifest_sha256 = (
-            snapshot.incumbent_candidate_manifest_sha256
-        )
-
-        if controller._objective is not None:
-            violation = geometry_constraint_error(
-                controller._objective, controller._baseline_geometry, controller._incumbent,
-            )
-            if violation is not None:
-                raise OptimizationEpisodeControllerError(violation)
-        expected_geometry = recovered_execution_context.get("geometry_baseline_sha256")
-        if expected_geometry is not None and expected_geometry != canonical_sha256(
-            controller._baseline_geometry.model_dump(mode="json") if controller._baseline_geometry else None
-        ):
-            raise OptimizationEpisodeControllerError("initial geometry does not match the execution context")
-        if replay.pending_intervention_ids:
-            controller._budget = controller._consume(
-                candidates=0, minimum_candidates=len(replay.pending_intervention_ids)
-            )
-            controller._state = OptimizationEpisodeState.QUARANTINED
-            controller._proposal = None
-            controller._pending_v2_proposal = None
-            controller._persist()
-        return controller
-
     def _result(self, rejection_reason: str | None = None) -> OptimizationControlResult:
         return OptimizationControlResult(
             self._state,
@@ -551,8 +431,39 @@ class OptimizationEpisodeController(
             "llm",
         )
 
-    def _attempted_requests(self) -> tuple[RequestedKnobValue, ...]:
-        return self._attempted_request_values
+    def _attempted_requests(
+        self, parent_config_sha256: str | None = None
+    ) -> tuple[RequestedKnobValue, ...]:
+        """Requests already dispatched, scoped to one parent configuration.
+
+        An attempted value only blocks the same value again under the same
+        parent configuration; a materially different parent may justify a
+        retest.  In-flight requests count as attempted for their parent.
+        """
+        requests = [
+            probe.requested
+            for probe in self._attempted_probes
+            if parent_config_sha256 is None
+            or probe.parent_config_sha256 == parent_config_sha256
+        ]
+        requests.extend(
+            record.requested
+            for record in self._pending_executions.values()
+            if parent_config_sha256 is None
+            or record.parent_config_sha256 == parent_config_sha256
+        )
+        return tuple(requests)
+
+    def _record_attempted_probe(
+        self, requested: RequestedKnobValue, parent_config_sha256: str
+    ) -> None:
+        self._attempted_probes = (
+            *self._attempted_probes,
+            AttemptedProbe(
+                parent_config_sha256=parent_config_sha256,
+                requested=requested,
+            ),
+        )
 
     def _refresh_budget(self) -> None:
         elapsed = max(
@@ -600,7 +511,7 @@ class OptimizationEpisodeController(
         decision_audit = self._decision_audit.replay()
         case_audit = self._case_audit.replay()
         value = {
-            "schema_version": "ecos.optimization_episode_state.v9",
+            "schema_version": "ecos.optimization_episode_state.v10",
             "episode_id": self.episode_id,
             "checkpoint_id": self.checkpoint_id,
             "mode": self.mode.value,
@@ -642,13 +553,17 @@ class OptimizationEpisodeController(
             "requested": self._requested.model_dump(mode="json")
             if self._requested
             else None,
-            "attempted_requests": [
-                request.model_dump(mode="json")
-                for request in self._attempted_request_values
+            "attempted_probes": [
+                probe.model_dump(mode="json") for probe in self._attempted_probes
             ],
-            "pending_intervention_id": self._pending_intervention_id,
-            "pending_execution_id": self._pending_execution_id,
-            "cancel_requested": self._cancel_requested,
+            "pending_executions": [
+                record.model_dump(mode="json")
+                for record in self._pending_executions.values()
+            ],
+            "execution_bindings": [
+                binding.model_dump(mode="json")
+                for binding in self._execution_bindings
+            ],
             "execution_context_sha256": canonical_sha256(self._execution_context),
         }
         if self._baseline_geometry is not None:
@@ -659,6 +574,8 @@ class OptimizationEpisodeController(
             value["receipt_aware_planning"] = False
         if self.knowledge_case_shots:
             value["knowledge_case_shots"] = self.knowledge_case_shots
+        if self.max_in_flight_candidates != 1:
+            value["max_in_flight_candidates"] = self.max_in_flight_candidates
         if case_audit.event_count:
             value["case_audit_event_count"] = case_audit.event_count
             value["case_audit_chain_head_sha256"] = case_audit.chain_head_sha256
@@ -673,6 +590,18 @@ class OptimizationEpisodeController(
         if self._pending_v2_proposal is not None:
             value["pending_v2_proposal"] = self._pending_v2_proposal.model_dump(
                 mode="json"
+            )
+        if self._approved_planning_entry_sha256 is not None:
+            value["approved_planning_entry_sha256"] = (
+                self._approved_planning_entry_sha256
+            )
+        if self._approved_parent_incumbent_sha256 is not None:
+            value["approved_parent_incumbent_sha256"] = (
+                self._approved_parent_incumbent_sha256
+            )
+        if self._approved_parent_config_sha256 is not None:
+            value["approved_parent_config_sha256"] = (
+                self._approved_parent_config_sha256
             )
         if self._task_memory_scope_sha256 is not None:
             value["task_memory_scope_sha256"] = self._task_memory_scope_sha256
@@ -778,8 +707,8 @@ class OptimizationEpisodeController(
             raise OptimizationEpisodeControllerError(
                 "decision audit does not match the frozen objective"
             )
-        if tuple(replay.pending_intervention_ids) != _pending_tuple(
-            snapshot.pending_intervention_id
+        if tuple(replay.pending_intervention_ids) != tuple(
+            record.intervention_id for record in snapshot.pending_executions
         ):
             raise OptimizationEpisodeControllerError(
                 "episode pending execution does not match ledger trace"

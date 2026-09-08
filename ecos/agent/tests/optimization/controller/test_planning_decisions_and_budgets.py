@@ -573,7 +573,7 @@ def test_recovery_preserves_the_frozen_objective(tmp_path: Path) -> None:
 
 def test_empirical_archive_separates_objective_gain_from_hypothesis_support() -> None:
     """Promotion is not hypothesis support; signoff stays a separate verdict."""
-    from ecos_agent.optimization.controller_execution import ControllerExecutionMixin
+    from ecos_agent.optimization.controller_cases import ControllerCaseRecordingMixin
     from ecos_agent.optimization.knowledge.cases import EmpiricalOutcome
     from ecos_agent.optimization.parameters.contracts import ExpectedEffectV2
     from ecos_agent.optimization.contracts import GateResult, ObjectiveMetric
@@ -613,14 +613,14 @@ def test_empirical_archive_separates_objective_gain_from_hypothesis_support() ->
         }
     )
 
-    assert ControllerExecutionMixin._empirical_outcome(
+    assert ControllerCaseRecordingMixin._empirical_outcome(
         OptimizationOutcomeKind.IMPROVED,
         receipt,
         wirelength_gain_only,
         incumbent=incumbent,
         expected_effects=expected_effects,
     ) is EmpiricalOutcome.CONTRADICTED
-    assert ControllerExecutionMixin._empirical_outcome(
+    assert ControllerCaseRecordingMixin._empirical_outcome(
         OptimizationOutcomeKind.IMPROVED,
         receipt,
         realized,
@@ -642,7 +642,7 @@ def test_empirical_archive_separates_objective_gain_from_hypothesis_support() ->
             ),
         }
     )
-    assert ControllerExecutionMixin._empirical_outcome(
+    assert ControllerCaseRecordingMixin._empirical_outcome(
         OptimizationOutcomeKind.IMPROVED,
         receipt,
         unsigned,

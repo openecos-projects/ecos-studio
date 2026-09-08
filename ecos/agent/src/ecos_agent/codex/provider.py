@@ -191,8 +191,9 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         system = (
             "Select one exact parameter value within the supplied static legal bounds and legal direction. "
-            "The task parameter_policy records knob roles, disabled knobs and the active search layer; "
-            "only supplied legal_actions are candidates. target_density and cell_padding_x control "
+            "The task parameter_policy records knob roles, disabled knobs, and the advisory layer priority; "
+            "every supplied legal_action is a permitted candidate, and departing from the recommended layer "
+            "order needs a stated reason. only supplied legal_actions are candidates. target_density and cell_padding_x control "
             "placement, not die size; target_overflow controls convergence; routability_opt changes "
             "strategy. core_util changes core area in die-util mode, while aspect_ratio changes shape. "
             "density_weight is advanced and must never be enabled implicitly. "
@@ -209,6 +210,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             "activation or successful optimization. Compare execution contexts before generalizing; "
             "Equal actual values do not imply equal QoR or identical execution. Observed thresholds are "
             "hypotheses, not hard exclusions; do not repeat attempted_values from the current domain. "
+            "in_flight experiments are dispatched but unresolved: never count them as observations, and do "
+            "not re-dispatch the same knob and value under the same parent_config_sha256. "
             "A probe need not have a knowledge claim: leave all claim and binding fields null. "
             "When citing a supported claim, select its complete claim, binding, knob, direction, and hash "
             "from supported_action_view; raw citations do not authorize an action. A claim supporting one "

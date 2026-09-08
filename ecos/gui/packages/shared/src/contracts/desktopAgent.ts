@@ -440,6 +440,7 @@ export interface DesktopAgentOptimizationPayload {
   decisive_metric?: string | null
   episode_id: string
   execution_state?: string | null
+  in_flight?: number
   incumbent_candidate_root_ref?: string | null
   incumbent_decision?: string | null
   objective_sha256?: string

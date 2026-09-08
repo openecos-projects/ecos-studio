@@ -8,10 +8,6 @@ import tempfile
 from pathlib import Path
 
 
-def _pending_tuple(intervention_id: str | None) -> tuple[str, ...]:
-    return () if intervention_id is None else (intervention_id,)
-
-
 def _write_json_atomic(destination: Path, value: object) -> None:
     descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent,
