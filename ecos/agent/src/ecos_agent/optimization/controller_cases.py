@@ -32,6 +32,9 @@ class ControllerCaseRecordingMixin:
         proposal = record.proposal_v2 if record is not None else None
         if proposal is not None and proposal.action is not None and proposal.action.claim_id is None:
             # Unclaimed probes remain episode evidence, not claim-bound empirical cases.
+            self._append_case_diagnostic(
+                "unclaimed_probe", outcome, receipt, terminal, record=record
+            )
             return
         if proposal is None or receipt is None or terminal is None:
             self._append_case_diagnostic(

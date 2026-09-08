@@ -11,6 +11,7 @@ from .support import (
     _FakeCodex,
     _FakeEcc,
     _controller,
+    _eligible_terminal,
     _native_receipt,
     _observation,
     _proposal,
@@ -26,8 +27,10 @@ from ecos_agent.optimization.contracts import (
 from ecos_agent.optimization.controller import (
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
+    OptimizationEpisodeController,
     OptimizationEpisodeControllerError,
 )
+from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 
 
@@ -153,6 +156,65 @@ def test_controller_persists_native_receipt_in_terminal_ledger(tmp_path: Path) -
     outcome = controller.ledger.replay().terminal_outcomes[0]
     assert outcome.parameter_application_receipt is not None
     assert outcome.parameter_application_receipt.actual_value == 2
+
+
+def _complete_padding_probe(controller: OptimizationEpisodeController) -> None:
+    controller.complete_terminal(
+        CandidateExecutionReceipt(
+            execution_id="execution-1",
+            started=True,
+            outcome=OptimizationOutcomeKind.DEGRADED,
+            parameter_application_receipt=_native_receipt(
+                RequestedKnobValue(knob_id="place.cell_padding_x", value=3),
+                effective_value=2,
+            ),
+        ),
+        _eligible_terminal(),
+    )
+
+
+def test_unclaimed_probe_records_diagnostic_instead_of_case(
+    tmp_path: Path,
+) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    _complete_padding_probe(controller)
+
+    replay = EmpiricalCaseAuditStore(tmp_path / "episode").verify()
+    assert replay.cases == ()
+    assert [item.reason_code for item in replay.diagnostics] == ["unclaimed_probe"]
+    assert replay.diagnostics[0].intervention_id == "intervention-1"
+    assert replay.diagnostics[0].proposal_sha256 is not None
+
+
+def test_claimed_probe_still_records_an_empirical_case(tmp_path: Path) -> None:
+    def _claimed_proposal(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal["action"].update(
+            {
+                "claim_id": "strategy.congestion.padding.v1",
+                "claim_sha256": HASH,
+                "binding_id": "binding.test.v1",
+                "binding_sha256": "sha256:" + "c" * 64,
+            }
+        )
+        return proposal
+
+    controller = _controller(
+        tmp_path, _FakeCodex(_claimed_proposal), _FakeEcc(_started())
+    )
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    controller.execute()
+
+    _complete_padding_probe(controller)
+
+    replay = EmpiricalCaseAuditStore(tmp_path / "episode").verify()
+    assert replay.diagnostics == ()
+    assert [item.claim_id for item in replay.cases] == [
+        "strategy.congestion.padding.v1"
+    ]
 
 
 def test_candidate_execution_receipt_exposes_only_native_parameter_receipts() -> None:
