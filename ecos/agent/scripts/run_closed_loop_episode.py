@@ -46,7 +46,8 @@ BASELINE: dict[str, object] = {
     "target_overflow": 0.1,
     "cell_padding_sites": 2,
     "routability_opt": True,
-    "density_weight": 0.0005,
+    # ECC workspace.create 的实际默认（dreamplace_ecc.json 实测）；不是参数卡参考值。
+    "density_weight": 0.00085,
 }
 
 # 时钟端口名来自各设计 SDC（已核实：gcd=clk，cia=E_CLK）。
