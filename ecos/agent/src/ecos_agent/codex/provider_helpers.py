@@ -59,6 +59,7 @@ _CONTROL_PAYLOAD_KEYS = frozenset(
         "effective_domains",
         "filesystem_roots",
         "legal_actions",
+        "parameter_policy",
         "numeric_field",
         "objective",
         "recommended_defaults",

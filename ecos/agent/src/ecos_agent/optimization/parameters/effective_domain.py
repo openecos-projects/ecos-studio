@@ -132,7 +132,13 @@ def build_context_fingerprint(context: Mapping[str, Any]) -> str:
             f"effective-domain context is missing binding fields: {', '.join(missing)}"
         )
     # A run identifier is evidence provenance, not a change of execution context.
-    return canonical_sha256({key: context[key] for key in sorted(_DOMAIN_CONTEXT_KEYS)})
+    keys = _DOMAIN_CONTEXT_KEYS | ({
+        "objective_contract_sha256", "parameter_policy_sha256", "geometry_baseline_sha256",
+    } & context.keys())
+    for key in keys - _DOMAIN_CONTEXT_KEYS:
+        if not isinstance(context[key], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", context[key]):
+            raise EffectiveDomainError(f"effective-domain {key} is invalid")
+    return canonical_sha256({key: context[key] for key in sorted(keys)})
 
 
 def compile_effective_domain(

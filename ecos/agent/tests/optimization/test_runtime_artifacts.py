@@ -240,7 +240,7 @@ def test_current_values_read_the_seven_runtime_knob_surfaces(tmp_path: Path) -> 
     }
 
 
-def test_runner_observes_each_parameter_stage_from_the_current_incumbent(
+def test_runner_observes_policy_stage_from_the_current_incumbent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -256,8 +256,9 @@ def test_runner_observes_each_parameter_stage_from_the_current_incumbent(
         "ecos_agent.optimization.runtime._current_values", lambda _path, _width: {}
     )
 
-    def observe(path: Path, stage: str, *, budget: BudgetSnapshot) -> None:
+    def observe(path: Path, stage: str, *, budget: BudgetSnapshot):
         calls.append((path, stage))
+        return SimpleNamespace(stage=SimpleNamespace(value=stage))
 
     monkeypatch.setattr(
         "ecos_agent.optimization.runtime.build_stage_observation", observe
@@ -266,6 +267,7 @@ def test_runner_observes_each_parameter_stage_from_the_current_incumbent(
     controller = SimpleNamespace(
         incumbent_candidate_root_ref=".agent/candidates/candidate-1",
         budget=budget,
+        planning_stage=lambda _observation, values: "place",
     )
     runner = _assemble_runner(
         runtime=SimpleNamespace(episode_id="episode-1", objective=None),
@@ -279,7 +281,7 @@ def test_runner_observes_each_parameter_stage_from_the_current_incumbent(
     runner._observation_supplier(budget)
     runner._observation_supplier(budget.model_copy(update={"consumed_candidates": 1}))
 
-    assert calls == [(incumbent, "Floorplan"), (incumbent, "place")]
+    assert calls == [(incumbent, "place"), (incumbent, "place")]
 
 
 def test_incumbent_workspace_resolves_only_registered_candidate_roots(

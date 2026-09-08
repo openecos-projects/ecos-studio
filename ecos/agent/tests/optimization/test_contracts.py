@@ -234,10 +234,10 @@ def test_drc_binding_preserves_explicit_route_metric_and_rejects_other_overflow(
     )
     with pytest.raises(ValueError, match="too many metrics"):
         freeze_optimization_objective(
-            "reduce wirelength while preserving DRC, area and power",
+            "reduce wirelength while preserving DRC, standard cell area and power",
             OptimizationObjectiveProposal(
                 primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
-                preserve_metrics=(ObjectiveMetric.DIE_AREA, ObjectiveMetric.STA_WORST_DYNAMIC_POWER),
+                preserve_metrics=(ObjectiveMetric.STA_STANDARD_CELL_AREA, ObjectiveMetric.STA_WORST_DYNAMIC_POWER),
                 rationale_summary="Do not silently drop independent constraints.",
             ),
         )

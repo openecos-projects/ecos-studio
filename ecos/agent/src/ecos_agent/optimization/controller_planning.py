@@ -78,6 +78,10 @@ class ControllerPlanningMixin:
         planner_source: Literal["llm", "repair"] = "llm"
         planner_turn: OptimizationPlannerTurn | None = None
         provider_payload_sha256 = None
+        if not context.legal_actions:
+            return self._defer_or_escalate(
+                planning_entry, context, proposal=None, reason="no_legal_candidate",
+            )
         try:
             provider_payload_sha256 = v2_provider_payload_sha256(context)
         except EffectiveDomainError:

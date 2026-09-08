@@ -79,6 +79,10 @@ class OptimizationEpisodeRunner:
         self._site_width_dbu = site_width_dbu
 
     @property
+    def current_values(self) -> Mapping[str, bool | int | float]:
+        return dict(self._current_values)
+
+    @property
     def state(self) -> OptimizationEpisodeState:
         return self._controller.state
 
@@ -167,6 +171,7 @@ class OptimizationEpisodeRunner:
             incumbent=self._controller.incumbent,
             objective=self._objective,
             semantic_objective=self._controller.objective,
+            baseline_geometry=self._controller.baseline_geometry,
             objective_alignment=self._controller.objective_alignment,
             requested=planning.requested,
             parameter_receipt=receipt.parameter_application_receipt,

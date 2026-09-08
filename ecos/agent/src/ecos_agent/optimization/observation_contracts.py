@@ -9,6 +9,7 @@ from pydantic import Field, field_validator, model_validator
 
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.geometry import GeometrySnapshot
 from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
     EvaluationMetricDirection,
@@ -157,6 +158,9 @@ class TerminalObservation(_ContractModel):
         "ecos.terminal_observation.v2", "ecos.terminal_observation.v3"
     ] = "ecos.terminal_observation.v2"
     observation_id: str
+    geometry: GeometrySnapshot | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     evidence_manifest_sha256: str
     evidence_valid: bool
     harden_artifacts_complete: bool

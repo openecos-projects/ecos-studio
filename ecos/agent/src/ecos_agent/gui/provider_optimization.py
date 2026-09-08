@@ -163,6 +163,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationObjectiveContract,
 )
 from ecos_agent.optimization.observations import build_terminal_observation
+from ecos_agent.optimization.rules import geometry_constraint_error
 from ecos_agent.optimization.objective_alignment import (
     build_active_objective,
     build_objective_alignment,
@@ -329,6 +330,9 @@ class ProviderOptimizationMixin:
         try:
             objective = OptimizationObjectiveContract.model_validate(contract)
             baseline = build_terminal_observation(Path(workspace))
+            geometry_error = geometry_constraint_error(objective, baseline.geometry, baseline)
+            if geometry_error is not None:
+                raise ValueError(geometry_error)
             alignment = build_objective_alignment(objective, baseline)
             active = build_active_objective(alignment, objective, baseline)
         except Exception as exc:
@@ -353,6 +357,8 @@ class ProviderOptimizationMixin:
                 signoff_gates=_objective_string_tuple(contract, "required_signoff_gates"),
                 rationale_summary=str(contract["rationale_summary"]),
                 objective_sha256=session.optimization_objective_sha256,
+                geometry_mode=contract["parameter_policy"]["geometry_mode"],
+                advanced_parameters_enabled=contract["parameter_policy"]["advanced_parameters_enabled"],
             ),
         )
         self._begin_optimization_authorization(session)

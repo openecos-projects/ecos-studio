@@ -70,6 +70,7 @@ class OptimizationPlanningContext:
     parameter_knowledge: tuple[ParameterSemanticsCard, ...] = ()
     parameter_trajectories: tuple["OptimizationHistory", ...] = ()
     planning_feedback: tuple[str, ...] = ()
+    parameter_policy: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,8 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         optimization_history_payload(item) for item in context.parameter_trajectories
     ]
     payload["planning_feedback"] = list(context.planning_feedback)
+    if context.parameter_policy is not None:
+        payload["parameter_policy"] = dict(context.parameter_policy)
     if context.effective_domains:
         payload["effective_domains"] = [
             item.model_dump(mode="json") for item in context.effective_domains

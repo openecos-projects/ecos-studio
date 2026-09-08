@@ -116,6 +116,7 @@ from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
 )
+from ecos_agent.optimization.knob_policy import allowed_knobs, select_search_actions, policy_payload
 from ecos_agent.optimization.parameters.semantics import (
     LATTICE_VERSION,
     card_hash,
@@ -142,10 +143,9 @@ class ControllerContextMixin:
     ) -> OptimizationPlanningContext:
         trajectories = self._history(include_receipts=self.receipt_aware_planning)
         history = trajectories[-6:]
-        attempted = self._attempted_requests()
         active_values = {
             knob_id.value: current_values[knob_id.value]
-            for knob_id in ACTIVE_OPTIMIZATION_KNOBS
+            for knob_id in ACTIVE_OPTIMIZATION_KNOBS if knob_id.value in current_values
         }
         cards = load_parameter_cards()
         parameter_knowledge = (
@@ -158,21 +158,16 @@ class ControllerContextMixin:
             if prior_decisions and prior_decisions[-1].validation_result == "rejected"
             and prior_decisions[-1].rejection_reason else ()
         )
-        effective_domains = tuple(
-            compile_effective_domain(
-                cards[knob_id],
-                context=self._effective_domain_context(
-                    observation,
-                    active_values,
-                    knob_id,
-                    cards[knob_id].tool.revision,
-                    cards[knob_id].surface.unit,
-                    card_hash(cards[knob_id]),
-                ),
-                attempted=attempted,
-                baseline_surface_value=active_values.get(knob_id.value),
+        effective_domains = self._parameter_domains(observation, active_values)
+        search_layer, selected_actions = self._select_parameter_actions(effective_domains, observation)
+        selected_knobs = {action.knob_id for action in selected_actions}
+        if self._objective is not None:
+            effective_domains = tuple(
+                domain for domain in effective_domains if domain.knob_id in selected_knobs
             )
-            for knob_id in ACTIVE_OPTIMIZATION_KNOBS
+        parameter_policy = policy_payload(
+            self._objective, search_layer,
+            convergence_evidence=self._has_convergence_evidence(observation),
         )
         task_memory = (
             self._task_memory_supplier()
@@ -194,11 +189,8 @@ class ControllerContextMixin:
                 "task memory snapshot does not match the episode"
             )
         available_actions = tuple(
-            LegalAction(knob_id=domain.knob_id, direction=direction)
-            for domain in effective_domains
-            for direction in StrategyDirection
-            if candidate_target_step(domain.knob_id) == observation.stage.value
-            and domain.direction_schema(direction) is not None
+            action for action in selected_actions
+            if candidate_target_step(action.knob_id) == observation.stage.value
         )
         observation_ref = ObservationReference(
             observation_id=observation.observation_id,
@@ -351,6 +343,7 @@ class ControllerContextMixin:
                     ),
                     "budget": self._budget.model_dump(mode="json"),
                     "current_values": dict(sorted(active_values.items())),
+                    "parameter_policy": parameter_policy,
                     "legal_actions": [
                         item.model_dump(mode="json") for item in available_actions
                     ],
@@ -398,7 +391,51 @@ class ControllerContextMixin:
             parameter_knowledge,
             trajectories,
             planning_feedback,
+            parameter_policy,
         )
+
+    def _parameter_domains(self, observation, current_values):
+        cards = load_parameter_cards()
+        return tuple(
+            compile_effective_domain(
+                cards[knob],
+                context=self._effective_domain_context(
+                    observation, current_values, knob, cards[knob].tool.revision,
+                    cards[knob].surface.unit, card_hash(cards[knob]),
+                ),
+                attempted=self._attempted_requests(),
+                baseline_surface_value=current_values.get(knob.value),
+            )
+            for knob in allowed_knobs(self._objective)
+        )
+
+    @staticmethod
+    def _has_convergence_evidence(observation):
+        return any(
+            feature.feature_id == "place_final_density_overflow"
+            and feature.evidence_ref == "analysis/parameter_runtime_report.v2.json"
+            and type(feature.value) in (int, float) and feature.value >= 0
+            for feature in observation.state_evidence
+        )
+
+    def _select_parameter_actions(self, domains, observation):
+        available = tuple(
+            LegalAction(knob_id=domain.knob_id, direction=direction)
+            for domain in domains for direction in StrategyDirection
+            if domain.direction_schema(direction) is not None
+        )
+        return select_search_actions(
+            self._objective, available,
+            history=tuple((item.requested.knob_id, item.outcome.value) for item in self._history()),
+            recovering=self.recovery_incomplete,
+            convergence_evidence=self._has_convergence_evidence(observation),
+        )
+
+    def planning_stage(self, observation, current_values):
+        """Select a nonempty task-permitted layer before requesting stage evidence."""
+        active_values = {knob.value: current_values[knob.value] for knob in ACTIVE_OPTIMIZATION_KNOBS if knob.value in current_values}
+        _, actions = self._select_parameter_actions(self._parameter_domains(observation, active_values), observation)
+        return candidate_target_step(actions[0].knob_id) if actions else "place"
 
     def _design_id(self) -> str | None:
         value = self._execution_context.get("design_id")
@@ -471,6 +508,11 @@ class ControllerContextMixin:
                 }
             ),
         }
+        if self._objective is not None and self._objective.parameter_policy is not None:
+            context["objective_contract_sha256"] = self._objective.contract_sha256
+            context["parameter_policy_sha256"] = canonical_sha256(
+                self._objective.parameter_policy.model_dump(mode="json")
+            )
         context["tool_revision"] = tool_revision
         context["parameter_card_sha256"] = parameter_card_sha256
         context["unit"] = unit

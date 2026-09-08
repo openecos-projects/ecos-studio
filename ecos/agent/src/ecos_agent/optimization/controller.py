@@ -24,6 +24,8 @@ from ecos_agent.optimization.parameters.effective_domain import (
     compile_effective_domain,
 )
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.geometry import GeometrySnapshot
+from ecos_agent.optimization.rules import geometry_constraint_error
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     ExpectedEffect,
@@ -230,6 +232,7 @@ class OptimizationEpisodeController(
         self._budget = budget
         self._incumbent = incumbent
         self._objective = objective
+        self._baseline_geometry = incumbent.geometry if incumbent is not None else None
         if objective_alignment is not None:
             if objective is None or incumbent is None:
                 raise OptimizationEpisodeControllerError(
@@ -281,6 +284,10 @@ class OptimizationEpisodeController(
     @property
     def incumbent(self) -> TerminalObservation | None:
         return self._incumbent
+
+    @property
+    def baseline_geometry(self) -> GeometrySnapshot | None:
+        return self._baseline_geometry
 
     @property
     def objective(self) -> OptimizationObjectiveContract | None:
@@ -339,6 +346,9 @@ class OptimizationEpisodeController(
         candidate: TerminalObservation,
         evidence: CandidateExecutionEvidence | None,
     ) -> None:
+        violation = geometry_constraint_error(self._objective, self._baseline_geometry, candidate)
+        if violation is not None:
+            raise OptimizationEpisodeControllerError(violation)
         self._incumbent = candidate
         self._incumbent_candidate_root_ref = (
             evidence.candidate_root_ref if evidence else None
@@ -447,6 +457,7 @@ class OptimizationEpisodeController(
         controller._budget = snapshot.budget
         controller._incumbent = snapshot.incumbent
         controller._objective = snapshot.objective
+        controller._baseline_geometry = snapshot.baseline_geometry
         controller._objective_alignment = snapshot.objective_alignment
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._task_memory_scope_sha256 = snapshot.task_memory_scope_sha256
@@ -497,6 +508,17 @@ class OptimizationEpisodeController(
             snapshot.incumbent_candidate_manifest_sha256
         )
 
+        if controller._objective is not None:
+            violation = geometry_constraint_error(
+                controller._objective, controller._baseline_geometry, controller._incumbent,
+            )
+            if violation is not None:
+                raise OptimizationEpisodeControllerError(violation)
+        expected_geometry = recovered_execution_context.get("geometry_baseline_sha256")
+        if expected_geometry is not None and expected_geometry != canonical_sha256(
+            controller._baseline_geometry.model_dump(mode="json") if controller._baseline_geometry else None
+        ):
+            raise OptimizationEpisodeControllerError("initial geometry does not match the execution context")
         if replay.pending_intervention_ids:
             controller._budget = controller._consume(
                 candidates=0, minimum_candidates=len(replay.pending_intervention_ids)
@@ -616,6 +638,8 @@ class OptimizationEpisodeController(
             "cancel_requested": self._cancel_requested,
             "execution_context_sha256": canonical_sha256(self._execution_context),
         }
+        if self._baseline_geometry is not None:
+            value["baseline_geometry"] = self._baseline_geometry.model_dump(mode="json")
         if not self.receipt_aware_planning:
             value["receipt_aware_planning"] = False
         if self.knowledge_case_shots:

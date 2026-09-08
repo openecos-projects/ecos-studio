@@ -24,6 +24,7 @@ from ecos_agent.optimization.parameters.effective_domain import (
     compile_effective_domain,
 )
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.geometry import GeometrySnapshot
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
     ExpectedEffect,
@@ -167,6 +168,7 @@ class _PersistedEpisodeState(BaseModel):
     budget: BudgetSnapshot
     started_at: float
     incumbent: TerminalObservation | None = None
+    baseline_geometry: GeometrySnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
     objective: OptimizationObjectiveContract | None = None
     objective_alignment: OptimizationObjectiveAlignment | None = None
     active_objective: ActiveOptimizationObjective | None = None

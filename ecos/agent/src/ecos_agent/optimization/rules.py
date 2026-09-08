@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Iterable, Mapping
 
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.geometry import GeometrySnapshot, validate_fixed_geometry
 from ecos_agent.optimization.contracts import (
     POWER_SELECTION_ORDER,
     REQUIRED_SIGNOFF_GATES,
@@ -145,6 +146,24 @@ def terminal_quality_outcome(
     }[comparison.decision]
 
 
+def geometry_constraint_error(
+    objective: OptimizationObjectiveContract | None,
+    baseline_geometry: GeometrySnapshot | None,
+    candidate: TerminalObservation | None,
+) -> str | None:
+    if objective is None:
+        return None
+    if objective.parameter_policy is None:
+        return "task parameter policy is missing"
+    if objective.parameter_policy.geometry_mode == "variable":
+        return None
+    try:
+        validate_fixed_geometry(baseline_geometry, candidate.geometry if candidate is not None else None)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def terminal_candidate_is_promotable(
     *,
     execution_outcome: OptimizationOutcomeKind,
@@ -154,6 +173,8 @@ def terminal_candidate_is_promotable(
     parameter_receipt: ParameterApplicationReceipt | None,
     objective_alignment: OptimizationObjectiveAlignment | None = None,
     recovery_active: bool = False,
+    semantic_objective: OptimizationObjectiveContract | None = None,
+    baseline_geometry: GeometrySnapshot | None = None,
 ) -> bool:
     recovery_eligible = False
     if recovery_active and candidate is not None and objective_alignment is not None:
@@ -163,7 +184,8 @@ def terminal_candidate_is_promotable(
         except ObjectiveAlignmentError:
             recovery_eligible = False
     return bool(
-        candidate is not None
+        geometry_constraint_error(semantic_objective, baseline_geometry, candidate) is None
+        and candidate is not None
         and execution_outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
         and candidate.schema_version == "ecos.terminal_observation.v3"
         and (candidate.eligible_for_incumbent or recovery_eligible)
@@ -186,6 +208,7 @@ def classify_terminal_candidate(
     objective_alignment: OptimizationObjectiveAlignment | None = None,
     requested: RequestedKnobValue | None,
     parameter_receipt: ParameterApplicationReceipt | None,
+    baseline_geometry: GeometrySnapshot | None = None,
 ) -> TerminalCandidateClassification:
     comparison: IncumbentComparison | None = None
     recovering = bool(
@@ -232,6 +255,8 @@ def classify_terminal_candidate(
         comparison = IncumbentComparison(
             IncumbentDecision.CANDIDATE_INELIGIBLE, None
         )
+    if geometry_constraint_error(semantic_objective, baseline_geometry, candidate) is not None:
+        comparison = IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
     return TerminalCandidateClassification(
         comparison=comparison,
         outcome=terminal_quality_outcome(execution_outcome, comparison),
@@ -243,6 +268,8 @@ def classify_terminal_candidate(
             parameter_receipt=parameter_receipt,
             objective_alignment=objective_alignment,
             recovery_active=recovering,
+            semantic_objective=semantic_objective,
+            baseline_geometry=baseline_geometry,
         ),
     )
 
@@ -276,11 +303,17 @@ def freeze_optimization_objective(
 ) -> OptimizationObjectiveContract:
     if not isinstance(goal_text, str) or not goal_text.strip():
         raise ValueError("optimization goal text is invalid")
-    preserve_metrics = _effective_preserve_metrics(goal_text, proposal)
+    from ecos_agent.optimization.objective_intent import resolve_objective_intent
+
+    primary_metric, parameter_policy = resolve_objective_intent(goal_text, proposal)
+    preserve_metrics = _effective_preserve_metrics(
+        goal_text, proposal, geometry_fixed=parameter_policy.geometry_mode == "fixed"
+    )
     payload = {
         "schema_version": "ecos.optimization_objective.v1",
         "source_goal_sha256": canonical_sha256(goal_text.strip()),
-        "primary_metric": proposal.primary_metric.value,
+        "primary_metric": primary_metric.value,
+        "parameter_policy": parameter_policy.model_dump(mode="json"),
         "preserve_metrics": [metric.value for metric in preserve_metrics],
         "required_signoff_gates": list(REQUIRED_SIGNOFF_GATES),
         "rationale_summary": proposal.rationale_summary,
@@ -292,7 +325,7 @@ def freeze_optimization_objective(
 
 
 def _effective_preserve_metrics(
-    goal_text: str, proposal: OptimizationObjectiveProposal
+    goal_text: str, proposal: OptimizationObjectiveProposal, *, geometry_fixed: bool = False
 ) -> tuple[ObjectiveMetric, ...]:
     # Timing is protected by shared WNS/TNS tolerances and recovery/signoff count gates.
     preserve_metrics = [
@@ -304,6 +337,11 @@ def _effective_preserve_metrics(
             ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
         )
     ]
+    if geometry_fixed:
+        preserve_metrics = [
+            metric for metric in preserve_metrics
+            if metric not in (ObjectiveMetric.DIE_AREA, ObjectiveMetric.CORE_AREA)
+        ]
     mentions_drc = any(marker in goal_text.casefold() for marker in _DRC_GOAL_MARKERS)
     drc_metric = ObjectiveMetric.DRC_COUNT
     if (

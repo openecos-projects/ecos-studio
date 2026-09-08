@@ -505,6 +505,8 @@ def test_optimization_objective_parser_sends_only_bounded_request(
         captured.update(system=system, user=user, output_schema=output_schema)
         return {
             "schema_version": "ecos.optimization_objective_proposal.v1",
+            "parameter_policy": {"geometry_mode": "fixed", "advanced_parameters_enabled": False},
+            "unsupported_reason": None,
             "primary_metric": "route_wirelength",
             "preserve_metrics": ["route_dr_total_violation_count"],
             "rationale_summary": "Reduce routing wirelength while preserving signoff cleanliness.",
@@ -526,6 +528,8 @@ def test_optimization_objective_parser_sends_only_bounded_request(
     assert "requires user confirmation" in captured["system"]
     assert captured["output_schema"]["required"] == [
         "schema_version",
+        "parameter_policy",
+        "unsupported_reason",
         "primary_metric",
         "preserve_metrics",
         "rationale_summary",
@@ -555,3 +559,20 @@ def test_optimization_objective_parser_rejects_empty_goal(tmp_path: Path) -> Non
 
     with pytest.raises(CodexProviderError, match="empty"):
         provider.propose_optimization_objective("  ")
+
+
+@pytest.mark.parametrize("policy", [None, {}])
+def test_objective_provider_requires_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, policy
+) -> None:
+    provider = _provider(tmp_path)
+    monkeypatch.setattr(provider, "_request_json", lambda *args, **kwargs: {
+        "primary_metric": "route_wirelength", "parameter_policy": policy,
+        "rationale_summary": "Reduce wirelength.",
+    })
+    if policy is None:
+        with pytest.raises(CodexProviderError, match="missing parameter_policy"):
+            provider.propose_optimization_objective("reduce wirelength")
+    else:
+        result = provider.propose_optimization_objective("reduce wirelength")
+        assert result["parameter_policy"]["geometry_mode"] == "fixed"

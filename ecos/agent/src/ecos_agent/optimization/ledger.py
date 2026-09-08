@@ -194,6 +194,7 @@ class OptimizationInterventionStart(_LedgerModel):
 
 
 class OptimizationTerminalOutcome(_LedgerModel):
+    constraint_violation: str | None = Field(default=None, max_length=256, exclude_if=lambda value: value is None)
     record_type: Literal["terminal_outcome"] = "terminal_outcome"
     intervention_id: str
     outcome: OptimizationOutcomeKind

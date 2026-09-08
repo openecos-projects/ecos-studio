@@ -4,6 +4,7 @@ from pathlib import Path
 
 from tests.optimization.support import support_catalog
 
+from ecos_agent.optimization.geometry import GeometrySnapshot
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
@@ -416,6 +417,14 @@ def _density_proposal(context: object) -> dict[str, object]:
     )
 
 
+def _geometry() -> GeometrySnapshot:
+    return GeometrySnapshot(
+        dbu_per_micron=1000, die_bbox=(0, 0, 1000, 1000),
+        core_bbox=(100, 100, 900, 900),
+        evidence_refs=("filler_ecc/output/geometry/geometry.manifest",), evidence_sha256=HASH,
+    )
+
+
 def _eligible_terminal(
     observation_id: str = "terminal-eligible",
 ) -> TerminalObservation:
@@ -426,6 +435,7 @@ def _eligible_terminal(
         "sta_expected_corner_count",
     }
     return TerminalObservation(
+        geometry=_geometry(),
         schema_version="ecos.terminal_observation.v3",
         observation_id=observation_id,
         evidence_manifest_sha256=HASH,
