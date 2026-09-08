@@ -241,6 +241,9 @@ def main() -> int:
         objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
     )
     case_replay = EmpiricalCaseAuditStore(episode_root).verify()
+    state_files = sorted(episode_root.glob("optimization-episode-state.v*.json"))
+    if not state_files:
+        raise SystemExit(f"episode state file missing under {episode_root}")
     started_candidates = sum(item.started for item in traces)
     summary = {
         "schema_version": "ecos.overnight_episode_summary.v1",
@@ -260,7 +263,7 @@ def main() -> int:
         "traces": [item.__dict__ for item in traces],
         "case_selections": len(case_replay.selections),
         "episode_state": json.loads(
-            (episode_root / "optimization-episode-state.v9.json").read_text("utf-8")
+            state_files[-1].read_text("utf-8")
         ),
     }
     (output / "episode-summary.v1.json").write_text(
