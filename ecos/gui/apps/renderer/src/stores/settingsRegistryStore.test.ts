@@ -223,9 +223,10 @@ describe('settingsRegistryStore', () => {
     expect(store.isValidating('runtime.eccPath')).toBe(false)
   })
 
-  it('keeps a changed broadcast that lands during load instead of the stale list snapshot', async () => {
+  it('merges a broadcast that lands during the initial load into the full snapshot', async () => {
     const store = useSettingsRegistryStore()
     const stale = entryFixture('runtime.eccPath', { value: '/stale/ecc' })
+    const untouched = entryFixture('agent.codexBin', { value: '/bin/codex' })
     listMock.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -238,13 +239,57 @@ describe('settingsRegistryStore', () => {
               }),
             )
           }
-          resolve([stale])
+          resolve([stale, untouched])
         }),
     )
     store.bindChangedEvents()
     await store.load()
 
+    // The broadcast wins for its key while the snapshot keeps the rest.
     expect(store.entryFor('runtime.eccPath')?.value).toBe('/fresh/ecc')
+    expect(store.entryFor('agent.codexBin')?.value).toBe('/bin/codex')
+    expect(store.entries).toHaveLength(2)
+    store.unbindChangedEvents()
+  })
+
+  it('does not apply a successful write response that a newer broadcast superseded', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: '/old/ecc' })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+    store.bindChangedEvents()
+
+    let resolveSet!: (result: { ok: true; state: DesktopSettingState }) => void
+    registrySet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSet = resolve
+        }),
+    )
+    const inFlight = store.set('runtime.eccPath', '/mine/ecc')
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/mine/ecc')
+
+    // Another window wins the last-write-wins race before our response lands.
+    for (const listener of changedListeners) {
+      listener(
+        entryFixture('runtime.eccPath', {
+          isDefault: false,
+          value: '/theirs/ecc',
+        }),
+      )
+    }
+    resolveSet({
+      ok: true,
+      state: entryFixture('runtime.eccPath', {
+        isDefault: false,
+        value: '/mine/ecc',
+      }),
+    })
+    await inFlight
+
+    // The stale successful response must not regress the newer broadcast.
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/theirs/ecc')
+    expect(store.errorFor('runtime.eccPath')).toBe('')
     store.unbindChangedEvents()
   })
 

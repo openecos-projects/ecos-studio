@@ -48,7 +48,9 @@ interface ApplyFailure {
 /**
  * Transactional write path for registry-owned settings:
  * validate -> persist -> apply, with a changed broadcast after every accepted
- * write so all windows converge (last write wins).
+ * write so all windows converge (last write wins). Transactions for the same
+ * key are serialized so concurrent windows can never interleave a validate,
+ * persist, or apply step and broadcast a mixed value/status.
  */
 export class SettingsRegistryService {
   private readonly broadcast: SettingsRegistryServiceOptions['broadcast']
@@ -58,6 +60,8 @@ export class SettingsRegistryService {
   /** Keys whose runtime apply was deferred while the ECC pool was busy. */
   private readonly pendingApplyKeys = new Set<string>()
   private readonly applyFailures = new Map<string, ApplyFailure>()
+  /** Tail promise of the per-key write transaction queue. */
+  private readonly writeQueues = new Map<string, Promise<unknown>>()
 
   constructor(options: SettingsRegistryServiceOptions) {
     this.broadcast = options.broadcast
@@ -91,17 +95,19 @@ export class SettingsRegistryService {
       return { ok: false, error: `设置项 ${key} 没有可用的处理器` }
     }
 
-    const validation = await handler.validate(value)
-    if (!validation.ok) {
-      return { ok: false, error: validation.error }
-    }
+    return await this.enqueueWrite(key, async () => {
+      const validation = await handler.validate(value)
+      if (!validation.ok) {
+        return { ok: false, error: validation.error }
+      }
 
-    await handler.persist(value)
-    return await this.finishWrite(descriptor, value, async () => {
-      const outcome = await handler.apply(value)
-      return outcome === 'pending'
-        ? { kind: 'pending' }
-        : okStatus(validation.displayInfo)
+      await handler.persist(value)
+      return await this.finishWrite(descriptor, value, async () => {
+        const outcome = await handler.apply(value)
+        return outcome === 'pending'
+          ? { kind: 'pending' }
+          : okStatus(validation.displayInfo)
+      })
     })
   }
 
@@ -119,10 +125,12 @@ export class SettingsRegistryService {
       return { ok: false, error: `设置项 ${key} 没有可用的处理器` }
     }
 
-    await handler.clear()
-    return await this.finishWrite(descriptor, null, async () => {
-      const outcome = await handler.apply(null)
-      return outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
+    return await this.enqueueWrite(key, async () => {
+      await handler.clear()
+      return await this.finishWrite(descriptor, null, async () => {
+        const outcome = await handler.apply(null)
+        return outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
+      })
     })
   }
 
@@ -134,8 +142,24 @@ export class SettingsRegistryService {
   async notifyKeyChanged(key: string): Promise<void> {
     const descriptor = this.requireDescriptor(key)
     if (!descriptor) return
-    const state = await this.stateFor(descriptor)
-    this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
+    await this.enqueueWrite(key, async () => {
+      const state = await this.stateFor(descriptor)
+      this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
+    })
+  }
+
+  /** Run one key's write transaction after any already-queued write for it. */
+  private enqueueWrite<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.writeQueues.get(key) ?? Promise.resolve()
+    const next = previous.then(operation, operation)
+    this.writeQueues.set(
+      key,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    )
+    return next
   }
 
   private async finishWrite(

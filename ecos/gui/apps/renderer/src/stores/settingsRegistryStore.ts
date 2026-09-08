@@ -23,10 +23,14 @@ function errorFromException(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+interface WriteTicket {
+  superseded: boolean
+}
+
 /**
  * Renderer cache for the desktop settings registry. Writes are optimistic with
  * rollback on failure; main stays the single source of truth and broadcasts
- * changed states so multiple windows converge.
+ * changed states so multiple windows converge (last write wins).
  */
 export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   const entries = ref<DesktopSettingState[]>([])
@@ -35,13 +39,12 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   /** Last rejected write per key, shown inline until the value changes again. */
   const rowErrors = ref<Record<string, string>>({})
   let unsubscribeChanged: (() => void) | null = null
-  /** Supersedence tracking so a stale list snapshot never overwrites live updates. */
+  /** One ticket per key with a write in flight; superseded by newer values. */
+  const writeTickets = new Map<string, WriteTicket>()
   let loadSeq = 0
-  let liveUpdateCount = 0
-
-  function noteLiveUpdate(): void {
-    liveUpdateCount += 1
-  }
+  let loadInFlight = false
+  /** Live updates that landed while a load was fetching, newer than its snapshot. */
+  const liveUpdatesDuringLoad = new Map<string, DesktopSettingState>()
 
   function isValidating(key: string): boolean {
     return validatingKeys.value.includes(key)
@@ -55,20 +58,35 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     return entries.value.find((entry) => entry.descriptor.key === key) ?? null
   }
 
+  function applyLiveUpdate(state: DesktopSettingState): void {
+    entries.value = replaceEntry(entries.value, state)
+    delete rowErrors.value[state.descriptor.key]
+    if (loadInFlight) {
+      // Remember it so the in-flight list() snapshot cannot regress it.
+      liveUpdatesDuringLoad.set(state.descriptor.key, state)
+    }
+  }
+
   async function load(): Promise<void> {
     const api = getOptionalDesktopApi()
     if (!api?.settingsRegistry) return
     const seq = ++loadSeq
-    const liveAtStart = liveUpdateCount
+    loadInFlight = true
+    liveUpdatesDuringLoad.clear()
     loading.value = true
     try {
       const result = await api.settingsRegistry.list()
-      // A changed broadcast (or this window's own write) that landed during the
-      // fetch is newer than the snapshot; keep it instead of the stale list.
-      if (seq !== loadSeq || liveUpdateCount !== liveAtStart) return
+      if (seq !== loadSeq) return
       entries.value = result
+      // Live updates that landed during the fetch may be newer than the
+      // snapshot; if the snapshot already contains them the values match.
+      for (const state of liveUpdatesDuringLoad.values()) {
+        entries.value = replaceEntry(entries.value, state)
+      }
     } finally {
       if (seq === loadSeq) {
+        loadInFlight = false
+        liveUpdatesDuringLoad.clear()
         loading.value = false
       }
     }
@@ -85,6 +103,11 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       entries.value = replaceEntry(entries.value, { ...previous, value })
     }
     validatingKeys.value = [...validatingKeys.value, key]
+    // A newer write to the same key supersedes this one's response.
+    const previousTicket = writeTickets.get(key)
+    if (previousTicket) previousTicket.superseded = true
+    const ticket: WriteTicket = { superseded: false }
+    writeTickets.set(key, ticket)
     try {
       let result: DesktopSettingWriteResult
       try {
@@ -94,10 +117,12 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
         // bridge as thrown errors; surface them like an ordinary rejection.
         result = { ok: false, error: errorFromException(error) }
       }
-      if (result.ok) {
+      if (result.ok && !ticket.superseded) {
         entries.value = replaceEntry(entries.value, result.state)
         delete rowErrors.value[key]
-        noteLiveUpdate()
+      } else if (result.ok) {
+        // A broadcast for a newer write already replaced this value.
+        delete rowErrors.value[key]
       } else {
         rowErrors.value[key] = result.error
         // Only undo our optimistic write if no newer value (for example a
@@ -108,6 +133,9 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       }
       return result
     } finally {
+      if (writeTickets.get(key) === ticket) {
+        writeTickets.delete(key)
+      }
       validatingKeys.value = validatingKeys.value.filter((candidate) => candidate !== key)
     }
   }
@@ -119,6 +147,10 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     }
 
     validatingKeys.value = [...validatingKeys.value, key]
+    const previousTicket = writeTickets.get(key)
+    if (previousTicket) previousTicket.superseded = true
+    const ticket: WriteTicket = { superseded: false }
+    writeTickets.set(key, ticket)
     try {
       let result: DesktopSettingWriteResult
       try {
@@ -126,15 +158,19 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       } catch (error) {
         result = { ok: false, error: errorFromException(error) }
       }
-      if (result.ok) {
+      if (result.ok && !ticket.superseded) {
         entries.value = replaceEntry(entries.value, result.state)
         delete rowErrors.value[key]
-        noteLiveUpdate()
+      } else if (result.ok) {
+        delete rowErrors.value[key]
       } else {
         rowErrors.value[key] = result.error
       }
       return result
     } finally {
+      if (writeTickets.get(key) === ticket) {
+        writeTickets.delete(key)
+      }
       validatingKeys.value = validatingKeys.value.filter((candidate) => candidate !== key)
     }
   }
@@ -144,9 +180,11 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     const api = getOptionalDesktopApi()
     if (!api?.settingsRegistry || unsubscribeChanged) return
     unsubscribeChanged = api.settingsRegistry.onChanged((state) => {
-      entries.value = replaceEntry(entries.value, state)
-      delete rowErrors.value[state.descriptor.key]
-      noteLiveUpdate()
+      // A broadcast for a key with a write in flight means that write lost the
+      // last-write-wins race; its own successful response must not overwrite.
+      const ticket = writeTickets.get(state.descriptor.key)
+      if (ticket) ticket.superseded = true
+      applyLiveUpdate(state)
     })
   }
 

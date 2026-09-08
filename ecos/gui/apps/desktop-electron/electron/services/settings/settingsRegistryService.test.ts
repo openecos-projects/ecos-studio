@@ -9,6 +9,7 @@ import {
   RUNTIME_ECC_PATH_SETTING_KEY,
   RUNTIME_ECC_SIZER_ROOT_SETTING_KEY,
   type DesktopSettingState,
+  type PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 import {
   createSettingHandlers,
@@ -309,6 +310,55 @@ describe('SettingsRegistryService', () => {
     )
     expect(state?.status.kind).toBe('ok')
     expect(state?.value).toBe(goodRoot)
+  })
+
+  it('serializes concurrent writes to the same key so responses cannot interleave', async () => {
+    const harness = createHarness()
+    let releaseFirstValidation!: () => void
+    const firstValidationGate = new Promise<void>((resolve) => {
+      releaseFirstValidation = resolve
+    })
+    let validationCalls = 0
+    const gatedInstallations = async (): Promise<PdkInstallationSnapshot[]> => {
+      validationCalls += 1
+      if (validationCalls === 1) await firstValidationGate
+      return [
+        {
+          displayName: 'SkyWater 130nm',
+          familyId: 'sky130',
+          id: 'sky130-1',
+          ownership: 'managed' as const,
+          readiness: 'ready' as const,
+          reason: null,
+          registrySha256: null,
+          root: '/pdks/sky130',
+          supportsEccDefaults: true,
+          version: null,
+        },
+      ]
+    }
+    harness.dependencies.pdkInventory.listInstallations = gatedInstallations
+
+    const first = harness.service.set(PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY, 'sky130-1')
+    const second = harness.service.set(
+      PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
+      'sky130-1',
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+
+    // The second write waits for the first transaction to finish completely.
+    expect(validationCalls).toBe(1)
+
+    releaseFirstValidation()
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toMatchObject({ ok: true })
+    expect(secondResult).toMatchObject({ ok: true })
+    expect(validationCalls).toBe(2)
+    // Each broadcast carries a value matching its own transaction, in order.
+    expect(harness.broadcasted.map((state) => [state.value, state.status.kind])).toEqual([
+      ['sky130-1', 'ok'],
+      ['sky130-1', 'ok'],
+    ])
   })
 
   it('defers the runtime apply while the ECC pool is busy and converges later', async () => {
