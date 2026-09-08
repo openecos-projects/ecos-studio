@@ -266,7 +266,11 @@ class ControllerContextMixin:
                         if item.terminal_observation is not None
                     ),
                     history_sha256=tuple(
-                        canonical_sha256(optimization_history_payload(item))
+                        canonical_sha256(
+                            optimization_history_payload(
+                                item, incumbent=self._incumbent
+                            )
+                        )
                         for item in history
                     ),
                 ),
@@ -373,13 +377,19 @@ class ControllerContextMixin:
                     ],
                     "ledger_head": self.ledger.replay().chain_head_sha256,
                     "history": [
-                        optimization_history_payload(item) for item in history
+                        optimization_history_payload(
+                            item, incumbent=self._incumbent
+                        )
+                        for item in history
                     ],
                     "parameter_knowledge": [
                         card.model_dump(mode="json") for card in parameter_knowledge
                     ],
                     "parameter_trajectories": [
-                        optimization_history_payload(item) for item in trajectories
+                        optimization_history_payload(
+                            item, incumbent=self._incumbent
+                        )
+                        for item in trajectories
                     ],
                     "planning_feedback": planning_feedback,
                     "in_flight": [in_flight_payload(item) for item in in_flight],
