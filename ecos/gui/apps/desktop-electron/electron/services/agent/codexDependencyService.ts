@@ -289,6 +289,8 @@ export class CodexDependencyService {
     const extractDir = await mkdtemp(join(tmpdir(), 'ecos-codex-'))
     let stagedBin: string | null = null
     let backupBin: string | null = null
+    /** True once the staged binary replaced the target (rename succeeded). */
+    let swapped = false
     try {
       await this.runTarExtract(archivePath, extractDir)
       const extractedBinary = await findExtractedCodexBinary(extractDir)
@@ -307,15 +309,14 @@ export class CodexDependencyService {
       // failed install leaves the previous working version in place.
       const extractedVersion = await this.readVersion(extractedBinary)
       if (!extractedVersion || !/^codex[\s_-]/i.test(extractedVersion)) {
-        const error = new Error('下载内容不是有效的 Codex CLI')
-        this.emitProgress({ phase: 'error', message: error.message })
-        throw error
+        throw new Error('下载内容不是有效的 Codex CLI')
       }
 
       await mkdir(dirname(targetBin), { recursive: true })
       // Keep a backup until the new binary is verified and persisted so a
       // post-rename failure can restore the previous managed version.
-      if (existsSync(targetBin)) {
+      const hadPreviousBinary = existsSync(targetBin)
+      if (hadPreviousBinary) {
         backupBin = `${targetBin}.backup-${randomUUID()}`
         await copyFile(targetBin, backupBin)
       }
@@ -326,6 +327,7 @@ export class CodexDependencyService {
       await chmod(stagedBin, 0o755)
       await rename(stagedBin, targetBin)
       stagedBin = null
+      swapped = true
 
       const version = await this.readVersion(targetBin)
       if (!version) {
@@ -343,9 +345,15 @@ export class CodexDependencyService {
         progress: 1,
       })
     } catch (error) {
-      // Roll the previous managed version back if we already swapped it.
-      if (backupBin) {
-        await rename(backupBin, targetBin).catch(() => undefined)
+      // Roll back the swap: restore the previous managed version, or remove
+      // the freshly replaced binary on a first-time install so a failed
+      // install never takes effect.
+      if (swapped) {
+        if (backupBin) {
+          await rename(backupBin, targetBin).catch(() => undefined)
+        } else {
+          await rm(targetBin, { force: true })
+        }
       }
       this.emitProgress({
         phase: 'error',

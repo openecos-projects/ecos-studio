@@ -1870,6 +1870,26 @@ const pdkResolvedForGeneration = ref(-1)
 const manifestPdkRoot = ref<string | null>(null)
 const manifestPdkRequirement = ref<PdkRequirement | null>(null)
 
+/**
+ * Remove manifest-derived PDK values (tracked snapshots) from the config,
+ * leaving any values the user entered themselves untouched.
+ */
+function clearManifestDerivedPdkState(): void {
+  if (manifestPdkRoot.value && config.value.pdk_root === manifestPdkRoot.value) {
+    config.value.pdk_root = ''
+  }
+  if (
+    manifestPdkRequirement.value !== null &&
+    JSON.stringify(config.value.pdk_requirement ?? null) ===
+      JSON.stringify(manifestPdkRequirement.value)
+  ) {
+    config.value.pdk_requirement = undefined
+  }
+  manifestPdkRoot.value = null
+  manifestPdkRequirement.value = null
+  manifestPdkFamily.value = ''
+}
+
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [
     ...(props.initialConfig?.pdk_config?.tech_lef ??
@@ -2544,6 +2564,11 @@ async function runProjectDefaultsLoad(projectRoot: string) {
   }
   if (loadGeneration !== projectManifestLoadGeneration) return
 
+  // A new project load invalidates the previous project's manifest-derived
+  // PDK state and selection so they cannot leak into this project.
+  clearManifestDerivedPdkState()
+  selectedPdkId.value = ''
+
   // Track the manifest family explicitly (including its absence) so the
   // default-PDK decision in ensurePdksLoaded sees authoritative information.
   manifestPdkFamily.value = manifest?.base_design.pdk ?? ''
@@ -2833,15 +2858,7 @@ function setProjectMode(mode: ProjectMode) {
     // Create mode has no project manifest; drop the family and any
     // manifest-derived PDK fields so the default-PDK decision is not poisoned
     // by a previous selection.
-    manifestPdkFamily.value = ''
-    if (config.value.pdk_root === manifestPdkRoot.value) {
-      config.value.pdk_root = ''
-    }
-    if (config.value.pdk_requirement === manifestPdkRequirement.value) {
-      config.value.pdk_requirement = undefined
-    }
-    manifestPdkRoot.value = null
-    manifestPdkRequirement.value = null
+    clearManifestDerivedPdkState()
     delete projectContext.value.project_id
     projectContext.value.project_root = joinPath(
       projectParentPath.value,
@@ -3011,17 +3028,19 @@ async function ensurePdksLoaded() {
   if (props.initialConfig?.isWorkspaceUpdate) return
   // No explicit PDK source at all and a brand-new workspace: preselect the
   // user's default installation. Updates/reconfigures are never re-seeded.
-  await seedDefaultPdkInstallation()
+  await seedDefaultPdkInstallation(generation)
 }
 
-async function seedDefaultPdkInstallation() {
+async function seedDefaultPdkInstallation(generation: number) {
   try {
     const defaultId = await getDesktopApi().settings.get<string>(
       PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
     )
-    if (!defaultId) return
+    if (!defaultId || projectManifestLoadGeneration !== generation) return
     const defaultPdk = importedPdks.value.find((pdk) => pdk.id === defaultId)
-    if (defaultPdk) selectPdk(defaultPdk)
+    if (defaultPdk && projectManifestLoadGeneration === generation) {
+      selectPdk(defaultPdk)
+    }
   } catch {
     // A stale or unreadable default must not block the wizard.
   }
