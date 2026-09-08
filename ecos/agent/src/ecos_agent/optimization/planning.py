@@ -33,6 +33,7 @@ from ecos_agent.optimization.knowledge.cases import (
     TerminalEmpiricalCase,
 )
 from ecos_agent.optimization.knowledge.compiler import SupportedActionView
+from ecos_agent.optimization.metrics.contracts import EvaluationMetricDirection
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
 from ecos_agent.optimization.objective_alignment import (
     ActiveOptimizationObjective,
@@ -156,21 +157,130 @@ class OptimizationPlannerTurn:
     proposal_v2: OptimizationProposalV2 | None = None
 
 
-def optimization_history_payload(item: OptimizationHistory) -> dict[str, object]:
+def _worse_corner_value(
+    value: float, reference: float, direction: EvaluationMetricDirection
+) -> bool:
+    if direction == EvaluationMetricDirection.HIGHER_IS_BETTER:
+        return value < reference
+    # Lower-is-better metrics degrade upward; non-directional cornered
+    # metrics are counts where a higher value is the conservative worst.
+    return value > reference
+
+
+def projected_terminal_observation(
+    observation: TerminalObservation,
+    *,
+    incumbent: TerminalObservation | None = None,
+) -> dict[str, object]:
+    """Project a terminal observation to its decisive planner-facing summary.
+
+    The full observation stays ledger-bound through the history reference
+    (outcome_sha256) and the evidence manifest; the planner receives frozen
+    objective metrics, timing guardrails, signoff gates, eligibility counts,
+    the worst corner per STA metric, and deltas versus the incumbent instead
+    of every per-corner evaluation metric.
+    """
+    worst: dict[str, tuple[str, float]] = {}
+    for metric in observation.evaluation_metrics:
+        if metric.corner is None:
+            continue
+        current = worst.get(metric.metric_id)
+        if current is None or _worse_corner_value(
+            metric.value, current[1], metric.direction
+        ):
+            worst[metric.metric_id] = (metric.corner, metric.value)
+    payload: dict[str, object] = {
+        "schema_version": "ecos.terminal_observation.projection.v1",
+        "observation_id": observation.observation_id,
+        "evidence_valid": observation.evidence_valid,
+        "harden_artifacts_complete": observation.harden_artifacts_complete,
+        "evaluation_metrics_complete": observation.evaluation_metrics_complete,
+        "signoff_gates": observation.signoff_gates.model_dump(mode="json"),
+        "metrics": {
+            metric.value: value for metric, value in observation.metrics.items()
+        },
+        "timing_guardrail": {
+            metric.value: value
+            for metric, value in observation.timing_guardrail.items()
+        },
+        "unscoped_evaluation_metrics": {
+            metric.metric_id: metric.value
+            for metric in observation.evaluation_metrics
+            if metric.corner is None
+        },
+        "worst_corner_metrics": {
+            metric_id: {"corner": corner, "value": value}
+            for metric_id, (corner, value) in sorted(worst.items())
+        },
+        "sta_corner_count": len(observation.sta_corner_ids),
+        "sta_corner_set_sha256": observation.sta_corner_set_sha256,
+        "evidence_manifest_sha256": observation.evidence_manifest_sha256,
+    }
+    if observation.geometry is not None:
+        payload["geometry"] = observation.geometry.model_dump(mode="json")
+    if incumbent is not None:
+        # Deltas are planner-facing summaries; rounding to 12 decimals keeps
+        # them free of float subtraction noise without hiding real changes.
+        payload["delta_vs_incumbent"] = {
+            "metrics": {
+                metric.value: round(
+                    observation.metrics[metric] - incumbent.metrics[metric], 12
+                )
+                for metric in observation.metrics
+            },
+            "timing_guardrail": {
+                metric.value: round(
+                    observation.timing_guardrail[metric]
+                    - incumbent.timing_guardrail[metric],
+                    12,
+                )
+                for metric in observation.timing_guardrail
+            },
+        }
+    return payload
+
+
+def projected_parameter_receipt(
+    receipt: ParameterApplicationReceipt,
+) -> dict[str, object]:
+    """Planner-facing receipt summary; evidence_sha256 binds the full receipt."""
+    return {
+        "schema_version": receipt.schema_version,
+        "receipt_id": receipt.receipt_id,
+        "tool": {"name": receipt.tool.name, "revision": receipt.tool.revision},
+        "context_sha256": receipt.context.get("context_sha256"),
+        "requested": receipt.requested,
+        "written_value": receipt.materialization.written_value,
+        "written_unit": receipt.materialization.unit,
+        "actual_value": receipt.actual_value,
+        "status": receipt.status,
+        "reason": receipt.reason,
+        "observation": receipt.observation,
+        "evidence_sha256": receipt.evidence_sha256,
+    }
+
+
+def optimization_history_payload(
+    item: OptimizationHistory,
+    *,
+    incumbent: TerminalObservation | None = None,
+) -> dict[str, object]:
     payload = {
         "reference": item.reference.model_dump(mode="json"),
         "outcome": item.outcome.value,
         "action": item.action.model_dump(mode="json"),
         "requested": item.requested.model_dump(mode="json"),
         "terminal_observation": (
-            item.terminal_observation.model_dump(mode="json")
+            projected_terminal_observation(
+                item.terminal_observation, incumbent=incumbent
+            )
             if item.terminal_observation is not None
             else None
         ),
     }
     if item.parameter_application_receipt is not None:
-        payload["parameter_application_receipt"] = (
-            item.parameter_application_receipt.model_dump(mode="json")
+        payload["parameter_application_receipt"] = projected_parameter_receipt(
+            item.parameter_application_receipt
         )
     if item.rationale_summary is not None:
         payload["rationale_summary"] = item.rationale_summary
@@ -193,11 +303,10 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         "context_ref": context.context_ref.model_dump(mode="json"),
         "observation_ref": context.observation_ref.model_dump(mode="json"),
         "incumbent": (
-            context.incumbent.model_dump(mode="json")
+            projected_terminal_observation(context.incumbent)
             if context.incumbent is not None
             else None
         ),
-        "history": [optimization_history_payload(item) for item in context.history],
         "knowledge_refs": [
             item.model_dump(mode="json") for item in context.knowledge_refs
         ],
@@ -236,7 +345,8 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         card.model_dump(mode="json") for card in context.parameter_knowledge
     ]
     payload["parameter_trajectories"] = [
-        optimization_history_payload(item) for item in context.parameter_trajectories
+        optimization_history_payload(item, incumbent=context.incumbent)
+        for item in context.parameter_trajectories
     ]
     payload["planning_feedback"] = list(context.planning_feedback)
     if context.in_flight:

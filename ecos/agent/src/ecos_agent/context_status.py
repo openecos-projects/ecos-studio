@@ -215,8 +215,10 @@ class StatusSnapshots:
                 "remaining_wall_time_seconds": snapshot.remaining_wall_time_seconds,
                 "exhausted": snapshot.exhausted,
             }
-        history = payload.get("history") if planning else None
-        history = history if isinstance(history, list) else []
+        # The planner payload renders the full trajectory once; the recent
+        # window and the latest action are its tail.
+        trajectories = payload.get("parameter_trajectories") if planning else None
+        history = trajectories if isinstance(trajectories, list) else []
         last = _mapping(history[-1]) if history else {}
         terminal = _mapping(last.get("terminal_observation"))
         last_action = {
@@ -246,7 +248,9 @@ class StatusSnapshots:
             "objective": _fields(objective, ("primary_metric", "preserve_metrics", "contract_sha256")) or None,
             "active_objective": _fields(active, ("active_primary_metric", "recovery_stage", "alignment_contract_sha256")) or None,
             "progress": {
-                "completed": [copy.deepcopy(item.get("reference")) for item in history]
+                "completed": [
+                    copy.deepcopy(item.get("reference")) for item in history[-6:]
+                ]
                 if planning else None,
                 "completed_scope": "recorded_outcomes_not_successes" if planning else "unknown",
                 "pending": pending,
