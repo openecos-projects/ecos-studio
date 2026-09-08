@@ -381,6 +381,35 @@ def test_export_signoff_package_archive_preserves_existing_target_on_incomplete_
     assert output_path.read_bytes() == b"old"
 
 
+def test_workspace_export_signoff_maps_malformed_additional_file(monkeypatch, tmp_path):
+    workspace = SimpleNamespace(directory=tmp_path / "workspace")
+    sessions = WorkspaceSessionRegistry()
+    session = sessions.open_session(workspace.directory, workspace=workspace)
+
+    monkeypatch.setattr(
+        signoff_export,
+        "inspect_signoff_package",
+        lambda _workspace: {"status": "ready", "groups": [], "risks": []},
+    )
+
+    def reject_malformed_file(_workspace, _output_path, additional_files=None):
+        assert additional_files == [{"archivePath": ".", "content": "invalid"}]
+        raise SignoffExportError("additional file path must name a relative file")
+
+    monkeypatch.setattr(signoff_export, "export_signoff_package_archive", reject_malformed_file)
+
+    with pytest.raises(RuntimeApiError) as exc_info:
+        WorkspaceRuntimeApi(sessions=sessions).export_signoff(
+            WorkspaceExportSignoffRequest(
+                workspace_id=session.workspace_id,
+                output_path=str(tmp_path / "export.tar.gz"),
+                additional_files=[{"archivePath": ".", "content": "invalid"}],
+            )
+        )
+
+    assert exc_info.value.code == "command_failed"
+
+
 def test_export_signoff_package_archive_replaces_symlink_entry_not_target(
     monkeypatch,
     tmp_path,
