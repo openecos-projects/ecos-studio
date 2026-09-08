@@ -155,7 +155,7 @@ class OptimizationEpisodeRunner:
     def request_stop(self) -> None:
         self._stop_event.set()
 
-    def run_turn(self) -> OptimizationEpisodeTurn:
+    def run_turn(self, *, paused: bool = False) -> OptimizationEpisodeTurn:
         if self._controller.state not in _PLANNABLE_STATES:
             raise OptimizationEpisodeRunnerError(
                 "episode is not ready for a planning turn"
@@ -166,8 +166,10 @@ class OptimizationEpisodeRunner:
         execution: OptimizationControlResult | None = None
         # Fill phase: start candidates until every slot is used or dispatch
         # must wait.  A busy backend keeps the approved proposal for a retry
-        # after the next terminal; nothing is re-planned or re-charged.
-        while not self._stop_event.is_set():
+        # after the next terminal; nothing is re-planned or re-charged.  A
+        # paused episode skips dispatch entirely but still absorbs one
+        # terminal below, so pause never strands in-flight evidence.
+        while not self._stop_event.is_set() and not paused:
             if self._controller.state not in _PLANNABLE_STATES:
                 break
             if self._controller.free_candidate_slots <= 0:

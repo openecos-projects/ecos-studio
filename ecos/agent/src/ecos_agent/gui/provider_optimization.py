@@ -446,7 +446,13 @@ class ProviderOptimizationMixin:
         final_phase = "completed"
         try:
             while True:
-                while session.optimization_pause.is_set() and not session.optimization_stop.wait(0.1):
+                # Pause stops new dispatch but still collects in-flight
+                # terminals; only an idle paused episode waits here.
+                while (
+                    session.optimization_pause.is_set()
+                    and not runner.pending_execution_ids
+                    and not session.optimization_stop.wait(0.1)
+                ):
                     pass
                 stop_requested = session.optimization_stop.is_set()
                 in_flight = len(runner.pending_execution_ids)
@@ -466,7 +472,7 @@ class ProviderOptimizationMixin:
                 if runner.state == OptimizationEpisodeState.QUARANTINED:
                     final_phase = "quarantined"
                     break
-                turn = runner.run_turn()
+                turn = runner.run_turn(paused=session.optimization_pause.is_set())
                 session.optimization_turn_count += 1
                 active_before = getattr(turn, "active_objective_before", None)
                 active_after = getattr(turn, "active_objective_after", None)
