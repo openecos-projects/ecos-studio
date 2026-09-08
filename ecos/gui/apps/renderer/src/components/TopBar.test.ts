@@ -91,6 +91,28 @@ describe('TopBar signoff export menu', () => {
     wrapper.unmount()
   })
 
+  it('opens Step Configuration from the workspace Edit menu', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true },
+    })
+
+    const editMenu = wrapper
+      .findAll('button.menu-btn')
+      .find((item) => item.text() === 'Edit')
+    expect(editMenu).toBeDefined()
+    await editMenu!.trigger('click')
+
+    const configItem = wrapper
+      .findAll('button.dropdown-item')
+      .find((item) => item.text().includes('Config'))
+    expect(configItem).toBeDefined()
+    expect((configItem!.element as HTMLButtonElement).disabled).toBe(false)
+    await configItem!.trigger('click')
+    expect(wrapper.emitted('step-config')).toEqual([[]])
+
+    wrapper.unmount()
+  })
+
   it('coordinates workspace shortcuts with the other topbar popovers', async () => {
     const overlayOpened = vi.fn()
     document.addEventListener('ecos-topbar-overlay-open', overlayOpened)

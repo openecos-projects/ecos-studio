@@ -100,6 +100,21 @@ describe('useStepConfigInfo', () => {
       step: 'Floorplan',
       workspacePath: '/workspace/demo',
     })
+    expect(result.stepConfigParameterDescriptions.value).toEqual({
+      'floorplan.ifp.thread_number': 'floorplan.ifp.thread_number',
+    })
+  })
+
+  it('keeps every returned Step parameter and reports its count', async () => {
+    const parameters = Object.fromEntries(
+      Array.from({ length: 24 }, (_, index) => [`floorplan.parameter_${index}`, index]),
+    )
+    testState.readWorkspaceStepConfiguration.mockResolvedValue(available(parameters))
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => expect(result.stepConfigParameterCount.value).toBe(24))
+    expect(result.stepConfigDraft.value).toEqual(parameters)
   })
 
   it('saves Step Parameters through one Product Command and advances Revision', async () => {

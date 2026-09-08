@@ -56,6 +56,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
   const configRelativePath = ref<string | null>(null)
   const configFileName = ref<string | null>(null)
   const rawText = ref<string | null>(null)
+  const parameterDescriptions = ref<Record<string, string>>({})
   const parsed = ref<unknown>(null)
   const jsonInvalid = ref(false)
   const viewDraft = ref<Record<string, unknown> | null>(null)
@@ -72,6 +73,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
     workspaceRevision?: number | null
     configRelativePath?: string | null
     rawText?: string | null
+    parameterDescriptions?: Record<string, string>
     error?: string | null
   }): void {
     status.value = next.status
@@ -84,6 +86,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
       ? basename(next.configRelativePath)
       : null
     rawText.value = next.rawText ?? null
+    parameterDescriptions.value = next.parameterDescriptions ?? {}
     error.value = next.error ?? null
 
     const text = rawText.value
@@ -287,6 +290,9 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
         baselineWorkspaceName: snapshot.workspaceName,
         baselineSource: baseline.source,
         workspaceRevision: result.workspaceRevision,
+        parameterDescriptions: Object.fromEntries(
+          result.parameters.map((parameter) => [parameter.param, parameter.description]),
+        ),
         configRelativePath: result.stepId ?? result.step,
         rawText: JSON.stringify(
           Object.fromEntries(
@@ -329,6 +335,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
     configRelativePath,
     configFileName,
     rawText,
+    parameterDescriptions,
     parsed,
     jsonInvalid,
     viewDraft,

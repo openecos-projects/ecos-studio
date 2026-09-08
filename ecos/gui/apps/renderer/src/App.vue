@@ -9,6 +9,7 @@
         :mutations-disabled="mutationsDisabled"
         :signoff-export-disabled="signoffExportDisabled"
         @menu-action="handleMenuAction"
+        @step-config="showStepConfigDialog = true"
       />
       <!-- 页面内容 -->
       <div

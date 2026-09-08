@@ -18,6 +18,7 @@ const props = withDefaults(
     maxDepth?: number
     accent?: 'indigo' | 'violet' | 'emerald' | 'amber' | 'cyan'
     readonly?: boolean
+    parameterDescriptions?: Record<string, string>
     /** Baseline-comparison leaf path ('' at the root; keys append '.k', array items '[i]'). */
     path?: string
   }>(),
@@ -44,6 +45,11 @@ function isChanged(path: string): boolean {
 
 function changedUnder(prefix: string): number {
   return diff?.changedCountUnder(prefix) ?? 0
+}
+
+function descriptionFor(path: string): string | undefined {
+  const description = props.parameterDescriptions?.[path]?.trim()
+  return description || undefined
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -226,6 +232,7 @@ function setPrim(i: number, v: unknown): void {
                 :max-depth="maxDepth"
                 :accent="accent"
                 :readonly="readonly"
+                :parameter-descriptions="parameterDescriptions"
                 :path="cellPath(ri, k)"
                 @update:model-value="setCell(ri, k, $event)"
               />
@@ -322,6 +329,7 @@ function setPrim(i: number, v: unknown): void {
             :max-depth="maxDepth"
             :accent="accent"
             :readonly="readonly"
+            :parameter-descriptions="parameterDescriptions"
             :path="itemPath(i)"
             @update:model-value="setPrim(i, $event)"
           />
@@ -367,12 +375,16 @@ function setPrim(i: number, v: unknown): void {
             >{{ changedUnder(childPath(k)) }}</span
           >
         </div>
+        <div v-if="descriptionFor(childPath(k))" class="sc-pro-subpanel__description">
+          {{ descriptionFor(childPath(k)) }}
+        </div>
         <StepConfigValueBlock
           :model-value="(model as Record<string, unknown>)[k]"
           :depth="depth + 1"
           :max-depth="maxDepth"
           :accent="accent"
           :readonly="readonly"
+          :parameter-descriptions="parameterDescriptions"
           :path="childPath(k)"
           @update:model-value="setKey(k, $event)"
         />

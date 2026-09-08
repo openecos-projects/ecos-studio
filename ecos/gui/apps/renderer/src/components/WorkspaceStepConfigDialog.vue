@@ -1,7 +1,7 @@
 <template>
   <div class="workspace-step-config-dialog">
     <aside class="workspace-step-config-nav" aria-label="Flow step configuration">
-      <header>
+      <header class="workspace-step-config-heading">
         <span>Flow steps</span>
         <small>{{ configurableSteps.length }}</small>
       </header>
@@ -25,7 +25,11 @@
           <i :class="item.icon" aria-hidden="true" />
           <span class="workspace-step-config-step">
             <span>{{ item.label }}</span>
-            <small v-if="item.tool">{{ item.tool }}</small>
+            <small>
+              <template v-if="item.tool">{{ item.tool }} · </template
+              >{{ item.parameterCount }}
+              {{ item.parameterCount === 1 ? 'param' : 'params' }}
+            </small>
           </span>
         </button>
       </div>
@@ -75,10 +79,10 @@ const configurableSteps = computed(() => {
       (candidate) => candidate.toLowerCase() === stage.path.toLowerCase(),
     )
     const applies = catalogApplies.value ?? []
-    const configurable = applies.some((target) =>
+    const parameterCount = applies.filter((target) =>
       target === 'all' ? index === 0 : sameFlowStepName(target, stage.path),
-    )
-    if (!step || seen.has(step) || !configurable) return []
+    ).length
+    if (!step || seen.has(step) || parameterCount === 0) return []
     seen.add(step)
     return [
       {
@@ -86,6 +90,7 @@ const configurableSteps = computed(() => {
         label: stage.label,
         icon: stage.icon,
         tool: formatStepToolName(stage.tool),
+        parameterCount,
       },
     ]
   })
@@ -156,7 +161,6 @@ defineExpose({ hasUnsavedChanges })
 
 .workspace-step-config-nav header {
   display: flex;
-  min-height: 38px;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-color);
@@ -164,6 +168,13 @@ defineExpose({ hasUnsavedChanges })
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 700;
+}
+
+.workspace-step-config-nav > .workspace-step-config-heading,
+.workspace-step-config-editor :deep(.workspace-step-config-heading) {
+  height: 60px;
+  min-height: 60px;
+  flex: 0 0 60px;
 }
 
 .workspace-step-config-nav small {

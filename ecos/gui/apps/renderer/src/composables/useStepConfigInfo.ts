@@ -63,6 +63,21 @@ function parameterValues(records: unknown[]): Record<string, unknown> | null {
   return values
 }
 
+function parameterDescriptions(records: unknown[]): Record<string, string> {
+  return Object.fromEntries(
+    records.flatMap((record) => {
+      if (
+        !isRecord(record) ||
+        typeof record.param !== 'string' ||
+        typeof record.description !== 'string'
+      ) {
+        return []
+      }
+      return [[record.param, record.description]]
+    }),
+  )
+}
+
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
   const { currentProject } = useWorkspace()
@@ -80,6 +95,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   const stepConfigPathResolved = ref<string | null>(null)
   const stepConfigRaw = ref<string | null>(null)
   const stepConfigReadError = ref<string | null>(null)
+  const stepConfigParameterDescriptions = ref<Record<string, string>>({})
 
   /** Editable draft (matches disk when JSON is valid; baseline updates after save). */
   const stepConfigDraft = ref<unknown | null>(null)
@@ -176,6 +192,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
           clearFileState()
           return
         }
+        stepConfigParameterDescriptions.value = parameterDescriptions(response.parameters)
         const payload = {
           parameters,
           stepId: response.stepId ?? response.step,
@@ -223,6 +240,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigPathResolved.value = null
     stepConfigRaw.value = null
     stepConfigReadError.value = null
+    stepConfigParameterDescriptions.value = {}
     stepConfigDraft.value = null
     stepConfigBaselineSig.value = ''
     stepConfigTextDraft.value = ''
@@ -332,6 +350,10 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       return true
     }
   })
+
+  const stepConfigParameterCount = computed(() =>
+    isRecord(stepConfigDraft.value) ? Object.keys(stepConfigDraft.value).length : 0,
+  )
 
   watch(
     [() => stepConfigRaw.value, () => stepConfigReadError.value],
@@ -483,6 +505,8 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigReadError,
     stepConfigParsed,
     stepConfigJsonInvalid,
+    stepConfigParameterCount,
+    stepConfigParameterDescriptions,
     stepConfigDraft,
     stepConfigTextDraft,
     hasStepConfigChanges,

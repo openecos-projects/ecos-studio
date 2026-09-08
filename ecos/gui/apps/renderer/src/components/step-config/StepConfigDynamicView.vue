@@ -8,6 +8,7 @@ const draft = defineModel<unknown>({ required: true })
 defineProps<{
   step: StepEnum
   readonly?: boolean
+  parameterDescriptions?: Record<string, string>
 }>()
 const emit = defineEmits<{ initialized: [] }>()
 let initialized = false
@@ -28,6 +29,7 @@ onMounted(() => {
     :is="GenericStepConfigView"
     v-model="draft"
     :readonly="readonly"
+    :parameter-descriptions="parameterDescriptions"
     @initialized="emitInitialized"
   />
 </template>

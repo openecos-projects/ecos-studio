@@ -1,11 +1,17 @@
 <template>
   <div class="step-config-root flex h-full min-h-0 w-full min-w-0 flex-col">
-    <div class="shrink-0 border-b border-(--border-color) bg-(--bg-primary) px-3 py-2">
+    <div
+      class="workspace-step-config-heading shrink-0 border-b border-(--border-color) bg-(--bg-primary) px-3 py-2"
+    >
       <h2 class="truncate text-[12px] font-bold text-(--text-primary)">
         {{ stepHeading }}
       </h2>
       <p class="mt-0.5 text-[10px] tracking-wider text-(--text-secondary) uppercase">
         Step configuration
+        <span v-if="stepConfigParameterCount" class="ml-2 normal-case">
+          · {{ stepConfigParameterCount }}
+          {{ stepConfigParameterCount === 1 ? 'parameter' : 'parameters' }}
+        </span>
         <span v-if="workspaceRevision !== null" class="ml-2 normal-case">
           · Revision {{ workspaceRevision }}
         </span>
@@ -177,6 +183,7 @@
                     :key="`${currentStep}-${baseline.configRelativePath.value}`"
                     v-model="baseline.viewDraft.value"
                     :step="currentStep"
+                    :parameter-descriptions="baseline.parameterDescriptions.value"
                     readonly
                   />
                   <p v-else class="px-1 text-[11px] text-(--text-secondary) italic">
@@ -285,6 +292,7 @@
                       v-if="currentStep"
                       v-model="stepConfigDraft"
                       :step="currentStep"
+                      :parameter-descriptions="stepConfigParameterDescriptions"
                       @initialized="markStepConfigEditorInitialized"
                     />
                   </template>
@@ -333,6 +341,8 @@ const {
   stepConfigDisplay,
   stepConfigReadError,
   stepConfigJsonInvalid,
+  stepConfigParameterCount,
+  stepConfigParameterDescriptions,
   stepConfigParsed,
   stepConfigDraft,
   stepConfigTextDraft,

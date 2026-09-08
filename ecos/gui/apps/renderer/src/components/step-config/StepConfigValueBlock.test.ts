@@ -76,6 +76,22 @@ describe('StepConfigValueBlock', () => {
     expect((changed[0].find('input').element as HTMLInputElement).value).toBe('b')
   })
 
+  it('renders parameter descriptions below matching keys', () => {
+    const wrapper = mount(StepConfigValueBlock, {
+      props: {
+        modelValue: { 'cts.skew_bound': 0.08, other: true },
+        parameterDescriptions: {
+          'cts.skew_bound': 'Allowed clock skew upper bound in ns.',
+        },
+      },
+      global: { stubs: primevueStubs },
+    })
+
+    expect(wrapper.find('.sc-pro-subpanel__description').text()).toBe(
+      'Allowed clock skew upper bound in ns.',
+    )
+  })
+
   it('marks changed subpanels and shows a count badge', () => {
     const wrapper = mountBlock(
       { pdn: { stripe: [{ w: 1 }] }, untouched: { x: 1 } },

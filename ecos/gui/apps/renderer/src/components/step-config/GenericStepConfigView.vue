@@ -6,6 +6,7 @@ const draft = defineModel<unknown>({ required: true })
 withDefaults(
   defineProps<{
     readonly?: boolean
+    parameterDescriptions?: Record<string, string>
   }>(),
   { readonly: false },
 )
@@ -24,6 +25,7 @@ withDefaults(
       :max-depth="6"
       accent="indigo"
       :readonly="readonly"
+      :parameter-descriptions="parameterDescriptions"
     />
   </div>
 </template>

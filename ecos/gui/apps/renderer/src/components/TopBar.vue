@@ -208,11 +208,13 @@ import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
 import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 // ---- 类型定义 ----
+type TopBarMenuAction = AppMenuAction | 'step-config'
+
 interface DropdownItem {
   label?: string
   icon?: string
   shortcut?: string
-  event?: AppMenuAction
+  event?: TopBarMenuAction
   separator?: boolean
   disabled?: boolean
   title?: string
@@ -239,6 +241,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
+  (e: 'step-config'): void
 }>()
 
 const workspaceFocusId = computed(
@@ -252,6 +255,9 @@ const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = getDesktopApi()
+const canOpenStepConfig = computed(
+  () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
+)
 const toggleTheme = () => {
   themeStore.toggleTheme()
 }
@@ -267,6 +273,19 @@ const handleGoHome = () => {
   quickMenuOpen.value = false
   router.push({ name: 'ECOS' })
 }
+
+const editMenu = computed<Menu>(() => ({
+  label: 'Edit',
+  action: 'edit',
+  children: [
+    {
+      label: 'Config',
+      icon: 'ri-settings-3-line',
+      event: 'step-config',
+      disabled: !canOpenStepConfig.value,
+    },
+  ],
+}))
 
 // ---- 菜单配置 ----
 const menus = computed<Menu[]>(() => [
@@ -319,6 +338,7 @@ const menus = computed<Menu[]>(() => [
         : []),
     ],
   },
+  ...(isWorkspaceRoute.value ? [editMenu.value] : []),
   {
     label: 'View',
     action: 'view',
@@ -390,8 +410,9 @@ const handleMenuHover = (action: string) => {
 }
 
 /** 下拉项点击 */
-const handleItemClick = (event?: AppMenuAction) => {
+const handleItemClick = (event?: TopBarMenuAction) => {
   activeMenu.value = null
+  if (event === 'step-config') return emit('step-config')
   if (event) emit('menu-action', event)
 }
 
