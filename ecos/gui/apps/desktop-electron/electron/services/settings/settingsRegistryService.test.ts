@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -396,10 +396,44 @@ describe('SettingsRegistryService', () => {
     const rejected = await harness.service.set(DESKTOP_CODEX_BIN_SETTING_KEY, missing)
     expect(rejected).toMatchObject({ ok: false })
 
-    const accepted = await harness.service.set(DESKTOP_CODEX_BIN_SETTING_KEY, root)
-    expect(accepted).toMatchObject({ ok: true, state: { value: root } })
+    const codex = await createTempExecutable('bin/codex', 'codex-cli 1.0')
+    const accepted = await harness.service.set(DESKTOP_CODEX_BIN_SETTING_KEY, codex)
+    expect(accepted).toMatchObject({ ok: true, state: { value: codex } })
     expect(setSpy).not.toHaveBeenCalled()
-    expect(harness.dependencies.codexDependency.setBinPath).toHaveBeenCalledWith(root)
+    expect(harness.dependencies.codexDependency.setBinPath).toHaveBeenCalledWith(codex)
+  })
+
+  it('reports a persisted apply failure for a canonicalized input across list()', async () => {
+    const harness = createHarness({
+      restartEccRuntimes: vi.fn(async () => {
+        throw new Error('restart exploded')
+      }),
+    })
+    const root = await mkdtemp(join(tmpdir(), 'ecos-registry-cwd-'))
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const executable = join(binDir, 'ecc')
+    await writeFile(executable, '#!/usr/bin/env bash\necho "ecc 1.0"\n', 'utf8')
+    await chmod(executable, 0o755)
+
+    const previousCwd = process.cwd()
+    process.chdir(root)
+    try {
+      // The input is relative; the handler persists the resolved absolute path.
+      const result = await harness.service.set(
+        RUNTIME_ECC_PATH_SETTING_KEY,
+        join('bin', 'ecc'),
+      )
+      expect(result).toMatchObject({ ok: true })
+
+      const states = await harness.service.list()
+      expect(
+        states.find((state) => state.descriptor.key === RUNTIME_ECC_PATH_SETTING_KEY)
+          ?.status,
+      ).toEqual({ kind: 'error', error: 'restart exploded' })
+    } finally {
+      process.chdir(previousCwd)
+    }
   })
 
   it('resets agent.codexBin through CodexDependencyService.clearBinPath', async () => {
@@ -428,11 +462,17 @@ describe('SettingsRegistryService', () => {
 })
 
 async function createTempEcc(): Promise<string> {
+  return await createTempExecutable('bin/ecc', 'ecc 1.0')
+}
+
+async function createTempExecutable(
+  relativePath: string,
+  version: string,
+): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'ecos-registry-'))
-  const binDir = join(root, 'bin')
-  await mkdir(binDir, { recursive: true })
-  const executable = join(binDir, 'ecc')
-  await writeFile(executable, '#!/usr/bin/env bash\necho "ecc 1.0"\n', 'utf8')
+  const executable = join(root, relativePath)
+  await mkdir(dirname(executable), { recursive: true })
+  await writeFile(executable, `#!/usr/bin/env bash\necho "${version}"\n`, 'utf8')
   await chmod(executable, 0o755)
   return executable
 }

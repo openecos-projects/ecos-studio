@@ -12,7 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import {
@@ -159,10 +159,15 @@ export class CodexDependencyService {
     if (!trimmed) {
       throw new Error('Codex 路径不能为空')
     }
-    const resolved = await this.validateExecutable(
-      expandUserPath(trimmed, this.resolveHomedir),
-    )
-    if (!resolved) {
+    // Canonicalize (tilde expansion + working-directory resolution) so the
+    // stored value is spawnable as-is regardless of the entry point.
+    const resolved = resolve(expandUserPath(trimmed, this.resolveHomedir))
+    if (!(await this.validateExecutable(resolved))) {
+      throw new Error('所选路径不是可执行的 Codex CLI')
+    }
+    // A non-Codex binary (for example /bin/true) must never be persisted.
+    const version = await this.readVersion(resolved)
+    if (!version || !/codex/i.test(version)) {
       throw new Error('所选路径不是可执行的 Codex CLI')
     }
     await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, resolved)

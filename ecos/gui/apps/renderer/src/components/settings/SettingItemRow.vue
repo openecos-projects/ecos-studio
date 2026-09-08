@@ -6,7 +6,10 @@
         <span v-if="statusKind === 'pending'" class="status-badge pending">Pending</span>
       </div>
       <div class="setting-description">{{ entry.descriptor.description }}</div>
-      <div class="setting-status" :class="`status-${statusKind}`">
+      <div
+        class="setting-status"
+        :class="writeError ? 'status-error' : `status-${statusKind}`"
+      >
         <template v-if="validating">Validating…</template>
         <template v-else-if="writeError">✗ {{ writeError }}</template>
         <template v-else-if="statusKind === 'pending'">

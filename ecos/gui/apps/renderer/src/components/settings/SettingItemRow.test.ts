@@ -99,6 +99,8 @@ describe('SettingItemRow', () => {
     const wrapper = mountRow(entryFixture(), { writeError: 'validation failed' })
 
     expect(wrapper.find('.setting-status').text()).toContain('validation failed')
+    // The rejection must render with the error styling, not the ok green.
+    expect(wrapper.find('.setting-status').classes()).toContain('status-error')
   })
 
   it('offers reset only for non-default entries and emits reset', async () => {

@@ -53,6 +53,7 @@ export interface SettingHandlerDependencies {
 }
 
 export const ECC_VERSION_PROBE_TIMEOUT_MS = 10_000
+export const CODEX_VERSION_PROBE_TIMEOUT_MS = 8_000
 
 function sizerBinaryName(): string {
   return process.platform === 'win32' ? 'Sizer.exe' : 'Sizer'
@@ -152,23 +153,32 @@ export function createSettingHandlers(
         await dependencies.codexDependency.setBinPath(value)
       },
       validate: async (value) => {
-        const resolved = await resolveExecutablePath(value)
-        if (!resolved) {
-          return { ok: false, error: `路径不存在或不可执行: ${value}` }
+        const probe = await probeExecutableVersion(value, ['--version'], {
+          timeoutMs: CODEX_VERSION_PROBE_TIMEOUT_MS,
+        })
+        if (!probe.ok) {
+          return { ok: false, error: probe.error }
         }
-        return { ok: true, displayInfo: resolved }
+        // An executable that is not a Codex CLI (for example /bin/true) must
+        // be rejected before anything is persisted.
+        if (!/codex/i.test(probe.version)) {
+          return { ok: false, error: `所选路径不是可执行的 Codex CLI: ${value}` }
+        }
+        return { ok: true, displayInfo: probe.version }
       },
     },
     [PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY]: {
       apply: async () => 'applied',
       clear: () => settingsStore.delete(PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY),
+      // Store the trimmed id so the wizard's exact-match lookup succeeds.
       persist: (value) =>
-        settingsStore.set(PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY, value),
+        settingsStore.set(PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY, value.trim()),
       validate: async (value) => {
+        const trimmed = value.trim()
         const installations = await dependencies.pdkInventory.listInstallations()
-        const installation = installations.find((entry) => entry.id === value.trim())
+        const installation = installations.find((entry) => entry.id === trimmed)
         if (!installation) {
-          return { ok: false, error: `未找到 ID 为 ${value.trim()} 的 PDK 安装` }
+          return { ok: false, error: `未找到 ID 为 ${trimmed} 的 PDK 安装` }
         }
         return { ok: true, displayInfo: installation.displayName }
       },

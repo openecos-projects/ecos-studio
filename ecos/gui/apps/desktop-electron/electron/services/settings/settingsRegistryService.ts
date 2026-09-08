@@ -101,8 +101,14 @@ export class SettingsRegistryService {
         return { ok: false, error: validation.error }
       }
 
-      await handler.persist(value)
-      return await this.finishWrite(descriptor, value, async () => {
+      try {
+        await handler.persist(value)
+      } catch (error) {
+        // A persistence failure (main-side exception) must surface as a clean
+        // rejection without touching state or broadcasting.
+        return { ok: false, error: errorFromException(error) }
+      }
+      return await this.finishWrite(descriptor, async () => {
         const outcome = await handler.apply(value)
         return outcome === 'pending'
           ? { kind: 'pending' }
@@ -126,8 +132,12 @@ export class SettingsRegistryService {
     }
 
     return await this.enqueueWrite(key, async () => {
-      await handler.clear()
-      return await this.finishWrite(descriptor, null, async () => {
+      try {
+        await handler.clear()
+      } catch (error) {
+        return { ok: false, error: errorFromException(error) }
+      }
+      return await this.finishWrite(descriptor, async () => {
         const outcome = await handler.apply(null)
         return outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
       })
@@ -164,7 +174,6 @@ export class SettingsRegistryService {
 
   private async finishWrite(
     descriptor: DesktopSettingDescriptor,
-    writtenValue: string | null,
     computeStatus: () => Promise<DesktopSettingStatus>,
   ): Promise<DesktopSettingWriteResult> {
     let status: DesktopSettingStatus
@@ -173,16 +182,18 @@ export class SettingsRegistryService {
     } catch (error) {
       status = { kind: 'error', error: errorFromException(error) }
     }
+    // Read the persisted value AFTER applying so apply-failure records key off
+    // what is actually stored (handlers may canonicalize the input).
+    const value = await this.readStoredValue(descriptor.key)
     if (status.kind === 'pending') {
       this.pendingApplyKeys.add(descriptor.key)
     } else if (status.kind === 'error') {
-      this.applyFailures.set(descriptor.key, { error: status.error, value: writtenValue })
+      this.applyFailures.set(descriptor.key, { error: status.error, value })
     } else {
       this.pendingApplyKeys.delete(descriptor.key)
       this.applyFailures.delete(descriptor.key)
     }
 
-    const value = await this.readStoredValue(descriptor.key)
     const state: DesktopSettingState = {
       descriptor,
       isDefault: value === null,

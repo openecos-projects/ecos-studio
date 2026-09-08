@@ -212,6 +212,83 @@ describe('CodexDependencyService', () => {
     )
   })
 
+  it('setBinPath rejects an executable that is not a Codex CLI', async () => {
+    const root = await createRoot()
+    const impostor = join(root, 'true')
+    await writeFile(impostor, '#!/usr/bin/env bash\necho "true 1.0"\n')
+    await chmod(impostor, 0o755)
+
+    const spawn = vi.fn(
+      (_command: string, _args: string[], _options: { env?: NodeJS.ProcessEnv }) => {
+        const child = new FakeChild()
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'true 1.0\n')
+          child.emit('close', 0)
+        })
+        return child as never
+      },
+    )
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: '', HOME: root },
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await expect(service.setBinPath(impostor)).rejects.toThrow('不是可执行的 Codex CLI')
+    await expect(settingsStore.get(DESKTOP_CODEX_BIN_SETTING_KEY)).resolves.toBeNull()
+  })
+
+  it('setBinPath persists the working-directory-resolved absolute path', async () => {
+    const root = await createRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const codexBin = join(binDir, 'codex')
+    await writeFile(codexBin, '#!/usr/bin/env bash\necho "codex-cli 1.0"\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn(
+      (_command: string, args: string[], _options: { env?: NodeJS.ProcessEnv }) => {
+        const child = new FakeChild()
+        queueMicrotask(() => {
+          if (args[0] === '--version') {
+            child.stdout.emit('data', 'codex-cli 1.0\n')
+            child.emit('close', 0)
+            return
+          }
+          child.stdout.emit('data', 'Logged in\n')
+          child.emit('close', 0)
+        })
+        return child as never
+      },
+    )
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: '/usr/bin:/bin', HOME: root },
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    const previousCwd = process.cwd()
+    process.chdir(root)
+    try {
+      await expect(service.setBinPath(join('bin', 'codex'))).resolves.toMatchObject({
+        state: 'ready',
+      })
+    } finally {
+      process.chdir(previousCwd)
+    }
+    await expect(settingsStore.get(DESKTOP_CODEX_BIN_SETTING_KEY)).resolves.toBe(codexBin)
+  })
+
   it('uses the selected Codex directory for NVM Node script execution', async () => {
     const root = await createRoot()
     const binDir = join(root, '.nvm', 'versions', 'node', 'v20', 'bin')

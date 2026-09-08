@@ -184,7 +184,7 @@ describe('settings handlers', () => {
     const handler = handlers['agent.codexBin']
 
     await expect(handler.validate(codexPath)).resolves.toMatchObject({
-      displayInfo: codexPath,
+      displayInfo: 'codex 1.2.3',
       ok: true,
     })
 
@@ -207,6 +207,15 @@ describe('settings handlers', () => {
     await expect(
       handlers['agent.codexBin'].validate(join(await createTempRoot(), 'missing')),
     ).resolves.toMatchObject({ ok: false })
+    expect(dependencies.codexDependency.setBinPath).not.toHaveBeenCalled()
+
+    // An executable that is not a Codex CLI (no codex in its version output)
+    // must be rejected as well.
+    const root = await createTempRoot()
+    const impostor = await createVersionExecutable(root, 'codex', 'true 1.0')
+    await expect(handlers['agent.codexBin'].validate(impostor)).resolves.toMatchObject({
+      ok: false,
+    })
     expect(dependencies.codexDependency.setBinPath).not.toHaveBeenCalled()
   })
 
@@ -241,6 +250,13 @@ describe('settings handlers', () => {
 
     await handler.persist('sky130-1')
     expect(dependencies.settings.get('pdk.defaultInstallationId')).toBe('sky130-1')
+
+    // A padded id validates and persists trimmed so the wizard's exact-match
+    // lookup succeeds.
+    await expect(handler.validate(' sky130-1 ')).resolves.toMatchObject({ ok: true })
+    await handler.persist(' sky130-1 ')
+    expect(dependencies.settings.get('pdk.defaultInstallationId')).toBe('sky130-1')
+
     await expect(handler.apply('sky130-1')).resolves.toBe('applied')
     await handler.clear()
     expect(dependencies.settings.has('pdk.defaultInstallationId')).toBe(false)
@@ -291,11 +307,15 @@ describe('settings handlers', () => {
     const previousHome = process.env.HOME
     process.env.HOME = root
     try {
-      const handlers = createSettingHandlers(createDependencies())
+      const dependencies = createDependencies()
+      const handlers = createSettingHandlers(dependencies)
 
       await expect(
         handlers['runtime.eccSizerRoot'].validate('~/ecc-sizer'),
       ).resolves.toMatchObject({ displayInfo: sizerRoot, ok: true })
+
+      await handlers['runtime.eccSizerRoot'].persist('~/ecc-sizer')
+      expect(dependencies.settings.get('runtime.eccSizerRoot')).toBe(sizerRoot)
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME
