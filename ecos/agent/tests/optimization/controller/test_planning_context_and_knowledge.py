@@ -18,6 +18,7 @@ from .support import (
     _FakeEcc,
     _controller,
     _execution_context,
+    _eligible_terminal,
     _native_receipt,
     _objective,
     _observation,
@@ -35,6 +36,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationEpisodeState,
     RequestedKnobValue,
     StrategyDirection,
+    StageEvidenceFeature,
 )
 from ecos_agent.optimization.controller import (
     CandidateExecutionReceipt,
@@ -214,6 +216,7 @@ def test_controller_binds_task_memory_snapshot_and_rejects_unknown_refs(
         _FakeCodex(_proposal),
         _FakeEcc(_started()),
         objective=_objective(),
+        incumbent=_eligible_terminal(),
         task_memory=snapshot,
     )
 
@@ -248,6 +251,7 @@ def test_controller_binds_task_memory_snapshot_and_rejects_unknown_refs(
         _FakeCodex(unknown_ref),
         _FakeEcc(_started()),
         objective=_objective(),
+        incumbent=_eligible_terminal(),
         task_memory=snapshot,
     ).plan(_observation(), _retrieval(), CURRENT_VALUES)
     assert rejected.rejection_reason == "task_memory_reference"
@@ -318,12 +322,15 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
     tmp_path: Path,
 ) -> None:
     task_memory = _task_memory_snapshot(tmp_path)
-    planner = _FakeCodex(_proposal, _proposal)
+    planner = _FakeCodex(_proposal, lambda context: _proposal(
+        context, knob_id="place.target_overflow", requested_value=0.2,
+    ))
     controller = _controller(
         tmp_path,
         planner,
         _FakeEcc(_started()),
         objective=_objective(),
+        incumbent=_eligible_terminal(),
         task_memory=task_memory,
         receipt_aware_planning=False,
     )
@@ -340,7 +347,11 @@ def test_requested_only_planning_does_not_expose_receipts_or_task_memory(
         ),
         incumbent_decision="incumbent_retained",
     )
-    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+    observation = _observation().model_copy(update={"state_evidence": (StageEvidenceFeature(
+        feature_id="place_final_density_overflow", value=0.05,
+        evidence_ref="analysis/parameter_runtime_report.v2.json", evidence_sha256=HASH,
+    ),)})
+    controller.plan(observation, _retrieval(), CURRENT_VALUES)
 
     context = planner.contexts[1]
     assert context.task_memory is None

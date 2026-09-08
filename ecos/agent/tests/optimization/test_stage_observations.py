@@ -183,3 +183,46 @@ def test_floorplan_mode_is_configuration_evidence_not_parameter_effectiveness(
 def test_absent_floorplan_mode_remains_unknown(frozen_workspace: Path) -> None:
     observation = build_stage_observation(frozen_workspace, "Floorplan", budget=_budget())
     assert not any(item.feature_id == "floorplan_die_util_mode" for item in observation.state_evidence)
+
+
+@pytest.mark.parametrize("final", [0.0, 0.2, None, -1, True, "0.2", float("inf")])
+def test_convergence_evidence_is_hash_bound_and_stage_independent(frozen_workspace, final):
+    relative = "analysis/parameter_runtime_report.v2.json"
+    _write_json(frozen_workspace / relative, {
+        "schema_version": "tool.parameter_runtime_report.v2",
+        "knob_id": "place.target_overflow",
+        "tool": {"name": "DREAMPlace"},
+        "observation": {"stop_overflow": 0.1, "final_overflow": final},
+    })
+    expected = type(final) in (int, float) and 0 <= final < float("inf")
+    evidence = []
+    for stage in ("place", "Floorplan"):
+        observation = build_stage_observation(frozen_workspace, stage, budget=_budget())
+        features = [item for item in observation.state_evidence
+                    if item.feature_id == "place_final_density_overflow"]
+        assert bool(features) is expected
+        if expected:
+            assert features[0].value == final
+            assert features[0].evidence_ref == relative
+            assert features[0].evidence_sha256 == file_sha256(frozen_workspace / relative)
+        evidence.append(features)
+    assert evidence[0] == evidence[1]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema_version", "tool.parameter_runtime_report.v1"),
+    ("knob_id", "place.target_density"),
+    ("tool", {"name": "routing"}),
+    ("observation", {"stop_overflow": 0.1}),
+])
+def test_convergence_report_requires_placement_observation(frozen_workspace, field, value):
+    payload = {
+        "schema_version": "tool.parameter_runtime_report.v2",
+        "knob_id": "place.target_overflow", "tool": {"name": "DREAMPlace"},
+        "observation": {"stop_overflow": 0.1, "final_overflow": 0.05},
+    }
+    payload[field] = value
+    _write_json(frozen_workspace / "analysis/parameter_runtime_report.v2.json", payload)
+    observation = build_stage_observation(frozen_workspace, "place", budget=_budget())
+    assert not any(item.feature_id == "place_final_density_overflow"
+                   for item in observation.state_evidence)

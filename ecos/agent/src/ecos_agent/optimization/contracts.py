@@ -20,6 +20,7 @@ from pydantic import (
 
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
 from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
     TerminalEvaluationMetric,
@@ -192,6 +193,13 @@ class OptimizationObjectiveProposal(_ContractModel):
     schema_version: Literal["ecos.optimization_objective_proposal.v1"] = (
         "ecos.optimization_objective_proposal.v1"
     )
+    parameter_policy: OptimizationParameterPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    unsupported_reason: str | None = Field(
+        default=None, min_length=1, max_length=512,
+        exclude_if=lambda value: value is None,
+    )
     primary_metric: ObjectiveMetric
     preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
     rationale_summary: str
@@ -221,10 +229,15 @@ class OptimizationObjectiveProposal(_ContractModel):
 
 
 class OptimizationObjectiveContract(_ContractModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     schema_version: Literal["ecos.optimization_objective.v1"] = (
         "ecos.optimization_objective.v1"
     )
     source_goal_sha256: str
+    parameter_policy: OptimizationParameterPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     primary_metric: ObjectiveMetric
     preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
     required_signoff_gates: tuple[str, ...]

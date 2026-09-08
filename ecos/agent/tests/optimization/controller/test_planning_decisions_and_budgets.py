@@ -535,6 +535,7 @@ def test_objective_is_bound_to_planning_state_decision_and_execution(
         codex,
         _FakeEcc(_started()),
         objective=objective,
+        incumbent=_eligible_terminal(),
     )
 
     controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
@@ -556,6 +557,7 @@ def test_recovery_preserves_the_frozen_objective(tmp_path: Path) -> None:
         _FakeCodex(_proposal),
         _FakeEcc(_started()),
         objective=objective,
+        incumbent=_eligible_terminal(),
     )
 
     recovered = OptimizationEpisodeController.recover(

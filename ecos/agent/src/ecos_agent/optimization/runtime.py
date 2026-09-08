@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import threading
+from time import monotonic as _monotonic
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
@@ -64,7 +65,7 @@ from ecos_agent.optimization.knowledge.retrieval import (
     OptimizationKnowledgeRetriever,
     build_optimization_retrieval_request,
 )
-from ecos_agent.optimization.rules import freeze_routability_objective
+from ecos_agent.optimization.rules import freeze_routability_objective, geometry_constraint_error
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.workspace.parameters import (
     WorkspaceParametersError,
@@ -89,10 +90,6 @@ _OPTIMIZATION_RERUN_STAGES = (
     "RCX",
     "sta",
     CANDIDATE_END_STEP,
-)
-_OPTIMIZATION_OBSERVATION_STAGES = (
-    ECCStepName.FLOORPLAN,
-    ECCStepName.PLACEMENT,
 )
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
@@ -143,6 +140,10 @@ def create_optimization_runner(
         runtime = OptimizationRuntimeContext.model_validate(context)
     except ValidationError as exc:
         raise OptimizationRuntimeError("optimization runtime context is invalid") from exc
+    if runtime.objective.parameter_policy is None:
+        raise OptimizationRuntimeError(
+            "legacy objective has no parameter policy; confirm a new optimization objective"
+        )
     workspace = _workspace(runtime.workspace)
     episode_id = runtime.episode_id
     objective = runtime.objective
@@ -160,6 +161,9 @@ def create_optimization_runner(
             "authorized objective alignment does not match the current baseline"
         ) from exc
     _require_objective_metrics(terminal_observation, objective)
+    geometry_violation = geometry_constraint_error(objective, terminal_observation.geometry, terminal_observation)
+    if geometry_violation is not None:
+        raise OptimizationRuntimeError(geometry_violation)
     site_width_dbu = _site_width_dbu(workspace)
     parent_manifest = _parent_manifest_sha256(workspace, terminal_observation)
     design_id = _design_id(workspace)
@@ -197,6 +201,10 @@ def create_optimization_runner(
         parent_manifest=parent_manifest,
         design_id=design_id,
     )
+    if objective.parameter_policy.geometry_mode == "fixed":
+        execution_context["geometry_baseline_sha256"] = canonical_sha256(
+            terminal_observation.geometry.model_dump(mode="json")
+        )
     try:
         controller = _recover_or_create_controller(
             runtime=runtime,
@@ -419,13 +427,14 @@ def _assemble_runner(
     )
 
     def observation_supplier(current_budget: BudgetSnapshot):
-        stage = _OPTIMIZATION_OBSERVATION_STAGES[
-            current_budget.consumed_candidates % len(_OPTIMIZATION_OBSERVATION_STAGES)
-        ]
         incumbent = _incumbent_workspace(
             workspace, controller.incumbent_candidate_root_ref
         )
-        return build_stage_observation(incumbent, stage, budget=current_budget)
+        observation = build_stage_observation(incumbent, ECCStepName.PLACEMENT, budget=current_budget)
+        stage = controller.planning_stage(observation, runner.current_values)
+        if stage != observation.stage.value:
+            observation = build_stage_observation(incumbent, ECCStepName(stage), budget=current_budget)
+        return observation
 
     def retrieval_supplier(observation, previous: OptimizationOutcomeKind | None):
         active = controller.active_objective
@@ -464,7 +473,7 @@ def _assemble_runner(
             )
         return build_candidate_terminal_observation(workspace, receipt.evidence)
 
-    return OptimizationEpisodeRunner(
+    runner = OptimizationEpisodeRunner(
         controller=controller,
         observation_supplier=observation_supplier,
         retrieval_supplier=retrieval_supplier,
@@ -475,6 +484,8 @@ def _assemble_runner(
         stop_event=stop_event,
         site_width_dbu=site_width_dbu,
     )
+
+    return runner
 
 
 def _wait_for_terminal_receipt(
@@ -784,9 +795,3 @@ def _terminal_timeout_seconds() -> float:
             "ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid"
         )
     return value
-
-
-def _monotonic() -> float:
-    import time
-
-    return time.monotonic()

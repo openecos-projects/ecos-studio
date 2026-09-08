@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.optimization.controller.support import _geometry, _native_receipt
+
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     GateResult,
@@ -91,6 +93,7 @@ def _terminal(
         mpc_maximum_area=GateResult.NOT_APPLICABLE,
     )
     return TerminalObservation(
+        geometry=_geometry(),
         schema_version="ecos.terminal_observation.v3",
         observation_id="terminal-Harden",
         evidence_manifest_sha256=HASH,
@@ -266,6 +269,35 @@ def test_alignment_does_not_exempt_ineligible_candidate_after_recovery() -> None
         ),
         objective_alignment=alignment,
         recovery_active=False,
+    )
+
+
+@pytest.mark.parametrize("counts", [dict(drc=2), dict(setup=2), dict(hold=2)])
+@pytest.mark.parametrize("geometry_changed", [False, True])
+def test_recovery_progress_still_requires_initial_geometry(counts, geometry_changed):
+    from ecos_agent.optimization.rules import classify_terminal_candidate
+
+    objective = _objective()
+    baseline = _terminal(**counts)
+    alignment = build_objective_alignment(objective, baseline)
+    candidate = _terminal(**{key: 1 for key in counts})
+    requested = RequestedKnobValue(knob_id=OptimizationKnob.TARGET_DENSITY, value=0.65)
+    if geometry_changed:
+        candidate = candidate.model_copy(update={"geometry": candidate.geometry.model_copy(
+            update={"die_bbox": (0, 0, 1250, 800), "core_bbox": (100, 100, 1150, 700)},
+        )})
+    result = classify_terminal_candidate(
+        execution_outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+        candidate=candidate, incumbent=baseline,
+        objective=freeze_routability_objective(baseline, objective_alignment=alignment),
+        semantic_objective=objective, objective_alignment=alignment,
+        baseline_geometry=baseline.geometry,
+        requested=requested, parameter_receipt=_native_receipt(requested),
+    )
+    assert result.promote is not geometry_changed
+    assert result.comparison.decision == (
+        IncumbentDecision.CANDIDATE_INELIGIBLE if geometry_changed
+        else IncumbentDecision.CANDIDATE_BETTER
     )
 
 

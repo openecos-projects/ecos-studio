@@ -21,6 +21,7 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization.execution import CandidateExecutionEvidence
+from ecos_agent.optimization.geometry import read_terminal_geometry
 from ecos_agent.optimization.ledger import build_optimization_artifact_manifest
 from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
@@ -30,6 +31,7 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.metrics.extraction import (
     OptimizationObservationError,
+    _required_payload_number,
     build_area_metrics,
     build_cost_metrics,
     build_eligibility_metrics,
@@ -40,6 +42,7 @@ from ecos_agent.optimization.metrics.extraction import (
 )
 from ecos_agent.optimization.parameter_config import (
     floorplan_mode_state_evidence,
+    placement_convergence_state_evidence,
     harden_output_paths,
     mpc_configured,
     read_workspace_parameters,
@@ -140,6 +143,7 @@ def build_stage_observation(
         *_hotspot_state_evidence(root, hotspots_path),
         *_place_map_state_evidence(root, canonical_stage),
         *floorplan_mode_state_evidence(root, canonical_stage),
+        *placement_convergence_state_evidence(root),
     )
     evidence_paths = tuple(
         dict.fromkeys(item.evidence_ref.partition("#")[0] for item in state_evidence)
@@ -264,17 +268,20 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         qor_payloads,
         files["sta_ecc/feature/sta.step.json"],
     )
+    geometry = read_terminal_geometry(root)
     manifest_paths = (
         *_TERMINAL_FILES,
         parameters_ref,
         *(path for path in metrics_by_path if path not in _REQUIRED_TERMINAL_QOR_FILES),
         *corner_paths,
+        *(geometry.evidence_refs if geometry is not None else ()),
         *(path for path in output_paths if _is_file(root, path)),
     )
     manifest = build_optimization_artifact_manifest(root, manifest_paths)
     return TerminalObservation(
         schema_version="ecos.terminal_observation.v3",
         observation_id="terminal-Harden",
+        geometry=geometry,
         evidence_manifest_sha256=manifest.manifest_sha256,
         evidence_valid=True,
         harden_artifacts_complete=harden_complete,
@@ -630,22 +637,6 @@ def _corner_metric(
         (source_ref,),
         corner,
     )
-
-
-def _required_payload_number(
-    payload: dict[str, Any], path: tuple[str, ...], *, nonnegative: bool = False
-) -> float:
-    value: object = payload
-    for key in path:
-        if not isinstance(value, dict):
-            raise OptimizationObservationError("terminal metric payload is invalid")
-        value = value.get(key)
-    if type(value) not in {int, float} or not math.isfinite(float(value)):
-        raise OptimizationObservationError("terminal metric payload is invalid")
-    number = float(value)
-    if nonnegative and number < 0:
-        raise OptimizationObservationError("terminal metric payload is invalid")
-    return number
 
 
 def _workspace_root(workspace_root: Path) -> Path:

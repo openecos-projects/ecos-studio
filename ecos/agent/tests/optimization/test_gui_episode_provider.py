@@ -613,8 +613,9 @@ def test_gui_authorizes_recovery_then_original_objective_with_one_confirmation(
     )
 
 
+@pytest.mark.parametrize("missing_evidence", ["evaluation_metrics", "geometry"])
 def test_gui_blocks_authorization_when_baseline_evidence_is_incomplete(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing_evidence: str,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -622,7 +623,8 @@ def test_gui_blocks_authorization_when_baseline_evidence_is_incomplete(
     monkeypatch.setattr(
         "ecos_agent.gui.provider_optimization.build_terminal_observation",
         lambda _workspace: _baseline().model_copy(
-            update={"evaluation_metrics_complete": False}
+            update=({"geometry": None} if missing_evidence == "geometry"
+                    else {"evaluation_metrics_complete": False})
         ),
     )
     provider = EcosAgentProvider(

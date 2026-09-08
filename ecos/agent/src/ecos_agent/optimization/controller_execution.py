@@ -15,6 +15,8 @@ from typing import Callable, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ecos_agent.errors import ProposalProviderError
+from ecos_agent.optimization.knob_policy import allowed_knobs
+from ecos_agent.optimization.rules import geometry_constraint_error
 from ecos_agent.optimization.parameters.effective_domain import (
     EffectiveDomainError,
     compile_effective_domain,
@@ -150,6 +152,23 @@ class ControllerExecutionMixin:
                 "recovery_incomplete" if self.recovery_incomplete else "budget_exhausted"
             )
 
+        if self._requested.knob_id not in allowed_knobs(self._objective):
+            raise OptimizationEpisodeControllerError("requested knob is forbidden by the task parameter policy")
+        violation = geometry_constraint_error(self._objective, self._baseline_geometry, self._incumbent)
+        if violation is not None:
+            raise OptimizationEpisodeControllerError(violation)
+        decisions = self._decision_audit.replay().entries
+        if (
+            not decisions or decisions[-1].validation_result != "accepted"
+            or decisions[-1].proposal != self._proposal
+            or decisions[-1].requested != self._requested
+        ):
+            raise OptimizationEpisodeControllerError("execution request does not match the approved planning decision")
+        if self._pending_v2_proposal is None or self._pending_v2_proposal.action is None:
+            raise OptimizationEpisodeControllerError("execution request has no validated exact-value proposal")
+        action = self._pending_v2_proposal.action
+        if action.knob_id != self._requested.knob_id or action.requested_value != self._requested.value:
+            raise OptimizationEpisodeControllerError("execution request differs from the validated exact-value proposal")
         intervention_id = self._next_intervention_id()
         planning_entries = self._planning_audit.replay().entries
         domain = (
@@ -168,6 +187,14 @@ class ControllerExecutionMixin:
             raise OptimizationEpisodeControllerError(
                 "approved proposal has no context-bound effective domain"
             )
+        if (
+            decisions[-1].planning_entry_sha256 != planning_entries[-1].entry_sha256
+            or self._proposal.context_ref != planning_entries[-1].context_ref
+            or action.effective_domain_sha256 != domain.snapshot_sha256
+            or domain.direction_schema(action.direction) is None
+            or not domain.accepts(self._requested.value)
+        ):
+            raise OptimizationEpisodeControllerError("execution request does not match the approved parameter domain")
         request = CandidateExecutionRequest(
             intervention_id=intervention_id,
             episode_id=self.episode_id,
@@ -415,6 +442,13 @@ class ControllerExecutionMixin:
                 raise OptimizationEpisodeControllerError(
                     "terminal candidate evidence execution contract does not match"
                 )
+        constraint_violation = geometry_constraint_error(
+            self._objective, self._baseline_geometry, terminal_observation,
+        ) if receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED else None
+        if constraint_violation is not None:
+            outcome = OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+            incumbent_decision = IncumbentDecision.CANDIDATE_INELIGIBLE.value
+            decisive_metric = None
         comparison = (
             IncumbentDecision(incumbent_decision)
             if incumbent_decision is not None
@@ -432,6 +466,8 @@ class ControllerExecutionMixin:
             parameter_receipt=receipt.parameter_application_receipt,
             objective_alignment=self._objective_alignment,
             recovery_active=self.recovery_incomplete,
+            semantic_objective=self._objective,
+            baseline_geometry=self._baseline_geometry,
         )
         active_objective = self.active_objective
         next_active_objective = active_objective
@@ -541,6 +577,7 @@ class ControllerExecutionMixin:
                 != next_active_objective.recovery_stage
                 else None
             ),
+            constraint_violation=constraint_violation,
             outcome_details_sha256=canonical_sha256(details),
             target_step=candidate_target_step(self._requested.knob_id)
             if self._requested

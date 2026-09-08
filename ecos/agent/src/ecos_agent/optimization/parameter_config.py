@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -59,3 +60,29 @@ def floorplan_mode_state_evidence(
 def mpc_configured(parameters: dict[str, Any]) -> bool:
     mpc = parameters.get("mpc")
     return isinstance(mpc, dict) and isinstance(mpc.get("core_template"), dict)
+
+
+def placement_convergence_state_evidence(root: Path) -> tuple[StageEvidenceFeature, ...]:
+    # Read the same incumbent evidence before and after choosing a planning stage.
+    relative_path = "analysis/parameter_runtime_report.v2.json"
+    path = root / relative_path
+    if not (path.exists() or path.is_symlink()):
+        return ()
+    try:
+        report = _read_json(root, relative_path)
+    except WorkspaceParametersError as exc:
+        raise OptimizationObservationError(str(exc)) from exc
+    tool = report.get("tool")
+    observation = report.get("observation")
+    if (report.get("schema_version") != "tool.parameter_runtime_report.v2"
+            or report.get("knob_id") != "place.target_overflow"
+            or not isinstance(tool, dict) or tool.get("name") != "DREAMPlace"
+            or not isinstance(observation, dict)):
+        return ()
+    value = observation.get("final_overflow")
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        return ()
+    return (StageEvidenceFeature(
+        feature_id="place_final_density_overflow", value=value,
+        evidence_ref=relative_path, evidence_sha256=file_sha256(path),
+    ),)

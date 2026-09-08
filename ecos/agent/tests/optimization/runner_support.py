@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from tests.optimization.support import support_catalog
 
+from tests.optimization.controller.support import _geometry
+
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     BudgetSnapshot,
@@ -447,6 +449,7 @@ def _terminal_observation(
         )
     )
     return TerminalObservation(
+        geometry=_geometry(),
         schema_version="ecos.terminal_observation.v3",
         observation_id=f"terminal-{receipt.execution_id}",
         evidence_manifest_sha256="sha256:" + receipt.execution_id[-1] * 64,

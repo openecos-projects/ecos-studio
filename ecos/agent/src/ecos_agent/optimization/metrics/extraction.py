@@ -488,3 +488,19 @@ def optional_nonnegative_metric(
     if value is not None and value < 0:
         raise OptimizationObservationError("terminal evaluation metric is invalid")
     return value
+
+
+def _required_payload_number(
+    payload: dict[str, Any], path: tuple[str, ...], *, nonnegative: bool = False
+) -> float:
+    value: object = payload
+    for key in path:
+        if not isinstance(value, dict):
+            raise OptimizationObservationError("terminal metric payload is invalid")
+        value = value.get(key)
+    if type(value) not in {int, float} or not math.isfinite(float(value)):
+        raise OptimizationObservationError("terminal metric payload is invalid")
+    number = float(value)
+    if nonnegative and number < 0:
+        raise OptimizationObservationError("terminal metric payload is invalid")
+    return number

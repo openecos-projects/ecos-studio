@@ -191,6 +191,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         system = (
             "Select one exact parameter value within the supplied static legal bounds and legal direction. "
+            "The task parameter_policy records knob roles, disabled knobs and the active search layer; "
+            "only supplied legal_actions are candidates. target_density and cell_padding_x control "
+            "placement, not die size; target_overflow controls convergence; routability_opt changes "
+            "strategy. core_util changes core area in die-util mode, while aspect_ratio changes shape. "
+            "density_weight is advanced and must never be enabled implicitly. "
             "Use parameter_knowledge, including runtime_semantics and source spans, together with "
             "parameter_trajectories: requested and written values, actual values, status, raw observations, "
             "mechanism reasons, execution context, and terminal outcomes or failures. Infer behavior for any "
@@ -258,7 +263,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             raise CodexProviderError(
                 "optimization objective request is empty", failure_class="missing_input"
             )
-        return self._proposal(
+        proposal = self._proposal(
             {
                 "schema_version": "ecos.optimization_objective_request.v1",
                 "natural_language_goal": goal,
@@ -266,7 +271,20 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             (
                 "Return one JSON object matching ecos.optimization_objective_proposal.v1. "
                 "Interpret only the user's optimization goal. Output only the whitelisted "
-                "primary_metric, preserve_metrics, and rationale fields defined by the schema. "
+                "primary_metric, preserve_metrics, rationale_summary, unsupported_reason and "
+                "parameter_policy fields defined by the schema. "
+                "Always return a non-null parameter_policy with geometry_mode fixed by default and "
+                "advanced_parameters_enabled false unless explicitly opted in. Lowering unqualified area "
+                "means die_area; core area means core_area; synthesis cell area means synthesis_cell_area; "
+                "final standard-cell area means sta_standard_cell_area. "
+                "Do not substitute cell area when geometry metrics are unavailable. Physical area reduction "
+                "or explicit permission to change outline means geometry_mode variable. Keeping area, "
+                "outline or dimensions unchanged means fixed; omit die_area/core_area from preserve_metrics "
+                "when fixed because the geometry invariant protects them independently. Fixed-area aspect-ratio "
+                "exploration is unsupported: set unsupported_reason to a short explanation and geometry_mode "
+                "fixed. Set unsupported_reason to null for supported goals; report contradictory or ambiguous "
+                "permission requests instead of inventing permission. Distinguish negation "
+                "and prohibitions from permission. Advanced density_weight requires explicit opt-in. "
                 "Use drc_count for final DRC; route_dr_total_violation_count is only a "
                 "routing-stage statistic, not final DRC cleanliness. "
                 "Setup/hold WNS and TNS are always protected by local timing tolerances "
@@ -280,6 +298,14 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             _optimization_objective_output_schema(),
             OptimizationObjectiveProposal,
         )
+
+        if proposal.get("parameter_policy") is None:
+            self._runtime_status.validation(False)
+            raise CodexProviderError(
+                "optimization objective response is missing parameter_policy",
+                failure_class="parse_error",
+            )
+        return proposal
 
     def consume_planning_evidence(self) -> PlanningProviderEvidence | None:
         """Return the evidence for the most recent optimization planner turn once."""
