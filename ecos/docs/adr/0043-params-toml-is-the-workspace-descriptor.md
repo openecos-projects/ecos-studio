@@ -1,8 +1,12 @@
 ---
-status: accepted
+status: superseded
+superseded_by: ./0044-origin-main-is-the-ecc-integration-baseline.md
 ---
 
 # Keep params.toml as the Workspace Descriptor
+
+> Superseded by ADR 0044. In particular, the strict no-migration and mandatory
+> Workspace recreation policy below no longer applies.
 
 To minimize changes to the upstream ECC CLI, the canonical Workspace Descriptor keeps the upstream path `<workspace>/home/params.toml`. The file must satisfy the complete current Descriptor contract; opening a Workspace never infers missing fields, fills defaults, rewrites the configuration or creates a second `workspace.toml`. Data outside the contract requires an explicit migration or recreation decision. This preserves one authoritative Workspace configuration while retaining the upstream CLI's existing file name and Project-level `ecc.toml` behavior.
 

@@ -1,8 +1,14 @@
 ---
-status: proposed
+status: superseded
+superseded_by: ./backend-architecture-main-integration-v1.zh-CN.md
 ---
 
 # ECC Upstream CLI Integration v1
+
+> 本预集成方案已由
+> [ECC Backend Architecture Main Integration v1](./backend-architecture-main-integration-v1.zh-CN.md)
+> 取代。新的 accepted 方案以最新 ECC `origin/main` 重建目标分支，并保留 main
+> 的 Workspace migration 和 Flow completion 语义。
 
 ## Problem Statement
 
