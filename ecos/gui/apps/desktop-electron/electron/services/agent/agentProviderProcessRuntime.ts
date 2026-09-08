@@ -856,6 +856,11 @@ function readOptimizationPayload(
       : {}),
     ...(typeof record.turn === 'number' ? { turn: record.turn } : {}),
     ...(typeof record.turn_count === 'number' ? { turn_count: record.turn_count } : {}),
+    ...(typeof record.in_flight === 'number' &&
+    Number.isSafeInteger(record.in_flight) &&
+    record.in_flight >= 0
+      ? { in_flight: record.in_flight }
+      : {}),
     ...(typeof record.planning_state === 'string'
       ? { planning_state: record.planning_state }
       : {}),
