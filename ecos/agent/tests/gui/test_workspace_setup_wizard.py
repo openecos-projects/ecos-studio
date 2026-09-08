@@ -198,12 +198,12 @@ def test_existing_project_branch_requires_project_json_and_uses_workspace_name(
     }
     assert [option["label"] for option in flow_end_choice["options"][1:4]] == [
         "Synthesis",
+        "lec",
         "Floorplan",
-        "place",
     ]
     assert flow_end_choice["options"][-1]["label"] == "Harden"
 
-    _send(provider, session_id, "3")
+    _send(provider, session_id, "4")
     assert provider.sessions[session_id].phase == "workspace_rtl"
     assert provider.sessions[session_id].workspace_setup.flow_end == "place"
 
