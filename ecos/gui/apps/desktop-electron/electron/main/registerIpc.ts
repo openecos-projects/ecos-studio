@@ -7,8 +7,8 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -507,6 +507,28 @@ async function resolveWorkspacePdkContext(
   }
 }
 
+/**
+ * Resolve an inventory installation for a wizard-provided PDK root: reuse the
+ * installation registered for that directory, or import the local path the way
+ * the New Project wizard does.
+ */
+async function resolveInstallationIdForPdkRoot(
+  services: DesktopBridgeServices,
+  pdkRoot: string,
+): Promise<string | undefined> {
+  const root = pdkRoot.trim()
+  if (!root) return undefined
+  const canonical = await realpath(resolve(root)).catch(() => undefined)
+  if (!canonical) return undefined
+  const installations = await services.pdkInventoryService.listInstallations()
+  const existing = installations.find((installation) => installation.root === canonical)
+  if (existing) return existing.id
+  const imported = (await services.resourceManagerService.importPdkPath(root)) as {
+    id?: string
+  }
+  return imported.id ?? undefined
+}
+
 async function prepareEccWorkspaceCreateRequest(
   services: DesktopBridgeServices,
   request: EccWorkspaceCreateRequest,
@@ -518,21 +540,30 @@ async function prepareEccWorkspaceCreateRequest(
     projectRoot,
     request.pdkRequirement,
   )
-  if (!context.requirement) {
+  const requestedFamilyId = request.pdk?.trim() ?? ''
+  const requirement =
+    context.requirement ??
+    (requestedFamilyId
+      ? { familyId: requestedFamilyId, version: null, manualConfig: null }
+      : undefined)
+  if (!requirement) {
     throw new Error('PDK Requirement is required for backend workspace creation')
   }
-  const { projectId, requirement } = context
+  const { projectId } = context
   const binding = await services.pdkInventoryService.resolveBinding({
     projectId,
     projectRoot,
     requirement,
   })
   if (!binding) {
-    if (!request.pdkInstallationId) {
+    const installationId =
+      request.pdkInstallationId ||
+      (await resolveInstallationIdForPdkRoot(services, request.pdkRoot ?? ''))
+    if (!installationId) {
       throw new Error('Project PDK Requirement is unbound')
     }
     await services.pdkInventoryService.bindInstallation({
-      installationId: request.pdkInstallationId,
+      installationId,
       requirement,
       projectId,
       projectRoot,
