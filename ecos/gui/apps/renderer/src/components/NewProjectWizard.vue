@@ -1583,6 +1583,7 @@ import {
   projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
+  type PdkRequirement,
   type PickedRtlSources,
 } from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
@@ -1865,6 +1866,9 @@ const validatingPdkId = ref('')
 const manifestPdkFamily = ref('')
 /** Manifest generation the PDK selection last resolved against. */
 const pdkResolvedForGeneration = ref(-1)
+/** Manifest-derived PDK fields, tracked so create mode can clear them. */
+const manifestPdkRoot = ref<string | null>(null)
+const manifestPdkRequirement = ref<PdkRequirement | null>(null)
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [
@@ -2576,9 +2580,11 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
   }
   if (baseDesign.pdk_root && !hasInitialConfigValue('pdk_root')) {
     config.value.pdk_root = baseDesign.pdk_root
+    manifestPdkRoot.value = baseDesign.pdk_root
   }
   if (baseDesign.pdk_requirement && !hasInitialConfigValue('pdk_requirement')) {
     config.value.pdk_requirement = baseDesign.pdk_requirement
+    manifestPdkRequirement.value = baseDesign.pdk_requirement
   }
 
   applyProjectDesignFileDefaults(baseDesignRecord, parameters)
@@ -2824,9 +2830,18 @@ function setProjectMode(mode: ProjectMode) {
     projectMpc.value = null
     projectManifestError.value = ''
     isLoadingProjectManifest.value = false
-    // Create mode has no project manifest; drop any family it declared so the
-    // default-PDK decision is not poisoned by a previous selection.
+    // Create mode has no project manifest; drop the family and any
+    // manifest-derived PDK fields so the default-PDK decision is not poisoned
+    // by a previous selection.
     manifestPdkFamily.value = ''
+    if (config.value.pdk_root === manifestPdkRoot.value) {
+      config.value.pdk_root = ''
+    }
+    if (config.value.pdk_requirement === manifestPdkRequirement.value) {
+      config.value.pdk_requirement = undefined
+    }
+    manifestPdkRoot.value = null
+    manifestPdkRequirement.value = null
     delete projectContext.value.project_id
     projectContext.value.project_root = joinPath(
       projectParentPath.value,
@@ -2925,6 +2940,9 @@ async function ensurePdksLoaded() {
   if (projectDefaultsPromise) await projectDefaultsPromise
   if (pdkResolvedForGeneration.value === projectManifestLoadGeneration) return
   pdkResolvedForGeneration.value = projectManifestLoadGeneration
+  const generation = projectManifestLoadGeneration
+  /** The user switched projects while an async resolution was in flight. */
+  const generationChanged = (): boolean => projectManifestLoadGeneration !== generation
   const requirement = config.value.pdk_requirement
   // Explicit PDK information (a family name, a requirement, an installation
   // id, or a pdk_root) always wins over the default installation in every
@@ -2949,6 +2967,7 @@ async function ensurePdksLoaded() {
       projectRoot,
       requirement,
     })
+    if (generationChanged()) return
     const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
     if (bound) {
       selectPdk(bound)
@@ -2975,6 +2994,7 @@ async function ensurePdksLoaded() {
       const scanned = await getDesktopApi().workspace.scanPdkDirectory(
         config.value.pdk_root,
       )
+      if (generationChanged()) return
       const canonicalPdk = importedPdks.value.find(
         (pdk) => normalizePath(pdk.path) === normalizePath(scanned.canonicalPath),
       )

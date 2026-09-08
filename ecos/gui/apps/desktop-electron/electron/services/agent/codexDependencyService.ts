@@ -1,6 +1,6 @@
 import { spawn as spawnChild, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { createWriteStream } from 'node:fs'
+import { createWriteStream, existsSync } from 'node:fs'
 import {
   access,
   chmod,
@@ -288,6 +288,7 @@ export class CodexDependencyService {
 
     const extractDir = await mkdtemp(join(tmpdir(), 'ecos-codex-'))
     let stagedBin: string | null = null
+    let backupBin: string | null = null
     try {
       await this.runTarExtract(archivePath, extractDir)
       const extractedBinary = await findExtractedCodexBinary(extractDir)
@@ -312,15 +313,40 @@ export class CodexDependencyService {
       }
 
       await mkdir(dirname(targetBin), { recursive: true })
+      // Keep a backup until the new binary is verified and persisted so a
+      // post-rename failure can restore the previous managed version.
+      if (existsSync(targetBin)) {
+        backupBin = `${targetBin}.backup-${randomUUID()}`
+        await copyFile(targetBin, backupBin)
+      }
       // Stage next to the target and swap via rename, which atomically
-      // replaces the target on Linux; a failure before the rename keeps the
-      // previous managed version intact.
+      // replaces the target on Linux.
       stagedBin = `${targetBin}.staging-${randomUUID()}`
       await copyFile(extractedBinary, stagedBin)
       await chmod(stagedBin, 0o755)
       await rename(stagedBin, targetBin)
       stagedBin = null
+
+      const version = await this.readVersion(targetBin)
+      if (!version) {
+        throw new Error('安装完成但 Codex CLI 无法执行')
+      }
+
+      if (this.managedBinPersister) {
+        await this.managedBinPersister(targetBin)
+      } else {
+        await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, targetBin)
+      }
+      this.emitProgress({
+        phase: 'done',
+        message: `Codex CLI ${version} 已安装`,
+        progress: 1,
+      })
     } catch (error) {
+      // Roll the previous managed version back if we already swapped it.
+      if (backupBin) {
+        await rename(backupBin, targetBin).catch(() => undefined)
+      }
       this.emitProgress({
         phase: 'error',
         message: error instanceof Error ? error.message : String(error),
@@ -328,26 +354,10 @@ export class CodexDependencyService {
       throw error
     } finally {
       if (stagedBin) await rm(stagedBin, { force: true })
+      if (backupBin) await rm(backupBin, { force: true })
       await rm(extractDir, { force: true, recursive: true })
     }
 
-    const version = await this.readVersion(targetBin)
-    if (!version) {
-      const error = new Error('安装完成但 Codex CLI 无法执行')
-      this.emitProgress({ phase: 'error', message: error.message })
-      throw error
-    }
-
-    if (this.managedBinPersister) {
-      await this.managedBinPersister(targetBin)
-    } else {
-      await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, targetBin)
-    }
-    this.emitProgress({
-      phase: 'done',
-      message: `Codex CLI ${version} 已安装`,
-      progress: 1,
-    })
     // Avoid getStatus()'s in-flight install short-circuit while installPromise is set.
     return await this.probeStatus()
   }

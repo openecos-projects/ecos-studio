@@ -2375,20 +2375,23 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.agentCodexLogin, async () => {
-    const status = await withCodexKeyTransaction(services, () =>
-      requireCodexDependencyService(services).login(),
-    )
-    await applyCodexBinEnv(services)
+    const status = await withCodexKeyTransaction(services, async () => {
+      const loginStatus = await requireCodexDependencyService(services).login()
+      await applyCodexBinEnv(services)
+      return loginStatus
+    })
     await notifyCodexBinSettingChanged(services)
     return status
   })
 
   handle(desktopApiIpcChannels.agentCodexSetBinPath, async (_event, request) => {
     const pathValue = readCodexBinPathRequest(request)
-    const status = await withCodexKeyTransaction(services, () =>
-      requireCodexDependencyService(services).setBinPath(pathValue),
-    )
-    await applyCodexBinEnv(services)
+    const status = await withCodexKeyTransaction(services, async () => {
+      const binStatus =
+        await requireCodexDependencyService(services).setBinPath(pathValue)
+      await applyCodexBinEnv(services)
+      return binStatus
+    })
     await notifyCodexBinSettingChanged(services)
     return status
   })
