@@ -389,6 +389,7 @@ describe('SettingsRegistryService', () => {
         .mockResolvedValueOnce('pending')
         .mockResolvedValueOnce('applied'),
     })
+    harness.setPoolBusy(true)
     const root = await createTempEcc()
 
     const result = await harness.service.set(RUNTIME_ECC_PATH_SETTING_KEY, root)

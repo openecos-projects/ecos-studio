@@ -2890,11 +2890,15 @@ async function ensurePdksLoaded() {
   hasLoadedPdks.value = true
   await loadPdks(true)
   const requirement = config.value.pdk_requirement
-  // Explicit PDK information (a requirement, an installation id, or a pdk_root)
-  // always wins over the default installation in every flow, even when it
-  // fails to resolve — the default must never seed over it.
+  // Explicit PDK information (a family name, a requirement, an installation
+  // id, or a pdk_root) always wins over the default installation in every
+  // flow, even when it fails to resolve — the default must never seed over it.
   const hasExplicitPdkInfo = Boolean(
-    requirement || config.value.pdk_installation_id || config.value.pdk_root,
+    requirement ||
+    config.value.pdk_installation_id ||
+    config.value.pdk_root ||
+    props.initialConfig?.pdk ||
+    props.initialConfig?.source_config?.pdk,
   )
   if (requirement) {
     const projectRoot = projectContext.value.project_root || config.value.directory

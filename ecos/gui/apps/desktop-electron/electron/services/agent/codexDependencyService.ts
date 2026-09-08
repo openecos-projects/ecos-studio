@@ -44,7 +44,6 @@ export interface CodexDependencyServiceOptions {
   spawn?: SpawnLike
   homedir?: () => string
 }
-
 const GITHUB_LATEST_DOWNLOAD_BASE =
   'https://github.com/openai/codex/releases/latest/download'
 const OPENAI_RELEASES_BASE = 'https://releases.openai.com/codex'
@@ -61,6 +60,12 @@ export class CodexDependencyService {
   private installPromise: Promise<DesktopCodexDependencyStatus> | null = null
   private progressListeners = new Set<(event: DesktopCodexInstallProgressEvent) => void>()
   private lastProgress: DesktopCodexInstallProgressEvent | null = null
+  /**
+   * Optional persistence hook for the managed install write. Electron main
+   * routes it through the settings-registry key transaction so the install
+   * write cannot interleave with registry writes of the same key.
+   */
+  private managedBinPersister: ((binPath: string) => Promise<void>) | null = null
 
   constructor(options: CodexDependencyServiceOptions) {
     this.env = options.env ?? process.env
@@ -81,6 +86,10 @@ export class CodexDependencyService {
     return () => {
       this.progressListeners.delete(listener)
     }
+  }
+
+  setManagedBinPersister(persist: ((binPath: string) => Promise<void>) | null): void {
+    this.managedBinPersister = persist
   }
 
   platformSupportsInstall(): boolean {
@@ -120,6 +129,17 @@ export class CodexDependencyService {
         authState: 'unknown',
         binPath: resolved,
         message: '已找到 Codex 路径，但无法执行。请重新安装或选择其他二进制。',
+        platformSupportsInstall: this.platformSupportsInstall(),
+        state: 'error',
+      }
+    }
+    // A legacy or environment-provided path pointing at an unrelated binary is
+    // degraded to an error state so the agent never runs it as Codex.
+    if (!/^codex[\s_-]/i.test(version)) {
+      return {
+        authState: 'unknown',
+        binPath: resolved,
+        message: '该路径不是有效的 Codex CLI。请重新选择 Codex 二进制。',
         platformSupportsInstall: this.platformSupportsInstall(),
         state: 'error',
       }
@@ -292,7 +312,11 @@ export class CodexDependencyService {
       throw error
     }
 
-    await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, targetBin)
+    if (this.managedBinPersister) {
+      await this.managedBinPersister(targetBin)
+    } else {
+      await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, targetBin)
+    }
     this.emitProgress({
       phase: 'done',
       message: `Codex CLI ${version} 已安装`,
@@ -335,7 +359,7 @@ export class CodexDependencyService {
       const validated = await this.validateExecutable(
         expandUserPath(fromSettings.trim(), this.resolveHomedir),
       )
-      if (validated) return validated
+      if (validated && (await this.isCodexBinary(validated))) return validated
     }
 
     const fromEnv = this.env.ECOS_AGENT_CODEX_BIN
@@ -343,7 +367,7 @@ export class CodexDependencyService {
       const validated = await this.validateExecutable(
         expandUserPath(fromEnv.trim(), this.resolveHomedir),
       )
-      if (validated) return validated
+      if (validated && (await this.isCodexBinary(validated))) return validated
     }
 
     const managed = join(this.installRoot, 'bin', 'codex')
@@ -351,6 +375,12 @@ export class CodexDependencyService {
     if (managedValidated) return managedValidated
 
     return await this.whichCodex()
+  }
+
+  /** Confirm an executable actually identifies as a Codex CLI. */
+  private async isCodexBinary(bin: string): Promise<boolean> {
+    const version = await this.readVersion(bin)
+    return Boolean(version && /^codex[\s_-]/i.test(version))
   }
 
   private async whichCodex(): Promise<string | null> {

@@ -597,12 +597,16 @@ export class EccWorkspaceRuntime {
   }
 
   /**
-   * Invoke `listener` once when the runtime's operation queue drains. The
-   * listener set is one-shot: registered listeners fire on the first drain
-   * and are then discarded.
+   * Invoke `listener` every time the runtime's operation queue drains.
+   * Listeners stay registered until they unsubscribe via the returned
+   * function; the settings layer relies on repeated notifications to settle
+   * deferred applies after later flows finish.
    */
-  notifyOnDrain(listener: () => void): void {
+  notifyOnDrain(listener: () => void): () => void {
     this.drainListeners.add(listener)
+    return () => {
+      this.drainListeners.delete(listener)
+    }
   }
 
   /**
@@ -760,9 +764,7 @@ export class EccWorkspaceRuntime {
         }
         this.inFlightCount = Math.max(0, this.inFlightCount - 1)
         if (this.inFlightCount === 0) {
-          const listeners = [...this.drainListeners]
-          this.drainListeners.clear()
-          for (const listener of listeners) listener()
+          for (const listener of Array.from(this.drainListeners)) listener()
         }
       }
     }

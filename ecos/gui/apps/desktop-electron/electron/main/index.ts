@@ -11,6 +11,7 @@ import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProvid
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
+import { DESKTOP_CODEX_BIN_SETTING_KEY } from '@ecos-studio/shared'
 import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
@@ -330,10 +331,22 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         desktopServices.eccRuntimeService.hasPendingRuntimeWork(),
       settingsStore: desktopServices.settingsStore,
     })
+    // The managed Codex install writes its binary path through the registry's
+    // key transaction so it cannot interleave with a Preferences write.
+    desktopServices.codexDependencyService.setManagedBinPersister((binPath) =>
+      settingsRegistryService.runExclusive(DESKTOP_CODEX_BIN_SETTING_KEY, () =>
+        desktopServices.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, binPath),
+      ),
+    )
     // A deferred runtime apply settles as soon as the pool turns idle so open
     // settings pages stop showing 'pending' without waiting for a reload.
     desktopServices.eccRuntimeService.notifyOnRuntimeDrain(() => {
-      void settingsRegistryService.settleDeferredApplies()
+      settingsRegistryService.settleDeferredApplies().catch((error) => {
+        electronLogger.error(
+          '[settings] failed to settle deferred setting applies: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      })
     })
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,

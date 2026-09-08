@@ -62,6 +62,8 @@ export class SettingsRegistryService {
   private readonly applyFailures = new Map<string, ApplyFailure>()
   /** Tail promise of the per-key write transaction queue. */
   private readonly writeQueues = new Map<string, Promise<unknown>>()
+  /** Guards against concurrent deferred-apply settlement passes. */
+  private settling = false
 
   constructor(options: SettingsRegistryServiceOptions) {
     this.broadcast = options.broadcast
@@ -190,41 +192,52 @@ export class SettingsRegistryService {
    * idle runtimes, then clear the pending marker and broadcast the resulting
    * state so open pages stop showing 'pending'. A failing apply becomes an
    * error record so the failure is surfaced instead of silently timing out.
+   * Triggered proactively whenever the runtime pool drains (and defensively
+   * by list()); safe to call concurrently.
    */
   async settleDeferredApplies(): Promise<void> {
-    for (const key of Array.from(this.pendingApplyKeys)) {
-      if (this.isEccRuntimePoolBusy()) return
-      const descriptor = this.requireDescriptor(key)
-      const handler = this.handlers[key]
-      if (!descriptor || !handler) {
-        this.pendingApplyKeys.delete(key)
-        continue
-      }
-
-      await this.enqueueWrite(key, async () => {
-        if (!this.pendingApplyKeys.has(key)) return
+    if (this.settling || this.pendingApplyKeys.size === 0) return
+    this.settling = true
+    try {
+      for (const key of Array.from(this.pendingApplyKeys)) {
         if (this.isEccRuntimePoolBusy()) return
-        this.pendingApplyKeys.delete(key)
-        let status: DesktopSettingStatus
-        try {
-          const outcome = await handler.apply(await this.readStoredValue(key))
-          status = outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
-        } catch (error) {
-          status = { kind: 'error', error: errorFromException(error) }
+        const descriptor = this.requireDescriptor(key)
+        const handler = this.handlers[key]
+        if (!descriptor || !handler) {
+          this.pendingApplyKeys.delete(key)
+          continue
         }
-        if (status.kind === 'pending') {
-          this.pendingApplyKeys.add(key)
-        } else if (status.kind === 'error') {
-          this.applyFailures.set(key, {
-            error: status.error,
-            value: await this.readStoredValue(key),
-          })
-        } else {
-          this.applyFailures.delete(key)
-        }
-        const state = await this.stateFor(descriptor)
-        this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
-      })
+
+        await this.enqueueWrite(key, async () => {
+          if (!this.pendingApplyKeys.has(key)) return
+          if (this.isEccRuntimePoolBusy()) return
+          this.pendingApplyKeys.delete(key)
+          let status: DesktopSettingStatus
+          try {
+            const outcome = await handler.apply(await this.readStoredValue(key))
+            status = outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
+          } catch (error) {
+            status = { kind: 'error', error: errorFromException(error) }
+          }
+          if (status.kind === 'pending') {
+            // A runtime deferred again; leave the marker for the next drain.
+            this.pendingApplyKeys.add(key)
+            return
+          }
+          if (status.kind === 'error') {
+            this.applyFailures.set(key, {
+              error: status.error,
+              value: await this.readStoredValue(key),
+            })
+          } else {
+            this.applyFailures.delete(key)
+          }
+          const state = await this.stateFor(descriptor)
+          this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
+        })
+      }
+    } finally {
+      this.settling = false
     }
   }
 
@@ -243,6 +256,12 @@ export class SettingsRegistryService {
     const value = await this.readStoredValue(descriptor.key)
     if (status.kind === 'pending') {
       this.pendingApplyKeys.add(descriptor.key)
+      // Re-check immediately: the pool may have drained while apply() ran, and
+      // registering the marker after that drain would otherwise leave the key
+      // pending until an unrelated future drain.
+      queueMicrotask(() => {
+        void this.settleDeferredApplies()
+      })
     } else if (status.kind === 'error') {
       this.applyFailures.set(descriptor.key, { error: status.error, value })
     } else {

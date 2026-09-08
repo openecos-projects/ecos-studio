@@ -172,6 +172,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       return { ok: false, error: BRIDGE_UNAVAILABLE_ERROR }
     }
 
+    const previous = entryFor(key)
     beginValidating(key)
     const previousTicket = writeTickets.get(key)
     if (previousTicket) previousTicket.superseded = true
@@ -191,6 +192,11 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
         delete rowErrors.value[key]
       } else {
         rowErrors.value[key] = result.error
+        // Restore the authoritative entry (the clearing editor already showed
+        // an empty draft) so editors refill it unless a newer broadcast won.
+        if (previous && entryFor(key) === previous) {
+          entries.value = replaceEntry(entries.value, { ...previous })
+        }
       }
       return result
     } finally {

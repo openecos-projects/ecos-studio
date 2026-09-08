@@ -88,14 +88,21 @@ describe('ECC sidecar settings drift', () => {
 
     // Persisting user overrides changes what resolveLaunch/envProvider return;
     // the next start detects the launch/env drift and respawns transparently.
-    settings.set('runtime.eccPath', '/custom/ecc')
+    // The override must exist on disk or the launch hooks fall back.
+    const { chmodSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs')
+    mkdirSync('/tmp/ecos-drift-custom', { recursive: true })
+    const userEcc = '/tmp/ecos-drift-custom/ecc'
+    writeFileSync(userEcc, '#!/usr/bin/env bash\necho ok\n')
+    chmodSync(userEcc, 0o755)
+    settings.set('runtime.eccPath', userEcc)
     settings.set('runtime.eccSizerRoot', '/opt/ecc-sizer')
     const firstChild = spawnImpl.mock.results[0]?.value as FakeChild
     await completeRestart(sidecar, firstChild)
     expect(spawns).toHaveLength(2)
-    expect(spawns[1]?.command).toBe('/custom/ecc')
+    expect(spawns[1]?.command).toBe(userEcc)
     expect(spawns[1]?.env[ECC_SIZER_ROOT_ENV_KEY]).toBe('/opt/ecc-sizer')
     expect(spawns[1]?.env.BASE).toBe('1')
+    rmSync('/tmp/ecos-drift-custom', { force: true, recursive: true })
 
     // Reset deletes both keys; the next start falls back to the default.
     settings.delete('runtime.eccPath')

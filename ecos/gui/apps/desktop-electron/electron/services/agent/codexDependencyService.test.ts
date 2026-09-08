@@ -86,7 +86,7 @@ describe('CodexDependencyService', () => {
         if (args[0] === '--version') {
           child.stdout.emit(
             'data',
-            `${command.includes('settings') ? 'settings' : 'path'} 1.0\n`,
+            `${command.includes('settings') ? 'codex settings' : 'codex path'} 1.0\n`,
           )
           child.emit('close', 0)
           return

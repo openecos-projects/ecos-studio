@@ -1,12 +1,39 @@
-import { describe, expect, it } from 'vitest'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 
-import { createEccSidecarLaunchHooks, ECC_SIZER_ROOT_ENV_KEY } from './eccSidecarLaunch'
-import { ECC_RPC_SIDECAR_ARGS } from './eccSidecarLaunch'
+import {
+  createEccSidecarLaunchHooks,
+  ECC_RPC_SIDECAR_ARGS,
+  ECC_SIZER_ROOT_ENV_KEY,
+} from './eccSidecarLaunch'
 
-function createHarness(persisted: Record<string, unknown> = {}) {
+const tempRoots: string[] = []
+
+afterEach(() => {
+  for (const root of tempRoots.splice(0)) {
+    rmSync(root, { force: true, recursive: true })
+  }
+})
+
+function createTempExecutable(relativePath: string): string {
+  const root = mkdtempSync(join(tmpdir(), 'ecos-launch-'))
+  tempRoots.push(root)
+  const executable = join(root, relativePath)
+  mkdirSync(join(executable, '..'), { recursive: true })
+  writeFileSync(executable, '#!/usr/bin/env bash\necho ok\n')
+  chmodSync(executable, 0o755)
+  return executable
+}
+
+function createHarness(
+  persisted: Record<string, unknown> = {},
+  defaultExecutable: string | null = '/opt/studio/binaries/ecc',
+) {
   return createEccSidecarLaunchHooks({
     baseEnvProvider: async () => ({ PATH: '/usr/bin', ECOS_TEST_BASE: '1' }),
-    resolveDefaultExecutable: () => '/opt/studio/binaries/ecc',
+    resolveDefaultExecutable: () => defaultExecutable,
     settingsStore: {
       get: async <T>(key: string): Promise<T | null> =>
         key in persisted ? (persisted[key] as T) : null,
@@ -16,10 +43,11 @@ function createHarness(persisted: Record<string, unknown> = {}) {
 
 describe('ECC sidecar launch hooks', () => {
   it('prefers the user ECC executable over the packaged/dev default', async () => {
-    const hooks = createHarness({ 'runtime.eccPath': '/custom/ecc' })
+    const userEcc = createTempExecutable('custom/ecc')
+    const hooks = createHarness({ 'runtime.eccPath': userEcc })
     await expect(hooks.resolveLaunch()).resolves.toEqual({
       args: ECC_RPC_SIDECAR_ARGS,
-      command: '/custom/ecc',
+      command: userEcc,
     })
   })
 
@@ -36,6 +64,15 @@ describe('ECC sidecar launch hooks', () => {
     })
     await expect(pathFallback.resolveLaunch()).resolves.toMatchObject({
       command: 'ecc',
+    })
+  })
+
+  it('falls back to the default when the configured user executable disappeared', async () => {
+    const hooks = createHarness({
+      'runtime.eccPath': join(await Promise.resolve('/gone'), 'ecc'),
+    })
+    await expect(hooks.resolveLaunch()).resolves.toMatchObject({
+      command: '/opt/studio/binaries/ecc',
     })
   })
 
