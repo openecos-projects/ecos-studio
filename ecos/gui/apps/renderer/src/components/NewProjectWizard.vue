@@ -1670,12 +1670,17 @@ onMounted(() => {
   document.addEventListener('keydown', handleWizardKeydown)
   if (standaloneWorkspace.value) return
   void loadProjectHistoryEntries()
-  void applyProjectDefaultsForProject(projectContext.value.project_root)
+  projectDefaultsPromise = applyProjectDefaultsForProject(
+    projectContext.value.project_root,
+  )
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleWizardKeydown)
 })
+
+/** Manifest defaults load in the background; the PDK decision waits for them. */
+let projectDefaultsPromise: Promise<void> | null = null
 
 const currentStep = ref(1)
 const highestStep = ref(1)
@@ -1856,6 +1861,8 @@ const selectedPdkId = ref<string>(
 )
 const hasLoadedPdks = ref(false)
 const validatingPdkId = ref('')
+/** PDK family carried by the project manifest (explicit information). */
+const manifestPdkFamily = ref('')
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [
@@ -2546,9 +2553,12 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
 
   applyProjectFlowDefaults(baseDesignRecord, parameters)
 
-  if (baseDesign.pdk && !hasInitialConfigValue('pdk')) {
-    config.value.pdk = baseDesign.pdk
-    selectedPdkId.value = baseDesign.pdk
+  if (baseDesign.pdk) {
+    manifestPdkFamily.value = baseDesign.pdk
+    if (!hasInitialConfigValue('pdk')) {
+      config.value.pdk = baseDesign.pdk
+      selectedPdkId.value = baseDesign.pdk
+    }
   }
   if (baseDesign.pdk_root && !hasInitialConfigValue('pdk_root')) {
     config.value.pdk_root = baseDesign.pdk_root
@@ -2888,6 +2898,9 @@ function applyFlowStartStep(stepName: FlowStepName) {
 async function ensurePdksLoaded() {
   if (hasLoadedPdks.value) return
   hasLoadedPdks.value = true
+  // Project manifest defaults load in the background and may carry explicit
+  // PDK information; wait for them so the decision below sees the full state.
+  if (projectDefaultsPromise) await projectDefaultsPromise
   await loadPdks(true)
   const requirement = config.value.pdk_requirement
   // Explicit PDK information (a family name, a requirement, an installation
@@ -2897,6 +2910,7 @@ async function ensurePdksLoaded() {
     requirement ||
     config.value.pdk_installation_id ||
     config.value.pdk_root ||
+    manifestPdkFamily.value ||
     props.initialConfig?.pdk ||
     props.initialConfig?.source_config?.pdk,
   )

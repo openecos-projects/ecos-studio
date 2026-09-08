@@ -1,10 +1,9 @@
-import { existsSync } from 'node:fs'
-
 import {
   RUNTIME_ECC_PATH_SETTING_KEY,
   RUNTIME_ECC_SIZER_ROOT_SETTING_KEY,
   type DesktopSettingsValue,
 } from '@ecos-studio/shared'
+import { resolveExecutablePath } from './executableProbe'
 
 import { electronLogger } from '../logger'
 import type { EccRpcSidecarLaunch } from '../eccRpc/sidecarProcess'
@@ -46,14 +45,16 @@ export function createEccSidecarLaunchHooks(
     const userPath = await options.settingsStore.get<string>(RUNTIME_ECC_PATH_SETTING_KEY)
     const trimmed = typeof userPath === 'string' ? userPath.trim() : ''
     if (trimmed) {
-      // A legacy value whose file has since disappeared must not poison every
-      // future launch; fall back to the default and let the settings page
-      // surface the validation error.
-      if (existsSync(trimmed)) {
-        return trimmed
+      // A legacy value pointing at a missing directory or a non-executable
+      // file must not poison every future launch; reuse the unified file and
+      // executability check and fall back to the default resolution. The
+      // settings page surfaces the validation error for the stored value.
+      const resolved = await resolveExecutablePath(trimmed)
+      if (resolved) {
+        return resolved
       }
       electronLogger.warn(
-        '[settings] configured ECC executable no longer exists (%s); using default resolution',
+        '[settings] configured ECC executable is unavailable (%s); using default resolution',
         trimmed,
       )
     }

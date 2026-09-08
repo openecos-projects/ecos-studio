@@ -306,7 +306,7 @@ export class CodexDependencyService {
     })
 
     const version = await this.readVersion(targetBin)
-    if (!version) {
+    if (!version || !/^codex[\s_-]/i.test(version)) {
       const error = new Error('安装完成但 Codex CLI 无法执行')
       this.emitProgress({ phase: 'error', message: error.message })
       throw error
@@ -372,7 +372,9 @@ export class CodexDependencyService {
 
     const managed = join(this.installRoot, 'bin', 'codex')
     const managedValidated = await this.validateExecutable(managed)
-    if (managedValidated) return managedValidated
+    if (managedValidated && (await this.isCodexBinary(managedValidated))) {
+      return managedValidated
+    }
 
     return await this.whichCodex()
   }
@@ -389,7 +391,9 @@ export class CodexDependencyService {
       if (!entry) continue
       const candidate = join(entry, 'codex')
       const validated = await this.validateExecutable(candidate)
-      if (validated) return validated
+      // A PATH candidate must identify as Codex too, or it would be injected
+      // into the agent environment.
+      if (validated && (await this.isCodexBinary(validated))) return validated
     }
     return null
   }
@@ -507,7 +511,9 @@ export class CodexDependencyService {
     options: { env?: NodeJS.ProcessEnv; timeoutMs?: number },
   ): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
+      const detached = process.platform !== 'win32'
       const child = this.spawnImpl(command, args, {
+        detached,
         env: options.env ?? this.env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -516,9 +522,23 @@ export class CodexDependencyService {
       let stdout = ''
       let stderr = ''
       let settled = false
+      let timedOut = false
       let killTimer: ReturnType<typeof setTimeout> | null = null
       let forceResolveTimer: ReturnType<typeof setTimeout> | null = null
 
+      const terminate = (signal: NodeJS.Signals): void => {
+        try {
+          if (detached && child.pid) {
+            // Kill the whole process group so descendants holding the pipes
+            // cannot outlive the capture.
+            process.kill(-child.pid, signal)
+            return
+          }
+        } catch {
+          // Fall through to the direct child kill.
+        }
+        child.kill(signal)
+      }
       const appendCapped = (target: string, chunk: Buffer | string): string => {
         if (target.length >= maxCapturedChars) return target
         const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
@@ -535,9 +555,10 @@ export class CodexDependencyService {
       const timer =
         options.timeoutMs && options.timeoutMs > 0
           ? setTimeout(() => {
-              child.kill()
-              // A child ignoring SIGTERM still must not outlive the probe.
-              killTimer = setTimeout(() => child.kill('SIGKILL'), 1_000)
+              timedOut = true
+              terminate('SIGTERM')
+              // A child ignoring SIGTERM still must not outlive the capture.
+              killTimer = setTimeout(() => terminate('SIGKILL'), 1_000)
               // Hard backstop if the process ignores every signal.
               forceResolveTimer = setTimeout(() => {
                 settle(resolve, { code: null, stderr, stdout })
@@ -554,7 +575,9 @@ export class CodexDependencyService {
         settle(reject, error)
       })
       child.on('close', (code) => {
-        settle(resolve, { code, stderr, stdout })
+        // A process that only exits after the timeout fired must not surface
+        // as a successful capture.
+        settle(resolve, { code: timedOut ? null : code, stderr, stdout })
       })
     })
   }
