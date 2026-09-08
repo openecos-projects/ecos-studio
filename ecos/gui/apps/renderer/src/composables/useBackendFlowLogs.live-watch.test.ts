@@ -4,7 +4,7 @@ import type { DesignRuntimeEvent } from '@ecos-studio/shared'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
-  workspaceSession: null as Ref<{ sessionId: string }> | null,
+  workspaceSession: null as Ref<{ sessionId: string; workspaceId: string }> | null,
   getWorkspaceResourceIndexApi: vi.fn<() => Promise<any>>(async () => ({
     flow: { steps: [] },
   })),
@@ -73,6 +73,7 @@ function runtimeEvent(data: Record<string, unknown>): DesignRuntimeEvent {
     rerunScope,
     runtimeEventId,
     runtimeProtocolType,
+    workspaceHandle,
     ...payload
   } = data
   eventSequence += 1
@@ -97,7 +98,12 @@ function runtimeEvent(data: Record<string, unknown>): DesignRuntimeEvent {
     },
     type: 'runtime.protocol',
     workspaceDirectory: typeof directory === 'string' ? directory : '/workspace/demo',
-    workspaceHandle: 'workspace-handle',
+    ...(workspaceHandle === null
+      ? {}
+      : {
+          workspaceHandle:
+            typeof workspaceHandle === 'string' ? workspaceHandle : 'workspace-handle',
+        }),
   }
 }
 
@@ -106,7 +112,10 @@ describe('useBackendFlowLogs runtime updates', () => {
     const { resetSharedHomeDataProjectState } = await import('./useBackendFlowLogs')
     resetSharedHomeDataProjectState()
     eventSequence = 0
-    testState.workspaceSession = ref({ sessionId: 'session-1' })
+    testState.workspaceSession = ref({
+      sessionId: 'session-1',
+      workspaceId: 'workspace-handle',
+    })
     testState.getWorkspaceResourceIndexApi.mockReset()
     testState.getWorkspaceResourceIndexApi.mockResolvedValue({ flow: { steps: [] } })
   })
@@ -202,10 +211,63 @@ describe('useBackendFlowLogs runtime updates', () => {
     await nextTick()
     expect(home.flowLogSegments.value).toHaveLength(1)
 
-    testState.workspaceSession!.value = { sessionId: 'session-2' }
+    testState.workspaceSession!.value = {
+      sessionId: 'session-2',
+      workspaceId: 'workspace-handle',
+    }
     await nextTick()
 
     expect(home.flowLogSegments.value).toEqual([])
+    scope.stop()
+  })
+
+  it('ignores retained events from the old workspace when mounting a new one', async () => {
+    testState.currentProject = ref({ path: '/workspace/new' })
+    testState.workspaceSession = ref({
+      sessionId: 'session-new',
+      workspaceId: 'workspace-new',
+    })
+    testState.runtimeEvents = ref([
+      runtimeEvent({
+        directory: '/workspace/new',
+        finalLog: 'old handle log',
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'Synthesis',
+        tool: 'yosys',
+        workspaceHandle: 'workspace-old',
+      }),
+      runtimeEvent({
+        directory: '/workspace/old',
+        finalLog: 'old directory log',
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'Floorplan',
+        tool: 'ecc',
+        workspaceHandle: null,
+      }),
+      runtimeEvent({
+        directory: '/workspace/new',
+        finalLog: 'current workspace log',
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'Place',
+        tool: 'ecc',
+        workspaceHandle: null,
+      }),
+    ])
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+    const scope = effectScope()
+    const home = scope.run(() => useBackendFlowLogs())!
+
+    await nextTick()
+
+    expect(home.flowLogSegments.value).toEqual([
+      expect.objectContaining({ stepName: 'Place', tool: 'ecc' }),
+    ])
+    expect(Object.values(home.flowLogContentByKey.value)).toEqual([
+      'current workspace log',
+    ])
     scope.stop()
   })
 

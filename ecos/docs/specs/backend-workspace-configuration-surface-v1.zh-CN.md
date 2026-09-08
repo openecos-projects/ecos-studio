@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: implemented
 ---
 
 # Backend Workspace Configuration Surface v1

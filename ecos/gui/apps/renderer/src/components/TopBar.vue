@@ -237,6 +237,7 @@ const props = defineProps<{
   hasWorkspace?: boolean
   mutationsDisabled?: boolean
   signoffExportDisabled?: boolean
+  workspaceUpdateDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -316,7 +317,11 @@ const menus = computed<Menu[]>(() => [
         label: 'Update Workspace',
         icon: 'ri-settings-3-line',
         event: appMenuActionIds.reconfigureWorkspace,
-        disabled: !props.hasWorkspace || props.mutationsDisabled,
+        disabled:
+          !props.hasWorkspace || props.mutationsDisabled || props.workspaceUpdateDisabled,
+        title: props.workspaceUpdateDisabled
+          ? 'Workspace update is unavailable while its flow is running. Create another Workspace for a parallel comparison.'
+          : undefined,
       },
       ...(isWorkspaceRoute.value
         ? [

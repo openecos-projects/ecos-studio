@@ -7,7 +7,8 @@
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
         :mutations-disabled="mutationsDisabled"
-        :signoff-export-disabled="signoffExportDisabled"
+        :signoff-export-disabled="currentWorkspaceFlowActive"
+        :workspace-update-disabled="currentWorkspaceFlowActive"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -314,7 +315,7 @@ const {
   showToast,
   workspaceSession,
 })
-const signoffExportDisabled = computed(() =>
+const currentWorkspaceFlowActive = computed(() =>
   isFlowExecutionActiveForWorkspace(currentProject.value?.path),
 )
 const {
@@ -343,14 +344,19 @@ function updatePdkNameDialogVisibility(visible: boolean): void {
 }
 
 watch(
-  () => [Boolean(currentProject.value?.path), isWorkspaceRoute.value] as const,
-  ([hasWorkspace, workspaceRoute]) => {
+  () =>
+    [
+      Boolean(currentProject.value?.path),
+      isWorkspaceRoute.value,
+      currentWorkspaceFlowActive.value,
+    ] as const,
+  ([hasWorkspace, workspaceRoute, flowActive]) => {
     void (async () => {
       try {
         await Promise.all([
           desktopApi.menu.setActionEnabled(
             appMenuActionIds.reconfigureWorkspace,
-            hasWorkspace,
+            hasWorkspace && !flowActive,
           ),
           desktopApi.menu.setActionEnabled(
             appMenuActionIds.manageDesignFiles,
@@ -765,7 +771,7 @@ const { handleMenuAction } = useAppMenuActions({
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage: () => {
     if (!isWorkspaceRoute.value) return
-    if (signoffExportDisabled.value) {
+    if (currentWorkspaceFlowActive.value) {
       showToast({
         severity: 'warn',
         summary: 'Signoff Export Unavailable',

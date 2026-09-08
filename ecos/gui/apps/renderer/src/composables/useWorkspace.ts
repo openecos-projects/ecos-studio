@@ -1084,6 +1084,20 @@ export function useWorkspace() {
 
       selectedPath = normalizePath(selectedPath)
       if (
+        config?.replaceExistingWorkspace &&
+        isFlowExecutionActiveForWorkspace(selectedPath)
+      ) {
+        lastWorkspaceCreationError.value =
+          'Cannot update a workspace while its flow is running. Wait for it to finish, or create another Workspace for a parallel comparison.'
+        showToast({
+          severity: 'warn',
+          summary: 'Workspace Update Unavailable',
+          detail: lastWorkspaceCreationError.value,
+          life: 5000,
+        })
+        return false
+      }
+      if (
         !config?.replaceExistingWorkspace &&
         currentProject.value &&
         normalizePath(currentProject.value.path) === selectedPath

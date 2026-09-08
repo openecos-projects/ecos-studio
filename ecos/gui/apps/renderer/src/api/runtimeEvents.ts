@@ -70,10 +70,9 @@ function eventMatchesWorkspace(
   workspaceId: string,
   workspaceDirectory?: string,
 ): boolean {
-  if (!('workspaceHandle' in event) || !event.workspaceHandle) {
-    return true
+  if ('workspaceHandle' in event && event.workspaceHandle) {
+    return event.workspaceHandle === workspaceId
   }
-  if (event.workspaceHandle === workspaceId) return true
   if (!workspaceDirectory || !event.workspaceDirectory) return false
   return (
     normalizeWorkspacePath(event.workspaceDirectory) ===

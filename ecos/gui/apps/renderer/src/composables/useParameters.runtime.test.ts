@@ -562,6 +562,89 @@ describe('useParameters desktop bridge integration', () => {
     expect(readProjectTextFile).not.toHaveBeenCalled()
   })
 
+  it('does not expose default parameters before the backend snapshot is ready', async () => {
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    const snapshot = createDeferred<{
+      parameters: ReturnType<typeof workspaceSnapshotParameters>
+      home: Record<string, unknown>
+    }>()
+    getWorkspaceRuntimeSnapshotApi.mockReturnValue(snapshot.promise)
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(getWorkspaceRuntimeSnapshotApi).toHaveBeenCalledWith('workspace-demo')
+    })
+    expect(parameters.isLoaded.value).toBe(false)
+
+    snapshot.resolve({
+      parameters: workspaceSnapshotParameters({
+        core: { ...workspaceSnapshotParameters().core, utilitization: 0.67 },
+      }),
+      home: {},
+    })
+
+    await vi.waitFor(() => expect(parameters.isLoaded.value).toBe(true))
+    expect(parameters.config.core.utilization).toBe(0.67)
+  })
+
+  it('clears loading when the workspace closes during a snapshot request', async () => {
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    const snapshot = createDeferred<{
+      parameters: ReturnType<typeof workspaceSnapshotParameters>
+      home: Record<string, unknown>
+    }>()
+    getWorkspaceRuntimeSnapshotApi.mockReturnValue(snapshot.promise)
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(getWorkspaceRuntimeSnapshotApi).toHaveBeenCalledWith('workspace-demo')
+    })
+    expect(parameters.isLoading.value).toBe(true)
+
+    currentProject.value = null
+    await parameters.loadParameters()
+
+    expect(parameters.isLoading.value).toBe(false)
+    snapshot.resolve({ parameters: workspaceSnapshotParameters(), home: {} })
+  })
+
+  it('clears loading when the same path is replaced by a new Workspace Session', async () => {
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    const oldSnapshot = createDeferred<{
+      parameters: ReturnType<typeof workspaceSnapshotParameters>
+      home: Record<string, unknown>
+    }>()
+    getWorkspaceRuntimeSnapshotApi
+      .mockReturnValueOnce(oldSnapshot.promise)
+      .mockResolvedValueOnce({
+        parameters: workspaceSnapshotParameters({ design: 'replacement-demo' }),
+        home: {},
+      })
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => expect(parameters.isLoading.value).toBe(true))
+
+    const lifecycle = useWorkspaceLifecycle()
+    const nextSession = lifecycle.beginSession({ projectRoot: '/workspace/demo' })
+    expect(parameters.isLoading.value).toBe(false)
+    workspaceSession.value = { workspaceId: 'workspace-replacement' }
+    lifecycle.activateSession(nextSession.sessionId, {
+      workspaceId: 'workspace-replacement',
+      projectRoot: '/workspace/demo',
+      workspaceRevision: 2,
+    })
+    void parameters.loadParameters()
+
+    await vi.waitFor(() => expect(parameters.config.design).toBe('replacement-demo'))
+    oldSnapshot.resolve({ parameters: workspaceSnapshotParameters(), home: {} })
+  })
+
   it('does not fall back to derived JSON when ECC parameters are unavailable', async () => {
     currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
     workspaceSession.value = { workspaceId: 'workspace-demo' }

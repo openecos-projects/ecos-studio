@@ -89,14 +89,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: false,
     group: 'setup',
   },
-  configure: {
-    label: 'Config',
-    icon: 'ri-settings-3-line',
-    path: 'configure',
-    showInSidebar: true,
-    group: 'setup',
-  },
-
   // 运行步骤 (key 为 flow.json 中的 step.name 小写)
   [StepEnum.SYNTHESIS.toLowerCase()]: {
     label: 'Synthesis',

@@ -301,8 +301,9 @@ function eventMatchesWorkspace(
   workspaceDirectory?: string,
   allowDirectoryFallback = true,
 ): boolean {
-  if (!('workspaceHandle' in event) || !event.workspaceHandle) return true
-  if (event.workspaceHandle === workspaceHandle) return true
+  if ('workspaceHandle' in event && event.workspaceHandle) {
+    return event.workspaceHandle === workspaceHandle
+  }
   if (!allowDirectoryFallback) return false
   return Boolean(
     workspaceDirectory &&

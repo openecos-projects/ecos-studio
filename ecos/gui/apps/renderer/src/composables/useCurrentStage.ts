@@ -3,22 +3,18 @@ import { useRoute } from 'vue-router'
 
 export interface WorkspaceStageFlags {
   isHome: boolean
-  isConfigure: boolean
   isTech: boolean
   isFlowStep: boolean
 }
 
 export function getWorkspaceStageFlags(stage: string): WorkspaceStageFlags {
   const isHome = stage === 'home'
-  const isConfigure = stage === 'configure'
   const isTech = stage === 'tech'
-  const isWorkspaceTool = isConfigure || isTech
 
   return {
     isHome,
-    isConfigure,
     isTech,
-    isFlowStep: !isHome && !isWorkspaceTool,
+    isFlowStep: !isHome && !isTech,
   }
 }
 
@@ -34,9 +30,6 @@ export function useCurrentStage() {
   })
 
   const isHome = computed(() => getWorkspaceStageFlags(currentStage.value).isHome)
-  const isConfigure = computed(
-    () => getWorkspaceStageFlags(currentStage.value).isConfigure,
-  )
   const isTech = computed(() => getWorkspaceStageFlags(currentStage.value).isTech)
   const isFlowStep = computed(() => getWorkspaceStageFlags(currentStage.value).isFlowStep)
 
@@ -51,7 +44,6 @@ export function useCurrentStage() {
   return {
     currentStage,
     isHome,
-    isConfigure,
     isTech,
     isFlowStep,
     getStagePath,

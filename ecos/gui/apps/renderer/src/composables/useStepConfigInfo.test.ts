@@ -1,6 +1,9 @@
 const testState = vi.hoisted(() => ({
   currentProject: null as import('vue').Ref<{ path: string } | null> | null,
-  readWorkspaceStepConfiguration: vi.fn(),
+  workspaceSession: null as
+    | import('vue').Ref<import('./useWorkspaceLifecycle').WorkspaceSession>
+    | null,
+  readWorkspaceStepConfigurationApi: vi.fn(),
   route: {
     path: '/workspace/floorplan',
     query: { projectRoot: '/projects/gcd' } as Record<string, unknown>,
@@ -13,20 +16,14 @@ import { effectScope, ref, type EffectScope } from 'vue'
 
 vi.mock('vue-router', () => ({ useRoute: () => testState.route }))
 vi.mock('./useWorkspace', () => ({
-  useWorkspace: () => ({ currentProject: testState.currentProject }),
-}))
-vi.mock('@/api/workspace', () => ({
-  updateWorkspaceStepConfigurationApi: testState.updateWorkspaceStepConfigurationApi,
-}))
-vi.mock('@/platform/desktop', () => ({
-  getDesktopApi: () => ({
-    projectManagement: {
-      readWorkspaceStepConfiguration: testState.readWorkspaceStepConfiguration,
-    },
+  useWorkspace: () => ({
+    currentProject: testState.currentProject,
+    workspaceSession: testState.workspaceSession,
   }),
 }))
-vi.mock('@/utils/projectManifestRegistration', () => ({
-  resolveProjectRouteContextForWorkspace: vi.fn().mockResolvedValue(null),
+vi.mock('@/api/workspace', () => ({
+  readWorkspaceStepConfigurationApi: testState.readWorkspaceStepConfigurationApi,
+  updateWorkspaceStepConfigurationApi: testState.updateWorkspaceStepConfigurationApi,
 }))
 
 import { useStepConfigInfo } from './useStepConfigInfo'
@@ -70,9 +67,10 @@ describe('useStepConfigInfo', () => {
       projectRoot: '/workspace/demo',
       workspaceRevision: 1,
     })
+    testState.workspaceSession = lifecycle.session
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.route.path = '/workspace/floorplan'
-    testState.readWorkspaceStepConfiguration.mockReset()
+    testState.readWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockResolvedValue({
       workspaceRevision: 2,
@@ -83,7 +81,7 @@ describe('useStepConfigInfo', () => {
   afterEach(() => scope.stop())
 
   it('loads an ECC-owned Step configuration object', async () => {
-    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ 'floorplan.ifp.thread_number': 16 }),
     )
 
@@ -95,21 +93,99 @@ describe('useStepConfigInfo', () => {
     expect(result.stepConfigPathResolved.value).toBe('Floorplan parameters')
     expect(result.workspaceRevision.value).toBe(1)
     expect(result.isEmpty.value).toBe(false)
-    expect(testState.readWorkspaceStepConfiguration).toHaveBeenCalledWith({
-      projectRoot: '/projects/gcd',
+    expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
       step: 'Floorplan',
-      workspacePath: '/workspace/demo',
+      workspaceHandle: 'workspace-demo',
     })
     expect(result.stepConfigParameterDescriptions.value).toEqual({
       'floorplan.ifp.thread_number': 'floorplan.ifp.thread_number',
     })
   })
 
+  it('does not read until the current Workspace Session becomes active', async () => {
+    const lifecycle = useWorkspaceLifecycle()
+    lifecycle.closeSession()
+    testState.workspaceSession = lifecycle.session
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue({
+      ...available({ 'floorplan.ifp.thread_number': 16 }),
+      workspaceRevision: 3,
+    })
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => expect(result.loading.value).toBe(false))
+    expect(testState.readWorkspaceStepConfigurationApi).not.toHaveBeenCalled()
+    expect(result.error.value).toBe('Workspace Session is unavailable.')
+
+    const session = lifecycle.beginSession({ projectRoot: '/workspace/demo' })
+    lifecycle.activateSession(session.sessionId, {
+      workspaceId: 'workspace-restored',
+      projectRoot: '/workspace/demo',
+      workspaceRevision: 3,
+    })
+
+    await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
+    expect(testState.readWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
+      step: 'Floorplan',
+      workspaceHandle: 'workspace-restored',
+    })
+  })
+
+  it('rejects a response from an earlier Workspace Revision', async () => {
+    let resolveRequest!: (value: ReturnType<typeof available>) => void
+    testState.readWorkspaceStepConfigurationApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve
+      }),
+    )
+    const result = scope.run(() => useStepConfigInfo())!
+    useWorkspaceLifecycle().updateWorkspaceRevision(2)
+
+    resolveRequest(available({ 'floorplan.ifp.thread_number': 8 }))
+
+    await vi.waitFor(() => expect(result.loading.value).toBe(false))
+    expect(result.error.value).toContain('another Workspace Revision')
+    expect(result.stepConfigDraft.value).toBeNull()
+  })
+
+  it('rejects a response for another Flow Step', async () => {
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+      available({ 'cts.max_fanout': 32 }, 'CTS'),
+    )
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => expect(result.loading.value).toBe(false))
+    expect(result.error.value).toContain('another Flow Step')
+    expect(result.stepConfigDraft.value).toBeNull()
+  })
+
+  it('keeps an unavailable Step reason visible without reporting a Flow failure', async () => {
+    testState.route.path = '/workspace/Synthesis'
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue({
+      reason: 'step_configuration_unavailable',
+      status: 'missing',
+      step: 'Synthesis',
+      workspaceId: 'workspace-demo',
+      workspaceRevision: 1,
+    })
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => expect(result.loading.value).toBe(false))
+    expect(result.responseKind.value).toBe('warning')
+    expect(result.runtimeMessages.value).toEqual([
+      'This Flow Step has no configurable parameters.',
+    ])
+    expect(result.isEmpty.value).toBe(true)
+    expect(result.error.value).toBeNull()
+  })
+
   it('keeps every returned Step parameter and reports its count', async () => {
     const parameters = Object.fromEntries(
       Array.from({ length: 24 }, (_, index) => [`floorplan.parameter_${index}`, index]),
     )
-    testState.readWorkspaceStepConfiguration.mockResolvedValue(available(parameters))
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(available(parameters))
 
     const result = scope.run(() => useStepConfigInfo())!
 
@@ -118,7 +194,7 @@ describe('useStepConfigInfo', () => {
   })
 
   it('saves Step Parameters through one Product Command and advances Revision', async () => {
-    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ 'floorplan.ifp.thread_number': 16 }),
     )
     const result = scope.run(() => useStepConfigInfo())!
@@ -139,7 +215,7 @@ describe('useStepConfigInfo', () => {
   })
 
   it('keeps Step configuration read-only while execution is active', async () => {
-    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ 'floorplan.ifp.thread_number': 16 }),
     )
     const result = scope.run(() => useStepConfigInfo())!
@@ -154,7 +230,7 @@ describe('useStepConfigInfo', () => {
 
   it('saves canonical CTS parameters atomically', async () => {
     testState.route.path = '/workspace/CTS'
-    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'CTS'),
     )
 
@@ -177,7 +253,7 @@ describe('useStepConfigInfo', () => {
 
   it('keeps the editor dirty when a Step Parameter update fails', async () => {
     testState.route.path = '/workspace/CTS'
-    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
       available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'CTS'),
     )
     testState.updateWorkspaceStepConfigurationApi.mockRejectedValue(
@@ -197,18 +273,18 @@ describe('useStepConfigInfo', () => {
 
   it('discards a response after the Workspace session changes', async () => {
     let resolveRequest!: (value: ReturnType<typeof available>) => void
-    testState.readWorkspaceStepConfiguration.mockReturnValue(
+    testState.readWorkspaceStepConfigurationApi.mockReturnValue(
       new Promise((resolve) => {
         resolveRequest = resolve
       }),
     )
     const result = scope.run(() => useStepConfigInfo())!
     const lifecycle = useWorkspaceLifecycle()
-    const next = lifecycle.beginSession({
+    lifecycle.beginSession({
       workspaceId: 'workspace-next',
       projectRoot: '/workspace/next',
     })
-    lifecycle.activateSession(next.sessionId)
+    lifecycle.closeSession()
 
     resolveRequest(available({ 'floorplan.ifp.thread_number': 8 }))
 

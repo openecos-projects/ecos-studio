@@ -400,7 +400,6 @@ export class EccWorkspaceRuntime {
   async readWorkspaceStepConfiguration(
     request: EccWorkspaceStepConfigurationReadRequest,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
-    await this.sidecarLifecycle.waitForFinalSnapshot()
     return await this.commands.readWorkspaceStepConfiguration(request)
   }
 

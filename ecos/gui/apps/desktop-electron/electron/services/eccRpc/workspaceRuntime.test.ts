@@ -756,7 +756,7 @@ describe('EccWorkspaceRuntime', () => {
     ).toHaveLength(2)
   })
 
-  it('waits for terminal finalization before reading Step Configuration', async () => {
+  it('reads Step Configuration while terminal finalization is pending', async () => {
     const { client, service, sidecarNotification } = createService()
     const finalSnapshot = deferred<Record<string, unknown>>()
     client.responses.push({
@@ -765,31 +765,23 @@ describe('EccWorkspaceRuntime', () => {
       workspaceRevision: 4,
     })
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
-    client.responses.push(
-      finalSnapshot.promise,
-      {
-        directory: '/work/demo',
-        workspaceId: 'workspace-2',
-        workspaceRevision: 4,
-      },
-      {
-        parameters: [
-          {
-            applies: 'place',
-            default: 0.2,
-            description: 'Placement target density',
-            param: 'place.target_density',
-            type: 'float',
-            value: 0.49,
-          },
-        ],
-        status: 'available',
-        step: 'Legalization',
-        stepId: 'Legalization',
-        workspaceId: 'workspace-2',
-        workspaceRevision: 4,
-      },
-    )
+    client.responses.push(finalSnapshot.promise, {
+      parameters: [
+        {
+          applies: 'place',
+          default: 0.2,
+          description: 'Placement target density',
+          param: 'place.target_density',
+          type: 'float',
+          value: 0.49,
+        },
+      ],
+      status: 'available',
+      step: 'Legalization',
+      stepId: 'Legalization',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
 
     sidecarNotification({
       jsonrpc: '2.0',
@@ -821,6 +813,7 @@ describe('EccWorkspaceRuntime', () => {
     const readStartedBeforeFinalization = client.calls.some(
       (call) => call.method === 'workspace.step_configuration.read',
     )
+    expect(readStartedBeforeFinalization).toBe(true)
 
     finalSnapshot.resolve({
       directory: '/work/demo',
@@ -833,9 +826,8 @@ describe('EccWorkspaceRuntime', () => {
 
     await expect(configuration).resolves.toMatchObject({
       status: 'available',
-      workspaceId: 'workspace-2',
+      workspaceId: 'workspace-1',
     })
-    expect(readStartedBeforeFinalization).toBe(false)
   })
 
   it('finalizes a failed operation before releasing its sidecar', async () => {

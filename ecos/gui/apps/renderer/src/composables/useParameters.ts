@@ -480,6 +480,7 @@ export function useParameters() {
 
   const config = reactive<ConfigData>(getDefaultConfig())
   const isLoading = ref(false)
+  const isLoaded = ref(false)
   const isSaving = ref(false)
   const error = ref<string | null>(null)
   const hasChanges = ref(false)
@@ -512,6 +513,8 @@ export function useParameters() {
     Object.assign(config, getDefaultConfig())
     originalConfig = ''
     resolvedParametersPath = ''
+    isLoading.value = false
+    isLoaded.value = false
     hasChanges.value = false
     isSaving.value = false
     savingSessionId = null
@@ -567,6 +570,7 @@ export function useParameters() {
     const transformedConfig = transformParametersToConfig(normalizedParameters)
     const nextConfigSnapshot = JSON.stringify(transformedConfig)
     if (nextConfigSnapshot === originalConfig) {
+      isLoaded.value = parametersHaveChipIdentity(normalizedParameters)
       hasChanges.value = false
       return true
     }
@@ -581,6 +585,7 @@ export function useParameters() {
     }
 
     Object.assign(config, transformedConfig)
+    isLoaded.value = parametersHaveChipIdentity(normalizedParameters)
     console.log('Loaded config:', config)
     originalConfig = JSON.stringify(config)
     hasChanges.value = false
@@ -981,6 +986,16 @@ export function useParameters() {
   )
 
   watch(
+    () => workspaceLifecycle.currentSessionId.value,
+    (sessionId, previousSessionId) => {
+      if (sessionId === previousSessionId) return
+      advanceParametersResourceToken()
+      isLoading.value = false
+    },
+    { flush: 'sync' },
+  )
+
+  watch(
     () => [
       resourceVersions.value.parameters,
       resourceVersions.value.home,
@@ -1025,6 +1040,7 @@ export function useParameters() {
   return {
     config,
     isLoading,
+    isLoaded,
     isSaving,
     error,
     hasChanges,

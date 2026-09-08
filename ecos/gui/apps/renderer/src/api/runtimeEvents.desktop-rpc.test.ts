@@ -143,7 +143,7 @@ describe('createFrontendRuntimeEventClient desktop design runtime events', () =>
     )
   })
 
-  it('accepts a frontend event with a stale handle when its directory matches', async () => {
+  it('rejects a frontend event with a stale handle even when its directory matches', async () => {
     const bridge = installRuntimeEventBridge()
     const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
     const client = createFrontendRuntimeEventClient('frontend-handle', {
@@ -163,6 +163,33 @@ describe('createFrontendRuntimeEventClient desktop design runtime events', () =>
           type: 'operation.progress',
           workspaceDirectory: '/work/frontend',
           workspaceHandle: 'stale-handle',
+        },
+        'frontend',
+      ),
+    )
+
+    expect(allHandler).not.toHaveBeenCalled()
+  })
+
+  it('uses the directory only when a frontend event has no handle', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createFrontendRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createFrontendRuntimeEventClient('frontend-handle', {
+      workspaceDirectory: '/work/frontend/',
+    })
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    bridge.emit(
+      asDesignEvent(
+        {
+          data: { step: 'prepare' },
+          method: 'flow.run',
+          phase: 'started',
+          step: 'prepare',
+          type: 'operation.progress',
+          workspaceDirectory: '/work/frontend',
         },
         'frontend',
       ),

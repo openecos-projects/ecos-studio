@@ -182,6 +182,18 @@ function rerunPreparedForWorkspace(
     : []
 }
 
+function eventMatchesWorkspace(
+  event: DesignRuntimeEvent,
+  workspaceHandle: string,
+  workspacePath: string,
+): boolean {
+  if ('workspaceHandle' in event && event.workspaceHandle) {
+    return event.workspaceHandle === workspaceHandle
+  }
+  const eventWorkspace = normalizedPath(event.workspaceDirectory)
+  return Boolean(eventWorkspace && eventWorkspace === normalizedPath(workspacePath))
+}
+
 export function useBackendFlowLogs() {
   const { backendRuntimeEvents, currentProject, workspaceSession } = useWorkspace()
   const handledEventIds = new Set<string>()
@@ -208,7 +220,12 @@ export function useBackendFlowLogs() {
 
   function processRuntimeEvent(event: DesignRuntimeEvent): void {
     const workspacePath = currentProject.value?.path
-    if (!workspacePath || !shouldProcess(event)) return
+    if (
+      !workspacePath ||
+      !eventMatchesWorkspace(event, workspaceSession.value.workspaceId, workspacePath) ||
+      !shouldProcess(event)
+    )
+      return
     const affected = rerunPreparedForWorkspace(event, workspacePath)
     if (affected) {
       flowLogRerunAffectedStepsState.value = affected

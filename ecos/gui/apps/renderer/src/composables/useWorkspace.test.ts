@@ -2769,6 +2769,43 @@ describe('useWorkspace openProject', () => {
     expect(workspace.backendRuntimeEvents.value).toHaveLength(0)
   })
 
+  it('rejects Workspace update at submission when its flow started after opening the wizard', async () => {
+    const workspace = useWorkspace()
+    const lifecycle = useWorkspaceLifecycle()
+    workspace.currentProject.value = {
+      id: '/work/existing',
+      name: 'existing',
+      path: '/work/existing',
+      designTool: 'backend',
+      lastOpened: new Date(),
+    }
+    const session = lifecycle.beginSession({ projectRoot: '/work/existing' })
+    lifecycle.activateSession(session.sessionId, {
+      projectRoot: '/work/existing',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+    isFlowExecutionActiveForWorkspaceMock.mockReturnValue(true)
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/existing',
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        parameters: { design: 'gcd', top_module: 'gcd', clock: 'clk' },
+        origin_def: '',
+        origin_verilog: '/work/gcd.v',
+        rtl_list: ['/work/gcd.v'],
+        replaceExistingWorkspace: true,
+      }),
+    ).resolves.toBe(false)
+
+    expect(workspace.lastWorkspaceCreationError.value).toContain('flow is running')
+    expect(updateWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(createWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).not.toHaveBeenCalled()
+  })
+
   it('replaces the active backend workspace when keeping the original backup', async () => {
     const workspace = useWorkspace()
     const lifecycle = useWorkspaceLifecycle()

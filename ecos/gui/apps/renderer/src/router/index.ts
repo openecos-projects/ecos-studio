@@ -48,11 +48,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/TechLibraryView.vue'),
       },
       {
-        path: 'configure',
-        name: 'Configure',
-        component: () => import('../views/ConfigureView.vue'),
-      },
-      {
         path: 'projects',
         name: 'WorkspaceProjects',
         component: () => import('../views/ProjectsView.vue'),
@@ -62,6 +57,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: ':step',
         name: ':step',
+        beforeEnter: (to) => String(to.params.step || '').toLowerCase() !== 'configure',
         component: () => import('../views/WorkspaceRouteView.vue'),
       },
     ],

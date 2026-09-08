@@ -96,4 +96,56 @@ describe('createBackendRuntimeEventClient', () => {
 
     expect(handler).not.toHaveBeenCalled()
   })
+
+  it('uses the directory only when a Backend event has no handle', () => {
+    const client = createBackendRuntimeEventClient('workspace-handle', '/work/gcd')
+    const handler = vi.fn()
+    client.onAll(handler)
+    client.connect()
+
+    bridge.emit({
+      designTool: 'backend',
+      event: {
+        eventId: 'engineering-workspace:9',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { sourceType: 'step.started', step: 'Synthesis' },
+        sequence: 9,
+        timestamp: 1,
+        type: 'execution.progress',
+        workspaceId: 'engineering-workspace',
+      },
+      workspaceDirectory: '/work/gcd',
+      type: 'runtime.protocol',
+    } as DesignRuntimeEvent)
+
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a Backend event without a handle when its directory differs', () => {
+    const client = createBackendRuntimeEventClient('workspace-handle', '/work/gcd')
+    const handler = vi.fn()
+    client.onAll(handler)
+    client.connect()
+
+    bridge.emit({
+      designTool: 'backend',
+      event: {
+        eventId: 'engineering-workspace:10',
+        kind: 'flow',
+        operationId: 'operation-1',
+        origin: 'gui',
+        payload: { sourceType: 'step.started', step: 'Synthesis' },
+        sequence: 10,
+        timestamp: 1,
+        type: 'execution.progress',
+        workspaceId: 'engineering-workspace',
+      },
+      workspaceDirectory: '/work/other',
+      type: 'runtime.protocol',
+    } as DesignRuntimeEvent)
+
+    expect(handler).not.toHaveBeenCalled()
+  })
 })

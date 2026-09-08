@@ -25,6 +25,7 @@ from ecos_runtime_adapter.requests import (
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
     WorkspaceStepConfigurationUpdateRequest,
+    WorkspaceUpdateRequest,
 )
 from ecos_runtime_adapter.sessions import (
     WorkspaceSessionNotFound,
@@ -964,6 +965,81 @@ def test_step_configuration_update_waits_for_session_mutation_lock(monkeypatch, 
         ),
         entered=entered,
     )
+
+
+def test_workspace_update_rejects_active_operation_without_waiting_for_lock(
+    monkeypatch, tmp_path
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
+    monkeypatch.setattr(api.operations, "has_active_workspace", lambda _id: True)
+    result_queue = queue.Queue()
+    started = threading.Event()
+
+    def update_workspace():
+        started.set()
+        try:
+            api.update_workspace(
+                WorkspaceUpdateRequest(
+                    command_id="update-1",
+                    workspace_id=workspace_id,
+                    expected_workspace_revision=1,
+                    workspace_spec={},
+                    workspace_bindings={},
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - asserted in parent thread
+            result_queue.put(exc)
+
+    session = api.sessions.get_session(workspace_id)
+    with session.mutation_lock:
+        worker = threading.Thread(target=update_workspace)
+        worker.start()
+        assert started.wait(timeout=1)
+        worker.join(timeout=0.2)
+        rejected_before_lock = not worker.is_alive()
+
+    worker.join(timeout=2)
+    assert rejected_before_lock
+    error = result_queue.get_nowait()
+    assert isinstance(error, RuntimeApiError)
+    assert error.code == "operation_conflict"
+
+
+def test_workspace_update_rechecks_active_operation_after_taking_lock(
+    monkeypatch, tmp_path
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
+    active_checks = iter((False, True))
+    monkeypatch.setattr(
+        api.operations,
+        "has_active_workspace",
+        lambda _id: next(active_checks),
+    )
+    monkeypatch.setattr(
+        "chipcompiler.engine.update_workspace_from_spec",
+        lambda *_args: pytest.fail("workspace mutation must not start"),
+    )
+
+    with pytest.raises(RuntimeApiError) as exc_info:
+        api.update_workspace(
+            WorkspaceUpdateRequest(
+                command_id="update-1",
+                workspace_id=workspace_id,
+                expected_workspace_revision=1,
+                workspace_spec={},
+                workspace_bindings={},
+            )
+        )
+
+    assert exc_info.value.code == "operation_conflict"
 
 
 def test_reset_flow_waits_for_session_mutation_lock(monkeypatch, tmp_path):

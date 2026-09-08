@@ -158,4 +158,21 @@ describe('TopBar signoff export menu', () => {
     expect((newWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
     expect((updateWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
   })
+
+  it('disables only Workspace update while the current flow is running', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, workspaceUpdateDisabled: true },
+    })
+
+    await wrapper.get('button.menu-btn').trigger('click')
+    const items = wrapper.findAll('button.dropdown-item')
+    const newWorkspace = items.find((item) => item.text().includes('New Workspace'))
+    const updateWorkspace = items.find((item) => item.text().includes('Update Workspace'))
+
+    expect((newWorkspace!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((updateWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
+    expect(updateWorkspace!.attributes('title')).toContain('flow is running')
+
+    wrapper.unmount()
+  })
 })

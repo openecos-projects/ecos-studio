@@ -1,11 +1,12 @@
 import { computed, nextTick, ref, unref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { StepEnum } from '@/api/type'
-import { updateWorkspaceStepConfigurationApi } from '@/api/workspace'
+import { sameFlowStepName, StepEnum } from '@/api/type'
+import {
+  readWorkspaceStepConfigurationApi,
+  updateWorkspaceStepConfigurationApi,
+} from '@/api/workspace'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
-import { getDesktopApi } from '@/platform/desktop'
-import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 
 const stepEnumValues = Object.values(StepEnum)
@@ -80,7 +81,7 @@ function parameterDescriptions(records: unknown[]): Record<string, string> {
 
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
-  const { currentProject } = useWorkspace()
+  const { currentProject, workspaceSession } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
   const { resourceVersions } = workspaceLifecycle
 
@@ -157,19 +158,29 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
     try {
       const response = await workspaceLifecycle.runForSession(sessionId, async () => {
-        const workspacePath = currentProject.value?.path
-        if (!workspacePath) throw new Error('Workspace path is unavailable.')
-        const projectRoot =
-          routeString(route.query.projectRoot) ??
-          (await resolveProjectRouteContextForWorkspace(workspacePath))?.projectRoot
-        if (!projectRoot) throw new Error('Project context is unavailable.')
-        return await getProjectManagement().readWorkspaceStepConfiguration({
-          projectRoot,
+        const session = workspaceSession.value
+        if (!currentProject.value?.path) throw new Error('Workspace path is unavailable.')
+        if (session.state !== 'active' || !session.workspaceId) {
+          return null
+        }
+        return await readWorkspaceStepConfigurationApi({
           step: stepEnum,
-          workspacePath,
+          workspaceHandle: session.workspaceId,
         })
       })
-      if (!canApply() || !response) return
+      if (!canApply()) return
+      if (!response) {
+        info.value = null
+        const waiting = ['validating', 'loading', 'switching'].includes(
+          workspaceSession.value.state,
+        )
+        responseKind.value = waiting ? 'warning' : 'error'
+        error.value = waiting ? null : 'Workspace Session is unavailable.'
+        runtimeMessages.value = waiting ? ['Waiting for Workspace Session.'] : []
+        clearFileState()
+        lastLoadedStep = null
+        return
+      }
       if (
         (response.status === 'available' || response.status === 'missing') &&
         (typeof response.workspaceId !== 'string' ||
@@ -180,6 +191,26 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         responseKind.value = 'error'
         info.value = null
         error.value = 'Step configuration response has no valid Workspace identity.'
+        clearFileState()
+        return
+      }
+      const responseStep = response.stepId ?? response.step
+      if (!sameFlowStepName(responseStep, stepEnum)) {
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Step configuration response belongs to another Flow Step.'
+        clearFileState()
+        return
+      }
+      const currentRevision = workspaceSession.value.workspaceRevision
+      if (
+        typeof response.workspaceRevision === 'number' &&
+        typeof currentRevision === 'number' &&
+        response.workspaceRevision !== currentRevision
+      ) {
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Step configuration response belongs to another Workspace Revision.'
         clearFileState()
         return
       }
@@ -209,7 +240,12 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
       if (response.status === 'missing' || response.status === 'unavailable') {
         info.value = {}
-        responseKind.value = 'idle'
+        responseKind.value = 'warning'
+        runtimeMessages.value = [
+          response.reason === 'step_configuration_unavailable'
+            ? 'This Flow Step has no configurable parameters.'
+            : `Step configuration unavailable: ${response.reason}`,
+        ]
         workspaceRevision.value = response.workspaceRevision ?? null
         clearFileState()
         lastLoadedStep = stepEnum
@@ -304,7 +340,12 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   }
 
   watch(
-    currentStep,
+    [
+      currentStep,
+      () => workspaceSession.value.sessionId,
+      () => workspaceSession.value.state,
+      () => workspaceSession.value.workspaceId,
+    ],
     () => {
       void refetch()
     },
@@ -518,16 +559,4 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     resetStepConfig,
     reloadStepConfigFiles,
   }
-}
-
-function getProjectManagement() {
-  const api = getDesktopApi().projectManagement
-  if (!api)
-    throw new Error('Project management reads are unavailable in this desktop build.')
-  return api
-}
-
-function routeString(value: unknown): string | null {
-  const routeValue = Array.isArray(value) ? value[0] : value
-  return typeof routeValue === 'string' && routeValue.trim() ? routeValue : null
 }

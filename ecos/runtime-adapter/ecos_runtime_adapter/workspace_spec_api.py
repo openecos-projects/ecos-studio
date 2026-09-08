@@ -247,17 +247,11 @@ class WorkspaceSpecRuntimeMixin:
             update_workspace_from_spec,
         )
 
-        session = self._get_session(request.workspace_id)
-        with session.mutation_lock:
+        def update(session: WorkspaceSession) -> dict:
             self._validate_workspace_revision(
                 session,
                 request.expected_workspace_revision,
             )
-            if self.operations.has_active_workspace(session.workspace_id):
-                raise RuntimeApiError(
-                    "operation_conflict",
-                    "Workspace has an active Operation",
-                )
             self._release_session_db(session)
             try:
                 workspace = update_workspace_from_spec(
@@ -276,6 +270,12 @@ class WorkspaceSpecRuntimeMixin:
             session.execution_readiness = {"ready": True}
             return _workspace_session_result(session)
 
+        return self._with_session_mutation_lock(
+            request.workspace_id,
+            update,
+            reject_active_operation=True,
+        )
+
     def update_workspace_configuration(
         self, request: WorkspaceConfigurationUpdateRequest
     ) -> dict:
@@ -284,17 +284,11 @@ class WorkspaceSpecRuntimeMixin:
             update_workspace_configuration,
         )
 
-        session = self._get_session(request.workspace_id)
-        with session.mutation_lock:
+        def update(session: WorkspaceSession) -> dict:
             self._validate_workspace_revision(
                 session,
                 request.expected_workspace_revision,
             )
-            if self.operations.has_active_workspace(session.workspace_id):
-                raise RuntimeApiError(
-                    "operation_conflict",
-                    "Workspace has an active Operation",
-                )
             self._release_session_db(session)
             try:
                 workspace = update_workspace_configuration(
@@ -313,6 +307,12 @@ class WorkspaceSpecRuntimeMixin:
             session.execution_readiness = {"ready": True}
             return _workspace_session_result(session)
 
+        return self._with_session_mutation_lock(
+            request.workspace_id,
+            update,
+            reject_active_operation=True,
+        )
+
     def update_workspace_step_configuration(
         self, request: WorkspaceStepConfigurationUpdateRequest
     ) -> dict:
@@ -321,17 +321,11 @@ class WorkspaceSpecRuntimeMixin:
             update_workspace_step_configuration,
         )
 
-        session = self._get_session(request.workspace_id)
-        with session.mutation_lock:
+        def update(session: WorkspaceSession) -> dict:
             self._validate_workspace_revision(
                 session,
                 request.expected_workspace_revision,
             )
-            if self.operations.has_active_workspace(session.workspace_id):
-                raise RuntimeApiError(
-                    "operation_conflict",
-                    "Workspace has an active Operation",
-                )
             self._release_session_db(session)
             try:
                 workspace = update_workspace_step_configuration(
@@ -347,6 +341,12 @@ class WorkspaceSpecRuntimeMixin:
             session.workspace = workspace
             session.workspace_revision = snapshot["workspaceRevision"]
             return _workspace_session_result(session)
+
+        return self._with_session_mutation_lock(
+            request.workspace_id,
+            update,
+            reject_active_operation=True,
+        )
 
     def _load_workspace(self, directory: str):
         if not directory:

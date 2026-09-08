@@ -21,4 +21,11 @@ describe('workspace fixed routes', () => {
       '/workspace/tech',
     ])
   })
+
+  it('does not treat the removed Config URL as a dynamic Flow Step', async () => {
+    const failure = await router.push('/workspace/configure')
+
+    expect(failure).toBeTruthy()
+    expect(router.currentRoute.value.path).not.toBe('/workspace/configure')
+  })
 })
