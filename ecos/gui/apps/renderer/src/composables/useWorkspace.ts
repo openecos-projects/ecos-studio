@@ -1160,9 +1160,14 @@ export function useWorkspace() {
       let creationConfig = config
       if (config?.replaceExistingWorkspace) {
         const desktopApi = getDesktopApi()
-        const registeredParent = await desktopApi.workspace.registerProjectRoot(
+        const registeredParent = await registerProjectRoot(
           workspaceParentPath(selectedPath),
+          candidateRootOwner,
         )
+        candidateProjectRootRegistered = Boolean(registeredParent)
+        if (!registeredParent) {
+          throw new Error('Failed to register workspace parent directory')
+        }
         replacement =
           await desktopApi.workspace.prepareProjectDirectoryReplacement(selectedPath)
         if (replacement) {
@@ -1180,9 +1185,6 @@ export function useWorkspace() {
           selectedPath = normalizePath(replacement.targetPath)
         } else {
           selectedPath = normalizePath(selectedPath)
-        }
-        if (!registeredParent) {
-          throw new Error('Failed to register workspace parent directory')
         }
         if (claimedCreatePath !== selectedPath) {
           await unbindWorkspaceWindow(claimedCreatePath)

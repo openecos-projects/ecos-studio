@@ -2826,6 +2826,54 @@ describe('useWorkspace openProject', () => {
     )
   })
 
+  it('restores the active workspace root when replacement is blocked', async () => {
+    const workspace = useWorkspace()
+    const lifecycle = useWorkspaceLifecycle()
+    workspace.currentProject.value = {
+      id: '/work/existing',
+      name: 'existing',
+      path: '/work/existing',
+      designTool: 'backend',
+      lastOpened: new Date(),
+    }
+    activeProjectRoot = '/work/existing'
+    const session = lifecycle.beginSession({ projectRoot: '/work/existing' })
+    lifecycle.activateSession(session.sessionId, {
+      projectRoot: '/work/existing',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockRejectedValueOnce(
+      new Error('Cannot replace a workspace while its flow is running.'),
+    )
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/existing',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        parameters: { design: 'gcd', top_module: 'gcd', clock: 'clk' },
+        origin_def: '',
+        origin_verilog: '/work/gcd.v',
+        rtl_list: ['/work/gcd.v'],
+      }),
+    ).resolves.toBe(false)
+
+    expect(activeProjectRoot).toBe('/work/existing')
+    expect(workspace.currentProject.value?.path).toBe('/work/existing')
+    expect(workspace.workspaceSession.value).toMatchObject({
+      sessionId: session.sessionId,
+      state: 'active',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 1,
+    })
+    expect(createWorkspaceApiMock).not.toHaveBeenCalled()
+  })
+
   it('closes a freshly created workspace handle when local activation fails', async () => {
     const workspace = useWorkspace()
     vi.mocked(desktopApi.workspace.registerProjectRoot).mockResolvedValueOnce('')
