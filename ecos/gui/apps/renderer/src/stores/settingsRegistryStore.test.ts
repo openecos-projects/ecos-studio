@@ -293,6 +293,48 @@ describe('settingsRegistryStore', () => {
     store.unbindChangedEvents()
   })
 
+  it('keeps the validating state until every in-flight write for a key settles', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: null })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+
+    let resolveFirst!: (result: { ok: true; state: DesktopSettingState }) => void
+    let resolveSecond!: (result: { ok: true; state: DesktopSettingState }) => void
+    registrySet
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+
+    const first = store.set('runtime.eccPath', '/first/ecc')
+    const second = store.set('runtime.eccPath', '/second/ecc')
+    expect(store.isValidating('runtime.eccPath')).toBe(true)
+
+    resolveFirst({
+      ok: true,
+      state: entryFixture('runtime.eccPath', { isDefault: false, value: '/first/ecc' }),
+    })
+    await first
+    // The second write is still in flight; the spinner must stay up.
+    expect(store.isValidating('runtime.eccPath')).toBe(true)
+
+    resolveSecond({
+      ok: true,
+      state: entryFixture('runtime.eccPath', { isDefault: false, value: '/second/ecc' }),
+    })
+    await second
+    expect(store.isValidating('runtime.eccPath')).toBe(false)
+  })
+
   it('reset restores the default entry', async () => {
     const store = useSettingsRegistryStore()
     const initial = entryFixture('agent.codexBin', {

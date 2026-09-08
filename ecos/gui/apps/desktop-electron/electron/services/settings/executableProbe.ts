@@ -25,6 +25,13 @@ function joinUserPath(home: string, rest: string): string {
   return `${home.replace(/[\\/]+$/, '')}${separator}${trimmed}`
 }
 
+export function expandTildePath(
+  pathValue: string,
+  resolveHome: () => string = () => process.env.HOME ?? process.env.USERPROFILE ?? '',
+): string {
+  return expandUserPath(pathValue.trim(), resolveHome)
+}
+
 export async function resolveExecutablePath(
   pathValue: string,
   resolveHome: () => string = () => process.env.HOME ?? process.env.USERPROFILE ?? '',

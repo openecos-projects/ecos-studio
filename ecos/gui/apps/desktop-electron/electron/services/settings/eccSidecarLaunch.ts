@@ -48,14 +48,17 @@ export function createEccSidecarLaunchHooks(
   }
 
   const resolveEnv = async (): Promise<NodeJS.ProcessEnv> => {
-    const env = { ...(await options.baseEnvProvider()) }
+    const baseEnv = await options.baseEnvProvider()
+    const env = { ...baseEnv }
     const sizerRoot = await options.settingsStore.get<string>(
       RUNTIME_ECC_SIZER_ROOT_SETTING_KEY,
     )
     if (typeof sizerRoot === 'string' && sizerRoot.trim()) {
       env[ECC_SIZER_ROOT_ENV_KEY] = sizerRoot.trim()
-    } else {
-      delete env[ECC_SIZER_ROOT_ENV_KEY]
+    } else if (baseEnv[ECC_SIZER_ROOT_ENV_KEY] !== undefined) {
+      // No override: keep whatever value the process environment itself
+      // provides instead of stripping it (reset must not break that fallback).
+      env[ECC_SIZER_ROOT_ENV_KEY] = baseEnv[ECC_SIZER_ROOT_ENV_KEY]
     }
     return env
   }

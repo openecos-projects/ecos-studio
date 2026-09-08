@@ -59,6 +59,25 @@ describe('TopBar renderer-owned File shortcuts', () => {
     wrapper.unmount()
   })
 
+  it('opens preferences even while a text input has focus', async () => {
+    const wrapper = mount(TopBar, {
+      global: { plugins: [createPinia()] },
+    })
+
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    input.focus()
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { ctrlKey: true, key: ',', bubbles: true }),
+    )
+    await Promise.resolve()
+
+    const emitted = (wrapper.emitted('menu-action') ?? []).flat()
+    expect(emitted).toContain(appMenuActionIds.openPreferences)
+    input.remove()
+    wrapper.unmount()
+  })
+
   it('keeps other shortcut keys from opening preferences', async () => {
     const wrapper = mount(TopBar, {
       global: { plugins: [createPinia()] },

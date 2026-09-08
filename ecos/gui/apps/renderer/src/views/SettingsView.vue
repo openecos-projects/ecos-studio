@@ -115,12 +115,17 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Grid (not flex): the router-view wrapper adds a `flex-col` utility class to
+   this root element via attribute fallthrough, which would otherwise stack the
+   sidebar above the content. */
 .settings-view {
-  display: flex;
-  gap: 2rem;
+  background: var(--bg-primary, transparent);
+  column-gap: 2rem;
+  display: grid;
+  grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
   height: 100%;
-  padding: 1.5rem 2rem;
   overflow: auto;
+  padding: 1.5rem 2rem;
 }
 
 .settings-sidebar {

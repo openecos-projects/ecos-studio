@@ -48,16 +48,28 @@ describe('ECC sidecar launch hooks', () => {
     expect(env.ECOS_TEST_BASE).toBe('1')
   })
 
-  it('removes a stale sizer root env var when the override is cleared', async () => {
+  it('omits the sizer root env var when neither the override nor the environment provides one', async () => {
+    const hooks = createEccSidecarLaunchHooks({
+      baseEnvProvider: async () => ({ PATH: '/usr/bin' }),
+      resolveDefaultExecutable: () => null,
+      settingsStore: { get: async () => null },
+    })
+    const env = await hooks.envProvider()
+    expect(env[ECC_SIZER_ROOT_ENV_KEY]).toBeUndefined()
+  })
+
+  it('keeps a sizer root provided by the process environment when no override is set', async () => {
     const hooks = createEccSidecarLaunchHooks({
       baseEnvProvider: async () => ({
-        [ECC_SIZER_ROOT_ENV_KEY]: '/stale/root',
+        [ECC_SIZER_ROOT_ENV_KEY]: '/inherited/root',
         PATH: '/usr/bin',
       }),
       resolveDefaultExecutable: () => null,
       settingsStore: { get: async () => null },
     })
     const env = await hooks.envProvider()
-    expect(env[ECC_SIZER_ROOT_ENV_KEY]).toBeUndefined()
+    // Resetting (or never setting) the override must not strip an env value
+    // that the surrounding environment provided.
+    expect(env[ECC_SIZER_ROOT_ENV_KEY]).toBe('/inherited/root')
   })
 })

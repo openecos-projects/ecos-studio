@@ -35,7 +35,8 @@ interface WriteTicket {
 export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   const entries = ref<DesktopSettingState[]>([])
   const loading = ref(false)
-  const validatingKeys = ref<string[]>([])
+  /** In-flight write count per key; any remaining write keeps the spinner up. */
+  const validatingCounts = ref<Record<string, number>>({})
   /** Last rejected write per key, shown inline until the value changes again. */
   const rowErrors = ref<Record<string, string>>({})
   let unsubscribeChanged: (() => void) | null = null
@@ -46,8 +47,26 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   /** Live updates that landed while a load was fetching, newer than its snapshot. */
   const liveUpdatesDuringLoad = new Map<string, DesktopSettingState>()
 
+  function beginValidating(key: string): void {
+    validatingCounts.value = {
+      ...validatingCounts.value,
+      [key]: (validatingCounts.value[key] ?? 0) + 1,
+    }
+  }
+
+  function endValidating(key: string): void {
+    const remaining = (validatingCounts.value[key] ?? 1) - 1
+    const next = { ...validatingCounts.value }
+    if (remaining > 0) {
+      next[key] = remaining
+    } else {
+      delete next[key]
+    }
+    validatingCounts.value = next
+  }
+
   function isValidating(key: string): boolean {
-    return validatingKeys.value.includes(key)
+    return (validatingCounts.value[key] ?? 0) > 0
   }
 
   function errorFor(key: string): string {
@@ -102,7 +121,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     if (previous) {
       entries.value = replaceEntry(entries.value, { ...previous, value })
     }
-    validatingKeys.value = [...validatingKeys.value, key]
+    beginValidating(key)
     // A newer write to the same key supersedes this one's response.
     const previousTicket = writeTickets.get(key)
     if (previousTicket) previousTicket.superseded = true
@@ -136,7 +155,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       if (writeTickets.get(key) === ticket) {
         writeTickets.delete(key)
       }
-      validatingKeys.value = validatingKeys.value.filter((candidate) => candidate !== key)
+      endValidating(key)
     }
   }
 
@@ -146,7 +165,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       return { ok: false, error: BRIDGE_UNAVAILABLE_ERROR }
     }
 
-    validatingKeys.value = [...validatingKeys.value, key]
+    beginValidating(key)
     const previousTicket = writeTickets.get(key)
     if (previousTicket) previousTicket.superseded = true
     const ticket: WriteTicket = { superseded: false }
@@ -171,7 +190,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       if (writeTickets.get(key) === ticket) {
         writeTickets.delete(key)
       }
-      validatingKeys.value = validatingKeys.value.filter((candidate) => candidate !== key)
+      endValidating(key)
     }
   }
 
@@ -204,6 +223,6 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     reset,
     set,
     unbindChangedEvents,
-    validatingKeys,
+    validatingCounts,
   }
 })

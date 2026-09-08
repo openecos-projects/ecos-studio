@@ -459,7 +459,7 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   )
 }
 
-/** Escape 关闭菜单；File 快捷键与菜单文案一致（⇧⌘N / ⌘N / ⌘O） */
+/** Escape 关闭菜单；File 快捷键与菜单文案一致（⇧⌘N / ⌘N / ⌘O / ⌘,） */
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
     activeMenu.value = null
@@ -467,12 +467,21 @@ const handleKeydown = (e: KeyboardEvent) => {
     return
   }
 
-  if (e.repeat || isEditableKeyboardTarget(e.target)) return
-
   const mod = e.metaKey || e.ctrlKey
   if (!mod) return
 
   const key = e.key.toLowerCase()
+  // Preferences must open even while a text field has focus, so this shortcut
+  // is handled before the editable-target exclusion below.
+  if (!e.repeat && !e.shiftKey && key === ',') {
+    e.preventDefault()
+    activeMenu.value = null
+    emit('menu-action', appMenuActionIds.openPreferences)
+    return
+  }
+
+  if (e.repeat || isEditableKeyboardTarget(e.target)) return
+
   if (e.shiftKey && key === 'n') {
     e.preventDefault()
     activeMenu.value = null
@@ -489,12 +498,6 @@ const handleKeydown = (e: KeyboardEvent) => {
     e.preventDefault()
     activeMenu.value = null
     emit('menu-action', appMenuActionIds.openProject)
-    return
-  }
-  if (!e.shiftKey && key === ',') {
-    e.preventDefault()
-    activeMenu.value = null
-    emit('menu-action', appMenuActionIds.openPreferences)
   }
 }
 

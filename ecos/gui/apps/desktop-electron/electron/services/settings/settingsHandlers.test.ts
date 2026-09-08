@@ -246,6 +246,38 @@ describe('settings handlers', () => {
     expect(dependencies.settings.has('pdk.defaultInstallationId')).toBe(false)
   })
 
+  it('persists an ECC path as the resolved absolute path so the sidecar can spawn it', async () => {
+    const root = await createTempRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const executablePath = join(binDir, 'ecc')
+    await writeFile(executablePath, '#!/usr/bin/env bash\necho "~ ecc"\n', {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+
+    const previousHome = process.env.HOME
+    process.env.HOME = root
+    try {
+      const dependencies = createDependencies()
+      const handlers = createSettingHandlers(dependencies)
+
+      await expect(
+        handlers['runtime.eccPath'].validate('~/bin/ecc'),
+      ).resolves.toMatchObject({ ok: true })
+
+      await handlers['runtime.eccPath'].persist('~/bin/ecc')
+      // The stored value must be spawnable as-is (no literal `~`).
+      expect(dependencies.settings.get('runtime.eccPath')).toBe(executablePath)
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME
+      } else {
+        process.env.HOME = previousHome
+      }
+    }
+  })
+
   it('keeps the version probe timeout at an internal constant', () => {
     expect(ECC_VERSION_PROBE_TIMEOUT_MS).toBeGreaterThan(0)
   })

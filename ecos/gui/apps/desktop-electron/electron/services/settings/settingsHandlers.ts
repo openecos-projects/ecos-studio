@@ -9,7 +9,11 @@ import {
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { probeExecutableVersion, resolveExecutablePath } from './executableProbe'
+import {
+  expandTildePath,
+  probeExecutableVersion,
+  resolveExecutablePath,
+} from './executableProbe'
 
 export type SettingValidation =
   | { ok: true; displayInfo?: string }
@@ -104,7 +108,15 @@ export function createSettingHandlers(
     [RUNTIME_ECC_PATH_SETTING_KEY]: {
       apply: restartEccRuntimes,
       clear: () => settingsStore.delete(RUNTIME_ECC_PATH_SETTING_KEY),
-      persist: (value) => settingsStore.set(RUNTIME_ECC_PATH_SETTING_KEY, value),
+      // Store the resolved absolute path: validation may expand `~`, but the
+      // sidecar spawn would not, leaving a validated setting unlaunchable.
+      persist: async (value) => {
+        const resolved = await resolveExecutablePath(value)
+        if (!resolved) {
+          throw new Error(`路径不存在或不可执行: ${value}`)
+        }
+        await settingsStore.set(RUNTIME_ECC_PATH_SETTING_KEY, resolved)
+      },
       validate: async (value) => {
         const probe = await probeExecutableVersion(value, ['--version'], {
           timeoutMs: ECC_VERSION_PROBE_TIMEOUT_MS,
@@ -118,7 +130,9 @@ export function createSettingHandlers(
     [RUNTIME_ECC_SIZER_ROOT_SETTING_KEY]: {
       apply: restartEccRuntimes,
       clear: () => settingsStore.delete(RUNTIME_ECC_SIZER_ROOT_SETTING_KEY),
-      persist: (value) => settingsStore.set(RUNTIME_ECC_SIZER_ROOT_SETTING_KEY, value),
+      // The sidecar env cannot expand `~` either; store the absolute path.
+      persist: (value) =>
+        settingsStore.set(RUNTIME_ECC_SIZER_ROOT_SETTING_KEY, expandTildePath(value)),
       validate: validateSizerRoot,
     },
     [DESKTOP_CODEX_BIN_SETTING_KEY]: {
