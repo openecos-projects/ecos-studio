@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 class ECCStepName(StrEnum):
     SYNTHESIS = "Synthesis"
+    LEC = "lec"
     FLOORPLAN = "Floorplan"
     PLACEMENT = "place"
     CTS = "CTS"

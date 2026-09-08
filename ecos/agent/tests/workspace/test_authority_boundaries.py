@@ -13,6 +13,7 @@ def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
     assert GUI_WORKSPACE_FLOW_STEPS == tuple(step.value for step in ECCStepName)
     assert GUI_WORKSPACE_FLOW_STEPS == (
         "Synthesis",
+        "lec",
         "Floorplan",
         "place",
         "CTS",
