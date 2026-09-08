@@ -250,7 +250,16 @@ describe('EccRpcRuntimeService pool', () => {
       'CTS',
     )
     pool.clientFor(null).responses.push({
-      options: { skew_bound: 0.08 },
+      parameters: [
+        {
+          applies: 'cts',
+          default: 0.08,
+          description: 'CTS skew bound',
+          param: 'cts.skew_bound',
+          type: 'float',
+          value: 0.08,
+        },
+      ],
       status: 'available',
       step: 'CTS',
       stepId: 'CTS',

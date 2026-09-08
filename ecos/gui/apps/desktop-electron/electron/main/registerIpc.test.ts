@@ -726,23 +726,15 @@ describe('registerIpc', () => {
       configuration: {
         workspaceSpec: {
           design: { name: 'gcd' },
-          parameters: { target_density: 0.4 },
+          parameters: {
+            'place.target_density': 0.4,
+            'cts.skew_bound': '0.08',
+          },
         },
       },
       directory: '/runs/gcd',
       engineeringSnapshot: { workspaceRevision: 4 },
     })
-    services.eccRuntimeService.readWorkspaceStepConfiguration.mockImplementation(
-      ({ step }) =>
-        Promise.resolve({
-          options: step === 'CTS' ? { skew_bound: 0.08 } : {},
-          status: 'available',
-          step,
-          stepId: step,
-          workspaceId: 'workspace-1',
-          workspaceRevision: 4,
-        }),
-    )
     const sender = {
       id: 42,
       isDestroyed: vi.fn(() => false),
@@ -770,6 +762,9 @@ describe('registerIpc', () => {
         }),
       }),
     )
+    expect(
+      services.eccRuntimeService.readWorkspaceStepConfiguration,
+    ).not.toHaveBeenCalled()
 
     services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
       engineeringSnapshot: { workspaceRevision: 5 },
@@ -1022,7 +1017,7 @@ describe('registerIpc', () => {
       workspaceHandle: 'target-gui-handle',
     })
     services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
-      workspaceRevision: 1,
+      engineeringSnapshot: { workspaceRevision: 1 },
     })
     await openBackendWorkspace(
       handlers,
@@ -1109,7 +1104,7 @@ describe('registerIpc', () => {
       workspaceHandle: 'aliased-handle',
     })
     services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
-      workspaceRevision: 1,
+      engineeringSnapshot: { workspaceRevision: 1 },
     })
     await openBackendWorkspace(
       handlers,

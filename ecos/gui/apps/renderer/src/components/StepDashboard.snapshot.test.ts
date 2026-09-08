@@ -46,6 +46,7 @@ vi.mock('@/platform/desktop', () => ({
 }))
 
 import StepDashboard from './StepDashboard.vue'
+import dashboardSource from './StepDashboard.vue?raw'
 import { snapshotStepDashboardData } from '@/composables/stepDashboardSnapshot'
 
 function detail(): WorkspaceStepDetail {
@@ -139,5 +140,9 @@ describe('StepDashboard committed Snapshot rendering', () => {
     expect(testState.openReport).toHaveBeenCalledWith(
       expect.objectContaining({ artifactId: 'report-place' }),
     )
+  })
+
+  it('keeps scrollable data highlights aligned to the top', () => {
+    expect(dashboardSource).toMatch(/\.data-highlights\s*{[^}]*align-content: start/s)
   })
 })

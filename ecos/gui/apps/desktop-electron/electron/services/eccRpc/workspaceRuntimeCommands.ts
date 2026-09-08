@@ -238,7 +238,7 @@ export class WorkspaceRuntimeCommands {
       (workspaceId) => ({
         commandId: request.commandId,
         expectedWorkspaceRevision: request.expectedWorkspaceRevision,
-        options: request.options,
+        parameters: request.parameters,
         stepId: request.stepId,
         workspaceId,
       }),

@@ -49,6 +49,7 @@ export type FlowStepState =
   | 'not-started'
   | 'running'
   | 'succeeded'
+  | 'warning'
   | 'failed'
   | 'cancelled'
   | 'skipped'

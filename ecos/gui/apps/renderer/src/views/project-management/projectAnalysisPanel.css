@@ -259,6 +259,9 @@
 .run-state-success {
   background: var(--success-color);
 }
+.run-state-warning {
+  background: var(--warn-color);
+}
 
 .run-state-failed {
   background: var(--danger-color);
@@ -632,6 +635,7 @@
   position: absolute;
   right: 0;
   left: 0;
+  min-width: 0;
   height: 39px;
   overflow: hidden;
   background: color-mix(in srgb, var(--bg-primary) 86%, transparent);

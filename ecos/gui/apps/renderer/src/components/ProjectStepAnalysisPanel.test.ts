@@ -794,7 +794,7 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(wrapper.get('.issue-pane').text()).toContain('No findings reported')
   })
 
-  it('does not fall back to unverified eager detail after a Findings error', () => {
+  it('does not fall back to unverified detail after a Findings error, while comparison remains usable', async () => {
     const wrapper = mountPanel({
       findings: {
         status: 'error',
@@ -806,6 +806,102 @@ describe('ProjectStepAnalysisPanel', () => {
     })
 
     expect(wrapper.get('.findings-read-status').text()).toContain('Findings unavailable')
-    expect(wrapper.get('.issue-pane').text()).toContain('No findings reported')
+    expect(wrapper.get('.issue-pane').text()).toContain('Findings could not be read')
+    await openCompare(wrapper)
+    expect(wrapper.get('.verdict-badge').text()).toBe('Blocked')
+    expect(wrapper.find('.findings-read-status').exists()).toBe(false)
   })
+
+  it('shows labeled previous Findings while comparison stays on current results', async () => {
+    const current = workspaceSummaryFixture('ws_a', {
+      Route: stepSnapshotFixture({
+        flowStatus: 'unstart',
+        metrics: [],
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        summaryStatus: null,
+      }),
+    })
+    current.analysis.resultState = {
+      workspaceRevision: 5,
+      pendingStepIds: ['Route'],
+      previous: { workspaceRevision: 4, completedStepCount: 14, stepCount: 14 },
+    }
+    const wrapper = mountPanel({
+      workspaceSummaries: [current, routeWorkspace('ws_b', 1100)],
+      findings: {
+        status: 'ready',
+        data: {
+          engineeringWorkspaceId: 'engineering-ws-a',
+          projectWorkspaceId: 'ws_a',
+          step: 'Route',
+          workspaceRevision: 4,
+          currentWorkspaceRevision: 5,
+          resultState: 'stale',
+          details: stepSnapshotFixture({
+            metrics: [
+              metricRecordFixture({
+                metricName: 'route_wirelength',
+                displayName: 'Previous wirelength',
+                value: 12345,
+              }),
+            ],
+          }),
+        },
+      },
+    })
+    expect(wrapper.get('.verdict-badge').text()).toBe('Previous result')
+    expect(wrapper.get('.findings-read-status').text()).toContain('Revision 5')
+    expect(wrapper.get('.findings-read-status').text()).toContain(
+      'read-only results from Revision 4',
+    )
+    expect(wrapper.get('.step-body').text()).toContain('Previous wirelength')
+    expect(wrapper.find('.metric-delta').exists()).toBe(false)
+    await openCompare(wrapper)
+    expect(wrapper.get('.verdict-badge').text()).toBe('Needs rerun')
+    expect(wrapper.get('.findings-read-status').text()).toContain(
+      'excluded from comparison',
+    )
+    expect(wrapper.text()).not.toContain('12345')
+  })
+
+  it.each(['not-started', 'pending-rerun'] as const)(
+    'treats %s as a normal empty state',
+    (resultState) => {
+      const workspace = workspaceSummaryFixture('ws_a', {})
+      workspace.analysis.resultState = {
+        workspaceRevision: 5,
+        pendingStepIds: resultState === 'pending-rerun' ? ['Route'] : [],
+      }
+      const wrapper = mountPanel({
+        workspaceSummaries: [workspace],
+        findings: {
+          status: 'ready',
+          data: {
+            engineeringWorkspaceId: 'engineering-ws-a',
+            projectWorkspaceId: 'ws_a',
+            step: 'Route',
+            workspaceRevision: 5,
+            currentWorkspaceRevision: 5,
+            resultState,
+            details: stepSnapshotFixture({
+              flowStatus: 'unstart',
+              metrics: [],
+              artifactStatus: 'missing',
+              summaryArtifactStatus: 'missing',
+              hotspotArtifactStatus: 'missing',
+              summaryStatus: null,
+            }),
+          },
+        },
+      })
+      expect(wrapper.get('.verdict-badge').text()).toBe(
+        resultState === 'pending-rerun' ? 'Needs rerun' : 'Not run',
+      )
+      expect(wrapper.text()).not.toContain('read failed')
+      expect(wrapper.text()).not.toContain('No V3')
+      expect(wrapper.find('.findings-read-status.error').exists()).toBe(false)
+    },
+  )
 })

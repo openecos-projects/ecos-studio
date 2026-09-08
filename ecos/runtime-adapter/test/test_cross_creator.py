@@ -46,7 +46,7 @@ def _spec():
             ],
         },
         "flow": {"flowId": "syn_sta"},
-        "parameters": {"frequency_max": 100.0},
+        "parameters": {"design.frequency_mhz": 100.0},
     }
 
 

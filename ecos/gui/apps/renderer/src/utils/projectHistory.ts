@@ -228,6 +228,7 @@ function asString(value: unknown): string | undefined {
 function asProjectStatus(value: unknown): ProjectStatus | undefined {
   if (
     value === 'success' ||
+    value === 'warning' ||
     value === 'failed' ||
     value === 'running' ||
     value === 'in_progress' ||

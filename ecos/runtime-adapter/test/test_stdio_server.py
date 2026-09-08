@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from chipcompiler.data import create_workspace
+from chipcompiler.engine import create_workspace_from_spec
 from ecos_runtime_adapter.server import RuntimeServer
 from ecos_runtime_adapter.stdio_server import run_stdio_server
 from ecos_runtime_adapter.transport import ContentLengthDecoder, encode_content_length_frame
@@ -66,19 +66,18 @@ def _create_real_workspace(tmp_path: Path, minimal_ics55_pdk_factory) -> Path:
     rtl_path = tmp_path / "gcd.v"
     rtl_path.write_text("module gcd(input clk, output y); assign y = clk; endmodule\n")
     workspace_dir = tmp_path / "workspace"
-    create_workspace(
-        directory=workspace_dir,
-        origin_def="",
-        origin_verilog=rtl_path,
-        pdk="ics55",
-        pdk_root=pdk_root,
-        parameters={
-            "PDK": "ics55",
-            "Design": "gcd",
-            "Top module": "gcd",
-            "Clock": "clk",
-            "Frequency max [MHz]": 100,
+    create_workspace_from_spec(
+        workspace_dir,
+        {
+            "schemaVersion": 1,
+            "design": {"name": "gcd", "topModule": "gcd", "clockPort": "clk"},
+            "inputMode": "rtl",
+            "inputs": [{"inputId": "rtl-main", "role": "rtl"}],
+            "pdk": {"familyId": "ics55", "mode": "default"},
+            "flow": {"flowId": "syn_sta"},
+            "parameters": {"design.frequency_mhz": 100.0},
         },
+        {"inputs": {"rtl-main": str(rtl_path)}, "pdk": {"root": str(pdk_root)}},
     )
     return workspace_dir
 

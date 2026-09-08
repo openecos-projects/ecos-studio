@@ -40,17 +40,25 @@ function projectManifest() {
       name: 'gcd',
       design_name: 'gcd',
       description: '',
+      root_path: '/projects/gcd',
       created_at: now,
       updated_at: now,
-      objectives: {},
+      base_design: { pdk: 'ics55', top_module: 'gcd_top', parameters: {} },
+      objectives: { primary: 'timing', directions: {} },
       workspaces: ['ws_0001', 'ws_0004'].map((workspaceId) => ({
         workspace_id: workspaceId,
         name: workspaceId,
         workspace_path: workspaceId,
         source_workspace_id: null,
-        lifecycle: 'active' as const,
+        branch_from: null,
+        start_step: 'Synth',
+        end_step: 'Harden',
+        status: 'not_started' as const,
         created_at: now,
         updated_at: now,
+        parameter_patch: {},
+        metrics_summary: {},
+        step_metrics: {},
       })),
       mpc: null,
       best_workspace: null,
@@ -74,7 +82,16 @@ describe('useBaselineStepConfig', () => {
     })
     testState.readManifest.mockReset().mockResolvedValue(projectManifest())
     testState.readWorkspaceStepConfiguration.mockReset().mockResolvedValue({
-      options: { cts_buf_list: 'BUF' },
+      parameters: [
+        {
+          applies: 'cts',
+          default: ['BUF'],
+          description: 'CTS buffers',
+          param: 'cts.buffer_type',
+          type: 'json',
+          value: ['BUF'],
+        },
+      ],
       status: 'available',
       step: 'CTS',
       stepId: 'CTS',
@@ -88,7 +105,7 @@ describe('useBaselineStepConfig', () => {
     clearBaselineStepConfigCache()
   })
 
-  it('reads baseline options through the ECC domain API', async () => {
+  it('reads baseline parameters through the ECC domain API', async () => {
     const baseline = scope.run(() => useBaselineStepConfig(step))!
 
     await vi.waitFor(() => expect(baseline.status.value).toBe('available'))
@@ -98,7 +115,7 @@ describe('useBaselineStepConfig', () => {
       step: 'CTS',
       workspacePath: '/projects/gcd/ws_0001',
     })
-    expect(baseline.parsed.value).toEqual({ cts_buf_list: 'BUF' })
+    expect(baseline.parsed.value).toEqual({ 'cts.buffer_type': ['BUF'] })
     expect(baseline.workspaceRevision.value).toBe(1)
   })
 

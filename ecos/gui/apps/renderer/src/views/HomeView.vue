@@ -11,9 +11,15 @@
         :class="{ 'has-stale': staleRevision !== null }"
         aria-label="Workspace dashboard"
       >
-        <div v-if="staleRevision !== null" class="home-dashboard-stale" role="status">
+        <div
+          v-if="staleResultNotice"
+          class="home-dashboard-stale"
+          role="status"
+          :title="staleResultNotice.detail"
+          :aria-description="staleResultNotice.detail"
+        >
           <i class="ri-history-line" aria-hidden="true" />
-          {{ staleResultNotice }}
+          {{ staleResultNotice.message }}
         </div>
         <div class="home-dashboard-row home-dashboard-top">
           <section class="dashboard-section chip-card">

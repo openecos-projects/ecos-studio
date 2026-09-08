@@ -2,7 +2,6 @@ import type {
   DesktopAgentWorkspaceParameterUpdateContract,
   DesktopAgentExecutionContract,
   EccWorkspaceConfigurationUpdateRequest,
-  EccWorkspaceStepConfigurationUpdateRequest,
 } from '@ecos-studio/shared'
 
 export function confirmedExecutionToken(
@@ -23,9 +22,6 @@ interface WorkspaceParameterUpdateDependencies {
   report(status: 'succeeded' | 'failed', error: string): Promise<void>
   updateConfiguration(request: EccWorkspaceConfigurationUpdateRequest): Promise<unknown>
   updateRevision(revision: number): void
-  updateStepConfiguration(
-    request: EccWorkspaceStepConfigurationUpdateRequest,
-  ): Promise<unknown>
   workspaceHandle: string
 }
 
@@ -65,6 +61,9 @@ export async function executeConfirmedWorkspaceParameterUpdate(
     ) {
       throw new Error('Workspace Revision is unavailable.')
     }
+    if (contract.step_configurations.length) {
+      throw new Error('Legacy Step Options are no longer supported.')
+    }
     let workspaceRevision = initialRevision
     if (Object.keys(contract.workspace_parameters).length) {
       workspaceRevision = resultRevision(
@@ -79,20 +78,6 @@ export async function executeConfirmedWorkspaceParameterUpdate(
           workspaceHandle: dependencies.workspaceHandle,
         }),
         'Workspace parameter update',
-      )
-      committed = true
-      dependencies.updateRevision(workspaceRevision)
-    }
-    for (const update of contract.step_configurations) {
-      workspaceRevision = resultRevision(
-        await dependencies.updateStepConfiguration({
-          commandId: dependencies.commandId(),
-          expectedWorkspaceRevision: workspaceRevision,
-          options: update.options,
-          stepId: update.step_id,
-          workspaceHandle: dependencies.workspaceHandle,
-        }),
-        'Step configuration update',
       )
       committed = true
       dependencies.updateRevision(workspaceRevision)

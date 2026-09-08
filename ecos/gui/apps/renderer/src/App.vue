@@ -9,7 +9,6 @@
         :mutations-disabled="mutationsDisabled"
         :signoff-export-disabled="signoffExportDisabled"
         @menu-action="handleMenuAction"
-        @step-config="showStepConfigDialog = true"
       />
       <!-- 页面内容 -->
       <div
@@ -380,9 +379,7 @@ watch(
 watch(
   [() => route.path, () => Boolean(currentProject.value?.path)] as const,
   ([path, hasWorkspace]) => {
-    if (path === '/projects' && hasWorkspace) {
-      void router.replace({ path: '/workspace/projects', query: route.query })
-    } else if (path === '/workspace/projects' && !hasWorkspace) {
+    if (path === '/workspace/projects' && !hasWorkspace) {
       void router.replace({ path: '/projects', query: route.query })
     }
   },

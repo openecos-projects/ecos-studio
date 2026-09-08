@@ -54,6 +54,7 @@ function formatRuntime(seconds: number | undefined): string {
 
 function displayFlowState(state: FlowStepState): string {
   if (state === 'succeeded') return 'Success'
+  if (state === 'warning') return 'Warning'
   if (state === 'running') return 'Ongoing'
   if (state === 'failed' || state === 'cancelled') return 'Incomplete'
   if (state === 'skipped') return 'Skipped'

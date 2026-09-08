@@ -17,6 +17,7 @@ export function isSuccessfulFlowState(state: string): boolean {
     case 'succeeded':
     case 'complete':
     case 'completed':
+    case 'warning':
       return true
     default:
       return false

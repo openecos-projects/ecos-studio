@@ -603,7 +603,8 @@
   background: var(--success-color);
 }
 
-.workspace-tree-item.flow-hint-running::after {
+.workspace-tree-item.flow-hint-running::after,
+.workspace-tree-item.flow-hint-warning::after {
   background: var(--warn-color);
 }
 
@@ -634,7 +635,8 @@
   background: color-mix(in srgb, var(--danger-color) 7%, var(--bg-primary));
 }
 
-.workspace-tree-item.flow-hint-running .workspace-tree-row {
+.workspace-tree-item.flow-hint-running .workspace-tree-row,
+.workspace-tree-item.flow-hint-warning .workspace-tree-row {
   background: color-mix(in srgb, var(--warn-color) 7%, var(--bg-primary));
 }
 
@@ -706,7 +708,8 @@
   background: var(--success-bg);
 }
 
-.workspace-flow-hint.flow-hint-running {
+.workspace-flow-hint.flow-hint-running,
+.workspace-flow-hint.flow-hint-warning {
   color: var(--warn-color);
   background: var(--warn-bg);
 }
@@ -1221,6 +1224,10 @@
 .step-running {
   color: var(--info-color);
   background: var(--info-bg);
+}
+.step-warning {
+  color: var(--warn-color);
+  background: var(--warn-bg);
 }
 .step-failed {
   color: var(--danger-color);

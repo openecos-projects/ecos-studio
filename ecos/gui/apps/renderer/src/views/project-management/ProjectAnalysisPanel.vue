@@ -299,6 +299,7 @@
                   <button
                     type="button"
                     class="dash-cell-action"
+                    :title="row.workspaceId"
                     :aria-label="`Select workspace ${row.workspaceId}`"
                     @click="selectWorkspace(row.workspaceId)"
                   >
@@ -592,7 +593,7 @@ const analysisContext = computed(() => {
   if (!baselineId || baselineId === workspaceId) {
     return `${props.project.name} / ${workspaceId} is the QoR reference workspace`
   }
-  return `${props.project.name} / ${workspaceId} compared with ${baselineId}`
+  return `${props.project.name} / ${workspaceId} · QoR baseline ${baselineId}`
 })
 const dashboardMetricRows = computed(() =>
   buildDashboardMetricRows(

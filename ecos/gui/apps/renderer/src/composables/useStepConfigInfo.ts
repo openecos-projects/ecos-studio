@@ -11,8 +11,6 @@ import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 const stepEnumValues = Object.values(StepEnum)
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
-const ROUTE_STEP_BOTTOM_LAYER = 'MET2'
-const ROUTE_STEP_TOP_LAYER = 'MET5'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -54,16 +52,15 @@ function stableJsonSig(v: unknown): string {
   }
 }
 
-function pinRouteStepConfigRoutingLayers(
-  value: unknown,
-  step: StepEnum | undefined,
-): unknown {
-  if (step !== StepEnum.ROUTING || !isRecord(value)) return value
-
-  const routeBlock = isRecord(value.RT) ? value.RT : value
-  routeBlock['-bottom_routing_layer'] = ROUTE_STEP_BOTTOM_LAYER
-  routeBlock['-top_routing_layer'] = ROUTE_STEP_TOP_LAYER
-  return value
+function parameterValues(records: unknown[]): Record<string, unknown> | null {
+  const values: Record<string, unknown> = {}
+  for (const record of records) {
+    if (!isRecord(record) || typeof record.param !== 'string' || !('value' in record)) {
+      return null
+    }
+    values[record.param] = record.value
+  }
+  return values
 }
 
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
@@ -170,9 +167,17 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         clearFileState()
         return
       }
-      if (response.status === 'available' && isRecord(response.options)) {
+      if (response.status === 'available' && Array.isArray(response.parameters)) {
+        const parameters = parameterValues(response.parameters)
+        if (parameters === null) {
+          responseKind.value = 'error'
+          info.value = null
+          error.value = 'Step configuration response is invalid.'
+          clearFileState()
+          return
+        }
         const payload = {
-          options: response.options,
+          parameters,
           stepId: response.stepId ?? response.step,
         }
         responseKind.value = 'success'
@@ -254,15 +259,9 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     }
     try {
       const parsed = JSON.parse(raw) as unknown
-      stepConfigDraft.value = pinRouteStepConfigRoutingLayers(
-        deepClone(parsed),
-        currentStep.value,
-      )
+      stepConfigDraft.value = deepClone(parsed)
       stepConfigBaselineSig.value = stableJsonSig(parsed)
-      // Floorplan/placement/DRC forms materialize missing containers on mount. Let
-      // that view-only initialization become the baseline, but keep routing's
-      // enforced layer pinning dirty so it still requires an explicit save.
-      initialEditorDraftPending = currentStep.value !== StepEnum.ROUTING
+      initialEditorDraftPending = true
       if (stepConfigEditorMounted) {
         void nextTick(markStepConfigEditorInitialized)
       }
@@ -279,10 +278,10 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     _sessionId: string,
     _refetchToken: symbol,
   ) {
-    if (!isRecord(data.options)) return
+    if (!isRecord(data.parameters)) return
     const stepId = typeof data.stepId === 'string' ? data.stepId : currentStep.value
-    stepConfigPathResolved.value = stepId ? `${stepId} options` : 'Step options'
-    stepConfigRaw.value = JSON.stringify(data.options, null, 2)
+    stepConfigPathResolved.value = stepId ? `${stepId} parameters` : 'Step parameters'
+    stepConfigRaw.value = JSON.stringify(data.parameters, null, 2)
     stepConfigReadError.value = null
   }
 
@@ -412,8 +411,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         stepConfigSaveError.value = 'Nothing to save'
         return false
       }
-      const normalizedDraft = pinRouteStepConfigRoutingLayers(draftBeforeSave, step)
-      if (!isRecord(normalizedDraft)) {
+      if (!isRecord(draftBeforeSave)) {
         stepConfigSaveError.value = 'Step configuration must be an object'
         return false
       }
@@ -422,31 +420,33 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         stepConfigSaveError.value = 'Workspace Revision is unavailable'
         return false
       }
-      const result = await workspaceLifecycle.runForSession(sessionId, () =>
+      const stepResult = await workspaceLifecycle.runForSession(sessionId, () =>
         updateWorkspaceStepConfigurationApi({
           commandId: crypto.randomUUID(),
           expectedWorkspaceRevision,
-          options: normalizedDraft,
+          parameters: draftBeforeSave,
           stepId: step,
           workspaceHandle: workspaceLifecycle.session.value.workspaceId,
         }),
       )
       if (
         !canApply() ||
-        !result ||
-        !('workspaceRevision' in result) ||
-        typeof result.workspaceRevision !== 'number'
+        !stepResult ||
+        !('workspaceRevision' in stepResult) ||
+        typeof stepResult.workspaceRevision !== 'number'
       )
         return false
-      workspaceLifecycle.updateWorkspaceRevision(result.workspaceRevision, sessionId)
-      workspaceRevision.value = result.workspaceRevision
+      const nextWorkspaceRevision = stepResult.workspaceRevision
+      workspaceLifecycle.updateWorkspaceRevision(nextWorkspaceRevision, sessionId)
+      workspaceRevision.value = nextWorkspaceRevision
+      if (!canApply()) return false
       workspaceLifecycle.invalidate(['step-config', 'step', 'home'], {
         reason: 'step-config-save',
         sessionId,
         step,
       })
-      stepConfigRaw.value = JSON.stringify(normalizedDraft, null, 2)
-      stepConfigBaselineSig.value = stableJsonSig(normalizedDraft)
+      stepConfigRaw.value = JSON.stringify(draftBeforeSave, null, 2)
+      stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)
       return true
     } catch (e) {
       if (!canApply()) return false

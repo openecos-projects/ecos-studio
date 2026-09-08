@@ -306,14 +306,12 @@ describe('prepareWorkspaceRerun', () => {
     })
   })
 
-  it('does not materialize Step Options while preparing the isolated workspace', async () => {
+  it('does not materialize parameters while preparing the isolated workspace', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
-    contract.workspace_parameters = {}
-    contract.step_configurations = [
-      { step_id: 'place', options: { density_weight: 0.1 } },
-    ]
+    contract.workspace_parameters = { 'place.density_weight': 0.1 }
+    contract.step_configurations = []
 
     await prepareWorkspaceRerun(contract)
 
@@ -322,16 +320,14 @@ describe('prepareWorkspaceRerun', () => {
     ).resolves.toContain('0.01')
   })
 
-  it('updates Step Options and executes every full-flow step in order', async () => {
+  it('updates parameters atomically and executes every full-flow step in order', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     contract.end_step = 'Harden'
     contract.execution_scope = 'full_flow'
     contract.parameter_patch = [{ knob_id: 'place.density_weight', value: 0.1 }]
-    contract.workspace_parameters = {}
-    contract.step_configurations = [
-      { step_id: 'place', options: { density_weight: 0.1 } },
-    ]
+    contract.workspace_parameters = { 'place.density_weight': 0.1 }
+    contract.step_configurations = []
     const runtime = {
       startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'operation-flow' }),
       startStepOperation: vi
@@ -340,21 +336,21 @@ describe('prepareWorkspaceRerun', () => {
           operationId: `operation-${request.step}`,
         })),
       updateWorkspaceConfiguration: vi.fn().mockResolvedValue({ workspaceRevision: 2 }),
-      updateWorkspaceStepConfiguration: vi
-        .fn()
-        .mockResolvedValue({ workspaceRevision: 2 }),
       waitForOperation: vi.fn().mockResolvedValue({ error: null, state: 'succeeded' }),
     }
 
     await executeWorkspaceRerun(contract, runtime, 'target-gui-handle', 1)
 
-    expect(runtime.updateWorkspaceStepConfiguration).toHaveBeenCalledWith({
-      commandId: expect.any(String),
-      expectedWorkspaceRevision: 1,
-      options: { density_weight: 0.1 },
-      stepId: 'place',
-      workspaceHandle: 'target-gui-handle',
-    })
+    expect(runtime.updateWorkspaceConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configuration: {
+          design: {},
+          parameters: { 'place.density_weight': 0.1 },
+          pdk: {},
+        },
+        expectedWorkspaceRevision: 1,
+      }),
+    )
     expect(runtime.startStepOperation).not.toHaveBeenCalled()
     expect(runtime.startFlowOperation).toHaveBeenCalledWith({
       expectedWorkspaceRevision: 2,

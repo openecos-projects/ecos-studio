@@ -68,17 +68,25 @@ function manifestWithWorkspaces(workspaceIds: string[]) {
       name: 'gcd',
       design_name: 'gcd',
       description: '',
+      root_path: '/projects/gcd',
       created_at: now,
       updated_at: now,
-      objectives: {},
+      base_design: { pdk: 'ics55', top_module: 'gcd_top', parameters: {} },
+      objectives: { primary: 'timing', directions: {} },
       workspaces: workspaceIds.map((workspaceId) => ({
         workspace_id: workspaceId,
         name: workspaceId,
         workspace_path: workspaceId,
         source_workspace_id: null,
-        lifecycle: 'active',
+        branch_from: null,
+        start_step: 'Synth',
+        end_step: 'Harden',
+        status: 'not_started' as const,
         created_at: now,
         updated_at: now,
+        parameter_patch: {},
+        metrics_summary: {},
+        step_metrics: {},
       })),
       mpc: null,
       best_workspace: null,
@@ -265,6 +273,27 @@ describe('project management V3 model', () => {
     expect(backup).toMatchObject({
       status: 'archived',
       flowStatusHint: { state: 'success', label: 'Success' },
+    })
+  })
+
+  it('keeps a warning flow completed and eligible for branching', () => {
+    const source = manifestWithWorkspace('ws_warning')
+    const manifest = {
+      ...source,
+      workspaces: [{ ...source.workspaces[0]!, status: 'warning' as const }],
+    }
+
+    const model = buildProjectManagementProject(project, manifest, {
+      ws_warning: { Synth: 'success', LEC: 'warning' },
+    })
+
+    expect(model.workspaces[0]).toMatchObject({
+      status: 'warning',
+      flowStatusHint: { state: 'warning', label: 'Completed with warnings' },
+    })
+    expect(model.workspaces[0]?.steps.find((step) => step.step === 'LEC')).toMatchObject({
+      status: 'warning',
+      canCreateWorkspace: true,
     })
   })
 

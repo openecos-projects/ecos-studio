@@ -13,21 +13,17 @@ import {
   type ProjectQorTrendSummary,
   type ProjectQorTrendWorkspaceSummary,
   type ProjectRecommendation,
+  type ProjectStepStatus as SharedProjectStepStatus,
   type ReadSection,
   type ResourceInfo,
 } from '@ecos-studio/shared'
 import type { Project } from '@/types'
+import { applyProjectResultStates } from './projectResultPresentation'
 
 export const FLOW_STEPS = projectManifestFlowSteps
 
 export type FlowStep = ProjectManifestFlowStep
-export type ProjectStepStatus =
-  | 'success'
-  | 'reused'
-  | 'skipped'
-  | 'unstart'
-  | 'running'
-  | 'failed'
+export type ProjectStepStatus = SharedProjectStepStatus
 export type ProjectWorkspaceStatus = ProjectManifestWorkspaceStatus
 export type MetricsRowKind = 'line' | 'bar'
 export type ProjectMetricId =
@@ -82,11 +78,12 @@ export interface ProjectWorkspace {
   endStep: FlowStep
   depth: number
   flowStatusHint: ProjectFlowStatusHint
+  resultState?: ProjectAnalysisSnapshot['resultState']
   steps: ProjectStepCell[]
 }
 
 export interface ProjectFlowStatusHint {
-  state: 'success' | 'failed' | 'running' | 'unstart' | 'skipped'
+  state: 'success' | 'warning' | 'failed' | 'running' | 'unstart' | 'skipped'
   step?: FlowStep
   label: string
 }
@@ -404,6 +401,7 @@ export function buildProjectManagementProject(
     qorTrendSummary,
     stepComparisons,
   )
+  applyProjectResultStates(workspaces, snapshots)
   const comparisonSummary = buildV3ComparisonSummary(
     manifest,
     sortedWorkspaces,
@@ -958,6 +956,7 @@ export function workspaceStatusFromFlow(
   if (states.includes('failed')) return 'failed'
   if (states.includes('running')) return 'running'
   if (states.includes('unstart')) return 'in_progress'
+  if (states.includes('warning')) return 'warning'
   if (states.some((state) => state === 'success' || state === 'reused')) return 'success'
   return manifestStatus
 }
@@ -1035,9 +1034,10 @@ function buildFlowStatusHint(
     (cell) => !isCompletedStepStatus(cell.status),
   )
   if (!firstIncomplete) {
+    const warning = configuredSteps.some((cell) => cell.status === 'warning')
     return {
-      state: 'success',
-      label: 'Success',
+      state: warning ? 'warning' : 'success',
+      label: warning ? 'Completed with warnings' : 'Success',
     }
   }
 
@@ -1051,6 +1051,7 @@ function buildFlowStatusHint(
 function flowHintState(status: ProjectStepStatus): ProjectFlowStatusHint['state'] {
   if (status === 'failed') return 'failed'
   if (status === 'running') return 'running'
+  if (status === 'warning') return 'warning'
   if (status === 'success' || status === 'reused') return 'success'
   if (status === 'skipped') return 'skipped'
   return 'unstart'
@@ -1115,6 +1116,7 @@ function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | nul
 
   if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized))
     return 'success'
+  if (normalized === 'warning') return 'warning'
   if (['reused', 'reuse'].includes(normalized)) return 'reused'
   if (['skipped', 'skip'].includes(normalized)) return 'skipped'
   if (['ongoing', 'running', 'run'].includes(normalized)) return 'running'
@@ -1202,6 +1204,7 @@ function buildProjectDashboardSummary(
 function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSlice[] {
   const labels: Record<ProjectFlowStatusHint['state'], string> = {
     success: 'Success',
+    warning: 'Completed with warnings',
     failed: 'Failed',
     running: 'Running',
     unstart: 'Not Started',
@@ -1217,6 +1220,7 @@ function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSli
   return (
     [
       'success',
+      'warning',
       'failed',
       'running',
       'unstart',
@@ -1444,7 +1448,7 @@ function knownFlowStep(step: FlowStep | string): FlowStep | null {
 }
 
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {
-  return status === 'success' || status === 'reused'
+  return status === 'success' || status === 'warning' || status === 'reused'
 }
 
 function nextFlowStep(step: FlowStep): FlowStep {
@@ -1479,6 +1483,7 @@ function optionalString(value: unknown): string {
 function labelForStepStatus(status: ProjectStepStatus): string {
   const map: Record<ProjectStepStatus, string> = {
     success: 'S',
+    warning: 'W',
     reused: 'R',
     skipped: '-',
     unstart: 'U',

@@ -12,6 +12,8 @@ function normalizeState(value: unknown, fallback: FlowStepState): FlowStepState 
     case 'completed':
     case 'complete':
       return 'succeeded'
+    case 'warning':
+      return 'warning'
     case 'ongoing':
     case 'running':
       return 'running'

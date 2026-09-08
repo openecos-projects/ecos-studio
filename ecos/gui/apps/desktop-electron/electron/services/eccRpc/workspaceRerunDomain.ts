@@ -26,13 +26,6 @@ export interface WorkspaceRerunRuntime {
     expectedWorkspaceRevision: number
     workspaceHandle: string
   }): Promise<{ workspaceRevision: number }>
-  updateWorkspaceStepConfiguration(request: {
-    commandId: string
-    expectedWorkspaceRevision: number
-    options: Record<string, unknown>
-    stepId: string
-    workspaceHandle: string
-  }): Promise<{ workspaceRevision: number }>
   waitForOperation(request: {
     operationId: string
     workspaceHandle: string
@@ -60,7 +53,7 @@ export function hasValidWorkspaceRerunDomainUpdates(
     typeof contract.workspace_parameters !== 'object' ||
     Array.isArray(contract.workspace_parameters) ||
     !Array.isArray(contract.step_configurations) ||
-    contract.step_configurations.length > 8
+    contract.step_configurations.length !== 0
   ) {
     return false
   }
@@ -74,12 +67,8 @@ export function hasValidWorkspaceRerunDomainUpdates(
   }
   return (
     validOptions(contract.workspace_parameters) &&
-    contract.step_configurations.every(
-      (update) =>
-        typeof update.step_id === 'string' &&
-        flowSteps.has(update.step_id) &&
-        validOptions(update.options),
-    )
+    flowSteps.has(contract.target_step) &&
+    contract.step_configurations.length === 0
   )
 }
 
@@ -106,16 +95,6 @@ export async function executeWorkspaceRerunDomain(
         pdk: {},
       },
       expectedWorkspaceRevision: workspaceRevision,
-      workspaceHandle,
-    })
-    workspaceRevision = updated.workspaceRevision
-  }
-  for (const update of contract.step_configurations) {
-    const updated = await runtime.updateWorkspaceStepConfiguration({
-      commandId: randomUUID(),
-      expectedWorkspaceRevision: workspaceRevision,
-      options: update.options,
-      stepId: update.step_id,
       workspaceHandle,
     })
     workspaceRevision = updated.workspaceRevision

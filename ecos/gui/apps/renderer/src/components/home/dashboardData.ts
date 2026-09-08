@@ -223,12 +223,22 @@ export function formatDashboardMetric(metric: DashboardMetric): string {
 export function workspaceResultFreshnessNotice(
   freshness: WorkspaceResultFreshness | undefined,
   executionActive: boolean,
-): string {
-  if (!freshness || freshness.status === 'current' || !freshness.staleRevision) return ''
+): { message: string; detail: string } | null {
+  if (!freshness || freshness.status === 'current' || !freshness.staleRevision)
+    return null
+  const detail = `Current configuration: Revision ${freshness.currentRevision}. Previous results: Revision ${freshness.staleRevision} (read-only).`
   if (freshness.status === 'mixed') {
-    return executionActive
-      ? `Completed steps show current results from Revision ${freshness.currentRevision}; remaining steps still show read-only results from Revision ${freshness.staleRevision} until they finish.`
-      : `Completed steps show current results from Revision ${freshness.currentRevision}; remaining steps still show read-only results from Revision ${freshness.staleRevision}. Use the green play control in Flow status to rerun them.`
+    return {
+      message: executionActive
+        ? 'The flow is running. Some steps have updated results; others still reflect the previous configuration.'
+        : 'Some results still reflect the previous configuration. Rerun the remaining steps to update them.',
+      detail: `${detail} Updated steps use Revision ${freshness.currentRevision}.`,
+    }
   }
-  return `Showing read-only results from Revision ${freshness.staleRevision}. Current Revision ${freshness.currentRevision} has newer configuration; use the green play control in Flow status to rerun the flow.`
+  return {
+    message: executionActive
+      ? 'The flow is running. Results still reflect the previous configuration until new results are available.'
+      : 'Configuration changed since the last run. These results reflect the previous configuration. Rerun the flow to update them.',
+    detail,
+  }
 }

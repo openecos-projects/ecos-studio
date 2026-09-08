@@ -125,13 +125,13 @@ def test_workspace_step_configuration_update_maps_canonical_payload():
             "workspaceId": "workspace-1",
             "expectedWorkspaceRevision": 3,
             "stepId": "Floorplan",
-            "options": {"ifp": {"thread_number": 8}},
+            "parameters": {"floorplan.ifp.thread_number": 8},
         },
     )
 
     assert isinstance(request, WorkspaceStepConfigurationUpdateRequest)
     assert request.step_id == "Floorplan"
-    assert request.options == {"ifp": {"thread_number": 8}}
+    assert request.parameters == {"floorplan.ifp.thread_number": 8}
 
 
 def test_workspace_step_configuration_read_accepts_session_or_directory():

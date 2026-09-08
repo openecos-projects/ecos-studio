@@ -29,10 +29,8 @@ import {
   ProjectExecutionOverlay,
   type CommittedProjectWorkspace,
 } from './projectExecutionOverlay'
-import {
-  ProjectStepFindingsService,
-  type CommittedFindingsWorkspace,
-} from './projectStepFindingsService'
+import { ProjectStepFindingsService } from './projectStepFindingsService'
+import { projectComparisonEvidence } from './projectComparisonEvidence'
 import {
   analysisTextsFromSnapshot,
   buildProjectComparisonSnapshots,
@@ -614,35 +612,15 @@ export class BackendProjectComparisonService {
         manifest.workspaces.flatMap((workspace) => {
           const snapshot = context.snapshotCache.get(resolve(workspace.workspace_path))
           const analysis = analysisByWorkspace.get(workspace.workspace_id)
-          if (
-            !snapshot?.ok ||
-            !analysis ||
-            snapshot.sections.qor.status !== 'ready' ||
-            snapshot.sections.artifacts.status !== 'ready'
-          ) {
-            return []
-          }
-          return [
-            {
-              analysis,
-              comparisonMetrics: Object.fromEntries(
-                stepComparisons.map((comparison) => [
-                  comparison.stepId,
-                  comparison.workspaces.find(
-                    (candidate) => candidate.workspaceId === workspace.workspace_id,
-                  )?.metrics ?? [],
-                ]),
-              ),
-              engineeringSnapshot: {
-                analysis: snapshot.sections.qor.data.analysis,
-                artifacts: snapshot.sections.artifacts.data,
-                workspaceId: snapshot.snapshot.workspaceId,
-                workspaceRevision: snapshot.snapshot.workspaceRevision,
-              },
-              projectWorkspaceId: workspace.workspace_id,
-              workspacePath: workspace.workspace_path,
-            } satisfies CommittedFindingsWorkspace,
-          ]
+          if (!snapshot?.ok || !analysis) return []
+          const evidence = projectComparisonEvidence(
+            snapshot,
+            manifest,
+            workspace,
+            analysis,
+            stepComparisons,
+          )
+          return evidence ? [evidence] : []
         }),
       )
       const recommendation = selectRecommendation(trend.workspaces)

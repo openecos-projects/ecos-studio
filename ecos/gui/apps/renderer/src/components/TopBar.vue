@@ -208,13 +208,11 @@ import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
 import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
 import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 // ---- 类型定义 ----
-type TopBarMenuAction = AppMenuAction | 'step-config'
-
 interface DropdownItem {
   label?: string
   icon?: string
   shortcut?: string
-  event?: TopBarMenuAction
+  event?: AppMenuAction
   separator?: boolean
   disabled?: boolean
   title?: string
@@ -241,7 +239,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
-  (e: 'step-config'): void
 }>()
 
 const workspaceFocusId = computed(
@@ -255,9 +252,6 @@ const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
 const desktopApi = getDesktopApi()
-const canOpenStepConfig = computed(
-  () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
-)
 const toggleTheme = () => {
   themeStore.toggleTheme()
 }
@@ -273,19 +267,6 @@ const handleGoHome = () => {
   quickMenuOpen.value = false
   router.push({ name: 'ECOS' })
 }
-
-const editMenu = computed<Menu>(() => ({
-  label: 'Edit',
-  action: 'edit',
-  children: [
-    {
-      label: 'Config',
-      icon: 'ri-settings-3-line',
-      event: 'step-config',
-      disabled: !canOpenStepConfig.value,
-    },
-  ],
-}))
 
 // ---- 菜单配置 ----
 const menus = computed<Menu[]>(() => [
@@ -338,7 +319,6 @@ const menus = computed<Menu[]>(() => [
         : []),
     ],
   },
-  ...(isWorkspaceRoute.value ? [editMenu.value] : []),
   {
     label: 'View',
     action: 'view',
@@ -384,6 +364,7 @@ const menuBarRef = ref<HTMLElement | null>(null)
 const quickMenuOpen = ref(false)
 const quickMenuRef = ref<HTMLElement | null>(null)
 const quickMenuStyle = ref<Record<string, string>>({})
+const topbarOverlayEvent = 'ecos-topbar-overlay-open'
 
 function queryString(value: unknown): string {
   if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
@@ -409,9 +390,8 @@ const handleMenuHover = (action: string) => {
 }
 
 /** 下拉项点击 */
-const handleItemClick = (event?: TopBarMenuAction) => {
+const handleItemClick = (event?: AppMenuAction) => {
   activeMenu.value = null
-  if (event === 'step-config') return emit('step-config')
   if (event) emit('menu-action', event)
 }
 
@@ -429,14 +409,23 @@ const toggleQuickMenu = async () => {
   activeMenu.value = null
   quickMenuOpen.value = !quickMenuOpen.value
   if (quickMenuOpen.value) {
+    document.dispatchEvent(
+      new CustomEvent(topbarOverlayEvent, { detail: 'workspace-shortcuts' }),
+    )
     await nextTick()
     updateQuickMenuPosition()
   }
 }
 
+function closeForOverlay(event: Event): void {
+  if ((event as CustomEvent<string>).detail !== 'workspace-shortcuts') {
+    quickMenuOpen.value = false
+  }
+}
+
 const goToProjectManagement = () => {
   quickMenuOpen.value = false
-  if (props.hasWorkspace && route.path !== '/workspace/projects') {
+  if (isWorkspaceRoute.value && route.path !== '/workspace/projects') {
     rememberWorkspaceManagementReturnRoute(route)
   }
   const query: Record<string, string> = {}
@@ -446,7 +435,7 @@ const goToProjectManagement = () => {
   }
   if (workspaceFocusId.value) query.workspaceId = workspaceFocusId.value
   router.push({
-    path: props.hasWorkspace ? '/workspace/projects' : '/projects',
+    path: isWorkspaceRoute.value ? '/workspace/projects' : '/projects',
     query,
   })
 }
@@ -520,6 +509,7 @@ async function syncMaximizedState() {
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeydown)
+  document.addEventListener(topbarOverlayEvent, closeForOverlay)
   window.addEventListener('resize', handleQuickMenuViewportChange)
   window.addEventListener('scroll', handleQuickMenuViewportChange, true)
 
@@ -532,6 +522,7 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener(topbarOverlayEvent, closeForOverlay)
   window.removeEventListener('resize', handleQuickMenuViewportChange)
   window.removeEventListener('scroll', handleQuickMenuViewportChange, true)
   unlistenMaximizedChanged?.()

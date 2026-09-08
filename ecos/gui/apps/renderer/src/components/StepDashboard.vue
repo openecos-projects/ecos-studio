@@ -22,11 +22,16 @@
     </div>
 
     <template v-else>
-      <div v-if="data.staleRevision" class="step-dashboard-stale" role="status">
+      <div
+        v-if="data.staleRevision"
+        class="step-dashboard-stale"
+        role="status"
+        :title="`Previous results: Revision ${data.staleRevision} (read-only). The current configuration has changed since this run.`"
+        :aria-description="`Previous results: Revision ${data.staleRevision} (read-only). The current configuration has changed since this run.`"
+      >
         <i class="ri-history-line" aria-hidden="true" />
-        Showing read-only results from Revision {{ data.staleRevision }}. The current
-        configuration is newer; use the green play control in Flow status to rerun this
-        step.
+        Configuration changed since the last run. These step results reflect the previous
+        configuration. Rerun this step to update them.
       </div>
       <div class="step-dashboard-row step-dashboard-top">
         <section class="step-dashboard-card step-summary-card">
@@ -75,6 +80,7 @@
                 </div>
               </div>
               <button
+                v-if="stepConfigPathResolved"
                 type="button"
                 class="status-detail-link config-details-link"
                 title="View and edit step configuration"
@@ -655,10 +661,11 @@
                       }"
                     >
                       <th :title="corner.staCorner">{{ corner.staCorner }}</th>
-                      <td>{{ corner.role }}</td>
-                      <td>{{ staCornerPvt(corner) }}</td>
-                      <td>{{ corner.rcCorner }}</td>
+                      <td :title="corner.role">{{ corner.role }}</td>
+                      <td :title="staCornerPvt(corner)">{{ staCornerPvt(corner) }}</td>
+                      <td :title="corner.rcCorner">{{ corner.rcCorner }}</td>
                       <td
+                        :title="corner.availability"
                         :class="{ 'is-good': isStaCornerAvailable(corner.availability) }"
                       >
                         {{ corner.availability }}
@@ -2405,8 +2412,9 @@ function fileName(path: string): string {
   line-height: 1.2;
 }
 .rcx-summary-grid {
-  flex: 0 0 86px;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  flex: 0 0 auto;
+  grid-auto-rows: minmax(42px, auto);
+  max-height: 150px;
 }
 .rcx-summary-grid > div {
   padding: 4px 6px;
@@ -2555,6 +2563,10 @@ function fileName(path: string): string {
 .sta-corner-summary-table tbody tr {
   height: 1.5rem;
 }
+.sta-corner-summary-table table {
+  min-width: 430px;
+  table-layout: auto;
+}
 .sta-corner-summary-table tr.is-unavailable th,
 .sta-corner-summary-table tr.is-unavailable td {
   color: var(--text-secondary);
@@ -2662,7 +2674,7 @@ function fileName(path: string): string {
   text-align: right;
 }
 .data-highlights {
-  align-content: center;
+  align-content: start;
   display: grid;
   gap: 7px;
   overflow: auto;
@@ -3004,6 +3016,9 @@ function fileName(path: string): string {
   .step-dashboard-bottom {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(210px, auto) minmax(210px, auto);
+  }
+  .sta-data-body {
+    grid-template-columns: 1fr;
   }
   .step-summary-body {
     grid-template-columns: 1fr;

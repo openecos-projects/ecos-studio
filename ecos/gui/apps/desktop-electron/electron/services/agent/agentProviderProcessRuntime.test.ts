@@ -520,7 +520,7 @@ describe('AgentProviderProcessRuntime', () => {
         end_step: 'place',
         source_flow_json_sha256: 'a'.repeat(64),
         source_stage_artifact_sha256: 'b'.repeat(64),
-        workspace_parameters: { target_density: 0.55 },
+        workspace_parameters: { 'place.target_density': 0.55 },
         step_configurations: [],
       }),
     })
@@ -614,8 +614,11 @@ describe('AgentProviderProcessRuntime', () => {
         type: 'workspace_parameter_update',
         workspaceParameterUpdate: expect.objectContaining({
           schema_version: 'flow-agent.workspace_parameter_update_contract.v3',
-          workspace_parameters: { core_utilization: 0.7 },
-          step_configurations: [{ step_id: 'CTS', options: { skew_bound: 0.08 } }],
+          workspace_parameters: {
+            'floorplan.core_util': 0.7,
+            'cts.skew_bound': '0.08',
+          },
+          step_configurations: [],
           workspace_revision: 4,
         }),
       }),

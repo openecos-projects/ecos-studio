@@ -135,6 +135,7 @@ describe('useStepDashboardData', () => {
   afterEach(() => {
     scope.stop()
     clearStepDashboardDataCache()
+    vi.restoreAllMocks()
   })
 
   it('loads normalized Step facts through the revision-bound Backend API', async () => {
@@ -221,4 +222,106 @@ describe('useStepDashboardData', () => {
     expect(dashboard.data.value?.layoutAvailability).toBe('stale')
     expect(dashboard.data.value?.layoutUrl).toBeNull()
   })
+
+  it.each(['succeeded', 'skipped'] as const)(
+    'keeps stale artifacts and Checklist until the current Step is %s',
+    async (state) => {
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:layout-place')
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+      const previous = detailResult()
+      const current = detailResult(10)
+      if (previous.detail.status !== 'ready' || current.detail.status !== 'ready') {
+        throw new Error('expected fixture detail')
+      }
+      previous.detail.data.artifacts = [
+        'layout_image',
+        'timing_summary',
+        'timing_paths',
+      ].map((kind) => ({
+        artifactId: `${kind}-old`,
+        availability: 'available',
+        kind,
+        name: kind,
+        stepId: 'Place',
+      }))
+      current.detail.data.step.state = 'not-started'
+      current.detail.data.analysis.metrics = []
+      current.detail.data.checklist.findings = []
+      current.detail.data.staleEvidence = {
+        ...previous.detail.data,
+        workspaceRevision: 9,
+      }
+      testState.getStepDetail.mockResolvedValue(previous)
+      testState.getArtifact.mockImplementation(({ artifactId, workspaceRevision }) => ({
+        artifact: {
+          status: 'ready',
+          issues: [],
+          data: {
+            bytes: new Uint8Array([1, 2, 3]),
+            mimeType: 'image/png',
+            ...(artifactId.startsWith('timing_summary')
+              ? {
+                  timingSummary: {
+                    corner: 'TT',
+                    meetsTiming: true,
+                    setup: { wns: 0.1, tns: 0, violationCount: 0, frequencyMhz: 100 },
+                    hold: { wns: 0.2, tns: 0, violationCount: 0 },
+                  },
+                }
+              : {}),
+            ...(artifactId.startsWith('timing_paths')
+              ? { timingPaths: { corner: 'TT', pathLimit: 10, paths: [] } }
+              : {}),
+          },
+        },
+        workspaceContextId: 'context-a',
+        workspaceRevision,
+      }))
+      const dashboard = scope.run(() => useStepDashboardData())!
+      await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+      expect(dashboard.data.value?.layoutUrl).toBe('blob:layout-place')
+
+      testState.getArtifact.mockClear()
+      testState.getStepDetail.mockResolvedValue(current)
+      testState.session!.projection.data.revision.data.workspaceRevision = 10
+      await vi.waitFor(() => expect(dashboard.data.value?.staleRevision).toBe(9))
+
+      expect(dashboard.data.value).toMatchObject({
+        checklist: { passed: 1, total: 1 },
+        keyMetrics: [{ id: 'core_area', value: 1200 }],
+        layoutAvailability: 'available',
+        layoutUrl: 'blob:layout-place',
+        timingAnalysis: {
+          overview: { worstSetup: { corner: 'TT', wns: 0.1 } },
+          pathsByCorner: [{ corner: 'TT', paths: [] }],
+        },
+      })
+      expect(testState.getArtifact.mock.calls.map(([request]) => request)).toEqual(
+        previous.detail.data.artifacts.map(({ artifactId }) => ({
+          artifactId,
+          workspaceContextId: 'context-a',
+          workspaceRevision: 9,
+        })),
+      )
+
+      current.detail.data.step.state = state
+      current.detail.data.artifacts = previous.detail.data.artifacts.map((artifact) => ({
+        ...artifact,
+        artifactId: artifact.artifactId.replace('-old', '-current'),
+      }))
+      testState.getArtifact.mockClear()
+      await dashboard.refresh()
+
+      expect(dashboard.data.value?.staleRevision).toBeNull()
+      expect(dashboard.data.value?.layoutUrl).toBe('blob:layout-place')
+      expect(dashboard.data.value?.checklist.total).toBe(0)
+      expect(testState.getArtifact.mock.calls.map(([request]) => request)).toEqual(
+        current.detail.data.artifacts.map(({ artifactId }) => ({
+          artifactId,
+          workspaceContextId: 'context-a',
+          workspaceRevision: 10,
+        })),
+      )
+    },
+  )
 })

@@ -8,21 +8,6 @@ class EmptyRequest:
 
 
 @dataclass(frozen=True)
-class WorkspaceCreateRequest:
-    directory: str
-    pdk: str = ""
-    pdk_root: str = ""
-    pdk_json: Any = None
-    parameters: dict[str, Any] | None = None
-    origin_def: str = ""
-    origin_verilog: str = ""
-    filelist: str = ""
-    rtl_list: list[str] | None = None
-    sdc: str = ""
-    flow_config: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
 class WorkspaceOpenRequest:
     directory: str
 
@@ -89,7 +74,7 @@ class WorkspaceStepConfigurationUpdateRequest:
     workspace_id: str
     expected_workspace_revision: int
     step_id: str
-    options: dict[str, Any]
+    parameters: dict[str, Any]
 
 
 @dataclass(frozen=True)

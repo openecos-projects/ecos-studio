@@ -1,7 +1,7 @@
 <template>
   <section
     class="step-analysis"
-    :class="{ 'has-findings-status': mode === 'findings' && findingsReadStatus }"
+    :class="{ 'has-findings-status': findingsReadStatus }"
     aria-label="Step analysis"
   >
     <nav class="step-rail" aria-label="Flow steps">
@@ -178,7 +178,7 @@
     </div>
 
     <div
-      v-if="mode === 'findings' && findingsReadStatus"
+      v-if="findingsReadStatus"
       class="findings-read-status"
       :class="findingsReadStatus.tone"
       role="status"
@@ -298,7 +298,10 @@
             </div>
           </div>
           <p v-else class="pane-empty">
-            No V3 metrics were reported for {{ selectedStep }} in this workspace.
+            {{
+              evidenceEmptyState ??
+              `No V3 metrics were reported for ${selectedStep} in this workspace.`
+            }}
           </p>
         </section>
 
@@ -579,7 +582,6 @@ import {
   buildStepIssues,
   buildStepMetricGroups,
   buildStepTabs,
-  buildStepVerdict,
   buildStepWorkspaceChips,
   COMPARE_BAR_FULL_SCALE_PERCENT,
   countStepIssues,
@@ -605,10 +607,8 @@ import type {
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
 import type { ProjectStepFindingsProjectionState } from '@/stores/backendProjectComparisonSession'
-import {
-  parseProjectManifestFlowStep,
-  type ProjectQorTrendSummary,
-} from '@ecos-studio/shared'
+import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
+import { useProjectStepEvidence } from '@/composables/useProjectStepEvidence'
 
 const props = defineProps<{
   findings?: ProjectStepFindingsProjectionState
@@ -644,63 +644,14 @@ const compareSort = ref<StepCompareSort | null>(null)
 const barFullScalePercent = COMPARE_BAR_FULL_SCALE_PERCENT
 const WORKSPACE_PICKER_PREVIEW_COUNT = 16
 
-const activeWorkspace = computed(() => {
-  const workspace =
-    props.workspaceSummaries.find(
-      (summary) => summary.workspaceId === props.selectedWorkspaceId,
-    ) ??
-    props.workspaceSummaries[0] ??
-    null
-  if (!workspace || !props.findings) return workspace
-  const step = parseProjectManifestFlowStep(props.selectedStep)
-  if (!step) return workspace
-  const steps = { ...workspace.analysis.steps }
-  const findings = props.findings
-  if (
-    (findings.status === 'ready' || findings.status === 'stale') &&
-    findings.data.projectWorkspaceId === workspace.workspaceId &&
-    findings.data.step === step
-  ) {
-    steps[step] = findings.data.details
-  } else {
-    delete steps[step]
-  }
-  return { ...workspace, analysis: { ...workspace.analysis, steps } }
-})
+const {
+  activeWorkspace,
+  emptyMessage: evidenceEmptyState,
+  notice: findingsReadStatus,
+  readOnly: evidenceReadOnly,
+  verdict,
+} = useProjectStepEvidence(props, mode)
 const activeWorkspaceId = computed(() => activeWorkspace.value?.workspaceId ?? '')
-const findingsReadStatus = computed(() => {
-  const findings = props.findings
-  if (!findings || findings.status === 'ready') return null
-  if (findings.status === 'stale') {
-    return {
-      icon: 'ri-history-line',
-      label: `Last committed · ${findingsIssueLabel(findings.issue.code)}`,
-      tone: 'stale',
-    }
-  }
-  if (findings.status === 'error') {
-    return {
-      icon: 'ri-error-warning-line',
-      label: `Findings unavailable · ${findingsIssueLabel(findings.issue.code)}`,
-      tone: 'error',
-    }
-  }
-  return {
-    icon: 'ri-loader-4-line',
-    label: 'Loading findings',
-    tone: 'loading',
-  }
-})
-
-function findingsIssueLabel(code: string): string {
-  if (code === 'ARTIFACT_REFERENCE_MISSING') return 'artifact missing'
-  if (code === 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE') return 'unsafe artifact reference'
-  if (code === 'FINDINGS_ARTIFACT_TOO_LARGE') return 'artifact too large'
-  if (code === 'FINDINGS_ARTIFACT_INVALID_JSON') return 'invalid artifact JSON'
-  if (code === 'FINDINGS_SNAPSHOT_REVISION_CHANGED') return 'snapshot changed'
-  if (code === 'ARTIFACT_REVISION_MISMATCH') return 'artifact revision changed'
-  return 'read failed'
-}
 const baselineWorkspace = computed(
   () =>
     props.workspaceSummaries.find(
@@ -729,15 +680,19 @@ const evidenceIssue = computed(() =>
     ? selectedIssue.value
     : null,
 )
-const issueEmptyMessage = computed(() =>
-  issueCounts.value.total === 0
-    ? `No findings reported for ${props.selectedStep} in this workspace.`
-    : 'No findings match this filter.',
+const issueEmptyMessage = computed(
+  () =>
+    evidenceEmptyState.value ??
+    (issueCounts.value.total === 0
+      ? `No findings reported for ${props.selectedStep} in this workspace.`
+      : 'No findings match this filter.'),
 )
-const evidenceEmptyMessage = computed(() =>
-  issueCounts.value.total === 0
-    ? `No findings reported for ${props.selectedStep} in this workspace.`
-    : 'No findings match this filter.',
+const evidenceEmptyMessage = computed(
+  () =>
+    evidenceEmptyState.value ??
+    (issueCounts.value.total === 0
+      ? `No findings reported for ${props.selectedStep} in this workspace.`
+      : 'No findings match this filter.'),
 )
 
 // Context changes start from the complete queue. A metric supplied by Dashboard then
@@ -754,9 +709,6 @@ watch(
   { immediate: true },
 )
 
-const verdict = computed(() =>
-  buildStepVerdict(activeWorkspace.value, props.selectedStep, issues.value),
-)
 const stepTabs = computed(() => buildStepTabs(props.steps, activeWorkspace.value))
 const workspaceChips = computed(() =>
   buildStepWorkspaceChips(
@@ -853,7 +805,7 @@ const comparisonWorkspaceSummaries = computed(() => {
 const metricGroups = computed(() =>
   buildStepMetricGroups(
     activeWorkspace.value,
-    baselineWorkspace.value,
+    evidenceReadOnly.value ? null : baselineWorkspace.value,
     props.selectedStep,
   ),
 )

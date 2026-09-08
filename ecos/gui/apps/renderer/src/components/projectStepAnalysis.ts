@@ -1,4 +1,5 @@
 import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
+import { projectStepResultLabel } from '@/utils/projectResultPresentation'
 import type {
   ProjectAnalysisArtifactStatus,
   ProjectAnalysisAvailability,
@@ -886,7 +887,11 @@ export function buildStepWorkspaceChips(
       workspaceId: summary.workspaceId,
       workspaceName: summary.workspaceName,
       tone: stepWorkspaceTone(counts, availability),
-      statusLabel: stepWorkspaceStatusLabel(step, counts, availability),
+      statusLabel: projectStepResultLabel(
+        summary,
+        step,
+        stepWorkspaceStatusLabel(step, counts, availability),
+      ),
       blockingCount: counts.blocking,
       findingCount: counts.total,
       isBaseline: summary.workspaceId === qorTrendSummary.baselineWorkspaceId,

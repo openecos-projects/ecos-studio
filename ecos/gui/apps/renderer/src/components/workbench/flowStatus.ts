@@ -1,4 +1,10 @@
-export type FlowNodeStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped'
+export type FlowNodeStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'warning'
+  | 'failed'
+  | 'skipped'
 
 export interface FlowStatusNode {
   id: string
@@ -13,6 +19,7 @@ export interface FlowStatusSummary {
   queued: number
   running: number
   succeeded: number
+  warning: number
   failed: number
   skipped: number
 }
@@ -29,6 +36,8 @@ export function flowNodeStatus(value: string | null | undefined): FlowNodeStatus
     case 'completed':
     case 'complete':
       return 'succeeded'
+    case 'warning':
+      return 'warning'
     case 'ongoing':
     case 'running':
       return 'running'
@@ -51,6 +60,7 @@ export function flowStatusSummary(nodes: readonly FlowStatusNode[]): FlowStatusS
     queued: 0,
     running: 0,
     succeeded: 0,
+    warning: 0,
     failed: 0,
     skipped: 0,
   }
@@ -64,6 +74,8 @@ export function statusLabel(status: FlowNodeStatus): string {
       return 'Succeeded'
     case 'running':
       return 'Running'
+    case 'warning':
+      return 'Completed with warnings'
     case 'failed':
       return 'Failed'
     case 'skipped':
@@ -79,6 +91,8 @@ export function statusIcon(status: FlowNodeStatus): string {
       return 'ri-checkbox-circle-fill'
     case 'running':
       return 'ri-loader-4-line'
+    case 'warning':
+      return 'ri-error-warning-fill'
     case 'failed':
       return 'ri-close-circle-fill'
     case 'skipped':

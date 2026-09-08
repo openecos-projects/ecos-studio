@@ -82,7 +82,12 @@ const hasFinishedFlow = computed(
     dynamicFlowStages.value.length > 0 &&
     dynamicFlowStages.value.every((stage) => {
       const status = flowNodeStatus(stage.state)
-      return status === 'succeeded' || status === 'failed' || status === 'skipped'
+      return (
+        status === 'succeeded' ||
+        status === 'warning' ||
+        status === 'failed' ||
+        status === 'skipped'
+      )
     }),
 )
 const hasFinishedStep = computed(

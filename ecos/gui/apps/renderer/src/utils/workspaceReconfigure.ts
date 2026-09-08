@@ -58,11 +58,14 @@ export function workspaceReconfigureInitialConfig(
   const steps = snapshot.flow.steps
     .map((step) => step.name)
     .filter((step) => step && step.toLowerCase() !== 'fixfanout')
-  const coreMargin = Array.isArray(parameters.core_margin)
-    ? parameters.core_margin.filter((value): value is number => typeof value === 'number')
+  const coreMargin = Array.isArray(parameters['floorplan.core_margin'])
+    ? parameters['floorplan.core_margin'].filter(
+        (value): value is number => typeof value === 'number',
+      )
     : []
-  const dieWidth = number(parameters.die_width) ?? 0
-  const dieHeight = number(parameters.die_height) ?? 0
+  const dieWidth = number(parameters['floorplan.die_builder.die_size.width_micron']) ?? 0
+  const dieHeight =
+    number(parameters['floorplan.die_builder.die_size.height_micron']) ?? 0
   const pdkMode = pdk.mode === 'manual' ? 'manual' : 'default'
 
   return {
@@ -80,8 +83,12 @@ export function workspaceReconfigureInitialConfig(
         dieWidth > 0 && dieHeight > 0 ? 'width_height' : 'utilitization_margin',
       die_width: dieWidth,
       die_height: dieHeight,
-      utilitization: number(parameters.core_utilization),
+      frequency_max: number(parameters['design.frequency_mhz']),
+      utilitization: number(parameters['floorplan.core_util']),
       margin: coreMargin[0],
+      max_fanout: number(parameters['cts.max_fanout']),
+      target_density: number(parameters['place.target_density']),
+      target_overflow: number(parameters['place.target_overflow']),
     } as WorkspaceConfig['parameters'],
     origin_def: pathForInputRole('def'),
     origin_verilog: pathForInputRole('netlist'),

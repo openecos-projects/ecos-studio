@@ -19,13 +19,17 @@ interface FindingsArtifactReader {
   }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
-export interface CommittedFindingsWorkspace {
+export interface CommittedFindingsResult {
   analysis: ProjectAnalysisSnapshot
   comparisonMetrics: Partial<Record<ProjectManifestFlowStep, ProjectQorMetricRecord[]>>
   engineeringSnapshot: Pick<
     EccPersistedEngineeringSnapshot,
     'analysis' | 'artifacts' | 'workspaceId' | 'workspaceRevision'
   >
+}
+
+export interface CommittedFindingsWorkspace extends CommittedFindingsResult {
+  previous?: CommittedFindingsResult
   projectWorkspaceId: string
   workspacePath: string
 }
@@ -101,18 +105,56 @@ export class ProjectStepFindingsService {
     if (!workspace) return { ok: false, code: 'FINDINGS_WORKSPACE_UNAVAILABLE' }
     const step = parseProjectManifestFlowStep(request.step)
     if (!step) return { ok: false, code: 'FINDINGS_STEP_UNAVAILABLE' }
-    const analysisStep = workspace.engineeringSnapshot.analysis.steps.find(
+    const currentWorkspaceRevision = workspace.engineeringSnapshot.workspaceRevision
+    const pending = workspace.analysis.resultState?.pendingStepIds.includes(step) ?? false
+    const source =
+      pending &&
+      workspace.previous?.engineeringSnapshot.analysis.steps.some(
+        (candidate) => parseProjectManifestFlowStep(candidate.stepId) === step,
+      )
+        ? workspace.previous
+        : workspace
+    const analysisStep = source.engineeringSnapshot.analysis.steps.find(
       (candidate) => parseProjectManifestFlowStep(candidate.stepId) === step,
     )
-    const details = workspace.analysis.steps[step]
-    if (!analysisStep || !details) {
+    const details = source.analysis.steps[step]
+    if (!details || (!analysisStep && details.flowStatus === undefined)) {
       return { ok: false, code: 'FINDINGS_STEP_UNAVAILABLE' }
     }
-    const artifacts = declaredArtifacts(workspace.engineeringSnapshot, analysisStep, step)
+    const data: BackendProjectStepFindings = {
+      details: { ...details, metrics: source.comparisonMetrics[step] ?? details.metrics },
+      engineeringWorkspaceId: source.engineeringSnapshot.workspaceId,
+      projectWorkspaceId: request.projectWorkspaceId,
+      step,
+      workspaceRevision: source.engineeringSnapshot.workspaceRevision,
+      currentWorkspaceRevision,
+      resultState:
+        source !== workspace
+          ? 'stale'
+          : pending
+            ? 'pending-rerun'
+            : details.flowStatus === 'unstart' && !analysisStep
+              ? 'not-started'
+              : 'current',
+    }
+    if (!analysisStep) {
+      return {
+        ok: true,
+        projectComparisonContextId: request.projectComparisonContextId,
+        generation: context.generation,
+        freshness: 'current',
+        data,
+      }
+    }
+    const artifacts = declaredArtifacts(source.engineeringSnapshot, analysisStep, step)
     if (!artifacts.ok) return artifacts
 
     const generation = context.generation
-    const key = cacheKey(request.projectComparisonContextId, workspace, step)
+    const key = cacheKey(
+      request.projectComparisonContextId,
+      { ...workspace, ...source },
+      step,
+    )
     const read = await this.reader.readVerifiedArtifacts({
       artifacts: artifacts.data,
       projectRoot: context.projectRoot,
@@ -127,16 +169,6 @@ export class ProjectStepFindingsService {
     }
     if (!read.ok) return this.readFailure(read, key, context, request)
 
-    const data: BackendProjectStepFindings = {
-      details: {
-        ...details,
-        metrics: workspace.comparisonMetrics[step] ?? details.metrics,
-      },
-      engineeringWorkspaceId: workspace.engineeringSnapshot.workspaceId,
-      projectWorkspaceId: request.projectWorkspaceId,
-      step,
-      workspaceRevision: workspace.engineeringSnapshot.workspaceRevision,
-    }
     this.cache.set(key, data)
     if (this.cache.size > MAX_VERIFIED_FINDINGS_CACHE_ENTRIES) {
       this.cache.delete(this.cache.keys().next().value!)

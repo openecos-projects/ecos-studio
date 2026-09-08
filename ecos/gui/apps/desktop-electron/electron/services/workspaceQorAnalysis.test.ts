@@ -50,6 +50,8 @@ function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
     parameters: {},
     qorAssessment: {
       status: 'ready',
+      areaScoringStep: 'Route',
+      dimensionScores: { routability_physical: 73.5 },
       metrics: [metric],
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [
@@ -153,9 +155,12 @@ describe('analyzeWorkspaceQor', () => {
       },
       engineeringSnapshot(5000),
     )
-    expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]?.overallScore).toBe(
-      result.qor.status === 'ready' ? result.qor.data.score.value : null,
-    )
+    expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]).toMatchObject({
+      areaScoringStep: 'Route',
+      dimensionScores: { routability_physical: 73.5 },
+      overallScore: result.qor.status === 'ready' ? result.qor.data.score.value : null,
+      scoreThreshold: 60,
+    })
   })
 
   it('restores step metrics directly from an authoritative snapshot', () => {
@@ -169,6 +174,8 @@ describe('analyzeWorkspaceQor', () => {
       parameters: {},
       qorAssessment: {
         status: 'ready',
+        areaScoringStep: null,
+        dimensionScores: { routability_physical: 73.5 },
         metrics: [metric],
         score: { gate: 'pass', threshold: 60, value: 73.5 },
         steps: [

@@ -315,7 +315,7 @@ describe('useParameters desktop bridge integration', () => {
         commandId: expect.any(String),
         configuration: {
           design: {},
-          parameters: { frequency_max: 250 },
+          parameters: { 'design.frequency_mhz': 250 },
           pdk: {},
         },
         expectedWorkspaceRevision: 1,

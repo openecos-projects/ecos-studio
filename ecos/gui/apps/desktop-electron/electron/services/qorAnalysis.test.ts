@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildProjectQorTrendSummary,
-  normalizeQorMetrics,
-  QOR_SCORE_THRESHOLD,
-} from './qorAnalysis'
+import { buildProjectQorTrendSummary, normalizeQorMetrics } from './qorAnalysis'
 
 function routeMetricText(value: number): string {
   return JSON.stringify({
@@ -34,7 +30,7 @@ function routeMetricText(value: number): string {
 }
 
 describe('qorAnalysis', () => {
-  it('owns the score threshold and metric polarity in Electron', () => {
+  it('normalizes metric polarity without owning the ECC scoring policy', () => {
     const records = normalizeQorMetrics({
       step: 'STA',
       text: JSON.stringify({
@@ -73,7 +69,6 @@ describe('qorAnalysis', () => {
       workspaceKey: '/project/ws-a',
     })
 
-    expect(QOR_SCORE_THRESHOLD).toBe(60)
     expect(records).toMatchObject([
       {
         metricName: 'sta_setup_wns',

@@ -47,12 +47,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { formatStepToolName, StepEnum } from '@/api/type'
+import { computed, onMounted, ref, watch } from 'vue'
+import { formatStepToolName, sameFlowStepName, StepEnum } from '@/api/type'
 import StepConfigPanel from '@/components/StepConfigPanel.vue'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
+import { getDesktopApi } from '@/platform/desktop'
 
-const { dynamicFlowStages, error, isLoading: loading } = useBackendFlowStages()
+const {
+  dynamicFlowStages,
+  error: flowError,
+  isLoading: flowLoading,
+} = useBackendFlowStages()
+const catalogApplies = ref<string[] | null>(null)
+const catalogError = ref<string | null>(null)
+const loading = computed(() => flowLoading.value || catalogApplies.value === null)
+const error = computed(() => flowError.value ?? catalogError.value)
 const selectedStep = ref<StepEnum | undefined>()
 const stepConfigPanel = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const hasUnsavedChanges = computed(
@@ -61,11 +70,15 @@ const hasUnsavedChanges = computed(
 
 const configurableSteps = computed(() => {
   const seen = new Set<StepEnum>()
-  return dynamicFlowStages.value.flatMap((stage) => {
+  return dynamicFlowStages.value.flatMap((stage, index) => {
     const step = Object.values(StepEnum).find(
       (candidate) => candidate.toLowerCase() === stage.path.toLowerCase(),
     )
-    if (!step || seen.has(step)) return []
+    const applies = catalogApplies.value ?? []
+    const configurable = applies.some((target) =>
+      target === 'all' ? index === 0 : sameFlowStepName(target, stage.path),
+    )
+    if (!step || seen.has(step) || !configurable) return []
     seen.add(step)
     return [
       {
@@ -76,6 +89,23 @@ const configurableSteps = computed(() => {
       },
     ]
   })
+})
+
+onMounted(async () => {
+  try {
+    const model = await getDesktopApi().workspaceCreationModel.get()
+    const catalog = Array.isArray(model.discovery.parameterCatalog)
+      ? model.discovery.parameterCatalog
+      : []
+    catalogApplies.value = catalog.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const appliesTo = (entry as Record<string, unknown>).appliesTo
+      return typeof appliesTo === 'string' ? [appliesTo] : []
+    })
+  } catch (cause) {
+    catalogError.value = cause instanceof Error ? cause.message : String(cause)
+    catalogApplies.value = []
+  }
 })
 
 const selectedTool = computed(

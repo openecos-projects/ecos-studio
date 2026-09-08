@@ -36,12 +36,19 @@ import {
 } from './useFlowRunner'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
-function available(options: Record<string, unknown>) {
+function available(values: Record<string, unknown>, step = 'Floorplan') {
   return {
-    options,
+    parameters: Object.entries(values).map(([param, value]) => ({
+      applies: step,
+      default: value,
+      description: param,
+      param,
+      type: typeof value,
+      value,
+    })),
     status: 'available',
-    step: 'Floorplan',
-    stepId: 'Floorplan',
+    step,
+    stepId: step,
     workspaceId: 'engineering-workspace-demo',
     workspaceRevision: 1,
   }
@@ -77,15 +84,15 @@ describe('useStepConfigInfo', () => {
 
   it('loads an ECC-owned Step configuration object', async () => {
     testState.readWorkspaceStepConfiguration.mockResolvedValue(
-      available({ ifp: { thread_number: 16 } }),
+      available({ 'floorplan.ifp.thread_number': 16 }),
     )
 
     const result = scope.run(() => useStepConfigInfo())!
 
     await vi.waitFor(() =>
-      expect(result.stepConfigDraft.value).toEqual({ ifp: { thread_number: 16 } }),
+      expect(result.stepConfigDraft.value).toEqual({ 'floorplan.ifp.thread_number': 16 }),
     )
-    expect(result.stepConfigPathResolved.value).toBe('Floorplan options')
+    expect(result.stepConfigPathResolved.value).toBe('Floorplan parameters')
     expect(result.workspaceRevision.value).toBe(1)
     expect(result.isEmpty.value).toBe(false)
     expect(testState.readWorkspaceStepConfiguration).toHaveBeenCalledWith({
@@ -95,20 +102,20 @@ describe('useStepConfigInfo', () => {
     })
   })
 
-  it('saves Step Options through one Product Command and advances Revision', async () => {
+  it('saves Step Parameters through one Product Command and advances Revision', async () => {
     testState.readWorkspaceStepConfiguration.mockResolvedValue(
-      available({ ifp: { thread_number: 16 } }),
+      available({ 'floorplan.ifp.thread_number': 16 }),
     )
     const result = scope.run(() => useStepConfigInfo())!
     await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
-    result.stepConfigDraft.value = { ifp: { thread_number: 8 } }
+    result.stepConfigDraft.value = { 'floorplan.ifp.thread_number': 8 }
 
     await expect(result.saveStepConfig()).resolves.toBe(true)
 
     expect(testState.updateWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
       commandId: expect.any(String),
       expectedWorkspaceRevision: 1,
-      options: { ifp: { thread_number: 8 } },
+      parameters: { 'floorplan.ifp.thread_number': 8 },
       stepId: 'Floorplan',
       workspaceHandle: 'workspace-demo',
     })
@@ -118,7 +125,7 @@ describe('useStepConfigInfo', () => {
 
   it('keeps Step configuration read-only while execution is active', async () => {
     testState.readWorkspaceStepConfiguration.mockResolvedValue(
-      available({ ifp: { thread_number: 16 } }),
+      available({ 'floorplan.ifp.thread_number': 16 }),
     )
     const result = scope.run(() => useStepConfigInfo())!
     await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
@@ -128,6 +135,49 @@ describe('useStepConfigInfo', () => {
 
     expect(result.stepConfigSaveError.value).toContain('read-only')
     expect(testState.updateWorkspaceStepConfigurationApi).not.toHaveBeenCalled()
+  })
+
+  it('saves canonical CTS parameters atomically', async () => {
+    testState.route.path = '/workspace/CTS'
+    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+      available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'CTS'),
+    )
+
+    const result = scope.run(() => useStepConfigInfo())!
+    await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
+    result.stepConfigDraft.value = { 'cts.skew_bound': 0.08, 'cts.max_fanout': 24 }
+
+    await expect(result.saveStepConfig()).resolves.toBe(true)
+
+    expect(testState.updateWorkspaceStepConfigurationApi).toHaveBeenCalledWith({
+      commandId: expect.any(String),
+      expectedWorkspaceRevision: 1,
+      parameters: { 'cts.skew_bound': 0.08, 'cts.max_fanout': 24 },
+      stepId: 'CTS',
+      workspaceHandle: 'workspace-demo',
+    })
+    expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(2)
+    expect(result.hasStepConfigChanges.value).toBe(false)
+  })
+
+  it('keeps the editor dirty when a Step Parameter update fails', async () => {
+    testState.route.path = '/workspace/CTS'
+    testState.readWorkspaceStepConfiguration.mockResolvedValue(
+      available({ 'cts.skew_bound': 0.08, 'cts.max_fanout': 32 }, 'CTS'),
+    )
+    testState.updateWorkspaceStepConfigurationApi.mockRejectedValue(
+      new Error('ECC rejected CTS parameters'),
+    )
+
+    const result = scope.run(() => useStepConfigInfo())!
+    await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
+    result.stepConfigDraft.value = { 'cts.skew_bound': 0.1, 'cts.max_fanout': 24 }
+
+    await expect(result.saveStepConfig()).resolves.toBe(false)
+
+    expect(result.stepConfigSaveError.value).toBe('ECC rejected CTS parameters')
+    expect(result.hasStepConfigChanges.value).toBe(true)
+    expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(1)
   })
 
   it('discards a response after the Workspace session changes', async () => {
@@ -145,7 +195,7 @@ describe('useStepConfigInfo', () => {
     })
     lifecycle.activateSession(next.sessionId)
 
-    resolveRequest(available({ ifp: { thread_number: 8 } }))
+    resolveRequest(available({ 'floorplan.ifp.thread_number': 8 }))
 
     await vi.waitFor(() => expect(result.loading.value).toBe(false))
     expect(result.stepConfigDraft.value).toBeNull()

@@ -57,6 +57,7 @@ import {
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import type { RuntimeShutdownResult } from './runtimeClient'
 import { RuntimeOperationProjection } from './runtimeOperationProjection'
+import { mapStepConfigurationReadResult } from './stepConfigurationResult'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -728,67 +729,4 @@ export class EccRpcRuntimeService {
       })
     }
   }
-}
-
-function mapStepConfigurationReadResult(
-  result: unknown,
-): EccWorkspaceStepConfigurationReadResult {
-  if (!isRecord(result) || typeof result.step !== 'string') {
-    return {
-      reason: 'step_configuration_invalid_response',
-      status: 'unavailable',
-      step: '',
-    }
-  }
-  if (result.status === 'available') {
-    if (
-      typeof result.workspaceId !== 'string' ||
-      typeof result.workspaceRevision !== 'number' ||
-      !Number.isInteger(result.workspaceRevision) ||
-      result.workspaceRevision < 1 ||
-      typeof result.stepId !== 'string' ||
-      !isRecord(result.options)
-    ) {
-      return {
-        reason: 'step_configuration_invalid_response',
-        status: 'unavailable',
-        step: result.step,
-      }
-    }
-    return result as EccWorkspaceStepConfigurationReadResult
-  }
-  if (
-    (result.status === 'missing' || result.status === 'unavailable') &&
-    typeof result.reason === 'string'
-  ) {
-    if (
-      result.reason === 'step_configuration_unavailable' &&
-      (typeof result.workspaceId !== 'string' ||
-        typeof result.workspaceRevision !== 'number' ||
-        !Number.isInteger(result.workspaceRevision) ||
-        result.workspaceRevision < 1)
-    ) {
-      return {
-        reason: 'step_configuration_invalid_response',
-        status: 'unavailable',
-        step: result.step,
-      }
-    }
-    if (
-      result.status === 'unavailable' &&
-      result.reason === 'step_configuration_unavailable'
-    ) {
-      return { ...result, status: 'missing' } as EccWorkspaceStepConfigurationReadResult
-    }
-    return result as EccWorkspaceStepConfigurationReadResult
-  }
-  return {
-    reason: 'step_configuration_invalid_response',
-    status: 'unavailable',
-    step: result.step,
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

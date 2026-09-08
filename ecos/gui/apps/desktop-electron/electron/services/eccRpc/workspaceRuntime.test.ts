@@ -169,7 +169,16 @@ describe('EccWorkspaceRuntime', () => {
     })
     const opened = await service.openWorkspace({ directory: '/work/demo' })
     client.responses.push({
-      options: { skew_bound: 0.08 },
+      parameters: [
+        {
+          applies: 'cts',
+          default: 0.08,
+          description: 'CTS skew bound',
+          param: 'cts.skew_bound',
+          type: 'float',
+          value: 0.08,
+        },
+      ],
       status: 'available',
       step: 'CTS',
       stepId: 'CTS',
@@ -197,7 +206,7 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.isActive()).toBe(false)
   })
 
-  it('updates Step Options by identity without a file path', async () => {
+  it('updates Step Parameters by identity without a file path', async () => {
     const { client, service } = createService()
     client.responses.push({
       directory: '/work/demo',
@@ -214,7 +223,7 @@ describe('EccWorkspaceRuntime', () => {
     await service.updateWorkspaceStepConfiguration({
       commandId: 'step-configuration-1',
       expectedWorkspaceRevision: 1,
-      options: { ifp: { thread_number: 8 } },
+      parameters: { 'floorplan.ifp.thread_number': 8 },
       stepId: 'Floorplan',
       workspaceHandle: opened.workspaceHandle,
     })
@@ -224,7 +233,7 @@ describe('EccWorkspaceRuntime', () => {
       params: {
         commandId: 'step-configuration-1',
         expectedWorkspaceRevision: 1,
-        options: { ifp: { thread_number: 8 } },
+        parameters: { 'floorplan.ifp.thread_number': 8 },
         stepId: 'Floorplan',
         workspaceId: 'workspace-1',
       },
@@ -764,7 +773,16 @@ describe('EccWorkspaceRuntime', () => {
         workspaceRevision: 4,
       },
       {
-        options: { target_density: 0.49 },
+        parameters: [
+          {
+            applies: 'place',
+            default: 0.2,
+            description: 'Placement target density',
+            param: 'place.target_density',
+            type: 'float',
+            value: 0.49,
+          },
+        ],
         status: 'available',
         step: 'Legalization',
         stepId: 'Legalization',

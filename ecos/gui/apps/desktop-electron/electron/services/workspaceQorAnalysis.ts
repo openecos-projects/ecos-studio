@@ -15,6 +15,7 @@ import {
   normalizeQorMetricRecords,
   type ProjectQorMetricRecord,
   type ProjectQorWorkspaceInput,
+  type QorDimension,
 } from './qorAnalysis'
 
 export type WorkspaceAnalysisTexts = Record<string, string | null>
@@ -131,6 +132,16 @@ function snapshotQorProjection(
     return empty
   }
   const signoffStatus = snapshot.signoffAssessment?.status
+  const rawDimensions = record(qor?.dimensionScores)
+  const dimensionScores: Partial<Record<QorDimension, number>> = {}
+  for (const [dimension, dimensionScore] of Object.entries(rawDimensions ?? {})) {
+    if (!isQorDimension(dimension) || !finiteNumber(dimensionScore)) return empty
+    dimensionScores[dimension] = dimensionScore
+  }
+  const rawAreaStep = qor?.areaScoringStep
+  const areaScoringStep =
+    typeof rawAreaStep === 'string' ? parseProjectManifestFlowStep(rawAreaStep) : null
+  if (rawAreaStep !== undefined && rawAreaStep !== null && !areaScoringStep) return empty
   const assessment = ['ready', 'attention', 'blocked'].includes(String(signoffStatus))
     ? {
         gateStatus: gate as NonNullable<
@@ -138,6 +149,8 @@ function snapshotQorProjection(
         >['gateStatus'],
         score: value as number | null,
         scoreThreshold: threshold,
+        areaScoringStep,
+        dimensionScores,
         signoffStatus: signoffStatus!,
       }
     : null
@@ -203,6 +216,21 @@ function snapshotQorProjection(
   }
 }
 
+function isQorDimension(value: string): value is QorDimension {
+  return [
+    'timing',
+    'power_integrity',
+    'routability_physical',
+    'area_cost',
+    'clock_robustness_dfm',
+    'runtime',
+  ].includes(value)
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function flowState(value: unknown): ProjectStepStatus | undefined {
   if (typeof value !== 'string') return undefined
   switch (value.trim().toLowerCase()) {
@@ -210,6 +238,8 @@ function flowState(value: unknown): ProjectStepStatus | undefined {
     case 'succeeded':
     case 'completed':
       return 'success'
+    case 'warning':
+      return 'warning'
     case 'reused':
       return 'reused'
     case 'skipped':
@@ -252,6 +282,7 @@ function workspaceStatus(
   if (values.includes('failed')) return 'failed'
   if (values.includes('running')) return 'running'
   if (values.includes('unstart')) return 'in_progress'
+  if (values.includes('warning')) return 'warning'
   if (values.some((state) => state === 'success' || state === 'reused')) {
     return 'success'
   }

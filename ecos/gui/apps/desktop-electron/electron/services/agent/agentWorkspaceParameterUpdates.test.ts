@@ -9,15 +9,14 @@ describe('Agent Workspace parameter mapping', () => {
     const values = readAgentWorkspaceParameterValues(
       {
         parameters: {
-          frequency_max: 200,
-          target_density: 0.4,
-          routability_opt_flag: 0,
+          'design.frequency_mhz': 200,
+          'place.target_density': 0.4,
+          'place.routability_opt': 0,
+          'cts.skew_bound': 0.08,
+          'route.RT.-thread_number': 8,
         },
       },
-      {
-        CTS: { skew_bound: 0.08 },
-        route: { RT: { '-thread_number': 8 } },
-      },
+      {},
     )
 
     expect(values).toMatchObject({
@@ -37,11 +36,12 @@ describe('Agent Workspace parameter mapping', () => {
         { knob_id: 'route.thread_number', value: 8 },
       ]),
     ).toEqual({
-      workspace_parameters: { routability_opt_flag: 0 },
-      step_configurations: [
-        { step_id: 'CTS', options: { skew_bound: 0.08 } },
-        { step_id: 'route', options: { RT: { '-thread_number': 8 } } },
-      ],
+      workspace_parameters: {
+        'place.routability_opt': 0,
+        'cts.skew_bound': '0.08',
+        'route.RT.-thread_number': '8',
+      },
+      step_configurations: [],
     })
   })
 })

@@ -3,6 +3,7 @@ import type { PdkRequirement } from '../contracts/pdkInventory'
 
 export type WorkspaceStatus =
   | 'success'
+  | 'warning'
   | 'failed'
   | 'running'
   | 'in_progress'

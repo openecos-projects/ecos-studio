@@ -94,10 +94,7 @@ import {
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
-import {
-  agentWorkspaceStepIds,
-  readAgentWorkspaceParameterValues,
-} from '../services/agent/agentWorkspaceParameterUpdates'
+import { readAgentWorkspaceParameterValues } from '../services/agent/agentWorkspaceParameterUpdates'
 import {
   closeWindow,
   isWindowMaximized,
@@ -1405,8 +1402,10 @@ export function registerIpc(
       workspaceHandle,
     })
     const workspaceRevision =
-      isRecord(runtimeSnapshot) && typeof runtimeSnapshot.workspaceRevision === 'number'
-        ? runtimeSnapshot.workspaceRevision
+      isRecord(runtimeSnapshot) &&
+      isRecord(runtimeSnapshot.engineeringSnapshot) &&
+      typeof runtimeSnapshot.engineeringSnapshot.workspaceRevision === 'number'
+        ? runtimeSnapshot.engineeringSnapshot.workspaceRevision
         : undefined
     await executeWorkspaceRerun(
       pending.contract,
@@ -2576,29 +2575,9 @@ export function registerIpc(
         throw new Error('ECC Workspace Revision is unavailable.')
       }
       agentRequest.workspaceRevision = Number(workspaceRevision)
-      const stepConfigurations = Object.fromEntries(
-        (
-          await Promise.all(
-            agentWorkspaceStepIds.map(async (step) => {
-              try {
-                const result =
-                  await services.eccRuntimeService.readWorkspaceStepConfiguration({
-                    step,
-                    workspaceHandle: agentRequest.workspaceId!,
-                  })
-                return result.status === 'available' && isRecord(result.options)
-                  ? ([step, result.options] as const)
-                  : null
-              } catch {
-                return null
-              }
-            }),
-          )
-        ).filter((entry): entry is readonly [string, Record<string, unknown>] => !!entry),
-      )
       agentRequest.workspaceParameterValues = readAgentWorkspaceParameterValues(
         workspaceSpec,
-        stepConfigurations,
+        {},
       )
       const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
       if (typeof design?.name === 'string' && design.name) {

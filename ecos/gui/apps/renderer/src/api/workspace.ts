@@ -125,13 +125,8 @@ export function backendWorkspaceOptions(
   const startStep = config.flow_config?.start_step || flowSteps[0]
   const endStep = config.flow_config?.end_step || flowSteps[flowSteps.length - 1]
   const selectedSteps = new Set([...flowSteps, startStep, endStep].filter(Boolean))
-  const flowId = selectedSteps.has('Harden')
-    ? 'harden'
-    : selectedSteps.has('RCX') || selectedSteps.has('sta')
-      ? 'rcx'
-      : selectedSteps.size === 1 && selectedSteps.has('Synthesis')
-        ? 'syn_sta'
-        : 'rtl2gds'
+  const flowId =
+    selectedSteps.size === 1 && selectedSteps.has('Synthesis') ? 'syn_sta' : 'rtl2gds'
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
   const projectContext = config.project_context
 
@@ -182,25 +177,32 @@ export function backendWorkspaceOptions(
           }
         : {}),
       parameters: {
-        frequency_max: numberValue(parameters.frequency_max, 100),
-        core_utilization: numberValue(
+        'design.frequency_mhz': numberValue(parameters.frequency_max, 100),
+        'floorplan.core_util': numberValue(
           parameters.utilitization ?? parameters.core_utilization,
           fixedDie ? 0.5 : 0.6,
         ),
+        'floorplan.die_builder.mode': fixedDie ? 'die_size' : 'die_util',
         ...(fixedDie
           ? {
-              die_width: numberValue(parameters.die_width, 100),
-              die_height: numberValue(parameters.die_height, 100),
+              'floorplan.die_builder.die_size.width_micron': numberValue(
+                parameters.die_width,
+                100,
+              ),
+              'floorplan.die_builder.die_size.height_micron': numberValue(
+                parameters.die_height,
+                100,
+              ),
             }
           : {
-              core_margin: [
+              'floorplan.core_margin': [
                 numberValue(parameters.margin, 0),
                 numberValue(parameters.margin, 0),
               ],
             }),
-        max_fanout: numberValue(parameters.max_fanout, 20),
-        target_density: numberValue(parameters.target_density, 0.2),
-        target_overflow: numberValue(parameters.target_overflow, 0.1),
+        'cts.max_fanout': numberValue(parameters.max_fanout, 20),
+        'place.target_density': numberValue(parameters.target_density, 0.2),
+        'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
       },
     },
     workspaceBindings: {

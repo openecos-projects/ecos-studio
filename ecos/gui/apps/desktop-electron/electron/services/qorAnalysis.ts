@@ -1,15 +1,8 @@
 import type {
   ProjectManifestFlowStep as FlowStep,
   ProjectManifestWorkspaceStatus as ProjectWorkspaceStatus,
+  ProjectStepStatus,
 } from '@ecos-studio/shared'
-
-type ProjectStepStatus =
-  | 'success'
-  | 'reused'
-  | 'skipped'
-  | 'unstart'
-  | 'running'
-  | 'failed'
 
 export type QorDimension =
   | 'timing'
@@ -49,6 +42,8 @@ export interface ProjectQorWorkspaceInput {
     gateStatus: QorGateStatus
     score: number | null
     scoreThreshold: number
+    areaScoringStep: FlowStep | null
+    dimensionScores: Partial<Record<QorDimension, number>>
     signoffStatus: 'ready' | 'attention' | 'blocked'
   } | null
 }
@@ -215,6 +210,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   workspaceKey: string
   status: QorStatus
   overallScore: number | null
+  scoreThreshold: number
   gateStatus: QorGateStatus
   signoffReadiness: ProjectQorSignoffReadiness
   signoffComparison: ProjectQorSignoffComparisonContext
@@ -386,14 +382,6 @@ type QorMetricConfidence = ProjectQorMetricRecord['confidence']
 type QorMetricProjectRole = ProjectQorMetricRecord['projectRole']
 type QorMetricStepRole = ProjectQorMetricRecord['stepRole']
 
-interface QorMetricDefinition {
-  metricName: string
-  displayName: string
-  unit?: string
-  dimension: QorDimension
-  polarity: QorPolarity
-}
-
 const QOR_FLOW_STEPS: FlowStep[] = [
   'Synth',
   'Floor',
@@ -408,9 +396,6 @@ const QOR_FLOW_STEPS: FlowStep[] = [
   'STA',
   'Harden',
 ]
-
-/** The 0-100 QoR score line that separates the Home pass and fail presentation. */
-export const QOR_SCORE_THRESHOLD = 60
 
 const QOR_DIMENSIONS: QorDimension[] = [
   'timing',
@@ -429,522 +414,8 @@ const QOR_POLARITIES: QorPolarity[] = [
 ]
 
 const QOR_CONFIDENCES: QorMetricConfidence[] = ['high', 'medium', 'low']
-
 const QOR_PROJECT_ROLES: QorMetricProjectRole[] = ['final', 'trend', 'gate', 'none']
-
 const QOR_STEP_ROLES: QorMetricStepRole[] = ['primary', 'secondary', 'detail', 'hidden']
-
-const QOR_METRIC_REGISTRY: Record<string, QorMetricDefinition> = {
-  'cell area': {
-    metricName: 'synthesis_cell_area',
-    displayName: 'Synthesis Cell Area',
-    unit: 'um^2',
-    dimension: 'area_cost',
-    polarity: 'lower_is_better',
-  },
-  'cell number': {
-    metricName: 'synthesis_cell_count',
-    displayName: 'Synthesis Cell Count',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'wire number': {
-    metricName: 'synthesis_wire_count',
-    displayName: 'Synthesis Wire Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  'port number': {
-    metricName: 'synthesis_port_count',
-    displayName: 'Synthesis Port Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  'die area um 2': {
-    metricName: 'die_area',
-    displayName: 'Die Area',
-    unit: 'um^2',
-    dimension: 'area_cost',
-    polarity: 'lower_is_better',
-  },
-  'die width um': {
-    metricName: 'die_width',
-    displayName: 'Die Width',
-    unit: 'um',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'die height um': {
-    metricName: 'die_height',
-    displayName: 'Die Height',
-    unit: 'um',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'die util': {
-    metricName: 'die_utilization',
-    displayName: 'Die Utilization',
-    dimension: 'area_cost',
-    polarity: 'target_range',
-  },
-  die_utilization: {
-    metricName: 'die_utilization',
-    displayName: 'Die Utilization',
-    dimension: 'area_cost',
-    polarity: 'target_range',
-  },
-  'core area um 2': {
-    metricName: 'core_area',
-    displayName: 'Core Area',
-    unit: 'um^2',
-    dimension: 'area_cost',
-    polarity: 'lower_is_better',
-  },
-  'core util': {
-    metricName: 'core_utilization',
-    displayName: 'Core Utilization',
-    dimension: 'area_cost',
-    polarity: 'target_range',
-  },
-  'total instances': {
-    metricName: 'instance_count',
-    displayName: 'Instance Count',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'total nets': {
-    metricName: 'net_count',
-    displayName: 'Net Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  'total io pins': {
-    metricName: 'io_pin_count',
-    displayName: 'IO Pin Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  io_pin_count: {
-    metricName: 'io_pin_count',
-    displayName: 'IO Pin Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  hpwl: {
-    metricName: 'place_hpwl',
-    displayName: 'Place HPWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'gp hpwl': {
-    metricName: 'place_hpwl',
-    displayName: 'Place HPWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'dp hpwl': {
-    metricName: 'place_hpwl',
-    displayName: 'Place HPWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  grwl: {
-    metricName: 'place_grwl',
-    displayName: 'Place GRWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  flute: {
-    metricName: 'place_flute_wirelength',
-    displayName: 'Place FLUTE Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_congestion_egr_overflow_total: {
-    metricName: 'place_congestion_egr_overflow_total',
-    displayName: 'Place EGR Overflow Total',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'egr overflow total': {
-    metricName: 'place_congestion_egr_overflow_total',
-    displayName: 'Place EGR Overflow Total',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_congestion_egr_overflow_max: {
-    metricName: 'place_congestion_egr_overflow_max',
-    displayName: 'Place EGR Overflow Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'egr overflow max': {
-    metricName: 'place_congestion_egr_overflow_max',
-    displayName: 'Place EGR Overflow Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_rudy_utilization_max: {
-    metricName: 'place_rudy_utilization_max',
-    displayName: 'Place RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'rudy utilization max': {
-    metricName: 'place_rudy_utilization_max',
-    displayName: 'Place RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_lutrudy_utilization_max: {
-    metricName: 'place_lutrudy_utilization_max',
-    displayName: 'Place LUT-RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'lutrudy utilization max': {
-    metricName: 'place_lutrudy_utilization_max',
-    displayName: 'Place LUT-RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  buffer_num: {
-    metricName: 'cts_buffer_count',
-    displayName: 'CTS Buffer Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  buffer_area: {
-    metricName: 'cts_buffer_area',
-    displayName: 'CTS Buffer Area',
-    unit: 'um^2',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  clock_path_max_buffer: {
-    metricName: 'clock_path_max_buffer',
-    displayName: 'Clock Path Max Buffer',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  clock_path_min_buffer: {
-    metricName: 'clock_path_min_buffer',
-    displayName: 'Clock Path Min Buffer',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  total_clock_wirelength: {
-    metricName: 'clock_wirelength',
-    displayName: 'Clock Wirelength',
-    unit: 'um',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  max_clock_wirelength: {
-    metricName: 'cts_clock_wirelength_max',
-    displayName: 'CTS Max Clock Wirelength',
-    unit: 'um',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  max_level_of_clock_tree: {
-    metricName: 'cts_clock_tree_max_level',
-    displayName: 'CTS Clock Tree Max Level',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  wire_len: {
-    metricName: 'route_wirelength',
-    displayName: 'Route Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  num_via: {
-    metricName: 'route_via_count',
-    displayName: 'Route Via Count',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_violation_count: {
-    metricName: 'route_dr_total_violation_count',
-    displayName: 'Route DR Violations',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_violation_num: {
-    metricName: 'route_dr_total_violation_count',
-    displayName: 'Route DR Violations',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_patch_count: {
-    metricName: 'route_dr_total_patch_count',
-    displayName: 'Route DR Patches',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_patch_num: {
-    metricName: 'route_dr_total_patch_count',
-    displayName: 'Route DR Patches',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_wirelength: {
-    metricName: 'route_dr_total_wirelength',
-    displayName: 'Route DR Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_wire_length: {
-    metricName: 'route_dr_total_wirelength',
-    displayName: 'Route DR Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_via_count: {
-    metricName: 'route_dr_total_via_count',
-    displayName: 'Route DR Via Count',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_via_num: {
-    metricName: 'route_dr_total_via_count',
-    displayName: 'Route DR Via Count',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_la_total_overflow: {
-    metricName: 'route_la_total_overflow',
-    displayName: 'Route LA Overflow',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_overflow: {
-    metricName: 'route_la_total_overflow',
-    displayName: 'Route LA Overflow',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_la_total_demand: {
-    metricName: 'route_la_total_demand',
-    displayName: 'Route LA Demand',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  total_demand: {
-    metricName: 'route_la_total_demand',
-    displayName: 'Route LA Demand',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  drc_num: {
-    metricName: 'drc_count',
-    displayName: 'DRC Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  lvs_count: {
-    metricName: 'lvs_count',
-    displayName: 'LVS Violation Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  rcx_spef_file_count: {
-    metricName: 'rcx_spef_file_count',
-    displayName: 'RCX SPEF File Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  spef_file_count: {
-    metricName: 'rcx_spef_file_count',
-    displayName: 'RCX SPEF File Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  rcx_expected_corner_count: {
-    metricName: 'rcx_expected_corner_count',
-    displayName: 'RCX Expected Corner Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  rcx_missing_corner_count: {
-    metricName: 'rcx_missing_corner_count',
-    displayName: 'RCX Missing Corner Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  missing_spef_count: {
-    metricName: 'rcx_missing_corner_count',
-    displayName: 'RCX Missing Corner Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  sta_setup_wns: {
-    metricName: 'sta_setup_wns',
-    displayName: 'STA Setup WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  max_wns: {
-    metricName: 'sta_setup_wns',
-    displayName: 'STA Setup WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_setup_tns: {
-    metricName: 'sta_setup_tns',
-    displayName: 'STA Setup TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  max_tns: {
-    metricName: 'sta_setup_tns',
-    displayName: 'STA Setup TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_hold_wns: {
-    metricName: 'sta_hold_wns',
-    displayName: 'STA Hold WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  min_wns: {
-    metricName: 'sta_hold_wns',
-    displayName: 'STA Hold WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_hold_tns: {
-    metricName: 'sta_hold_tns',
-    displayName: 'STA Hold TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  min_tns: {
-    metricName: 'sta_hold_tns',
-    displayName: 'STA Hold TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_frequency_mhz: {
-    metricName: 'sta_frequency_mhz',
-    displayName: 'STA Frequency',
-    unit: 'MHz',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  'frequency mhz': {
-    metricName: 'sta_frequency_mhz',
-    displayName: 'STA Frequency',
-    unit: 'MHz',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_corner_count: {
-    metricName: 'sta_corner_count',
-    displayName: 'STA Corner Count',
-    dimension: 'timing',
-    polarity: 'trend_only',
-  },
-  sta_expected_corner_count: {
-    metricName: 'sta_expected_corner_count',
-    displayName: 'STA Expected Corner Count',
-    dimension: 'timing',
-    polarity: 'trend_only',
-  },
-  sta_missing_corner_count: {
-    metricName: 'sta_missing_corner_count',
-    displayName: 'STA Missing Corner Count',
-    dimension: 'timing',
-    polarity: 'lower_is_better',
-  },
-  setup_violation_count: {
-    metricName: 'sta_setup_violation_count',
-    displayName: 'STA Setup Violation Count',
-    dimension: 'timing',
-    polarity: 'lower_is_better',
-  },
-  hold_violation_count: {
-    metricName: 'sta_hold_violation_count',
-    displayName: 'STA Hold Violation Count',
-    dimension: 'timing',
-    polarity: 'lower_is_better',
-  },
-  harden_artifact_missing_count: {
-    metricName: 'harden_artifact_missing_count',
-    displayName: 'Harden Missing Artifact Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-}
-
-const QOR_METRIC_IDS = new Set(
-  Object.values(QOR_METRIC_REGISTRY).map((definition) => definition.metricName),
-)
-
-const DIMENSION_WEIGHTS: Record<QorDimension, number> = {
-  timing: 0.35,
-  power_integrity: 0.25,
-  routability_physical: 0.2,
-  area_cost: 0.1,
-  clock_robustness_dfm: 0.1,
-  runtime: 0,
-}
-
-const METRIC_FAIL_VALUES: Record<string, number> = {
-  drc_count: 10,
-  lvs_count: 10,
-  route_wirelength: 6000,
-  route_via_count: 2000,
-  cts_buffer_count: 20,
-  cts_buffer_area: 40,
-  clock_wirelength: 400000,
-  cts_clock_wirelength_max: 100000,
-  cts_clock_tree_max_level: 20,
-  die_area: 3000,
-  core_area: 2500,
-  core_utilization: 0.85,
-  synthesis_cell_area: 3000,
-  place_hpwl: 10000,
-  place_grwl: 12000,
-  place_flute_wirelength: 10000,
-  place_congestion_egr_overflow_total: 100,
-  place_congestion_egr_overflow_max: 20,
-  place_rudy_utilization_max: 1,
-  place_lutrudy_utilization_max: 1,
-  route_dr_total_violation_count: 50,
-  route_dr_total_patch_count: 100,
-  route_dr_total_wirelength: 6000,
-  route_dr_total_via_count: 2000,
-  route_la_total_overflow: 100,
-  rcx_missing_corner_count: 9,
-  sta_setup_wns: -0.2,
-  sta_setup_tns: -1,
-  sta_hold_wns: -0.2,
-  sta_hold_tns: -1,
-  sta_frequency_mhz: 100,
-  sta_setup_violation_count: 1,
-  sta_hold_violation_count: 1,
-  sta_missing_corner_count: 1,
-  harden_artifact_missing_count: 6,
-}
 
 export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetricRecord[] {
   const record = parseJsonObject(input.text)
@@ -1112,7 +583,9 @@ export function buildProjectQorTrendSummary(
     baselineLabel: baselineWorkspace
       ? baselineWorkspace.workspaceName || baselineWorkspace.workspaceId
       : 'Sequential workspace baseline',
-    scoreThreshold: QOR_SCORE_THRESHOLD,
+    scoreThreshold:
+      workspaceSummaries.find((workspace) => workspace.scoreThreshold > 0)
+        ?.scoreThreshold ?? 0,
     regressions,
     improvements,
     risks,
@@ -1144,8 +617,9 @@ function buildWorkspaceSummary(
       }),
     )
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
-  const areaScoringStep = resolveLastSuccessfulAreaStep(records, workspace.stepStatuses)
-  const projectRecords = selectProjectRecords(records, areaScoringStep)
+  const snapshotAssessment = workspace.authoritativeAssessment
+  const areaScoringStep = snapshotAssessment?.areaScoringStep ?? null
+  const projectRecords = records
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter((step) => {
     if (step === 'LVS' && workspace.stepStatuses.LVS === undefined) return false
     return !workspace.stepMetricTexts[step]
@@ -1184,7 +658,6 @@ function buildWorkspaceSummary(
     workspace.stepSummaryTexts,
     blockingIssues,
   )
-  const snapshotAssessment = workspace.authoritativeAssessment
   const hasSnapshotAssessment = 'authoritativeAssessment' in workspace
   const signoffReadiness = hasSnapshotAssessment
     ? snapshotSignoffReadiness(snapshotAssessment)
@@ -1193,13 +666,8 @@ function buildWorkspaceSummary(
   const effectiveGateStatus = hasSnapshotAssessment
     ? (snapshotAssessment?.gateStatus ?? 'unavailable')
     : combineGateStatus(gateStatus, signoffReadiness.status)
-  const dimensionScores = buildDimensionScores(projectRecords, areaScoringStep)
-  const weightedScore = weightedOverallScore(dimensionScores)
-  const overallScore = hasSnapshotAssessment
-    ? (snapshotAssessment?.score ?? null)
-    : signoffReadiness.scoreEligible && weightedScore !== null
-      ? roundScore(weightedScore)
-      : null
+  const dimensionScores = snapshotAssessment?.dimensionScores ?? {}
+  const overallScore = snapshotAssessment?.score ?? null
 
   return {
     workspaceId: workspace.workspaceId,
@@ -1207,6 +675,7 @@ function buildWorkspaceSummary(
     workspaceKey: workspace.workspaceKey,
     status: workspaceStatus(workspace.status, overallScore, effectiveGateStatus),
     overallScore,
+    scoreThreshold: snapshotAssessment?.scoreThreshold ?? 0,
     gateStatus: effectiveGateStatus,
     signoffReadiness,
     signoffComparison,
@@ -1324,7 +793,7 @@ function resolveWorkspaceGateStatus(
 }
 
 function isCompletedStepStatus(status: ProjectStepStatus | undefined): boolean {
-  return status === 'success' || status === 'reused'
+  return status === 'success' || status === 'warning' || status === 'reused'
 }
 
 function combineGateStatus(
@@ -1438,41 +907,6 @@ function stableStaPvtRcFingerprint(value: unknown): string | null {
   return values.length === value.length && values.length > 0
     ? Array.from(new Set(values)).sort().join('\u0001')
     : null
-}
-
-function selectProjectRecords(
-  records: ProjectQorMetricRecord[],
-  areaScoringStep: FlowStep | null,
-): ProjectQorMetricRecord[] {
-  const selected = new Map<string, ProjectQorMetricRecord>()
-  for (const record of records) {
-    if (record.projectRole === 'none') continue
-    if (record.dimension === 'area_cost' && record.step !== areaScoringStep) continue
-
-    const key = projectRecordKey(record)
-    const current = selected.get(key)
-    if (!current || compareProjectRecordSelection(record, current) < 0) {
-      selected.set(key, record)
-    }
-  }
-  return Array.from(selected.values()).sort((left, right) =>
-    left.metricName.localeCompare(right.metricName),
-  )
-}
-
-function compareProjectRecordSelection(
-  left: ProjectQorMetricRecord,
-  right: ProjectQorMetricRecord,
-): number {
-  const rolePriority: Record<ProjectQorMetricRecord['projectRole'], number> = {
-    final: 0,
-    gate: 1,
-    trend: 2,
-    none: 3,
-  }
-  const roleDelta = rolePriority[left.projectRole] - rolePriority[right.projectRole]
-  if (roleDelta !== 0) return roleDelta
-  return QOR_FLOW_STEPS.indexOf(right.step) - QOR_FLOW_STEPS.indexOf(left.step)
 }
 
 function buildProjectQorRisks(
@@ -2018,133 +1452,6 @@ function timingTriageState(
     return 'persistent'
   }
   return slackDeltaNs < 0 ? 'regressed' : 'improved'
-}
-
-function buildDimensionScores(
-  records: ProjectQorMetricRecord[],
-  areaScoringStep: FlowStep | null,
-): Partial<Record<QorDimension, number>> {
-  const scoredByDimension = new Map<QorDimension, number[]>()
-
-  for (const record of records) {
-    if (!isRecordIncludedInDimensionScore(record, record.dimension, areaScoringStep)) {
-      continue
-    }
-    const score = scoreRecord(record)
-    if (score === null) continue
-
-    const scores = scoredByDimension.get(record.dimension) ?? []
-    scores.push(score)
-    scoredByDimension.set(record.dimension, scores)
-  }
-
-  const entries = Array.from(scoredByDimension.entries()).map(([dimension, scores]) => [
-    dimension,
-    roundScore(average(scores)),
-  ])
-  return Object.fromEntries(entries)
-}
-
-function isRecordIncludedInDimensionScore(
-  record: ProjectQorMetricRecord,
-  dimension: QorDimension,
-  areaScoringStep: FlowStep | null,
-): boolean {
-  if (record.dimension !== dimension) return false
-  if (!record.rating.score) return false
-  return dimension !== 'area_cost' || record.step === areaScoringStep
-}
-
-function resolveLastSuccessfulAreaStep(
-  records: ProjectQorMetricRecord[],
-  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
-): FlowStep | null {
-  for (let index = QOR_FLOW_STEPS.length - 1; index >= 0; index -= 1) {
-    const step = QOR_FLOW_STEPS[index]!
-    if (
-      isCompletedStepStatus(stepStatuses[step]) &&
-      records.some(
-        (record) =>
-          record.step === step && record.dimension === 'area_cost' && record.rating.score,
-      )
-    ) {
-      return step
-    }
-  }
-  return null
-}
-
-function weightedOverallScore(
-  dimensionScores: Partial<Record<QorDimension, number>>,
-): number | null {
-  let weightedTotal = 0
-  let usedWeight = 0
-
-  for (const [dimension, score] of Object.entries(dimensionScores) as Array<
-    [QorDimension, number | undefined]
-  >) {
-    if (score === undefined) continue
-    const weight = DIMENSION_WEIGHTS[dimension]
-    if (weight <= 0) continue
-    weightedTotal += score * weight
-    usedWeight += weight
-  }
-
-  if (usedWeight === 0) return null
-  return weightedTotal
-}
-
-function scoreRecord(record: ProjectQorMetricRecord): number | null {
-  if (record.value === null || record.polarity === 'trend_only') return null
-  if (!QOR_METRIC_IDS.has(record.metricName)) return null
-
-  if (
-    record.metricName === 'sta_setup_wns' ||
-    record.metricName === 'sta_setup_tns' ||
-    record.metricName === 'sta_hold_wns' ||
-    record.metricName === 'sta_hold_tns'
-  ) {
-    const failValue = METRIC_FAIL_VALUES[record.metricName]
-    if (failValue === undefined || failValue >= 0) return null
-    if (record.value >= 0) return 100
-    return clampScore((100 * (record.value - failValue)) / -failValue)
-  }
-
-  if (record.polarity === 'target_range') {
-    if (record.metricName === 'core_utilization') {
-      return scoreTargetRange(
-        record.value,
-        0.45,
-        0.7,
-        METRIC_FAIL_VALUES.core_utilization,
-      )
-    }
-    return null
-  }
-
-  const failValue = METRIC_FAIL_VALUES[record.metricName]
-  if (!failValue || failValue <= 0) return null
-
-  if (record.polarity === 'lower_is_better') {
-    return clampScore((100 * (failValue - record.value)) / failValue)
-  }
-
-  if (record.polarity === 'higher_is_better') {
-    return clampScore((100 * record.value) / failValue)
-  }
-
-  return null
-}
-
-function scoreTargetRange(
-  value: number,
-  minTarget: number,
-  maxTarget: number,
-  failValue: number,
-): number {
-  if (value >= minTarget && value <= maxTarget) return 100
-  if (value < minTarget) return clampScore((100 * value) / minTarget)
-  return clampScore((100 * (failValue - value)) / (failValue - maxTarget))
 }
 
 function buildWorkspaceDeltas(
@@ -3266,18 +2573,6 @@ function compareProjectQorTimingCoverage(
 
 function compareDeltaMagnitude(left: ProjectQorDelta, right: ProjectQorDelta): number {
   return Math.abs(right.absoluteDelta) - Math.abs(left.absoluteDelta)
-}
-
-function average(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function clampScore(score: number): number {
-  return Math.max(0, Math.min(100, score))
-}
-
-function roundScore(score: number): number {
-  return Number(score.toFixed(1))
 }
 
 function roundMetric(value: number): number {

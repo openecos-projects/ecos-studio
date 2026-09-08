@@ -7,6 +7,7 @@ import type { ReadIssue, ReadSection } from './backendWorkspace.ts'
 
 export type ProjectStepStatus =
   | 'success'
+  | 'warning'
   | 'reused'
   | 'skipped'
   | 'unstart'
@@ -382,6 +383,15 @@ export interface ProjectAnalysisStepSnapshot {
 
 export interface ProjectAnalysisSnapshot {
   workspaceId: string
+  resultState?: {
+    workspaceRevision: number
+    pendingStepIds: string[]
+    previous?: {
+      workspaceRevision: number
+      completedStepCount: number
+      stepCount: number
+    }
+  }
   steps: Partial<Record<FlowStep, ProjectAnalysisStepSnapshot>>
   signoffReadiness: ProjectQorSignoffReadiness
   timingConstraints: ProjectQorTimingConstraints
@@ -507,6 +517,8 @@ export interface BackendProjectStepFindings {
   projectWorkspaceId: string
   step: FlowStep
   workspaceRevision: number
+  currentWorkspaceRevision?: number
+  resultState?: 'current' | 'stale' | 'not-started' | 'pending-rerun'
   details: ProjectAnalysisStepSnapshot
 }
 

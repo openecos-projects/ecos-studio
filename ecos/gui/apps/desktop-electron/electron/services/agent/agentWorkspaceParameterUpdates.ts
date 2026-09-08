@@ -1,7 +1,4 @@
-import type {
-  DesktopAgentStepConfigurationUpdate,
-  DesktopAgentWorkspaceRerunParameterPatch,
-} from '@ecos-studio/shared'
+import type { DesktopAgentWorkspaceRerunParameterPatch } from '@ecos-studio/shared'
 
 type ParameterValue = DesktopAgentWorkspaceRerunParameterPatch['value']
 type ValueKind =
@@ -15,8 +12,8 @@ type ValueKind =
 
 type Knob = {
   kind: ValueKind
+  parameter: string
   range?: readonly [number, number]
-  target: readonly ['workspace', string] | readonly ['step', string, ...string[]]
   transform?: (value: ParameterValue) => ParameterValue
 }
 
@@ -26,85 +23,63 @@ const workspace = (
   range?: readonly [number, number],
 ): Knob => ({
   kind,
+  parameter: id,
   range,
-  target: ['workspace', id],
 })
-const step = (
-  stepId: string,
-  path: string[],
-  kind: ValueKind,
+const numericString = (
+  id: string,
+  kind: 'integer' | 'number',
   range?: readonly [number, number],
-): Knob => ({ kind, range, target: ['step', stepId, ...path] })
+): Knob => ({
+  ...workspace(id, kind, range),
+  transform: (value) => String(value),
+})
 
 const knobs: Record<string, Knob> = {
-  'design.frequency_max': workspace('frequency_max', 'positive'),
-  'floorplan.utilitization': workspace('core_utilization', 'number', [0.01, 1]),
-  'floorplan.aspect_ratio': workspace('aspect_ratio', 'positive'),
-  'floorplan.die_width': workspace('die_width', 'positive'),
-  'floorplan.die_height': workspace('die_height', 'positive'),
-  'floorplan.global_right_padding': workspace('global_right_padding', 'integer', [
+  'design.frequency_max': workspace('design.frequency_mhz', 'positive'),
+  'floorplan.utilitization': workspace('floorplan.core_util', 'number', [0.01, 1]),
+  'floorplan.aspect_ratio': workspace('floorplan.aspect_ratio', 'positive'),
+  'floorplan.die_width': workspace(
+    'floorplan.die_builder.die_size.width_micron',
+    'positive',
+  ),
+  'floorplan.die_height': workspace(
+    'floorplan.die_builder.die_size.height_micron',
+    'positive',
+  ),
+  'floorplan.global_right_padding': workspace('place.global_right_padding', 'integer', [
     0,
     Infinity,
   ]),
-  'place.target_density': workspace('target_density', 'number', [0.1, 0.95]),
-  'place.target_overflow': workspace('target_overflow', 'number', [0, 1]),
-  'place.cell_padding_x': workspace('cell_padding_x', 'integer', [0, Infinity]),
+  'place.target_density': workspace('place.target_density', 'number', [0.1, 0.95]),
+  'place.target_overflow': workspace('place.target_overflow', 'number', [0, 1]),
+  'place.cell_padding_x': workspace('place.cell_padding_x', 'integer', [0, Infinity]),
   'place.routability_opt': {
-    ...workspace('routability_opt_flag', 'boolean'),
+    ...workspace('place.routability_opt', 'boolean'),
     transform: (value) => (value ? 1 : 0),
   },
-  'cts.max_fanout': workspace('max_fanout', 'integer'),
-  'route.bottom_layer': workspace('bottom_layer', 'string'),
-  'route.top_layer': workspace('top_layer', 'string'),
-  'place.density_weight': step('place', ['density_weight'], 'number'),
-  'place.gp_noise_ratio': step('place', ['gp_noise_ratio'], 'number', [0, 1]),
-  'place.num_threads': step('place', ['num_threads'], 'integer'),
-  'cts.skew_bound': step('CTS', ['skew_bound'], 'number', [0, 1]),
-  'cts.max_buf_tran': step('CTS', ['max_buf_tran'], 'number'),
-  'cts.root_input_slew': step('CTS', ['root_input_slew'], 'number'),
-  'cts.max_sink_tran': step('CTS', ['max_sink_tran'], 'number'),
-  'cts.max_cap': step('CTS', ['max_cap'], 'number'),
-  'cts.wirelength_unit_um': step('CTS', ['wirelength_unit_um'], 'number'),
-  'cts.wirelength_iterations': step('CTS', ['wirelength_iterations'], 'integer'),
-  'cts.slew_steps': step('CTS', ['slew_steps'], 'integer'),
-  'cts.cap_steps': step('CTS', ['cap_steps'], 'integer'),
-  'cts.wire_width': step('CTS', ['wire_width'], 'number'),
-  'cts.routing_layer': step('CTS', ['routing_layer'], 'int-list'),
-  'cts.buffer_type': step('CTS', ['buffer_type'], 'str-list'),
-  'cts.char_buf_redundancy_pct': step('CTS', ['char_buf_redundancy_pct'], 'number'),
-  'cts.force_branch_buffer': step('CTS', ['force_branch_buffer'], 'boolean'),
-  'cts.htree_depth_explore_window': step(
-    'CTS',
-    ['htree_depth_explore_window'],
-    'integer',
-  ),
-  'cts.htree_topology_tolerance': step('CTS', ['htree_topology_tolerance'], 'number'),
-  'cts.enable_analytical_htree': step('CTS', ['enable_analytical_htree'], 'boolean'),
-  'cts.enable_sink_clustering': step('CTS', ['enable_sink_clustering'], 'boolean'),
-  'legalization.cell_padding_x': step('legalization', ['cell_padding_x'], 'integer', [
-    0,
-    Infinity,
-  ]),
-  'legalization.bndry_padding_x': step('legalization', ['bndry_padding_x'], 'integer'),
-  'legalization.bndry_padding_y': step('legalization', ['bndry_padding_y'], 'integer'),
-  'legalization.detailed_place_flag': step(
-    'legalization',
-    ['detailed_place_flag'],
-    'boolean',
-  ),
-  'legalization.num_threads': step('legalization', ['num_threads'], 'integer'),
-  'legalization.deterministic': step('legalization', ['deterministic_flag'], 'boolean'),
-  'route.thread_number': step('route', ['RT', '-thread_number'], 'integer'),
-  'route.enable_timing': step('route', ['RT', '-enable_timing'], 'boolean'),
+  'cts.max_fanout': workspace('cts.max_fanout', 'integer'),
+  'route.bottom_layer': workspace('route.bottom_layer', 'string'),
+  'route.top_layer': workspace('route.top_layer', 'string'),
+  'place.density_weight': workspace('place.density_weight', 'number'),
+  'place.gp_noise_ratio': workspace('place.gp_noise_ratio', 'number', [0, 1]),
+  'place.num_threads': workspace('place.num_threads', 'integer'),
+  'cts.skew_bound': numericString('cts.skew_bound', 'number', [0, 1]),
+  'cts.max_buf_tran': numericString('cts.max_buf_tran', 'number'),
+  'cts.root_input_slew': numericString('cts.root_input_slew', 'number'),
+  'cts.max_sink_tran': numericString('cts.max_sink_tran', 'number'),
+  'cts.max_cap': numericString('cts.max_cap', 'number'),
+  'cts.wirelength_iterations': numericString('cts.wirelength_iterations', 'integer'),
+  'cts.slew_steps': numericString('cts.slew_steps', 'integer'),
+  'cts.cap_steps': numericString('cts.cap_steps', 'integer'),
+  'cts.routing_layer': workspace('cts.routing_layer', 'int-list'),
+  'cts.buffer_type': workspace('cts.buffer_type', 'str-list'),
+  'route.thread_number': numericString('route.RT.-thread_number', 'integer'),
+  'route.enable_timing': {
+    ...workspace('route.RT.-enable_timing', 'boolean'),
+    transform: (value) => (value ? '1' : '0'),
+  },
 }
-
-export const agentWorkspaceStepIds = [
-  ...new Set(
-    Object.values(knobs).flatMap((knob) =>
-      knob.target[0] === 'step' ? [knob.target[1]] : [],
-    ),
-  ),
-]
 
 function validString(value: unknown): value is string {
   return (
@@ -137,36 +112,9 @@ function validValue(value: ParameterValue, knob: Knob): boolean {
   return !knob.range || (value >= knob.range[0] && value <= knob.range[1])
 }
 
-function setOption(
-  target: Record<string, unknown>,
-  path: string[],
-  value: ParameterValue,
-): void {
-  let node = target
-  for (const segment of path.slice(0, -1)) {
-    const current = node[segment]
-    const child =
-      current && typeof current === 'object' && !Array.isArray(current)
-        ? (current as Record<string, unknown>)
-        : {}
-    node[segment] = child
-    node = child
-  }
-  node[path.at(-1)!] = Array.isArray(value) ? [...value] : value
-}
-
-function getValue(source: Record<string, unknown>, path: readonly string[]): unknown {
-  let value: unknown = source
-  for (const segment of path) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-    value = (value as Record<string, unknown>)[segment]
-  }
-  return value
-}
-
 export function readAgentWorkspaceParameterValues(
   workspaceSpec: Record<string, unknown>,
-  stepConfigurations: Record<string, Record<string, unknown>>,
+  _stepConfigurations: Record<string, Record<string, unknown>>,
 ): Record<string, ParameterValue> {
   const parameters =
     workspaceSpec.parameters &&
@@ -176,14 +124,20 @@ export function readAgentWorkspaceParameterValues(
       : {}
   const result: Record<string, ParameterValue> = {}
   for (const [knobId, knob] of Object.entries(knobs)) {
-    const value =
-      knob.target[0] === 'workspace'
-        ? parameters[knob.target[1]]
-        : getValue(stepConfigurations[knob.target[1]] ?? {}, knob.target.slice(2))
-    const normalized =
-      knobId === 'place.routability_opt' && (value === 0 || value === 1)
-        ? value === 1
-        : value
+    const value = parameters[knob.parameter]
+    let normalized = value
+    if (
+      knob.kind === 'boolean' &&
+      (value === 0 || value === 1 || value === '0' || value === '1')
+    ) {
+      normalized = value === 1 || value === '1'
+    } else if (
+      (knob.kind === 'integer' || knob.kind === 'number' || knob.kind === 'positive') &&
+      typeof value === 'string' &&
+      Number.isFinite(Number(value))
+    ) {
+      normalized = Number(value)
+    }
     if (
       typeof normalized === 'boolean' ||
       typeof normalized === 'string' ||
@@ -206,28 +160,17 @@ export function deriveAgentWorkspaceParameterUpdates(
   patch: DesktopAgentWorkspaceRerunParameterPatch[],
 ): {
   workspace_parameters: Record<string, unknown>
-  step_configurations: DesktopAgentStepConfigurationUpdate[]
+  step_configurations: []
 } | null {
   const workspaceParameters: Record<string, unknown> = {}
-  const stepOptions = new Map<string, Record<string, unknown>>()
   for (const item of patch) {
     const knob = knobs[item.knob_id]
     if (!knob || !validValue(item.value, knob)) return null
     const value = knob.transform?.(item.value) ?? item.value
-    if (knob.target[0] === 'workspace') {
-      workspaceParameters[knob.target[1]] = Array.isArray(value) ? [...value] : value
-      continue
-    }
-    const [, stepId, ...path] = knob.target
-    const options = stepOptions.get(stepId) ?? {}
-    setOption(options, path, value)
-    stepOptions.set(stepId, options)
+    workspaceParameters[knob.parameter] = Array.isArray(value) ? [...value] : value
   }
   return {
     workspace_parameters: workspaceParameters,
-    step_configurations: [...stepOptions].map(([step_id, options]) => ({
-      step_id,
-      options,
-    })),
+    step_configurations: [],
   }
 }

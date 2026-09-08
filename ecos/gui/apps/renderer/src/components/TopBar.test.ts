@@ -91,6 +91,36 @@ describe('TopBar signoff export menu', () => {
     wrapper.unmount()
   })
 
+  it('coordinates workspace shortcuts with the other topbar popovers', async () => {
+    const overlayOpened = vi.fn()
+    document.addEventListener('ecos-topbar-overlay-open', overlayOpened)
+    const wrapper = mount(TopBar, { props: { hasWorkspace: true } })
+    const trigger = wrapper.get('.workspace-quick-menu-btn')
+
+    for (const overlay of ['background-tasks', 'notifications', 'shutdown-status']) {
+      await trigger.trigger('click')
+      expect(trigger.attributes('aria-expanded')).toBe('true')
+      expect(overlayOpened).toHaveBeenLastCalledWith(
+        expect.objectContaining({ detail: 'workspace-shortcuts' }),
+      )
+
+      document.dispatchEvent(
+        new CustomEvent('ecos-topbar-overlay-open', { detail: overlay }),
+      )
+      await nextTick()
+      expect(trigger.attributes('aria-expanded')).toBe('false')
+    }
+
+    await trigger.trigger('click')
+    overlayOpened.mockClear()
+    await trigger.trigger('click')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(overlayOpened).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    document.removeEventListener('ecos-topbar-overlay-open', overlayOpened)
+  })
+
   it('disables Workspace mutations while shutdown is draining', async () => {
     const wrapper = mount(TopBar, {
       props: { hasWorkspace: true, mutationsDisabled: true },

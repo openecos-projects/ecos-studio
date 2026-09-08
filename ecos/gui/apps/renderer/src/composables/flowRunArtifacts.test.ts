@@ -87,6 +87,7 @@ describe('flow run artifacts', () => {
 
     expect(isSuccessfulFlowStep(initial)).toBe(true)
     expect(isSuccessfulFlowState('succeeded')).toBe(true)
+    expect(isSuccessfulFlowState('Warning')).toBe(true)
     expect(isSuccessfulFlowState('failed')).toBe(false)
     expect(flowStepArtifactFingerprint(changed)).not.toBe(
       flowStepArtifactFingerprint(initial),

@@ -1,9 +1,6 @@
-import json
 import os
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from ecos_runtime_adapter.errors import RuntimeApiError
 from ecos_runtime_adapter.requests import (
@@ -11,7 +8,6 @@ from ecos_runtime_adapter.requests import (
     ProjectManifestLoadRequest,
     ProjectManifestMutationRequest,
     WorkspaceConfigurationUpdateRequest,
-    WorkspaceCreateRequest,
     WorkspaceOpenRequest,
     WorkspaceSpecCreateRequest,
     WorkspaceSpecOpenRequest,
@@ -47,9 +43,15 @@ class WorkspaceSpecRuntimeMixin:
             raise RuntimeApiError("workspace_descriptor_invalid", str(exc)) from exc
 
     def read_workspace_configuration(self, request: WorkspaceOpenRequest) -> dict:
-        from chipcompiler.engine import read_workspace_configuration
+        from chipcompiler.engine import (
+            WorkspaceLifecycleError,
+            read_workspace_configuration_from_directory,
+        )
 
-        return read_workspace_configuration(self._load_workspace(request.directory))
+        try:
+            return read_workspace_configuration_from_directory(request.directory)
+        except WorkspaceLifecycleError as exc:
+            raise RuntimeApiError(exc.code, str(exc), exc.details) from exc
 
     def discover_project(self, request: ProjectManifestDiscoverRequest) -> dict | None:
         from chipcompiler.project import discover_project_manifest
@@ -110,6 +112,8 @@ class WorkspaceSpecRuntimeMixin:
                     ("workspaceId", "workspace_id"),
                     ("workspacePath", "workspace_path"),
                     ("sourceWorkspaceId", "source_workspace_id"),
+                    ("startStep", "start_step"),
+                    ("endStep", "end_step"),
                     ("lifecycle", "lifecycle"),
                     ("name", "name"),
                     ("reason", "reason"),
@@ -118,6 +122,21 @@ class WorkspaceSpecRuntimeMixin:
             },
             "updated_at": now,
         }
+        if source.get("sourceStep"):
+            translated["branch_from"] = {
+                "source_workspace_id": str(source.get("sourceWorkspaceId") or ""),
+                "source_step": str(source["sourceStep"]),
+                **(
+                    {"source_output_path": str(source["sourceOutputPath"])}
+                    if source.get("sourceOutputPath")
+                    else {}
+                ),
+                **(
+                    {"source_output_type": str(source["sourceOutputType"])}
+                    if source.get("sourceOutputType")
+                    else {}
+                ),
+            }
         if translated["type"] == "register_workspace":
             workspace_path = str(translated.get("workspace_path") or "")
             workspace_id = str(
@@ -137,69 +156,9 @@ class WorkspaceSpecRuntimeMixin:
 
     def create_workspace(
         self,
-        request: WorkspaceCreateRequest | WorkspaceSpecCreateRequest,
+        request: WorkspaceSpecCreateRequest,
     ) -> dict:
-        if isinstance(request, WorkspaceSpecCreateRequest):
-            return self._create_workspace_from_spec(request)
-        if not request.directory:
-            raise RuntimeApiError(
-                "invalid_request", "missing required field: directory"
-            )
-
-        temp_filelist_dir = None
-        input_filelist = request.filelist
-        if not input_filelist:
-            rtl_paths = _normalize_rtl_list(request.rtl_list or [])
-            if rtl_paths:
-                temp_filelist_dir = tempfile.TemporaryDirectory(
-                    prefix="ecc-workspace-filelist-"
-                )
-                input_filelist = _write_filelist(temp_filelist_dir.name, rtl_paths)
-
-        import chipcompiler.data as data_api
-
-        pdk_json, pdk_json_temp_path = _materialize_inline_pdk_json(request.pdk_json)
-        try:
-            workspace = data_api.create_workspace(
-                directory=request.directory,
-                pdk=request.pdk,
-                parameters=request.parameters or {},
-                origin_def=request.origin_def,
-                origin_verilog=request.origin_verilog,
-                input_filelist=input_filelist,
-                pdk_root=request.pdk_root,
-                pdk_json=pdk_json,
-                sdc=request.sdc,
-                flow_config=request.flow_config,
-            )
-        finally:
-            if pdk_json_temp_path is not None:
-                pdk_json_temp_path.unlink(missing_ok=True)
-            if temp_filelist_dir is not None:
-                temp_filelist_dir.cleanup()
-        if workspace is None:
-            raise RuntimeApiError(
-                "command_failed",
-                f"create workspace failed : {os.path.abspath(request.directory)}",
-            )
-
-        if getattr(workspace, "parameters", None) is not None:
-            from chipcompiler.data.workspace_descriptor import load_workspace_descriptor
-
-            load_workspace_descriptor(workspace.directory)
-            workspace = data_api.load_workspace(workspace.directory) or workspace
-
-        from chipcompiler.engine.workspace_flow import build_flow_for_workspace
-
-        build_flow_for_workspace(workspace)
-        snapshot = self._create_engineering_snapshot(workspace)
-        session = self.sessions.create_session(
-            workspace.directory,
-            workspace=workspace,
-            workspace_id=snapshot["workspaceId"],
-            workspace_revision=snapshot["workspaceRevision"],
-        )
-        return _workspace_session_result(session)
+        return self._create_workspace_from_spec(request)
 
     def _create_workspace_from_spec(self, request: WorkspaceSpecCreateRequest) -> dict:
         from chipcompiler.engine import (
@@ -379,7 +338,7 @@ class WorkspaceSpecRuntimeMixin:
                     session.directory,
                     request.expected_workspace_revision,
                     request.step_id,
-                    request.options,
+                    request.parameters,
                     request.command_id,
                 )
             except WorkspaceLifecycleError as exc:
@@ -537,40 +496,3 @@ def _workspace_session_result(session: WorkspaceSession) -> dict:
             else {}
         ),
     }
-
-
-def _normalize_rtl_list(rtl_list: list[str]) -> list[str]:
-    result: list[str] = []
-    seen = set()
-    for item in rtl_list:
-        path = str(item).strip()
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        result.append(path)
-    return result
-
-
-def _write_filelist(directory: str, rtl_paths: list[str]) -> str:
-    os.makedirs(directory, exist_ok=True)
-    filelist_path = os.path.join(directory, "filelist")
-    with open(filelist_path, "w", encoding="utf-8") as filelist:
-        for path in rtl_paths:
-            filelist.write(
-                f'"{path}"\n' if any(ch.isspace() for ch in path) else f"{path}\n"
-            )
-    return filelist_path
-
-
-def _materialize_inline_pdk_json(pdk_json: Any) -> tuple[Any, Path | None]:
-    if not isinstance(pdk_json, dict):
-        return pdk_json, None
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        prefix="ecc-pdk-",
-        suffix=".json",
-        delete=False,
-    ) as pdk_file:
-        json.dump(pdk_json, pdk_file)
-        return pdk_file.name, Path(pdk_file.name)

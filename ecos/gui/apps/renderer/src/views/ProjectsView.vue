@@ -242,13 +242,11 @@
                             projectExecutionOperations(project.source.path, workspace.id)
                           "
                         />
-                        <span
+                        <ProjectResultStatus
                           v-else
-                          class="workspace-flow-hint"
-                          :class="flowStatusHintClass(workspace.flowStatusHint.state)"
-                        >
-                          {{ workspace.flowStatusHint.label }}
-                        </span>
+                          :hint="workspace.flowStatusHint"
+                          :result-state="workspace.resultState"
+                        />
                       </button>
                       <div
                         class="workspace-tree-actions"
@@ -800,6 +798,7 @@ import {
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
 import ProjectComparisonRefreshStatus from './project-management/ProjectComparisonRefreshStatus.vue'
 import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
+import ProjectResultStatus from './project-management/ProjectResultStatus.vue'
 import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
 import ProjectCreationRecoveryPanel from './project-management/ProjectCreationRecoveryPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
@@ -2046,6 +2045,7 @@ function workspacePopoverPlacementClass(workspaceId: string): string {
 function stepStatusClass(status: ProjectStepStatus): string {
   const map: Record<ProjectStepStatus, string> = {
     success: 'step-success',
+    warning: 'step-warning',
     reused: 'step-reused',
     skipped: 'step-skipped',
     unstart: 'step-unstart',
@@ -2133,9 +2133,13 @@ function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
     return 'in_progress'
   if (
     manifest.workspaces.length > 0 &&
-    manifest.workspaces.every((workspace) => workspace.status === 'success')
+    manifest.workspaces.every((workspace) =>
+      ['success', 'warning'].includes(workspace.status),
+    )
   )
-    return 'success'
+    return manifest.workspaces.some((workspace) => workspace.status === 'warning')
+      ? 'warning'
+      : 'success'
   return manifest.workspaces.length > 0 ? 'in_progress' : 'not_started'
 }
 

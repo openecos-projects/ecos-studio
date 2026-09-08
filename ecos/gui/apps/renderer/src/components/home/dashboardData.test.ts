@@ -75,32 +75,64 @@ describe('dashboard data presentation', () => {
     ).toBe('40.0%')
   })
 
-  it('distinguishes stale and mixed Dashboard results', () => {
+  it.each([
+    {
+      status: 'stale' as const,
+      running: false,
+      message:
+        'Configuration changed since the last run. These results reflect the previous configuration. Rerun the flow to update them.',
+    },
+    {
+      status: 'stale' as const,
+      running: true,
+      message:
+        'The flow is running. Results still reflect the previous configuration until new results are available.',
+    },
+    {
+      status: 'mixed' as const,
+      running: false,
+      message:
+        'Some results still reflect the previous configuration. Rerun the remaining steps to update them.',
+    },
+    {
+      status: 'mixed' as const,
+      running: true,
+      message:
+        'The flow is running. Some steps have updated results; others still reflect the previous configuration.',
+    },
+  ])(
+    'explains $status results with running=$running and puts revisions in the detail',
+    ({ status, running, message }) => {
+      const notice = workspaceResultFreshnessNotice(
+        {
+          status,
+          currentRevision: 16,
+          staleRevision: 15,
+          currentStepIds: status === 'mixed' ? ['Synthesis'] : [],
+          staleStepIds: ['Place'],
+        },
+        running,
+      )
+      expect(notice?.message).toBe(message)
+      expect(notice?.detail).toBe(
+        'Current configuration: Revision 16. Previous results: Revision 15 (read-only).' +
+          (status === 'mixed' ? ' Updated steps use Revision 16.' : ''),
+      )
+    },
+  )
+
+  it('omits the notice when no previous results are displayed', () => {
+    expect(workspaceResultFreshnessNotice(undefined, false)).toBeNull()
     expect(
       workspaceResultFreshnessNotice(
         {
-          status: 'stale',
-          currentRevision: 4,
-          staleRevision: 1,
-          currentStepIds: [],
-          staleStepIds: ['Synthesis', 'Place'],
+          status: 'current',
+          currentRevision: 16,
+          currentStepIds: ['Place'],
+          staleStepIds: [],
         },
         false,
       ),
-    ).toContain('Showing read-only results from Revision 1')
-    expect(
-      workspaceResultFreshnessNotice(
-        {
-          status: 'mixed',
-          currentRevision: 4,
-          staleRevision: 1,
-          currentStepIds: ['Synthesis'],
-          staleStepIds: ['Place'],
-        },
-        true,
-      ),
-    ).toBe(
-      'Completed steps show current results from Revision 4; remaining steps still show read-only results from Revision 1 until they finish.',
-    )
+    ).toBeNull()
   })
 })

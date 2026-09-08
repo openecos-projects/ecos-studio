@@ -9,12 +9,12 @@ export const projectManifestFlowSteps = [
   'Legal',
   'Timing Opt',
   'Route',
-  'DRC',
-  'LVS',
   'Filler',
-  'Post-route LEC',
   'RCX',
   'STA',
+  'LVS',
+  'Post-route LEC',
+  'DRC',
   'Harden',
 ] as const
 
@@ -22,6 +22,7 @@ export type ProjectManifestFlowStep = (typeof projectManifestFlowSteps)[number]
 
 export type ProjectManifestWorkspaceStatus =
   | 'success'
+  | 'warning'
   | 'failed'
   | 'running'
   | 'in_progress'
@@ -115,43 +116,8 @@ export interface ProjectManifest {
   } | null
 }
 
-export interface EccProjectManifestWorkspace {
-  workspace_id: string
-  name: string
-  workspace_path: string
-  source_workspace_id: string | null
-  lifecycle: 'active' | 'archived'
-  created_at: string
-  updated_at: string
-}
-
-export interface EccProjectManifest {
-  schema_version: 1
-  project_id: string
-  name: string
-  design_name: string
-  description: string
-  created_at: string
-  updated_at: string
-  objectives: {
-    primary?: string
-    directions?: Record<string, 'maximize' | 'minimize'>
-  }
-  workspaces: EccProjectManifestWorkspace[]
-  mpc: {
-    resource_id: string
-    version: string
-    design_id: string
-  } | null
-  best_workspace: {
-    workspace_id: string
-    reason: string
-  } | null
-  qor_baseline: {
-    workspace_id: string
-    reason: string
-  } | null
-}
+export type EccProjectManifestWorkspace = ProjectManifestWorkspace
+export type EccProjectManifest = ProjectManifest
 
 export interface ProjectManifestWorkspaceRegistrationInput {
   projectRoot: string
@@ -249,53 +215,15 @@ export function projectManifestForPresentation(
   const rootPath = normalizeProjectManifestPath(containingProjectRoot)
   if (!rootPath) throw new Error('Project root is required.')
   return {
-    schema_version: 1,
-    project_id: source.project_id,
-    name: source.name,
-    design_name: source.design_name,
-    description: source.description,
+    ...source,
     root_path: normalizeProjectManifestPath(rootPath),
-    created_at: source.created_at,
-    updated_at: source.updated_at,
-    base_design: {
-      rtl_list: [],
-      parameters: { design: source.design_name },
-    },
-    objectives: {
-      primary: source.objectives.primary || 'timing',
-      directions: { ...source.objectives.directions },
-    },
     workspaces: source.workspaces.map((workspace) => ({
-      workspace_id: workspace.workspace_id,
-      name: workspace.name,
+      ...workspace,
       workspace_path: resolveProjectManifestWorkspacePath(
         rootPath,
         workspace.workspace_path,
       ),
-      source_workspace_id: workspace.source_workspace_id,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: workspace.lifecycle === 'archived' ? 'archived' : 'not_started',
-      created_at: workspace.created_at,
-      updated_at: workspace.updated_at,
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
     })),
-    mpc: source.mpc
-      ? {
-          resource_id: source.mpc.resource_id,
-          display_name: source.mpc.resource_id,
-          installed_version: source.mpc.version,
-          path: '',
-          spec_path: '',
-          design: { index: 0, design_name: source.mpc.design_id },
-          core_template: {},
-        }
-      : null,
-    best_workspace: source.best_workspace ? { ...source.best_workspace } : null,
-    qor_baseline: source.qor_baseline ? { ...source.qor_baseline } : null,
   }
 }
 

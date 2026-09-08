@@ -124,6 +124,10 @@ export function useStepDashboardData() {
         return
       }
       const next = snapshotStepDashboardData(detail)
+      const artifacts =
+        next.staleRevision !== null && detail.staleEvidence
+          ? detail.staleEvidence.artifacts
+          : detail.artifacts
       const artifactRevision = next.staleRevision ?? revision
       const readArtifact = async (
         artifactId: string,
@@ -157,7 +161,7 @@ export function useStepDashboardData() {
         }
         return url
       }
-      const layout = detail.artifacts.find(
+      const layout = artifacts.find(
         (artifact) =>
           artifact.kind === 'layout_image' && artifact.availability === 'available',
       )
@@ -178,7 +182,7 @@ export function useStepDashboardData() {
       next.mapUrl = next.congestionTileUrls.values().next().value ?? null
       const timingSummaries = []
       const timingPaths = []
-      for (const descriptor of detail.artifacts
+      for (const descriptor of artifacts
         .filter(
           (artifact) =>
             artifact.availability === 'available' &&

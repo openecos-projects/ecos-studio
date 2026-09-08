@@ -22,8 +22,9 @@ describe('workspaceConfigurationPatch', () => {
     expect(
       workspaceConfigurationPatch(config([120, 140]), config([])).parameters,
     ).toEqual({
-      die_width: 120,
-      die_height: 140,
+      'floorplan.die_builder.mode': 'die_size',
+      'floorplan.die_builder.die_size.width_micron': 120,
+      'floorplan.die_builder.die_size.height_micron': 140,
     })
   })
 
@@ -31,8 +32,9 @@ describe('workspaceConfigurationPatch', () => {
     expect(
       workspaceConfigurationPatch(config([]), config([120, 140])).parameters,
     ).toEqual({
-      die_width: 0,
-      die_height: 0,
+      'floorplan.die_builder.mode': 'die_util',
+      'floorplan.die_builder.die_size.width_micron': 0,
+      'floorplan.die_builder.die_size.height_micron': 0,
     })
   })
 })

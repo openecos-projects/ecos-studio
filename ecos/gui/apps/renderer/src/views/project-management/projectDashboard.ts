@@ -1,5 +1,6 @@
 import { buildStepIssues, countStepIssues } from '@/components/projectStepAnalysis'
 import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
+import { projectResultStatusLabel } from '@/utils/projectResultPresentation'
 import type {
   ProjectQorTrendSummary,
   QorGateStatus,
@@ -115,6 +116,7 @@ export interface DashboardAttentionItem {
 
 const RUN_STATE_LABELS: Record<ProjectRunStateSlice['state'], string> = {
   success: 'Success',
+  warning: 'Completed with warnings',
   failed: 'Failed',
   running: 'Running',
   unstart: 'Not started',
@@ -123,6 +125,7 @@ const RUN_STATE_LABELS: Record<ProjectRunStateSlice['state'], string> = {
 
 const WORKSPACE_STATUS_TONES: Record<ProjectWorkspace['status'], DashboardTone> = {
   success: 'good',
+  warning: 'warn',
   failed: 'bad',
   running: 'warn',
   in_progress: 'warn',
@@ -132,6 +135,7 @@ const WORKSPACE_STATUS_TONES: Record<ProjectWorkspace['status'], DashboardTone> 
 
 const WORKSPACE_STATUS_LABELS: Record<ProjectWorkspace['status'], string> = {
   success: 'Success',
+  warning: 'Completed with warnings',
   failed: 'Failed',
   running: 'Running',
   in_progress: 'In progress',
@@ -302,7 +306,10 @@ export function buildDashboardWorkspaceRows(
     return {
       workspaceId: workspace.id,
       workspaceName: workspace.name,
-      statusLabel: WORKSPACE_STATUS_LABELS[workspace.status],
+      statusLabel: projectResultStatusLabel(
+        workspace,
+        WORKSPACE_STATUS_LABELS[workspace.status],
+      ),
       statusTone: WORKSPACE_STATUS_TONES[workspace.status],
       isBaseline: workspace.id === project.qorTrendSummary.baselineWorkspaceId,
       isRecommended: workspace.id === recommendedWorkspaceId,

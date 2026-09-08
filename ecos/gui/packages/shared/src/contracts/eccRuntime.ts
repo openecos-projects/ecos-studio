@@ -55,7 +55,7 @@ export interface EccWorkspaceConfigurationUpdateRequest extends EccWorkspaceMuta
 
 export interface EccWorkspaceStepConfigurationUpdateRequest extends EccWorkspaceMutationRequest {
   commandId: string
-  options: Record<string, unknown>
+  parameters: Record<string, unknown>
   stepId: string
 }
 
@@ -63,9 +63,21 @@ export interface EccWorkspaceStepConfigurationReadRequest extends EccWorkspaceHa
   step: string
 }
 
+export interface EccWorkspaceParameterRecord {
+  applies: string
+  choices?: unknown[]
+  default: unknown
+  description: string
+  param: string
+  range?: unknown[]
+  type: string
+  unit?: string
+  value: unknown
+}
+
 export type EccWorkspaceStepConfigurationReadResult =
   | {
-      options: Record<string, unknown>
+      parameters: EccWorkspaceParameterRecord[]
       status: 'available'
       step: string
       stepId: string
@@ -73,7 +85,7 @@ export type EccWorkspaceStepConfigurationReadResult =
       workspaceRevision: number
     }
   | {
-      options?: Record<string, unknown>
+      parameters?: EccWorkspaceParameterRecord[]
       reason: string
       status: 'missing' | 'unavailable'
       step: string

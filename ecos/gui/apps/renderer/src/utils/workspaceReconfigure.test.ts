@@ -14,7 +14,10 @@ describe('workspaceReconfigureInitialConfig', () => {
               { inputId: 'rtl-main', role: 'rtl' },
               { inputId: 'constraints', role: 'sdc' },
             ],
-            parameters: { frequency_max: 250, core_margin: [3, 4] },
+            parameters: {
+              'design.frequency_mhz': 250,
+              'floorplan.core_margin': [3, 4],
+            },
             pdk: {
               familyId: 'ics55',
               mode: 'manual',
@@ -73,7 +76,12 @@ describe('workspaceReconfigureInitialConfig', () => {
       pdk_root: '/pdk',
       rtl_list: ['/ws/origin/gcd.v'],
       sdc: '/ws/origin/gcd.sdc',
-      parameters: { design: 'gcd', top_module: 'gcd_top', margin: 3 },
+      parameters: {
+        design: 'gcd',
+        top_module: 'gcd_top',
+        frequency_max: 250,
+        margin: 3,
+      },
       flow_config: { steps: ['Synthesis', 'STA'] },
       pdk_config: {
         tech_lef: ['/pdk/tech.lef'],

@@ -16,7 +16,6 @@ from ecos_runtime_adapter.requests import (
     ProjectManifestDiscoverRequest,
     ProjectManifestLoadRequest,
     ProjectManifestMutationRequest,
-    WorkspaceCreateRequest,
     WorkspaceIdRequest,
     WorkspaceInfoRequest,
     WorkspaceStepConfigurationReadRequest,
@@ -92,7 +91,7 @@ class DummyFlow:
         DummyFlow.instances.append(self)
 
     def has_init(self):
-        return False
+        return True
 
     def add_step(self, step, tool, state):
         self.added_steps.append((step, tool, state))
@@ -178,7 +177,15 @@ def _workspace(directory: Path):
     return SimpleNamespace(
         directory=directory.resolve(),
         design=design,
-        flow=SimpleNamespace(path=directory / "home" / "flow.json", data={"steps": []}),
+        flow=SimpleNamespace(
+            path=directory / "home" / "flow.json",
+            data={
+                "steps": [
+                    {"name": "Synthesis", "tool": "yosys", "state": "Unstart"},
+                    {"name": "Floorplan", "tool": "ecc", "state": "Unstart"},
+                ]
+            },
+        ),
         home=SimpleNamespace(path=directory / "home" / "home.json"),
     )
 
@@ -261,34 +268,6 @@ def _assert_call_waits_for_session_lock(api, workspace_id, call, entered):
         raise payload
     assert entered.is_set()
     return payload
-
-
-def test_create_workspace_returns_plain_runtime_result_and_session(
-    monkeypatch, tmp_path
-):
-    capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    api = WorkspaceRuntimeApi()
-
-    result = api.create_workspace(
-        WorkspaceCreateRequest(
-            directory=str(ws),
-            pdk="ics55",
-            pdk_root="/pdk",
-            pdk_json={"name": "ics55"},
-            parameters={"Design": "gcd"},
-            rtl_list=["a.v"],
-            sdc="/constraints/top.sdc",
-        )
-    )
-
-    assert set(result) == {"workspaceId", "workspaceRevision", "directory"}
-    assert result["directory"] == str(ws.resolve())
-    assert result["workspaceId"].startswith("workspace-")
-    assert result["workspaceRevision"] == 1
-    assert isinstance(capture["create_kwargs"]["pdk_json"], str)
-    assert capture["create_kwargs"]["sdc"] == "/constraints/top.sdc"
-    assert DummyFlow.instances[0].created
-    assert api.sessions.get_session(result["workspaceId"]).directory == ws.resolve()
 
 
 def test_managed_create_uses_shared_project_workspace_interface(monkeypatch, tmp_path):
@@ -403,128 +382,6 @@ def test_project_and_descriptor_errors_keep_domain_error_codes(monkeypatch):
 
     assert manifest_error.value.code == "project_manifest_invalid"
     assert descriptor_error.value.code == "workspace_descriptor_invalid"
-
-
-def test_create_workspace_forwards_dynamic_flow_config(monkeypatch, tmp_path):
-    capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    flow_config = {
-        "start_step": "Synthesis",
-        "end_step": "Harden",
-        "steps": ["Synthesis", "RCX", "sta", "Harden"],
-    }
-
-    WorkspaceRuntimeApi().create_workspace(
-        WorkspaceCreateRequest(directory=str(ws), flow_config=flow_config)
-    )
-
-    assert capture["create_kwargs"]["flow_config"] == flow_config
-
-
-def test_create_workspace_writes_rtl_list_filelist_outside_workspace(
-    monkeypatch,
-    tmp_path,
-):
-    capture, ws = _install_runtime_mocks(
-        monkeypatch,
-        tmp_path,
-        create_workspace_files=False,
-    )
-    project = tmp_path / "project"
-    project.mkdir()
-    rtl_paths = [str(project / "a.v"), str(project / "b.v")]
-    api = WorkspaceRuntimeApi()
-
-    api.create_workspace(
-        WorkspaceCreateRequest(
-            directory=str(ws),
-            pdk="ics55",
-            parameters={"Design": "gcd"},
-            rtl_list=rtl_paths,
-        )
-    )
-
-    input_filelist = Path(capture["create_kwargs"]["input_filelist"])
-    assert input_filelist.name == "filelist"
-    assert not input_filelist.is_relative_to(ws)
-    assert capture["input_filelist_lines"] == rtl_paths
-    assert capture["workspace_entries_when_create_called"] == []
-    assert not (ws / "filelist").exists()
-
-
-def test_create_workspace_materializes_inline_pdk_json_before_data_api(
-    monkeypatch, tmp_path
-):
-    pdk_json = {"name": "ics55", "lef": ["tech.lef"]}
-    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    seen = {}
-
-    def create_workspace(**kwargs):
-        pdk_json_path = Path(kwargs["pdk_json"])
-        seen["pdk_json"] = json.loads(pdk_json_path.read_text(encoding="utf-8"))
-        return _workspace(Path(kwargs["directory"]))
-
-    monkeypatch.setattr("chipcompiler.data.create_workspace", create_workspace)
-    api = WorkspaceRuntimeApi()
-
-    api.create_workspace(
-        WorkspaceCreateRequest(
-            directory=str(ws),
-            pdk="ics55",
-            pdk_json=pdk_json,
-        )
-    )
-
-    assert seen["pdk_json"] == pdk_json
-
-
-def test_create_workspace_with_inline_pdk_json_uses_real_data_api(
-    monkeypatch, tmp_path
-):
-    pdk_root = tmp_path / "pdk"
-    tech = pdk_root / "tech.lef"
-    lef = pdk_root / "stdcell.lef"
-    liberty = pdk_root / "stdcell.lib"
-    for path in (tech, lef, liberty):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("VERSION 5.8 ;\n")
-
-    workspace_dir = tmp_path / "workspace"
-    monkeypatch.setattr(
-        "chipcompiler.engine.workspace_flow.build_flow_for_workspace",
-        lambda _workspace: SimpleNamespace(),
-    )
-
-    api = WorkspaceRuntimeApi()
-    result = api.create_workspace(
-        WorkspaceCreateRequest(
-            directory=str(workspace_dir),
-            pdk="ics55",
-            pdk_json={
-                "name": "ics55",
-                "root": str(pdk_root),
-                "tech": str(tech),
-                "lefs": [str(lef)],
-                "libs": [str(liberty)],
-            },
-            parameters={
-                "Design": "gcd",
-                "Top module": "gcd",
-                "Clock": "clk",
-            },
-        )
-    )
-
-    assert result["directory"] == str(workspace_dir.resolve())
-    pdk_config_path = workspace_dir / "home" / "pdk.json"
-    assert pdk_config_path.is_file()
-    parameters = json.loads((workspace_dir / "home" / "parameters.json").read_text())
-    assert parameters["pdk_config"] == str(pdk_config_path.resolve())
-    session = api.sessions.get_session(result["workspaceId"])
-    assert session.workspace.pdk.tech == tech
-    assert session.workspace.pdk.lefs == [lef]
-    assert session.workspace.pdk.libs == [liberty]
-    assert session.workspace.pdk.buffers
-    assert session.directory == workspace_dir.resolve()
 
 
 def test_open_workspace_loads_without_creating_step_workspaces(monkeypatch, tmp_path):
@@ -783,25 +640,6 @@ def test_recover_interrupted_is_marker_scoped_and_idempotent(monkeypatch, tmp_pa
     ) == {"recovered": []}
 
 
-def test_create_workspace_replaces_existing_same_directory_session(
-    monkeypatch, tmp_path
-):
-    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
-    api = WorkspaceRuntimeApi()
-
-    opened = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))
-    opened_session = api.sessions.get_session(opened["workspaceId"])
-    opened_session.db_handle = object()
-    created = api.create_workspace(WorkspaceCreateRequest(directory=str(ws)))
-
-    assert created["workspaceId"] != opened["workspaceId"]
-    assert opened_session.db_handle is None
-    with pytest.raises(RuntimeApiError, match="workspace session not found"):
-        api.workspace_home(WorkspaceIdRequest(workspace_id=opened["workspaceId"]))
-    created_session = api.sessions.get_session(created["workspaceId"])
-    assert created_session.workspace is not opened_session.workspace
-
-
 def test_open_workspace_reuses_existing_same_directory_session(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     api = WorkspaceRuntimeApi()
@@ -886,7 +724,7 @@ def test_step_configuration_directory_read_does_not_create_session(
         lambda directory, step: {
             "step": step,
             "stepId": step,
-            "options": {"skew_bound": 0.08},
+            "parameters": [{"param": "cts.skew_bound", "value": 0.08}],
             "workspaceId": "workspace-1",
             "workspaceRevision": 3,
         },
@@ -901,7 +739,7 @@ def test_step_configuration_directory_read_does_not_create_session(
         "status": "available",
         "step": "CTS",
         "stepId": "CTS",
-        "options": {"skew_bound": 0.08},
+        "parameters": [{"param": "cts.skew_bound", "value": 0.08}],
         "workspaceId": "workspace-1",
         "workspaceRevision": 3,
     }
@@ -912,8 +750,8 @@ def test_step_configuration_directory_read_does_not_create_session(
 def test_workspace_configuration_read_does_not_create_session(monkeypatch, tmp_path):
     _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "chipcompiler.engine.read_workspace_configuration",
-        lambda workspace: {
+        "chipcompiler.engine.read_workspace_configuration_from_directory",
+        lambda directory: {
             "workspaceSpec": {
                 "design": {"topModule": "gcd_top", "clockPort": "clk"}
             },
@@ -1002,7 +840,7 @@ def test_step_configuration_update_releases_active_session_db(monkeypatch, tmp_p
             workspace_id=workspace_id,
             expected_workspace_revision=1,
             step_id="Floorplan",
-            options={"ifp": {"thread_number": 8}},
+            parameters={"floorplan.ifp.thread_number": 8},
         )
     )
 
@@ -1093,7 +931,7 @@ def test_step_configuration_update_waits_for_session_mutation_lock(monkeypatch, 
                 workspace_id=workspace_id,
                 expected_workspace_revision=1,
                 step_id="Floorplan",
-                options={"ifp": {"thread_number": 8}},
+                parameters={"floorplan.ifp.thread_number": 8},
             )
         ),
         entered=entered,
@@ -1753,6 +1591,22 @@ def test_flow_run_step_initializes_db_before_direct_step(monkeypatch, tmp_path):
     assert not flow.engine_db.has_init()
     assert flow.engine_db.close_calls == 1
     assert api.sessions.get_session(workspace_id).db_handle is None
+
+
+def test_flow_run_step_preserves_warning_as_a_successful_result(monkeypatch, tmp_path):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    DummyFlow.workspace_step_specs = ({"name": "lec", "tool": "yosys_lec"},)
+    DummyFlow.next_run_states = [StateEnum.Warning]
+    api = WorkspaceRuntimeApi()
+    workspace_id = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))[
+        "workspaceId"
+    ]
+
+    result = api.flow_run_step(
+        FlowRunStepRequest(workspace_id=workspace_id, step="lec", rerun=False)
+    )
+
+    assert result == {"step": "lec", "state": "Warning"}
 
 
 def test_flow_run_step_with_active_session_db_injects_and_captures_final_db(

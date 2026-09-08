@@ -33,10 +33,6 @@ interface BaselineWorkspaceSnapshot {
 const snapshotCache = new Map<string, BaselineWorkspaceSnapshot>()
 const READ_TIMEOUT_MS = 12_000
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
 /** Clears cached baseline workspace snapshots (route leave / workspace close). */
 export function clearBaselineStepConfigCache(): void {
   snapshotCache.clear()
@@ -276,7 +272,7 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
         }
         return
       }
-      if (!isRecord(result.options)) {
+      if (!Array.isArray(result.parameters)) {
         applyResult({
           status: 'unavailable',
           baselineWorkspaceName: snapshot.workspaceName,
@@ -292,7 +288,13 @@ export function useBaselineStepConfig(step: Ref<StepEnum | undefined>) {
         baselineSource: baseline.source,
         workspaceRevision: result.workspaceRevision,
         configRelativePath: result.stepId ?? result.step,
-        rawText: JSON.stringify(result.options, null, 2),
+        rawText: JSON.stringify(
+          Object.fromEntries(
+            result.parameters.map((parameter) => [parameter.param, parameter.value]),
+          ),
+          null,
+          2,
+        ),
       })
     } catch (cause) {
       if (disposed || token !== requestToken) return

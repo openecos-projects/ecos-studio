@@ -227,10 +227,7 @@ import {
 } from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
-import {
-  updateWorkspaceConfigurationApi,
-  updateWorkspaceStepConfigurationApi,
-} from '@/api/workspace'
+import { updateWorkspaceConfigurationApi } from '@/api/workspace'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
   registerProjectManagedWorkspace,
@@ -1750,7 +1747,6 @@ async function executeWorkspaceParameterUpdate(
         ),
       updateConfiguration: updateWorkspaceConfigurationApi,
       updateRevision: (revision) => workspaceLifecycle.updateWorkspaceRevision(revision),
-      updateStepConfiguration: updateWorkspaceStepConfigurationApi,
       workspaceHandle: workspaceLifecycle.session.value.workspaceId,
     })
   } finally {

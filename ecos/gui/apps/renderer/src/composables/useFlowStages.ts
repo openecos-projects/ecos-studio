@@ -101,6 +101,8 @@ function normalizeFlowStageState(value: string | null | undefined): string {
     case 'completed':
     case 'complete':
       return 'Success'
+    case 'warning':
+      return 'Warning'
     case 'ongoing':
     case 'running':
       return 'Ongoing'
