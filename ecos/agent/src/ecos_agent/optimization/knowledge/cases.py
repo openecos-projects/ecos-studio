@@ -733,6 +733,17 @@ def _replay_audit_entries(
     )
 
 
+def replay_case_audit_prefix(
+    replay: EmpiricalCaseAuditReplay, event_count: int
+) -> EmpiricalCaseAuditReplay:
+    """Re-verify a leading prefix of a verified replay (R2 crash recovery)."""
+    if event_count > replay.event_count:
+        raise EmpiricalCaseAuditIntegrityError(
+            "empirical case audit prefix exceeds replayed events"
+        )
+    return _replay_audit_entries(replay.entries[:event_count])
+
+
 def _verify_selection_audit(
     audit: EmpiricalCaseAudit,
     cases: tuple[TerminalEmpiricalCase, ...],

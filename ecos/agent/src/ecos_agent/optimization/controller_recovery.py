@@ -23,6 +23,7 @@ from ecos_agent.optimization.execution import CandidateExecutionEvidence
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditReplay,
     EmpiricalCaseAuditStore,
+    replay_case_audit_prefix,
 )
 from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
@@ -106,19 +107,24 @@ class ControllerRecoveryMixin:
         case_audit_replay = case_audit.verify()
         # R2: a crash between the ledger append and the state write leaves the
         # ledger ahead of the snapshot.  Replay only the surplus terminal
-        # outcomes; any other divergence stays an integrity error.
+        # outcomes; any other divergence stays an integrity error.  Case-audit
+        # entries appended by the surplus merges are tolerated the same way.
         surplus_terminals: tuple[OptimizationTerminalOutcome, ...] = ()
         prefix_replay = replay
+        prefix_case_audit = case_audit_replay
         if snapshot.ledger_event_count != len(replay.entries):
             surplus_terminals = cls._surplus_terminal_outcomes(snapshot, replay)
             prefix_replay = cls._replay_prefix(replay, snapshot.ledger_event_count)
+            prefix_case_audit = replay_case_audit_prefix(
+                case_audit_replay, snapshot.case_audit_event_count
+            )
         cls._verify_snapshot_trace(
             snapshot,
             prefix_replay,
             audit_replay,
             provider_audit_replay,
             decision_audit_replay,
-            case_audit_replay,
+            prefix_case_audit,
         )
         if snapshot.task_memory_scope_sha256 != task_memory_scope_sha256:
             raise OptimizationEpisodeControllerError(
