@@ -38,7 +38,7 @@
           :entry="entry"
           :validating="store.isValidating(entry.descriptor.key)"
           :write-error="store.errorFor(entry.descriptor.key)"
-          @commit="(value) => void store.set(entry.descriptor.key, value)"
+          @commit="(value) => onCommit(entry.descriptor.key, value)"
           @reset="() => void store.reset(entry.descriptor.key)"
         />
       </div>
@@ -59,6 +59,19 @@ const route = useRoute()
 const store = useSettingsRegistryStore()
 const searchQuery = ref('')
 const activeCategory = ref<string>(ALL_CATEGORIES)
+
+/**
+ * An empty committed value means "back to the built-in resolution" (the
+ * registry default is null), so it goes through the reset channel instead of
+ * being validated as a literal path or PDK id.
+ */
+function onCommit(key: string, value: string): void {
+  if (value === '') {
+    void store.reset(key)
+  } else {
+    void store.set(key, value)
+  }
+}
 
 const categories = computed(() => {
   const names = new Set<string>()

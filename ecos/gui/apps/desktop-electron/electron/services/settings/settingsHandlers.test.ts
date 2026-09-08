@@ -164,6 +164,13 @@ describe('settings handlers', () => {
       handlers['runtime.eccSizerRoot'].validate(nonExecutableSizer),
     ).resolves.toMatchObject({ ok: false })
 
+    const missingSizerBinary = await createTempRoot()
+    await mkdir(join(missingSizerBinary, 'src'), { recursive: true })
+    await writeFile(join(missingSizerBinary, 'src', 'sizer_os.tcl'), '', 'utf8')
+    await expect(
+      handlers['runtime.eccSizerRoot'].validate(missingSizerBinary),
+    ).resolves.toMatchObject({ ok: false })
+
     await expect(
       handlers['runtime.eccSizerRoot'].validate(join(await createTempRoot(), 'nope')),
     ).resolves.toMatchObject({ ok: false })

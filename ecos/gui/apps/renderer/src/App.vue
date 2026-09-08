@@ -278,6 +278,8 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string
+  /** True when the wizard reopens an existing workspace (Update Workspace). */
+  isWorkspaceUpdate?: boolean
 }
 
 const router = useRouter()
@@ -695,6 +697,7 @@ async function buildReconfigureWizardInitialConfig(
 
   return {
     directory: workspacePath,
+    isWorkspaceUpdate: true,
     lockWorkspaceDirectory: true,
     standaloneWorkspace: !resolvedProjectContext,
     pdk:

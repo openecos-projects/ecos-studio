@@ -36,6 +36,16 @@ function errorFromException(error: unknown): string {
 }
 
 /**
+ * Apply-failure records, kept per key together with the value that failed, so
+ * every list() (any window, any reload) reports the same error status until
+ * the value changes again or a later write succeeds.
+ */
+interface ApplyFailure {
+  error: string
+  value: string | null
+}
+
+/**
  * Transactional write path for registry-owned settings:
  * validate -> persist -> apply, with a changed broadcast after every accepted
  * write so all windows converge (last write wins).
@@ -44,8 +54,10 @@ export class SettingsRegistryService {
   private readonly broadcast: SettingsRegistryServiceOptions['broadcast']
   private readonly handlers: Record<string, SettingHandler>
   private readonly isEccRuntimePoolBusy: () => boolean
-  private readonly pendingApplyKeys = new Set<string>()
   private readonly settingsStore: SettingsRegistryServiceOptions['settingsStore']
+  /** Keys whose runtime apply was deferred while the ECC pool was busy. */
+  private readonly pendingApplyKeys = new Set<string>()
+  private readonly applyFailures = new Map<string, ApplyFailure>()
 
   constructor(options: SettingsRegistryServiceOptions) {
     this.broadcast = options.broadcast
@@ -85,22 +97,12 @@ export class SettingsRegistryService {
     }
 
     await handler.persist(value)
-
-    let status: DesktopSettingStatus
-    try {
+    return await this.finishWrite(descriptor, value, async () => {
       const outcome = await handler.apply(value)
-      if (outcome === 'pending') {
-        this.pendingApplyKeys.add(key)
-        status = { kind: 'pending' }
-      } else {
-        this.pendingApplyKeys.delete(key)
-        status = okStatus(validation.displayInfo)
-      }
-    } catch (error) {
-      status = { kind: 'error', error: errorFromException(error) }
-    }
-
-    return await this.finishWrite(descriptor, status)
+      return outcome === 'pending'
+        ? { kind: 'pending' }
+        : okStatus(validation.displayInfo)
+    })
   }
 
   async reset(key: unknown): Promise<DesktopSettingWriteResult> {
@@ -118,17 +120,10 @@ export class SettingsRegistryService {
     }
 
     await handler.clear()
-
-    let status: DesktopSettingStatus
-    try {
+    return await this.finishWrite(descriptor, null, async () => {
       const outcome = await handler.apply(null)
-      this.pendingApplyKeys.delete(key)
-      status = outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
-    } catch (error) {
-      status = { kind: 'error', error: errorFromException(error) }
-    }
-
-    return await this.finishWrite(descriptor, status)
+      return outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
+    })
   }
 
   /**
@@ -145,8 +140,24 @@ export class SettingsRegistryService {
 
   private async finishWrite(
     descriptor: DesktopSettingDescriptor,
-    status: DesktopSettingStatus,
+    writtenValue: string | null,
+    computeStatus: () => Promise<DesktopSettingStatus>,
   ): Promise<DesktopSettingWriteResult> {
+    let status: DesktopSettingStatus
+    try {
+      status = await computeStatus()
+    } catch (error) {
+      status = { kind: 'error', error: errorFromException(error) }
+    }
+    if (status.kind === 'pending') {
+      this.pendingApplyKeys.add(descriptor.key)
+    } else if (status.kind === 'error') {
+      this.applyFailures.set(descriptor.key, { error: status.error, value: writtenValue })
+    } else {
+      this.pendingApplyKeys.delete(descriptor.key)
+      this.applyFailures.delete(descriptor.key)
+    }
+
     const value = await this.readStoredValue(descriptor.key)
     const state: DesktopSettingState = {
       descriptor,
@@ -162,21 +173,23 @@ export class SettingsRegistryService {
     descriptor: DesktopSettingDescriptor,
   ): Promise<DesktopSettingState> {
     const value = await this.readStoredValue(descriptor.key)
-    if (value === null) {
-      return { descriptor, isDefault: true, status: { kind: 'ok' }, value: null }
-    }
-    return {
-      descriptor,
-      isDefault: false,
-      status: await this.recomputeStatus(descriptor.key, value),
-      value,
-    }
+    const status = await this.recomputeStatus(descriptor.key, value)
+    return { descriptor, isDefault: value === null, status, value }
   }
 
   private async recomputeStatus(
     key: string,
-    value: string,
+    value: string | null,
   ): Promise<DesktopSettingStatus> {
+    const failure = this.applyFailures.get(key)
+    if (failure && failure.value === value) {
+      return { kind: 'error', error: failure.error }
+    }
+    if (failure) {
+      // The stored value moved on from the failed one; the record is stale.
+      this.applyFailures.delete(key)
+    }
+
     if (this.pendingApplyKeys.has(key)) {
       if (this.isEccRuntimePoolBusy()) {
         return { kind: 'pending' }
@@ -186,6 +199,9 @@ export class SettingsRegistryService {
       this.pendingApplyKeys.delete(key)
     }
 
+    if (value === null) {
+      return { kind: 'ok' }
+    }
     const handler = this.handlers[key]
     if (!handler) {
       return { kind: 'ok' }

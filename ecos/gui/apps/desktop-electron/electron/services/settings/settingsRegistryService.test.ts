@@ -262,6 +262,55 @@ describe('SettingsRegistryService', () => {
     expect(harness.broadcasted).toHaveLength(0)
   })
 
+  it('keeps the pending status consistent across list() after a deferred reset', async () => {
+    const harness = createHarness({
+      restartEccRuntimes: vi.fn(async () => 'pending' as const),
+    })
+    const root = await createTempEcc()
+    harness.dependencies.settings.set(RUNTIME_ECC_PATH_SETTING_KEY, root)
+
+    const result = await harness.service.reset(RUNTIME_ECC_PATH_SETTING_KEY)
+    expect(result).toMatchObject({ ok: true, state: { status: { kind: 'pending' } } })
+
+    // A reload must still report pending while the pool is busy.
+    harness.setPoolBusy(true)
+    const states = await harness.service.list()
+    expect(
+      states.find((state) => state.descriptor.key === RUNTIME_ECC_PATH_SETTING_KEY)
+        ?.status,
+    ).toEqual({ kind: 'pending' })
+  })
+
+  it('rebuilds the apply-error status from list() until the value changes again', async () => {
+    const harness = createHarness({
+      restartEccRuntimes: vi.fn(async () => {
+        throw new Error('restart exploded')
+      }),
+    })
+    const root = await createTempEcc()
+    await harness.service.set(RUNTIME_ECC_PATH_SETTING_KEY, root)
+
+    // Any window reloading the list keeps seeing the apply failure.
+    let states = await harness.service.list()
+    expect(
+      states.find((state) => state.descriptor.key === RUNTIME_ECC_PATH_SETTING_KEY)
+        ?.status,
+    ).toEqual({ kind: 'error', error: 'restart exploded' })
+
+    // A later write that clears the failure also clears the recorded status.
+    vi.mocked(harness.dependencies.restartEccRuntimes).mockImplementation(
+      async () => 'applied',
+    )
+    const goodRoot = await createTempEcc()
+    await harness.service.set(RUNTIME_ECC_PATH_SETTING_KEY, goodRoot)
+    states = await harness.service.list()
+    const state = states.find(
+      (state) => state.descriptor.key === RUNTIME_ECC_PATH_SETTING_KEY,
+    )
+    expect(state?.status.kind).toBe('ok')
+    expect(state?.value).toBe(goodRoot)
+  })
+
   it('defers the runtime apply while the ECC pool is busy and converges later', async () => {
     const harness = createHarness({
       restartEccRuntimes: vi.fn(async () => 'pending' as const),

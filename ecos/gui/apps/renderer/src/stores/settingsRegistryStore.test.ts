@@ -208,6 +208,46 @@ describe('settingsRegistryStore', () => {
     store.unbindChangedEvents()
   })
 
+  it('rolls back and surfaces the error when the IPC call itself throws', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: null })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+
+    registrySet.mockRejectedValueOnce(new Error('main-side disk failure'))
+
+    const result = await store.set('runtime.eccPath', '/bad/ecc')
+    expect(result).toMatchObject({ ok: false, error: 'main-side disk failure' })
+    expect(store.entryFor('runtime.eccPath')?.value).toBeNull()
+    expect(store.errorFor('runtime.eccPath')).toBe('main-side disk failure')
+    expect(store.isValidating('runtime.eccPath')).toBe(false)
+  })
+
+  it('keeps a changed broadcast that lands during load instead of the stale list snapshot', async () => {
+    const store = useSettingsRegistryStore()
+    const stale = entryFixture('runtime.eccPath', { value: '/stale/ecc' })
+    listMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          // The broadcast arrives while the list fetch is still in flight.
+          for (const listener of changedListeners) {
+            listener(
+              entryFixture('runtime.eccPath', {
+                isDefault: false,
+                value: '/fresh/ecc',
+              }),
+            )
+          }
+          resolve([stale])
+        }),
+    )
+    store.bindChangedEvents()
+    await store.load()
+
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/fresh/ecc')
+    store.unbindChangedEvents()
+  })
+
   it('reset restores the default entry', async () => {
     const store = useSettingsRegistryStore()
     const initial = entryFixture('agent.codexBin', {

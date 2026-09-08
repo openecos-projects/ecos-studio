@@ -1599,6 +1599,8 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string
+  /** True when the wizard reopens an existing workspace (Update Workspace). */
+  isWorkspaceUpdate?: boolean
 }
 
 interface Props {
@@ -2945,8 +2947,9 @@ async function ensurePdksLoaded() {
     return
   }
   if (hasExplicitPdkInfo) return
-  // No explicit PDK source at all; preselect the user's default installation
-  // for brand-new workspaces only (never reconfigure flows).
+  if (props.initialConfig?.isWorkspaceUpdate) return
+  // No explicit PDK source at all and a brand-new workspace: preselect the
+  // user's default installation. Updates/reconfigures are never re-seeded.
   await seedDefaultPdkInstallation()
 }
 

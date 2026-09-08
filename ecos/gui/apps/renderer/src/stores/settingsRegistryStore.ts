@@ -19,6 +19,10 @@ function replaceEntry(
   return updated
 }
 
+function errorFromException(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /**
  * Renderer cache for the desktop settings registry. Writes are optimistic with
  * rollback on failure; main stays the single source of truth and broadcasts
@@ -31,6 +35,13 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   /** Last rejected write per key, shown inline until the value changes again. */
   const rowErrors = ref<Record<string, string>>({})
   let unsubscribeChanged: (() => void) | null = null
+  /** Supersedence tracking so a stale list snapshot never overwrites live updates. */
+  let loadSeq = 0
+  let liveUpdateCount = 0
+
+  function noteLiveUpdate(): void {
+    liveUpdateCount += 1
+  }
 
   function isValidating(key: string): boolean {
     return validatingKeys.value.includes(key)
@@ -47,11 +58,19 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
   async function load(): Promise<void> {
     const api = getOptionalDesktopApi()
     if (!api?.settingsRegistry) return
+    const seq = ++loadSeq
+    const liveAtStart = liveUpdateCount
     loading.value = true
     try {
-      entries.value = await api.settingsRegistry.list()
+      const result = await api.settingsRegistry.list()
+      // A changed broadcast (or this window's own write) that landed during the
+      // fetch is newer than the snapshot; keep it instead of the stale list.
+      if (seq !== loadSeq || liveUpdateCount !== liveAtStart) return
+      entries.value = result
     } finally {
-      loading.value = false
+      if (seq === loadSeq) {
+        loading.value = false
+      }
     }
   }
 
@@ -67,10 +86,18 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     }
     validatingKeys.value = [...validatingKeys.value, key]
     try {
-      const result = await api.settingsRegistry.set({ key, value })
+      let result: DesktopSettingWriteResult
+      try {
+        result = await api.settingsRegistry.set({ key, value })
+      } catch (error) {
+        // Main-side exceptions (disk failures, inventory errors, ...) cross the
+        // bridge as thrown errors; surface them like an ordinary rejection.
+        result = { ok: false, error: errorFromException(error) }
+      }
       if (result.ok) {
         entries.value = replaceEntry(entries.value, result.state)
         delete rowErrors.value[key]
+        noteLiveUpdate()
       } else {
         rowErrors.value[key] = result.error
         // Only undo our optimistic write if no newer value (for example a
@@ -93,10 +120,16 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
 
     validatingKeys.value = [...validatingKeys.value, key]
     try {
-      const result = await api.settingsRegistry.reset({ key })
+      let result: DesktopSettingWriteResult
+      try {
+        result = await api.settingsRegistry.reset({ key })
+      } catch (error) {
+        result = { ok: false, error: errorFromException(error) }
+      }
       if (result.ok) {
         entries.value = replaceEntry(entries.value, result.state)
         delete rowErrors.value[key]
+        noteLiveUpdate()
       } else {
         rowErrors.value[key] = result.error
       }
@@ -113,6 +146,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     unsubscribeChanged = api.settingsRegistry.onChanged((state) => {
       entries.value = replaceEntry(entries.value, state)
       delete rowErrors.value[state.descriptor.key]
+      noteLiveUpdate()
     })
   }
 
