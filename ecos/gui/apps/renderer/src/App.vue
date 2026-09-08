@@ -1091,6 +1091,9 @@ const { handleMenuAction } = useAppMenuActions({
     if (isWorkspaceRoute.value) openDesignReportExport()
   },
   manageDesignFiles: openManageDialog,
+  openPreferences: () => {
+    router.push({ name: 'Settings' })
+  },
   adjustZoom,
 })
 useAppWindowClose(closeProject)

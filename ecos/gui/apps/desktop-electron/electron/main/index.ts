@@ -35,6 +35,9 @@ import { ProjectManagementReadService } from '../services/projectManagementReadS
 import { ResourceManagerService } from '../services/resourceManagerService'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
+import { createEccSidecarLaunchHooks } from '../services/settings/eccSidecarLaunch'
+import { createSettingHandlers } from '../services/settings/settingsHandlers'
+import { SettingsRegistryService } from '../services/settings/settingsRegistryService'
 import { ShellPtyService } from '../services/shellPtyService'
 import {
   registerSurferProtocolSchemes,
@@ -160,15 +163,21 @@ function getDesktopServices() {
     resourceManagerService.createRuntimeEnv(runtimeEnv, {
       platform: process.platform,
     })
+  const eccSidecarLaunch = createEccSidecarLaunchHooks({
+    baseEnvProvider: runtimeEnvProvider,
+    resolveDefaultExecutable: () => resolveEccExecutable(eccRuntimeOptions),
+    settingsStore,
+  })
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         command: eccExecutable ?? 'ecc',
         env: runtimeEnv,
-        envProvider: runtimeEnvProvider,
+        envProvider: eccSidecarLaunch.envProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
         onEvent,
         onNotification,
+        resolveLaunch: eccSidecarLaunch.resolveLaunch,
       }),
     lazyWorkspaceOpen: true,
     snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
@@ -290,6 +299,37 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         ? join(process.resourcesPath, 'agent')
         : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
     )
+    const codexDependencyService = desktopServices.codexDependencyService
+    const settingsRegistryService = new SettingsRegistryService({
+      broadcast: (channel, payload) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) {
+            window.webContents.send(channel, payload)
+          }
+        }
+      },
+      handlers: createSettingHandlers({
+        codexDependency: {
+          clearBinPath: () => codexDependencyService.clearBinPath(),
+          setBinPath: (pathValue) => codexDependencyService.setBinPath(pathValue),
+        },
+        pdkInventory: {
+          listInstallations: () =>
+            desktopServices.pdkInventoryService.listInstallations(),
+        },
+        restartEccRuntimes: () => desktopServices.eccRuntimeService.restartIdleRuntimes(),
+        settingsStore: desktopServices.settingsStore,
+        syncAgentCodexEnv: async () => {
+          if (!agentRuntimeService?.syncEnvironmentOverrides) return
+          agentRuntimeService.syncEnvironmentOverrides(
+            await codexDependencyService.resolveEnvironmentForAgent(),
+          )
+        },
+      }),
+      isEccRuntimePoolBusy: () =>
+        desktopServices.eccRuntimeService.hasPendingRuntimeWork(),
+      settingsStore: desktopServices.settingsStore,
+    })
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
@@ -307,6 +347,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       resourceManagerService: desktopServices.resourceManagerService,
       pdkInventoryService: desktopServices.pdkInventoryService,
       chipViewerService: desktopServices.chipViewerService,
+      settingsRegistryService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
       surferProtocolService: desktopServices.surferProtocolService,

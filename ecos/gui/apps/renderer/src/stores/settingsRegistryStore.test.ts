@@ -1,0 +1,204 @@
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import type { DesktopSettingState } from '@ecos-studio/shared'
+
+type ChangedListener = (state: DesktopSettingState) => void
+
+const {
+  bridgeAvailable,
+  changedListeners,
+  listMock,
+  onChangedMock,
+  registryReset,
+  registrySet,
+} = vi.hoisted(() => ({
+  bridgeAvailable: { value: true },
+  changedListeners: [] as ChangedListener[],
+  listMock: vi.fn(),
+  onChangedMock: vi.fn((listener: ChangedListener) => {
+    changedListeners.push(listener)
+    return () => {
+      const index = changedListeners.indexOf(listener)
+      if (index >= 0) changedListeners.splice(index, 1)
+    }
+  }),
+  registryReset: vi.fn(),
+  registrySet: vi.fn(),
+}))
+
+vi.mock('@/platform/desktop', () => ({
+  getOptionalDesktopApi: () =>
+    bridgeAvailable.value
+      ? {
+          settingsRegistry: {
+            list: listMock,
+            onChanged: onChangedMock,
+            reset: registryReset,
+            set: registrySet,
+          },
+        }
+      : null,
+  hasDesktopApi: () => bridgeAvailable.value,
+}))
+
+import { useSettingsRegistryStore } from './settingsRegistryStore'
+
+function entryFixture(
+  key: string,
+  overrides: Partial<DesktopSettingState> = {},
+): DesktopSettingState {
+  return {
+    descriptor: {
+      category: 'Runtime',
+      default: null,
+      description: `${key} description`,
+      key,
+      title: key,
+      valueType: 'filePath',
+    },
+    isDefault: true,
+    status: { kind: 'ok' },
+    value: null,
+    ...overrides,
+  }
+}
+
+describe('settingsRegistryStore', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    bridgeAvailable.value = true
+    changedListeners.length = 0
+    listMock.mockReset()
+    registryReset.mockReset()
+    registrySet.mockReset()
+  })
+
+  it('loads entries from the registry list', async () => {
+    const store = useSettingsRegistryStore()
+    const entries = [
+      entryFixture('runtime.eccPath'),
+      entryFixture('agent.codexBin', {
+        descriptor: {
+          category: 'Agent',
+          default: null,
+          description: 'codex',
+          key: 'agent.codexBin',
+          title: 'Codex CLI Binary',
+          valueType: 'filePath',
+        },
+      }),
+    ]
+    listMock.mockResolvedValueOnce(entries)
+
+    await store.load()
+    expect(store.entries).toEqual(entries)
+    expect(store.loading).toBe(false)
+  })
+
+  it('updates optimistically and rolls back on a failed set', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { isDefault: true, value: null })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+
+    registrySet.mockResolvedValueOnce({ ok: false, error: 'path missing' })
+
+    const result = await store.set('runtime.eccPath', '/bad/ecc')
+    expect(result).toMatchObject({ ok: false })
+    expect(store.entryFor('runtime.eccPath')?.value).toBeNull()
+    expect(store.isValidating('runtime.eccPath')).toBe(false)
+    expect(store.errorFor('runtime.eccPath')).toBe('path missing')
+  })
+
+  it('clears the row error after a successful write', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: null })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+
+    registrySet.mockResolvedValueOnce({ ok: false, error: 'path missing' })
+    await store.set('runtime.eccPath', '/bad/ecc')
+    expect(store.errorFor('runtime.eccPath')).toBe('path missing')
+
+    const confirmed = entryFixture('runtime.eccPath', {
+      isDefault: false,
+      value: '/good/ecc',
+    })
+    registrySet.mockResolvedValueOnce({ ok: true, state: confirmed })
+    await store.set('runtime.eccPath', '/good/ecc')
+    expect(store.errorFor('runtime.eccPath')).toBe('')
+  })
+
+  it('keeps the optimistic value validated by a successful set', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: null })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+
+    const confirmed = entryFixture('runtime.eccPath', {
+      isDefault: false,
+      status: { displayInfo: 'ecc 1.0', kind: 'ok' },
+      value: '/good/ecc',
+    })
+    registrySet.mockImplementation(async () => {
+      for (const listener of changedListeners) listener(confirmed)
+      return { ok: true, state: confirmed }
+    })
+
+    const result = await store.set('runtime.eccPath', '/good/ecc')
+    expect(result).toMatchObject({ ok: true })
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/good/ecc')
+    expect(store.entryFor('runtime.eccPath')?.status).toEqual({
+      displayInfo: 'ecc 1.0',
+      kind: 'ok',
+    })
+  })
+
+  it('applies changed broadcasts from other windows', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: '/old/ecc' })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+    store.bindChangedEvents()
+
+    const broadcast = entryFixture('runtime.eccPath', {
+      isDefault: false,
+      status: { kind: 'pending' },
+      value: '/new/ecc',
+    })
+    for (const listener of changedListeners) listener(broadcast)
+
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/new/ecc')
+    expect(store.entryFor('runtime.eccPath')?.status).toEqual({ kind: 'pending' })
+    store.unbindChangedEvents()
+    expect(changedListeners).toHaveLength(0)
+  })
+
+  it('reset restores the default entry', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('agent.codexBin', {
+      isDefault: false,
+      value: '/bin/codex',
+    })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+
+    const resetEntry = entryFixture('agent.codexBin', { isDefault: true, value: null })
+    registryReset.mockResolvedValueOnce({ ok: true, state: resetEntry })
+
+    const result = await store.reset('agent.codexBin')
+    expect(result).toMatchObject({ ok: true })
+    expect(store.entryFor('agent.codexBin')?.isDefault).toBe(true)
+    expect(store.entryFor('agent.codexBin')?.value).toBeNull()
+  })
+
+  it('fails gracefully when the bridge is unavailable', async () => {
+    bridgeAvailable.value = false
+    const store = useSettingsRegistryStore()
+    const result = await store.set('runtime.eccPath', '/x')
+    expect(result).toMatchObject({ ok: false })
+    await expect(store.load()).resolves.toBeUndefined()
+    expect(store.entries).toEqual([])
+  })
+})

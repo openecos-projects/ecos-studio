@@ -27,6 +27,7 @@ type SpawnLike = typeof spawnChild
 type FetchLike = typeof fetch
 
 export interface CodexDependencySettingsStore {
+  delete(key: string): Promise<void>
   get<T extends DesktopSettingsValue = DesktopSettingsValue>(
     key: string,
   ): Promise<T | null>
@@ -165,6 +166,15 @@ export class CodexDependencyService {
       throw new Error('所选路径不是可执行的 Codex CLI')
     }
     await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, resolved)
+    return await this.getStatus()
+  }
+
+  /**
+   * Remove the persisted Codex binary override so resolution falls back to the
+   * environment, the managed install, or PATH.
+   */
+  async clearBinPath(): Promise<DesktopCodexDependencyStatus> {
+    await this.settingsStore.delete(DESKTOP_CODEX_BIN_SETTING_KEY)
     return await this.getStatus()
   }
 

@@ -53,6 +53,10 @@ import {
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
+  type DesktopSettingState,
+  type DesktopSettingWriteResult,
+  DESKTOP_CODEX_BIN_SETTING_KEY,
+  isRegistryOwnedSettingKey,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
@@ -142,8 +146,15 @@ export interface DesktopBridgeServices {
     setBinPath(
       pathValue: string,
     ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    clearBinPath(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
+  }
+  settingsRegistryService?: {
+    list(): Promise<DesktopSettingState[]>
+    notifyKeyChanged(key: string): Promise<void>
+    reset(key: unknown): Promise<DesktopSettingWriteResult>
+    set(key: unknown, value: unknown): Promise<DesktopSettingWriteResult>
   }
   appInfoService: {
     getVersions(): Promise<VersionInfo>
@@ -1306,11 +1317,43 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.settingsSet, async (_event, key, value) => {
-    await services.settingsStore.set(key as string, value as DesktopSettingsValue)
+    const keyString = key as string
+    if (isRegistryOwnedSettingKey(keyString)) {
+      throw new Error(
+        `Setting "${keyString}" is managed by the settings registry; use the settingsRegistry API.`,
+      )
+    }
+    await services.settingsStore.set(keyString, value as DesktopSettingsValue)
   })
 
   handle(desktopApiIpcChannels.settingsDelete, async (_event, key) => {
-    await services.settingsStore.delete(key as string)
+    const keyString = key as string
+    if (isRegistryOwnedSettingKey(keyString)) {
+      throw new Error(
+        `Setting "${keyString}" is managed by the settings registry; use the settingsRegistry API.`,
+      )
+    }
+    await services.settingsStore.delete(keyString)
+  })
+
+  handle(desktopApiIpcChannels.settingsRegistryList, async () => {
+    return await requireSettingsRegistryService(services).list()
+  })
+
+  handle(desktopApiIpcChannels.settingsRegistrySet, async (_event, request) => {
+    const registry = requireSettingsRegistryService(services)
+    if (!isRecord(request) || typeof request.key !== 'string') {
+      return { ok: false, error: 'Settings registry set request is invalid.' }
+    }
+    return await registry.set(request.key, request.value)
+  })
+
+  handle(desktopApiIpcChannels.settingsRegistryReset, async (_event, request) => {
+    const registry = requireSettingsRegistryService(services)
+    if (!isRecord(request) || typeof request.key !== 'string') {
+      return { ok: false, error: 'Settings registry reset request is invalid.' }
+    }
+    return await registry.reset(request.key)
   })
 
   handle(desktopApiIpcChannels.projectManifestMutate, async (_event, request) => {
@@ -2321,12 +2364,14 @@ export function registerIpc(
     } finally {
       unsubscribe()
       await applyCodexBinEnv(services)
+      await notifyCodexBinSettingChanged(services)
     }
   })
 
   handle(desktopApiIpcChannels.agentCodexLogin, async () => {
     const status = await requireCodexDependencyService(services).login()
     await applyCodexBinEnv(services)
+    await notifyCodexBinSettingChanged(services)
     return status
   })
 
@@ -2334,6 +2379,7 @@ export function registerIpc(
     const pathValue = readCodexBinPathRequest(request)
     const status = await requireCodexDependencyService(services).setBinPath(pathValue)
     await applyCodexBinEnv(services)
+    await notifyCodexBinSettingChanged(services)
     return status
   })
 
@@ -2443,6 +2489,26 @@ function requireCodexDependencyService(
     throw new Error('Codex dependency service is unavailable.')
   }
   return services.codexDependencyService
+}
+
+function requireSettingsRegistryService(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['settingsRegistryService']> {
+  if (!services.settingsRegistryService) {
+    throw new Error('Settings registry service is unavailable.')
+  }
+  return services.settingsRegistryService
+}
+
+/**
+ * Broadcast the registry state of the Codex binary after a write through the
+ * legacy Codex IPC paths so the Preferences page converges when the AI chat
+ * panel is the writer.
+ */
+async function notifyCodexBinSettingChanged(
+  services: DesktopBridgeServices,
+): Promise<void> {
+  await services.settingsRegistryService?.notifyKeyChanged(DESKTOP_CODEX_BIN_SETTING_KEY)
 }
 
 async function applyCodexBinEnv(

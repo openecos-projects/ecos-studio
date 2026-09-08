@@ -69,6 +69,12 @@ async function loadDesktopBridge() {
     menu: {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
+    settingsRegistry: {
+      list(): Promise<unknown>
+      onChanged(listener: (state: unknown) => void): () => void
+      reset(request: unknown): Promise<unknown>
+      set(request: unknown): Promise<unknown>
+    }
     workspace: {
       openWaveformExternal(path: string): Promise<void>
       readProjectTextFile(path: string): Promise<unknown>
@@ -386,6 +392,58 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccWorkspaceInspectSignoff,
       request,
+    )
+  })
+
+  it('routes settings registry calls through shared IPC channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+    const state = {
+      descriptor: { key: 'runtime.eccPath', valueType: 'filePath' },
+      isDefault: false,
+      status: { kind: 'ok' },
+      value: '/opt/ecc',
+    }
+    ipcRenderer.invoke
+      .mockResolvedValueOnce([state])
+      .mockResolvedValueOnce({ ok: true, state })
+      .mockResolvedValueOnce({ ok: true, state })
+
+    await expect(bridge.settingsRegistry.list()).resolves.toEqual([state])
+    await expect(
+      bridge.settingsRegistry.set({ key: 'runtime.eccPath', value: '/opt/ecc' }),
+    ).resolves.toEqual({ ok: true, state })
+    await expect(
+      bridge.settingsRegistry.reset({ key: 'runtime.eccPath' }),
+    ).resolves.toEqual({ ok: true, state })
+
+    const unsubscribe = bridge.settingsRegistry.onChanged(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, state)
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.settingsRegistryList,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.settingsRegistrySet,
+      { key: 'runtime.eccPath', value: '/opt/ecc' },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.settingsRegistryReset,
+      { key: 'runtime.eccPath' },
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.settingsRegistryChanged,
+      expect.any(Function),
+    )
+    expect(listener).toHaveBeenCalledWith(state)
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.settingsRegistryChanged,
+      eventListener,
     )
   })
 

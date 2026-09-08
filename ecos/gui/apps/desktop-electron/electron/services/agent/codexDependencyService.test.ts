@@ -12,6 +12,10 @@ import { DESKTOP_CODEX_BIN_SETTING_KEY } from '@ecos-studio/shared'
 class MemorySettingsStore implements CodexDependencySettingsStore {
   private readonly values = new Map<string, unknown>()
 
+  async delete(key: string): Promise<void> {
+    this.values.delete(key)
+  }
+
   async get<T>(key: string): Promise<T | null> {
     if (!this.values.has(key)) return null
     return this.values.get(key) as T

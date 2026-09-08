@@ -195,6 +195,7 @@ import {
   type DesktopAgentWorkspaceParameterWrite,
   type DesktopCodexDependencyStatus,
   type DesktopCodexInstallProgressEvent,
+  DESKTOP_CODEX_BIN_SETTING_KEY,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
@@ -565,6 +566,7 @@ const emptyStateSuggestions = computed(() => {
   return suggestions
 })
 let unsubscribeAgentEvents: (() => void) | undefined
+let unsubscribeCodexBinChanged: (() => void) | undefined
 let postCreateFlowRunning = false
 
 onMounted(() => {
@@ -572,6 +574,7 @@ onMounted(() => {
     void maybeRunPostCreateFlow()
     void flushPendingGuiActionForActiveTab()
   })
+  bindCodexBinChanged()
 })
 
 onUnmounted(() => {
@@ -579,6 +582,8 @@ onUnmounted(() => {
   unsubscribeAgentEvents = undefined
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
+  unsubscribeCodexBinChanged?.()
+  unsubscribeCodexBinChanged = undefined
   agentFlowProgress.stop()
   scrollContentObserver?.disconnect()
   scrollContentObserver = undefined
@@ -764,6 +769,19 @@ function bindCodexProgress(): void {
       }
     },
   )
+}
+
+/**
+ * The Codex binary can also be changed from the Preferences page; observe the
+ * settings registry so this panel always reflects the same source of truth.
+ */
+function bindCodexBinChanged(): void {
+  const registry = getOptionalDesktopApi()?.settingsRegistry
+  if (!registry?.onChanged) return
+  unsubscribeCodexBinChanged = registry.onChanged((state) => {
+    if (state.descriptor.key !== DESKTOP_CODEX_BIN_SETTING_KEY) return
+    void refreshCodexStatus()
+  })
 }
 
 async function installCodexCli(): Promise<void> {

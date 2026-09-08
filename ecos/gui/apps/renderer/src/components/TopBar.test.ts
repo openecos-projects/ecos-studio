@@ -124,6 +124,12 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('isEditableKeyboardTarget')
   })
 
+  it('binds the renderer-owned Preferences shortcut and File menu entry', () => {
+    expect(topBarSource).toContain("key === ','")
+    expect(topBarSource).toContain('appMenuActionIds.openPreferences')
+    expect(topBarSource).toContain('Preferences...')
+  })
+
   it('adds View zoom actions to the topbar menu', () => {
     expect(topBarSource).toContain("label: 'View'")
     expect(topBarSource).toContain("label: 'Zoom In'")

@@ -49,6 +49,7 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
+import { EccRpcShutdownDeferredError } from './sidecarProcess'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -136,6 +137,36 @@ export class EccRpcRuntimeService {
 
   hasPendingRuntimeWork(): boolean {
     return this.uniqueRuntimes().some((runtime) => runtime.hasPendingRuntimeWork())
+  }
+
+  /**
+   * Shut down every runtime whose sidecar is idle so its next start() call
+   * respawns with the current launch configuration. Runtimes with pending work
+   * keep running; their next sidecar start picks up the new configuration via
+   * env/launch drift detection. Returns 'pending' when at least one runtime was
+   * left untouched because it still had active work.
+   */
+  async restartIdleRuntimes(): Promise<'applied' | 'pending'> {
+    let deferred = false
+    for (const runtime of this.uniqueRuntimes()) {
+      if (runtime.hasPendingRuntimeWork()) {
+        deferred = true
+        continue
+      }
+      try {
+        await runtime.releaseIdleSidecar()
+      } catch (error) {
+        if (error instanceof EccRpcShutdownDeferredError) {
+          deferred = true
+          continue
+        }
+        electronLogger.error(
+          '[runtime] failed to restart an idle ECC sidecar after a settings change: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+    return deferred ? 'pending' : 'applied'
   }
 
   rpcHello(): Promise<EccRpcHelloResult> {

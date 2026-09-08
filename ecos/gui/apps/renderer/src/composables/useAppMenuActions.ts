@@ -5,6 +5,7 @@ interface AppMenuActionDependencies {
   createWindow?(): Promise<void> | void
   navigateToWorkspace(): void
   openDocumentation(): Promise<void>
+  openPreferences?(): void | Promise<void>
   openProject(): Promise<boolean | undefined>
   exportSignoffPackage?(): void | Promise<void>
   exportDesignSummary?(): void | Promise<void>
@@ -20,6 +21,7 @@ export function useAppMenuActions({
   createWindow,
   navigateToWorkspace,
   openDocumentation,
+  openPreferences,
   openProject,
   exportSignoffPackage,
   exportDesignSummary,
@@ -42,6 +44,9 @@ export function useAppMenuActions({
         if (await openProject()) {
           navigateToWorkspace()
         }
+        break
+      case appMenuActionIds.openPreferences:
+        await openPreferences?.()
         break
       case appMenuActionIds.manageDesignFiles:
         await manageDesignFiles?.()
@@ -84,6 +89,9 @@ export function useAppMenuActions({
     },
     [appMenuActionIds.openProject]: () => {
       void handleMenuAction(appMenuActionIds.openProject)
+    },
+    [appMenuActionIds.openPreferences]: () => {
+      void handleMenuAction(appMenuActionIds.openPreferences)
     },
     [appMenuActionIds.about]: () => {
       void handleMenuAction(appMenuActionIds.about)

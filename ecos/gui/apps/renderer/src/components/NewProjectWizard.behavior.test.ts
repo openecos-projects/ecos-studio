@@ -15,6 +15,7 @@ const wizardMocks = vi.hoisted(() => ({
   readProjectManagementManifest: vi.fn(async () => null),
   resolveBinding: vi.fn(),
   scanPdkDirectory: vi.fn(),
+  settingsGet: vi.fn(async (_key: string): Promise<string | null> => null),
 }))
 
 vi.mock('../composables/usePdkManager', () => ({
@@ -28,6 +29,7 @@ vi.mock('../composables/useWorkspace', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     pdkInventory: { resolveBinding: wizardMocks.resolveBinding },
+    settings: { get: wizardMocks.settingsGet },
     workspace: { scanPdkDirectory: wizardMocks.scanPdkDirectory },
   }),
 }))
@@ -272,6 +274,153 @@ describe('NewProjectWizard behavior', () => {
     expect(wrapper.text()).toContain('Unverified')
     expect(wizard.canProceed).toBe(false)
     expect(wizard.stepFiveBlockedReason).toContain('Tech LEF, Cell LEF, Liberty')
+    wrapper.unmount()
+  })
+
+  it('preselects the default PDK installation for a fresh workspace', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:sky130:local:default',
+        name: 'SkyWater 130nm',
+        path: '/pdks/sky130',
+        description: '',
+        techNode: '130nm',
+        pdkId: 'sky130',
+        importedAt: '',
+        detectedFiles: { directories: [], files: [] },
+        source: 'imported',
+        version: '',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+      },
+    ]
+    wizardMocks.resolveBinding.mockReset()
+    wizardMocks.scanPdkDirectory.mockReset()
+    wizardMocks.resolveBinding.mockResolvedValue(null)
+    wizardMocks.settingsGet.mockReset()
+    wizardMocks.settingsGet.mockResolvedValue('pdk:sky130:local:default')
+
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          directory: '/workspace/ws_default',
+          rtl_list: ['/workspace/top.v'],
+        },
+      },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      ensurePdksLoaded(): Promise<void>
+    }
+    await wizard.ensurePdksLoaded()
+    wizard.currentStep = 5
+    await flushPromises()
+
+    expect(wizardMocks.settingsGet).toHaveBeenCalledWith('pdk.defaultInstallationId')
+    expect(wrapper.find('button[aria-pressed="true"]').text()).toContain('SkyWater 130nm')
+    wrapper.unmount()
+  })
+
+  it('ignores a stale default PDK installation id silently', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:sky130:local:default',
+        name: 'SkyWater 130nm',
+        path: '/pdks/sky130',
+        description: '',
+        techNode: '130nm',
+        pdkId: 'sky130',
+        importedAt: '',
+        detectedFiles: { directories: [], files: [] },
+        source: 'imported',
+        version: '',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+      },
+    ]
+    wizardMocks.resolveBinding.mockReset()
+    wizardMocks.scanPdkDirectory.mockReset()
+    wizardMocks.resolveBinding.mockResolvedValue(null)
+    wizardMocks.settingsGet.mockReset()
+    wizardMocks.settingsGet.mockResolvedValue('pdk:gone:local:removed')
+
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          directory: '/workspace/ws_default',
+          rtl_list: ['/workspace/top.v'],
+        },
+      },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      ensurePdksLoaded(): Promise<void>
+    }
+    await wizard.ensurePdksLoaded()
+    wizard.currentStep = 5
+    await flushPromises()
+
+    expect(wrapper.find('button[aria-pressed="true"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps an explicit pdk_root ahead of the default installation', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:vendor:local:explicit',
+        name: 'Vendor Explicit PDK',
+        path: '/pdks/vendor-explicit',
+        description: '',
+        techNode: '',
+        pdkId: 'vendor-pdk',
+        importedAt: '',
+        detectedFiles: { directories: [], files: [] },
+        source: 'local',
+        version: '',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+      },
+    ]
+    wizardMocks.resolveBinding.mockReset()
+    wizardMocks.scanPdkDirectory.mockReset()
+    wizardMocks.settingsGet.mockReset()
+    wizardMocks.settingsGet.mockResolvedValue('pdk:sky130:local:default')
+
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          directory: '/workspace/ws_reconfigure',
+          pdk: 'vendor-pdk',
+          pdk_root: '/pdks/vendor-explicit',
+          rtl_list: ['/workspace/top.v'],
+        },
+      },
+      global: {
+        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      ensurePdksLoaded(): Promise<void>
+    }
+    await wizard.ensurePdksLoaded()
+    wizard.currentStep = 5
+    await flushPromises()
+
+    // The explicit pdk_root matched before the default was ever consulted.
+    expect(wizardMocks.settingsGet).not.toHaveBeenCalled()
+    expect(wrapper.find('button[aria-pressed="true"]').text()).toContain(
+      'Vendor Explicit PDK',
+    )
     wrapper.unmount()
   })
 })

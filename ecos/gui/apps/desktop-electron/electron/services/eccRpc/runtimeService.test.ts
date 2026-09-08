@@ -556,4 +556,54 @@ describe('EccRpcRuntimeService pool', () => {
       }),
     ).resolves.toEqual({ rerun: false })
   })
+
+  describe('restartIdleRuntimes', () => {
+    it('shuts down idle runtimes so the next start respawns them', async () => {
+      const pool = createPool()
+      await pool.service.openWorkspace({ directory: '/work/a' })
+      const sidecar = pool.sidecarFor('/work/a')
+      expect(sidecar.shutdownCount).toBe(0)
+
+      await expect(pool.service.restartIdleRuntimes()).resolves.toBe('applied')
+      expect(sidecar.shutdownCount).toBe(1)
+    })
+
+    it('leaves busy runtimes untouched and reports pending', async () => {
+      const pool = createPool()
+      const workspace = await pool.service.openWorkspace({ directory: '/work/a' })
+      const client = pool.clientFor('/work/a')
+      const gate = deferred<unknown>()
+      client.responses.push(gate.promise)
+      const flow = pool.service
+        .runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+        .catch((error: unknown) => error)
+
+      await waitForQueuedOperation()
+      const sidecar = pool.sidecarFor('/work/a')
+      await expect(pool.service.restartIdleRuntimes()).resolves.toBe('pending')
+      expect(sidecar.shutdownCount).toBe(0)
+
+      gate.resolve({ rerun: false })
+      await flow
+    })
+
+    it('reports applied once the busy runtime drained', async () => {
+      const pool = createPool()
+      const workspace = await pool.service.openWorkspace({ directory: '/work/a' })
+      const client = pool.clientFor('/work/a')
+      const gate = deferred<unknown>()
+      client.responses.push(gate.promise)
+      const flow = pool.service
+        .runFlow({ rerun: false, workspaceHandle: workspace.workspaceHandle })
+        .catch((error: unknown) => error)
+
+      await waitForQueuedOperation()
+      await expect(pool.service.restartIdleRuntimes()).resolves.toBe('pending')
+
+      gate.resolve({ rerun: false })
+      await flow
+      await expect(pool.service.restartIdleRuntimes()).resolves.toBe('applied')
+      expect(pool.sidecarFor('/work/a').shutdownCount).toBe(1)
+    })
+  })
 })

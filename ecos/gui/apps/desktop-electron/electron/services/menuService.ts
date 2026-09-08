@@ -110,7 +110,18 @@ export function setMenuActionEnabled(
 export function registerApplicationMenu(options: ApplicationMenuOptions = {}): void {
   const template: MenuItemConstructorOptions[] = []
 
+  // Preferences uses the renderer-handled CmdOrCtrl+, shortcut (no native
+  // accelerator, matching the frameless-window File-shortcut pattern).
+  const preferencesItem: MenuItemConstructorOptions = {
+    click: () => {
+      emitMenuAction(appMenuActionIds.openPreferences)
+    },
+    id: appMenuActionIds.openPreferences,
+    label: 'Preferences...',
+  }
+
   if (process.platform === 'darwin') {
+    // Platform convention: Preferences lives in the app menu on macOS.
     template.push({
       label: app.name,
       submenu: [
@@ -119,6 +130,7 @@ export function registerApplicationMenu(options: ApplicationMenuOptions = {}): v
         { role: 'hide' },
         { role: 'hideOthers' },
         { role: 'unhide' },
+        preferencesItem,
         { type: 'separator' },
         { role: 'quit' },
       ],
@@ -138,6 +150,9 @@ export function registerApplicationMenu(options: ApplicationMenuOptions = {}): v
     {
       label: 'File',
       submenu: [
+        ...(process.platform === 'darwin'
+          ? []
+          : [preferencesItem, { type: 'separator' as const }]),
         {
           // Accelerators are handled in the renderer TopBar so frameless windows
           // get one consistent shortcut path without double-firing.

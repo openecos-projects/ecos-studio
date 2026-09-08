@@ -304,6 +304,12 @@ const menus = computed<Menu[]>(() => [
         event: appMenuActionIds.openProject,
       },
       {
+        label: 'Preferences...',
+        icon: 'ri-settings-4-line',
+        shortcut: '⌘,',
+        event: appMenuActionIds.openPreferences,
+      },
+      {
         label: 'Update Workspace',
         icon: 'ri-settings-3-line',
         event: appMenuActionIds.reconfigureWorkspace,
@@ -483,6 +489,12 @@ const handleKeydown = (e: KeyboardEvent) => {
     e.preventDefault()
     activeMenu.value = null
     emit('menu-action', appMenuActionIds.openProject)
+    return
+  }
+  if (!e.shiftKey && key === ',') {
+    e.preventDefault()
+    activeMenu.value = null
+    emit('menu-action', appMenuActionIds.openPreferences)
   }
 }
 

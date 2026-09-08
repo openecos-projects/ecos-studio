@@ -129,6 +129,22 @@ export type {
 } from './contracts/desktopCodex.ts'
 export { DESKTOP_CODEX_BIN_SETTING_KEY } from './contracts/desktopCodex.ts'
 export type {
+  DesktopSettingDescriptor,
+  DesktopSettingResetRequest,
+  DesktopSettingSetRequest,
+  DesktopSettingState,
+  DesktopSettingStatus,
+  DesktopSettingValueType,
+  DesktopSettingWriteResult,
+} from './contracts/desktopSettings.ts'
+export {
+  isRegistryOwnedSettingKey,
+  PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
+  RUNTIME_ECC_PATH_SETTING_KEY,
+  RUNTIME_ECC_SIZER_ROOT_SETTING_KEY,
+  SETTINGS_REGISTRY,
+} from './contracts/desktopSettings.ts'
+export type {
   DesktopAgentEvent,
   DesktopAgentChoice,
   DesktopAgentChoiceOption,

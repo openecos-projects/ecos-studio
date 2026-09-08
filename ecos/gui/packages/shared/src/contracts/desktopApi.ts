@@ -61,6 +61,12 @@ import type {
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
 } from './desktopCodex.ts'
+import type {
+  DesktopSettingResetRequest,
+  DesktopSettingSetRequest,
+  DesktopSettingState,
+  DesktopSettingWriteResult,
+} from './desktopSettings.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -242,6 +248,12 @@ export interface DesktopApi {
     ): Promise<T | null>
     set(key: string, value: DesktopSettingsValue): Promise<void>
     delete(key: string): Promise<void>
+  }
+  settingsRegistry?: {
+    list(): Promise<DesktopSettingState[]>
+    set(request: DesktopSettingSetRequest): Promise<DesktopSettingWriteResult>
+    reset(request: DesktopSettingResetRequest): Promise<DesktopSettingWriteResult>
+    onChanged(listener: (state: DesktopSettingState) => void): DesktopEventUnsubscribe
   }
   projectManifest: {
     mutate(

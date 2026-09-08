@@ -1579,6 +1579,7 @@ import {
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import {
   isHdlFilePath,
+  PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
   projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
@@ -2933,6 +2934,22 @@ async function ensurePdksLoaded() {
         return
       }
     } catch {}
+  }
+  // Every explicit PDK source resolved nothing; preselect the user's default
+  // installation for brand-new workspaces only (never reconfigure flows).
+  await seedDefaultPdkInstallation()
+}
+
+async function seedDefaultPdkInstallation() {
+  try {
+    const defaultId = await getDesktopApi().settings.get<string>(
+      PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
+    )
+    if (!defaultId) return
+    const defaultPdk = importedPdks.value.find((pdk) => pdk.id === defaultId)
+    if (defaultPdk) selectPdk(defaultPdk)
+  } catch {
+    // A stale or unreadable default must not block the wizard.
   }
 }
 

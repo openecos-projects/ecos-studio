@@ -128,6 +128,32 @@ describe('useAppMenuActions', () => {
     expect(navigateToWorkspace).not.toHaveBeenCalled()
   })
 
+  it('opens the Preferences page from the shared menu event', async () => {
+    let registeredHandlers: Partial<Record<AppMenuAction, () => void>> | undefined
+    useMenuEvents.mockImplementation((handlers) => {
+      registeredHandlers = handlers
+    })
+
+    const openPreferences = vi.fn().mockResolvedValue(undefined)
+    const { handleMenuAction } = useAppMenuActions({
+      navigateToWorkspace: vi.fn(),
+      openDocumentation: vi.fn().mockResolvedValue(undefined),
+      openPreferences,
+      openProject: vi.fn().mockResolvedValue(true),
+      showAboutDialog: vi.fn(),
+      showNewProjectWizard: vi.fn(),
+    })
+
+    registeredHandlers?.[appMenuActionIds.openPreferences]?.()
+    await Promise.resolve()
+
+    expect(openPreferences).toHaveBeenCalledTimes(1)
+
+    await handleMenuAction(appMenuActionIds.openPreferences)
+
+    expect(openPreferences).toHaveBeenCalledTimes(2)
+  })
+
   it('dispatches all View zoom actions to the shared zoom handler', async () => {
     let registeredHandlers: Partial<Record<string, () => void>> | undefined
     useMenuEvents.mockImplementation((handlers) => {

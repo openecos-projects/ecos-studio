@@ -25,6 +25,11 @@ const routes: RouteRecordRaw[] = [
         name: 'Projects',
         component: () => import('../views/ProjectsView.vue'),
       },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('../views/SettingsView.vue'),
+      },
     ],
     meta: {
       title: 'ECOS-Studio',

@@ -19,6 +19,9 @@ import type {
   ResourceImportLocalRequest,
   ResourceInstallRequest,
   DesktopSettingsValue,
+  DesktopSettingResetRequest,
+  DesktopSettingSetRequest,
+  DesktopSettingState,
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSessionOptions,
@@ -124,6 +127,20 @@ const desktopApi: DesktopApi = {
       invokeDesktop<T | null>(desktopApiIpcChannels.settingsGet, key),
     set: (key, value) => invokeDesktop(desktopApiIpcChannels.settingsSet, key, value),
     delete: (key) => invokeDesktop(desktopApiIpcChannels.settingsDelete, key),
+  },
+  settingsRegistry: {
+    list: () => invokeDesktop(desktopApiIpcChannels.settingsRegistryList),
+    set: (request: DesktopSettingSetRequest) =>
+      invokeDesktop(desktopApiIpcChannels.settingsRegistrySet, request),
+    reset: (request: DesktopSettingResetRequest) =>
+      invokeDesktop(desktopApiIpcChannels.settingsRegistryReset, request),
+    onChanged: (listener: (state: DesktopSettingState) => void) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.settingsRegistryChanged,
+        (_event, payload: unknown) => {
+          listener(payload as DesktopSettingState)
+        },
+      ),
   },
   projectManifest: {
     mutate: (request: ProjectManifestMutationRequest) =>

@@ -18,6 +18,9 @@ export const desktopApiIpcChannels = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   settingsDelete: 'settings:delete',
+  settingsRegistryList: 'settings-registry:list',
+  settingsRegistrySet: 'settings-registry:set',
+  settingsRegistryReset: 'settings-registry:reset',
   projectManifestMutate: 'project-manifest:mutate',
   projectManagementReadManifest: 'project-management:read-manifest',
   projectManagementListEntries: 'project-management:list-entries',
@@ -150,6 +153,7 @@ export const desktopApiIpcChannels = {
 
 export const desktopApiEventChannels = {
   menuAction: 'menu:action',
+  settingsRegistryChanged: 'settings-registry:changed',
   windowCloseRequested: 'window:close-requested',
   windowResized: 'window:resized',
   windowMaximizedChanged: 'window:maximized-changed',

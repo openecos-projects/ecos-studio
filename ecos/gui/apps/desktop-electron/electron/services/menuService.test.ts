@@ -170,6 +170,36 @@ describe('menuService', () => {
     )
   })
 
+  it('registers Preferences without a native accelerator in the File menu', () => {
+    const send = vi.fn()
+    let capturedTemplate: MenuItem[] = []
+
+    getFocusedWindow.mockReturnValue({
+      webContents: { send },
+    })
+    buildFromTemplate.mockImplementation((template: MenuItem[]) => {
+      capturedTemplate = template
+      return { items: template }
+    })
+
+    registerApplicationMenu()
+
+    const preferences = capturedTemplate
+      .flatMap((menu) => menu.submenu ?? [])
+      .find((item) => item.label === 'Preferences...')
+    expect(preferences).toBeDefined()
+    // The renderer owns the CmdOrCtrl+, shortcut; a native accelerator would
+    // double-fire navigation in the frameless window.
+    expect(preferences?.accelerator).toBeUndefined()
+    expect(preferences?.id).toBe(desktopMenuEventIds.openPreferences)
+
+    preferences?.click?.()
+    expect(send).toHaveBeenCalledWith(
+      desktopApiEventChannels.menuAction,
+      desktopMenuEventIds.openPreferences,
+    )
+  })
+
   it('updates a registered action by stable menu item ID', () => {
     const menuItem = { enabled: false }
     const getMenuItemById = vi.fn(() => menuItem)
