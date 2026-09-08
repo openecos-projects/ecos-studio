@@ -2888,6 +2888,12 @@ async function ensurePdksLoaded() {
   hasLoadedPdks.value = true
   await loadPdks(true)
   const requirement = config.value.pdk_requirement
+  // Explicit PDK information (a requirement, an installation id, or a pdk_root)
+  // always wins over the default installation in every flow, even when it
+  // fails to resolve — the default must never seed over it.
+  const hasExplicitPdkInfo = Boolean(
+    requirement || config.value.pdk_installation_id || config.value.pdk_root,
+  )
   if (requirement) {
     const projectRoot = projectContext.value.project_root || config.value.directory
     const projectId =
@@ -2934,9 +2940,13 @@ async function ensurePdksLoaded() {
         return
       }
     } catch {}
+    // Explicit pdk_root present but unresolved: leave the selection empty
+    // instead of seeding the default over the workspace's explicit context.
+    return
   }
-  // Every explicit PDK source resolved nothing; preselect the user's default
-  // installation for brand-new workspaces only (never reconfigure flows).
+  if (hasExplicitPdkInfo) return
+  // No explicit PDK source at all; preselect the user's default installation
+  // for brand-new workspaces only (never reconfigure flows).
   await seedDefaultPdkInstallation()
 }
 

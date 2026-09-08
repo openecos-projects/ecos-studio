@@ -568,6 +568,16 @@ describe('EccRpcRuntimeService pool', () => {
       expect(sidecar.shutdownCount).toBe(1)
     })
 
+    it('surfaces unexpected shutdown failures instead of reporting applied', async () => {
+      const pool = createPool()
+      await pool.service.openWorkspace({ directory: '/work/a' })
+      pool.sidecarFor('/work/a').shutdownError = new Error('shutdown exploded')
+
+      await expect(pool.service.restartIdleRuntimes()).rejects.toThrow(
+        'shutdown exploded',
+      )
+    })
+
     it('leaves busy runtimes untouched and reports pending', async () => {
       const pool = createPool()
       const workspace = await pool.service.openWorkspace({ directory: '/work/a' })

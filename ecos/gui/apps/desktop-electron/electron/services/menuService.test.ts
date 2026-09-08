@@ -200,6 +200,48 @@ describe('menuService', () => {
     )
   })
 
+  it('places Preferences in the macOS app menu without duplicating the File menu', () => {
+    const send = vi.fn()
+    let capturedTemplate: MenuItem[] = []
+
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    try {
+      getFocusedWindow.mockReturnValue({
+        webContents: { send },
+      })
+      buildFromTemplate.mockImplementation((template: MenuItem[]) => {
+        capturedTemplate = template
+        return { items: template }
+      })
+
+      registerApplicationMenu()
+
+      const appMenu = capturedTemplate[0]
+      expect(appMenu?.label).toBe('ECOS Studio')
+      const preferences = appMenu?.submenu?.find(
+        (item) => item.label === 'Preferences...',
+      )
+      expect(preferences).toBeDefined()
+      expect(preferences?.accelerator).toBeUndefined()
+
+      const fileMenu = capturedTemplate.find((item) => item.label === 'File')
+      expect(
+        fileMenu?.submenu?.find((item) => item.label === 'Preferences...'),
+      ).toBeUndefined()
+
+      preferences?.click?.()
+      expect(send).toHaveBeenCalledWith(
+        desktopApiEventChannels.menuAction,
+        desktopMenuEventIds.openPreferences,
+      )
+    } finally {
+      if (platformDescriptor) {
+        Object.defineProperty(process, 'platform', platformDescriptor)
+      }
+    }
+  })
+
   it('updates a registered action by stable menu item ID', () => {
     const menuItem = { enabled: false }
     const getMenuItemById = vi.fn(() => menuItem)

@@ -193,9 +193,15 @@ describe('settings registry IPC surface', () => {
     registerIpc(fakeIpc, createServices(settings, broadcasted))
 
     await fakeIpc.invoke('agent:codex-set-bin-path', { path: '/tmp/codex' })
-
     expect(broadcasted).toHaveLength(1)
     expect(broadcasted[0]?.descriptor.key).toBe(DESKTOP_CODEX_BIN_SETTING_KEY)
     expect(broadcasted[0]?.value).toBe('/tmp/codex')
+
+    await fakeIpc.invoke('agent:codex-install')
+    await fakeIpc.invoke('agent:codex-login')
+    expect(broadcasted).toHaveLength(3)
+    for (const state of broadcasted) {
+      expect(state.descriptor.key).toBe(DESKTOP_CODEX_BIN_SETTING_KEY)
+    }
   })
 })

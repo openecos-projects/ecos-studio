@@ -175,6 +175,39 @@ describe('settingsRegistryStore', () => {
     expect(changedListeners).toHaveLength(0)
   })
 
+  it('keeps a newer cross-window broadcast when an older in-flight set fails', async () => {
+    const store = useSettingsRegistryStore()
+    const initial = entryFixture('runtime.eccPath', { value: '/old/ecc' })
+    listMock.mockResolvedValueOnce([initial])
+    await store.load()
+    store.bindChangedEvents()
+
+    let resolveSet!: (result: { error: string; ok: false }) => void
+    registrySet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSet = resolve
+        }),
+    )
+    const inFlight = store.set('runtime.eccPath', '/mine/ecc')
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/mine/ecc')
+
+    // Another window wins the race and broadcasts its newer value.
+    const broadcast = entryFixture('runtime.eccPath', {
+      isDefault: false,
+      value: '/theirs/ecc',
+    })
+    for (const listener of changedListeners) listener(broadcast)
+
+    resolveSet({ error: 'write rejected', ok: false })
+    const result = await inFlight
+
+    expect(result).toMatchObject({ ok: false })
+    // The rollback must not clobber the last-write-wins broadcast value.
+    expect(store.entryFor('runtime.eccPath')?.value).toBe('/theirs/ecc')
+    store.unbindChangedEvents()
+  })
+
   it('reset restores the default entry', async () => {
     const store = useSettingsRegistryStore()
     const initial = entryFixture('agent.codexBin', {

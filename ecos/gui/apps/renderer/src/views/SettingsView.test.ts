@@ -6,9 +6,11 @@ import type { DesktopSettingState } from '@ecos-studio/shared'
 
 type ChangedListener = (state: DesktopSettingState) => void
 
-const { changedListeners, listMock } = vi.hoisted(() => ({
+const { changedListeners, listMock, registryReset, registrySet } = vi.hoisted(() => ({
   changedListeners: [] as ChangedListener[],
   listMock: vi.fn(),
+  registryReset: vi.fn(),
+  registrySet: vi.fn(),
 }))
 
 const pushMock = vi.fn()
@@ -29,8 +31,8 @@ vi.mock('@/platform/desktop', () => ({
           if (index >= 0) changedListeners.splice(index, 1)
         }
       },
-      reset: vi.fn(),
-      set: vi.fn(),
+      reset: registryReset,
+      set: registrySet,
     },
   }),
   hasDesktopApi: () => true,
@@ -185,6 +187,58 @@ describe('SettingsView', () => {
 
     expect(wrapper.find('.status-badge.pending').exists()).toBe(true)
     expect(wrapper.text()).toContain('missing sentinel')
+    wrapper.unmount()
+  })
+
+  it('shows the validating state while a write is in flight', async () => {
+    changedListeners.length = 0
+    registrySet.mockReset()
+    listMock.mockResolvedValueOnce([entryFixture('runtime.eccPath')])
+    const wrapper = await mountView()
+
+    let resolveSet!: (result: { ok: true; state: DesktopSettingState }) => void
+    registrySet.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSet = resolve
+        }),
+    )
+    await wrapper.find('.setting-item-row input').setValue('/new/ecc')
+    await wrapper.find('.setting-item-row input').trigger('keydown.enter')
+
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('Validating…')
+    })
+
+    const confirmed = entryFixture('runtime.eccPath', {
+      isDefault: false,
+      status: { displayInfo: 'ecc 1.0', kind: 'ok' },
+      value: '/new/ecc',
+    })
+    resolveSet({ ok: true, state: confirmed })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Validating…')
+    expect(wrapper.text()).toContain('✓ ecc 1.0')
+    wrapper.unmount()
+  })
+
+  it('commits through the store from the row widgets and resets to default', async () => {
+    changedListeners.length = 0
+    registrySet.mockReset()
+    registryReset.mockReset()
+    const initial = entryFixture('runtime.eccPath', { isDefault: false, value: '/ecc' })
+    listMock.mockResolvedValueOnce([initial])
+    const wrapper = await mountView()
+
+    const resetState = entryFixture('runtime.eccPath', { isDefault: true, value: null })
+    registryReset.mockResolvedValueOnce({ ok: true, state: resetState })
+
+    await wrapper.find('.reset-btn').trigger('click')
+    await flushPromises()
+
+    expect(registryReset).toHaveBeenCalledWith({ key: 'runtime.eccPath' })
+    expect(wrapper.text()).toContain('Using default resolution')
     wrapper.unmount()
   })
 })

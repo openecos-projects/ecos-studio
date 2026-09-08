@@ -7,6 +7,7 @@ import {
   DESKTOP_CODEX_BIN_SETTING_KEY,
   PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
   RUNTIME_ECC_PATH_SETTING_KEY,
+  RUNTIME_ECC_SIZER_ROOT_SETTING_KEY,
   type DesktopSettingState,
 } from '@ecos-studio/shared'
 import {
@@ -174,6 +175,22 @@ describe('SettingsRegistryService', () => {
     expect(harness.broadcasted).toHaveLength(1)
   })
 
+  it('resetting a runtime path deletes the key and restarts the pool against defaults', async () => {
+    const harness = createHarness()
+    const root = await createTempEcc()
+    harness.dependencies.settings.set(RUNTIME_ECC_PATH_SETTING_KEY, root)
+    const restartSpy = vi.mocked(harness.dependencies.restartEccRuntimes)
+
+    const result = await harness.service.reset(RUNTIME_ECC_PATH_SETTING_KEY)
+    expect(result).toMatchObject({
+      ok: true,
+      state: { isDefault: true, status: { kind: 'ok' }, value: null },
+    })
+    expect(harness.dependencies.settings.has(RUNTIME_ECC_PATH_SETTING_KEY)).toBe(false)
+    expect(restartSpy).toHaveBeenCalledTimes(1)
+    expect(harness.broadcasted).toHaveLength(1)
+  })
+
   it('reports a persisted value with an error status when the apply step fails', async () => {
     const harness = createHarness({
       restartEccRuntimes: vi.fn(async () => {
@@ -192,6 +209,57 @@ describe('SettingsRegistryService', () => {
     })
     expect(harness.dependencies.settings.get(RUNTIME_ECC_PATH_SETTING_KEY)).toBe(root)
     expect(harness.broadcasted).toHaveLength(1)
+  })
+
+  it('surfaces a real ECC runtime restart failure through the actual runtime service', async () => {
+    const { EccRpcRuntimeService } = await import('../eccRpc/runtimeService')
+    const stubSidecar = {
+      logFile: null,
+      start: async () => {
+        throw new Error('start unavailable')
+      },
+      shutdown: async () => {
+        throw new Error('sidecar restart exploded')
+      },
+    }
+    const runtimeService = new EccRpcRuntimeService({
+      createSidecar: () => stubSidecar as never,
+    })
+    // Register a runtime in the pool; its sidecar shutdown always fails.
+    await expect(
+      runtimeService.openWorkspace({ directory: '/work/failing' }),
+    ).rejects.toThrow('start unavailable')
+
+    const harness = createHarness({
+      restartEccRuntimes: () => runtimeService.restartIdleRuntimes(),
+    })
+    const root = await createTempEcc()
+
+    const result = await harness.service.set(RUNTIME_ECC_PATH_SETTING_KEY, root)
+    expect(result).toMatchObject({
+      ok: true,
+      state: {
+        status: {
+          error: expect.stringContaining('sidecar restart exploded'),
+          kind: 'error',
+        },
+        value: root,
+      },
+    })
+    expect(harness.dependencies.settings.get(RUNTIME_ECC_PATH_SETTING_KEY)).toBe(root)
+  })
+
+  it('rejects an ecc-sizer root that is missing both the sentinel and Sizer without persisting', async () => {
+    const harness = createHarness()
+    const bareRoot = await mkdtemp(join(tmpdir(), 'ecos-sizer-bare-'))
+
+    const setSpy = vi.spyOn(harness.dependencies.settingsStore, 'set')
+    const result = await harness.service.set(RUNTIME_ECC_SIZER_ROOT_SETTING_KEY, bareRoot)
+
+    expect(result).toMatchObject({ ok: false })
+    expect(setSpy).not.toHaveBeenCalled()
+    expect(harness.dependencies.settings.size).toBe(0)
+    expect(harness.broadcasted).toHaveLength(0)
   })
 
   it('defers the runtime apply while the ECC pool is busy and converges later', async () => {

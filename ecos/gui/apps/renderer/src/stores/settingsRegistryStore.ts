@@ -73,7 +73,9 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
         delete rowErrors.value[key]
       } else {
         rowErrors.value[key] = result.error
-        if (previous) {
+        // Only undo our optimistic write if no newer value (for example a
+        // last-write-wins broadcast from another window) replaced it meanwhile.
+        if (previous && entryFor(key)?.value === value) {
           entries.value = replaceEntry(entries.value, previous)
         }
       }
@@ -89,7 +91,6 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
       return { ok: false, error: BRIDGE_UNAVAILABLE_ERROR }
     }
 
-    const previous = entryFor(key)
     validatingKeys.value = [...validatingKeys.value, key]
     try {
       const result = await api.settingsRegistry.reset({ key })
@@ -98,9 +99,6 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
         delete rowErrors.value[key]
       } else {
         rowErrors.value[key] = result.error
-        if (previous) {
-          entries.value = replaceEntry(entries.value, previous)
-        }
       }
       return result
     } finally {

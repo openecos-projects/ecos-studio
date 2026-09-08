@@ -144,10 +144,13 @@ export class EccRpcRuntimeService {
    * respawns with the current launch configuration. Runtimes with pending work
    * keep running; their next sidecar start picks up the new configuration via
    * env/launch drift detection. Returns 'pending' when at least one runtime was
-   * left untouched because it still had active work.
+   * left untouched because it still had active work. Unexpected shutdown
+   * failures are surfaced to the caller after every runtime was attempted, so
+   * the settings layer can report the apply failure instead of swallowing it.
    */
   async restartIdleRuntimes(): Promise<'applied' | 'pending'> {
     let deferred = false
+    const failures: string[] = []
     for (const runtime of this.uniqueRuntimes()) {
       if (runtime.hasPendingRuntimeWork()) {
         deferred = true
@@ -164,7 +167,11 @@ export class EccRpcRuntimeService {
           '[runtime] failed to restart an idle ECC sidecar after a settings change: %s',
           error instanceof Error ? error.message : String(error),
         )
+        failures.push(error instanceof Error ? error.message : String(error))
       }
+    }
+    if (failures.length > 0) {
+      throw new Error(`Failed to restart idle ECC sidecars: ${failures.join('; ')}`)
     }
     return deferred ? 'pending' : 'applied'
   }

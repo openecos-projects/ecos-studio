@@ -252,6 +252,59 @@ describe('CodexDependencyService', () => {
     })
     expect(spawn.mock.calls[0]?.[2]?.env?.PATH).toBe(`${binDir}:/usr/bin:/bin`)
   })
+
+  it('clearBinPath deletes the override so resolution falls back to the environment', async () => {
+    const root = await createRoot()
+    const envBinDir = join(root, 'env-bin')
+    const envCodex = join(envBinDir, 'codex')
+    await mkdir(envBinDir, { recursive: true })
+    await writeFile(envCodex, '#!/usr/bin/env node\n')
+    await chmod(envCodex, 0o755)
+    const customCodex = join(root, 'custom-codex')
+    await writeFile(customCodex, '#!/usr/bin/env node\n')
+    await chmod(customCodex, 0o755)
+
+    const spawn = vi.fn(
+      (_command: string, args: string[], _options: { env?: NodeJS.ProcessEnv }) => {
+        const child = new FakeChild()
+        queueMicrotask(() => {
+          if (args[0] === '--version') {
+            child.stdout.emit('data', 'codex-cli 0.1.0\n')
+            child.emit('close', 0)
+            return
+          }
+          child.stdout.emit('data', 'Logged in\n')
+          child.emit('close', 0)
+        })
+        return child as never
+      },
+    )
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: '/usr/bin:/bin', ECOS_AGENT_CODEX_BIN: envCodex, HOME: root },
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await expect(service.setBinPath(customCodex)).resolves.toMatchObject({
+      binPath: customCodex,
+      state: 'ready',
+    })
+
+    await expect(service.clearBinPath()).resolves.toMatchObject({
+      binPath: envCodex,
+      state: 'ready',
+    })
+    await expect(settingsStore.get(DESKTOP_CODEX_BIN_SETTING_KEY)).resolves.toBeNull()
+    await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
+      ECOS_AGENT_CODEX_BIN: envCodex,
+      PATH: `${envBinDir}:/usr/bin:/bin`,
+    })
+  })
 })
 
 async function buildTinyGzipTarWithCodex(): Promise<Uint8Array> {
