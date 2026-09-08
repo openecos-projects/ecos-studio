@@ -1,7 +1,8 @@
-import type {
-  PdkInstallationSnapshot,
-  WorkspaceCreationModel,
-  WorkspaceCreationModelRequest,
+import {
+  parseProjectManifestFlowStep,
+  type PdkInstallationSnapshot,
+  type WorkspaceCreationModel,
+  type WorkspaceCreationModelRequest,
 } from '@ecos-studio/shared'
 
 export function buildWorkspaceCreationModel(
@@ -87,18 +88,7 @@ function flowSteps(
 }
 
 function normalizeStep(step: string): string {
-  const aliases: Record<string, string> = {
-    synthesis: 'synthesis',
-    synth: 'synthesis',
-    floor: 'floorplan',
-    lec: 'lec',
-    placement: 'place',
-    routing: 'route',
-    timingoptimization: 'timingoptimization',
-    postroutelec: 'postroutelec',
-  }
-  const normalized = step.toLowerCase()
-  return aliases[normalized] ?? normalized
+  return parseProjectManifestFlowStep(step) ?? step.trim().toLowerCase()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

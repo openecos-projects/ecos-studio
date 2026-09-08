@@ -1,3 +1,5 @@
+import { sameProjectManifestFlowStep } from '@ecos-studio/shared'
+
 export enum CMDEnum {
   catalog_list = 'catalog_list',
   validate_frontend_config = 'validate_frontend_config',
@@ -276,13 +278,14 @@ export function getStepMetadata(stepName: string): StepMetadata | undefined {
 
 /** True when both names refer to the same flow step, including display labels. */
 export function sameFlowStepName(left: string, right: string): boolean {
-  const a = left.trim().toLowerCase()
-  const b = right.trim().toLowerCase()
+  const a = left.trim()
+  const b = right.trim()
   if (!a || !b) return false
-  if (a === b) return true
+  if (a.toLowerCase() === b.toLowerCase()) return true
   const leftMeta = getStepMetadata(left)
   const rightMeta = getStepMetadata(right)
-  return Boolean(leftMeta && rightMeta && leftMeta.path === rightMeta.path)
+  if (leftMeta && rightMeta) return leftMeta.path === rightMeta.path
+  return sameProjectManifestFlowStep(a, b)
 }
 
 const STEP_TOOL_LABELS: Record<string, string> = {

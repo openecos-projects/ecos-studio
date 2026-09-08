@@ -248,6 +248,11 @@ export function parseProjectManifestFlowStep(
   )
 }
 
+export function sameProjectManifestFlowStep(left: string, right: string): boolean {
+  const canonical = parseProjectManifestFlowStep(left)
+  return canonical !== null && canonical === parseProjectManifestFlowStep(right)
+}
+
 function normalizeProjectManifestPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   if (normalized.length <= 1) return normalized

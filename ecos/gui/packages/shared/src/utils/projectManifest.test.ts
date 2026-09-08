@@ -4,6 +4,7 @@ import {
   parseProjectManifestFlowStep,
   projectManifestForPresentation,
   projectManifestFlowSteps,
+  sameProjectManifestFlowStep,
 } from './projectManifest'
 
 describe('project manifest presentation', () => {
@@ -33,6 +34,12 @@ describe('project manifest presentation', () => {
     expect(parseProjectManifestFlowStep('timing-optimization')).toBe('Timing Opt')
     expect(parseProjectManifestFlowStep('fixFanout')).toBeNull()
     expect(parseProjectManifestFlowStep('future-step')).toBeNull()
+    expect(sameProjectManifestFlowStep('placement', 'place')).toBe(true)
+    expect(sameProjectManifestFlowStep('routing', 'route')).toBe(true)
+    expect(sameProjectManifestFlowStep('Synthesis', 'Synth')).toBe(true)
+    expect(sameProjectManifestFlowStep('floorplan', 'Floor')).toBe(true)
+    expect(sameProjectManifestFlowStep('placement', 'route')).toBe(false)
+    expect(sameProjectManifestFlowStep('all', 'Synthesis')).toBe(false)
   })
 
   it('projects the portable ECC manifest for existing Studio consumers', () => {

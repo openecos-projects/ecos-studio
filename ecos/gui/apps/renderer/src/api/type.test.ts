@@ -17,6 +17,15 @@ describe('sameFlowStepName', () => {
     expect(sameFlowStepName('Post-Route LEC', 'lec')).toBe(false)
     expect(sameFlowStepName('LEC', StepEnum.POST_ROUTE_LEC)).toBe(false)
   })
+
+  it('treats catalog applies names as the same flow step as workspace paths', () => {
+    expect(sameFlowStepName('placement', 'place')).toBe(true)
+    expect(sameFlowStepName('routing', 'route')).toBe(true)
+    expect(sameFlowStepName('synthesis', 'Synthesis')).toBe(true)
+    expect(sameFlowStepName('floorplan', 'Floorplan')).toBe(true)
+    expect(sameFlowStepName('all', 'Synthesis')).toBe(false)
+    expect(sameFlowStepName('pdk', 'place')).toBe(false)
+  })
 })
 
 describe('formatStepToolName', () => {

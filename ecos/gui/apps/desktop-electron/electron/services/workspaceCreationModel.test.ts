@@ -10,6 +10,7 @@ describe('buildWorkspaceCreationModel', () => {
         parameterCatalog: [
           { id: 'frequency_max', default: 100, appliesTo: 'synthesis' },
           { id: 'top_layer', default: 'MET5', appliesTo: 'routing' },
+          { id: 'target_density', default: 0.2, appliesTo: 'placement' },
         ],
       },
       [],
@@ -20,6 +21,10 @@ describe('buildWorkspaceCreationModel', () => {
       expect.objectContaining({
         state: 'defaulted',
         value: 100,
+      }),
+      expect.objectContaining({
+        inapplicableReason: 'flow:synth',
+        state: 'inapplicable',
       }),
       expect.objectContaining({
         inapplicableReason: 'flow:synth',
@@ -66,6 +71,47 @@ describe('buildWorkspaceCreationModel', () => {
     expect(model.parameters).toMatchObject([
       { source: 'projectPreset', state: 'defaulted', value: 200 },
       { source: 'user', state: 'explicit', value: 0.72 },
+    ])
+  })
+
+  it('treats catalog applies names as the same flow steps as workspace identities', () => {
+    const model = buildWorkspaceCreationModel(
+      {
+        flowDefinitions: [
+          {
+            flowId: 'rtl2gds',
+            stepIds: ['Synthesis', 'place', 'route'],
+          },
+        ],
+        parameterCatalog: [
+          { id: 'frequency_mhz', default: 100, appliesTo: 'synthesis' },
+          { id: 'target_density', default: 0.2, appliesTo: 'placement' },
+          { id: 'bottom_layer', default: 'MET2', appliesTo: 'routing' },
+          { id: 'tech', default: '', appliesTo: 'pdk' },
+        ],
+      },
+      [],
+      { flowId: 'rtl2gds' },
+    )
+
+    expect(model.parameters).toEqual([
+      expect.objectContaining({
+        definition: expect.objectContaining({ id: 'frequency_mhz' }),
+        state: 'defaulted',
+      }),
+      expect.objectContaining({
+        definition: expect.objectContaining({ id: 'target_density' }),
+        state: 'defaulted',
+      }),
+      expect.objectContaining({
+        definition: expect.objectContaining({ id: 'bottom_layer' }),
+        state: 'defaulted',
+      }),
+      expect.objectContaining({
+        definition: expect.objectContaining({ id: 'tech' }),
+        inapplicableReason: 'flow:rtl2gds',
+        state: 'inapplicable',
+      }),
     ])
   })
 })

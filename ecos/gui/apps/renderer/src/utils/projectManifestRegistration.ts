@@ -1,3 +1,4 @@
+import { parseProjectManifestFlowStep } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
@@ -121,7 +122,7 @@ export async function registerProjectManagedWorkspace(
     if (!registeredProjectRoot) {
       warn(
         'Project manifest not updated',
-        'Workspace was created, but the project root could not be registered for manifest access.',
+        'Workspace was created. The project root could not be registered, so project.json was not updated.',
       )
       return
     }
@@ -138,26 +139,23 @@ export async function registerProjectManagedWorkspace(
         projectName,
         workspacePath,
         sourceWorkspaceId: queryString(input.routeQuery?.sourceWorkspace) || undefined,
-        sourceStep: queryString(input.routeQuery?.sourceStep) || undefined,
+        sourceStep: canonicalManifestStep(queryString(input.routeQuery?.sourceStep)),
         sourceOutputPath: queryString(input.routeQuery?.sourceOutputPath) || undefined,
         sourceOutputType: queryString(input.routeQuery?.sourceOutputType) || undefined,
-        startStep:
+        startStep: canonicalManifestStep(
           queryString(input.routeQuery?.startStep) ||
-          optionalString(input.config?.flow_config?.start_step) ||
-          undefined,
-        endStep:
+            optionalString(input.config?.flow_config?.start_step),
+        ),
+        endStep: canonicalManifestStep(
           queryString(input.routeQuery?.endStep) ||
-          optionalString(input.config?.flow_config?.end_step) ||
-          undefined,
+            optionalString(input.config?.flow_config?.end_step),
+        ),
         config: input.config,
       },
     })
   } catch (error) {
     console.warn('Failed to update project manifest after workspace creation.', error)
-    warn(
-      'Project manifest not updated',
-      'Workspace was created, but project.json could not be updated.',
-    )
+    warn('Project manifest not updated', projectManifestUpdateFailureDetail(error))
   } finally {
     const registeredWorkspaceRoot = await registerLocalProjectRoot(workspacePath)
     if (registeredProjectRoot && registeredWorkspaceRoot) {
@@ -180,6 +178,23 @@ async function registerLocalProjectRoot(rootPath: string): Promise<string | null
     console.warn('Failed to register project root for manifest update.', error)
     return null
   }
+}
+
+function canonicalManifestStep(value: string): string | undefined {
+  if (!value) return undefined
+  const canonical = parseProjectManifestFlowStep(value)
+  if (!canonical) {
+    throw new Error(
+      `Flow step "${value}" is not a canonical project.json step. Use names such as Synth or Harden.`,
+    )
+  }
+  return canonical
+}
+
+function projectManifestUpdateFailureDetail(error: unknown): string {
+  const reason =
+    error instanceof Error && error.message.trim() ? error.message.trim() : String(error)
+  return `Workspace was created. project.json was not updated: ${reason}`
 }
 
 function queryString(value: unknown): string {

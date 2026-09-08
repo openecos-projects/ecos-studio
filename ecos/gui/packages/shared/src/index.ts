@@ -387,6 +387,7 @@ export {
   projectManifestForPresentation,
   projectIdFromName,
   projectManifestFlowSteps,
+  sameProjectManifestFlowStep,
 } from './utils/projectManifest.ts'
 export type {
   EccProjectManifest,
