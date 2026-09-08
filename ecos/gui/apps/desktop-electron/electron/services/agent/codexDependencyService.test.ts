@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CodexDependencyService,
@@ -196,6 +197,69 @@ describe('CodexDependencyService', () => {
     await expect(settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY)).resolves.toBe(
       join(root, 'managed', 'bin', 'codex'),
     )
+  })
+
+  it('install keeps the previous managed binary when the download is not Codex', async () => {
+    const root = await createRoot()
+    const managedBin = join(root, 'managed', 'bin', 'codex')
+    await mkdir(dirname(managedBin), { recursive: true })
+    const previousBinary = '#!/usr/bin/env bash\necho "codex-cli 9.9"\n'
+    await writeFile(managedBin, previousBinary)
+    await chmod(managedBin, 0o755)
+
+    const archiveBytes = await buildTinyGzipTarWithCodex()
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes('releases.openai.com')) {
+        return new Response('missing', { status: 404 })
+      }
+      return new Response(archiveBytes.buffer as ArrayBuffer, {
+        status: 200,
+        headers: { 'content-length': String(archiveBytes.byteLength) },
+      })
+    })
+
+    const spawn = vi.fn((command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(async () => {
+        if (command === 'tar') {
+          const destFlag = args.indexOf('-C')
+          const destination = destFlag >= 0 ? args[destFlag + 1] : ''
+          await writeFile(
+            join(destination, 'codex-x86_64-unknown-linux-musl'),
+            '#!/bin/sh\necho "true 1.0"\n',
+          )
+          await chmod(join(destination, 'codex-x86_64-unknown-linux-musl'), 0o755)
+          child.emit('close', 0)
+          return
+        }
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'true 1.0\n')
+          child.emit('close', 0)
+          return
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: '', HOME: root },
+      fetchImpl: fetchImpl as never,
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await expect(service.install()).rejects.toThrow('不是有效的 Codex CLI')
+    // The previous managed version must survive the failed install.
+    expect(readFileSync(managedBin, 'utf8')).toBe(previousBinary)
+    await expect(
+      settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY),
+    ).resolves.toBeNull()
   })
 
   it('setBinPath validates executability before saving', async () => {

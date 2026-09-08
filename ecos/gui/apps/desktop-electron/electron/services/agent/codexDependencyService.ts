@@ -312,12 +312,12 @@ export class CodexDependencyService {
       }
 
       await mkdir(dirname(targetBin), { recursive: true })
-      // Stage next to the target and swap atomically; a failure before the
-      // rename keeps the previous managed version intact.
+      // Stage next to the target and swap via rename, which atomically
+      // replaces the target on Linux; a failure before the rename keeps the
+      // previous managed version intact.
       stagedBin = `${targetBin}.staging-${randomUUID()}`
       await copyFile(extractedBinary, stagedBin)
       await chmod(stagedBin, 0o755)
-      await rm(targetBin, { force: true })
       await rename(stagedBin, targetBin)
       stagedBin = null
     } catch (error) {

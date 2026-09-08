@@ -1863,6 +1863,8 @@ const hasLoadedPdks = ref(false)
 const validatingPdkId = ref('')
 /** PDK family carried by the project manifest (explicit information). */
 const manifestPdkFamily = ref('')
+/** Manifest generation the PDK selection last resolved against. */
+const pdkResolvedForGeneration = ref(-1)
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [
@@ -2822,6 +2824,9 @@ function setProjectMode(mode: ProjectMode) {
     projectMpc.value = null
     projectManifestError.value = ''
     isLoadingProjectManifest.value = false
+    // Create mode has no project manifest; drop any family it declared so the
+    // default-PDK decision is not poisoned by a previous selection.
+    manifestPdkFamily.value = ''
     delete projectContext.value.project_id
     projectContext.value.project_root = joinPath(
       projectParentPath.value,
@@ -2908,12 +2913,18 @@ function applyFlowStartStep(stepName: FlowStepName) {
 }
 
 async function ensurePdksLoaded() {
-  if (hasLoadedPdks.value) return
-  hasLoadedPdks.value = true
+  // The inventory loads once; the project-dependent resolution below re-runs
+  // whenever the project manifest generation changed (for example after
+  // switching projects on step 1).
+  if (!hasLoadedPdks.value) {
+    hasLoadedPdks.value = true
+    await loadPdks(true)
+  }
   // Project manifest defaults load in the background and may carry explicit
   // PDK information; wait for them so the decision below sees the full state.
   if (projectDefaultsPromise) await projectDefaultsPromise
-  await loadPdks(true)
+  if (pdkResolvedForGeneration.value === projectManifestLoadGeneration) return
+  pdkResolvedForGeneration.value = projectManifestLoadGeneration
   const requirement = config.value.pdk_requirement
   // Explicit PDK information (a family name, a requirement, an installation
   // id, or a pdk_root) always wins over the default installation in every
