@@ -261,12 +261,17 @@ class OptimizationTerminalOutcome(_LedgerModel):
             OptimizationOutcomeKind.EXECUTION_SUCCEEDED: {
                 IncumbentDecision.INITIALIZED
             },
-            OptimizationOutcomeKind.IMPROVED: {IncumbentDecision.CANDIDATE_BETTER},
+            OptimizationOutcomeKind.IMPROVED: {
+                IncumbentDecision.CANDIDATE_BETTER,
+                IncumbentDecision.RECOVERY_PROGRESS,
+                IncumbentDecision.PARITY_OBJECTIVE_IMPROVED,
+            },
             OptimizationOutcomeKind.DEGRADED: {
                 IncumbentDecision.INCUMBENT_RETAINED,
                 IncumbentDecision.CANDIDATE_INELIGIBLE,
             },
             OptimizationOutcomeKind.TRADEOFF: {
+                IncumbentDecision.EQUIVALENT,
                 IncumbentDecision.NOISE_TIE,
                 IncumbentDecision.CANDIDATE_INELIGIBLE,
             },

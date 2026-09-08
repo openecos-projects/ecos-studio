@@ -29,12 +29,17 @@ from ecos_agent.optimization.contracts import (
     StrategyDirection,
     TerminalObservation,
     TimingGuardrailContract,
+    TimingMetric,
     TimingReference,
     objective_metric_utility,
     requested_reference_values,
 )
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 from ecos_agent.optimization.objective_alignment import (
+    PRIMARY_METRIC_RELATIVE_TOLERANCE,
+    PROTECTION_ABSOLUTE_TOLERANCE,
+    PROTECTION_RELATIVE_TOLERANCE,
+    RECOVERY_ORDER,
     ObjectiveAlignmentError,
     OptimizationObjectiveAlignment,
     build_active_objective,
@@ -58,16 +63,29 @@ _DRC_GOAL_MARKERS = (
     "设计规则",
     "规则违例",
 )
-_METRIC_RELATIVE_TOLERANCE = 0.01
-_METRIC_ABSOLUTE_TOLERANCE = 0.01
+_METRIC_RELATIVE_TOLERANCE = PROTECTION_RELATIVE_TOLERANCE
+_METRIC_ABSOLUTE_TOLERANCE = PROTECTION_ABSOLUTE_TOLERANCE
 
 
 class IncumbentDecision(StrEnum):
     INITIALIZED = "initialized"
     CANDIDATE_BETTER = "candidate_better"
+    RECOVERY_PROGRESS = "recovery_progress"
+    PARITY_OBJECTIVE_IMPROVED = "parity_objective_improved"
     INCUMBENT_RETAINED = "incumbent_retained"
+    EQUIVALENT = "equivalent"
     NOISE_TIE = "noise_tie"
     CANDIDATE_INELIGIBLE = "candidate_ineligible"
+
+
+PROMOTING_DECISIONS = frozenset(
+    {
+        IncumbentDecision.INITIALIZED,
+        IncumbentDecision.CANDIDATE_BETTER,
+        IncumbentDecision.RECOVERY_PROGRESS,
+        IncumbentDecision.PARITY_OBJECTIVE_IMPROVED,
+    }
+)
 
 
 class CoordinateDirection(StrEnum):
@@ -138,7 +156,12 @@ def terminal_quality_outcome(
     return {
         IncumbentDecision.INITIALIZED: OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
         IncumbentDecision.CANDIDATE_BETTER: OptimizationOutcomeKind.IMPROVED,
+        IncumbentDecision.RECOVERY_PROGRESS: OptimizationOutcomeKind.IMPROVED,
+        IncumbentDecision.PARITY_OBJECTIVE_IMPROVED: (
+            OptimizationOutcomeKind.IMPROVED
+        ),
         IncumbentDecision.INCUMBENT_RETAINED: OptimizationOutcomeKind.DEGRADED,
+        IncumbentDecision.EQUIVALENT: OptimizationOutcomeKind.TRADEOFF,
         IncumbentDecision.NOISE_TIE: OptimizationOutcomeKind.TRADEOFF,
         IncumbentDecision.CANDIDATE_INELIGIBLE: (
             OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
@@ -190,8 +213,7 @@ def terminal_candidate_is_promotable(
         and candidate.schema_version == "ecos.terminal_observation.v3"
         and (candidate.eligible_for_incumbent or recovery_eligible)
         and comparison is not None
-        and comparison.decision
-        in {IncumbentDecision.INITIALIZED, IncumbentDecision.CANDIDATE_BETTER}
+        and comparison.decision in PROMOTING_DECISIONS
         and requested is not None
         and parameter_receipt is not None
         and native_receipt_is_effective(parameter_receipt)
@@ -227,6 +249,8 @@ def classify_terminal_candidate(
                 incumbent=incumbent,
                 candidate=candidate,
                 alignment=objective_alignment,
+                semantic_objective=semantic_objective,
+                objective=objective,
             )
         elif not candidate.eligible_for_incumbent:
             comparison = IncumbentComparison(
@@ -408,25 +432,26 @@ def compare_incumbent(
             return IncumbentComparison(
                 IncumbentDecision.CANDIDATE_INELIGIBLE, metric_id
             )
-    timing_regression = _timing_regression(incumbent, candidate)
-    if timing_regression is not None:
-        return timing_regression
-    if semantic_objective is not None:
-        for metric_id in semantic_objective.preserve_metrics:
-            incumbent_value = incumbent_objectives[metric_id]
-            candidate_value = candidate_objectives[metric_id]
-            if (
-                objective_metric_utility(metric_id, candidate_value)
-                < objective_metric_utility(metric_id, incumbent_value)
-                and _meaningful_metric_change(incumbent_value, candidate_value)
-            ):
-                return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
-    metric_order = (
-        (semantic_objective.primary_metric,)
-        if semantic_objective is not None
-        else ROUTABILITY_OBJECTIVE_ORDER
+    protected = _protected_metric_regression(
+        incumbent, candidate, semantic_objective, objective
     )
-    for metric_id in metric_order:
+    if protected is not None:
+        return protected
+    if semantic_objective is not None:
+        primary = semantic_objective.primary_metric
+        change = _utility_change(
+            primary, incumbent_objectives[primary], candidate_objectives[primary]
+        )
+        if change > 0:
+            return IncumbentComparison(
+                IncumbentDecision.CANDIDATE_BETTER, primary
+            )
+        if change < 0:
+            return IncumbentComparison(
+                IncumbentDecision.INCUMBENT_RETAINED, primary
+            )
+        return IncumbentComparison(IncumbentDecision.EQUIVALENT, None)
+    for metric_id in ROUTABILITY_OBJECTIVE_ORDER:
         incumbent_value = incumbent_objectives[metric_id]
         candidate_value = candidate_objectives[metric_id]
         incumbent_utility = objective_metric_utility(metric_id, incumbent_value)
@@ -464,30 +489,142 @@ def compare_recovery_incumbent(
     incumbent: TerminalObservation,
     candidate: TerminalObservation,
     alignment: OptimizationObjectiveAlignment,
+    semantic_objective: OptimizationObjectiveContract | None = None,
+    objective: RoutabilityObjectiveContract | None = None,
 ) -> IncumbentComparison:
+    """Priority-guarded comparison: DRC -> setup -> hold -> original objective.
+
+    A candidate must not increase any violation count; at least one decrease
+    is recovery progress, and an unchanged violation level may still promote
+    the frozen original objective.
+    """
     try:
         incumbent_counts = recovery_violation_counts(incumbent)
         candidate_counts = recovery_violation_counts(candidate)
     except ObjectiveAlignmentError:
         return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
-    active = next(
+    if next(
         (metric for metric in alignment.recovery_order if incumbent_counts[metric]),
         None,
-    )
-    if active is None:
+    ) is None:
         raise ValueError("incumbent has no active recovery metric")
     for metric in alignment.recovery_order:
-        if metric != active and candidate_counts[metric] > incumbent_counts[metric]:
+        if candidate_counts[metric] > incumbent_counts[metric]:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric)
+    protected = _protected_metric_regression(
+        incumbent, candidate, semantic_objective, objective
+    )
+    if protected is not None:
+        return protected
+    for metric in alignment.recovery_order:
+        if candidate_counts[metric] < incumbent_counts[metric]:
+            return IncumbentComparison(IncumbentDecision.RECOVERY_PROGRESS, metric)
+    primary = None if semantic_objective is None else semantic_objective.primary_metric
+    if primary is None or primary in RECOVERY_ORDER:
+        # The violation vector already covers this metric; do not compare it twice.
+        return IncumbentComparison(IncumbentDecision.EQUIVALENT, None)
+    incumbent_value = incumbent.objective_metrics.get(primary)
+    candidate_value = candidate.objective_metrics.get(primary)
+    if incumbent_value is None or candidate_value is None:
+        return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, primary)
+    change = _utility_change(primary, incumbent_value, candidate_value)
+    if change > 0:
+        return IncumbentComparison(
+            IncumbentDecision.PARITY_OBJECTIVE_IMPROVED, primary
+        )
+    if change < 0:
+        return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, primary)
+    return IncumbentComparison(IncumbentDecision.EQUIVALENT, None)
+
+
+def _protected_metric_regression(
+    incumbent: TerminalObservation,
+    candidate: TerminalObservation,
+    semantic_objective: OptimizationObjectiveContract | None,
+    objective: RoutabilityObjectiveContract | None,
+) -> IncumbentComparison | None:
+    """Timing guardrails and the user's original preserve constraints.
+
+    The adjacent incumbent is always checked; the frozen episode baseline also
+    bounds tolerated degradation whenever the incumbent still sits inside the
+    frozen tolerance envelope, so per-round tolerance cannot accumulate.
+    """
     timing_regression = _timing_regression(incumbent, candidate)
     if timing_regression is not None:
         return timing_regression
-    decision = (
-        IncumbentDecision.CANDIDATE_BETTER
-        if candidate_counts[active] < incumbent_counts[active]
-        else IncumbentDecision.INCUMBENT_RETAINED
+    frozen_timing = _frozen_timing_regression(objective, incumbent, candidate)
+    if frozen_timing is not None:
+        return frozen_timing
+    if semantic_objective is None:
+        return None
+    frozen_references = (
+        {
+            reference.metric_id: reference.reference_value
+            for reference in objective.references
+        }
+        if objective is not None
+        else {}
     )
-    return IncumbentComparison(decision, active)
+    for metric_id in semantic_objective.preserve_metrics:
+        incumbent_value = incumbent.objective_metrics[metric_id]
+        candidate_value = candidate.objective_metrics[metric_id]
+        if (
+            objective_metric_utility(metric_id, candidate_value)
+            < objective_metric_utility(metric_id, incumbent_value)
+            and _meaningful_metric_change(incumbent_value, candidate_value)
+        ):
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+        reference_value = frozen_references.get(metric_id)
+        if (
+            reference_value is not None
+            # An incumbent already outside the frozen envelope (for example a
+            # recovery-promoted one) is governed by the adjacent check alone.
+            and objective_metric_utility(metric_id, incumbent_value)
+            >= objective_metric_utility(metric_id, reference_value)
+            and objective_metric_utility(metric_id, candidate_value)
+            < objective_metric_utility(metric_id, reference_value)
+            and _meaningful_metric_change(reference_value, candidate_value)
+        ):
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+    return None
+
+
+def _frozen_timing_regression(
+    objective: RoutabilityObjectiveContract | None,
+    incumbent: TerminalObservation,
+    candidate: TerminalObservation,
+) -> IncumbentComparison | None:
+    if objective is None:
+        return None
+    for reference in objective.timing_guardrail.references:
+        metric_id = TimingMetric(reference.metric_id)
+        incumbent_value = incumbent.timing_guardrail[metric_id]
+        if incumbent_value < reference.reference_value and _meaningful_metric_change(
+            reference.reference_value, incumbent_value
+        ):
+            continue
+        candidate_value = candidate.timing_guardrail[metric_id]
+        if candidate_value < reference.reference_value and _meaningful_metric_change(
+            reference.reference_value, candidate_value
+        ):
+            return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
+    return None
+
+
+def _utility_change(
+    metric_id: ObjectiveMetric, reference: float, candidate: float
+) -> float:
+    """Strict signed utility change that only absorbs representation error."""
+    if math.isclose(
+        reference,
+        candidate,
+        rel_tol=PRIMARY_METRIC_RELATIVE_TOLERANCE,
+        abs_tol=0.0,
+    ):
+        return 0.0
+    return objective_metric_utility(
+        metric_id, candidate
+    ) - objective_metric_utility(metric_id, reference)
 
 
 def _timing_regression(

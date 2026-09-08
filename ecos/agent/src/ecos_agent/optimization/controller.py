@@ -116,6 +116,7 @@ from ecos_agent.optimization.rules import (
     ACTIVE_OPTIMIZATION_KNOBS,
     IncumbentComparison,
     IncumbentDecision,
+    PROMOTING_DECISIONS,
     compare_recovery_incumbent,
     native_receipt_is_effective,
     terminal_candidate_is_promotable,
@@ -331,8 +332,9 @@ class OptimizationEpisodeController(
                 incumbent=self._incumbent,
                 candidate=candidate,
                 alignment=self._objective_alignment,
+                semantic_objective=self._objective,
             ).decision
-            == IncumbentDecision.CANDIDATE_BETTER
+            in PROMOTING_DECISIONS - {IncumbentDecision.INITIALIZED}
         )
         if not candidate.eligible_for_incumbent and not recovery_promotion:
             raise OptimizationEpisodeControllerError(

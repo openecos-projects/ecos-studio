@@ -13,7 +13,13 @@ from ecos_agent.optimization.rules import (
     (
         (IncumbentDecision.INITIALIZED, OptimizationOutcomeKind.EXECUTION_SUCCEEDED),
         (IncumbentDecision.CANDIDATE_BETTER, OptimizationOutcomeKind.IMPROVED),
+        (IncumbentDecision.RECOVERY_PROGRESS, OptimizationOutcomeKind.IMPROVED),
+        (
+            IncumbentDecision.PARITY_OBJECTIVE_IMPROVED,
+            OptimizationOutcomeKind.IMPROVED,
+        ),
         (IncumbentDecision.INCUMBENT_RETAINED, OptimizationOutcomeKind.DEGRADED),
+        (IncumbentDecision.EQUIVALENT, OptimizationOutcomeKind.TRADEOFF),
         (IncumbentDecision.NOISE_TIE, OptimizationOutcomeKind.TRADEOFF),
         (
             IncumbentDecision.CANDIDATE_INELIGIBLE,

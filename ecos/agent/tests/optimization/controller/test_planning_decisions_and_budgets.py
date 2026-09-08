@@ -569,3 +569,83 @@ def test_recovery_preserves_the_frozen_objective(tmp_path: Path) -> None:
     )
 
     assert recovered.objective == objective
+
+
+def test_empirical_archive_separates_objective_gain_from_hypothesis_support() -> None:
+    """Promotion is not hypothesis support; signoff stays a separate verdict."""
+    from ecos_agent.optimization.controller_execution import ControllerExecutionMixin
+    from ecos_agent.optimization.knowledge.cases import EmpiricalOutcome
+    from ecos_agent.optimization.parameters.contracts import ExpectedEffectV2
+    from ecos_agent.optimization.contracts import GateResult, ObjectiveMetric
+
+    requested = RequestedKnobValue(
+        knob_id=OptimizationKnob.TARGET_DENSITY, value=0.65
+    )
+    receipt = _native_receipt(requested)
+    incumbent = _eligible_terminal("terminal-incumbent").model_copy(
+        update={
+            "metrics": {
+                **_eligible_terminal().metrics,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 10.0,
+            }
+        }
+    )
+    expected_effects = (
+        ExpectedEffectV2(
+            metric_id=ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW, direction="decrease"
+        ),
+    )
+    wirelength_gain_only = _eligible_terminal("terminal-candidate").model_copy(
+        update={
+            "metrics": {
+                **incumbent.metrics,
+                ObjectiveMetric.ROUTE_WIRELENGTH: 90.0,
+            }
+        }
+    )
+    realized = _eligible_terminal("terminal-candidate").model_copy(
+        update={
+            "metrics": {
+                **incumbent.metrics,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 5.0,
+                ObjectiveMetric.ROUTE_WIRELENGTH: 90.0,
+            }
+        }
+    )
+
+    assert ControllerExecutionMixin._empirical_outcome(
+        OptimizationOutcomeKind.IMPROVED,
+        receipt,
+        wirelength_gain_only,
+        incumbent=incumbent,
+        expected_effects=expected_effects,
+    ) is EmpiricalOutcome.CONTRADICTED
+    assert ControllerExecutionMixin._empirical_outcome(
+        OptimizationOutcomeKind.IMPROVED,
+        receipt,
+        realized,
+        incumbent=incumbent,
+        expected_effects=expected_effects,
+    ) is EmpiricalOutcome.SUPPORTED
+    # An unsigned candidate (final DRC still open) never becomes a supported
+    # case, even when the declared effect was observed.
+    unsigned = realized.model_copy(
+        update={
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 1})
+                if item.metric_id == "drc_count"
+                else item
+                for item in realized.evaluation_metrics
+            ),
+            "signoff_gates": realized.signoff_gates.model_copy(
+                update={"drc_clean": GateResult.FAIL}
+            ),
+        }
+    )
+    assert ControllerExecutionMixin._empirical_outcome(
+        OptimizationOutcomeKind.IMPROVED,
+        receipt,
+        unsigned,
+        incumbent=incumbent,
+        expected_effects=expected_effects,
+    ) is EmpiricalOutcome.GUARDRAIL_FAILURE

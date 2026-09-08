@@ -34,6 +34,7 @@ from ecos_agent.optimization.parameters.contracts import (
     ParameterApplicationReceipt,
     ToolRef,
 )
+from ecos_agent.optimization.rules import IncumbentDecision
 
 HASH = "sha256:" + "a" * 64
 
@@ -132,6 +133,29 @@ def test_terminal_outcome_rejects_conflicting_incumbent_decision() -> None:
 
     with pytest.raises(ValueError, match="does not match outcome"):
         OptimizationTerminalOutcome.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("decision", "outcome"),
+    (
+        (IncumbentDecision.RECOVERY_PROGRESS, OptimizationOutcomeKind.IMPROVED),
+        (
+            IncumbentDecision.PARITY_OBJECTIVE_IMPROVED,
+            OptimizationOutcomeKind.IMPROVED,
+        ),
+        (IncumbentDecision.EQUIVALENT, OptimizationOutcomeKind.TRADEOFF),
+    ),
+)
+def test_terminal_outcome_accepts_new_acceptance_decisions(
+    decision: IncumbentDecision, outcome: OptimizationOutcomeKind
+) -> None:
+    record = _terminal(outcome=outcome).model_copy(
+        update={"incumbent_decision": decision}
+    )
+
+    assert OptimizationTerminalOutcome.model_validate(
+        record.model_dump(mode="json")
+    ) == record
 
 
 @pytest.mark.parametrize(

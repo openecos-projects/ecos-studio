@@ -116,7 +116,12 @@ from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
 )
-from ecos_agent.optimization.knob_policy import allowed_knobs, select_search_actions, policy_payload
+from ecos_agent.optimization.knob_policy import (
+    allowed_knobs,
+    history_layer_signal,
+    policy_payload,
+    select_search_actions,
+)
 from ecos_agent.optimization.parameters.semantics import (
     LATTICE_VERSION,
     card_hash,
@@ -426,7 +431,11 @@ class ControllerContextMixin:
         )
         return select_search_actions(
             self._objective, available,
-            history=tuple((item.requested.knob_id, item.outcome.value) for item in self._history()),
+            history=tuple(
+                (item.requested.knob_id, item.layer_signal)
+                for item in self._history()
+                if item.layer_signal is not None
+            ),
             recovering=self.recovery_incomplete,
             convergence_evidence=self._has_convergence_evidence(observation),
         )
@@ -585,6 +594,24 @@ class ControllerContextMixin:
                 continue
             decision = decisions.get(start.proposal_sha256)
             prior = planning.get(decision.planning_entry_sha256) if decision else None
+            active_before = outcome.active_objective
+            layer_signal = history_layer_signal(
+                incumbent_decision=outcome.incumbent_decision,
+                recovery_transition=outcome.recovery_transition,
+                active_stage=(
+                    active_before.recovery_stage if active_before is not None else None
+                ),
+                active_primary=(
+                    active_before.active_primary_metric.value
+                    if active_before is not None
+                    else None
+                ),
+                decisive_metric=(
+                    outcome.decisive_metric.value
+                    if outcome.decisive_metric is not None
+                    else None
+                ),
+            )
             history.append(
                 OptimizationHistory(
                     reference=HistoryReference(
@@ -611,6 +638,18 @@ class ControllerContextMixin:
                         }
                         if prior else None
                     ),
+                    incumbent_decision=(
+                        outcome.incumbent_decision.value
+                        if outcome.incumbent_decision is not None
+                        else None
+                    ),
+                    decisive_metric=(
+                        outcome.decisive_metric.value
+                        if outcome.decisive_metric is not None
+                        else None
+                    ),
+                    recovery_transition=outcome.recovery_transition,
+                    layer_signal=layer_signal.value,
                 )
             )
         return tuple(history)

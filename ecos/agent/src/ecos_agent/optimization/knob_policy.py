@@ -1,5 +1,7 @@
 """Task permissions and deterministic search layers for the seven controlled knobs."""
 
+from enum import StrEnum
+
 from ecos_agent.optimization.contracts import (
     LegalAction,
     ObjectiveMetric,
@@ -7,6 +9,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationObjectiveContract,
     StrategyDirection,
 )
+from ecos_agent.optimization.rules import IncumbentDecision
 
 KNOB_ROLES = {
     OptimizationKnob.TARGET_DENSITY: "physical",
@@ -17,6 +20,46 @@ KNOB_ROLES = {
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "floorplan_shape",
     OptimizationKnob.DENSITY_WEIGHT: "advanced",
 }
+
+
+class SearchLayerSignal(StrEnum):
+    """Layer feedback derived from stage identity and metric change, not labels."""
+
+    RETAIN = "retain"  # current stage's active metric improved, stage unchanged
+    ADVANCE = "advance"  # stage unchanged, no current-stage progress
+    RESET = "reset"  # recovery stage changed; clear the old stage layer basis
+
+
+def history_layer_signal(
+    *,
+    incumbent_decision: IncumbentDecision | str | None,
+    recovery_transition: str | None,
+    active_stage: str | None,
+    active_primary: str | None,
+    decisive_metric: str | None,
+) -> SearchLayerSignal:
+    """Decide whether the last intervention keeps its layer, advances, or resets."""
+    decision = (
+        IncumbentDecision(incumbent_decision)
+        if incumbent_decision is not None
+        else None
+    )
+    if recovery_transition is not None:
+        return SearchLayerSignal.RESET
+    if (
+        decision is IncumbentDecision.RECOVERY_PROGRESS
+        and decisive_metric is not None
+        and decisive_metric == active_primary
+    ):
+        return SearchLayerSignal.RETAIN
+    # Episodes without an alignment have no recovery stage, so their primary
+    # objective improvement is original-stage progress.
+    if (
+        decision is IncumbentDecision.CANDIDATE_BETTER
+        and active_stage in (None, "original")
+    ):
+        return SearchLayerSignal.RETAIN
+    return SearchLayerSignal.ADVANCE
 
 
 def allowed_knobs(
@@ -40,11 +83,11 @@ def select_search_actions(
     objective: OptimizationObjectiveContract | None,
     available: tuple[LegalAction, ...],
     *,
-    history: tuple[tuple[OptimizationKnob, str], ...] = (),
+    history: tuple[tuple[OptimizationKnob, SearchLayerSignal | str], ...] = (),
     recovering: bool = False,
     convergence_evidence: bool = False,
 ) -> tuple[str, tuple[LegalAction, ...]]:
-    """Keep an improving layer; otherwise try the next nonempty permitted layer."""
+    """Keep a layer that progressed the current stage; otherwise try the next layer."""
     allowed = set(allowed_knobs(objective))
     available = tuple(action for action in available if action.knob_id in allowed)
     if objective is None:
@@ -63,11 +106,16 @@ def select_search_actions(
     )
     start = 0
     if history:
-        last_knob, outcome = history[-1]
+        last_knob, signal = history[-1]
         role = KNOB_ROLES[last_knob]
-        start = order.index(role) + (outcome != "improved")
-        # A new recovery stage must start with its physical search layer.
-        if recovering and role.startswith("floorplan_"):
+        if signal == SearchLayerSignal.RETAIN:
+            start = order.index(role)
+        elif signal == SearchLayerSignal.RESET:
+            # A new recovery stage restarts from that stage's initial layer order.
+            start = 0
+        else:
+            start = order.index(role) + 1
+        if recovering and role.startswith("floorplan_") and signal != SearchLayerSignal.RETAIN:
             start = 0
     for offset in range(len(order)):
         role = order[(start + offset) % len(order)]

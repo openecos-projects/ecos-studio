@@ -66,7 +66,12 @@ from tests.optimization.runner_support import (
 
 
 def _recovery_terminal(
-    execution_id: str, *, drc: int, setup: int, hold: int
+    execution_id: str,
+    *,
+    drc: int = 0,
+    setup: int = 0,
+    hold: int = 0,
+    wirelength: float = 4.0,
 ) -> TerminalObservation:
     terminal = _terminal_observation(
         _observation(_budget()),
@@ -94,6 +99,10 @@ def _recovery_terminal(
                     ),
                 }
             ),
+            "metrics": {
+                **terminal.metrics,
+                ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
+            },
         }
     )
 
@@ -108,6 +117,27 @@ class _RecoveryPlanner(_FakePlanner):
             history_refs=[item.reference.model_dump() for item in context.history],
         )
         proposal["action"]["requested_value"] = round(context.current_values["place.target_density"] - 0.01, 12)
+        return proposal
+
+
+class _LayerFollowingPlanner(_FakePlanner):
+    """Propose the first action of the currently selected search layer."""
+
+    def propose(self, context):
+        self.contexts.append(context)
+        action = context.legal_actions[0]
+        proposal = _proposal(
+            context,
+            action.knob_id.value,
+            action.direction,
+            history_refs=[item.reference.model_dump() for item in context.history],
+        )
+        if action.knob_id.value == "place.target_density" and (
+            action.direction == StrategyDirection.DECREASE
+        ):
+            proposal["action"]["requested_value"] = round(
+                context.current_values["place.target_density"] - 0.01, 12
+            )
         return proposal
 
 def test_successful_execution_is_classified_by_qor_comparison(tmp_path: Path) -> None:
@@ -351,11 +381,12 @@ def test_runner_promotes_progressive_recovery_and_switches_to_original_objective
         "hold",
         "original",
     ]
-    assert all(
-        turn.incumbent_comparison is not None
-        and turn.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_BETTER
-        for turn in turns
-    )
+    assert [turn.incumbent_comparison.decision for turn in turns] == [
+        IncumbentDecision.RECOVERY_PROGRESS,
+        IncumbentDecision.RECOVERY_PROGRESS,
+        IncumbentDecision.RECOVERY_PROGRESS,
+        IncumbentDecision.RECOVERY_PROGRESS,
+    ]
     assert executor.requests[1].parent_candidate_root_ref == (
         ".agent/candidates/execution-1"
     )
@@ -366,6 +397,104 @@ def test_runner_promotes_progressive_recovery_and_switches_to_original_objective
     outcomes = controller.ledger.replay().terminal_outcomes
     assert outcomes[1].recovery_transition == "drc_to_setup"
     assert outcomes[-1].recovery_transition == "hold_to_original"
+    runner.close()
+
+
+def test_runner_promotes_parity_objective_gain_and_keeps_recovery_stage(
+    tmp_path: Path,
+) -> None:
+    """The candidate-3 closed loop: DRC 6->6 with better wirelength is accepted."""
+    planner = _LayerFollowingPlanner()
+    executor = _FakeExecutor()
+    executor.start_receipts = iter(
+        CandidateExecutionReceipt(execution_id=f"execution-{index}", started=True)
+        for index in range(1, 4)
+    )
+
+    def terminal_receipt(execution_id):
+        request = executor.requests[-1]
+        return CandidateExecutionReceipt(
+            execution_id=execution_id,
+            started=True,
+            outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+            evidence=_evidence(execution_id),
+            parameter_application_receipt=_native_receipt(
+                request.requested.knob_id.value, request.requested.value
+            ),
+        )
+
+    baseline = _recovery_terminal("execution-0", drc=6, wirelength=5507.894)
+    objective = freeze_optimization_objective(
+        "reduce routed wirelength",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            rationale_summary="Reduce routed wirelength.",
+        ),
+    )
+    alignment = build_objective_alignment(objective, baseline)
+    controller = OptimizationEpisodeController(
+        episode_id="episode-1",
+        checkpoint_id="checkpoint-1",
+        mode=OptimizationAgentMode.FULL_AGENT,
+        budget=_budget(),
+        planner=planner,
+        executor=executor,
+        ledger=OptimizationLedger(tmp_path / "episode"),
+        clock=_Clock(),
+        execution_context=_execution_context(),
+        incumbent=baseline,
+        objective=objective,
+        objective_alignment=alignment,
+    )
+    candidates = iter((5486.556, 5486.556))
+
+    def terminal_observation(_observation, receipt):
+        return _recovery_terminal(
+            receipt.execution_id, drc=6, wirelength=next(candidates)
+        )
+
+    runner = OptimizationEpisodeRunner(
+        controller=controller,
+        observation_supplier=_observation,
+        retrieval_supplier=_retrieval,
+        current_values=_CURRENT_VALUES,
+        terminal_waiter=terminal_receipt,
+        terminal_observation_supplier=terminal_observation,
+        objective=freeze_routability_objective(
+            baseline, objective_alignment=alignment
+        ),
+        site_width_dbu=200,
+    )
+
+    first = runner.run_turn()
+    second = runner.run_turn()
+
+    assert first.incumbent_comparison.decision == (
+        IncumbentDecision.PARITY_OBJECTIVE_IMPROVED
+    )
+    assert first.incumbent_comparison.decisive_metric == (
+        ObjectiveMetric.ROUTE_WIRELENGTH
+    )
+    outcomes = controller.ledger.replay().terminal_outcomes
+    assert outcomes[0].outcome == OptimizationOutcomeKind.IMPROVED
+    assert outcomes[0].recovery_transition is None
+    assert first.active_objective_after.recovery_stage == "drc"
+    assert runner.recovery_incomplete is True
+    assert controller.incumbent == first.terminal_observation
+    # The next candidate executes from the promoted incumbent's workspace with
+    # its parameter value, and the parity gain does not retain the layer.
+    assert executor.requests[1].parent_candidate_root_ref == (
+        ".agent/candidates/execution-1"
+    )
+    assert planner.contexts[1].current_values["place.target_density"] == 0.25
+    assert planner.contexts[1].history[-1].layer_signal == "advance"
+    assert planner.contexts[1].history[-1].incumbent_decision == (
+        "parity_objective_improved"
+    )
+    # An equivalent follow-up keeps the incumbent and is never degraded.
+    assert second.incumbent_comparison.decision == IncumbentDecision.EQUIVALENT
+    assert outcomes[1].outcome == OptimizationOutcomeKind.TRADEOFF
+    assert controller.incumbent == first.terminal_observation
     runner.close()
 
 

@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
 from ecos_agent.optimization.contracts import LegalAction, ObjectiveMetric, OptimizationKnob
-from ecos_agent.optimization.knob_policy import allowed_knobs, select_search_actions
+from ecos_agent.optimization.knob_policy import (
+    SearchLayerSignal,
+    allowed_knobs,
+    history_layer_signal,
+    select_search_actions,
+)
+from ecos_agent.optimization.rules import IncumbentDecision
 
 
 def objective(metric=ObjectiveMetric.ROUTE_WIRELENGTH, *, geometry="fixed", advanced=False):
@@ -46,12 +52,91 @@ def test_empty_area_direction_falls_through_without_empty_planning_turn():
     assert layer == "physical" and selected
 
 
-def test_feedback_retains_improving_layer_and_advances_failed_layer():
+def test_feedback_retains_progressing_layer_and_advances_failed_layer():
     goal = objective(ObjectiveMetric.DIE_AREA, geometry="variable")
-    history = ((OptimizationKnob.FLOORPLAN_CORE_UTIL, "improved"),)
+    history = ((OptimizationKnob.FLOORPLAN_CORE_UTIL, SearchLayerSignal.RETAIN),)
     assert select_search_actions(goal, actions(), history=history)[0] == "floorplan_area"
-    history = ((OptimizationKnob.FLOORPLAN_CORE_UTIL, "degraded"),)
+    history = ((OptimizationKnob.FLOORPLAN_CORE_UTIL, SearchLayerSignal.ADVANCE),)
     assert select_search_actions(goal, actions(), history=history)[0] == "physical"
+
+
+def test_parity_objective_gain_does_not_retain_the_layer():
+    # Wirelength-only improvement during recovery promotes the incumbent but is
+    # not progress on the active recovery stage, so the search advances.
+    goal = objective()
+    history = ((OptimizationKnob.TARGET_DENSITY, SearchLayerSignal.ADVANCE),)
+    assert (
+        select_search_actions(
+            goal, actions(), history=history, convergence_evidence=True
+        )[0]
+        == "convergence"
+    )
+
+
+def test_stage_change_resets_the_layer_basis():
+    goal = objective(ObjectiveMetric.DIE_AREA, geometry="variable")
+    history = ((OptimizationKnob.FLOORPLAN_ASPECT_RATIO, SearchLayerSignal.RESET),)
+    layer, selected = select_search_actions(goal, actions(), history=history)
+    assert layer == "floorplan_area"
+    assert all(item.knob_id != OptimizationKnob.FLOORPLAN_ASPECT_RATIO for item in selected)
+
+
+def test_layer_signal_uses_stage_identity_and_metric_change():
+    # Current-stage progress retains the layer.
+    assert history_layer_signal(
+        incumbent_decision=IncumbentDecision.RECOVERY_PROGRESS,
+        recovery_transition=None,
+        active_stage="drc",
+        active_primary="drc_count",
+        decisive_metric="drc_count",
+    ) is SearchLayerSignal.RETAIN
+    # Lower-priority violation progress is promotion, not stage progress.
+    assert history_layer_signal(
+        incumbent_decision=IncumbentDecision.RECOVERY_PROGRESS,
+        recovery_transition=None,
+        active_stage="drc",
+        active_primary="drc_count",
+        decisive_metric="sta_hold_violation_count",
+    ) is SearchLayerSignal.ADVANCE
+    # Parity objective improvement promotes without resetting no-progress state.
+    assert history_layer_signal(
+        incumbent_decision=IncumbentDecision.PARITY_OBJECTIVE_IMPROVED,
+        recovery_transition=None,
+        active_stage="drc",
+        active_primary="drc_count",
+        decisive_metric="route_wirelength",
+    ) is SearchLayerSignal.ADVANCE
+    # Equivalent or degraded results advance per the existing order.
+    assert history_layer_signal(
+        incumbent_decision=IncumbentDecision.EQUIVALENT,
+        recovery_transition=None,
+        active_stage="drc",
+        active_primary="drc_count",
+        decisive_metric=None,
+    ) is SearchLayerSignal.ADVANCE
+    assert history_layer_signal(
+        incumbent_decision=None,
+        recovery_transition=None,
+        active_stage="drc",
+        active_primary="drc_count",
+        decisive_metric=None,
+    ) is SearchLayerSignal.ADVANCE
+    # A recovery stage change clears the old stage layer basis.
+    assert history_layer_signal(
+        incumbent_decision=IncumbentDecision.RECOVERY_PROGRESS,
+        recovery_transition="drc_to_setup",
+        active_stage="drc",
+        active_primary="drc_count",
+        decisive_metric="drc_count",
+    ) is SearchLayerSignal.RESET
+    # Original-stage objective improvement may retain the layer.
+    assert history_layer_signal(
+        incumbent_decision=IncumbentDecision.CANDIDATE_BETTER,
+        recovery_transition=None,
+        active_stage="original",
+        active_primary="route_wirelength",
+        decisive_metric="route_wirelength",
+    ) is SearchLayerSignal.RETAIN
 
 
 def test_recovery_does_not_unlock_geometry_or_advanced():
