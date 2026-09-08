@@ -399,6 +399,34 @@ def test_open_workspace_loads_without_creating_step_workspaces(monkeypatch, tmp_
     assert not DummyFlow.instances[0].created
 
 
+def test_workspace_snapshot_reads_configuration_from_canonical_descriptor(
+    monkeypatch, tmp_path
+):
+    _capture, ws = _install_runtime_mocks(monkeypatch, tmp_path)
+    (ws / "home" / "params.toml").write_text("format = 1\n", encoding="utf-8")
+    configuration = {
+        "workspaceSpec": {"design": {"name": "gcd"}},
+        "workspaceBindings": {"inputs": {}},
+    }
+    monkeypatch.setattr(
+        "chipcompiler.engine.read_workspace_configuration",
+        lambda workspace: configuration,
+    )
+    api = WorkspaceRuntimeApi()
+    opened = api.open_workspace(WorkspaceOpenRequest(directory=str(ws)))
+    workspace = api.sessions.get_session(opened["workspaceId"]).workspace
+    workspace.parameters = SimpleNamespace(
+        data={"design": "gcd"}, path=ws / "home" / "parameters.json"
+    )
+    workspace.home.data = {}
+
+    snapshot = api.workspace_snapshot(
+        WorkspaceIdRequest(workspace_id=opened["workspaceId"])
+    )
+
+    assert snapshot["configuration"] == configuration
+
+
 def test_open_workspace_persists_identity_across_restart_and_directory_move(
     monkeypatch,
     tmp_path,

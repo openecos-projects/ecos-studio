@@ -602,12 +602,9 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 parameter_path = Path(session.directory) / "home" / "parameters.json"
             home_data["parameters"] = str(parameter_path)
 
-        configuration = None
-        descriptor = Path(session.directory) / "home" / "workspace.toml"
-        if descriptor.is_file():
-            from chipcompiler.engine import read_workspace_configuration
+        from chipcompiler.engine import read_workspace_configuration
 
-            configuration = read_workspace_configuration(session.workspace)
+        configuration = read_workspace_configuration(session.workspace)
 
         return {
             **self.operations.workspace_snapshot(request.workspace_id),
