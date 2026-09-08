@@ -575,12 +575,16 @@ def _protected_metric_regression(
         ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
         reference_value = frozen_references.get(metric_id)
+        # An incumbent already meaningfully outside the frozen envelope is
+        # governed by the adjacent check alone; a sub-tolerance incumbent is
+        # not, so tolerated per-round drift cannot accumulate past the floor.
         if (
             reference_value is not None
-            # An incumbent already outside the frozen envelope (for example a
-            # recovery-promoted one) is governed by the adjacent check alone.
-            and objective_metric_utility(metric_id, incumbent_value)
-            >= objective_metric_utility(metric_id, reference_value)
+            and not (
+                objective_metric_utility(metric_id, incumbent_value)
+                < objective_metric_utility(metric_id, reference_value)
+                and _meaningful_metric_change(reference_value, incumbent_value)
+            )
             and objective_metric_utility(metric_id, candidate_value)
             < objective_metric_utility(metric_id, reference_value)
             and _meaningful_metric_change(reference_value, candidate_value)

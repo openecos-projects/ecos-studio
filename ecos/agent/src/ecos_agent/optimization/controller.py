@@ -118,6 +118,7 @@ from ecos_agent.optimization.rules import (
     IncumbentDecision,
     PROMOTING_DECISIONS,
     compare_recovery_incumbent,
+    freeze_routability_objective,
     native_receipt_is_effective,
     terminal_candidate_is_promotable,
 )
@@ -246,6 +247,14 @@ class OptimizationEpisodeController(
                     "objective alignment does not match the episode baseline"
                 ) from exc
         self._objective_alignment = objective_alignment
+        # Frozen from the construction-time incumbent, which is the episode
+        # baseline, so promote_incumbent enforces the same frozen protection
+        # envelope as the runner-side classification.
+        self._frozen_objective = (
+            freeze_routability_objective(incumbent, objective_alignment=objective_alignment)
+            if objective_alignment is not None
+            else None
+        )
         self._incumbent_candidate_root_ref: str | None = None
         self._incumbent_candidate_manifest_ref: str | None = None
         self._incumbent_candidate_manifest_sha256: str | None = None
@@ -333,6 +342,7 @@ class OptimizationEpisodeController(
                 candidate=candidate,
                 alignment=self._objective_alignment,
                 semantic_objective=self._objective,
+                objective=self._frozen_objective,
             ).decision
             in PROMOTING_DECISIONS - {IncumbentDecision.INITIALIZED}
         )
@@ -461,6 +471,7 @@ class OptimizationEpisodeController(
         controller._objective = snapshot.objective
         controller._baseline_geometry = snapshot.baseline_geometry
         controller._objective_alignment = snapshot.objective_alignment
+        controller._frozen_objective = snapshot.frozen_objective
         controller._parent_manifest_sha256 = snapshot.parent_manifest_sha256
         controller._task_memory_scope_sha256 = snapshot.task_memory_scope_sha256
         controller._task_memory_supplier = task_memory_supplier
@@ -642,6 +653,8 @@ class OptimizationEpisodeController(
         }
         if self._baseline_geometry is not None:
             value["baseline_geometry"] = self._baseline_geometry.model_dump(mode="json")
+        if self._frozen_objective is not None:
+            value["frozen_objective"] = self._frozen_objective.model_dump(mode="json")
         if not self.receipt_aware_planning:
             value["receipt_aware_planning"] = False
         if self.knowledge_case_shots:

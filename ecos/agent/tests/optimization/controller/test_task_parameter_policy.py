@@ -2,11 +2,12 @@ import pytest
 
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.optimization.contracts import (
-    ObjectiveMetric, OptimizationObjectiveProposal, RequestedKnobValue,
+    GateResult, ObjectiveMetric, OptimizationObjectiveProposal, RequestedKnobValue,
 )
 from ecos_agent.optimization.controller import OptimizationEpisodeController, OptimizationEpisodeControllerError
 from ecos_agent.optimization.geometry import GeometrySnapshot
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.objective_alignment import build_objective_alignment
 from ecos_agent.optimization.parameters.effective_domain import build_context_fingerprint
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from .support import (
@@ -88,6 +89,85 @@ def test_recovery_retains_initial_geometry_and_policy(tmp_path):
     with pytest.raises(OptimizationEpisodeControllerError, match="geometry"):
         recovered.promote_incumbent(changed)
     assert recovered.incumbent == instance.incumbent
+
+
+def _recovery_terminal(*, drc=6, wirelength=100.0, overflow=0):
+    terminal = _eligible_terminal().model_copy(update={"geometry": geometry()})
+    return terminal.model_copy(update={
+        "evaluation_metrics": tuple(
+            item.model_copy(update={"value": drc})
+            if item.metric_id == "drc_count" else item
+            for item in terminal.evaluation_metrics
+        ),
+        "signoff_gates": terminal.signoff_gates.model_copy(
+            update={"drc_clean": GateResult.PASS if drc == 0 else GateResult.FAIL}
+        ),
+        "metrics": {
+            **terminal.metrics,
+            ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: overflow,
+        },
+    })
+
+
+def _preserved_objective():
+    return freeze_optimization_objective(
+        "降低线长并保持布线溢出",
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,),
+            rationale_summary="Promotion keeps the frozen overflow envelope.",
+        ),
+    )
+
+
+def _recovery_controller(tmp_path, baseline, *, goal):
+    return _controller(
+        tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()),
+        objective=goal, incumbent=baseline,
+        objective_alignment=build_objective_alignment(goal, baseline),
+    )
+
+
+def test_promote_incumbent_accepts_parity_objective_gain_in_recovery(tmp_path):
+    baseline = _recovery_terminal(drc=6, wirelength=100.0)
+    instance = _recovery_controller(tmp_path, baseline, goal=_preserved_objective())
+    parity = _recovery_terminal(drc=6, wirelength=95.0)
+
+    instance.promote_incumbent(parity)
+
+    assert instance.incumbent == parity
+
+
+def test_promote_incumbent_enforces_frozen_protection_envelope(tmp_path):
+    baseline = _recovery_terminal(drc=6, wirelength=100.0, overflow=10000)
+    instance = _recovery_controller(tmp_path, baseline, goal=_preserved_objective())
+    drift = _recovery_terminal(drc=5, wirelength=100.0, overflow=10090)
+    instance.promote_incumbent(drift)
+
+    # Sub-tolerance against the adjacent incumbent, yet 1.7% below the frozen
+    # baseline: the promote entry must reject it exactly like classification.
+    creeping = _recovery_terminal(drc=4, wirelength=100.0, overflow=10170)
+    with pytest.raises(OptimizationEpisodeControllerError, match="not eligible"):
+        instance.promote_incumbent(creeping)
+    assert instance.incumbent == drift
+
+
+def test_recovered_controller_keeps_frozen_protection_envelope(tmp_path):
+    baseline = _recovery_terminal(drc=6, wirelength=100.0, overflow=10000)
+    instance = _recovery_controller(tmp_path, baseline, goal=_preserved_objective())
+    drift = _recovery_terminal(drc=5, wirelength=100.0, overflow=10090)
+    instance.promote_incumbent(drift)
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal), executor=_FakeEcc(), ledger=instance.ledger,
+        clock=_Clock(), execution_context=_execution_context(),
+    )
+    assert recovered.incumbent == drift
+    creeping = _recovery_terminal(drc=4, wirelength=100.0, overflow=10170)
+    with pytest.raises(OptimizationEpisodeControllerError, match="not eligible"):
+        recovered.promote_incumbent(creeping)
+    assert recovered.incumbent == drift
 
 
 def test_constraint_rejection_overrides_claimed_improvement_in_ledger(tmp_path):

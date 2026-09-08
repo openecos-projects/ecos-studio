@@ -534,6 +534,20 @@ def test_recovery_tolerance_cannot_accumulate_past_frozen_protection() -> None:
     assert rejected.decision == IncumbentDecision.INCUMBENT_RETAINED
     assert rejected.decisive_metric == ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
 
+    # Sub-tolerance steps must not accumulate either: 10090 -> 10170 is within
+    # the adjacent tolerance yet 1.7% below the frozen baseline.
+    creeping = _terminal(drc=3, setup=0, hold=0, wirelength=99)
+    creeping.metrics[ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW] = 10170
+    chained = compare_recovery_incumbent(
+        incumbent=drift,
+        candidate=creeping,
+        alignment=alignment,
+        semantic_objective=overflow_objective,
+        objective=frozen,
+    )
+    assert chained.decision == IncumbentDecision.INCUMBENT_RETAINED
+    assert chained.decisive_metric == ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
+
 
 def test_alignment_freezes_the_acceptance_rule_and_refuses_old_episodes() -> None:
     objective = _objective()

@@ -44,6 +44,7 @@ from ecos_agent.optimization.contracts import (
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
+    RoutabilityObjectiveContract,
     SelectionMetric,
     StageObservation,
     TerminalObservation,
@@ -171,6 +172,9 @@ class _PersistedEpisodeState(BaseModel):
     baseline_geometry: GeometrySnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
     objective: OptimizationObjectiveContract | None = None
     objective_alignment: OptimizationObjectiveAlignment | None = None
+    frozen_objective: RoutabilityObjectiveContract | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     active_objective: ActiveOptimizationObjective | None = None
     parent_manifest_sha256: str | None = None
     ledger_event_count: int = Field(ge=0)
@@ -241,6 +245,8 @@ class _PersistedEpisodeState(BaseModel):
                 raise ValueError("active objective does not match episode alignment")
         elif self.active_objective is not None:
             raise ValueError("active objective requires objective alignment")
+        if self.frozen_objective is not None and self.objective_alignment is None:
+            raise ValueError("frozen objective requires objective alignment")
         if self.state_sha256 != canonical_sha256(
             self.model_dump(mode="json", exclude={"state_sha256"})
         ):
