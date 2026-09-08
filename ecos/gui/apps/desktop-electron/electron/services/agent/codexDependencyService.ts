@@ -1,4 +1,5 @@
 import { spawn as spawnChild, type SpawnOptions } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import {
   access,
@@ -7,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -285,28 +287,52 @@ export class CodexDependencyService {
     })
 
     const extractDir = await mkdtemp(join(tmpdir(), 'ecos-codex-'))
+    let stagedBin: string | null = null
     try {
       await this.runTarExtract(archivePath, extractDir)
       const extractedBinary = await findExtractedCodexBinary(extractDir)
       if (!extractedBinary) {
         throw new Error('压缩包中未找到 Codex 可执行文件')
       }
+      await chmod(extractedBinary, 0o755)
+
+      this.emitProgress({
+        phase: 'verifying',
+        message: '正在验证 Codex CLI…',
+        progress: 0.97,
+      })
+
+      // Verify the downloaded binary BEFORE touching the installed one so a
+      // failed install leaves the previous working version in place.
+      const extractedVersion = await this.readVersion(extractedBinary)
+      if (!extractedVersion || !/^codex[\s_-]/i.test(extractedVersion)) {
+        const error = new Error('下载内容不是有效的 Codex CLI')
+        this.emitProgress({ phase: 'error', message: error.message })
+        throw error
+      }
+
       await mkdir(dirname(targetBin), { recursive: true })
+      // Stage next to the target and swap atomically; a failure before the
+      // rename keeps the previous managed version intact.
+      stagedBin = `${targetBin}.staging-${randomUUID()}`
+      await copyFile(extractedBinary, stagedBin)
+      await chmod(stagedBin, 0o755)
       await rm(targetBin, { force: true })
-      await copyFile(extractedBinary, targetBin)
-      await chmod(targetBin, 0o755)
+      await rename(stagedBin, targetBin)
+      stagedBin = null
+    } catch (error) {
+      this.emitProgress({
+        phase: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      })
+      throw error
     } finally {
+      if (stagedBin) await rm(stagedBin, { force: true })
       await rm(extractDir, { force: true, recursive: true })
     }
 
-    this.emitProgress({
-      phase: 'verifying',
-      message: '正在验证 Codex CLI…',
-      progress: 0.97,
-    })
-
     const version = await this.readVersion(targetBin)
-    if (!version || !/^codex[\s_-]/i.test(version)) {
+    if (!version) {
       const error = new Error('安装完成但 Codex CLI 无法执行')
       this.emitProgress({ phase: 'error', message: error.message })
       throw error
@@ -427,10 +453,17 @@ export class CodexDependencyService {
 
   private async detectAuthState(bin: string): Promise<DesktopCodexAuthState> {
     try {
-      const { stdout, stderr } = await this.runCommandCapture(bin, ['login', 'status'], {
-        env: this.commandEnv(bin),
-        timeoutMs: 8_000,
-      })
+      const { code, stdout, stderr } = await this.runCommandCapture(
+        bin,
+        ['login', 'status'],
+        {
+          env: this.commandEnv(bin),
+          timeoutMs: 8_000,
+        },
+      )
+      // A probe that timed out (code null) carries untrustworthy partial
+      // output; fall through to the auth file probe instead of parsing it.
+      if (code === null) throw new Error('codex login status timed out')
       const text = `${stdout}\n${stderr}`.toLowerCase()
       if (/not logged|unauthenticated|signed out|no .*auth|login required/.test(text)) {
         return 'unauthenticated'

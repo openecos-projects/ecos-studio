@@ -2510,7 +2510,15 @@ async function loadProjectHistoryEntries() {
   }
 }
 
-async function applyProjectDefaultsForProject(projectRoot: string) {
+function applyProjectDefaultsForProject(projectRoot: string): Promise<void> {
+  // Always record the latest load so ensurePdksLoaded waits for the current
+  // project's manifest rather than a stale earlier read.
+  const load = runProjectDefaultsLoad(projectRoot)
+  projectDefaultsPromise = load
+  return load
+}
+
+async function runProjectDefaultsLoad(projectRoot: string) {
   const loadGeneration = ++projectManifestLoadGeneration
   projectMpc.value = null
   projectManifestError.value = ''
@@ -2529,6 +2537,10 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
     return
   }
   if (loadGeneration !== projectManifestLoadGeneration) return
+
+  // Track the manifest family explicitly (including its absence) so the
+  // default-PDK decision in ensurePdksLoaded sees authoritative information.
+  manifestPdkFamily.value = manifest?.base_design.pdk ?? ''
 
   if (!lockWorkspaceDirectory.value && !workspaceNameTouched.value) {
     workspaceName.value = nextWorkspaceNameForProject(manifest)
