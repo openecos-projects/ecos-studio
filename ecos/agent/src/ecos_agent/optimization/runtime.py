@@ -67,6 +67,11 @@ from ecos_agent.optimization.knowledge.retrieval import (
 )
 from ecos_agent.optimization.rules import freeze_routability_objective, geometry_constraint_error
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
+from ecos_agent.optimization.runtime_waiting import (
+    _terminal_timeout_seconds,
+    _wait_for_any_terminal_receipt,
+    _wait_for_terminal_receipt,
+)
 from ecos_agent.workspace.parameters import (
     WorkspaceParametersError,
     read_workspace_parameters,
@@ -108,6 +113,7 @@ class OptimizationRuntimeContext(BaseModel):
     knowledge_case_pool_root: str | None = None
     receipt_aware_planning: StrictBool = True
     seed: StrictInt = 0
+    max_in_flight_candidates: Literal[1, 2] = 2
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -304,10 +310,10 @@ def _recover_or_create_controller(
     execution_context: Mapping[str, object],
     knowledge_case_pool_root: Path | None,
 ) -> OptimizationEpisodeController:
-    state_path = ledger_root / "optimization-episode-state.v9.json"
+    state_path = ledger_root / "optimization-episode-state.v10.json"
     legacy_state_paths = tuple(
         ledger_root / f"optimization-episode-state.v{version}.json"
-        for version in range(2, 9)
+        for version in range(2, 10)
     )
     if state_path.is_file():
         return _recover_controller(
@@ -324,7 +330,8 @@ def _recover_or_create_controller(
         )
     if any(path.is_file() for path in legacy_state_paths):
         raise OptimizationRuntimeError(
-            "pre-policy episode cannot be recovered; start a new optimization episode"
+            "earlier scheduling policy episode cannot be recovered; "
+            "start a new optimization episode"
         )
     if ledger.ledger_path.is_file() and ledger.ledger_path.stat().st_size:
         raise OptimizationRuntimeError("optimization episode state is missing")
@@ -348,6 +355,7 @@ def _recover_or_create_controller(
         receipt_aware_planning=runtime.receipt_aware_planning,
         knowledge_case_shots=runtime.knowledge_case_shots,
         knowledge_case_pool_root=knowledge_case_pool_root,
+        max_in_flight_candidates=runtime.max_in_flight_candidates,
     )
 
 
@@ -375,6 +383,7 @@ def _recover_controller(
         receipt_aware_planning=runtime.receipt_aware_planning,
         knowledge_case_shots=runtime.knowledge_case_shots,
         knowledge_case_pool_root=knowledge_case_pool_root,
+        max_in_flight_candidates=runtime.max_in_flight_candidates,
     )
     if controller.objective != runtime.objective:
         raise OptimizationRuntimeError(
@@ -466,12 +475,42 @@ def _assemble_runner(
             stop_event=stop_event,
         )
 
+    def terminal_waiter_any(execution_ids: tuple[str, ...]):
+        return _wait_for_any_terminal_receipt(
+            executor,
+            execution_ids,
+            timeout_seconds=min(
+                _terminal_timeout_seconds(),
+                controller.budget.remaining_wall_time_seconds,
+            ),
+            stop_event=stop_event,
+        )
+
     def terminal_observation_supplier(_observation, receipt):
         if receipt.evidence is None:
             raise OptimizationRuntimeError(
                 "ECC terminal receipt has no candidate evidence"
             )
         return build_candidate_terminal_observation(workspace, receipt.evidence)
+
+    def stage_observation_supplier(
+        primary: StageObservation, stages: tuple[str, ...]
+    ):
+        incumbent = _incumbent_workspace(
+            workspace, controller.incumbent_candidate_root_ref
+        )
+        return {
+            stage: build_stage_observation(
+                incumbent, ECCStepName(stage), budget=primary.budget
+            )
+            for stage in stages
+        }
+
+    def current_values_supplier(incumbent_root_ref: str | None):
+        return _current_values(
+            _incumbent_workspace(workspace, incumbent_root_ref),
+            site_width_dbu,
+        )
 
     runner = OptimizationEpisodeRunner(
         controller=controller,
@@ -483,35 +522,12 @@ def _assemble_runner(
         objective=routability_objective,
         stop_event=stop_event,
         site_width_dbu=site_width_dbu,
+        terminal_waiter_any=terminal_waiter_any,
+        current_values_supplier=current_values_supplier,
+        stage_observation_supplier=stage_observation_supplier,
     )
 
     return runner
-
-
-def _wait_for_terminal_receipt(
-    executor: EccCandidateRerunAdapter,
-    execution_id: str,
-    *,
-    timeout_seconds: float,
-    stop_event: threading.Event,
-) -> CandidateExecutionReceipt:
-    deadline = _monotonic() + max(0.0, timeout_seconds)
-    while not stop_event.is_set() and _monotonic() < deadline:
-        remaining = deadline - _monotonic()
-        if remaining <= 0:
-            break
-        try:
-            receipt = executor.wait_for_terminal(
-                execution_id, timeout_seconds=min(1.0, remaining)
-            )
-        except Exception:
-            if stop_event.is_set():
-                return executor.cancel(execution_id)
-            raise
-        if receipt.outcome is not None:
-            return receipt
-        stop_event.wait(min(0.05, max(0.0, deadline - _monotonic())))
-    return executor.cancel(execution_id)
 
 
 def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> str:
@@ -782,16 +798,3 @@ def _runtime_parameters(workspace: Path) -> tuple[str, dict[str, Any]]:
         raise OptimizationRuntimeError("workspace parameters are unavailable") from exc
 
 
-def _terminal_timeout_seconds() -> float:
-    raw = os.environ.get("ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS", "900")
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise OptimizationRuntimeError(
-            "ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid"
-        ) from exc
-    if value <= 0:
-        raise OptimizationRuntimeError(
-            "ECOS_AGENT_ECC_TERMINAL_TIMEOUT_SECONDS is invalid"
-        )
-    return value

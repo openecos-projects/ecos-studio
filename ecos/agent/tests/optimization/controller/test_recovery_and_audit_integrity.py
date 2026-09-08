@@ -33,7 +33,7 @@ from ecos_agent.optimization.decision_audit import (
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
 
 
-def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(
+def test_recovery_reattaches_pending_execution_and_rejects_tampered_state(
     tmp_path: Path,
 ) -> None:
     codex = _FakeCodex(_proposal)
@@ -49,14 +49,35 @@ def test_recovery_quarantines_pending_execution_and_rejects_tampered_state(
         clock=_Clock(),
         execution_context=_execution_context(),
     )
-    assert recovered.state == OptimizationEpisodeState.QUARANTINED
+    # R1: the in-flight candidate keeps its identity, parent snapshot, and
+    # budget reservation instead of being re-executed or silently dropped.
+    assert recovered.state == OptimizationEpisodeState.EXECUTING
     assert recovered.budget.consumed_candidates == 1
+    assert recovered.pending_execution_ids == ("execution-1",)
+    assert recovered.pending_intervention_ids == ("intervention-1",)
 
     state_path = controller.state_path
     state = json.loads(state_path.read_text(encoding="utf-8"))
     state["state"] = "planning"
     state_path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(OptimizationEpisodeControllerError, match="state hash"):
+        OptimizationEpisodeController.recover(
+            planner=_FakeCodex(_proposal),
+            executor=_FakeEcc(),
+            ledger=controller.ledger,
+            clock=_Clock(),
+            execution_context=_execution_context(),
+        )
+
+
+def test_recovery_rejects_single_pending_v9_state_file(tmp_path: Path) -> None:
+    controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc(_started()))
+    controller.state_path.rename(
+        controller.state_path.with_name("optimization-episode-state.v9.json")
+    )
+    with pytest.raises(
+        OptimizationEpisodeControllerError, match="single-pending"
+    ):
         OptimizationEpisodeController.recover(
             planner=_FakeCodex(_proposal),
             executor=_FakeEcc(),

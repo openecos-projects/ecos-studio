@@ -30,6 +30,7 @@ from .support import (
 )
 
 from ecos_agent.ecc_contracts import ECCStepName
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     KnowledgeReference,
     ObservationReference,
@@ -390,8 +391,15 @@ def test_planning_domain_excludes_attempted_value_without_rewriting_proposal(
 ) -> None:
     codex = _FakeCodex(_proposal)
     controller = _controller(tmp_path, codex, _FakeEcc())
-    controller._attempted_request_values = (
-        RequestedKnobValue(knob_id="place.target_density", value=0.85),
+    from ecos_agent.optimization.controller_models import AttemptedProbe
+
+    controller._attempted_probes = (
+        AttemptedProbe(
+            parent_config_sha256=canonical_sha256(
+                dict(sorted(CURRENT_VALUES.items()))
+            ),
+            requested=RequestedKnobValue(knob_id="place.target_density", value=0.85),
+        ),
     )
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)

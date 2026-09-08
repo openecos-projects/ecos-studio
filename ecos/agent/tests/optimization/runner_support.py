@@ -337,17 +337,19 @@ def _proposal(
     direction: StrategyDirection,
     *,
     history_refs: list[dict[str, str]] | None = None,
+    requested_value: bool | int | float | None = None,
 ) -> dict[str, object]:
     domain = next(item for item in context.effective_domains if item.knob_id == knob_id)
-    if direction in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
-        value = direction == StrategyDirection.ENABLE
-    else:
-        step = 1 if knob_id == "place.cell_padding_x" else 0.05
-        value = round(
-            context.current_values[knob_id]
-            + step * (1 if direction == StrategyDirection.INCREASE else -1),
-            12,
-        )
+    if requested_value is None:
+        if direction in {StrategyDirection.ENABLE, StrategyDirection.DISABLE}:
+            requested_value = direction == StrategyDirection.ENABLE
+        else:
+            step = 1 if knob_id == "place.cell_padding_x" else 0.05
+            requested_value = round(
+                context.current_values[knob_id]
+                + step * (1 if direction == StrategyDirection.INCREASE else -1),
+                12,
+            )
     return {
         "schema_version": "ecos.optimization_proposal.v3",
         "context_ref": context.context_ref.model_dump(),
@@ -362,7 +364,7 @@ def _proposal(
         "action": {
             "knob_id": knob_id,
             "direction": direction,
-            "requested_value": value,
+            "requested_value": requested_value,
             "effective_domain_sha256": domain.snapshot_sha256,
             "expected_effects": [
                 {

@@ -36,6 +36,7 @@ from ecos_agent.optimization.runtime import (
     _optimization_execution_context,
     _optimization_rerun_runtime_seconds,
     _parent_manifest_sha256,
+    _wait_for_any_terminal_receipt,
     _wait_for_terminal_receipt,
     create_optimization_runner,
 )
@@ -434,13 +435,78 @@ def test_terminal_waiter_propagates_stop_to_cancel_and_returns_terminal_receipt(
     assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
 
 
+def test_any_terminal_waiter_returns_first_terminal_among_pending() -> None:
+    class Executor:
+        def __init__(self):
+            self.waits: list[str] = []
+
+        def wait_for_terminal(self, execution_id: str, **_kwargs):
+            self.waits.append(execution_id)
+            if execution_id == "operation-2":
+                return CandidateExecutionReceipt(
+                    execution_id=execution_id,
+                    started=True,
+                    outcome=OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
+                )
+            return CandidateExecutionReceipt(
+                execution_id=execution_id, started=True
+            )
+
+        def cancel(self, execution_id: str):
+            raise AssertionError("a terminal arrived; cancel must not run")
+
+    executor = Executor()
+    receipt = _wait_for_any_terminal_receipt(
+        executor,
+        ("operation-1", "operation-2"),
+        timeout_seconds=5.0,
+        stop_event=threading.Event(),
+    )
+    assert receipt.execution_id == "operation-2"
+    assert receipt.outcome == OptimizationOutcomeKind.EXECUTION_SUCCEEDED
+
+
+def test_any_terminal_waiter_cancels_every_pending_on_stop() -> None:
+    stop = threading.Event()
+    cancelled: list[str] = []
+
+    class Executor:
+        def wait_for_terminal(self, execution_id: str, **_kwargs):
+            stop.wait(0.05)
+            if execution_id in cancelled:
+                return CandidateExecutionReceipt(
+                    execution_id=execution_id,
+                    started=True,
+                    outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
+                )
+            return CandidateExecutionReceipt(
+                execution_id=execution_id, started=True
+            )
+
+        def cancel(self, execution_id: str):
+            cancelled.append(execution_id)
+            return CandidateExecutionReceipt(
+                execution_id=execution_id, started=True
+            )
+
+    stop.set()
+    receipt = _wait_for_any_terminal_receipt(
+        Executor(),
+        ("operation-1", "operation-2"),
+        timeout_seconds=1.0,
+        stop_event=stop,
+    )
+    assert sorted(cancelled) == ["operation-1", "operation-2"]
+    assert receipt.outcome == OptimizationOutcomeKind.TIMED_OUT_CANCELLED
+
+
 def test_terminal_waiter_cancels_when_timeout_expires_between_clock_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
     clock = iter((0.0, 0.05, 0.2))
     monkeypatch.setattr(
-        "ecos_agent.optimization.runtime._monotonic", lambda: next(clock)
+        "ecos_agent.optimization.runtime_waiting._monotonic", lambda: next(clock)
     )
 
     class Executor:
@@ -538,7 +604,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     episode_root = workspace / ".agent" / "optimization" / "episode-new"
     assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()
     state = json.loads(
-        (episode_root / "optimization-episode-state.v9.json").read_text(
+        (episode_root / "optimization-episode-state.v10.json").read_text(
             encoding="utf-8"
         )
     )

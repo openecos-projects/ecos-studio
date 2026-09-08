@@ -19,6 +19,16 @@ _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 CANDIDATE_END_STEP = "Harden"
 CANDIDATE_EXECUTION_SCOPE = "full_flow"
+
+
+class CandidateExecutionBusy(RuntimeError):
+    """The execution backend cannot start another isolated candidate now.
+
+    Raised when the backend still owns an active candidate operation for the
+    source workspace.  The coordinator keeps the approved proposal and waits
+    for an in-flight terminal instead of consuming budget or re-dispatching.
+    """
+
 _CANDIDATE_TARGET_STEPS = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: "Floorplan",
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: "Floorplan",

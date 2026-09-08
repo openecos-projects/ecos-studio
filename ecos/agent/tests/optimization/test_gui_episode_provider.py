@@ -91,6 +91,7 @@ class _FailingRunner(OptimizationEpisodeRunner):
         self._controller = SimpleNamespace(
             state=OptimizationEpisodeState.PLANNING,
             episode_id="episode-test",
+            pending_execution_ids=(),
         )
 
     def run_turn(self):
@@ -147,6 +148,44 @@ class _BrokenClosureRunner(_BlockingRunner):
         assert self.release.wait(timeout=2)
         self._controller.state = OptimizationEpisodeState.EXECUTING
         raise RuntimeError("terminal closure failed")
+
+
+class _InFlightRunner(_CompletedRunner):
+    """One candidate still runs after the first turn; the second finishes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.turns = 0
+
+    def run_turn(self):
+        self.turns += 1
+        if self.turns == 1:
+            self._controller.state = OptimizationEpisodeState.EXECUTING
+            self._controller.pending_execution_ids = ("execution-2",)
+            return SimpleNamespace(
+                planning=SimpleNamespace(
+                    state=OptimizationEpisodeState.EXECUTING,
+                    proposal=None,
+                    requested=None,
+                    rejection_reason=None,
+                ),
+                execution=SimpleNamespace(
+                    state=OptimizationEpisodeState.EXECUTING
+                ),
+                incumbent_comparison=None,
+            )
+        self._controller.state = OptimizationEpisodeState.STOPPED
+        self._controller.pending_execution_ids = ()
+        return SimpleNamespace(
+            planning=SimpleNamespace(
+                state=OptimizationEpisodeState.STOPPED,
+                proposal=None,
+                requested=None,
+                rejection_reason=None,
+            ),
+            execution=None,
+            incumbent_comparison=None,
+        )
 
 
 class _QuarantinedRunner(_BlockingRunner):
@@ -272,6 +311,43 @@ def test_gui_pause_and_resume_update_running_session_control_state(tmp_path: Pat
         time.sleep(0.01)
 
     assert lifecycle == ["request-stop", "terminal-ledger", "runner-close"]
+
+
+def test_gui_reports_in_flight_and_waits_for_remaining_candidates(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[dict[str, object]] = []
+    runner = _InFlightRunner()
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: runner,
+    )
+    session_id = provider.start_session(
+        {"directory": str(workspace), "mode": "workspace"}
+    )["sessionId"]
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
+
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    # U1: one candidate ending never reads as all-complete; the episode keeps
+    # running while another candidate is still in flight.
+    assert runner.turns == 2
+    progress = [
+        event["optimization"]
+        for event in events
+        if isinstance(event.get("optimization"), dict)
+        and event["optimization"].get("turn") == 1
+    ][-1]
+    assert progress["in_flight"] == 1
+    assert progress["state"] == "executing"
+    assert provider.sessions[session_id].optimization_phase == "completed"
 
 
 def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> None:

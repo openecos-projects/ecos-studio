@@ -561,7 +561,7 @@ def _snapshot_case_pool(source: Path, destination: Path) -> tuple[Path, dict[str
 
 def _episode_evidence(workspace: Path, episode_root: Path) -> dict[str, object]:
     state = _verified_episode_state(episode_root)
-    state_path = episode_root / "optimization-episode-state.v9.json"
+    state_path = episode_root / "optimization-episode-state.v10.json"
     chain_names = (
         "ledger",
         "planning_audit",

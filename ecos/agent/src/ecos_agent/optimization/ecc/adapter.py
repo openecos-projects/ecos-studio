@@ -19,6 +19,7 @@ from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobVal
 from ecos_agent.optimization.execution import (
     CANDIDATE_END_STEP,
     CANDIDATE_EXECUTION_SCOPE,
+    CandidateExecutionBusy,
     CandidateExecutionEvidence,
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
@@ -94,6 +95,13 @@ class EccCandidateRerunAdapter:
 
     def start(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
         self._validate_request(request)
+        # ponytail: ECC allows one active operation per source workspace; until
+        # isolated candidate lifecycles land in ECC, refuse the second start
+        # client-side instead of racing the backend's conflict check.
+        if self._binding_by_execution_id:
+            raise CandidateExecutionBusy(
+                "ECC workspace already has an active candidate operation"
+            )
         patch = self._materialize_patch(request)
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
@@ -107,6 +115,10 @@ class EccCandidateRerunAdapter:
 
     def resume(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
         self._validate_request(request)
+        if self._binding_by_execution_id:
+            raise CandidateExecutionBusy(
+                "ECC workspace already has an active candidate operation"
+            )
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
             idempotency_key=f"{request.episode_id}.{request.intervention_id}.resume",
@@ -167,7 +179,12 @@ class EccCandidateRerunAdapter:
                 params["floorplanMode"] = "die_util"
             if parent_candidate_root_ref is not None:
                 params["parentCandidateRootRef"] = parent_candidate_root_ref
-        response = self._rpc.call(method, params)
+        try:
+            response = self._rpc.call(method, params)
+        except OptimizationEccAdapterError as exc:
+            if "already has an active operation" in str(exc):
+                raise CandidateExecutionBusy(str(exc)) from exc
+            raise
         operation_id, state = self._validate_operation(response)
         self._validate_execution_contract(response, requested)
         evidence = self._evidence(response)

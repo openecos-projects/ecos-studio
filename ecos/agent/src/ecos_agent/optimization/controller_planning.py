@@ -7,6 +7,7 @@ from typing import Literal, Mapping
 from pydantic import ValidationError
 
 from ecos_agent.errors import ProposalProviderError
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainError
 from ecos_agent.optimization.contracts import (
     OptimizationDecision,
@@ -51,16 +52,24 @@ class ControllerPlanningMixin:
         observation: StageObservation,
         retrieval: OptimizationRetrievalResult,
         current_values: Mapping[str, bool | int | float],
+        stage_observations: Mapping[str, StageObservation] | None = None,
     ) -> OptimizationControlResult:
         self._refresh_budget()
         if self._state not in {
             OptimizationEpisodeState.CREATED,
             OptimizationEpisodeState.PLANNING,
+            OptimizationEpisodeState.EXECUTING,
         }:
             raise OptimizationEpisodeControllerError(
                 "episode is not ready for planning"
             )
         if self._budget.exhausted:
+            # B3: an exhausted budget only blocks new dispatch.  In-flight
+            # candidates must still be collected before the episode may stop.
+            if self._pending_executions:
+                return self._result(
+                    "recovery_incomplete" if self.recovery_incomplete else "budget_exhausted"
+                )
             self._state = OptimizationEpisodeState.STOPPED
             self._proposal = None
             self._pending_v2_proposal = None
@@ -69,10 +78,19 @@ class ControllerPlanningMixin:
             return self._result(
                 "recovery_incomplete" if self.recovery_incomplete else "budget_exhausted"
             )
+        if self.free_candidate_slots <= 0:
+            # All in-flight slots are taken; wait for a terminal first.
+            return self._result("no_free_candidate_slot")
 
-        self._state = OptimizationEpisodeState.PLANNING
+        self._state = (
+            OptimizationEpisodeState.PLANNING
+            if not self._pending_executions
+            else self._state
+        )
         self._budget = self._consume(planning_calls=1)
-        context = self._planning_context(observation, retrieval, current_values)
+        context = self._planning_context(
+            observation, retrieval, current_values, stage_observations
+        )
         planning_entry = self._append_planning_audit(context)
         self._persist()
         planner_source: Literal["llm", "repair"] = "llm"
@@ -133,7 +151,9 @@ class ControllerPlanningMixin:
                     immediate_escalation=True,
                 )
             self._budget = self._consume(planning_calls=1)
-            context = self._planning_context(observation, retrieval, current_values)
+            context = self._planning_context(
+                observation, retrieval, current_values, stage_observations
+            )
             planning_entry = self._append_planning_audit(context)
             provider_payload_sha256 = v2_provider_payload_sha256(context)
             self._persist()
@@ -238,6 +258,15 @@ class ControllerPlanningMixin:
         self._proposal = proposal
         self._pending_v2_proposal = planner_turn.proposal_v2
         self._requested = requested
+        # A4: remember the parent snapshot the proposal was validated against
+        # so a later start cannot silently rebind it to a newer incumbent.
+        self._approved_planning_entry_sha256 = planning_entry.entry_sha256
+        self._approved_parent_incumbent_sha256 = (
+            canonical_sha256(context.incumbent.model_dump(mode="json"))
+            if context.incumbent is not None
+            else None
+        )
+        self._approved_parent_config_sha256 = context.parent_config_sha256
         self._planning_only_turns = 0
         self._state = OptimizationEpisodeState.AWAITING_EXECUTION
         return self._finish_planning(
@@ -274,7 +303,7 @@ class ControllerPlanningMixin:
         proposal = validate_v2_proposal(
             parsed,
             context,
-            attempted=self._attempted_requests(),
+            attempted=self._attempted_requests(context.parent_config_sha256),
         )
         return OptimizationPlannerTurn(
             v2_to_v1(proposal),
@@ -316,7 +345,11 @@ class ControllerPlanningMixin:
             and self._budget.remaining_planning_calls > 0
             and self._budget.remaining_wall_time_seconds > 0
         ):
-            self._state = OptimizationEpisodeState.PLANNING
+            self._state = (
+                OptimizationEpisodeState.EXECUTING
+                if self._pending_executions
+                else OptimizationEpisodeState.PLANNING
+            )
             return self._finish_planning(
                 planning_entry,
                 proposal,

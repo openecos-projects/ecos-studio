@@ -445,11 +445,26 @@ class ProviderOptimizationMixin:
             return
         final_phase = "completed"
         try:
-            while not session.optimization_stop.is_set():
+            while True:
                 while session.optimization_pause.is_set() and not session.optimization_stop.wait(0.1):
                     pass
-                if session.optimization_stop.is_set():
+                stop_requested = session.optimization_stop.is_set()
+                in_flight = len(runner.pending_execution_ids)
+                if stop_requested and not in_flight:
+                    # U1: one candidate ending never reads as all-complete; the
+                    # episode only finishes after every in-flight terminal is
+                    # collected or cancelled.
                     final_phase = "stopped"
+                    break
+                if not stop_requested and runner.state not in {
+                    OptimizationEpisodeState.CREATED,
+                    OptimizationEpisodeState.PLANNING,
+                    OptimizationEpisodeState.EXECUTING,
+                    OptimizationEpisodeState.AWAITING_EXECUTION,
+                }:
+                    break
+                if runner.state == OptimizationEpisodeState.QUARANTINED:
+                    final_phase = "quarantined"
                     break
                 turn = runner.run_turn()
                 session.optimization_turn_count += 1
@@ -504,6 +519,7 @@ class ProviderOptimizationMixin:
                         ),
                         "state": runner.state.value,
                         "turn": session.optimization_turn_count,
+                        "in_flight": len(runner.pending_execution_ids),
                         "planning_state": turn.planning.state.value,
                         "execution_state": turn.execution.state.value if turn.execution else None,
                         "incumbent_decision": (
@@ -545,13 +561,8 @@ class ProviderOptimizationMixin:
                 if runner.state == OptimizationEpisodeState.QUARANTINED:
                     final_phase = "quarantined"
                     break
-                if session.optimization_stop.is_set():
+                if session.optimization_stop.is_set() and not runner.pending_execution_ids:
                     final_phase = "stopped"
-                    break
-                if runner.state not in {
-                    OptimizationEpisodeState.CREATED,
-                    OptimizationEpisodeState.PLANNING,
-                }:
                     break
         except Exception as exc:
             if (

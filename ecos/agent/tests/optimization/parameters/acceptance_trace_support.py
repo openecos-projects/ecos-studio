@@ -164,7 +164,7 @@ def write_trace(
     ledger_replay = ledger.verify()
     decision_replay = OptimizationDecisionAudit(episode_root).verify()
     state = {
-        "schema_version": "ecos.optimization_episode_state.v9",
+        "schema_version": "ecos.optimization_episode_state.v10",
         "episode_id": scope.episode_id,
         "checkpoint_id": scope.checkpoint_id,
         "objective": {"contract_sha256": scope.objective_contract_sha256},
@@ -179,7 +179,7 @@ def write_trace(
         "task_memory_scope_sha256": scope.scope_sha256,
     }
     state["state_sha256"] = canonical_sha256(state)
-    write_json(episode_root / "optimization-episode-state.v9.json", state)
+    write_json(episode_root / "optimization-episode-state.v10.json", state)
     store.synchronize()
     return episode_root
 

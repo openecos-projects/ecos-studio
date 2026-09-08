@@ -139,6 +139,12 @@ class OptimizationInterventionStart(_LedgerModel):
     target_step: str = "place"
     end_step: str = "Harden"
     execution_scope: str = "full_flow"
+    parent_incumbent_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    parent_config_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator(
         "intervention_id", "parent_checkpoint_id", "candidate_checkpoint_id"
@@ -158,6 +164,8 @@ class OptimizationInterventionStart(_LedgerModel):
         "environment_sha256",
         "objective_contract_sha256",
         "objective_alignment_sha256",
+        "parent_incumbent_sha256",
+        "parent_config_sha256",
     )
     @classmethod
     def validate_hash(cls, value: str | None) -> str | None:
