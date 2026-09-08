@@ -197,12 +197,16 @@ def main() -> int:
         else:
             provider.select_model(model)
         objective = _objective()
+        # alignment 必须锚定 workspace 本体（canonical）观测：runner 启动时用
+        # build_terminal_observation(workspace) 重建 alignment 并做整对象比较，而
+        # terminal observation 含 flow_tool_runtime/flow_peak_memory 等易变遥测，
+        # 用 replay clone 的观测构建必然失配。reference 只用于墙钟预算（22x 中位数）。
         runtime_context = {
             "workspace": str(workspace),
             "episode_id": episode_id,
             "objective": objective.model_dump(mode="json"),
             "objective_alignment": build_objective_alignment(
-                objective, reference
+                objective, canonical
             ).model_dump(mode="json"),
             "seed": args.seed,
             "reference_runtime_seconds": reference_runtime,
