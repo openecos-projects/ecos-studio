@@ -35,20 +35,27 @@ const emit = defineEmits<{
 }>()
 
 const draftValue = ref(props.entry.value ?? '')
-/** True while the user typed something that has not been acknowledged yet. */
+/** The value this widget last acknowledged (initial or committed). */
+const committedValue = ref(props.entry.value ?? '')
+/** True while the user is typing something not yet acknowledged by a commit. */
 const draftDirty = ref(false)
 
 watch(draftValue, (value) => {
-  draftDirty.value = value !== (props.entry.value ?? '')
+  // Dirty only while the user is typing something not yet acknowledged by
+  // their own commit; once committed, authoritative updates may replace it.
+  draftDirty.value = value !== committedValue.value && value !== (props.entry.value ?? '')
 })
 
 watch(
   () => props.entry,
   (entry) => {
-    // An authoritative/optimistic entry replace must not clobber a value the
-    // user is still typing (a slow validate can take seconds).
-    if (!draftDirty.value) {
-      draftValue.value = entry.value ?? ''
+    const incoming = entry.value ?? ''
+    // An authoritative replace is adopted when the user has no pending edit —
+    // or when it matches exactly what the user typed (their write accepted) —
+    // so slow validations and cross-window updates are never lost.
+    if (!draftDirty.value || incoming === draftValue.value) {
+      draftValue.value = incoming
+      committedValue.value = incoming
     }
   },
 )
@@ -63,6 +70,7 @@ function commitDraft(value?: string): void {
   const next = (value ?? draftValue.value).trim()
   draftValue.value = next
   if (next === (props.entry.value ?? '')) return
+  committedValue.value = next
   emit('commit', next)
 }
 

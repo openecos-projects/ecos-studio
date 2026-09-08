@@ -284,7 +284,7 @@ describe('settings handlers', () => {
     const binDir = join(root, 'bin')
     await mkdir(binDir, { recursive: true })
     const executablePath = join(binDir, 'ecc')
-    await writeFile(executablePath, '#!/usr/bin/env bash\necho "~ ecc"\n', {
+    await writeFile(executablePath, '#!/usr/bin/env bash\necho "ecc tilde"\n', {
       encoding: 'utf8',
       mode: 0o755,
     })
@@ -347,7 +347,7 @@ describe('settings handlers', () => {
     const binDir = join(root, 'working-dir-bin')
     await mkdir(binDir, { recursive: true })
     const executablePath = join(binDir, 'ecc')
-    await writeFile(executablePath, '#!/usr/bin/env bash\necho "relative ecc"\n', {
+    await writeFile(executablePath, '#!/usr/bin/env bash\necho "ecc relative"\n', {
       encoding: 'utf8',
       mode: 0o755,
     })
@@ -360,7 +360,7 @@ describe('settings handlers', () => {
 
       await expect(
         handlers['runtime.eccPath'].validate(join('working-dir-bin', 'ecc')),
-      ).resolves.toMatchObject({ displayInfo: 'relative ecc', ok: true })
+      ).resolves.toMatchObject({ displayInfo: 'ecc relative', ok: true })
 
       await handlers['runtime.eccPath'].persist(join('working-dir-bin', 'ecc'))
       const stored = dependencies.settings.get('runtime.eccPath') as string
@@ -404,7 +404,7 @@ describe('settings handlers', () => {
         error: expect.stringContaining('超时'),
         ok: false,
       })
-      expect(child.kill).toHaveBeenCalledWith()
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM')
       expect(child.kill).toHaveBeenCalledWith('SIGKILL')
     } finally {
       vi.useRealTimers()

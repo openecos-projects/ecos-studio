@@ -435,6 +435,7 @@ describe('SettingsRegistryService', () => {
       }),
     })
     const root = await mkdtemp(join(tmpdir(), 'ecos-registry-cwd-'))
+    tempRoots.push(root)
     const binDir = join(root, 'bin')
     await mkdir(binDir, { recursive: true })
     const executable = join(binDir, 'ecc')

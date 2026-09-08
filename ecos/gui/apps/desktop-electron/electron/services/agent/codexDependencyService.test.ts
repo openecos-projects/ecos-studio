@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -38,6 +38,9 @@ describe('CodexDependencyService', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
+    await Promise.all(
+      tempRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+    )
   })
 
   async function createRoot(): Promise<string> {

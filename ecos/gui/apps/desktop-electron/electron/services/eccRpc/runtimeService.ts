@@ -74,12 +74,26 @@ export class EccRpcRuntimeService {
   private readonly runtimes = new Map<string, EccWorkspaceRuntime>()
   private readonly handleToDirectory = new Map<string, string>()
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  /** One-shot listeners notified the next time any runtime drains. */
+  private readonly drainListeners = new Set<() => void>()
   private controlRuntime: EccWorkspaceRuntime | null = null
 
   constructor(private readonly options: EccRpcRuntimeServiceOptions) {}
 
   get activeWorkspaceDirectory(): string | null {
     return this.handleToDirectory.values().next().value ?? null
+  }
+
+  /**
+   * Invoke `listener` the next time any runtime in the pool (including ones
+   * created later) finishes its queued work. Used by the settings layer to
+   * settle deferred applies as soon as the pool turns idle.
+   */
+  notifyOnRuntimeDrain(listener: () => void): void {
+    this.drainListeners.add(listener)
+    for (const runtime of this.uniqueRuntimes()) {
+      runtime.notifyOnDrain(listener)
+    }
   }
 
   callRuntime<T>(
@@ -383,8 +397,17 @@ export class EccRpcRuntimeService {
         snapshotLoader: this.options.snapshotLoader,
       })
       this.runtimes.set(key, runtime)
+      this.attachDrainForwarder(runtime)
     }
     return runtime
+  }
+
+  /** Forward per-runtime drain notifications to the pool-level listeners. */
+  private attachDrainForwarder(runtime: EccWorkspaceRuntime): void {
+    if (this.drainListeners.size === 0) return
+    for (const listener of this.drainListeners) {
+      runtime.notifyOnDrain(listener)
+    }
   }
 
   private uniqueRuntimes(): EccWorkspaceRuntime[] {
@@ -404,6 +427,7 @@ export class EccRpcRuntimeService {
         directory: null,
         onEvent: (event) => this.emit(event),
       })
+      this.attachDrainForwarder(this.controlRuntime)
     }
     return this.controlRuntime
   }

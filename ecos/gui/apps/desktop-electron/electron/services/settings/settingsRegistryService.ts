@@ -71,7 +71,7 @@ export class SettingsRegistryService {
   }
 
   async list(): Promise<DesktopSettingState[]> {
-    await this.settlePendingApplies()
+    await this.settleDeferredApplies()
     const states: DesktopSettingState[] = []
     for (const descriptor of SETTINGS_REGISTRY) {
       states.push(await this.stateFor(descriptor))
@@ -191,7 +191,7 @@ export class SettingsRegistryService {
    * state so open pages stop showing 'pending'. A failing apply becomes an
    * error record so the failure is surfaced instead of silently timing out.
    */
-  private async settlePendingApplies(): Promise<void> {
+  async settleDeferredApplies(): Promise<void> {
     for (const key of Array.from(this.pendingApplyKeys)) {
       if (this.isEccRuntimePoolBusy()) return
       const descriptor = this.requireDescriptor(key)

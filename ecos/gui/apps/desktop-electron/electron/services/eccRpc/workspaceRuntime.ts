@@ -41,7 +41,6 @@ import type {
 } from '@ecos-studio/shared'
 
 import { normalizeRuntimeError } from './errors'
-import { EccRpcShutdownDeferredError } from './sidecarProcess'
 import { electronLogger } from '../logger'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import {
@@ -114,6 +113,7 @@ export class EccWorkspaceRuntime {
   private readonly sidecarLifecycle: RuntimeSidecarLifecycle
   private readonly snapshotCache = new WorkspaceSnapshotCache()
   private readonly commands: WorkspaceRuntimeCommands
+  private readonly drainListeners = new Set<() => void>()
   private queue = Promise.resolve()
   private ready = false
   private boundDirectory: string | null
@@ -597,26 +597,30 @@ export class EccWorkspaceRuntime {
   }
 
   /**
+   * Invoke `listener` once when the runtime's operation queue drains. The
+   * listener set is one-shot: registered listeners fire on the first drain
+   * and are then discarded.
+   */
+  notifyOnDrain(listener: () => void): void {
+    this.drainListeners.add(listener)
+  }
+
+  /**
    * Restart this runtime so it picks up a changed launch configuration.
    * Unlike releaseIdleSidecar, the idle check and shutdown run serialized on
    * the runtime's own operation queue: a flow queued after this call can only
    * start once the sidecar has been shut down, so it respawns with the new
    * configuration instead of joining a dying process. Returns false when the
-   * runtime still had active work (or the sidecar deferred the shutdown) and
-   * the restart was deferred to its next sidecar start.
+   * runtime still had active work, or when the sidecar deferred the shutdown,
+   * leaving the restart to its next sidecar start.
    */
   async restartForConfigChange(): Promise<boolean> {
     return await this.runSerialized(async () => {
       if (this.isActive() || this.sidecarLifecycle.hasFinalSnapshotTask()) {
         return false
       }
-      try {
-        await this.shutdown()
-      } catch (error) {
-        if (error instanceof EccRpcShutdownDeferredError) return false
-        throw error
-      }
-      return true
+      const result = await this.shutdown()
+      return result.ok
     })
   }
 
@@ -755,6 +759,11 @@ export class EccWorkspaceRuntime {
           this.inFlightOperation = null
         }
         this.inFlightCount = Math.max(0, this.inFlightCount - 1)
+        if (this.inFlightCount === 0) {
+          const listeners = [...this.drainListeners]
+          this.drainListeners.clear()
+          for (const listener of listeners) listener()
+        }
       }
     }
 

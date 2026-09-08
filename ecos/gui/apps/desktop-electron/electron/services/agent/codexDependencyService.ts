@@ -165,9 +165,10 @@ export class CodexDependencyService {
     if (!(await this.validateExecutable(resolved))) {
       throw new Error('所选路径不是可执行的 Codex CLI')
     }
-    // A non-Codex binary (for example /bin/true) must never be persisted.
+    // A non-Codex binary (for example /bin/true) must never be persisted; the
+    // version line has to start with a Codex marker.
     const version = await this.readVersion(resolved)
-    if (!version || !/codex/i.test(version)) {
+    if (!version || !/^codex[\s_-]/i.test(version)) {
       throw new Error('所选路径不是可执行的 Codex CLI')
     }
     await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, resolved)
@@ -378,10 +379,11 @@ export class CodexDependencyService {
 
   private async readVersion(bin: string): Promise<string | null> {
     try {
-      const { stdout } = await this.runCommandCapture(bin, ['--version'], {
+      const { code, stdout } = await this.runCommandCapture(bin, ['--version'], {
         env: this.commandEnv(bin),
         timeoutMs: 8_000,
       })
+      if (code !== 0) return null
       const line = stdout.trim().split(/\r?\n/)[0]?.trim()
       return line || null
     } catch {
@@ -479,28 +481,50 @@ export class CodexDependencyService {
         env: options.env ?? this.env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      // Bound captured output so a chatty process cannot exhaust memory.
+      const maxCapturedChars = 8_192
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let killTimer: ReturnType<typeof setTimeout> | null = null
+      let forceResolveTimer: ReturnType<typeof setTimeout> | null = null
+
+      const appendCapped = (target: string, chunk: Buffer | string): string => {
+        if (target.length >= maxCapturedChars) return target
+        const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+        return `${target}${text.slice(0, maxCapturedChars - target.length)}`
+      }
+      const settle = (fn: (value: never) => void, value: unknown): void => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        if (killTimer) clearTimeout(killTimer)
+        if (forceResolveTimer) clearTimeout(forceResolveTimer)
+        ;(fn as (value: unknown) => void)(value)
+      }
       const timer =
         options.timeoutMs && options.timeoutMs > 0
           ? setTimeout(() => {
               child.kill()
-              reject(new Error(`${command} timed out`))
+              // A child ignoring SIGTERM still must not outlive the probe.
+              killTimer = setTimeout(() => child.kill('SIGKILL'), 1_000)
+              // Hard backstop if the process ignores every signal.
+              forceResolveTimer = setTimeout(() => {
+                settle(resolve, { code: null, stderr, stdout })
+              }, 3_000)
             }, options.timeoutMs)
           : null
       child.stdout?.on('data', (chunk) => {
-        stdout += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+        stdout = appendCapped(stdout, chunk as Buffer | string)
       })
       child.stderr?.on('data', (chunk) => {
-        stderr += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+        stderr = appendCapped(stderr, chunk as Buffer | string)
       })
       child.on('error', (error) => {
-        if (timer) clearTimeout(timer)
-        reject(error)
+        settle(reject, error)
       })
       child.on('close', (code) => {
-        if (timer) clearTimeout(timer)
-        resolve({ code, stdout, stderr })
+        settle(resolve, { code, stderr, stdout })
       })
     })
   }

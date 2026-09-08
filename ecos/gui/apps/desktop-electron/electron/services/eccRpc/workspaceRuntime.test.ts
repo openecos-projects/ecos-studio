@@ -20,6 +20,7 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import { EccJsonRpcError } from './jsonRpcClient'
+import { EccRpcShutdownDeferredError } from './sidecarProcess'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 
 interface RpcCall {
@@ -69,6 +70,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   logFile: string | null = '/tmp/ecc-rpc-runtime.log'
   relocateLogFileFrom = vi.fn()
   shutdownCount = 0
+  shutdownError: Error | null = null
   startCount = 0
 
   constructor(client: FakeRpcClient) {
@@ -77,6 +79,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
 
   async shutdown(): Promise<void> {
     this.shutdownCount += 1
+    if (this.shutdownError) throw this.shutdownError
     return
   }
 
@@ -1669,6 +1672,21 @@ describe('EccWorkspaceRuntime', () => {
     it('shuts down an idle runtime so the next start respawns it', async () => {
       const { service, sidecar } = createService('/work/demo')
       await expect(service.restartForConfigChange()).resolves.toBe(true)
+      expect(sidecar.shutdownCount).toBe(1)
+    })
+
+    it('defers when the sidecar reports a shutdown barrier', async () => {
+      const { service, sidecar } = createService('/work/demo')
+      // The sidecar refuses the shutdown because it is mid-operation.
+      sidecar.shutdownError = new EccRpcShutdownDeferredError({
+        operationId: 'operation-1',
+        safeToStop: false,
+        state: 'running',
+        step: 'place',
+        workspaceId: 'workspace-1',
+      })
+
+      await expect(service.restartForConfigChange()).resolves.toBe(false)
       expect(sidecar.shutdownCount).toBe(1)
     })
 

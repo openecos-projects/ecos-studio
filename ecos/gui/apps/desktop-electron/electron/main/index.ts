@@ -330,6 +330,11 @@ async function ensureDesktopBridgeReady(): Promise<void> {
         desktopServices.eccRuntimeService.hasPendingRuntimeWork(),
       settingsStore: desktopServices.settingsStore,
     })
+    // A deferred runtime apply settles as soon as the pool turns idle so open
+    // settings pages stop showing 'pending' without waiting for a reload.
+    desktopServices.eccRuntimeService.notifyOnRuntimeDrain(() => {
+      void settingsRegistryService.settleDeferredApplies()
+    })
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,

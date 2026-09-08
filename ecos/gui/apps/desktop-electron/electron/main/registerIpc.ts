@@ -2361,12 +2361,15 @@ export function registerIpc(
       }
     })
     try {
-      return await withCodexKeyTransaction(services, () =>
-        requireCodexDependencyService(services).install(),
-      )
+      // install() merges concurrent requests through a shared promise and must
+      // stay outside the key transaction; only the post-install environment
+      // sync runs inside the registry's queue so it cannot interleave with a
+      // Preferences write.
+      const status = await requireCodexDependencyService(services).install()
+      await withCodexKeyTransaction(services, () => applyCodexBinEnv(services))
+      return status
     } finally {
       unsubscribe()
-      await applyCodexBinEnv(services)
       await notifyCodexBinSettingChanged(services)
     }
   })

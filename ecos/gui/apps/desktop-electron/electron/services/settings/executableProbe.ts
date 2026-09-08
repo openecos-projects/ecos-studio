@@ -76,7 +76,13 @@ export async function probeExecutableVersion(
   }
 
   return await new Promise<ExecutableProbeResult>((resolve) => {
-    const child = spawnImpl(resolved, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    // A new process group lets the timeout path terminate the whole tree, so
+    // descendants that inherited the pipes cannot outlive the probe.
+    const detached = process.platform !== 'win32'
+    const child = spawnImpl(resolved, args, {
+      detached,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
     const timeoutError: ExecutableProbeResult = {
       ok: false,
       error: `探测可执行文件超时 (${Math.round(options.timeoutMs / 1000)}s): ${pathValue}`,
@@ -87,6 +93,18 @@ export async function probeExecutableVersion(
     let timedOut = false
     let killTimer: ReturnType<typeof setTimeout> | null = null
     let forceResolveTimer: ReturnType<typeof setTimeout> | null = null
+
+    const terminate = (signal: NodeJS.Signals): void => {
+      try {
+        if (detached && child.pid) {
+          process.kill(-child.pid, signal)
+          return
+        }
+      } catch {
+        // Fall through to the direct child kill.
+      }
+      child.kill(signal)
+    }
 
     const finish = (result: ExecutableProbeResult) => {
       if (settled) return
@@ -99,11 +117,11 @@ export async function probeExecutableVersion(
 
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill()
+      terminate('SIGTERM')
       // A child ignoring SIGTERM gets SIGKILL; a hard backstop keeps this
       // promise bounded even when the process ignores every signal.
       killTimer = setTimeout(() => {
-        child.kill('SIGKILL')
+        terminate('SIGKILL')
       }, KILL_GRACE_MS)
       forceResolveTimer = setTimeout(
         () => finish(timeoutError),

@@ -129,7 +129,7 @@ export function createSettingHandlers(
         }
         // Any binary can answer `--version`; require it to identify as ECC so
         // an unrelated executable does not poison the sidecar launch.
-        if (!/ecc/i.test(probe.version)) {
+        if (!/^ecc[\s_.-]/i.test(probe.version) && !/^ecc$/i.test(probe.version)) {
           return {
             ok: false,
             error: `所选路径不是 ECC 可执行文件 (版本输出: ${probe.version})`,
@@ -169,7 +169,7 @@ export function createSettingHandlers(
         }
         // An executable that is not a Codex CLI (for example /bin/true) must
         // be rejected before anything is persisted.
-        if (!/codex/i.test(probe.version)) {
+        if (!/^codex[\s_-]/i.test(probe.version)) {
           return { ok: false, error: `所选路径不是可执行的 Codex CLI: ${value}` }
         }
         return { ok: true, displayInfo: probe.version }
