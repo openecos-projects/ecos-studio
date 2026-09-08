@@ -263,11 +263,18 @@ def test_adapter_rejects_mismatched_request_or_foreign_operation() -> None:
             )
         )
 
-def test_adapter_refuses_a_second_concurrent_start_until_terminal() -> None:
-    """The ECC backend owns one active operation per source workspace."""
+def test_adapter_starts_two_isolated_candidates_concurrently() -> None:
+    """Isolated candidates run under their own ECC operation identity."""
     from ecos_agent.optimization.execution import CandidateExecutionBusy
 
-    rpc = _FakeEccRpc(_running_operation())
+    rpc = _FakeEccRpc(
+        {
+            **_running_operation(),
+            "workspaceId": (
+                "workspace-1::candidate::candidate-0c4c4b249d945101-intervention-1"
+            ),
+        }
+    )
     adapter = EccCandidateRerunAdapter(
         rpc, workspace_id="workspace-1", site_width_dbu=200
     )
@@ -275,20 +282,51 @@ def test_adapter_refuses_a_second_concurrent_start_until_terminal() -> None:
         _request("place.target_density", 0.65, StrategyDirection.INCREASE)
     )
     assert first.started is True
+    assert first.execution_id == "operation-1"
 
-    with pytest.raises(CandidateExecutionBusy):
-        adapter.start(
-            _request("place.target_density", 0.65, StrategyDirection.INCREASE)
-        )
-
-    # Collecting the terminal releases the busy state for the next start.
-    rpc.terminal_response = {
-        "operationId": "operation-1",
-        "workspaceId": "workspace-1",
-        "state": "failed",
+    # A second isolated candidate starts while the first is still in flight;
+    # ECC registers it under its own candidate operation identity instead of
+    # occupying the source workspace's active-operation slot.
+    rpc.candidate_response = {
+        **_running_operation(),
+        "operationId": "operation-2",
+        "workspaceId": (
+            "workspace-1::candidate::candidate-0c4c4b249d945101-intervention-2"
+        ),
     }
-    adapter.wait_for_terminal("operation-1")
     second = adapter.start(
-        _request("place.target_density", 0.65, StrategyDirection.INCREASE)
+        replace(
+            _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+            intervention_id="intervention-2",
+        )
     )
     assert second.started is True
+    assert second.execution_id == "operation-2"
+
+    # A foreign workspace identity is still rejected, not silently accepted.
+    rpc.candidate_response = {
+        **_running_operation(),
+        "operationId": "operation-3",
+        "workspaceId": "other-workspace::candidate::candidate-x",
+    }
+    with pytest.raises(OptimizationEccAdapterError, match="workspace"):
+        adapter.start(
+            replace(
+                _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+                intervention_id="intervention-3",
+            )
+        )
+
+    # A busy source workspace (its own active operation) still defers the
+    # start so the coordinator can keep the proposal without a charge.
+    rpc.candidate_error = (
+        "ECC RPC candidate.rerun rejected: workspace already has an active "
+        "operation: operation-9"
+    )
+    with pytest.raises(CandidateExecutionBusy):
+        adapter.start(
+            replace(
+                _request("place.target_density", 0.65, StrategyDirection.INCREASE),
+                intervention_id="intervention-4",
+            )
+        )

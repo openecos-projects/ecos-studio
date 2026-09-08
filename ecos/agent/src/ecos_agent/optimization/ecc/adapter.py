@@ -95,13 +95,6 @@ class EccCandidateRerunAdapter:
 
     def start(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
         self._validate_request(request)
-        # ponytail: ECC allows one active operation per source workspace; until
-        # isolated candidate lifecycles land in ECC, refuse the second start
-        # client-side instead of racing the backend's conflict check.
-        if self._binding_by_execution_id:
-            raise CandidateExecutionBusy(
-                "ECC workspace already has an active candidate operation"
-            )
         patch = self._materialize_patch(request)
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
@@ -115,10 +108,6 @@ class EccCandidateRerunAdapter:
 
     def resume(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
         self._validate_request(request)
-        if self._binding_by_execution_id:
-            raise CandidateExecutionBusy(
-                "ECC workspace already has an active candidate operation"
-            )
         return self._start_rerun(
             candidate_id=_candidate_id(request.episode_id, request.intervention_id),
             idempotency_key=f"{request.episode_id}.{request.intervention_id}.resume",
@@ -182,6 +171,9 @@ class EccCandidateRerunAdapter:
         try:
             response = self._rpc.call(method, params)
         except OptimizationEccAdapterError as exc:
+            # Isolated candidates run under their own ECC operation identity;
+            # this conflict now means the source workspace itself is busy with
+            # an active operation, so the start defers without a charge.
             if "already has an active operation" in str(exc):
                 raise CandidateExecutionBusy(str(exc)) from exc
             raise
@@ -560,9 +552,24 @@ class EccCandidateRerunAdapter:
             *_TERMINAL_STATES,
         }:
             raise OptimizationEccAdapterError("operation state is invalid")
-        if require_workspace and response.get("workspaceId") != self._workspace_id:
+        if require_workspace and not self._operation_workspace_matches(
+            response.get("workspaceId")
+        ):
             raise OptimizationEccAdapterError("operation workspace does not match")
         return operation_id, state
+
+    def _operation_workspace_matches(self, workspace_id: object) -> bool:
+        """ECC registers isolated candidates under their own operation identity.
+
+        An operation belongs to this workspace when it targets the source
+        workspace itself or one of its isolated candidate lifecycles
+        ("<source>::candidate::<candidate_id>"); anything else is foreign.
+        """
+        if not isinstance(workspace_id, str):
+            return False
+        return workspace_id == self._workspace_id or workspace_id.startswith(
+            f"{self._workspace_id}::candidate::"
+        )
 
 
 from ecos_agent.optimization.ecc.rpc_client import (  # noqa: E402
