@@ -304,8 +304,16 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     const settingsRegistryService = new SettingsRegistryService({
       broadcast: (channel, payload) => {
         for (const window of BrowserWindow.getAllWindows()) {
-          if (!window.isDestroyed()) {
+          if (window.isDestroyed()) continue
+          try {
             window.webContents.send(channel, payload)
+          } catch (error) {
+            // A crashing window must not fail the write transaction or block
+            // notification delivery to the remaining windows.
+            electronLogger.error(
+              '[settings] failed to deliver settings broadcast: %s',
+              error instanceof Error ? error.message : String(error),
+            )
           }
         }
       },

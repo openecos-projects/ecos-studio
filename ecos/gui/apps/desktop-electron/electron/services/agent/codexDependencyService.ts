@@ -84,7 +84,15 @@ export class CodexDependencyService {
 
   onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void {
     this.progressListeners.add(listener)
-    if (this.lastProgress) listener(this.lastProgress)
+    if (this.lastProgress) {
+      // The immediate replay must not fail the subscription when a listener
+      // throws (for example a renderer that died mid-notification).
+      try {
+        listener(this.lastProgress)
+      } catch {
+        // ignore
+      }
+    }
     return () => {
       this.progressListeners.delete(listener)
     }
@@ -291,6 +299,8 @@ export class CodexDependencyService {
     let backupBin: string | null = null
     /** True once the staged binary replaced the target (rename succeeded). */
     let swapped = false
+    /** True when a failed restore left the backup as the only old copy. */
+    let preservedBackup = false
     try {
       await this.runTarExtract(archivePath, extractDir)
       const extractedBinary = await findExtractedCodexBinary(extractDir)
@@ -343,7 +353,8 @@ export class CodexDependencyService {
       // Roll back the swap: restore the previous managed version, or remove
       // the freshly replaced binary on a first-time install so a failed
       // install never takes effect. A failed restore keeps the backup file on
-      // disk and surfaces the failure alongside the original error.
+      // disk (the finally skips it) and surfaces the failure alongside the
+      // original error.
       let rollbackError: Error | null = null
       if (swapped) {
         if (backupBin) {
@@ -351,6 +362,7 @@ export class CodexDependencyService {
             await rename(backupBin, targetBin)
             backupBin = null
           } catch (restoreError) {
+            preservedBackup = true
             rollbackError =
               restoreError instanceof Error
                 ? restoreError
@@ -376,9 +388,15 @@ export class CodexDependencyService {
         ? new Error(`${message}；回滚失败: ${rollbackError.message}`)
         : error
     } finally {
-      if (stagedBin) await rm(stagedBin, { force: true })
-      if (backupBin) await rm(backupBin, { force: true })
-      await rm(extractDir, { force: true, recursive: true })
+      try {
+        if (stagedBin) await rm(stagedBin, { force: true })
+        // A backup whose restore failed stays on disk: it is the only copy of
+        // the previous managed version.
+        if (backupBin && !preservedBackup) await rm(backupBin, { force: true })
+        await rm(extractDir, { force: true, recursive: true })
+      } catch {
+        // Cleanup errors must not mask the transaction result.
+      }
     }
 
     // Emit done only after the transaction fully succeeded, so a throwing

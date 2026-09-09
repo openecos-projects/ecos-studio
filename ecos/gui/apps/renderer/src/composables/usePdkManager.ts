@@ -78,16 +78,22 @@ async function importPath(path: string): Promise<ImportedPdk> {
 export function usePdkManager() {
   const { showToast } = useWorkspace()
 
-  const loadPdks = async (force = false): Promise<void> => {
-    if (isLoaded.value && !force) return
+  /**
+   * Load the PDK inventory. Returns whether the load succeeded so callers can
+   * retry instead of caching a failed load.
+   */
+  const loadPdks = async (force = false): Promise<boolean> => {
+    if (isLoaded.value && !force) return true
     try {
       const desktopApi = await waitForDesktopApi()
       importedPdks.value = (await desktopApi.pdkInventory.list())
         .map(installationToPdk)
         .sort((left, right) => left.name.localeCompare(right.name))
       isLoaded.value = true
+      return true
     } catch (error) {
       console.error('[usePdkManager] Failed to load PDK Inventory:', error)
+      return false
     }
   }
 

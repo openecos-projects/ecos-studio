@@ -726,17 +726,23 @@ async function ensureCodexReady(): Promise<boolean> {
   return status.state === 'ready'
 }
 
+/** Monotonic counter: only the latest refresh may update codexSetupStatus. */
+let codexStatusRequestSeq = 0
+
 async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
   const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) {
     codexSetupStatus.value = null
     return null
   }
+  const requestId = ++codexStatusRequestSeq
   try {
     const status = await codex.getStatus()
+    if (requestId !== codexStatusRequestSeq) return codexSetupStatus.value
     codexSetupStatus.value = status.state === 'ready' ? null : status
     return status
   } catch (error) {
+    if (requestId !== codexStatusRequestSeq) return codexSetupStatus.value
     codexSetupStatus.value = {
       authState: 'unknown',
       message: agentErrorMessage(error),

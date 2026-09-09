@@ -2949,8 +2949,17 @@ async function ensurePdksLoaded() {
   // whenever the project manifest generation changed (for example after
   // switching projects on step 1).
   if (!hasLoadedPdks.value) {
-    hasLoadedPdks.value = true
-    await loadPdks(true)
+    if (await loadPdks(true)) {
+      hasLoadedPdks.value = true
+    } else {
+      showToast({
+        severity: 'warn',
+        summary: 'PDK',
+        detail: 'PDK inventory could not be loaded. Please try again.',
+        life: 5000,
+      })
+      return
+    }
   }
   // Project manifest defaults load in the background and may carry explicit
   // PDK information; wait for them so the decision below sees the full state.
@@ -3033,29 +3042,30 @@ async function ensurePdksLoaded() {
   } catch (error) {
     // A failed resolution pass (unavailable inventory, bridge error) must not
     // be cached: clear the generation marker so it can be retried, and tell
-    // the user instead of failing silently.
-    pdkResolvedForGeneration.value = -1
-    showToast({
-      severity: 'warn',
-      summary: 'PDK',
-      detail: error instanceof Error ? error.message : String(error),
-      life: 5000,
-    })
+    // the user instead of failing silently — but only for the current
+    // project's generation, never for a stale interleaved pass.
+    if (!generationChanged() && pdkResolvedForGeneration.value === generation) {
+      pdkResolvedForGeneration.value = -1
+      showToast({
+        severity: 'warn',
+        summary: 'PDK',
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
+    }
   }
 }
 
 async function seedDefaultPdkInstallation(generation: number) {
-  try {
-    const defaultId = await getDesktopApi().settings.get<string>(
-      PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
-    )
-    if (!defaultId || projectManifestLoadGeneration !== generation) return
-    const defaultPdk = importedPdks.value.find((pdk) => pdk.id === defaultId)
-    if (defaultPdk && projectManifestLoadGeneration === generation) {
-      selectPdk(defaultPdk)
-    }
-  } catch {
-    // A stale or unreadable default must not block the wizard.
+  // Errors propagate to ensurePdksLoaded, which clears the cached resolution
+  // and warns the user so the default seeding can be retried.
+  const defaultId = await getDesktopApi().settings.get<string>(
+    PDK_DEFAULT_INSTALLATION_ID_SETTING_KEY,
+  )
+  if (!defaultId || projectManifestLoadGeneration !== generation) return
+  const defaultPdk = importedPdks.value.find((pdk) => pdk.id === defaultId)
+  if (defaultPdk && projectManifestLoadGeneration === generation) {
+    selectPdk(defaultPdk)
   }
 }
 

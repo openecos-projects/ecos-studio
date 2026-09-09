@@ -5,7 +5,7 @@ import NewProjectWizard from './NewProjectWizard.vue'
 
 const wizardMocks = vi.hoisted(() => ({
   importedPdks: { value: [] as Array<Record<string, unknown>> },
-  loadPdks: vi.fn(async () => undefined),
+  loadPdks: vi.fn(async () => true),
   importPdk: vi.fn(),
   removePdk: vi.fn(),
   validatePdk: vi.fn(),
