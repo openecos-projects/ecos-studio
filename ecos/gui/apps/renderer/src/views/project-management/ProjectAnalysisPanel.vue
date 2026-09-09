@@ -199,13 +199,16 @@
               ></i>
             </span>
             <strong class="dash-qphys-value">{{ dimension.display }}</strong>
-            <small class="dash-qphys-state">{{ dimension.state }}</small>
+            <small class="dash-qphys-state">
+              {{ dimension.state
+              }}<span v-if="dimension.reason"> · {{ dimension.reason }}</span>
+            </small>
           </div>
-          <ul v-if="recommendedDiagnoses.length > 0" class="dash-diagnoses">
-            <li v-for="diagnosis in recommendedDiagnoses" :key="diagnosis.id">
-              <strong :class="dashboardToneClass(diagnosis.tone)">
+          <div v-if="recommendedDiagnoses.length > 0" class="dash-diagnoses">
+            <details v-for="diagnosis in recommendedDiagnoses" :key="diagnosis.id">
+              <summary :class="dashboardToneClass(diagnosis.tone)">
                 {{ diagnosis.stateLabel }} · {{ diagnosis.id }}
-              </strong>
+              </summary>
               <p>{{ diagnosis.interpretation }}</p>
               <p
                 v-for="intervention in diagnosis.interventions"
@@ -214,8 +217,8 @@
               >
                 [{{ intervention.tierLabel }}] {{ intervention.hypothesis }}
               </p>
-            </li>
-          </ul>
+            </details>
+          </div>
         </section>
 
         <ProjectQorScoreChart

@@ -81,6 +81,27 @@ describe('parseQorReport', () => {
     expect(parseQorReport(JSON.stringify(broken))).toBeNull()
   })
 
+  it('rejects malformed nested gates, features, and diagnoses', () => {
+    const brokenGate = {
+      ...fullReport(),
+      feasibility: { status: 'PASS', gates: [{ state: 'failed' }] },
+    }
+    expect(parseQorReport(JSON.stringify(brokenGate))).toBeNull()
+    const brokenFeature = {
+      ...fullReport(),
+      qor_record: {
+        ...fullReport().qor_record,
+        timing: { ...fullReport().qor_record.timing, features: [null] },
+      },
+    }
+    expect(parseQorReport(JSON.stringify(brokenFeature))).toBeNull()
+    const brokenDiagnosis = {
+      ...fullReport(),
+      diagnoses: [{ diagnosis_id: 'broken', interventions: [null] }],
+    }
+    expect(parseQorReport(JSON.stringify(brokenDiagnosis))).toBeNull()
+  })
+
   it('rejects non-numeric scalar scores', () => {
     const broken = { ...fullReport(), scalar_summary: { score: 'high' } }
     expect(parseQorReport(JSON.stringify(broken))).toBeNull()
