@@ -256,8 +256,9 @@ def projected_terminal_observation(
     The full observation stays ledger-bound through the history reference
     (outcome_sha256) and the evidence manifest; the planner receives frozen
     objective metrics, timing guardrails, signoff gates, eligibility counts,
-    the worst corner per STA metric, and deltas versus the incumbent instead
-    of every per-corner evaluation metric.
+    the worst corner per STA metric, labeled Qphys dimension scores, and
+    deltas versus the incumbent instead of every per-corner evaluation
+    metric.
     """
     worst: dict[str, tuple[str, float]] = {}
     for metric in observation.evaluation_metrics:
@@ -312,11 +313,33 @@ def projected_terminal_observation(
     }
     if dimension_scores:
         payload["qor_dimension_scores"] = dimension_scores
+    # The calibrated Qphys dimension record (ECC-QoR draft 3, sections 8-9)
+    # gets its own labeled section: these are policy-derived composite
+    # scores, not raw diagnostic measurements.
+    qphys_scores = {
+        metric.metric_id: metric.value
+        for metric in observation.evaluation_metrics
+        if metric.corner is None
+        and metric.category.value == "qor"
+        and metric.metric_id.startswith("qor_")
+    }
+    if qphys_scores:
+        payload["qphys_dimension_scores"] = qphys_scores
     if observation.geometry is not None:
         payload["geometry"] = observation.geometry.model_dump(mode="json")
     if incumbent is not None:
         # Deltas are planner-facing summaries; rounding to 12 decimals keeps
         # them free of float subtraction noise without hiding real changes.
+        observation_unscoped = {
+            metric.metric_id: metric.value
+            for metric in observation.evaluation_metrics
+            if metric.corner is None
+        }
+        incumbent_unscoped = {
+            metric.metric_id: metric.value
+            for metric in incumbent.evaluation_metrics
+            if metric.corner is None
+        }
         payload["delta_vs_incumbent"] = {
             "metrics": {
                 metric.value: round(
@@ -331,6 +354,20 @@ def projected_terminal_observation(
                     12,
                 )
                 for metric in observation.timing_guardrail
+            },
+            # Unscoped evaluation metrics (raw lengths, inflation factors,
+            # Qphys scores included) delta over the keys both sides share;
+            # keys missing on either side are structural changes visible in
+            # each side's unscoped section, not deltas.
+            "unscoped_evaluation_metrics": {
+                metric_id: round(
+                    observation_unscoped[metric_id]
+                    - incumbent_unscoped[metric_id],
+                    12,
+                )
+                for metric_id in sorted(
+                    set(observation_unscoped) & set(incumbent_unscoped)
+                )
             },
         }
     return payload
