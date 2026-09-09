@@ -371,7 +371,7 @@ describe('CliInstallerService', () => {
     expect(existsSync(join(versionDir, 'install.json'))).toBe(true)
     const status = await service.status()
     expect(status.status).toBe('failed')
-    expect(status.error).toContain('shim is missing')
+    expect(status.error).toContain('shim is missing or stale')
     expect(status.shimPath).toBeNull()
   })
 
@@ -773,6 +773,64 @@ describe('CliInstallerService', () => {
     expect(resourceManager.resolveRegistryToolAsset).not.toHaveBeenCalled()
     // lstat: the dangling link itself is still there, deliberately unrepaired.
     expect(lstatSync(join(dataDir, 'current')).isSymbolicLink()).toBe(true)
+  })
+
+  it('treats a managed shim as stale once an external override is active', async () => {
+    const root = createTempDir('ecos-cli-installer-stale-shim-')
+    const bundle = createFakeEccBundle(root)
+    const managed = createService({ resourcesPath: bundle.resourcesPath })
+    await managed.service.ensureBundle({ installShim: true })
+    expect(existsSync(join(managed.binDir, 'ecos-ecc'))).toBe(true)
+
+    const externalBin = createExternalEccBinDir(managed.root)
+    const externalService = new CliInstallerService({
+      resourceManager: createResourceManagerDouble(),
+      env: { PATH: '/usr/bin' },
+      platform: 'linux',
+      isPackaged: true,
+      appPath: join(managed.root, 'app'),
+      resourcesPath: bundle.resourcesPath,
+      userDataPath: join(managed.root, 'user-data'),
+      dataDir: managed.dataDir,
+      binDir: managed.binDir,
+      spawn: spawnLike(createSpawnDouble({ code: 0, output: 'ecc 1.0.0' })),
+      expectedVersion: STUB_VERSION,
+      externalBinDir: externalBin,
+    })
+
+    // The shim on disk still execs the managed bundle; it must not count as
+    // an installed external shim even though we generated it.
+    const status = await externalService.status()
+    expect(status.status).toBe('ready')
+    expect(status.source).toBe('external')
+    expect(status.shimPath).toBeNull()
+
+    // And back in managed mode the reverse transition is stale too.
+    const externalShim = await externalService.ensureBundle({ installShim: true })
+    expect(externalShim).toBe(externalBin)
+    const managedAgain = await managed.service.status()
+    expect(managedAgain.status).toBe('failed')
+    expect(managedAgain.error).toContain('shim is missing or stale')
+  })
+
+  it('surfaces the shim failure while the external runtime stays ready', async () => {
+    const root = createTempDir('ecos-cli-installer-external-foreign-')
+    const externalBin = createExternalEccBinDir(root)
+    const { service, binDir } = createService({
+      externalBinDir: externalBin,
+      spawnResult: { code: 0, output: 'ecc 1.0.0' },
+    })
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(join(binDir, 'ecos-ecc'), '#!/bin/sh\n# foreign command\n')
+
+    await expect(service.ensureBundle({ installShim: true })).rejects.toThrow(
+      /Refusing to overwrite/,
+    )
+    const status = await service.status()
+    expect(status.status).toBe('ready')
+    expect(status.source).toBe('external')
+    expect(status.shimPath).toBeNull()
+    expect(status.error).toContain('Refusing to overwrite')
   })
 
   it('reports the external runtime instead of the dev wrapper in development mode', async () => {

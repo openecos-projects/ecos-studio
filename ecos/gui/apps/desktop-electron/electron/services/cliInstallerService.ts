@@ -204,12 +204,11 @@ export class CliInstallerService {
       return await this.externalStatus(this.externalBinDir)
     }
     if (!this.isPackaged) {
-      const shimPath = join(this.binDir, SHIM_NAME)
       return {
         ...base,
         status: 'dev-wrapper',
         versionDir: existsSync(this.dataDir) ? this.dataDir : null,
-        shimPath: this.ownsShim(shimPath) ? shimPath : null,
+        shimPath: this.installedShimPath(),
         error: null,
       }
     }
@@ -252,7 +251,7 @@ export class CliInstallerService {
         warning: null,
         error:
           this.lastShimFailure ??
-          'The ECC bundle is installed but the ecos-ecc shim is missing; reinstall to recreate it.',
+          'The ECC bundle is installed but the ecos-ecc shim is missing or stale; reinstall to recreate it.',
       }
     }
     return {
@@ -285,12 +284,13 @@ export class CliInstallerService {
       this.selfCheckTimeoutMs,
     )
     const installedVersion = parseVersionFromSelfCheckDetail(selfCheck.detail)
+    const shimPath = this.installedShimPath()
     return {
       expectedVersion: this.expectedVersion,
       installedVersion,
       source: 'external',
       versionDir: externalBinDir,
-      shimPath: this.installedShimPath(),
+      shimPath,
       selfCheck,
       status: selfCheck.ok ? 'ready' : 'self-check-failed',
       warning:
@@ -298,7 +298,11 @@ export class CliInstallerService {
           ? `The external ECC runtime reports version ${installedVersion}, but this release is tested against ${this.expectedVersion}.`
           : null,
       error: selfCheck.ok
-        ? null
+        ? // A recorded shim failure (with its manual remediation) stays
+          // visible even though the runtime itself is usable.
+          shimPath
+          ? null
+          : this.lastShimFailure
         : (selfCheck.detail ?? 'The external ECC runtime self-check failed.'),
     }
   }
@@ -664,10 +668,21 @@ export class CliInstallerService {
     }
   }
 
-  /** Path of our installed shim, or null when it is absent or foreign. */
+  /**
+   * Path of our installed shim, or null when it is absent, foreign, or
+   * stale. Stale means the content differs from what the current mode
+   * (managed / external / development) would generate — e.g. a managed shim
+   * left behind after an external override was configured still executes
+   * the managed bundle, so it must not count as installed.
+   */
   private installedShimPath(): string | null {
     const shimPath = join(this.binDir, SHIM_NAME)
-    return this.ownsShim(shimPath) ? shimPath : null
+    if (!this.ownsShim(shimPath)) return null
+    try {
+      return readFileSync(shimPath, 'utf8') === this.shimContent() ? shimPath : null
+    } catch {
+      return null
+    }
   }
 
   private async readActiveInstall(): Promise<CliBundleInstallRecord | null> {

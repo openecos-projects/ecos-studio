@@ -301,9 +301,15 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
   }
 
   const nextPath = prependPath(options.env, developmentBinDir, options.platform)
+  // An external bundle ships the same _internal layout as a packaged one;
+  // its native tools need the library path in development mode too.
+  const libraryEnv = externalRuntimeBin
+    ? packagedEccLibraryEnv(options.env, externalRuntimeBin, options.platform)
+    : {}
 
   return {
     ...options.env,
+    ...libraryEnv,
     [nextPath.key]: nextPath.value,
   }
 }

@@ -771,13 +771,21 @@ describe('external ECC override', () => {
     const env = createEccRuntimeEnv({
       appPath: fixture.appPath,
       cwd: fixture.appPath,
-      env: { ECOS_ECC_BIN_DIR: externalBin, PATH: '/usr/bin' },
+      env: {
+        ECOS_ECC_BIN_DIR: externalBin,
+        LD_LIBRARY_PATH: '/existing/libs',
+        PATH: '/usr/bin',
+      },
       isPackaged: false,
       platform: 'linux',
       userDataPath: fixture.userDataPath,
     })
 
     expect(env.PATH).toBe(`${externalBin}:/usr/bin`)
+    // The external bundle's native libraries resolve in development mode too.
+    expect(env.LD_LIBRARY_PATH).toBe(
+      `${join(externalBin, '_internal', 'ecc_tools_bin', 'lib')}:/existing/libs`,
+    )
     // The development runtime-bin shim is not materialized.
     expect(existsSync(join(fixture.userDataPath, 'runtime-bin', 'ecc'))).toBe(false)
   })
