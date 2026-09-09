@@ -37,7 +37,7 @@ RECOVERY_ORDER = (
 # Acceptance semantics frozen per episode: the rule identity and the protection
 # tolerances are hash-bound into the alignment, so an episode cannot be resumed
 # under a different comparator, and drifting code constants refuse old episodes.
-INCUMBENT_ACCEPTANCE_RULE = "ecos.incumbent_acceptance.v2"
+INCUMBENT_ACCEPTANCE_RULE = "ecos.incumbent_acceptance.v3"
 PROTECTION_RELATIVE_TOLERANCE = 0.01
 PROTECTION_ABSOLUTE_TOLERANCE = 0.01
 PRIMARY_METRIC_RELATIVE_TOLERANCE = 1e-9
@@ -78,7 +78,7 @@ class OptimizationObjectiveAlignment(BaseModel):
     sta_setup_violation_count: StrictInt = Field(ge=0)
     sta_hold_violation_count: StrictInt = Field(ge=0)
     recovery_order: tuple[ObjectiveMetric, ...]
-    acceptance_rule: Literal["ecos.incumbent_acceptance.v2"] = (
+    acceptance_rule: Literal["ecos.incumbent_acceptance.v3"] = (
         INCUMBENT_ACCEPTANCE_RULE
     )
     protection_relative_tolerance: StrictFloat = PROTECTION_RELATIVE_TOLERANCE

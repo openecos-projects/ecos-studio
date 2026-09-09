@@ -465,6 +465,110 @@ def test_comparator_never_promotes_an_invalid_terminal() -> None:
     assert comparison.decisive_metric is None
 
 
+def _tiebreak_terminal(
+    observation_id: str,
+    *,
+    dynamic_power: float,
+    die_area: float,
+    frequency: float,
+) -> TerminalObservation:
+    from ecos_agent.hashing import canonical_sha256
+    from ecos_agent.optimization.metrics.contracts import (
+        TerminalEvaluationMetric,
+    )
+
+    def record(
+        metric_id: str,
+        value: float,
+        unit: str,
+        direction: str,
+        category: str = "ppa",
+    ):
+        return TerminalEvaluationMetric(
+            metric_id=metric_id,
+            value=value,
+            unit=unit,
+            category=category,
+            role="report" if category == "ppa" else "gate",
+            direction=direction,
+            source_refs=("analysis/terminal.json",),
+        )
+
+    base = _terminal(observation_id, dr=10, overflow=10, wirelength=100)
+    return base.model_copy(
+        update={
+            "schema_version": "ecos.terminal_observation.v3",
+            "evaluation_metrics": tuple(
+                record(metric_id, 0.0, "count", "exact", "eligibility")
+                for metric_id in (
+                    "drc_count",
+                    "lvs_count",
+                    "rcx_missing_corner_count",
+                    "rcx_spef_parse_failure_count",
+                    "sta_missing_corner_count",
+                    "sta_setup_violation_count",
+                    "sta_hold_violation_count",
+                    "harden_artifact_missing_count",
+                )
+            )
+            + (
+                record("rcx_expected_corner_count", 1.0, "count", "exact", "eligibility"),
+                record("rcx_spef_file_count", 1.0, "count", "exact", "eligibility"),
+                record("sta_expected_corner_count", 1.0, "count", "exact", "eligibility"),
+                record("sta_corner_count", 1.0, "count", "exact", "eligibility"),
+                record(
+                    "sta_typical_dynamic_power", dynamic_power, "uW", "lower_is_better"
+                ),
+                record("die_area", die_area, "um^2", "lower_is_better"),
+                record("sta_frequency", frequency, "MHz", "higher_is_better"),
+            ),
+            "evaluation_metrics_complete": True,
+            "sta_corner_ids": (),
+            "sta_corner_set_sha256": canonical_sha256({"corners": ()}),
+        }
+    )
+
+
+def test_comparator_tiebreak_prefers_lower_dynamic_power() -> None:
+    comparison = compare_incumbent(
+        incumbent=_tiebreak_terminal("incumbent", dynamic_power=50.0, die_area=2000.0, frequency=400.0),
+        candidate=_tiebreak_terminal("candidate", dynamic_power=45.0, die_area=2100.0, frequency=380.0),
+        objective=_objective(),
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.STA_TYPICAL_DYNAMIC_POWER
+
+
+def test_comparator_tiebreak_prefers_smaller_die_area_after_power() -> None:
+    comparison = compare_incumbent(
+        incumbent=_tiebreak_terminal("incumbent", dynamic_power=50.0, die_area=2000.0, frequency=400.0),
+        candidate=_tiebreak_terminal("candidate", dynamic_power=50.0, die_area=1800.0, frequency=380.0),
+        objective=_objective(),
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.DIE_AREA
+
+
+def test_comparator_tiebreak_prefers_higher_frequency_and_rejects_loss() -> None:
+    better = compare_incumbent(
+        incumbent=_tiebreak_terminal("incumbent", dynamic_power=50.0, die_area=2000.0, frequency=400.0),
+        candidate=_tiebreak_terminal("candidate", dynamic_power=50.0, die_area=2000.0, frequency=430.0),
+        objective=_objective(),
+    )
+    worse = compare_incumbent(
+        incumbent=_tiebreak_terminal("incumbent", dynamic_power=50.0, die_area=2000.0, frequency=400.0),
+        candidate=_tiebreak_terminal("candidate", dynamic_power=50.0, die_area=2000.0, frequency=370.0),
+        objective=_objective(),
+    )
+
+    assert better.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert better.decisive_metric == ObjectiveMetric.STA_FREQUENCY
+    assert worse.decision == IncumbentDecision.INCUMBENT_RETAINED
+    assert worse.decisive_metric == ObjectiveMetric.STA_FREQUENCY
+
+
 def test_comparator_rejects_an_invalid_incumbent() -> None:
     with pytest.raises(ValueError, match="incumbent"):
         compare_incumbent(

@@ -77,6 +77,7 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
         ObjectiveMetric.CORE_AREA: 2500.0,
         ObjectiveMetric.SYNTHESIS_CELL_AREA: 1200.0,
         ObjectiveMetric.STA_STANDARD_CELL_AREA: 1140.0,
+        ObjectiveMetric.STA_FREQUENCY: 672.0,
         ObjectiveMetric.STA_SETUP_WNS: 0.2,
         ObjectiveMetric.STA_SETUP_TNS: 0.0,
         ObjectiveMetric.STA_HOLD_WNS: 0.1,
