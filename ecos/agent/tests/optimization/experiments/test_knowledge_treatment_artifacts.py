@@ -45,7 +45,15 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
         captured.update(context)
         return fake_runner
 
+    real_build = module.build_objective_alignment
+    alignment_baselines = []
+
+    def build_alignment(objective, baseline):
+        alignment_baselines.append(baseline)
+        return real_build(objective, baseline)
+
     monkeypatch.setattr(module, "create_optimization_runner", create_runner)
+    monkeypatch.setattr(module, "build_objective_alignment", build_alignment)
     monkeypatch.setattr(
         module,
         "export_episode_traces",
@@ -55,11 +63,13 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
     design = module.DesignSpec(
         "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
     )
+    canonical = _terminal_observation()
+    reference = _terminal_observation()
 
     result = module._run_treatment(
         design,
         tmp_path / "workspace",
-        _terminal_observation(),
+        reference,
         1.0,
         tmp_path / "output",
         run_id="run",
@@ -67,8 +77,10 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
         seed=1,
         treatment=module.KNOWLEDGE_TREATMENTS[0],
         provider_factory=FakeProvider,
+        canonical=canonical,
     )
 
+    assert alignment_baselines and alignment_baselines[0] is canonical
     assert captured["objective_alignment"]["alignment_contract_sha256"].startswith(
         "sha256:"
     )
@@ -77,6 +89,27 @@ def test_phase8_treatment_explicitly_sets_runtime_contract(
     assert captured["knowledge_case_shots"] == 0
     assert result["terminal_artifacts_complete"] is False
     assert result["replay_chain_complete"] is False
+
+
+def test_phase8_treatment_requires_the_canonical_observation(tmp_path) -> None:
+    module = _load_experiment_runner()
+    design = module.DesignSpec(
+        "design", "top", "clk", tmp_path / "filelist.f", (), tmp_path / "design.sdc"
+    )
+
+    with pytest.raises(ValueError, match="canonical"):
+        module._run_treatment(
+            design,
+            tmp_path / "workspace",
+            _terminal_observation(),
+            1.0,
+            tmp_path / "output",
+            run_id="run",
+            model="model",
+            seed=1,
+            treatment=module.KNOWLEDGE_TREATMENTS[0],
+            provider_factory=lambda **_kwargs: None,
+        )
 
 
 def test_phase8_case_pool_metadata_requires_a_frozen_directory(
