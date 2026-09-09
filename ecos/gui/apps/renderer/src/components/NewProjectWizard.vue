@@ -3412,16 +3412,15 @@ function selectPdk(pdk: import('../types').ImportedPdk, options?: { auto?: boole
   // syncWorkspaceConfig so the normalized requirement is captured. User
   // selections stay outside the baseline and survive generation switches.
   if (options?.auto) {
+    // After syncWorkspaceConfig, pdk_requirement reflects the normalized
+    // form and pdkConfigMode the resolved mode; snapshot those actuals.
     snapshotPdkBaseline({
       pdk: pdk.pdkId,
       pdkRoot: pdk.path,
       pdkInstallationId: pdk.id,
       selectedPdkId: pdk.id,
-      pdkRequirement: {
-        familyId: pdk.pdkId,
-        version: pdk.version || null,
-        manualConfig: null,
-      },
+      pdkRequirement: config.value.pdk_requirement ?? null,
+      pdkConfigMode: pdkConfigMode.value,
     })
   }
 }
