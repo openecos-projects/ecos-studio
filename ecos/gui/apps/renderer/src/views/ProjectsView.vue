@@ -396,31 +396,6 @@
                 </div>
               </article>
 
-              <button
-                v-if="projectListCanToggle"
-                type="button"
-                class="list-preview-toggle project-list-preview-toggle"
-                :aria-expanded="projectPreviewShowsAll"
-                :aria-label="
-                  projectPreviewShowsAll
-                    ? 'Show fewer projects'
-                    : `Show all ${projectCards.length} projects`
-                "
-                @click="projectPreviewShowsAll = !projectPreviewShowsAll"
-              >
-                <i
-                  :class="
-                    projectPreviewShowsAll ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'
-                  "
-                  aria-hidden="true"
-                ></i>
-                <span>{{
-                  projectPreviewShowsAll
-                    ? 'Show fewer projects'
-                    : `Show all ${projectCards.length} projects`
-                }}</span>
-              </button>
-
               <div v-if="projectCards.length === 0" class="empty-state">
                 <template v-if="searchQuery.trim()">
                   <i class="ri-search-line" aria-hidden="true"></i>
@@ -462,6 +437,30 @@
                 </template>
               </div>
             </div>
+            <button
+              v-if="projectListCanToggle"
+              type="button"
+              class="list-preview-toggle project-list-preview-toggle"
+              :aria-expanded="projectPreviewShowsAll"
+              :aria-label="
+                projectPreviewShowsAll
+                  ? 'Show fewer projects'
+                  : `Show all ${projectCards.length} projects`
+              "
+              @click="projectPreviewShowsAll = !projectPreviewShowsAll"
+            >
+              <i
+                :class="
+                  projectPreviewShowsAll ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'
+                "
+                aria-hidden="true"
+              ></i>
+              <span>{{
+                projectPreviewShowsAll
+                  ? 'Show fewer projects'
+                  : `Show all ${projectCards.length} projects`
+              }}</span>
+            </button>
           </div>
         </aside>
 

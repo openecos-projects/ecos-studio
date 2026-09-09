@@ -175,21 +175,18 @@
 }
 
 .project-list-panel {
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.project-list-panel {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
   gap: 14px;
   padding: 0;
   overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .project-list-toolbar {
@@ -285,6 +282,7 @@
 
 .project-list-preview-toggle {
   width: 100%;
+  flex: 0 0 auto;
   margin-top: 2px;
 }
 

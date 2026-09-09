@@ -34,19 +34,19 @@ vi.mock('../composables/useWorkspace', async () => {
   }
 })
 vi.mock('@/utils/projectHistory', () => ({
-  loadProjectHistory: vi.fn(async () => [testState.project]),
+  loadProjectHistory: vi.fn(),
   rememberProjectHistoryEntry: vi.fn(),
   removeProjectHistoryEntry: vi.fn(),
 }))
 vi.mock('@/utils/projectManagementRead', () => ({
   listProjectManagementEntries: vi.fn(async () => []),
-  readProjectManagementManifest: vi.fn(async () => ({
+  readProjectManagementManifest: vi.fn(async (projectRoot: string) => ({
     schema_version: 1,
-    project_id: 'project-demo',
-    name: 'demo',
+    project_id: `project-${projectRoot}`,
+    name: projectRoot.split('/').pop() ?? 'demo',
     design_name: 'gcd',
     description: '',
-    root_path: '/projects/demo',
+    root_path: projectRoot,
     created_at: '2026-09-04T00:00:00.000Z',
     updated_at: '2026-09-04T00:00:00.000Z',
     base_design: { parameters: {}, rtl_list: [] },
@@ -55,7 +55,7 @@ vi.mock('@/utils/projectManagementRead', () => ({
       {
         workspace_id: 'ws_0001',
         name: 'ws_0001',
-        workspace_path: '/projects/demo/ws_0001',
+        workspace_path: `${projectRoot}/ws_0001`,
         status: 'active',
       },
     ],
@@ -84,6 +84,16 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
+import { loadProjectHistory } from '@/utils/projectHistory'
+
+function historyProject(index: number) {
+  return {
+    id: `/projects/project-${index}`,
+    name: `project-${index}`,
+    path: `/projects/project-${index}`,
+    lastOpened: new Date('2026-09-04T00:00:00.000Z'),
+  }
+}
 
 describe('ProjectsView background lifecycle integration', () => {
   beforeEach(() => {
@@ -94,6 +104,8 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.route.query = {}
     testState.routerPush.mockReset()
     testState.showToast.mockReset()
+    vi.mocked(loadProjectHistory).mockReset()
+    vi.mocked(loadProjectHistory).mockResolvedValue([testState.project])
   })
 
   it('keeps opening after the Project Management route is normalized', async () => {
@@ -147,5 +159,36 @@ describe('ProjectsView background lifecycle integration', () => {
     expect(
       wrapper.findComponent({ name: 'ProjectBackgroundOperationPanel' }).exists(),
     ).toBe(true)
+  })
+
+  it('keeps Show all pinned outside the scrolling project list', async () => {
+    vi.mocked(loadProjectHistory).mockResolvedValue(
+      Array.from({ length: 21 }, (_, index) => historyProject(index + 1)),
+    )
+
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(20)
+    expect(wrapper.find('.project-list .project-list-preview-toggle').exists()).toBe(
+      false,
+    )
+    const toggle = wrapper.get('.project-list-preview-toggle')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.text()).toContain('Show all 21 projects')
+
+    await toggle.trigger('click')
+
+    expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(21)
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(toggle.text()).toContain('Show fewer projects')
+  })
+
+  it('hides the project preview toggle when the list fits', async () => {
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(1)
+    expect(wrapper.find('.project-list-preview-toggle').exists()).toBe(false)
   })
 })
