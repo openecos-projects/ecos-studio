@@ -487,7 +487,7 @@ def test_success_candidate_rejects_missing_native_parameter_receipt(
             )
 
     monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", SuccessfulAdapter)
-    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: HASH)
+    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: (HASH, 0))
 
     with pytest.raises(Gate0Error, match="native parameter application receipt"):
         run_pilot_candidate(
@@ -520,7 +520,7 @@ def test_failed_candidate_records_parent_and_chargeable_receipt(
             )
 
     monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", FailedAdapter)
-    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: HASH)
+    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: (HASH, 0))
     output = tmp_path / "candidate"
     parent_ref = ".agent/candidates/incumbent-1"
 
@@ -573,7 +573,7 @@ def test_pilot_candidate_uses_resume_rpc_for_existing_workspace(
             )
 
     monkeypatch.setattr(gate0, "EccCandidateRerunAdapter", ResumeAdapter)
-    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: HASH)
+    monkeypatch.setattr(gate0, "_pilot_context_sha256", lambda *_args: (HASH, 0))
 
     with pytest.raises(PilotCandidateExecutionError):
         run_pilot_candidate(
@@ -628,7 +628,7 @@ def test_pilot_context_uses_complete_domain_fingerprint(
     monkeypatch.setattr(gate0, "_current_values", lambda *_args: current_values)
     requested = RequestedKnobValue(knob_id="place.target_density", value=0.65)
 
-    first = gate0._pilot_context_sha256(
+    first, first_seed = gate0._pilot_context_sha256(
         tmp_path,
         200,
         _terminal(10, 5, 100),
@@ -636,7 +636,7 @@ def test_pilot_context_uses_complete_domain_fingerprint(
         None,
         "ecc-test-revision",
     )
-    second = gate0._pilot_context_sha256(
+    second, second_seed = gate0._pilot_context_sha256(
         tmp_path,
         200,
         _terminal(11, 5, 100),
@@ -647,3 +647,4 @@ def test_pilot_context_uses_complete_domain_fingerprint(
 
     assert gate0._SHA256.fullmatch(first)
     assert first != second
+    assert first_seed == second_seed == execution_context["seed"]

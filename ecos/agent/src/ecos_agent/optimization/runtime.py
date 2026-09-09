@@ -74,6 +74,7 @@ from ecos_agent.optimization.runtime_waiting import (
 )
 from ecos_agent.workspace.parameters import (
     WorkspaceParametersError,
+    read_workspace_dreamplace_seed,
     read_workspace_parameters,
 )
 
@@ -254,7 +255,6 @@ def _open_execution_adapter(
             execution_context = _optimization_execution_context(
                 workspace,
                 site_width_dbu,
-                runtime.seed,
                 parent_manifest,
                 ecc_revision,
                 design_id=design_id,
@@ -551,15 +551,12 @@ def _parent_manifest_sha256(workspace: Path, terminal: TerminalObservation) -> s
 def _optimization_execution_context(
     workspace: Path,
     site_width_dbu: int,
-    seed: object,
     parent_manifest: str,
     ecc_revision: str,
     *,
     design_id: str | None = None,
 ) -> dict[str, object]:
     """Return only immutable, reproducible inputs used by domain fingerprints."""
-    if type(seed) is not int:
-        raise OptimizationRuntimeError("optimization seed is invalid")
     if not isinstance(ecc_revision, str) or not ecc_revision.strip():
         raise OptimizationRuntimeError("ECC revision is invalid")
     design_id = design_id or _design_id(workspace)
@@ -611,7 +608,7 @@ def _optimization_execution_context(
         "parent_manifest_sha256": parent_manifest,
         "ecc_revision": ecc_revision,
         "site_width_dbu": site_width_dbu,
-        "seed": seed,
+        "seed": read_workspace_dreamplace_seed(workspace),
     }
 
 

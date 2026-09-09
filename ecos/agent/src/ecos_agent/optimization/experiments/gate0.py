@@ -464,20 +464,22 @@ def run_pilot_candidate(
 ) -> PilotCandidateRun:
     output.mkdir()
     ecc_revision = client.ecc_revision()
+    context_sha256, execution_seed = _pilot_context_sha256(
+        workspace,
+        site_width,
+        baseline,
+        requested,
+        parent_candidate_root_ref,
+        ecc_revision,
+    )
     request = _candidate_execution_request(
         candidate_id,
         requested,
         direction,
         baseline,
         str(config_sha256),
-        _pilot_context_sha256(
-            workspace,
-            site_width,
-            baseline,
-            requested,
-            parent_candidate_root_ref,
-            ecc_revision,
-        ),
+        context_sha256,
+        seed=execution_seed,
         ecc_revision=ecc_revision,
         episode_id=episode_id,
         parent_candidate_root_ref=parent_candidate_root_ref,
@@ -565,6 +567,7 @@ def _candidate_execution_request(
     config_sha256: str,
     context_sha256: str,
     *,
+    seed: int,
     ecc_revision: str,
     episode_id: str,
     parent_candidate_root_ref: str | None,
@@ -607,7 +610,7 @@ def _candidate_execution_request(
         proposal=proposal,
         requested=requested,
         context_sha256=context_sha256,
-        seed=0,
+        seed=seed,
         ecc_revision=ecc_revision,
         parent_candidate_root_ref=parent_candidate_root_ref,
     )
@@ -620,7 +623,7 @@ def _pilot_context_sha256(
     requested: RequestedKnobValue,
     parent_candidate_root_ref: str | None,
     ecc_revision: str,
-) -> str:
+) -> tuple[str, int]:
     parent_workspace = _incumbent_workspace(
         workspace.resolve(), parent_candidate_root_ref
     )
@@ -632,7 +635,6 @@ def _pilot_context_sha256(
     execution_context = _optimization_execution_context(
         parent_workspace,
         site_width_dbu,
-        0,
         parent_manifest_sha256,
         ecc_revision,
     )
@@ -660,7 +662,7 @@ def _pilot_context_sha256(
         ),
         "tool_source_sha256": card.tool.source_sha256,
     }
-    return build_context_fingerprint(context)
+    return build_context_fingerprint(context), context["seed"]
 
 
 def _baseline_values(baseline: Gate0Baseline) -> dict[str, bool | int | float]:
