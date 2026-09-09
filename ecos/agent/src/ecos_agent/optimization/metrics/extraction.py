@@ -88,7 +88,7 @@ def build_gui_overall_qor_metric(
         for dimension, score in dimension_scores.items()
         if _GUI_DIMENSION_WEIGHTS[dimension] > 0
     )
-    return (
+    records = [
         metric_record(
             "gui_overall_qor_score",
             _gui_round(weighted),
@@ -97,8 +97,25 @@ def build_gui_overall_qor_metric(
             EvaluationMetricRole.REPORT,
             EvaluationMetricDirection.HIGHER_IS_BETTER,
             sources,
-        ),
+        )
+    ]
+    # Planner-facing dimension breakdown (ECC-QoR draft 3, Tier-2 quality
+    # bottlenecks): the composite computation above is unchanged; these
+    # records only expose which weighted dimension limits the score.
+    records.extend(
+        metric_record(
+            f"gui_qor_dimension_{dimension}",
+            score,
+            "score",
+            EvaluationMetricCategory.QOR,
+            EvaluationMetricRole.REPORT,
+            EvaluationMetricDirection.HIGHER_IS_BETTER,
+            sources,
+        )
+        for dimension, score in sorted(dimension_scores.items())
+        if _GUI_DIMENSION_WEIGHTS[dimension] > 0
     )
+    return tuple(records)
 
 
 def _gui_project_rows(

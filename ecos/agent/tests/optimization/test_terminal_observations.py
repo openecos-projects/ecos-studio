@@ -430,7 +430,9 @@ def test_missing_selected_area_metric_rejects_candidate(
         semantic_objective=semantic,
     )
 
-    assert comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    # A physical failure removes no metric, so an absent objective metric is
+    # missing evidence (ECC-QoR draft 3, section 2.5), not a scored loss.
+    assert comparison.decision == IncumbentDecision.EVIDENCE_LIMITED
     assert comparison.decisive_metric == ObjectiveMetric.DIE_AREA
 
 

@@ -33,6 +33,12 @@ from ecos_agent.optimization.knowledge.cases import (
     TerminalEmpiricalCase,
 )
 from ecos_agent.optimization.knowledge.compiler import SupportedActionView
+from ecos_agent.optimization.evidence import (
+    derive_clock_period_ns,
+    inflation_engineering_state,
+    recovery_severity_entries,
+    timing_engineering_state,
+)
 from ecos_agent.optimization.metrics.contracts import EvaluationMetricDirection
 from ecos_agent.optimization.memory import OptimizationTaskMemorySnapshot
 from ecos_agent.optimization.objective_alignment import (
@@ -167,6 +173,79 @@ def _worse_corner_value(
     return value > reference
 
 
+def _worst_setup_corner_period_ns(observation: TerminalObservation) -> float | None:
+    """Derive Tclk from the setup-worst corner's own frequency and slack.
+
+    ECC defines ``frequency_mhz = 1000/(Tclk - WS)`` per corner, so the
+    inversion is exact by construction for the matching corner pair.
+    """
+    worst: tuple[str, float] | None = None
+    for metric in observation.evaluation_metrics:
+        if metric.metric_id == "sta_setup_wns" and metric.corner is not None:
+            if worst is None or metric.value < worst[1]:
+                worst = (metric.corner, metric.value)
+    if worst is None:
+        return None
+    frequency = next(
+        (
+            metric.value
+            for metric in observation.evaluation_metrics
+            if metric.metric_id == "sta_frequency"
+            and metric.corner == worst[0]
+        ),
+        None,
+    )
+    return derive_clock_period_ns(worst[1], frequency)
+
+
+def _engineering_states(observation: TerminalObservation) -> dict[str, object]:
+    """Planner-facing engineering states (ECC-QoR draft 3, sections 7-8).
+
+    Timing states classify the signed worst slack with the document
+    parameter triplet; an OPPORTUNITY state marks an over-provisioned
+    margin that conservative knobs may reclaim.  Missing operands simply
+    omit the state (UNKNOWN), never invent a threshold.
+    """
+    period = _worst_setup_corner_period_ns(observation)
+    guardrail = observation.timing_guardrail
+    states: dict[str, object] = {}
+    for key, metric_id in (
+        ("timing_setup", "sta_setup_wns"),
+        ("timing_hold", "sta_hold_wns"),
+    ):
+        state = timing_engineering_state(guardrail.get(metric_id, 0.0), period)
+        if state is not None:
+            states[key] = state
+    inflation = inflation_engineering_state(
+        next(
+            (
+                metric.value
+                for metric in observation.evaluation_metrics
+                if metric.metric_id == "interconnect_inflation_total"
+                and metric.corner is None
+            ),
+            None,
+        )
+    )
+    if inflation is not None:
+        states["interconnect_inflation"] = inflation
+    return states
+
+
+def _recovery_priorities(observation: TerminalObservation) -> tuple[dict, ...]:
+    """Tier-1 severity ranking for the planner (ECC-QoR draft 3, section 11)."""
+    values = observation.objective_metrics
+    entries = recovery_severity_entries(
+        drc_count=values.get("drc_count"),
+        setup_violation_count=values.get("sta_setup_violation_count"),
+        hold_violation_count=values.get("sta_hold_violation_count"),
+        setup_ws_ns=observation.timing_guardrail.get("sta_setup_wns"),
+        hold_ws_ns=observation.timing_guardrail.get("sta_hold_wns"),
+        clock_period_ns=_worst_setup_corner_period_ns(observation),
+    )
+    return entries
+
+
 def projected_terminal_observation(
     observation: TerminalObservation,
     *,
@@ -216,6 +295,23 @@ def projected_terminal_observation(
         "sta_corner_set_sha256": observation.sta_corner_set_sha256,
         "evidence_manifest_sha256": observation.evidence_manifest_sha256,
     }
+    if observation.consistency_violations:
+        payload["consistency_violations"] = list(observation.consistency_violations)
+    engineering_states = _engineering_states(observation)
+    if engineering_states:
+        payload["engineering_states"] = engineering_states
+    recovery_priorities = _recovery_priorities(observation)
+    if recovery_priorities:
+        payload["recovery_priorities"] = list(recovery_priorities)
+    dimension_scores = {
+        metric.metric_id: metric.value
+        for metric in observation.evaluation_metrics
+        if metric.corner is None
+        and metric.category.value == "qor"
+        and metric.metric_id.startswith("gui_qor_dimension_")
+    }
+    if dimension_scores:
+        payload["qor_dimension_scores"] = dimension_scores
     if observation.geometry is not None:
         payload["geometry"] = observation.geometry.model_dump(mode="json")
     if incumbent is not None:

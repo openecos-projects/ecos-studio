@@ -23,8 +23,10 @@ from ecos_agent.optimization.execution import CandidateExecutionReceipt
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
 from ecos_agent.optimization.knowledge.retrieval import OptimizationRetrievalResult
 from ecos_agent.optimization.objective_alignment import ActiveOptimizationObjective
+from ecos_agent.optimization.observations import OptimizationObservationError
 from ecos_agent.optimization.rules import (
     IncumbentComparison,
+    IncumbentDecision,
     classify_terminal_candidate,
 )
 
@@ -289,8 +291,12 @@ class OptimizationEpisodeRunner:
                 if self._terminal_observation_supplier is not None
                 else None
             )
-        except Exception:
-            return self._indeterminate_absorb(observation, None, None)
+        except OptimizationObservationError:
+            # ECC-QoR draft 3 (section 10.3): corrupt or missing candidate
+            # artifacts are an evidence gap for this candidate, not a
+            # protocol-level indeterminate: the episode keeps running and the
+            # planner sees the knob effect as unknown, never as a loss.
+            return self._evidence_limited_absorb(receipt)
         active_before = self._controller.active_objective
         classification = classify_terminal_candidate(
             execution_outcome=receipt.outcome,
@@ -340,6 +346,25 @@ class OptimizationEpisodeRunner:
     def _previous_outcome(self) -> OptimizationOutcomeKind | None:
         outcomes = self._controller.ledger.replay().terminal_outcomes
         return outcomes[-1].outcome if outcomes else None
+
+    def _evidence_limited_absorb(
+        self,
+        receipt: CandidateExecutionReceipt,
+    ):
+        active_before = self._controller.active_objective
+        completed = self._controller.complete_terminal(
+            receipt,
+            None,
+            outcome=OptimizationOutcomeKind.EVIDENCE_INVALID,
+            incumbent_decision=IncumbentDecision.EVIDENCE_LIMITED.value,
+        )
+        return (
+            None,
+            IncumbentComparison(IncumbentDecision.EVIDENCE_LIMITED, None),
+            active_before,
+            self._controller.active_objective,
+            (completed,),
+        )
 
     def _indeterminate_absorb(
         self,

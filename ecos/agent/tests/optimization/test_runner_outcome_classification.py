@@ -253,10 +253,12 @@ def test_ineligible_candidate_is_classified_without_an_incumbent(
     turn = runner.run_turn()
 
     assert turn.incumbent_comparison is not None
-    assert turn.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    # An unavailable gate is missing evidence, not a physical failure, so the
+    # decision is evidence_limited (ECC-QoR draft 3, section 10.3).
+    assert turn.incumbent_comparison.decision == IncumbentDecision.EVIDENCE_LIMITED
     assert controller.incumbent is None
     assert controller.ledger.replay().terminal_outcomes[0].outcome == (
-        OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+        OptimizationOutcomeKind.EVIDENCE_INVALID
     )
     runner.close()
 
@@ -298,10 +300,13 @@ def test_incomplete_terminal_metrics_are_not_compared_or_promoted(
     turn = runner.run_turn()
 
     assert turn.incumbent_comparison is not None
-    assert turn.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    # Incomplete evaluation coverage is missing evidence, so the candidate is
+    # still neither compared nor promoted, but the recorded reason is an
+    # evidence gap rather than a physical loss (ECC-QoR draft 3, 10.3).
+    assert turn.incumbent_comparison.decision == IncumbentDecision.EVIDENCE_LIMITED
     assert controller.incumbent is None
     assert controller.ledger.replay().terminal_outcomes[0].outcome == (
-        OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+        OptimizationOutcomeKind.EVIDENCE_INVALID
     )
     runner.close()
 

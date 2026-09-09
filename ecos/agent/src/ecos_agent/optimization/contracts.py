@@ -20,6 +20,7 @@ from pydantic import (
 
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.hashing import canonical_sha256
+from ecos_agent.optimization.evidence import preserve_metric_is_forbidden
 from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
 from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricCategory,
@@ -211,6 +212,8 @@ class OptimizationObjectiveProposal(_ContractModel):
     ) -> tuple[ObjectiveMetric, ...]:
         if len(set(value)) != len(value):
             raise ValueError("preserve metrics must be unique")
+        if any(preserve_metric_is_forbidden(metric) for metric in value):
+            raise ValueError("preserve metrics cannot rely on derived composites")
         return value
 
     @field_validator("rationale_summary")
@@ -272,6 +275,8 @@ class OptimizationObjectiveContract(_ContractModel):
             raise ValueError("primary metric cannot also be preserved")
         if len(set(self.preserve_metrics)) != len(self.preserve_metrics):
             raise ValueError("preserve metrics must be unique")
+        if any(preserve_metric_is_forbidden(metric) for metric in self.preserve_metrics):
+            raise ValueError("preserve metrics cannot rely on derived composites")
         expected = canonical_sha256(
             self.model_dump(mode="json", exclude={"contract_sha256"})
         )

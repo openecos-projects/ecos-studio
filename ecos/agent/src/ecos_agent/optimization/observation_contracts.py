@@ -35,6 +35,18 @@ from ecos_agent.optimization.contracts import (
     TimingMetric,
 )
 
+#: Required signoff gates whose FAIL state is a physical closure failure.
+_PHYSICAL_GATE_NAMES = (
+    "drc_clean",
+    "lvs_clean",
+    "rcx_corner_coverage",
+    "rcx_spef_parse_health",
+    "sta_setup_closed",
+    "sta_hold_closed",
+    "mpc_minimum_area",
+    "mpc_maximum_area",
+)
+
 
 class StageEvidenceFeature(_ContractModel):
     feature_id: str
@@ -179,6 +191,11 @@ class TerminalObservation(_ContractModel):
     sta_corner_set_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    consistency_violations: tuple[str, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="C1-C3 same-workspace contradictions (ECC-QoR draft 3, 10.4)",
+    )
 
     @field_validator("observation_id")
     @classmethod
@@ -246,6 +263,18 @@ class TerminalObservation(_ContractModel):
             raise ValueError("terminal STA corner set hash is invalid")
         return value
 
+    @field_validator("consistency_violations")
+    @classmethod
+    def validate_consistency_violations(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if any(
+            not item or len(item) > 64 or not item.isascii() or not item.islower()
+            for item in value
+        ):
+            raise ValueError("terminal consistency violation ids are invalid")
+        return value
+
     @model_validator(mode="after")
     def validate_extended_metrics(self) -> "TerminalObservation":
         if self.schema_version == "ecos.terminal_observation.v2":
@@ -254,6 +283,7 @@ class TerminalObservation(_ContractModel):
                 or self.evaluation_metrics_complete is not None
                 or self.sta_corner_ids
                 or self.sta_corner_set_sha256 is not None
+                or self.consistency_violations
             ):
                 raise ValueError("terminal observation v3 fields require the v3 schema")
             return self
@@ -332,12 +362,51 @@ class TerminalObservation(_ContractModel):
             self.evidence_valid
             and self.harden_artifacts_complete
             and self.signoff_gates.passed
+            and not self.consistency_violations
             and (
                 self.schema_version == "ecos.terminal_observation.v2"
                 or self.evaluation_metrics_complete is True
             )
             and self._numeric_eligibility_passed
         )
+
+    @property
+    def physical_signoff_failure(self) -> bool:
+        """A real closure defect, as opposed to missing evidence.
+
+        ECC-QoR draft 3 (section 10.2): a failed gate, a non-zero hard
+        violation count, or a negative signed slack is a physical failure;
+        these must never be reinterpreted as an evidence problem.
+        """
+        gates = self.signoff_gates
+        if any(
+            getattr(gates, name) == GateResult.FAIL
+            for name in _PHYSICAL_GATE_NAMES
+        ):
+            return True
+        values = self.objective_metrics
+        hard_counts = (
+            ObjectiveMetric.DRC_COUNT,
+            ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
+            ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
+        )
+        if any(values.get(metric, 0) > 0 for metric in hard_counts):
+            return True
+        # The guardrail carries signed worst slack: a negative value is a
+        # timing violation even when the checklist gate is unavailable.
+        return any(slack < 0 for slack in self.timing_guardrail.values())
+
+    @property
+    def evidence_incomplete(self) -> bool:
+        """Ineligibility caused by missing or contradictory evidence.
+
+        ECC-QoR draft 3 (section 10.3): unavailable gates, incomplete
+        evaluation coverage, artifact loss, or C1-C3 contradictions are
+        evidence gaps; they are never scored as physical failures.
+        """
+        if self.eligible_for_incumbent:
+            return False
+        return not self.physical_signoff_failure
 
     @property
     def _numeric_eligibility_passed(self) -> bool:

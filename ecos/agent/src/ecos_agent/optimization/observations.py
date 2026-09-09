@@ -20,6 +20,10 @@ from ecos_agent.optimization.contracts import (
     StageObservation,
     TerminalObservation,
 )
+from ecos_agent.optimization.evidence import (
+    consistency_violations,
+    interconnect_inflation_metrics,
+)
 from ecos_agent.optimization.execution import CandidateExecutionEvidence
 from ecos_agent.optimization.geometry import read_terminal_geometry
 from ecos_agent.optimization.ledger import build_optimization_artifact_manifest
@@ -313,6 +317,7 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         evaluation_metrics_complete=evaluation_complete,
         sta_corner_ids=corner_ids,
         sta_corner_set_sha256=canonical_sha256({"corners": corner_ids}),
+        consistency_violations=consistency_violations(metrics_by_path),
     )
 
 
@@ -406,6 +411,7 @@ def _evaluation_metrics(
     metrics = (
         *build_eligibility_metrics(metrics_by_path),
         *routing_metrics,
+        *interconnect_inflation_metrics(metrics_by_path),
         *cost_metrics,
         *area_metrics,
         *ppa_metrics,

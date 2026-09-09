@@ -14,7 +14,6 @@ from ecos_agent.optimization.contracts import (
     REQUIRED_SIGNOFF_GATES,
     ROUTABILITY_OBJECTIVE_ORDER,
     TIMING_GUARDRAIL_ORDER,
-    TIMING_OBJECTIVE_ORDER,
     LegalAction,
     MetricReference,
     ObjectiveMetric,
@@ -56,13 +55,6 @@ _LATTICE_VALUES = {
     OptimizationKnob.FLOORPLAN_CORE_UTIL: tuple(round(0.2 + 0.05 * i, 2) for i in range(16)),
     OptimizationKnob.FLOORPLAN_ASPECT_RATIO: (0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.33, 1.5, 2.0, 3.0, 4.0, 5.0),
 }
-_DRC_GOAL_MARKERS = (
-    "drc",
-    "design rule",
-    "design-rule",
-    "设计规则",
-    "规则违例",
-)
 _METRIC_RELATIVE_TOLERANCE = PROTECTION_RELATIVE_TOLERANCE
 _METRIC_ABSOLUTE_TOLERANCE = PROTECTION_ABSOLUTE_TOLERANCE
 
@@ -76,6 +68,7 @@ class IncumbentDecision(StrEnum):
     EQUIVALENT = "equivalent"
     NOISE_TIE = "noise_tie"
     CANDIDATE_INELIGIBLE = "candidate_ineligible"
+    EVIDENCE_LIMITED = "evidence_limited"
 
 
 PROMOTING_DECISIONS = frozenset(
@@ -92,6 +85,17 @@ class CoordinateDirection(StrEnum):
     DECREASE = "decrease"
     INCREASE = "increase"
     TOGGLE = "toggle"
+
+
+def _ineligibility_decision(
+    candidate: TerminalObservation,
+) -> IncumbentDecision:
+    """Missing evidence is never a physical failure (ECC-QoR draft 3, 10.3)."""
+    return (
+        IncumbentDecision.EVIDENCE_LIMITED
+        if candidate.evidence_incomplete
+        else IncumbentDecision.CANDIDATE_INELIGIBLE
+    )
 
 
 @dataclass(frozen=True)
@@ -165,6 +169,11 @@ def terminal_quality_outcome(
         IncumbentDecision.NOISE_TIE: OptimizationOutcomeKind.TRADEOFF,
         IncumbentDecision.CANDIDATE_INELIGIBLE: (
             OptimizationOutcomeKind.CANDIDATE_INELIGIBLE
+        ),
+        # ECC-QoR draft 3 (section 10.3): missing or contradictory evidence
+        # is not a physical failure and must not be learned as a loss.
+        IncumbentDecision.EVIDENCE_LIMITED: (
+            OptimizationOutcomeKind.EVIDENCE_INVALID
         ),
     }[comparison.decision]
 
@@ -254,7 +263,7 @@ def classify_terminal_candidate(
             )
         elif not candidate.eligible_for_incumbent:
             comparison = IncumbentComparison(
-                IncumbentDecision.CANDIDATE_INELIGIBLE, None
+                _ineligibility_decision(candidate), None
             )
         elif incumbent is None:
             comparison = IncumbentComparison(IncumbentDecision.INITIALIZED, None)
@@ -327,10 +336,13 @@ def freeze_optimization_objective(
 ) -> OptimizationObjectiveContract:
     if not isinstance(goal_text, str) or not goal_text.strip():
         raise ValueError("optimization goal text is invalid")
-    from ecos_agent.optimization.objective_intent import resolve_objective_intent
+    from ecos_agent.optimization.objective_intent import (
+        effective_preserve_metrics,
+        resolve_objective_intent,
+    )
 
     primary_metric, parameter_policy = resolve_objective_intent(goal_text, proposal)
-    preserve_metrics = _effective_preserve_metrics(
+    preserve_metrics = effective_preserve_metrics(
         goal_text, proposal, geometry_fixed=parameter_policy.geometry_mode == "fixed"
     )
     payload = {
@@ -346,37 +358,6 @@ def freeze_optimization_objective(
         **payload,
         contract_sha256=canonical_sha256(payload),
     )
-
-
-def _effective_preserve_metrics(
-    goal_text: str, proposal: OptimizationObjectiveProposal, *, geometry_fixed: bool = False
-) -> tuple[ObjectiveMetric, ...]:
-    # Timing is protected by shared WNS/TNS tolerances and recovery/signoff count gates.
-    preserve_metrics = [
-        metric
-        for metric in proposal.preserve_metrics
-        if metric not in (
-            *TIMING_OBJECTIVE_ORDER,
-            ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
-            ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
-        )
-    ]
-    if geometry_fixed:
-        preserve_metrics = [
-            metric for metric in preserve_metrics
-            if metric not in (ObjectiveMetric.DIE_AREA, ObjectiveMetric.CORE_AREA)
-        ]
-    mentions_drc = any(marker in goal_text.casefold() for marker in _DRC_GOAL_MARKERS)
-    drc_metric = ObjectiveMetric.DRC_COUNT
-    if (
-        mentions_drc
-        and proposal.primary_metric != drc_metric
-        and drc_metric not in preserve_metrics
-    ):
-        preserve_metrics.insert(0, drc_metric)
-    if len(preserve_metrics) > 2:
-        raise ValueError("optimization objective preserves too many metrics after DRC binding")
-    return tuple(preserve_metrics)
 
 
 def freeze_routability_objective(
@@ -417,7 +398,7 @@ def compare_incumbent(
     if not incumbent.eligible_for_incumbent:
         raise ValueError("incumbent terminal observation is not eligible")
     if not candidate.eligible_for_incumbent:
-        return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
+        return IncumbentComparison(_ineligibility_decision(candidate), None)
     incumbent_objectives = incumbent.objective_metrics
     candidate_objectives = candidate.objective_metrics
     selected_metrics = (
@@ -429,8 +410,10 @@ def compare_incumbent(
         if metric_id not in incumbent_objectives:
             raise ValueError("incumbent terminal objective metric is unavailable")
         if metric_id not in candidate_objectives:
+            # A physical failure removes no metric; an absent objective
+            # metric is missing evidence (ECC-QoR draft 3, section 2.5).
             return IncumbentComparison(
-                IncumbentDecision.CANDIDATE_INELIGIBLE, metric_id
+                IncumbentDecision.EVIDENCE_LIMITED, metric_id
             )
     protected = _protected_metric_regression(
         incumbent, candidate, semantic_objective, objective
@@ -502,7 +485,7 @@ def compare_recovery_incumbent(
         incumbent_counts = recovery_violation_counts(incumbent)
         candidate_counts = recovery_violation_counts(candidate)
     except ObjectiveAlignmentError:
-        return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, None)
+        return IncumbentComparison(_ineligibility_decision(candidate), None)
     if next(
         (metric for metric in alignment.recovery_order if incumbent_counts[metric]),
         None,
@@ -526,7 +509,7 @@ def compare_recovery_incumbent(
     incumbent_value = incumbent.objective_metrics.get(primary)
     candidate_value = candidate.objective_metrics.get(primary)
     if incumbent_value is None or candidate_value is None:
-        return IncumbentComparison(IncumbentDecision.CANDIDATE_INELIGIBLE, primary)
+        return IncumbentComparison(IncumbentDecision.EVIDENCE_LIMITED, primary)
     change = _utility_change(primary, incumbent_value, candidate_value)
     if change > 0:
         return IncumbentComparison(
@@ -634,6 +617,14 @@ def _utility_change(
 def _timing_regression(
     incumbent: TerminalObservation, candidate: TerminalObservation
 ) -> IncumbentComparison | None:
+    """Adjacent timing guardrail on signed worst slack.
+
+    ECC-QoR draft 3 (section 7.1): the guardrail carries the unclamped
+    signed worst slack, so a degradation inside the positive-margin region
+    (+0.5 ns falling to +0.02 ns) is still a detected regression, while the
+    shared protection tolerance absorbs representation noise.  Clamped WNS
+    must never feed this check: it cannot distinguish positive margins.
+    """
     for metric_id in TIMING_GUARDRAIL_ORDER:
         incumbent_value = incumbent.timing_guardrail[metric_id]
         candidate_value = candidate.timing_guardrail[metric_id]
