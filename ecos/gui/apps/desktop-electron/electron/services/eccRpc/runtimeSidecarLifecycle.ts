@@ -22,7 +22,7 @@ export class RuntimeSidecarLifecycle {
   /** The asynchronous sidecar close that follows the retention timer. */
   private diagnosticCloseTask: Promise<void> | null = null
   private releaseRetryTimer: ReturnType<typeof setTimeout> | null = null
-  private finalSnapshotTask: Promise<void> | null = null
+  private finalSnapshotTask: Promise<boolean> | null = null
 
   constructor(private readonly options: RuntimeSidecarLifecycleOptions) {}
 
@@ -36,7 +36,12 @@ export class RuntimeSidecarLifecycle {
     return this.diagnosticReleaseTimer !== null || this.diagnosticCloseTask !== null
   }
 
-  waitForFinalSnapshot(): Promise<void> | null {
+  /** True while a release is scheduled to retry after a start window. */
+  hasReleaseRetry(): boolean {
+    return this.releaseRetryTimer !== null
+  }
+
+  waitForFinalSnapshot(): Promise<boolean> | null {
     return this.finalSnapshotTask
   }
 
@@ -59,12 +64,17 @@ export class RuntimeSidecarLifecycle {
     this.cancelDiagnosticRelease()
     const task = this.finishSuccessfulOperation(workspaceId)
     this.finalSnapshotTask = task
-    void task.finally(() => {
-      if (this.finalSnapshotTask === task) {
-        this.finalSnapshotTask = null
-      }
-      this.options.emitIdle()
-    })
+    void task.then(
+      (closed) => {
+        if (this.finalSnapshotTask === task) {
+          this.finalSnapshotTask = null
+        }
+        if (closed) this.options.emitIdle()
+      },
+      () => {
+        // finishSuccessfulOperation never rejects; this branch cannot fire.
+      },
+    )
   }
 
   retainFailedOperationForDiagnostics(): void {
@@ -117,18 +127,29 @@ export class RuntimeSidecarLifecycle {
     this.diagnosticReleaseTimer = null
   }
 
-  private async finishSuccessfulOperation(workspaceId: string): Promise<void> {
+  private async finishSuccessfulOperation(workspaceId: string): Promise<boolean> {
     try {
       await this.options.captureFinalSnapshot(workspaceId)
     } catch (error) {
       this.options.emitError(errorMessage(error))
-      return
-    }
-    const result = await this.options.closeSidecar()
-    if (!result.ok) {
-      // The sidecar deferred the shutdown; re-arm the retention window so a
-      // later attempt closes it once it really drains. No idle signal yet.
+      // Snapshot failed: the sidecar is still unclosed. Re-arm retention so a
+      // later attempt can close it.
       this.retainFailedOperationForDiagnostics()
+      return false
+    }
+    try {
+      const result = await this.options.closeSidecar()
+      if (!result.ok) {
+        // The sidecar deferred the shutdown; re-arm the retention window so a
+        // later attempt closes it once it really drains. No idle signal yet.
+        this.retainFailedOperationForDiagnostics()
+        return false
+      }
+      return true
+    } catch (error) {
+      this.options.emitError(errorMessage(error))
+      this.retainFailedOperationForDiagnostics()
+      return false
     }
   }
 }

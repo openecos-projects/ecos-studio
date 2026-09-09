@@ -243,8 +243,10 @@ export class EccWorkspaceRuntime {
   hasPendingRuntimeWork(): boolean {
     return (
       this.isActive() ||
+      this.startRpcCount > 0 ||
       this.sidecarLifecycle.hasFinalSnapshotTask() ||
-      this.sidecarLifecycle.hasDiagnosticRetention()
+      this.sidecarLifecycle.hasDiagnosticRetention() ||
+      this.sidecarLifecycle.hasReleaseRetry()
     )
   }
 

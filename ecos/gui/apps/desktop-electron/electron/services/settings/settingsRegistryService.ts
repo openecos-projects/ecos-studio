@@ -160,7 +160,16 @@ export class SettingsRegistryService {
     if (!isNonEmptyString(key)) {
       throw new Error('设置项键名必须是非空字符串')
     }
-    return await this.enqueueWrite(key, operation)
+    return await this.enqueueWrite(key, async () => {
+      const result = await operation()
+      // Legacy writes on registry-owned keys (for example the Codex IPC
+      // paths) mutate the stored value too: bump the revision so optimistic
+      // concurrency checks (managed install CAS) see them.
+      if (this.handlers[key]) {
+        this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1)
+      }
+      return result
+    })
   }
 
   /**
@@ -235,6 +244,7 @@ export class SettingsRegistryService {
         let handled = 0
         for (const key of pending) {
           if (this.isEccRuntimePoolBusy()) return
+          let deferredAgain = false
           const descriptor = this.requireDescriptor(key)
           const handler = this.handlers[key]
           if (!descriptor || !handler) {
@@ -247,6 +257,7 @@ export class SettingsRegistryService {
             if (!this.pendingApplyKeys.has(key)) return
             if (this.isEccRuntimePoolBusy()) return
             this.pendingApplyKeys.delete(key)
+            deferredAgain = false
             let status: DesktopSettingStatus
             try {
               const outcome = await handler.apply(await this.readStoredValue(key))
@@ -256,7 +267,9 @@ export class SettingsRegistryService {
             }
             if (status.kind === 'pending') {
               // A runtime deferred again; leave the marker for the next drain.
+              // This key made no progress: do not count it as handled.
               this.pendingApplyKeys.add(key)
+              deferredAgain = true
               return
             }
             if (status.kind === 'error') {
@@ -270,10 +283,10 @@ export class SettingsRegistryService {
             const state = await this.stateFor(descriptor)
             this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
           })
-          handled++
+          if (!deferredAgain) handled++
         }
-        // Keys became pending while this pass ran; loop again unless every
-        // pending key re-deferred without any work being done.
+        // If every pending key re-deferred, stop this pass; the next runtime
+        // drain (or list) re-triggers settlement.
         if (handled === 0) return
       }
     } finally {

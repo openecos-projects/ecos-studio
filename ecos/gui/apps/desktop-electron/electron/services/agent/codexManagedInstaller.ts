@@ -11,7 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { Buffer } from 'node:buffer'
@@ -232,6 +232,18 @@ async function runTarExtract(
   destination: string,
 ): Promise<void> {
   await mkdir(destination, { recursive: true })
+  // List and validate members BEFORE extraction: reject absolute paths,
+  // `..` traversal, and links that escape the destination directory.
+  const listing = await capture(
+    'tar',
+    ['-tvf', archivePath],
+    { timeoutMs: 30_000 },
+    spawnImpl,
+  )
+  if (listing.code !== 0 || listing.timedOut) {
+    throw new Error(`tar failed: ${listing.stderr.trim() || 'exit unknown'}`)
+  }
+  validateArchiveMembers(listing.stdout, destination)
   const result = await capture(
     'tar',
     ['-xf', archivePath, '-C', destination],
@@ -242,6 +254,36 @@ async function runTarExtract(
     throw new Error(
       `tar failed: ${result.stderr.trim() || `exit ${result.code ?? 'unknown'}`}`,
     )
+  }
+}
+
+/**
+ * Validate a `tar -tvf` listing: member names must be relative and contained
+ * in the destination, and symlink/hardlink entries must not escape it.
+ */
+function validateArchiveMembers(listing: string, destination: string): void {
+  const root = resolve(destination)
+  for (const line of listing.split('\n')) {
+    const entry = line.trim()
+    if (!entry) continue
+    const fields = entry.split(/\s+/)
+    // Longest line format: lrwxrwxrwx user/group 0 2024-01-01 00:00 name -> target
+    const mode = fields[0] ?? ''
+    const arrowIndex = entry.indexOf(' -> ')
+    const name = (arrowIndex === -1 ? fields.slice(-1)[0] : fields.slice(-3)[0]).replace(
+      /^\.\//,
+      '',
+    )
+    if (!name || name.startsWith('/') || name.split('/').includes('..')) {
+      throw new Error(`archive 包含不安全的成员路径: ${name || entry}`)
+    }
+    if (arrowIndex !== -1 && /^[lh]/i.test(mode)) {
+      const target = entry.slice(arrowIndex + 4)
+      const resolvedTarget = resolve(root, dirname(name), target)
+      if (resolvedTarget !== root && !resolvedTarget.startsWith(root + sep)) {
+        throw new Error(`archive 包含越界的链接目标: ${name} -> ${target}`)
+      }
+    }
   }
 }
 
