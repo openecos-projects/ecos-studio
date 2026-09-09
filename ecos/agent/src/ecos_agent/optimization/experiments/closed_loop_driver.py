@@ -198,6 +198,15 @@ _COMPARISON_KEYS = (
     ("sta_setup_wns", "timing"),
     ("sta_hold_wns", "hold_wns"),
     ("gui_overall_qor_score", "qor_score"),
+    ("place_hpwl", "place_hpwl"),
+    ("total_clock_wirelength", "clock_wirelength"),
+    ("interconnect_inflation_total", "interconnect_inflation"),
+    ("qor_timing_quality", "qor_timing"),
+    ("qor_interconnect_quality", "qor_interconnect"),
+    ("qor_area_quality", "qor_area"),
+    ("qor_power_quality", "qor_power"),
+    ("qor_robustness_quality", "qor_robustness"),
+    ("qor_summary_balanced", "qor_summary"),
 )
 
 

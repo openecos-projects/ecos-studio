@@ -70,6 +70,15 @@ class CandidateTrace:
     die_area: float | None = None
     hold_wns: float | None = None
     qor_score: float | None = None
+    place_hpwl: float | None = None
+    clock_wirelength: float | None = None
+    interconnect_inflation: float | None = None
+    qor_timing: float | None = None
+    qor_interconnect: float | None = None
+    qor_area: float | None = None
+    qor_power: float | None = None
+    qor_robustness: float | None = None
+    qor_summary: float | None = None
     requested_value: str | float | int | bool | None = None
     actual_value: float | int | bool | None = None
     parameter_status: Literal["effective", "inactive", "unknown"] = "unknown"
@@ -192,6 +201,17 @@ def build_candidate_trace(
             else None
         ),
         qor_score=_evaluation_value(evaluation, "gui_overall_qor_score"),
+        place_hpwl=_evaluation_value(evaluation, "place_hpwl"),
+        clock_wirelength=_evaluation_value(evaluation, "total_clock_wirelength"),
+        interconnect_inflation=_evaluation_value(
+            evaluation, "interconnect_inflation_total"
+        ),
+        qor_timing=_evaluation_value(evaluation, "qor_timing_quality"),
+        qor_interconnect=_evaluation_value(evaluation, "qor_interconnect_quality"),
+        qor_area=_evaluation_value(evaluation, "qor_area_quality"),
+        qor_power=_evaluation_value(evaluation, "qor_power_quality"),
+        qor_robustness=_evaluation_value(evaluation, "qor_robustness_quality"),
+        qor_summary=_evaluation_value(evaluation, "qor_summary_balanced"),
         requested_value=(receipt.requested.get("value") if receipt else None),
         actual_value=(receipt.actual_value if receipt else None),
         parameter_status=(receipt.status if receipt else "unknown"),
