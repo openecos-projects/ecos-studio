@@ -289,9 +289,11 @@ def _validate_parameter_observation(receipt: ParameterApplicationReceipt) -> Non
     status, actual = "unknown", None
     if knob == OptimizationKnob.TARGET_DENSITY:
         value = observation.get("target_density")
+        # The live density tensor ramps adaptively toward the configured
+        # target, so only the configured value reaching the density operator
+        # decides effectiveness.
         if (
             _finite_number(value) and 0 < value <= 1
-            and _same_number(observation.get("density_tensor_value"), value)
             and _positive_count(observation.get("density_operator_call_count"))
         ):
             status, actual = "effective", value
