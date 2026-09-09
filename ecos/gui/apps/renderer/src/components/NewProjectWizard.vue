@@ -1567,6 +1567,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Project, WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
+import { useProjectPdkGeneration } from '../composables/useProjectPdkGeneration'
 import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
@@ -1583,7 +1584,6 @@ import {
   projectIdFromName,
   type DesktopFileDialogOptions,
   type PdkDetectedFiles,
-  type PdkRequirement,
   type PickedRtlSources,
 } from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
@@ -1862,79 +1862,42 @@ const selectedPdkId = ref<string>(
 )
 const hasLoadedPdks = ref(false)
 const validatingPdkId = ref('')
-/** PDK family carried by the project manifest (explicit information). */
-const manifestPdkFamily = ref('')
-/** Manifest generation the PDK selection last resolved against. */
-const pdkResolvedForGeneration = ref(-1)
-/** Baseline PDK state owned by the current manifest generation. */
-const pdkBaseline = ref<{
-  pdk: string | null
-  pdkInstallationId: string | null
-  pdkRequirement: PdkRequirement | null
-  pdkRoot: string | null
-  selectedPdkId: string | null
-  pdkSelections: string
-  pdkConfigMode: string
-} | null>(null)
-
-/**
- * Snapshot of every PDK field the current manifest generation owns. A new
- * generation clears exactly these fields, so user-entered values (which no
- * longer match the baseline) are preserved.
- */
-function snapshotPdkBaseline(): void {
-  pdkBaseline.value = {
-    pdk: config.value.pdk ?? null,
-    pdkInstallationId: config.value.pdk_installation_id ?? null,
-    pdkRequirement: config.value.pdk_requirement ?? null,
-    pdkRoot: config.value.pdk_root ?? null,
-    selectedPdkId: selectedPdkId.value || null,
-    pdkSelections: JSON.stringify(pdkSelections.value),
-    pdkConfigMode: pdkConfigMode.value as string,
-  }
-}
-
-/**
- * Remove manifest-derived PDK values (tracked snapshots) from the config,
- * leaving any values the user entered themselves untouched.
- */
-function clearPreviousGenerationPdkState(): void {
-  const baseline = pdkBaseline.value
-  if (!baseline) return
-  if (baseline.pdk !== null && config.value.pdk === baseline.pdk) {
-    config.value.pdk = ''
-  }
-  if (
-    baseline.pdkInstallationId !== null &&
-    config.value.pdk_installation_id === baseline.pdkInstallationId
-  ) {
-    config.value.pdk_installation_id = ''
-  }
-  if (
-    baseline.pdkRequirement !== null &&
-    JSON.stringify(config.value.pdk_requirement ?? null) ===
-      JSON.stringify(baseline.pdkRequirement)
-  ) {
-    config.value.pdk_requirement = undefined
-  }
-  if (baseline.pdkRoot !== null && config.value.pdk_root === baseline.pdkRoot) {
-    config.value.pdk_root = ''
-  }
-  if (baseline.selectedPdkId !== null && selectedPdkId.value === baseline.selectedPdkId) {
-    selectedPdkId.value = ''
-  }
-  if (
-    baseline.pdkSelections !== undefined &&
-    JSON.stringify(pdkSelections.value) === baseline.pdkSelections
-  ) {
+/** PDK generation ownership (baseline + manifest family) for this wizard. */
+const {
+  clearPreviousGenerationPdkState,
+  manifestPdkFamily,
+  pdkResolvedForGeneration,
+  snapshotPdkBaseline,
+} = useProjectPdkGeneration({
+  getPdk: () => config.value.pdk,
+  setPdk: (value) => {
+    config.value.pdk = value ?? ''
+  },
+  getPdkRoot: () => config.value.pdk_root,
+  setPdkRoot: (value) => {
+    config.value.pdk_root = value ?? ''
+  },
+  getPdkRequirement: () => config.value.pdk_requirement,
+  setPdkRequirement: (value) => {
+    config.value.pdk_requirement = value
+  },
+  getPdkInstallationId: () => config.value.pdk_installation_id,
+  setPdkInstallationId: (value) => {
+    config.value.pdk_installation_id = value ?? ''
+  },
+  getSelectedPdkId: () => selectedPdkId.value,
+  setSelectedPdkId: (value) => {
+    selectedPdkId.value = value
+  },
+  getPdkSelections: () => pdkSelections.value,
+  getPdkConfigMode: () => pdkConfigMode.value,
+  setPdkConfigMode: (value) => {
+    pdkConfigMode.value = value
+  },
+  clearPdkSelections: () => {
     pdkSelections.value = { tech_lef: [], cell_lef: [], liberty: [] }
-  }
-  if (pdkConfigMode.value === (baseline.pdkConfigMode as 'default' | 'manual')) {
-    pdkConfigMode.value = 'default'
-  }
-  manifestPdkFamily.value = ''
-  pdkBaseline.value = null
-}
+  },
+})
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [

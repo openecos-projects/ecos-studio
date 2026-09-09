@@ -2,7 +2,8 @@ const DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS = 30_000
 
 export interface RuntimeSidecarLifecycleOptions {
   captureFinalSnapshot(workspaceId: string): Promise<void>
-  closeSidecar(): Promise<void>
+  /** Close the sidecar; resolve { ok: false } when the close was deferred. */
+  closeSidecar(): Promise<{ ok: boolean }>
   emitError(message: string): void
   emitIdle(): void
   hasActiveOperations(): boolean
@@ -50,21 +51,36 @@ export class RuntimeSidecarLifecycle {
   }
 
   retainFailedOperationForDiagnostics(): void {
-    if (this.options.hasActiveOperations() || this.diagnosticReleaseTimer) return
+    if (
+      this.options.hasActiveOperations() ||
+      this.diagnosticReleaseTimer ||
+      this.diagnosticCloseTask
+    ) {
+      return
+    }
     const timeoutMs =
       this.options.diagnosticIdleTimeoutMs ?? DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS
     this.diagnosticReleaseTimer = setTimeout(() => {
       this.diagnosticReleaseTimer = null
       if (this.options.hasActiveOperations()) return
-      // Keep retention flagged while the asynchronous close is running.
+      // Keep retention flagged while the asynchronous close is running. A
+      // deferred close re-arms the retention window for another attempt.
       const closeTask = this.options.closeSidecar().then(
-        () => {
+        (result) => {
           this.diagnosticCloseTask = null
-          this.options.emitIdle()
+          if (result.ok) {
+            this.options.emitIdle()
+          } else {
+            this.retainFailedOperationForDiagnostics()
+          }
         },
         (error: unknown) => {
           this.diagnosticCloseTask = null
           this.options.emitError(errorMessage(error))
+          // Surface the drain to the settings layer even on failure so
+          // deferred applies can retry, and re-arm for another attempt.
+          this.options.emitIdle()
+          this.retainFailedOperationForDiagnostics()
         },
       )
       this.diagnosticCloseTask = closeTask

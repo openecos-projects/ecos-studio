@@ -16,6 +16,8 @@ export interface CommandCaptureResult {
   stderr: string
   /** True when the command had to be terminated after the timeout elapsed. */
   timedOut: boolean
+  /** Spawn-level failure detail (ENOENT, permission, ...), if any. */
+  error?: string
 }
 
 export interface CommandCaptureOptions {
@@ -110,8 +112,14 @@ export async function captureCommandOutput(
     child.stderr?.on('data', (chunk) => {
       stderr = appendCapped(stderr, chunk as Buffer | string)
     })
-    child.on('error', () => {
-      finish({ code: null, stderr, stdout, timedOut: false })
+    child.on('error', (error: Error) => {
+      finish({
+        code: null,
+        error: error.message,
+        stderr,
+        stdout,
+        timedOut: false,
+      })
     })
     child.on('close', (code) => {
       // A process that only exits after the timeout fired must not surface

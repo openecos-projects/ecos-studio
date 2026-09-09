@@ -137,7 +137,8 @@ export class EccWorkspaceRuntime {
         this.snapshotCache.set(snapshot)
       },
       closeSidecar: async () => {
-        await this.shutdown()
+        const result = await this.shutdown()
+        return { ok: result.ok }
       },
       diagnosticIdleTimeoutMs: options.diagnosticIdleTimeoutMs,
       emitError: (text) => {

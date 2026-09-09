@@ -75,6 +75,9 @@ export async function probeExecutableVersion(
     { timeoutMs: options.timeoutMs },
     spawnImpl,
   )
+  if (capture.error) {
+    return { ok: false, error: `无法执行 ${pathValue}: ${capture.error}` }
+  }
   if (capture.timedOut) {
     return {
       ok: false,

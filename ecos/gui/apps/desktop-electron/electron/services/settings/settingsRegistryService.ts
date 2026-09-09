@@ -64,6 +64,8 @@ export class SettingsRegistryService {
   private readonly writeQueues = new Map<string, Promise<unknown>>()
   /** Guards against concurrent deferred-apply settlement passes. */
   private settling = false
+  /** In-flight settlement pass; concurrent triggers share it. */
+  private settlementTask: Promise<void> | null = null
 
   constructor(options: SettingsRegistryServiceOptions) {
     this.broadcast = options.broadcast
@@ -196,7 +198,22 @@ export class SettingsRegistryService {
    * by list()); safe to call concurrently.
    */
   async settleDeferredApplies(): Promise<void> {
-    if (this.settling || this.pendingApplyKeys.size === 0) return
+    if (this.settlementTask) return this.settlementTask
+    if (this.pendingApplyKeys.size === 0) return Promise.resolve()
+    const task = this.runSettlement()
+    this.settlementTask = task
+    void task.then(
+      () => {
+        if (this.settlementTask === task) this.settlementTask = null
+      },
+      () => {
+        if (this.settlementTask === task) this.settlementTask = null
+      },
+    )
+    return this.settlementTask
+  }
+
+  private async runSettlement(): Promise<void> {
     this.settling = true
     try {
       for (const key of Array.from(this.pendingApplyKeys)) {
@@ -300,13 +317,10 @@ export class SettingsRegistryService {
       this.applyFailures.delete(key)
     }
 
+    // A pending marker is cleared only by an actual apply in
+    // runSettlement(); status recomputation here must not race it away.
     if (this.pendingApplyKeys.has(key)) {
-      if (this.isEccRuntimePoolBusy()) {
-        return { kind: 'pending' }
-      }
-      // The pool drained; the next sidecar start self-applies via launch
-      // drift detection, so nothing is deferred anymore.
-      this.pendingApplyKeys.delete(key)
+      return { kind: 'pending' }
     }
 
     if (value === null) {
