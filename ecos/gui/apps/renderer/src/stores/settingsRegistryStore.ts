@@ -71,6 +71,10 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     return (validatingCounts.value[key] ?? 0) > 0
   }
 
+  function recordRowError(key: string, message: string): void {
+    rowErrors.value = { ...rowErrors.value, [key]: message }
+  }
+
   function errorFor(key: string): string {
     return rowErrors.value[key] ?? ''
   }
@@ -230,6 +234,7 @@ export const useSettingsRegistryStore = defineStore('settingsRegistry', () => {
     entries,
     entryFor,
     errorFor,
+    recordRowError,
     isValidating,
     load,
     loadError,

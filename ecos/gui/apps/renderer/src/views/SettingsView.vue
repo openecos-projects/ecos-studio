@@ -45,6 +45,7 @@
           :validating="store.isValidating(entry.descriptor.key)"
           :write-error="store.errorFor(entry.descriptor.key)"
           @commit="(value) => onCommit(entry.descriptor.key, value)"
+          @error="(message) => store.recordRowError(entry.descriptor.key, message)"
           @reset="() => void store.reset(entry.descriptor.key)"
         />
       </div>

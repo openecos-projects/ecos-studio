@@ -2621,9 +2621,19 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
   applyProjectDesignFileDefaults(baseDesignRecord, parameters)
   applyProjectPdkResourceDefaults(baseDesignRecord)
   applyProjectParameterDefaults(manifest, parameters)
-  // Capture the applied state so a later generation clears exactly these
-  // fields (and anything auto-derived from them), never user modifications.
-  snapshotPdkBaseline()
+  // Capture ONLY the fields this manifest generation actually wrote (where
+  // hasInitialConfigValue was false), so a later generation clears exactly
+  // those and never user-provided or initialConfig values.
+  snapshotPdkBaseline({
+    ...(config.value.pdk === baseDesign.pdk ? { pdk: baseDesign.pdk } : {}),
+    ...(config.value.pdk_root === baseDesign.pdk_root
+      ? { pdkRoot: baseDesign.pdk_root }
+      : {}),
+    ...(config.value.pdk_requirement === baseDesign.pdk_requirement
+      ? { pdkRequirement: baseDesign.pdk_requirement }
+      : {}),
+    ...(selectedPdkId.value === baseDesign.pdk ? { selectedPdkId: baseDesign.pdk } : {}),
+  })
 }
 
 function applyProjectFlowDefaults(
@@ -3395,7 +3405,19 @@ function selectPdk(pdk: import('../types').ImportedPdk, options?: { auto?: boole
   // baseline must include it so a later generation clears it. Snapshot after
   // syncWorkspaceConfig so the normalized requirement is captured. User
   // selections stay outside the baseline and survive generation switches.
-  if (options?.auto) snapshotPdkBaseline()
+  if (options?.auto) {
+    snapshotPdkBaseline({
+      pdk: pdk.pdkId,
+      pdkRoot: pdk.path,
+      pdkInstallationId: pdk.id,
+      selectedPdkId: pdk.id,
+      pdkRequirement: {
+        familyId: pdk.pdkId,
+        version: pdk.version || null,
+        manualConfig: null,
+      },
+    })
+  }
 }
 
 async function handleValidatePdk(id: string): Promise<void> {

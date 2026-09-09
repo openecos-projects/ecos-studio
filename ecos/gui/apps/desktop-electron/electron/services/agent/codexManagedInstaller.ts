@@ -356,7 +356,18 @@ async function downloadToFile(
   const totalBytes = totalHeader ? Number(totalHeader) : NaN
   if (!response.body) {
     const data = Buffer.from(await response.arrayBuffer())
-    await writeFile(destination, data)
+    await writeFile(destination, new Uint8Array(data))
+    onProgress(1)
+    return
+  }
+
+  if (!response.body) {
+    // Non-streaming response: enforce the size cap via the buffer.
+    const data = await response.arrayBuffer()
+    if (data.byteLength > MAX_MANAGED_DOWNLOAD_BYTES) {
+      throw new Error(`下载超过大小上限 (${MAX_MANAGED_DOWNLOAD_BYTES} bytes)`)
+    }
+    await writeFile(destination, new Uint8Array(data))
     onProgress(1)
     return
   }

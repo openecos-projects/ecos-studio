@@ -21,7 +21,12 @@
       </div>
     </div>
     <div class="setting-editor">
-      <component :is="editorComponent" :entry="entry" @commit="onCommit" />
+      <component
+        :is="editorComponent"
+        :entry="entry"
+        @commit="onCommit"
+        @error="(message: string) => emit('error', message)"
+      />
       <button
         v-if="!entry.isDefault"
         class="reset-btn"
@@ -50,6 +55,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'commit', value: string): void
+  (e: 'error', message: string): void
   (e: 'reset'): void
 }>()
 

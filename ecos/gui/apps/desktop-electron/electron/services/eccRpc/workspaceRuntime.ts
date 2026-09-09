@@ -642,6 +642,7 @@ export class EccWorkspaceRuntime {
     this.operationTracker.rejectAll(
       new Error('ECC sidecar shut down before the operation completed.'),
     )
+    this.unregisteredStarts.clear()
     return { ok: true }
   }
 
@@ -890,6 +891,7 @@ export class EccWorkspaceRuntime {
       this.operationTracker.rejectAll(
         new Error('ECC sidecar exited before the operation completed.'),
       )
+      this.unregisteredStarts.clear()
       this.emit(
         workspaceHandle
           ? {

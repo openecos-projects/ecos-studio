@@ -34,8 +34,8 @@ export function useProjectPdkGeneration(accessors: ProjectPdkGenerationAccessors
     pdkRequirement: PdkRequirement | null
     pdkRoot: string | null
     selectedPdkId: string | null
-    pdkSelections: string
-    pdkConfigMode: string
+    pdkSelections: string | null
+    pdkConfigMode: string | null
   } | null>(null)
   /** Manifest generation the PDK selection last resolved against. */
   const pdkResolvedForGeneration = ref(-1)
@@ -45,15 +45,25 @@ export function useProjectPdkGeneration(accessors: ProjectPdkGenerationAccessors
    * generation clears exactly these fields, so user-entered values (which no
    * longer match the baseline) are preserved.
    */
-  function snapshotPdkBaseline(): void {
+  function snapshotPdkBaseline(owned: {
+    pdk?: string
+    pdkInstallationId?: string
+    pdkRequirement?: PdkRequirement
+    pdkRoot?: string
+    selectedPdkId?: string
+    pdkSelections?: Record<string, string[]>
+    pdkConfigMode?: string
+  }): void {
+    // Only fields the generation actually wrote are owned; user-provided or
+    // initialConfig values are not tracked and survive generation switches.
     pdkBaseline.value = {
-      pdk: accessors.getPdk() ?? null,
-      pdkInstallationId: accessors.getPdkInstallationId() ?? null,
-      pdkRequirement: accessors.getPdkRequirement() ?? null,
-      pdkRoot: accessors.getPdkRoot() ?? null,
-      selectedPdkId: accessors.getSelectedPdkId() || null,
-      pdkSelections: JSON.stringify(accessors.getPdkSelections()),
-      pdkConfigMode: accessors.getPdkConfigMode(),
+      pdk: owned.pdk ?? null,
+      pdkInstallationId: owned.pdkInstallationId ?? null,
+      pdkRequirement: owned.pdkRequirement ?? null,
+      pdkRoot: owned.pdkRoot ?? null,
+      selectedPdkId: owned.selectedPdkId ?? null,
+      pdkSelections: owned.pdkSelections ? JSON.stringify(owned.pdkSelections) : null,
+      pdkConfigMode: owned.pdkConfigMode ?? null,
     }
   }
 

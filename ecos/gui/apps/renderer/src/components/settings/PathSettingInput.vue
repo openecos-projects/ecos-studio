@@ -32,6 +32,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'commit', value: string): void
+  (e: 'error', message: string): void
 }>()
 
 const draftValue = ref(props.entry.value ?? '')
@@ -80,13 +81,19 @@ function commitDraft(value?: string): void {
 async function browse(): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   if (!desktopApi) return
-  const picked = isDirectory.value
-    ? await desktopApi.dialog.pickDirectory({
-        title: props.entry.descriptor.title,
-      })
-    : ((
-        await desktopApi.dialog.pickFiles({ title: props.entry.descriptor.title })
-      )?.[0] ?? null)
+  let picked: string | null = null
+  try {
+    picked = isDirectory.value
+      ? await desktopApi.dialog.pickDirectory({
+          title: props.entry.descriptor.title,
+        })
+      : ((
+          await desktopApi.dialog.pickFiles({ title: props.entry.descriptor.title })
+        )?.[0] ?? null)
+  } catch (error) {
+    emit('error', error instanceof Error ? error.message : String(error))
+    return
+  }
   if (!picked) return
   draftValue.value = picked
   commitDraft(picked)
