@@ -1164,3 +1164,103 @@
     display: none;
   }
 }
+
+/*
+ * QoR record breakdown: the five ECC-scored Qphys coordinates as flat
+ * meter rows, followed by the report's diagnoses with their intervention
+ * hypotheses. Scores render exactly as ECC wrote them; null coordinates
+ * read as N/A instead of a fabricated zero.
+ */
+.dash-qphys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: color-mix(
+    in srgb,
+    var(--panel-background, var(--background-color, transparent)) 40%,
+    transparent
+  );
+}
+
+.dash-qphys-row {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr) 44px 76px;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.dash-qphys-label {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-qphys-bar {
+  display: block;
+  overflow: hidden;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+.dash-qphys-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.dash-qphys-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 730;
+  text-align: right;
+}
+
+.dash-qphys-state {
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dash-diagnoses {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 46%, transparent);
+  list-style: none;
+}
+
+.dash-diagnoses li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 0;
+}
+
+.dash-diagnoses strong {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.dash-diagnoses p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.dash-diagnoses .dash-diagnosis-hypothesis {
+  font-style: italic;
+}

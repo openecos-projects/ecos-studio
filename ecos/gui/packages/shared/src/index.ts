@@ -100,6 +100,23 @@ export type {
   EccWorkspaceRuntimeSnapshot,
 } from './contracts/eccRuntime.ts'
 export type {
+  QorReportDimension,
+  QorReportDimensionKey,
+  QorReportDimensionState,
+  QorReportDiagnosis,
+  QorReportEvidence,
+  QorReportFeature,
+  QorReportFeasibility,
+  QorReportFeasibilityGate,
+  QorReportInflation,
+  QorReportIntervention,
+  QorReportScalarSummary,
+  QorReportSupportingMetric,
+  QorReportTimingSlack,
+  QorReportV3,
+} from './contracts/qorReport.ts'
+export { parseQorReport } from './contracts/qorReport.ts'
+export type {
   ResourceAction,
   ResourceImportLocalRequest,
   ResourceImportPdkRequest,
@@ -244,6 +261,7 @@ export {
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
+  projectManagementQorReportPath,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,

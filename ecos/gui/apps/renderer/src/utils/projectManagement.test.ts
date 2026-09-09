@@ -17,6 +17,7 @@ import {
   type FlowStep,
   type ProjectStepStatus,
 } from './projectManagement'
+import { buildQorReportText, passedFeasibilityGates } from './qorReportFixture'
 import type { Project } from '@/types'
 
 const project: Project = {
@@ -299,6 +300,29 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
       missing_corners: [],
       issues: [],
     }),
+    qorReportText:
+      readinessStatus === 'pass'
+        ? buildQorReportText()
+        : buildQorReportText({
+            feasibility: {
+              status: 'NOT_VERIFIED',
+              gates: passedFeasibilityGates().map((gate) =>
+                gate.id === 'GATE_SETUP_SLACK'
+                  ? {
+                      ...gate,
+                      state: 'unavailable' as const,
+                      availability: 'not_verified',
+                    }
+                  : gate,
+              ),
+            },
+            scalar_summary: {
+              score: null,
+              status: 'NOT_RATED',
+              profile: 'balanced',
+              weights: {},
+            },
+          }),
   }
 }
 
@@ -710,7 +734,6 @@ describe('project management V3 model', () => {
       model.workspaces[0]?.steps.find((step) => step.step === 'Harden'),
     ).toMatchObject({ status: 'reused', canCreateWorkspace: true })
     expect(model.qorTrendSummary.workspaces[0]).toMatchObject({
-      areaScoringStep: 'Harden',
       gateStatus: 'pass',
     })
     expect(model.workspaceSummaries[0]?.finalMetrics.area?.value).toBe(1200)

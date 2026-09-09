@@ -13,6 +13,7 @@ import type {
 import {
   QOR_SCORE_THRESHOLD,
   type ProjectQorTrendSummary,
+  type QphysKey,
   QorGateStatus,
   QorStatus,
 } from '@/utils/projectQorTrend'
@@ -488,6 +489,120 @@ function coverageTone(covered: number, total: number): DashboardTone {
 function scoreTone(score: number | null): DashboardTone {
   if (score === null) return 'neutral'
   return score >= QOR_SCORE_THRESHOLD ? 'good' : 'warn'
+}
+
+const QPHYS_LABELS: Record<QphysKey, string> = {
+  timing: 'Timing',
+  interconnect: 'Interconnect',
+  area: 'Area',
+  power: 'Power',
+  robustness: 'Robustness',
+}
+
+export interface DashboardQphysDimension {
+  key: QphysKey
+  label: string
+  value: number | null
+  state: string
+  display: string
+  percent: number | null
+  tone: DashboardTone
+}
+
+export interface DashboardDiagnosisIntervention {
+  hypothesis: string
+  tierLabel: string
+  confidence: string
+  validation: string | null
+}
+
+export interface DashboardDiagnosis {
+  id: string
+  stateLabel: string
+  severity: string
+  confidence: string
+  interpretation: string
+  tone: DashboardTone
+  interventions: DashboardDiagnosisIntervention[]
+}
+
+const DIAGNOSIS_TIER_LABELS: Record<string, string> = {
+  TIER_1_FEASIBILITY: 'Feasibility blocker',
+  TIER_2_BOTTLENECK: 'Quality limiter',
+  TIER_3_OPPORTUNITY: 'Optimization opportunity',
+}
+
+/**
+ * The five-coordinate physical QoR record of the recommended workspace,
+ * exactly as the ECC report scored it. Null dimensions surface as "N/A"
+ * with their reason state instead of pretending a score.
+ */
+export function buildDashboardQphys(
+  qorTrendSummary: ProjectQorTrendSummary,
+  workspaceId: string | null,
+): DashboardQphysDimension[] {
+  if (!workspaceId) return []
+  const workspace = qorTrendSummary.workspaces.find(
+    (entry) => entry.workspaceId === workspaceId,
+  )
+  if (!workspace || workspace.qphys.length === 0) return []
+  return workspace.qphys.map((dimension) => ({
+    key: dimension.key,
+    label: QPHYS_LABELS[dimension.key] ?? dimension.key,
+    value: dimension.value,
+    state: dimension.state,
+    display: dimension.value === null ? 'N/A' : dimension.value.toFixed(1),
+    percent:
+      dimension.value === null ? null : Math.max(0, Math.min(100, dimension.value)),
+    tone: qphysTone(dimension.value, dimension.state),
+  }))
+}
+
+function qphysTone(value: number | null, state: string): DashboardTone {
+  if (value === null) return state === 'UNKNOWN' ? 'neutral' : 'warn'
+  if (value >= QOR_SCORE_THRESHOLD) return 'good'
+  if (value >= 40) return 'warn'
+  return 'bad'
+}
+
+/**
+ * Deterministic diagnoses from the ECC report, already severity-ordered
+ * upstream; each intervention stays a hypothesis with its validation.
+ */
+export function buildDashboardDiagnoses(
+  qorTrendSummary: ProjectQorTrendSummary,
+  workspaceId: string | null,
+  limit = 5,
+): DashboardDiagnosis[] {
+  if (!workspaceId) return []
+  const workspace = qorTrendSummary.workspaces.find(
+    (entry) => entry.workspaceId === workspaceId,
+  )
+  if (!workspace) return []
+  return workspace.diagnoses.slice(0, limit).map((diagnosis) => ({
+    id: diagnosis.diagnosisId,
+    stateLabel:
+      diagnosis.state === 'OPPORTUNITY'
+        ? 'Opportunity'
+        : diagnosis.state === 'FAIL'
+          ? 'Blocking'
+          : 'Watch',
+    severity: diagnosis.severity.toFixed(2),
+    confidence: diagnosis.confidence.toLowerCase(),
+    interpretation: diagnosis.interpretation,
+    tone:
+      diagnosis.state === 'FAIL'
+        ? 'bad'
+        : diagnosis.state === 'OPPORTUNITY'
+          ? 'good'
+          : 'warn',
+    interventions: diagnosis.interventions.map((intervention) => ({
+      hypothesis: intervention.hypothesis,
+      tierLabel: DIAGNOSIS_TIER_LABELS[intervention.tier] ?? intervention.tier,
+      confidence: intervention.confidence.toLowerCase(),
+      validation: intervention.validationProcedure,
+    })),
+  }))
 }
 
 export function formatScore(score: number | null): string {
