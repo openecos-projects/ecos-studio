@@ -54,8 +54,34 @@ BASELINE: dict[str, object] = {
     "density_weight": 0.00085,
 }
 
-# 顶层模块名与设计 id 不同的设计（已对照各 rtl/ 源码核实），其余默认 design_id。
-TOP_MODULE = {"cordic": "CORDIC", "ov7670": "top"}
+# 顶层模块名与设计 id 不同的设计（对照 rtl/ 源码与 defined-not-instantiated 分析核实），
+# 其余默认 design_id。stage_d_* 系列取编号同名模块；24090015 的 RTL 无单一顶层，
+# 取首个顶层候选，预期该设计失败。
+TOP_MODULE = {
+    "cordic": "CORDIC",
+    "ov7670": "top",
+    "aes": "aes_cipher_top",
+    "dcpu": "dcpu16_cpu",
+    "fft": "FFT",
+    "qmcore": "ysyx_core1",
+    "rle": "RLE",
+    "vm80": "vm80_wb",
+    "ysyx_210101": "ysyx_210101",
+    "stage_d_ysyx_24080018": "ysyx_24080018",
+    "stage_d_ysyx_24090003": "ysyx_24090003",
+    "stage_d_ysyx_24090010": "ysyx_24090010_exu",
+    "stage_d_ysyx_24090015": "ysyx_24090015_csr_addr_mux",
+    "stage_d_ysyx_25010003": "ysyx_25010003",
+    "stage_d_ysyx_25010009": "ysyx_25010009",
+    "stage_d_ysyx_25010028": "ysyx_25010028",
+    "stage_d_ysyx_25020039": "ysyx_25020039",
+    "stage_d_ysyx_25020042": "ysyx_25020042",
+    "stage_d_ysyx_25070194": "ysyx_25070194",
+    "stage_d_ysyx_25070198": "ysyx_25070198",
+    "stage_d_ysyx_25080201": "ysyx_25080201",
+    "stage_d_ysyx_25080202": "ysyx_25080202",
+    "stage_d_ysyx_25080207": "ysyx_25080207",
+}
 
 _ACTIVE = {
     OptimizationEpisodeState.CREATED,
@@ -170,6 +196,12 @@ def main(provider_factory: Callable[..., Any]) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--agent-mode", default="full_agent")
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
+    parser.add_argument(
+        "--calibration-replays",
+        type=int,
+        default=3,
+        help="default replay count for calibration; 1 skips the noise-epsilon artifact",
+    )
     parser.add_argument("--episode-id", default=None)  # 同 id 重启 = resume
     args = parser.parse_args()
     if not _RUN_ID.fullmatch(args.design):
@@ -221,11 +253,20 @@ def main(provider_factory: Callable[..., Any]) -> int:
         canonical,
         output / "calibration",
         args.terminal_timeout_seconds,
+        replays=args.calibration_replays,
     )
-    noise_epsilon = write_noise_epsilon(output / "calibration")
+    noise_epsilon = (
+        write_noise_epsilon(output / "calibration")
+        if args.calibration_replays >= 2
+        else None
+    )
     print(
         f"[driver] calibration done: reference_runtime={reference_runtime:.1f}s "
-        f"noise_epsilon_drifting_keys={len(noise_epsilon['drifting_metric_keys'])}",
+        + (
+            f"noise_epsilon_drifting_keys={len(noise_epsilon['drifting_metric_keys'])}"
+            if noise_epsilon
+            else "noise_epsilon=skipped"
+        ),
         flush=True,
     )
 

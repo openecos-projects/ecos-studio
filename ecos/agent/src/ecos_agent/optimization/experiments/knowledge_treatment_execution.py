@@ -389,11 +389,12 @@ def _calibrate(
     canonical: TerminalObservation,
     output: Path,
     timeout: float,
+    replays: int = _DEFAULT_REPLAYS,
 ) -> tuple[TerminalObservation, float]:
     output.mkdir(parents=True, exist_ok=True)
     observations = []
     runtimes = []
-    for index in range(1, _DEFAULT_REPLAYS + 1):
+    for index in range(1, replays + 1):
         replay_root = output / f"default-replay-{index}"
         observation_path = replay_root / "terminal-observation.v1.json"
         runtime_path = replay_root / "runtime.v1.json"
