@@ -56,14 +56,34 @@ export function useProjectPdkGeneration(accessors: ProjectPdkGenerationAccessors
   }): void {
     // Only fields the generation actually wrote are owned; user-provided or
     // initialConfig values are not tracked and survive generation switches.
+    type Baseline = {
+      pdk: string | null
+      pdkInstallationId: string | null
+      pdkRequirement: PdkRequirement | null
+      pdkRoot: string | null
+      selectedPdkId: string | null
+      pdkSelections: string | null
+      pdkConfigMode: string | null
+    }
+    const prev: Baseline = pdkBaseline.value ?? {
+      pdk: null,
+      pdkInstallationId: null,
+      pdkRequirement: null,
+      pdkRoot: null,
+      selectedPdkId: null,
+      pdkSelections: null,
+      pdkConfigMode: null,
+    }
     pdkBaseline.value = {
-      pdk: owned.pdk ?? null,
-      pdkInstallationId: owned.pdkInstallationId ?? null,
-      pdkRequirement: owned.pdkRequirement ?? null,
-      pdkRoot: owned.pdkRoot ?? null,
-      selectedPdkId: owned.selectedPdkId ?? null,
-      pdkSelections: owned.pdkSelections ? JSON.stringify(owned.pdkSelections) : null,
-      pdkConfigMode: owned.pdkConfigMode ?? null,
+      pdk: owned.pdk ?? prev.pdk,
+      pdkInstallationId: owned.pdkInstallationId ?? prev.pdkInstallationId,
+      pdkRequirement: owned.pdkRequirement ?? prev.pdkRequirement,
+      pdkRoot: owned.pdkRoot ?? prev.pdkRoot,
+      selectedPdkId: owned.selectedPdkId ?? prev.selectedPdkId,
+      pdkSelections: owned.pdkSelections
+        ? JSON.stringify(owned.pdkSelections)
+        : prev.pdkSelections,
+      pdkConfigMode: owned.pdkConfigMode ?? prev.pdkConfigMode,
     }
   }
 

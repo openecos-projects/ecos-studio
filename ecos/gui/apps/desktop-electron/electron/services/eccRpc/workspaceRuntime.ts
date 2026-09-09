@@ -892,6 +892,8 @@ export class EccWorkspaceRuntime {
         new Error('ECC sidecar exited before the operation completed.'),
       )
       this.unregisteredStarts.clear()
+      // The sidecar exit is a drain: deferred applies can settle now.
+      for (const listener of Array.from(this.drainListeners)) listener()
       this.emit(
         workspaceHandle
           ? {
@@ -943,9 +945,9 @@ export class EccWorkspaceRuntime {
     const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
       protocolEvent.operationId,
     )
-    // Any protocol event for this operation confirms it is tracked; clear
-    // the unregistered-start record.
-    this.unregisteredStarts.delete(protocolEvent.operationId)
+    // Any protocol event means the protocol is alive; clear all
+    // unregistered-start records so stale entries cannot block work.
+    this.unregisteredStarts.clear()
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)
     if (

@@ -2624,22 +2624,22 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
   // Capture ONLY the fields this manifest generation actually wrote (where
   // hasInitialConfigValue was false), so a later generation clears exactly
   // those and never user-provided or initialConfig values.
-  snapshotPdkBaseline({
-    ...(config.value.pdk === baseDesign.pdk ? { pdk: baseDesign.pdk } : {}),
-    ...(config.value.pdk_root === baseDesign.pdk_root
-      ? { pdkRoot: baseDesign.pdk_root }
-      : {}),
-    ...(config.value.pdk_requirement === baseDesign.pdk_requirement
-      ? { pdkRequirement: baseDesign.pdk_requirement }
-      : {}),
-    ...(selectedPdkId.value === baseDesign.pdk ? { selectedPdkId: baseDesign.pdk } : {}),
-    ...(baseDesignRecord.pdk_config && !hasInitialConfigValue('pdk_config')
-      ? {
-          pdkSelections: { ...pdkSelections.value },
-          pdkConfigMode: pdkConfigMode.value,
-        }
-      : {}),
-  })
+  const owned: Record<string, unknown> = {}
+  if (!hasInitialConfigValue('pdk')) {
+    owned.pdk = baseDesign.pdk
+    owned.selectedPdkId = baseDesign.pdk
+  }
+  if (!hasInitialConfigValue('pdk_root')) {
+    owned.pdkRoot = baseDesign.pdk_root
+  }
+  if (!hasInitialConfigValue('pdk_requirement')) {
+    owned.pdkRequirement = baseDesign.pdk_requirement
+  }
+  if (!hasInitialConfigValue('pdk_config')) {
+    owned.pdkSelections = { ...pdkSelections.value }
+    owned.pdkConfigMode = pdkConfigMode.value
+  }
+  snapshotPdkBaseline(owned)
 }
 
 function applyProjectFlowDefaults(
