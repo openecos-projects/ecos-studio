@@ -155,6 +155,14 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
+          if (args.includes('-tvf')) {
+            child.stdout.emit(
+              'data',
+              '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
+            )
+            child.emit('close', 0)
+            return
+          }
           const destFlag = args.indexOf('-C')
           const destination = destFlag >= 0 ? args[destFlag + 1] : ''
           await writeFile(
@@ -222,6 +230,14 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
+          if (args.includes('-tvf')) {
+            child.stdout.emit(
+              'data',
+              '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
+            )
+            child.emit('close', 0)
+            return
+          }
           const destFlag = args.indexOf('-C')
           const destination = destFlag >= 0 ? args[destFlag + 1] : ''
           await writeFile(
@@ -281,6 +297,14 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
+          if (args.includes('-tvf')) {
+            child.stdout.emit(
+              'data',
+              '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
+            )
+            child.emit('close', 0)
+            return
+          }
           const destFlag = args.indexOf('-C')
           const destination = destFlag >= 0 ? args[destFlag + 1] : ''
           await writeFile(
@@ -344,6 +368,14 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
+          if (args.includes('-tvf')) {
+            child.stdout.emit(
+              'data',
+              '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
+            )
+            child.emit('close', 0)
+            return
+          }
           const destFlag = args.indexOf('-C')
           const destination = destFlag >= 0 ? args[destFlag + 1] : ''
           await writeFile(

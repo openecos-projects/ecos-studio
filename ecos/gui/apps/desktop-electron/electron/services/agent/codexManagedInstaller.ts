@@ -263,23 +263,35 @@ async function runTarExtract(
  */
 function validateArchiveMembers(listing: string, destination: string): void {
   const root = resolve(destination)
-  for (const line of listing.split('\n')) {
-    const entry = line.trim()
-    if (!entry) continue
-    const fields = entry.split(/\s+/)
-    // Longest line format: lrwxrwxrwx user/group 0 2024-01-01 00:00 name -> target
-    const mode = fields[0] ?? ''
-    const arrowIndex = entry.indexOf(' -> ')
-    const name = (arrowIndex === -1 ? fields.slice(-1)[0] : fields.slice(-3)[0]).replace(
-      /^\.\//,
-      '',
-    )
-    if (!name || name.startsWith('/') || name.split('/').includes('..')) {
-      throw new Error(`archive 包含不安全的成员路径: ${name || entry}`)
+  for (const rawLine of listing.split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    // GNU tar -tv layout: mode owner/group size date time name[ -> target].
+    const prefixMatch = line.match(/^.{10}\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+/)
+    if (!prefixMatch) continue
+    const rest = line.slice(prefixMatch[0].length)
+    let name = rest
+    let target: string | null = null
+    const linkTo = rest.indexOf(' link to ')
+    const arrow = rest.indexOf(' -> ')
+    if (linkTo !== -1 && (arrow === -1 || linkTo < arrow)) {
+      name = rest.slice(0, linkTo)
+      target = rest.slice(linkTo + 9)
+    } else if (arrow !== -1) {
+      name = rest.slice(0, arrow)
+      target = rest.slice(arrow + 4)
     }
-    if (arrowIndex !== -1 && /^[lh]/i.test(mode)) {
-      const target = entry.slice(arrowIndex + 4)
-      const resolvedTarget = resolve(root, dirname(name), target)
+    const normalized = name.replace(/^\.\//, '')
+    if (
+      !normalized ||
+      normalized.startsWith('/') ||
+      normalized.split('/').includes('..')
+    ) {
+      throw new Error(`archive 包含不安全的成员路径: ${name}`)
+    }
+    if (target !== null) {
+      // Link targets must resolve inside the destination.
+      const resolvedTarget = resolve(root, dirname(normalized), target)
       if (resolvedTarget !== root && !resolvedTarget.startsWith(root + sep)) {
         throw new Error(`archive 包含越界的链接目标: ${name} -> ${target}`)
       }

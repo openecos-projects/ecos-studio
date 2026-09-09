@@ -49,7 +49,9 @@ export class RuntimeSidecarLifecycle {
     if (
       this.finalSnapshotTask ||
       this.options.hasActiveOperations() ||
-      this.options.isStartWindow()
+      this.options.isStartWindow() ||
+      this.diagnosticReleaseTimer !== null ||
+      this.diagnosticCloseTask !== null
     ) {
       // A start RPC window is open; retry shortly so operation B (or its
       // registration) is not cut down by the snapshot/close below.
@@ -105,15 +107,15 @@ export class RuntimeSidecarLifecycle {
           if (result.ok) {
             this.options.emitIdle()
           } else {
+            // Sidecar still running an operation; retry later. No idle here.
             this.retainFailedOperationForDiagnostics()
           }
         },
         (error: unknown) => {
           this.diagnosticCloseTask = null
           this.options.emitError(errorMessage(error))
-          // Surface the drain to the settings layer even on failure so
-          // deferred applies can retry, and re-arm for another attempt.
-          this.options.emitIdle()
+          // The sidecar did not close; do NOT signal idle. Re-arm retention so
+          // a later attempt closes it, which will emit idle when it succeeds.
           this.retainFailedOperationForDiagnostics()
         },
       )
