@@ -3,9 +3,12 @@ from pathlib import Path
 
 import pytest
 
+from ecos_agent.optimization.contracts import ObjectiveMetric
 from ecos_agent.optimization.experiments.closed_loop_driver import (
+    build_metric_comparison,
     write_noise_epsilon,
 )
+from ecos_agent.optimization.experiments.equal_budget import CandidateTrace
 from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from tests.optimization.experiments.equal_budget_support import (
     _terminal_observation,
@@ -74,3 +77,74 @@ def test_write_noise_epsilon_requires_replays_and_aligned_structure(
 
     with pytest.raises(ValueError, match="structurally aligned"):
         write_noise_epsilon(calibration)
+
+
+def test_metric_comparison_reports_reference_best_and_noise() -> None:
+    reference = _terminal_observation()
+    best = CandidateTrace(
+        design_id="design",
+        candidate_id="episode.c2",
+        started=True,
+        terminal_success=True,
+        terminal_utility=-3.5,
+        area=11.0,
+        dynamic_power=2.4,
+        leakage_power=0.41,
+        frequency=105.0,
+        drc=0.0,
+        timing=0.1,
+        congestion=3.0,
+        wirelength=3.5,
+        die_area=1200.0,
+        hold_wns=0.0,
+    )
+    worse = CandidateTrace(
+        design_id="design",
+        candidate_id="episode.c1",
+        started=True,
+        terminal_success=True,
+        terminal_utility=-4.5,
+        wirelength=4.5,
+    )
+    rejected = CandidateTrace(
+        design_id="design",
+        candidate_id="episode.c3",
+        started=True,
+        terminal_success=False,
+    )
+    epsilon = {
+        "route_wirelength": 0.1,
+        "sta_frequency": 0.0,
+        "sta_typical_leakage_power": 0.05,
+    }
+
+    comparison = build_metric_comparison(reference, (worse, best, rejected), epsilon)
+
+    assert comparison["best_candidate_id"] == "episode.c2"
+    rows = comparison["metrics"]
+    assert rows["route_wirelength"] == {
+        "reference": 4.0,
+        "best": 3.5,
+        "delta": -0.5,
+        "epsilon": 0.1,
+        "beyond_noise": True,
+    }
+    assert rows["sta_frequency"]["beyond_noise"] is True
+    assert rows["sta_typical_leakage_power"]["beyond_noise"] is False
+    assert rows["route_la_total_overflow"]["epsilon"] is None
+    assert rows["route_la_total_overflow"]["beyond_noise"] is None
+    assert rows["gui_overall_qor_score"]["best"] is None
+    assert rows["gui_overall_qor_score"]["beyond_noise"] is None
+
+
+def test_metric_comparison_without_started_candidates_keeps_reference() -> None:
+    comparison = build_metric_comparison(_terminal_observation(), (), {})
+
+    assert comparison["best_candidate_id"] is None
+    assert comparison["metrics"]["route_wirelength"] == {
+        "reference": 4.0,
+        "best": None,
+        "delta": None,
+        "epsilon": None,
+        "beyond_noise": None,
+    }

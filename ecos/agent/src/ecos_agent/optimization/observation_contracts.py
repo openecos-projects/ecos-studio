@@ -522,27 +522,41 @@ def _metric_profile_key(metric: TerminalEvaluationMetric) -> str:
 def deterministic_noise_profile(
     observations: Sequence[TerminalObservation],
 ) -> dict[str, dict[str, float]]:
-    """Cross-replay noise over evaluation metrics, keyed by (metric_id, corner).
+    """Cross-replay noise over the candidate comparison key space.
 
-    Returns per key the median reference value and the max-minus-min epsilon.
-    Telemetry metrics (wall-clock / RSS sampling) are excluded: they vary
-    across replays of an identical flow by construction. Corner rows keep
-    their own key so cross-corner PVT spread (e.g. leakage across
-    -40 C / 125 C) is never reported as replay noise.
+    Keys cover every non-telemetry evaluation metric (corner rows keep their
+    own ``metric_id@corner`` key so cross-corner PVT spread, e.g. leakage
+    across -40 C / 125 C, is never reported as replay noise), the
+    routability objective trio, and the timing guardrail — the full set a
+    candidate-vs-reference delta can be judged against. Telemetry metrics
+    (wall-clock / RSS sampling) are excluded: they vary across replays of an
+    identical flow by construction.
     """
     if len(observations) < 2:
         raise ValueError("noise profile requires at least two observations")
-    rows = [
-        {
+    rows = []
+    for item in observations:
+        row = {
             _metric_profile_key(metric): metric.value
             for metric in item.evaluation_metrics
             if not is_telemetry_metric(metric)
         }
-        for item in observations
-    ]
+        row.update(
+            {
+                metric.value: float(item.metrics[metric])
+                for metric in ROUTABILITY_OBJECTIVE_ORDER
+            }
+        )
+        row.update(
+            {
+                metric.value: float(item.timing_guardrail[metric])
+                for metric in TIMING_GUARDRAIL_ORDER
+            }
+        )
+        rows.append(row)
     keys = tuple(rows[0])
     if any(tuple(row) != keys for row in rows[1:]):
-        raise ValueError("replay evaluation metrics are not structurally aligned")
+        raise ValueError("replay metrics are not structurally aligned")
     return {
         "reference": {
             key: float(statistics.median(row[key] for row in rows)) for key in keys
