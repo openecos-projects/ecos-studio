@@ -36,9 +36,11 @@ from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
 from ecos_agent.optimization.runtime import create_optimization_runner
 
-# GUI 生产默认（experiments/projects/ws_0001/home/params.toml 实测）。
+# 频率取各设计 SDC 的原始约束 100 MHz：ECC cf5db256 起 refresh_generated_sdc 会把
+# 带 "# Auto-generated SDC file" 标记的 SDC 改写为 frequency_max 参数值，基线必须
+# 与 SDC 一致，否则 workspace.create 后 origin SDC 哈希校验必然失配。
 BASELINE: dict[str, object] = {
-    "frequency_mhz": 50,
+    "frequency_mhz": 100,
     "max_fanout": 32,
     "core_utilization": 0.3,
     "core_aspect_ratio": 1.0,
