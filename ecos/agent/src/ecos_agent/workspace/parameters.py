@@ -10,6 +10,7 @@ from typing import Any
 
 PARAMETERS_JSON = "home/parameters.json"
 PARAMS_TOML = "home/params.toml"
+DREAMPLACE_CONFIG = "config/dreamplace_ecc.json"
 _DESIGN_SECTION_KEYS = {
     "design": "name",
     "top_module": "top",
@@ -35,6 +36,29 @@ def read_workspace_parameters(root: Path) -> tuple[str, dict[str, Any]]:
     if _path_present(root, PARAMETERS_JSON):
         return PARAMETERS_JSON, _normalize_mapping(_read_json(root, PARAMETERS_JSON))
     raise WorkspaceParametersError("workspace parameter evidence is unavailable")
+
+
+def read_workspace_dreamplace_seed(root: Path) -> int:
+    """The baseline run's DREAMPlace random_seed.
+
+    Candidate reruns must hold this value fixed; substituting an episode-level
+    seed silently changes a variable the baseline never held.
+    """
+    if not _path_present(root, DREAMPLACE_CONFIG):
+        raise WorkspaceParametersError(
+            "workspace DREAMPlace seed evidence is unavailable"
+        )
+    path = _safe_file(root, DREAMPLACE_CONFIG)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        seed = payload["random_seed"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise WorkspaceParametersError(
+            "workspace DREAMPlace seed evidence is unavailable"
+        ) from exc
+    if type(seed) is not int:
+        raise WorkspaceParametersError("workspace DREAMPlace seed is invalid")
+    return seed
 
 
 def _read_json(root: Path, relative_path: str) -> dict[str, Any]:

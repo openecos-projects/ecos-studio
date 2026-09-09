@@ -40,6 +40,7 @@ from ecos_agent.optimization.runtime import (
     _wait_for_terminal_receipt,
     create_optimization_runner,
 )
+from ecos_agent.workspace.parameters import WorkspaceParametersError
 from tests.optimization.controller.support import _eligible_terminal
 
 _STAGES = (
@@ -338,9 +339,7 @@ def test_parent_manifest_binds_terminal_evidence(
     )
 
 
-def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
-    tmp_path: Path,
-) -> None:
+def _execution_context_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
     origin = tmp_path / "origin"
     rtl = origin
     rtl.mkdir()
@@ -360,12 +359,25 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
         encoding="utf-8",
     )
     (tmp_path / "home" / "flow.json").write_text("{}\n", encoding="utf-8")
+    return rtl, filelist, origin
+
+
+def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
+    tmp_path: Path,
+) -> None:
+    rtl, filelist, origin = _execution_context_workspace(tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+        json.dumps({"target_density": 0.45, "random_seed": 3000}),
+        encoding="utf-8",
+    )
 
     context = _optimization_execution_context(
-        tmp_path, 200, 17, _HASH, "ecc-test-revision"
+        tmp_path, 200, _HASH, "ecc-test-revision"
     )
 
     assert context["design_id"] == "design-a"
+    assert context["seed"] == 3000
     assert context["rtl_sha256"] == canonical_sha256(
         {"files": [file_sha256(rtl / "a.v"), file_sha256(rtl / "b.v")]}
     )
@@ -384,6 +396,23 @@ def test_execution_context_matches_ecc_design_hash_for_multiple_inputs(
             "sdc_sha256": context["sdc_sha256"],
         }
     )
+
+
+def test_execution_context_seed_fails_closed_without_workspace_baseline(
+    tmp_path: Path,
+) -> None:
+    _execution_context_workspace(tmp_path)
+
+    with pytest.raises(WorkspaceParametersError, match="DREAMPlace seed"):
+        _optimization_execution_context(tmp_path, 200, _HASH, "ecc-test-revision")
+
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "dreamplace_ecc.json").write_text(
+        json.dumps({"random_seed": "3000"}), encoding="utf-8"
+    )
+    with pytest.raises(WorkspaceParametersError, match="DREAMPlace seed"):
+        _optimization_execution_context(tmp_path, 200, _HASH, "ecc-test-revision")
 
 
 def test_runtime_context_rejects_unknown_and_coerced_fields(tmp_path: Path) -> None:

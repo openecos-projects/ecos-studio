@@ -297,6 +297,15 @@ def _validate_materialization_files(
         raise OptimizationEccAdapterError(
             "application receipt materialization file hash does not match"
         )
+    if "random_seed" in config_payload:
+        # The seed the receipt claims must be the seed the candidate config
+        # actually ran with; a divergence silently confounds every incumbent
+        # comparison against the baseline run.
+        seed = receipt.context.get("seed")
+        if type(seed) is not int or config_payload["random_seed"] != seed:
+            raise OptimizationEccAdapterError(
+                "application receipt materialization seed does not match"
+            )
 
 
 def _validate_parent_binding(

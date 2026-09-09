@@ -219,9 +219,9 @@ def _write_candidate_evidence(
     )
     after_path = before_path.with_name("dreamplace.after.json")
     for path, payload in (
-        (config_path, {"target_density": 0.65}),
+        (config_path, {"target_density": 0.65, "random_seed": 17}),
         (before_path, {"target_density": 0.6}),
-        (after_path, {"target_density": 0.65}),
+        (after_path, {"target_density": 0.65, "random_seed": 17}),
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
