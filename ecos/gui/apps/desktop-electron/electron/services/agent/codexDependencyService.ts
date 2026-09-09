@@ -262,6 +262,12 @@ export class CodexDependencyService {
     const binDir = join(this.installRoot, 'bin')
     const archivePath = join(downloadsDir, assetName)
     const targetBin = join(binDir, 'codex')
+    // Remember what the settings key held when the install started so a
+    // user-selected path written during the (possibly long) download is not
+    // overwritten by the managed install result.
+    const pathAtInstallStart = await this.settingsStore.get<string>(
+      DESKTOP_CODEX_BIN_SETTING_KEY,
+    )
 
     await mkdir(downloadsDir, { recursive: true })
     await mkdir(binDir, { recursive: true })
@@ -340,6 +346,14 @@ export class CodexDependencyService {
       stagedBin = null
       swapped = true
 
+      if (
+        (await this.settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY)) !==
+        pathAtInstallStart
+      ) {
+        // The user picked a custom Codex path while the download ran; their
+        // newer choice wins over the managed install result.
+        return await this.probeStatus()
+      }
       if (this.managedBinPersister) {
         await this.managedBinPersister(targetBin)
       } else {

@@ -33,6 +33,13 @@ export class RuntimeOperationTracker {
     return this.terminalOperations.has(operationId)
   }
 
+  /** True once the operation has been observed as active or terminal. */
+  hasOperation(operationId: string): boolean {
+    return (
+      this.activeOperationIds.has(operationId) || this.terminalOperations.has(operationId)
+    )
+  }
+
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
     if (!terminalEventTypes.has(protocolEvent.type)) {
       if (this.terminalOperations.has(protocolEvent.operationId)) return false

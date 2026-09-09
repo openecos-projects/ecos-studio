@@ -3410,11 +3410,12 @@ function selectPdk(pdk: import('../types').ImportedPdk, options?: { auto?: boole
   if (pdk.readiness !== 'ready' || !pdk.supportsEccDefaults) {
     pdkConfigMode.value = 'manual'
   }
-  // An automatic selection is owned by the current manifest generation; the
-  // baseline must include it so a later generation clears it. User selections
-  // stay outside the baseline and survive generation switches.
-  if (options?.auto) snapshotPdkBaseline()
   syncWorkspaceConfig()
+  // An automatic selection is owned by the current manifest generation; the
+  // baseline must include it so a later generation clears it. Snapshot after
+  // syncWorkspaceConfig so the normalized requirement is captured. User
+  // selections stay outside the baseline and survive generation switches.
+  if (options?.auto) snapshotPdkBaseline()
 }
 
 async function handleValidatePdk(id: string): Promise<void> {

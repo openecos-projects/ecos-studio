@@ -404,7 +404,9 @@ export class EccWorkspaceRuntime {
   ): Promise<EccRuntimeOperation> {
     this.startRpcCount += 1
     try {
-      return await this.startFlowOperationRpc(request)
+      const operation = await this.startFlowOperationRpc(request)
+      await this.waitForStartRegistration(operation.operationId)
+      return operation
     } finally {
       this.startRpcCount -= 1
       this.notifyDrainedIfIdle()
@@ -433,7 +435,9 @@ export class EccWorkspaceRuntime {
   ): Promise<EccRuntimeOperation> {
     this.startRpcCount += 1
     try {
-      return await this.startStepOperationRpc(request)
+      const operation = await this.startStepOperationRpc(request)
+      await this.waitForStartRegistration(operation.operationId)
+      return operation
     } finally {
       this.startRpcCount -= 1
       this.notifyDrainedIfIdle()
@@ -632,6 +636,20 @@ export class EccWorkspaceRuntime {
     this.drainListeners.add(listener)
     return () => {
       this.drainListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Bound wait until the protocol has observed the started operation (active
+   * or terminal). Keeping the start RPC window open until registration means
+   * a config restart cannot shut down a sidecar underneath a just-launched
+   * operation, no matter whether the response or the started notification
+   * arrives first.
+   */
+  private async waitForStartRegistration(operationId: string): Promise<void> {
+    const deadline = Date.now() + 5_000
+    while (!this.operationTracker.hasOperation(operationId) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
 

@@ -336,7 +336,7 @@ describe('EccWorkspaceRuntime', () => {
   })
 
   it('starts GUI flow operations without waiting for the long-running result', async () => {
-    const { client, service } = createService()
+    const { client, service, sidecarNotification } = createService()
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
@@ -359,12 +359,27 @@ describe('EccWorkspaceRuntime', () => {
     )
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
 
-    await expect(
-      service.startFlowOperation({
-        idempotencyKey: 'request-1',
-        workspaceHandle: workspace.workspaceHandle,
-      }),
-    ).resolves.toMatchObject({ operationId: 'operation-1', state: 'queued' })
+    const startPromise = service.startFlowOperation({
+      idempotencyKey: 'request-1',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    // Deliver the started notification so the start RPC window closes.
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'event-start-1',
+        operationId: 'operation-1',
+        workspaceId: 'workspace-1',
+        sequence: 1,
+        type: 'operation.started',
+        payload: {},
+      },
+    })
+    await expect(startPromise).resolves.toMatchObject({
+      operationId: 'operation-1',
+      state: 'queued',
+    })
     expect(client.calls.at(-1)).toEqual({
       method: 'operation.start_flow',
       params: {
@@ -495,7 +510,7 @@ describe('EccWorkspaceRuntime', () => {
   })
 
   it('forwards GUI single-step rerun reset intent to ECC', async () => {
-    const { client, service } = createService()
+    const { client, service, sidecarNotification } = createService()
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
@@ -518,15 +533,29 @@ describe('EccWorkspaceRuntime', () => {
     )
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
 
-    await expect(
-      service.startStepOperation({
-        idempotencyKey: 'request-2',
-        rerun: true,
-        resetDependents: true,
-        step: 'Floorplan',
-        workspaceHandle: workspace.workspaceHandle,
-      }),
-    ).resolves.toMatchObject({ operationId: 'operation-2', state: 'queued' })
+    const startPromise = service.startStepOperation({
+      idempotencyKey: 'request-2',
+      rerun: true,
+      resetDependents: true,
+      step: 'Floorplan',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'event-start-2',
+        operationId: 'operation-2',
+        workspaceId: 'workspace-1',
+        sequence: 1,
+        type: 'operation.started',
+        payload: {},
+      },
+    })
+    await expect(startPromise).resolves.toMatchObject({
+      operationId: 'operation-2',
+      state: 'queued',
+    })
 
     expect(client.calls.at(-1)).toEqual({
       method: 'operation.start_step',
@@ -1401,7 +1430,7 @@ describe('EccWorkspaceRuntime', () => {
       },
     )
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
-    await service.startStepOperation({
+    const startPromise = service.startStepOperation({
       idempotencyKey: 'place-1',
       step: 'place',
       workspaceHandle: workspace.workspaceHandle,
@@ -1420,6 +1449,9 @@ describe('EccWorkspaceRuntime', () => {
         type: 'operation.started',
         workspaceId: 'workspace-1',
       },
+    })
+    await expect(startPromise).resolves.toMatchObject({
+      operationId: 'operation-place',
     })
     const startsBeforeCrash = sidecar.startCount
 
@@ -1716,7 +1748,8 @@ describe('EccWorkspaceRuntime', () => {
     })
 
     it('defers while a modern start RPC is in flight instead of killing the launch', async () => {
-      const { client, service, sidecar } = createService('/work/demo')
+      const { client, service, sidecar, sidecarNotification } =
+        createService('/work/demo')
       client.responses.push(
         { capabilities: [], eccVersion: '0.1.0', version: 1 },
         { directory: '/work/demo', workspaceId: 'workspace-1' },
@@ -1738,9 +1771,42 @@ describe('EccWorkspaceRuntime', () => {
       expect(sidecar.shutdownCount).toBe(0)
 
       startGate.resolve({ operationId: 'operation-1', state: 'queued' })
+      sidecarNotification({
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: 'event-start-1',
+          operationId: 'operation-1',
+          workspaceId: 'workspace-1',
+          sequence: 1,
+          type: 'operation.started',
+          payload: {},
+        },
+      })
       await startOperation
-      await expect(service.restartForConfigChange()).resolves.toBe(true)
-      expect(sidecar.shutdownCount).toBe(1)
+      // The operation is now tracked as active; the config restart still
+      // defers to it.
+      await expect(service.restartForConfigChange()).resolves.toBe(false)
+      expect(sidecar.shutdownCount).toBe(0)
+
+      // Once the modern operation reaches a terminal state the tracker drains;
+      // the runtime lifecycle retains the sidecar briefly for diagnostics, so
+      // only the NEXT drain (after retention) restarts with the new config.
+      sidecarNotification({
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: 'event-terminal-1',
+          operationId: 'operation-1',
+          workspaceId: 'workspace-1',
+          sequence: 2,
+          type: 'operation.completed',
+          payload: { state: 'Success', step: 'place' },
+        },
+      })
+      await vi.waitFor(() => {
+        expect(sidecar.shutdownCount).toBeGreaterThanOrEqual(1)
+      })
     })
 
     it('runs flows queued after the restart only once the sidecar shut down', async () => {
