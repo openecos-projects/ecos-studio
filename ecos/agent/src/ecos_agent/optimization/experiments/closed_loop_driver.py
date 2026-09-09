@@ -142,9 +142,19 @@ def write_noise_epsilon(calibration_dir: Path) -> dict[str, object]:
     nonzero_epsilon_keys = sorted(
         key for key, value in profile["epsilon"].items() if value > 0
     )
+    context_path = calibration_dir / "noise-context.v1.json"
+    fingerprint = None
+    if context_path.is_file():
+        try:
+            fingerprint = json.loads(context_path.read_text(encoding="utf-8")).get(
+                "fingerprint"
+            )
+        except (OSError, ValueError):
+            fingerprint = None
     payload = {
         "schema_version": "ecos.noise_epsilon.v1",
         "comparison_key": "(metric_id, corner)",
+        "noise_context_fingerprint": fingerprint,
         "telemetry_excluded_metric_ids": sorted(TELEMETRY_METRIC_IDS),
         "replay_count": len(observations),
         "reference": profile["reference"],

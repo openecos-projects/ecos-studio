@@ -7,6 +7,7 @@ import math
 import re
 import shutil
 import statistics
+import subprocess
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -21,6 +22,7 @@ from ecos_agent.optimization.experiments.equal_budget import (
     validate_design_manifest,
 )
 from ecos_agent.optimization.observations import build_terminal_observation
+from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
 from ecos_agent.optimization.runtime import (
     _ecc_executable,
     _optimization_rerun_runtime_seconds,
@@ -33,7 +35,10 @@ from ecos_agent.workspace.parameters import (
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SETUP_METHODS = frozenset({"workspace.create", "operation.start_flow"})
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+# Adaptive replay protocol: two replays establish epsilon when bitwise
+# identical; the third only runs when drift appears and needs bounding.
 _DEFAULT_REPLAYS = 3
+_MIN_NOISE_REPLAYS = 2
 
 
 class DesignSpec(NamedTuple):
@@ -392,9 +397,14 @@ def _calibrate(
     replays: int = _DEFAULT_REPLAYS,
 ) -> tuple[TerminalObservation, float]:
     output.mkdir(parents=True, exist_ok=True)
+    _ensure_noise_context(manifest, workspace, output)
     observations = []
     runtimes = []
     for index in range(1, replays + 1):
+        if len(observations) >= _MIN_NOISE_REPLAYS and not _replays_drift(
+            observations
+        ):
+            break
         replay_root = output / f"default-replay-{index}"
         observation_path = replay_root / "terminal-observation.v1.json"
         runtime_path = replay_root / "runtime.v1.json"
@@ -419,6 +429,100 @@ def _calibrate(
         observations.append(observation)
         runtimes.append(float(runtime))
     return observations[0], statistics.median(runtimes)
+
+
+def _ensure_noise_context(
+    manifest: ExperimentManifest,
+    workspace: Path,
+    output: Path,
+) -> None:
+    """Fingerprint-gate the replay cache.
+
+    Replays (and anything derived from them) are only valid for the
+    toolchain/design/baseline state that produced them; a changed context
+    must never silently reuse them. Stale replay directories are renamed
+    with a ``stale-`` prefix instead of deleted so the superseded evidence
+    stays auditable.
+    """
+    context = _noise_context_payload(manifest, workspace)
+    context_path = output / "noise-context.v1.json"
+    stored = None
+    if context_path.is_file():
+        try:
+            stored = json.loads(context_path.read_text(encoding="utf-8")).get(
+                "context"
+            )
+        except (OSError, ValueError):
+            stored = None
+    if stored == context:
+        return
+    for stale in output.glob("default-replay-*"):
+        renamed = output / f"stale-{stale.name}"
+        if renamed.exists():
+            shutil.rmtree(renamed)
+        stale.rename(renamed)
+    epsilon_path = output / "noise-epsilon.v1.json"
+    if epsilon_path.exists():
+        epsilon_path.unlink()
+    _write_json(
+        context_path,
+        {
+            "schema_version": "ecos.noise_context.v1",
+            "fingerprint": canonical_sha256(context),
+            "context": context,
+        },
+    )
+
+
+def _noise_context_payload(
+    manifest: ExperimentManifest, workspace: Path
+) -> dict[str, object]:
+    repo_root = Path(__file__).resolve().parents[6]
+    ecc_executable = _ecc_executable()
+    # Design inputs enter through workspace/origin/ (the exact bytes the
+    # canonical flow consumed); `design` itself needs no separate entry.
+    return {
+        "ecos_revision": _git_identity(repo_root),
+        "ecc_revision": _git_identity(ecc_executable.parents[2]),
+        "ecc_executable_sha256": file_sha256(ecc_executable),
+        "pdk_revision": _git_identity(manifest.pdk_root),
+        "design_inputs": _workspace_input_hashes(workspace),
+        "baseline": dict(manifest.baseline),
+        "flow_steps": [
+            item.get("name")
+            for item in _workspace_json(workspace, "home/flow.json")["steps"]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _git_identity(root: Path) -> str | None:
+    if not (root / ".git").exists():
+        return None
+    try:
+        return subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _workspace_input_hashes(workspace: Path) -> dict[str, str]:
+    origin = workspace / "origin"
+    return {
+        str(path.relative_to(origin)): file_sha256(path)
+        for path in sorted(origin.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _replays_drift(observations: list[TerminalObservation]) -> bool:
+    profile = deterministic_noise_profile(observations)
+    return any(value > 0 for value in profile["epsilon"].values())
 
 
 def _run_default_replay(
