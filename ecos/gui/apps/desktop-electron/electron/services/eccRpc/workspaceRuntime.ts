@@ -943,7 +943,8 @@ export class EccWorkspaceRuntime {
     const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
       protocolEvent.operationId,
     )
-    // The protocol registered a previously unregistered started operation.
+    // Any protocol event for this operation confirms it is tracked; clear
+    // the unregistered-start record.
     this.unregisteredStarts.delete(protocolEvent.operationId)
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)

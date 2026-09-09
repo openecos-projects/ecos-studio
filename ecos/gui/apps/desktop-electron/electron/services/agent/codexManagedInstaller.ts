@@ -347,15 +347,18 @@ async function downloadToFile(
     idleTimer = setTimeout(() => controller.abort(), DOWNLOAD_IDLE_TIMEOUT_MS)
   }
   armIdleTimer()
-  const response = await fetchImpl(url, { redirect: 'follow', signal: controller.signal })
-  if (!response.ok) {
-    throw new Error(`Download failed with ${response.status}: ${url}`)
-  }
-  await mkdir(dirname(destination), { recursive: true })
-  const totalHeader = response.headers.get('content-length')
-  const totalBytes = totalHeader ? Number(totalHeader) : NaN
-
   try {
+    const response = await fetchImpl(url, {
+      redirect: 'follow',
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      throw new Error(`Download failed with ${response.status}: ${url}`)
+    }
+    await mkdir(dirname(destination), { recursive: true })
+    const totalHeader = response.headers.get('content-length')
+    const totalBytes = totalHeader ? Number(totalHeader) : NaN
+
     if (!response.body) {
       // Non-streaming response: enforce the size cap via the buffer.
       const data = await response.arrayBuffer()

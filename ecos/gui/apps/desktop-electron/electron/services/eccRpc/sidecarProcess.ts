@@ -181,9 +181,7 @@ export class EccRpcSidecarProcess {
     this.shuttingDown = false
     this.outputTail = ''
     this.launchError = null
-    this.appendLog(
-      `[sidecar] spawning ${this.command} rpc serve --stdio --persistent-db\n`,
-    )
+    this.appendLog(`[sidecar] spawning ${launch.command} ${launch.args.join(' ')}\n`)
 
     const child = this.spawnImpl(launch.command, launch.args, {
       env,
