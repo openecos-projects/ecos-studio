@@ -105,5 +105,8 @@ describe('ProjectBackgroundOperationPanel', () => {
 
     await wrapper.get('button[aria-label="Open Workspace"]').trigger('click')
     expect(wrapper.emitted('open-workspace')).toHaveLength(1)
+    expect(wrapper.get('.operation-actions').text()).toContain('Open Workspace')
+    expect(wrapper.get('.operation-actions').text()).toContain('Cancel')
+    expect(wrapper.get('.operation-actions').text()).toContain('View Logs')
   })
 })

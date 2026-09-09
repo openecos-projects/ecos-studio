@@ -1,12 +1,5 @@
 <template>
-  <span
-    class="result-status"
-    :title="
-      resultState
-        ? `Current configuration: Revision ${resultState.workspaceRevision}`
-        : undefined
-    "
-  >
+  <span class="result-status" :title="statusTitle">
     <span class="workspace-flow-hint" :class="`flow-hint-${hint.state}`">{{
       hint.label
     }}</span>
@@ -24,6 +17,12 @@ const props = defineProps<{
   resultState?: ProjectWorkspace['resultState']
 }>()
 const previous = computed(() => previousProjectResultLabel(props.resultState))
+const statusTitle = computed(() => {
+  const revision = props.resultState
+    ? `Current configuration: Revision ${props.resultState.workspaceRevision}`
+    : ''
+  return [props.hint.label, previous.value, revision].filter(Boolean).join(' · ')
+})
 </script>
 
 <style scoped>
@@ -33,7 +32,7 @@ const previous = computed(() => previousProjectResultLabel(props.resultState))
   align-items: flex-end;
   gap: 4px;
   min-width: 0;
-  max-width: 120px;
+  max-width: 100%;
   text-align: right;
 }
 .result-status small {
@@ -43,13 +42,16 @@ const previous = computed(() => previousProjectResultLabel(props.resultState))
   overflow-wrap: anywhere;
 }
 .workspace-flow-hint {
+  max-width: 100%;
   padding: 4px 7px;
   border-radius: 8px;
   font-size: 10px;
   font-weight: 750;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .flow-hint-success {
   color: var(--success-color);

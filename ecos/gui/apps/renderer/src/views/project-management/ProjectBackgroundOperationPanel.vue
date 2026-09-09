@@ -1,92 +1,94 @@
 <template>
   <section
     v-if="operation || finalization"
-    class="operation-panel"
+    class="operation-shell"
     aria-label="Background Operation"
   >
-    <div class="operation-heading">
-      <span class="operation-state" role="status">
-        <i :class="stateIcon" aria-hidden="true"></i>
-        {{ stateText }}
-      </span>
-      <strong>{{
-        operation?.currentStep || operation?.step || 'Workspace finalization'
-      }}</strong>
-      <span class="operation-kind">{{
-        operation?.kind === 'step' ? 'Step run' : 'Full Flow'
-      }}</span>
+    <div class="operation-panel">
+      <div class="operation-heading">
+        <span class="operation-state" role="status">
+          <i :class="stateIcon" aria-hidden="true"></i>
+          {{ stateText }}
+        </span>
+        <strong>{{
+          operation?.currentStep || operation?.step || 'Workspace finalization'
+        }}</strong>
+        <span class="operation-kind">{{
+          operation?.kind === 'step' ? 'Step run' : 'Full Flow'
+        }}</span>
+      </div>
+
+      <dl v-if="operation" class="operation-facts">
+        <div>
+          <dt>Operation</dt>
+          <dd :title="operation.operationId">{{ operation.operationId }}</dd>
+        </div>
+        <div>
+          <dt>Workspace</dt>
+          <dd :title="operation.workspaceDirectory">{{ workspaceName }}</dd>
+        </div>
+        <div>
+          <dt>Revision</dt>
+          <dd>Revision {{ operation.workspaceRevision ?? '-' }}</dd>
+        </div>
+        <div>
+          <dt>Started</dt>
+          <dd>{{ formatTime(operation.createdAt) }}</dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>{{ formatTime(operation.updatedAt) }}</dd>
+        </div>
+      </dl>
+
+      <p v-if="finalization?.issue" class="operation-issue">{{ finalization.issue }}</p>
+
+      <div class="operation-actions">
+        <button
+          v-if="operation && operation.interruptibility !== 'forbidden'"
+          type="button"
+          class="operation-action"
+          aria-label="Cancel background Flow"
+          :disabled="operation.cancelRequested || busy"
+          @click="cancelOperation"
+        >
+          <i class="ri-stop-circle-line" aria-hidden="true"></i>
+          {{ operation.cancelRequested ? 'Cancelling' : 'Cancel' }}
+        </button>
+        <button
+          v-if="operation"
+          type="button"
+          class="operation-action"
+          :disabled="logStatus === 'loading'"
+          @click="loadLogs"
+        >
+          <i class="ri-file-text-line" aria-hidden="true"></i>
+          {{ logStatus === 'loading' ? 'Loading Logs' : 'View Logs' }}
+        </button>
+        <button
+          v-if="finalization?.state === 'snapshot-failed'"
+          type="button"
+          class="operation-action"
+          :disabled="busy"
+          @click="retrySnapshot"
+        >
+          <i class="ri-refresh-line" aria-hidden="true"></i>
+          Retry Snapshot
+        </button>
+        <button
+          type="button"
+          class="operation-action primary"
+          aria-label="Open Workspace"
+          @click="$emit('open-workspace')"
+        >
+          <i class="ri-arrow-right-up-line" aria-hidden="true"></i>
+          Open Workspace
+        </button>
+      </div>
+      <pre v-if="logContent" class="operation-log" aria-label="Runtime log">{{
+        logContent
+      }}</pre>
     </div>
-
-    <dl v-if="operation" class="operation-facts">
-      <div>
-        <dt>Operation</dt>
-        <dd :title="operation.operationId">{{ operation.operationId }}</dd>
-      </div>
-      <div>
-        <dt>Workspace</dt>
-        <dd :title="operation.workspaceDirectory">{{ workspaceName }}</dd>
-      </div>
-      <div>
-        <dt>Revision</dt>
-        <dd>Revision {{ operation.workspaceRevision ?? '-' }}</dd>
-      </div>
-      <div>
-        <dt>Started</dt>
-        <dd>{{ formatTime(operation.createdAt) }}</dd>
-      </div>
-      <div>
-        <dt>Updated</dt>
-        <dd>{{ formatTime(operation.updatedAt) }}</dd>
-      </div>
-    </dl>
-
-    <p v-if="finalization?.issue" class="operation-issue">{{ finalization.issue }}</p>
-
-    <div class="operation-actions">
-      <button
-        v-if="operation && operation.interruptibility !== 'forbidden'"
-        type="button"
-        class="operation-action"
-        aria-label="Cancel background Flow"
-        :disabled="operation.cancelRequested || busy"
-        @click="cancelOperation"
-      >
-        <i class="ri-stop-circle-line" aria-hidden="true"></i>
-        {{ operation.cancelRequested ? 'Cancelling' : 'Cancel' }}
-      </button>
-      <button
-        v-if="operation"
-        type="button"
-        class="operation-action"
-        :disabled="logStatus === 'loading'"
-        @click="loadLogs"
-      >
-        <i class="ri-file-text-line" aria-hidden="true"></i>
-        {{ logStatus === 'loading' ? 'Loading Logs' : 'View Logs' }}
-      </button>
-      <button
-        v-if="finalization?.state === 'snapshot-failed'"
-        type="button"
-        class="operation-action"
-        :disabled="busy"
-        @click="retrySnapshot"
-      >
-        <i class="ri-refresh-line" aria-hidden="true"></i>
-        Retry Snapshot
-      </button>
-      <button
-        type="button"
-        class="operation-action primary"
-        aria-label="Open Workspace"
-        @click="$emit('open-workspace')"
-      >
-        <i class="ri-arrow-right-up-line" aria-hidden="true"></i>
-        Open Workspace
-      </button>
-    </div>
-    <pre v-if="logContent" class="operation-log" aria-label="Runtime log">{{
-      logContent
-    }}</pre>
   </section>
 </template>
 
@@ -231,11 +233,17 @@ function formatTime(timestamp: number): string {
 </script>
 
 <style scoped>
+.operation-shell {
+  min-width: 0;
+  container-type: inline-size;
+}
+
 .operation-panel {
   display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(360px, 2fr) auto;
-  gap: 14px;
+  grid-template-columns: minmax(140px, max-content) minmax(0, 1fr) max-content;
+  gap: 10px 14px;
   align-items: center;
+  min-width: 0;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-primary);
@@ -321,8 +329,10 @@ function formatTime(timestamp: number): string {
 
 .operation-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+  min-width: max-content;
 }
 
 .operation-action {
@@ -349,12 +359,24 @@ function formatTime(timestamp: number): string {
   opacity: 0.45;
 }
 
-@media (max-width: 1100px) {
+@container (max-width: 1100px) {
   .operation-panel {
-    grid-template-columns: minmax(150px, 1fr) auto;
+    grid-template-columns: minmax(140px, 1fr) max-content;
   }
+
   .operation-facts {
-    display: none;
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 720px) {
+  .operation-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .operation-actions {
+    min-width: 0;
+    justify-content: flex-start;
   }
 }
 </style>

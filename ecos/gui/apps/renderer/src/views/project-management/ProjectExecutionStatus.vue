@@ -1,5 +1,10 @@
 <template>
-  <span v-if="current" class="workspace-flow-hint flow-hint-running" role="status">
+  <span
+    v-if="current"
+    class="workspace-flow-hint flow-hint-running"
+    role="status"
+    :title="label"
+  >
     <i :class="icon" aria-hidden="true"></i>
     {{ label }}
   </span>
@@ -41,6 +46,8 @@ function priority(operation: BackendProjectActiveOperation): number {
 <style scoped>
 .workspace-flow-hint {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 5px;
   white-space: nowrap;

@@ -10,6 +10,7 @@
   border-radius: 8px;
   background: var(--bg-primary);
   overflow: hidden;
+  container-type: inline-size;
 }
 
 .step-analysis.has-findings-status {
@@ -99,19 +100,22 @@
 
 /* Region 2 — workspace picker plus the one-line verdict for the current step. */
 .verdict-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: space-between;
   gap: 8px 16px;
   border-bottom: 1px solid var(--border-color);
   padding: 8px 12px;
+  min-width: 0;
 }
 
 .workspace-picker {
   position: relative;
   display: flex;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
 }
@@ -408,6 +412,7 @@
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 650;
+  min-width: 0;
 }
 
 .verdict-fact {
@@ -1654,6 +1659,16 @@
   outline-offset: -2px;
 }
 
+@container (max-width: 980px) {
+  .verdict-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .verdict {
+    padding-top: 2px;
+  }
+}
+
 @media (max-width: 1080px) {
   .step-body {
     grid-template-columns: minmax(0, 1fr);
@@ -1672,6 +1687,7 @@
   }
 
   .verdict-bar {
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
 

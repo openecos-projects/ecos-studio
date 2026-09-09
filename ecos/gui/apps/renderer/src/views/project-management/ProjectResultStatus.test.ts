@@ -25,6 +25,7 @@ describe('Project result status', () => {
     expect(wrapper.text()).toContain('Needs rerun')
     expect(wrapper.text()).toContain('Previous run completed')
     expect(wrapper.text()).toContain('Rev 15')
+    expect(wrapper.attributes('title')).toContain('Needs rerun')
     expect(wrapper.attributes('title')).toContain('Revision 16')
     expect(workspace.steps).toEqual(originalSteps)
   })

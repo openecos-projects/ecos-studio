@@ -612,9 +612,10 @@
 
 .workspace-tree-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   min-height: 58px;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -691,12 +692,13 @@
 }
 
 .workspace-flow-hint {
-  max-width: 82px;
+  max-width: 100%;
   overflow: hidden;
   border-radius: 999px;
   padding: 4px 7px;
   font-size: 10px;
   font-weight: 750;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

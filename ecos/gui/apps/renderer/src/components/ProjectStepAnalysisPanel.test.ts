@@ -340,6 +340,8 @@ describe('ProjectStepAnalysisPanel', () => {
     })
 
     expect(wrapper.get('.workspace-picker-total').text()).toBe('50 workspaces')
+    expect(wrapper.get('.verdict-bar').text()).toContain('50 workspaces')
+    expect(wrapper.get('.verdict-bar').text()).toContain('findings')
     expect(wrapper.get('.workspace-selector').text()).toContain('ws_0050')
     expect(wrapper.find('.workspace-picker-popover').exists()).toBe(false)
 
