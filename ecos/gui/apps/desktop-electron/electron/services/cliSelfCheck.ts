@@ -15,6 +15,17 @@ export type CliSpawnLike = (
 ) => CliSelfCheckChild
 
 /**
+ * Best-effort semver extraction from `<ecc> --version` output. Returns null
+ * when the output carries no full version (callers then skip version drift
+ * reporting rather than guess).
+ */
+export function parseVersionFromSelfCheckDetail(detail: string | null): string | null {
+  if (!detail) return null
+  const match = detail.match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)
+  return match ? match[0] : null
+}
+
+/**
  * Run `<executable> --version` with the given env and capture whether the
  * bundle binary is usable on this host. Never rejects: environmental
  * failures (missing nix-ld, broken loaders) come back as a failed check

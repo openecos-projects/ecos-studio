@@ -12,7 +12,11 @@ import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProvid
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
-import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
+import {
+  createEccRuntimeEnv,
+  resolveEccExecutable,
+  resolveExternalEccBinDir,
+} from '../services/eccRpc/runtimeEnv'
 import type { EccRuntimeEnvOptions } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
@@ -146,6 +150,7 @@ function getDesktopServices() {
     isPackaged: app.isPackaged,
     platform: process.platform,
     userDataPath: app.getPath('userData'),
+    externalEccBinDir: resolveExternalEccOverride(),
   }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
   const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
@@ -179,6 +184,7 @@ function getDesktopServices() {
     appPath: app.getAppPath(),
     resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
     userDataPath: app.getPath('userData'),
+    externalBinDir: resolveExternalEccOverride(),
   })
   const runtimeEnvProvider = () => {
     // Rebuild the base env on every resolution so a bundle acquired (or
@@ -391,6 +397,23 @@ function handleLaunchError(error: unknown): void {
   app.quit()
 }
 
+/**
+ * The external ECC override shared by the installer service and every
+ * runtime resolution (ECOS_ECC_BIN_DIR today; the settings page will feed
+ * the same seam). Resolved once so an invalid value warns exactly once.
+ */
+let externalEccOverride: string | null | undefined
+
+function resolveExternalEccOverride(): string | null {
+  if (externalEccOverride !== undefined) return externalEccOverride
+  const raw = process.env.ECOS_ECC_BIN_DIR
+  externalEccOverride = resolveExternalEccBinDir(raw, process.platform)
+  if (raw?.trim() && !externalEccOverride) {
+    electronLogger.warn('[cli-installer] Ignoring invalid ECOS_ECC_BIN_DIR %s', raw)
+  }
+  return externalEccOverride
+}
+
 function cliEccRuntimeOptions(): EccRuntimeEnvOptions {
   return {
     appPath: app.getAppPath(),
@@ -402,6 +425,7 @@ function cliEccRuntimeOptions(): EccRuntimeEnvOptions {
     isPackaged: app.isPackaged,
     platform: process.platform,
     userDataPath: app.getPath('userData'),
+    externalEccBinDir: resolveExternalEccOverride(),
   }
 }
 

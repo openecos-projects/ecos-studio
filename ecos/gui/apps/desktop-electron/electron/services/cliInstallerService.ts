@@ -24,7 +24,11 @@ import {
   cleanupTempInstalls,
   sha256File,
 } from './cliInstallerAcquisition'
-import { type CliSpawnLike } from './cliSelfCheck'
+import {
+  type CliSpawnLike,
+  parseVersionFromSelfCheckDetail,
+  runSelfCheck,
+} from './cliSelfCheck'
 import { CliInstallerEnvWriter } from './cliInstallerEnv'
 import {
   resolveDataHome,
@@ -78,6 +82,12 @@ export interface CliInstallerServiceOptions {
   dataDir?: string
   /** Directory receiving the `ecos-ecc` shim; defaults to `~/.local/bin`. */
   binDir?: string
+  /**
+   * Already-validated external ECC bin directory (from ECOS_ECC_BIN_DIR or a
+   * future settings value). When set the runtime is used read-only: no
+   * download, no drift repair, and uninstall only removes the shim.
+   */
+  externalBinDir?: string | null
   homeDir?: () => string
   spawn?: CliSpawnLike
   expectedVersion?: string
@@ -102,6 +112,7 @@ export class CliInstallerService {
   private readonly explicitDataHome: string | undefined
   private readonly dataDir: string
   private readonly binDir: string
+  private readonly externalBinDir: string | null
   private readonly resolveHomeDir: () => string
   private readonly spawnImpl: CliSpawnLike
   private readonly expectedVersion: string
@@ -132,6 +143,7 @@ export class CliInstallerService {
       (this.isPackaged ? (this.env.ECOS_ELECTRON_RESOURCES_PATH ?? null) : null)
     this.userDataPath = options.userDataPath ?? join(this.env.HOME ?? '', '.config')
     this.explicitDataHome = options.dataHome
+    this.externalBinDir = options.externalBinDir ?? null
     this.dataHome = options.dataHome ?? resolveDataHome(this.eccRuntimeOptions())
     this.resolveHomeDir = options.homeDir ?? homedir
     this.dataDir = options.dataDir ?? join(this.dataHome, 'ecos-studio', 'ecc-runtime')
@@ -187,6 +199,9 @@ export class CliInstallerService {
     }
     if (this.ensurePromise) {
       return { ...base, status: 'installing' }
+    }
+    if (this.externalBinDir) {
+      return await this.externalStatus(this.externalBinDir)
     }
     if (!this.isPackaged) {
       const shimPath = join(this.binDir, SHIM_NAME)
@@ -257,6 +272,38 @@ export class CliInstallerService {
   }
 
   /**
+   * Status of the external runtime: self-checked live (there is no install
+   * receipt to read), reported read-only, and never failed for a missing
+   * shim — the runtime stays usable by the GUI regardless.
+   */
+  private async externalStatus(externalBinDir: string): Promise<CliInstallState> {
+    const executable = join(externalBinDir, executableNameFor(this.platform))
+    const selfCheck = await runSelfCheck(
+      this.spawnImpl,
+      executable,
+      await this.envWriter.buildRuntimeEnv(),
+      this.selfCheckTimeoutMs,
+    )
+    const installedVersion = parseVersionFromSelfCheckDetail(selfCheck.detail)
+    return {
+      expectedVersion: this.expectedVersion,
+      installedVersion,
+      source: 'external',
+      versionDir: externalBinDir,
+      shimPath: this.installedShimPath(),
+      selfCheck,
+      status: selfCheck.ok ? 'ready' : 'self-check-failed',
+      warning:
+        installedVersion && installedVersion !== this.expectedVersion
+          ? `The external ECC runtime reports version ${installedVersion}, but this release is tested against ${this.expectedVersion}.`
+          : null,
+      error: selfCheck.ok
+        ? null
+        : (selfCheck.detail ?? 'The external ECC runtime self-check failed.'),
+    }
+  }
+
+  /**
    * Install (or refresh) the ECC bundle into the bundle home. Bundled
    * packages copy their embedded binaries; slim packages download the pinned
    * registry asset. The `ecos-ecc` shim is deliberately NOT touched here so
@@ -267,13 +314,13 @@ export class CliInstallerService {
     if (this.platform !== 'linux') {
       throw new Error('The ECC bundle installer currently supports Linux only')
     }
-    if (!this.isPackaged) {
+    if (this.uninstalling) {
+      throw new Error('An uninstall is in progress; retry the install afterwards')
+    }
+    if (!this.isPackaged && !this.externalBinDir) {
       throw new Error(
         'Development mode runs the repository wrapper directly; there is no bundle to install',
       )
-    }
-    if (this.uninstalling) {
-      throw new Error('An uninstall is in progress; retry the install afterwards')
     }
     const pending = this.ensurePromise
     let task: Promise<string>
@@ -311,7 +358,10 @@ export class CliInstallerService {
         throw error
       })
     } else {
-      task = this.runEnsureBundle(options).catch((error: unknown) => {
+      const pipeline = this.externalBinDir
+        ? this.runExternalEnsure(options, this.externalBinDir)
+        : this.runEnsureBundle(options)
+      task = pipeline.catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
         this.lastFailure = message
         this.publishProgress(options, {
@@ -356,7 +406,10 @@ export class CliInstallerService {
   }
 
   private async runInstallShim(): Promise<void> {
-    if (!this.isPackaged) {
+    if (this.externalBinDir) {
+      // The external shim sources the shared env file from our data dir.
+      await this.regenerateEnvFile()
+    } else if (!this.isPackaged) {
       // Ensure the repository wrapper shim (runtime-bin/ecc) and the shared
       // env file exist before the shim references them.
       const runtimeBinDir = resolveEccRuntimeBinDir(this.eccRuntimeOptions())
@@ -421,7 +474,11 @@ export class CliInstallerService {
       if (this.ownsShim(shimPath)) {
         await rm(shimPath, { force: true })
       }
-      if (this.isPackaged) {
+      if (this.externalBinDir) {
+        // Read-only semantics: the external tree and any managed bundle stay
+        // untouched; only the generated env file is refreshed away.
+        await rm(join(this.dataDir, 'env'), { force: true })
+      } else if (this.isPackaged) {
         await rm(this.dataDir, { force: true, recursive: true })
       } else {
         await rm(join(this.dataDir, 'env'), { force: true })
@@ -441,6 +498,8 @@ export class CliInstallerService {
   async checkSyncOnStartup(): Promise<void> {
     if (this.platform !== 'linux' || !this.isPackaged) return
     await cleanupTempInstalls(this.dataDir)
+    // An external runtime is the user's own; drift repair would fight it.
+    if (this.externalBinDir) return
     const install = await this.readActiveInstall()
     if (!install) {
       if (this.currentLinkExists()) {
@@ -484,6 +543,13 @@ export class CliInstallerService {
   /** Regenerate the shared env file from the current runtime env. */
   async regenerateEnvFile(): Promise<void> {
     if (this.platform !== 'linux') return
+    if (this.externalBinDir) {
+      // Never write into the external tree; the env file lives in our data
+      // dir just like the development-mode layout.
+      await mkdir(this.dataDir, { recursive: true })
+      await this.writeEnvFile(this.dataDir, this.externalBinDir)
+      return
+    }
     if (this.isPackaged) {
       const versionDir = await this.resolveCurrentVersionDir()
       if (!versionDir) return
@@ -531,6 +597,37 @@ export class CliInstallerService {
     })
     electronLogger.info('[cli-installer] Installed ECC bundle at %s', versionDir)
     return versionDir
+  }
+
+  /**
+   * External-runtime "install": no acquisition at all — regenerate the shared
+   * env file into our own data dir and (when requested) point the shim at
+   * the external executable.
+   */
+  private async runExternalEnsure(
+    options: EnsureBundleOptions,
+    externalBinDir: string,
+  ): Promise<string> {
+    this.lastFailure = null
+    await this.regenerateEnvFile()
+    if (options.installShim) {
+      try {
+        await this.installShim()
+      } catch (error) {
+        this.lastShimFailure = error instanceof Error ? error.message : String(error)
+        throw error
+      }
+    }
+    this.publishProgress(options, {
+      phase: 'done',
+      progress: 1,
+      message: 'External ECC runtime configured',
+    })
+    electronLogger.info(
+      '[cli-installer] Using external ECC runtime at %s',
+      externalBinDir,
+    )
+    return externalBinDir
   }
 
   private async reinstallOnDrift(reason: string): Promise<void> {
@@ -632,6 +729,7 @@ export class CliInstallerService {
       isPackaged: this.isPackaged,
       platform: this.platform,
       userDataPath: this.userDataPath,
+      ...(this.externalBinDir ? { externalEccBinDir: this.externalBinDir } : {}),
       ...(this.explicitDataHome !== undefined ? { dataHome: this.explicitDataHome } : {}),
     }
   }
@@ -649,6 +747,7 @@ export class CliInstallerService {
       isPackaged: this.isPackaged,
       dataDir: this.dataDir,
       devWrapper: join(this.userDataPath, 'runtime-bin', 'ecc'),
+      externalBinDir: this.externalBinDir,
     })
   }
 
