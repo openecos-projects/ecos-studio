@@ -105,6 +105,15 @@ def test_effective_density_requires_matching_runtime_observation(observation) ->
         validate_application_receipt(_rehash(payload), load_parameter_cards())
 
 
+def test_adaptive_density_tensor_does_not_revoke_effectiveness() -> None:
+    payload = density_receipt(domain_context()).model_dump(mode="json")
+    payload["observation"]["density_tensor_value"] = 0.709
+    receipt = _rehash(payload)
+    validate_application_receipt(receipt, load_parameter_cards())
+    assert native_receipt_is_effective(receipt)
+    assert receipt.actual_value == 0.8
+
+
 def test_density_floor_must_match_actual_value() -> None:
     payload = density_receipt(domain_context()).model_dump(mode="json")
     payload["observation"]["utilization_floor"] = 0.9
