@@ -200,6 +200,11 @@ describe('settings handlers', () => {
 
     await handler.clear()
     expect(dependencies.codexDependency.clearBinPath).toHaveBeenCalledTimes(1)
+    // The reset environment sync belongs exclusively to apply(null); clear
+    // must not run it twice.
+    expect(dependencies.syncAgentCodexEnv).toHaveBeenCalledTimes(1)
+
+    await handler.apply(null)
     expect(dependencies.syncAgentCodexEnv).toHaveBeenCalledTimes(2)
   })
 

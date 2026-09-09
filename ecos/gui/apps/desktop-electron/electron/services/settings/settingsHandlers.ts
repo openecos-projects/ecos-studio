@@ -153,9 +153,10 @@ export function createSettingHandlers(
         await dependencies.syncAgentCodexEnv()
         return 'applied'
       },
+      // Only the persistence side of the reset lives here; the agent
+      // environment sync happens exactly once via apply(null).
       clear: async () => {
         await dependencies.codexDependency.clearBinPath()
-        await dependencies.syncAgentCodexEnv()
       },
       persist: async (value) => {
         await dependencies.codexDependency.setBinPath(value)

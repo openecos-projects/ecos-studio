@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -260,6 +260,130 @@ describe('CodexDependencyService', () => {
     await expect(
       settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY),
     ).resolves.toBeNull()
+  })
+
+  it('first-time install removes the target when persistence fails after the swap', async () => {
+    const root = await createRoot()
+    const managedBin = join(root, 'managed', 'bin', 'codex')
+
+    const archiveBytes = await buildTinyGzipTarWithCodex()
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes('releases.openai.com')) {
+        return new Response('missing', { status: 404 })
+      }
+      return new Response(archiveBytes.buffer as ArrayBuffer, {
+        status: 200,
+        headers: { 'content-length': String(archiveBytes.byteLength) },
+      })
+    })
+
+    const spawn = vi.fn((command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(async () => {
+        if (command === 'tar') {
+          const destFlag = args.indexOf('-C')
+          const destination = destFlag >= 0 ? args[destFlag + 1] : ''
+          await writeFile(
+            join(destination, 'codex-x86_64-unknown-linux-musl'),
+            '#!/bin/sh\necho "codex-cli 0.1"\n',
+          )
+          await chmod(join(destination, 'codex-x86_64-unknown-linux-musl'), 0o755)
+          child.emit('close', 0)
+          return
+        }
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+          child.emit('close', 0)
+          return
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: '', HOME: root },
+      fetchImpl: fetchImpl as never,
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      // The registry transaction write fails after the swap.
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+    service.setManagedBinPersister(async () => {
+      throw new Error('registry transaction failed')
+    })
+
+    await expect(service.install()).rejects.toThrow('registry transaction failed')
+    // A first-time install must not leave an unpersisted binary behind.
+    expect(existsSync(managedBin)).toBe(false)
+    await expect(
+      settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY),
+    ).resolves.toBeNull()
+  })
+
+  it('isolates throwing progress listeners from the install transaction', async () => {
+    const root = await createRoot()
+    const managedBin = join(root, 'managed', 'bin', 'codex')
+
+    const archiveBytes = await buildTinyGzipTarWithCodex()
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes('releases.openai.com')) {
+        return new Response('missing', { status: 404 })
+      }
+      return new Response(archiveBytes.buffer as ArrayBuffer, {
+        status: 200,
+        headers: { 'content-length': String(archiveBytes.byteLength) },
+      })
+    })
+
+    const spawn = vi.fn((command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(async () => {
+        if (command === 'tar') {
+          const destFlag = args.indexOf('-C')
+          const destination = destFlag >= 0 ? args[destFlag + 1] : ''
+          await writeFile(
+            join(destination, 'codex-x86_64-unknown-linux-musl'),
+            '#!/bin/sh\necho "codex-cli 0.1"\n',
+          )
+          await chmod(join(destination, 'codex-x86_64-unknown-linux-musl'), 0o755)
+          child.emit('close', 0)
+          return
+        }
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+          child.emit('close', 0)
+          return
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: '', HOME: root },
+      fetchImpl: fetchImpl as never,
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+    service.onProgress(() => {
+      throw new Error('renderer vanished mid-notification')
+    })
+
+    await expect(service.install()).resolves.toMatchObject({
+      binPath: managedBin,
+      state: 'ready',
+    })
+    expect(existsSync(managedBin)).toBe(true)
   })
 
   it('setBinPath validates executability before saving', async () => {

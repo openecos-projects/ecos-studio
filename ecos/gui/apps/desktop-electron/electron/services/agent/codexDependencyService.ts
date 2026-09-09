@@ -339,33 +339,56 @@ export class CodexDependencyService {
       } else {
         await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, targetBin)
       }
-      this.emitProgress({
-        phase: 'done',
-        message: `Codex CLI ${version} 已安装`,
-        progress: 1,
-      })
     } catch (error) {
       // Roll back the swap: restore the previous managed version, or remove
       // the freshly replaced binary on a first-time install so a failed
-      // install never takes effect.
+      // install never takes effect. A failed restore keeps the backup file on
+      // disk and surfaces the failure alongside the original error.
+      let rollbackError: Error | null = null
       if (swapped) {
         if (backupBin) {
-          await rename(backupBin, targetBin).catch(() => undefined)
+          try {
+            await rename(backupBin, targetBin)
+            backupBin = null
+          } catch (restoreError) {
+            rollbackError =
+              restoreError instanceof Error
+                ? restoreError
+                : new Error(String(restoreError))
+          }
         } else {
-          await rm(targetBin, { force: true })
+          try {
+            await rm(targetBin, { force: true })
+          } catch (removeError) {
+            rollbackError =
+              removeError instanceof Error ? removeError : new Error(String(removeError))
+          }
         }
       }
+      const message = error instanceof Error ? error.message : String(error)
       this.emitProgress({
         phase: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: rollbackError
+          ? `${message}（回滚也失败: ${rollbackError.message}）`
+          : message,
       })
-      throw error
+      throw rollbackError
+        ? new Error(`${message}；回滚失败: ${rollbackError.message}`)
+        : error
     } finally {
       if (stagedBin) await rm(stagedBin, { force: true })
       if (backupBin) await rm(backupBin, { force: true })
       await rm(extractDir, { force: true, recursive: true })
     }
 
+    // Emit done only after the transaction fully succeeded, so a throwing
+    // progress listener can never trigger the rollback path above.
+    const finalVersion = await this.readVersion(targetBin)
+    this.emitProgress({
+      phase: 'done',
+      message: `Codex CLI ${finalVersion ?? ''} 已安装`,
+      progress: 1,
+    })
     // Avoid getStatus()'s in-flight install short-circuit while installPromise is set.
     return await this.probeStatus()
   }
@@ -507,7 +530,13 @@ export class CodexDependencyService {
   private emitProgress(event: DesktopCodexInstallProgressEvent): void {
     this.lastProgress = event
     for (const listener of this.progressListeners) {
-      listener(event)
+      // A broken listener (for example a renderer that died mid-notification)
+      // must not fail the install or trigger its rollback path.
+      try {
+        listener(event)
+      } catch {
+        // ignore
+      }
     }
   }
 

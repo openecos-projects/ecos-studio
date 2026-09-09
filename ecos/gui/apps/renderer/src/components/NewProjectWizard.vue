@@ -2960,75 +2960,88 @@ async function ensurePdksLoaded() {
   const generation = projectManifestLoadGeneration
   /** The user switched projects while an async resolution was in flight. */
   const generationChanged = (): boolean => projectManifestLoadGeneration !== generation
-  const requirement = config.value.pdk_requirement
-  // Explicit PDK information (a family name, a requirement, an installation
-  // id, or a pdk_root) always wins over the default installation in every
-  // flow, even when it fails to resolve — the default must never seed over it.
-  const hasExplicitPdkInfo = Boolean(
-    requirement ||
-    config.value.pdk_installation_id ||
-    config.value.pdk_root ||
-    manifestPdkFamily.value ||
-    props.initialConfig?.pdk ||
-    props.initialConfig?.source_config?.pdk,
-  )
-  if (requirement) {
-    const projectRoot = projectContext.value.project_root || config.value.directory
-    const projectId =
-      projectContext.value.project_id ||
-      projectIdFromName(
-        projectContext.value.project_name || getFileName(projectRoot) || 'project',
-      )
-    const binding = await getDesktopApi().pdkInventory.resolveBinding({
-      projectId,
-      projectRoot,
-      requirement,
-    })
-    if (generationChanged()) return
-    const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
-    if (bound) {
-      selectPdk(bound)
-      return
-    }
-  }
-  const selected = importedPdks.value.find(
-    (pdk) => pdk.id === config.value.pdk_installation_id,
-  )
-  if (selected) {
-    selectPdk(selected)
-    return
-  }
-  if (config.value.pdk_root) {
-    const configuredPdkRoot = normalizePath(config.value.pdk_root)
-    const direct = importedPdks.value.find(
-      (pdk) => normalizePath(pdk.path) === configuredPdkRoot,
+  try {
+    const requirement = config.value.pdk_requirement
+    // Explicit PDK information (a family name, a requirement, an installation
+    // id, or a pdk_root) always wins over the default installation in every
+    // flow, even when it fails to resolve — the default must never seed over it.
+    const hasExplicitPdkInfo = Boolean(
+      requirement ||
+      config.value.pdk_installation_id ||
+      config.value.pdk_root ||
+      manifestPdkFamily.value ||
+      props.initialConfig?.pdk ||
+      props.initialConfig?.source_config?.pdk,
     )
-    if (direct) {
-      selectPdk(direct)
-      return
-    }
-    try {
-      const scanned = await getDesktopApi().workspace.scanPdkDirectory(
-        config.value.pdk_root,
-      )
+    if (requirement) {
+      const projectRoot = projectContext.value.project_root || config.value.directory
+      const projectId =
+        projectContext.value.project_id ||
+        projectIdFromName(
+          projectContext.value.project_name || getFileName(projectRoot) || 'project',
+        )
+      const binding = await getDesktopApi().pdkInventory.resolveBinding({
+        projectId,
+        projectRoot,
+        requirement,
+      })
       if (generationChanged()) return
-      const canonicalPdk = importedPdks.value.find(
-        (pdk) => normalizePath(pdk.path) === normalizePath(scanned.canonicalPath),
-      )
-      if (canonicalPdk) {
-        selectPdk(canonicalPdk)
+      const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
+      if (bound) {
+        selectPdk(bound)
         return
       }
-    } catch {}
-    // Explicit pdk_root present but unresolved: leave the selection empty
-    // instead of seeding the default over the workspace's explicit context.
-    return
+    }
+    const selected = importedPdks.value.find(
+      (pdk) => pdk.id === config.value.pdk_installation_id,
+    )
+    if (selected) {
+      selectPdk(selected)
+      return
+    }
+    if (config.value.pdk_root) {
+      const configuredPdkRoot = normalizePath(config.value.pdk_root)
+      const direct = importedPdks.value.find(
+        (pdk) => normalizePath(pdk.path) === configuredPdkRoot,
+      )
+      if (direct) {
+        selectPdk(direct)
+        return
+      }
+      try {
+        const scanned = await getDesktopApi().workspace.scanPdkDirectory(
+          config.value.pdk_root,
+        )
+        if (generationChanged()) return
+        const canonicalPdk = importedPdks.value.find(
+          (pdk) => normalizePath(pdk.path) === normalizePath(scanned.canonicalPath),
+        )
+        if (canonicalPdk) {
+          selectPdk(canonicalPdk)
+          return
+        }
+      } catch {}
+      // Explicit pdk_root present but unresolved: leave the selection empty
+      // instead of seeding the default over the workspace's explicit context.
+      return
+    }
+    if (hasExplicitPdkInfo) return
+    if (props.initialConfig?.isWorkspaceUpdate) return
+    // No explicit PDK source at all and a brand-new workspace: preselect the
+    // user's default installation. Updates/reconfigures are never re-seeded.
+    await seedDefaultPdkInstallation(generation)
+  } catch (error) {
+    // A failed resolution pass (unavailable inventory, bridge error) must not
+    // be cached: clear the generation marker so it can be retried, and tell
+    // the user instead of failing silently.
+    pdkResolvedForGeneration.value = -1
+    showToast({
+      severity: 'warn',
+      summary: 'PDK',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 5000,
+    })
   }
-  if (hasExplicitPdkInfo) return
-  if (props.initialConfig?.isWorkspaceUpdate) return
-  // No explicit PDK source at all and a brand-new workspace: preselect the
-  // user's default installation. Updates/reconfigures are never re-seeded.
-  await seedDefaultPdkInstallation(generation)
 }
 
 async function seedDefaultPdkInstallation(generation: number) {
