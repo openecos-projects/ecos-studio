@@ -17,6 +17,7 @@ from ecos_agent.optimization.contracts import (
     KnowledgeReference,
     LegalAction,
     ObservationReference,
+    OptimizationKnob,
     OptimizationObjectiveContract,
     OptimizationOutcomeKind,
     OptimizationDecision,
@@ -508,6 +509,18 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         if context.empirical_case_audit is not None
         else None
     )
+    payload["measurement_stability"] = {
+        "protocol": (
+            "candidates rerun from the same checkpoint at the baseline's pinned "
+            "random_seed through a deterministic flow; candidate-vs-incumbent "
+            "comparisons hold everything but the requested knob fixed"
+        ),
+        "planning_guidance": (
+            "run-to-run noise cannot explain a metric delta, so do not spend a "
+            "candidate on reversal or confirmation reruns whose only purpose is "
+            "ruling out noise; such outcomes are predetermined"
+        ),
+    }
     return payload
 
 
@@ -528,6 +541,55 @@ def v2_domains(
         for domain in context.effective_domains
         if domain.knob_id in legal_knobs
     )
+
+
+_DENSITY_KNOB = OptimizationKnob.TARGET_DENSITY
+_PADDING_KNOB = OptimizationKnob.CELL_PADDING_X
+
+
+def clamped_density_equivalent_error(
+    proposal: OptimizationProposalV2,
+    context: OptimizationPlanningContext,
+) -> str | None:
+    """Reject a density request the native utilization floor clamps back to
+    the parent configuration's effective density.
+
+    The floor rewrites any lower request to itself, so when the parent
+    configuration's density already sits at or below that floor the candidate
+    outcome is predetermined (the 2026-09-08 episode spent intervention-17 on
+    0.35 under an observed floor of 0.5196 with the incumbent effective at
+    0.5196). Floor evidence is padding-specific and only reused when the
+    observed padding context matches the current one.
+    """
+    action = proposal.action
+    if action is None or action.knob_id != _DENSITY_KNOB:
+        return None
+    value = action.requested_value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if context.current_values is None:
+        return None
+    parent_density = context.current_values.get(_DENSITY_KNOB.value)
+    padding = context.current_values.get(_PADDING_KNOB.value)
+    if isinstance(parent_density, bool) or not isinstance(parent_density, (int, float)):
+        return None
+    for item in reversed(context.history):
+        receipt = item.parameter_application_receipt
+        floor = (receipt.observation or {}).get("utilization_floor") if receipt else None
+        if isinstance(floor, bool) or not isinstance(floor, (int, float)):
+            continue
+        observed_padding = (item.planning_values or {}).get(_PADDING_KNOB.value)
+        if observed_padding != padding:
+            continue
+        if value >= floor or parent_density > floor:
+            return None
+        return (
+            f"requested {_DENSITY_KNOB.value}={value} is below the observed "
+            f"utilization floor {floor}: the tool clamps it back to the parent "
+            "configuration's effective density, so the candidate outcome is "
+            "predetermined. Request a value above the floor or a different knob."
+        )
+    return None
 
 
 def v2_provider_payload_sha256(context: OptimizationPlanningContext) -> str:
@@ -560,6 +622,9 @@ def validate_v2_proposal(
     )
     if domain is None:
         raise EffectiveDomainError("v2 proposal knob is not legal")
+    clamped = clamped_density_equivalent_error(proposal, context)
+    if clamped is not None:
+        raise EffectiveDomainError(clamped)
     validated = validate_optimization_proposal_v2(
         proposal,
         domain,

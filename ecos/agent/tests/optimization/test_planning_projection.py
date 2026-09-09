@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
@@ -12,6 +13,7 @@ from ecos_agent.optimization.contracts import (
     HistoryReference,
     ObjectiveMetric,
     ObservationReference,
+    OptimizationKnob,
     OptimizationOutcomeKind,
     ProposalAction,
     ProposalContextRef,
@@ -30,9 +32,15 @@ from ecos_agent.optimization.observation_contracts import (
     SignoffGates,
     TerminalObservation,
 )
+from ecos_agent.optimization.parameters.contracts import (
+    NumericProposalActionV2,
+    OptimizationProposalV2,
+    ParameterApplicationReceipt,
+)
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
     OptimizationPlanningContext,
+    clamped_density_equivalent_error,
     optimization_history_payload,
     planning_context_payload,
     projected_terminal_observation,
@@ -352,3 +360,84 @@ def test_planning_payload_stays_within_budget_for_a_full_episode():
     # 44KB terminal observation.
     assert size < 256 * 1024
     assert size - smaller_size < 8192
+
+
+def _receipt_with_floor(floor: float):
+    return ParameterApplicationReceipt.model_construct(
+        observation={"utilization_floor": floor}
+    )
+
+
+def _floor_context(current_values, *, floor, padding):
+    item = replace(
+        _history_item("intervention-1", _terminal_observation()),
+        parameter_application_receipt=_receipt_with_floor(floor),
+        planning_values={"place.cell_padding_x": padding},
+    )
+    return replace(
+        _context(incumbent=None, trajectories=(item,)),
+        current_values=current_values,
+    )
+
+
+def _clamped_density_error(current_values, requested_value, *, floor, padding):
+    context = _floor_context(current_values, floor=floor, padding=padding)
+    proposal = OptimizationProposalV2.model_construct(
+        action=NumericProposalActionV2.model_construct(
+            knob_id=OptimizationKnob.TARGET_DENSITY,
+            requested_value=requested_value,
+        )
+    )
+    return clamped_density_equivalent_error(proposal, context)
+
+
+def test_clamp_guard_rejects_request_below_floor_matching_parent_state():
+    error = _clamped_density_error(
+        {"place.target_density": 0.45, "place.cell_padding_x": 400},
+        0.35,
+        floor=0.5196,
+        padding=400,
+    )
+
+    assert error is not None
+    assert "predetermined" in error
+    assert "0.5196" in error
+
+
+def test_clamp_guard_allows_value_above_floor():
+    assert _clamped_density_error(
+        {"place.target_density": 0.45, "place.cell_padding_x": 400},
+        0.55,
+        floor=0.5196,
+        padding=400,
+    ) is None
+
+
+def test_clamp_guard_allows_real_density_drop_below_floor():
+    # Parent already runs above the floor: clamping a low request to the
+    # floor is a real density decrease, not a predetermined no-op.
+    assert _clamped_density_error(
+        {"place.target_density": 0.65, "place.cell_padding_x": 0},
+        0.30,
+        floor=0.372,
+        padding=0,
+    ) is None
+
+
+def test_clamp_guard_ignores_floor_from_a_different_padding_context():
+    assert _clamped_density_error(
+        {"place.target_density": 0.45, "place.cell_padding_x": 400},
+        0.35,
+        floor=0.5196,
+        padding=0,
+    ) is None
+
+
+def test_planning_payload_declares_measurement_stability():
+    payload = planning_context_payload(
+        _context(incumbent=None, trajectories=())
+    )
+
+    stability = payload["measurement_stability"]
+    assert "pinned" in stability["protocol"]
+    assert "reversal" in stability["planning_guidance"]
