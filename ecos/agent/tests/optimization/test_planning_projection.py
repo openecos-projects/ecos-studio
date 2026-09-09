@@ -264,6 +264,66 @@ def test_planning_payload_renders_one_trajectory_list_only():
     ] == {metric.value: 0.0 for metric in TIMING_GUARDRAIL_ORDER}
 
 
+def _qphys_observation(score: float, *, with_qphys: bool = True):
+    observation = _terminal_observation()
+    if not with_qphys:
+        return observation
+    return observation.model_copy(
+        update={
+            "evaluation_metrics": observation.evaluation_metrics
+            + (
+                _metric(
+                    "qor_timing_quality",
+                    70.0,
+                    category=EvaluationMetricCategory.QOR,
+                    direction=EvaluationMetricDirection.HIGHER_IS_BETTER,
+                    unit="score",
+                ),
+                _metric(
+                    "qor_summary_balanced",
+                    score,
+                    category=EvaluationMetricCategory.QOR,
+                    direction=EvaluationMetricDirection.HIGHER_IS_BETTER,
+                    unit="score",
+                ),
+            )
+        }
+    )
+
+
+def test_projection_labels_qphys_scores_as_a_dedicated_section():
+    observation = _qphys_observation(72.0)
+    incumbent = _qphys_observation(70.5)
+    legacy = _terminal_observation()
+
+    projection = projected_terminal_observation(observation, incumbent=incumbent)
+
+    assert projection["qphys_dimension_scores"] == {
+        "qor_timing_quality": 70.0,
+        "qor_summary_balanced": 72.0,
+    }
+    # GUI dimension scores keep their own section; the two families never mix.
+    assert "gui_qor_dimension_routability_physical" not in projection[
+        "qphys_dimension_scores"
+    ]
+    deltas = projection["delta_vs_incumbent"]["unscoped_evaluation_metrics"]
+    assert deltas["qor_summary_balanced"] == 1.5
+    assert deltas["qor_timing_quality"] == 0.0
+    assert deltas["drc_count"] == 0.0
+    # Keys missing on one side are structural changes, not deltas.
+    assert not any(
+        metric_id.startswith("qor_")
+        for metric_id in projected_terminal_observation(
+            observation, incumbent=legacy
+        )["delta_vs_incumbent"]["unscoped_evaluation_metrics"]
+    )
+    # The dedicated section is labeling, not removal: the raw keys stay
+    # available in the unscoped section.
+    assert (
+        projection["unscoped_evaluation_metrics"]["qor_summary_balanced"] == 72.0
+    )
+
+
 def test_planning_payload_stays_within_budget_for_a_full_episode():
     incumbent = _terminal_observation("terminal-incumbent", full_scale=True)
     trajectories = tuple(
