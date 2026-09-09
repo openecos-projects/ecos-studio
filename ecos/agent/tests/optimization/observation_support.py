@@ -119,11 +119,27 @@ def frozen_workspace(tmp_path: Path) -> Path:
     _write_json(
         root / "place_dreamplace/analysis/qor_metrics.json",
         _metrics(
+            ("place_hpwl", 4315.0),
+            ("place_grwl", 3812.0),
             ("place_lutrudy_utilization_max", 0.88),
+            ("place_rudy_utilization_max", 0.55),
+            ("place_congestion_egr_overflow_max", 0),
+            ("place_congestion_egr_overflow_total", 0),
+            ("core_utilization", 0.52),
             ("place_total_wirelength", 123.0),
             ("runtime_seconds", 1.0),
             ("peak_memory_mb", 100.0),
         ),
+    )
+    _write_json(
+        root / "CTS_ecc/feature/CTS.step.json",
+        {
+            "CTS": {
+                "total_clock_wirelength": 950.0,
+                "clock_path_max_buffer": 4,
+                "clock_path_min_buffer": 4,
+            }
+        },
     )
     _write_json(
         root / "CTS_ecc/analysis/qor_metrics.json",

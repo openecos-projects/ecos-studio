@@ -35,15 +35,21 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 from ecos_agent.optimization.metrics.extraction import (
     OptimizationObservationError,
+    _corner_metric,
+    _power_summary_metric,
     _required_payload_number,
+    _worst_power_metric,
     build_area_metrics,
     build_cost_metrics,
     build_eligibility_metrics,
     build_gui_overall_qor_metric,
+    build_interconnect_length_metrics,
+    build_qphys_metrics,
     build_routing_diagnostics,
     metric_record,
     required_nonnegative_metric,
 )
+from ecos_agent.optimization.qor_quality import timing_period_ns
 from ecos_agent.optimization.parameter_config import (
     floorplan_mode_state_evidence,
     placement_convergence_state_evidence,
@@ -78,6 +84,7 @@ _PLACE_STATE_EVIDENCE_FILES = {
     "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
 }
 _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
+_CTS_FEATURE_FILE = "CTS_ecc/feature/CTS.step.json"
 _AREA_EVIDENCE_STEPS = (
     ECCStepName.SYNTHESIS,
     ECCStepName.FLOORPLAN,
@@ -271,6 +278,9 @@ def build_terminal_observation(workspace_root: Path) -> TerminalObservation:
         metrics_by_path,
         qor_payloads,
         files["sta_ecc/feature/sta.step.json"],
+        timing_guardrail,
+        _read_json(root, _CTS_FEATURE_FILE) if _is_file(root, _CTS_FEATURE_FILE) else None,
+        parameters,
     )
     geometry = read_terminal_geometry(root)
     manifest_paths = (
@@ -399,6 +409,9 @@ def _evaluation_metrics(
     metrics_by_path: dict[str, dict[str, float]],
     qor_payloads: dict[str, dict[str, object]],
     sta_step: dict[str, Any],
+    timing_guardrail: dict[str, float],
+    cts_feature: dict[str, Any] | None,
+    parameters: dict[str, Any],
 ) -> tuple[tuple[TerminalEvaluationMetric, ...], tuple[str, ...], tuple[str, ...], bool]:
     corner_metrics, ppa_metrics, corner_ids, corner_paths, complete = _sta_corner_metrics(
         root, metrics_by_path["sta_ecc/analysis/qor_metrics.json"], sta_step
@@ -408,17 +421,67 @@ def _evaluation_metrics(
     )
     area_metrics = build_area_metrics(metrics_by_path)
     cost_metrics, cost_complete = build_cost_metrics(metrics_by_path, _TERMINAL_QOR_FILES)
+    length_metrics, length_complete = build_interconnect_length_metrics(
+        metrics_by_path, cts_feature
+    )
+    typical_setup = next(
+        (
+            metric
+            for metric in corner_metrics
+            if metric.metric_id == "sta_setup_wns"
+            and metric.corner == "TYP_25/TYPICAL"
+        ),
+        None,
+    )
+    typical_frequency = next(
+        (
+            metric
+            for metric in corner_metrics
+            if metric.metric_id == "sta_frequency"
+            and metric.corner == "TYP_25/TYPICAL"
+        ),
+        None,
+    )
+    tclk_ns = timing_period_ns(
+        parameters.get("frequency_max"),
+        typical_setup.value if typical_setup is not None else None,
+        typical_frequency.value if typical_frequency is not None else None,
+    )
+    qphys_metrics = build_qphys_metrics(
+        metrics_by_path,
+        timing_guardrail,
+        tuple(
+            metric.value
+            for metric in corner_metrics
+            if metric.metric_id == "sta_setup_wns"
+        ),
+        tuple(
+            metric.value
+            for metric in corner_metrics
+            if metric.metric_id == "sta_hold_wns"
+        ),
+        cts_feature,
+        tclk_ns,
+        parameters.get("frequency_max"),
+    )
     metrics = (
         *build_eligibility_metrics(metrics_by_path),
         *routing_metrics,
         *interconnect_inflation_metrics(metrics_by_path),
+        *length_metrics,
         *cost_metrics,
         *area_metrics,
         *ppa_metrics,
         *corner_metrics,
+        *qphys_metrics,
         *build_gui_overall_qor_metric(qor_payloads, _ALL_TERMINAL_QOR_FILES),
     )
-    return tuple(metrics), corner_ids, corner_paths, complete and routing_complete and cost_complete
+    return (
+        tuple(metrics),
+        corner_ids,
+        corner_paths,
+        complete and routing_complete and cost_complete and length_complete,
+    )
 
 
 def _sta_corner_metrics(
@@ -579,70 +642,6 @@ def _ppa_metric_records(
             )
         )
     return tuple(records), complete
-
-
-def _power_summary_metric(
-    row: dict[str, Any], source_id: str, metric_id: str
-) -> TerminalEvaluationMetric:
-    corner = row["corner"]
-    return metric_record(
-        metric_id,
-        _required_payload_number(row["power"], (source_id,), nonnegative=True),
-        "uW",
-        EvaluationMetricCategory.PPA,
-        EvaluationMetricRole.REPORT,
-        EvaluationMetricDirection.LOWER_IS_BETTER,
-        (f"sta_ecc/feature/{corner}/power_summary.json",),
-        corner,
-    )
-
-
-def _worst_power_metric(
-    rows: tuple[dict[str, Any], ...], source_id: str, metric_id: str
-) -> TerminalEvaluationMetric:
-    worst = max(
-        rows,
-        key=lambda row: _required_payload_number(row["power"], (source_id,), nonnegative=True),
-    )
-    metric = _power_summary_metric(worst, source_id, metric_id)
-    return metric.model_copy(update={"corner": worst["corner"]})
-
-
-def _corner_metric(
-    payload: dict[str, Any],
-    path: tuple[str, ...],
-    metric_id: str,
-    unit: str,
-    corner: str,
-    source_ref: str,
-) -> TerminalEvaluationMetric:
-    direction = (
-        EvaluationMetricDirection.HIGHER_IS_BETTER
-        if metric_id
-        in {
-            "sta_setup_wns",
-            "sta_setup_tns",
-            "sta_hold_wns",
-            "sta_hold_tns",
-            "sta_frequency",
-        }
-        else EvaluationMetricDirection.LOWER_IS_BETTER
-    )
-    return metric_record(
-        metric_id,
-        _required_payload_number(
-            payload,
-            path,
-            nonnegative=metric_id
-            in {"sta_setup_violation_count", "sta_hold_violation_count", "sta_frequency"},
-        ),
-        unit,
-        EvaluationMetricCategory.CORNER_ROBUSTNESS,
-        EvaluationMetricRole.REPORT,
-        direction,
-        (source_ref,),
-        corner,
-    )
 
 
 def _workspace_root(workspace_root: Path) -> Path:

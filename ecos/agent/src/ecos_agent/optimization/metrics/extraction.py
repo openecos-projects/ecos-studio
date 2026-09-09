@@ -370,6 +370,209 @@ def build_routing_diagnostics(
     return records, len(records) == len(metric_ids)
 
 
+def build_interconnect_length_metrics(
+    metrics_by_path: dict[str, dict[str, float]],
+    cts_feature: dict[str, object] | None,
+) -> tuple[tuple[TerminalEvaluationMetric, ...], bool]:
+    """Raw length evidence (Table 1): HPWL, GRWL, and clock wirelength.
+
+    Raw lengths are diagnostics and comparison columns; they are never
+    scored directly (section 6.3 canonical bundles score the inflation
+    factors instead).
+    """
+    place = metrics_by_path.get("place_dreamplace/analysis/qor_metrics.json", {})
+    cts = cts_feature.get("CTS", {}) if isinstance(cts_feature, dict) else {}
+    specifications = (
+        (
+            "place_hpwl",
+            optional_nonnegative_metric(place, "place_hpwl"),
+            "place_dreamplace/analysis/qor_metrics.json",
+        ),
+        (
+            "place_grwl",
+            optional_nonnegative_metric(place, "place_grwl"),
+            "place_dreamplace/analysis/qor_metrics.json",
+        ),
+        (
+            "total_clock_wirelength",
+            optional_nonnegative_metric(cts, "total_clock_wirelength"),
+            "CTS_ecc/feature/CTS.step.json",
+        ),
+    )
+    records = []
+    for metric_id, value, source in specifications:
+        if value is None:
+            continue
+        records.append(
+            metric_record(
+                metric_id,
+                value,
+                "um",
+                EvaluationMetricCategory.ROUTING_DIAGNOSTIC,
+                EvaluationMetricRole.REPORT,
+                EvaluationMetricDirection.LOWER_IS_BETTER,
+                (source,),
+            )
+        )
+    return tuple(records), len(records) == len(specifications)
+
+
+def build_qphys_metrics(
+    metrics_by_path: dict[str, dict[str, float]],
+    timing_guardrail: dict[str, float],
+    corner_setup_ws_ns: tuple[float, ...],
+    corner_hold_ws_ns: tuple[float, ...],
+    cts_feature: dict[str, object] | None,
+    tclk_ns: float | None,
+    frequency_max_mhz: float | None,
+) -> tuple[TerminalEvaluationMetric, ...]:
+    """Qphys dimension scores and balanced summary (sections 8-9).
+
+    Scores derive strictly from same-workspace evidence; dimensions with
+    missing operands are omitted (UNKNOWN) rather than guessed. QP stays
+    null until a project power budget is declared, and the summary is null
+    while any of the seven feasibility gates lacks its operand (UNKNOWN
+    outranks an unevaluated projection, never the reverse).
+    """
+    from ecos_agent.optimization.qor_quality import (
+        area_quality,
+        congestion_severity,
+        interconnect_quality,
+        power_quality,
+        robustness_quality,
+        scalar_summary,
+        timing_period_ns,
+        timing_quality,
+    )
+
+    place = metrics_by_path.get("place_dreamplace/analysis/qor_metrics.json", {})
+    route = metrics_by_path.get("route_ecc/analysis/qor_metrics.json", {})
+    sta = metrics_by_path.get("sta_ecc/analysis/qor_metrics.json", {})
+    harden = metrics_by_path.get("Harden_ecc/analysis/qor_metrics.json", {})
+    hpwl = place.get("place_hpwl")
+    rwl = route.get("route_wirelength")
+    inflation_total = (
+        rwl / hpwl
+        if isinstance(hpwl, (int, float)) and hpwl > 0 and rwl is not None
+        else None
+    )
+    severity = congestion_severity(
+        place.get("place_rudy_utilization_max"),
+        place.get("place_congestion_egr_overflow_max"),
+        place.get("place_congestion_egr_overflow_total"),
+    )
+    if tclk_ns is None:
+        tclk_ns = timing_period_ns(frequency_max_mhz, None, None)
+    setup_ws = timing_guardrail["sta_setup_wns"]
+    hold_ws = timing_guardrail["sta_hold_wns"]
+    cts = cts_feature.get("CTS", {}) if isinstance(cts_feature, dict) else {}
+    max_buffer = cts.get("clock_path_max_buffer")
+    min_buffer = cts.get("clock_path_min_buffer")
+    imbalance = (
+        (max_buffer - min_buffer) / max_buffer
+        if isinstance(max_buffer, (int, float))
+        and max_buffer >= 1
+        and isinstance(min_buffer, (int, float))
+        else None
+    )
+    setup_spread = _corner_spread(corner_setup_ws_ns)
+    hold_spread = _corner_spread(corner_hold_ws_ns)
+    if setup_spread is None or tclk_ns is None:
+        dispersion = None
+    elif hold_spread is None:
+        dispersion = setup_spread / tclk_ns
+    else:
+        dispersion = max(setup_spread, hold_spread) / tclk_ns
+    scores = {
+        "timing": timing_quality(setup_ws, tclk_ns),
+        "interconnect": interconnect_quality(inflation_total, severity),
+        "area": area_quality(place.get("core_utilization")),
+        "power": power_quality(None, None),
+        "robustness": robustness_quality(imbalance, dispersion),
+    }
+    failed_gates = (
+        _gate_count_failed(
+            metrics_by_path.get("drc_ecc/analysis/qor_metrics.json", {}), "drc_count"
+        ),
+        _gate_count_failed(
+            metrics_by_path.get("lvs_ecc/analysis/qor_metrics.json", {}), "lvs_count"
+        ),
+        setup_ws < 0,
+        hold_ws < 0,
+        _gate_count_failed(sta, "sta_setup_violation_count"),
+        _gate_count_failed(sta, "sta_hold_violation_count"),
+        _gate_count_failed(harden, "harden_artifact_missing_count"),
+    )
+    gates_unknown = (
+        sta.get("sta_setup_wns") is None
+        or sta.get("sta_hold_wns") is None
+        or sta.get("sta_setup_violation_count") is None
+        or sta.get("sta_hold_violation_count") is None
+        or metrics_by_path.get("drc_ecc/analysis/qor_metrics.json", {}).get("drc_count")
+        is None
+        or metrics_by_path.get("lvs_ecc/analysis/qor_metrics.json", {}).get("lvs_count")
+        is None
+        or metrics_by_path.get(
+            "Harden_ecc/analysis/qor_metrics.json", {}
+        ).get("harden_artifact_missing_count")
+        is None
+    )
+    physical_failure = any(failed_gates)
+    summary = scalar_summary(scores, physical_failure)
+    if summary is not None and gates_unknown and not physical_failure:
+        # UNKNOWN feasibility suppresses the projection without inventing a
+        # score; an active physical failure still vetoes to exactly 0.0.
+        summary = None
+    sources = (
+        "place_dreamplace/analysis/qor_metrics.json",
+        "route_ecc/analysis/qor_metrics.json",
+        "sta_ecc/analysis/qor_metrics.json",
+    )
+    records = []
+    for dimension, score in scores.items():
+        if score is None:
+            continue
+        records.append(
+            metric_record(
+                f"qor_{dimension}_quality",
+                _qphys_round(score),
+                "score",
+                EvaluationMetricCategory.QOR,
+                EvaluationMetricRole.REPORT,
+                EvaluationMetricDirection.HIGHER_IS_BETTER,
+                sources,
+            )
+        )
+    if summary is not None:
+        records.append(
+            metric_record(
+                "qor_summary_balanced",
+                _qphys_round(summary),
+                "score",
+                EvaluationMetricCategory.QOR,
+                EvaluationMetricRole.REPORT,
+                EvaluationMetricDirection.HIGHER_IS_BETTER,
+                sources,
+            )
+        )
+    return tuple(records)
+
+
+def _gate_count_failed(metrics: dict[str, float], metric_id: str) -> bool:
+    value = metrics.get(metric_id)
+    return value is not None and value > 0
+
+
+def _corner_spread(values: tuple[float, ...]) -> float | None:
+    if len(values) < 2:
+        return None
+    return max(values) - min(values)
+
+
+def _qphys_round(value: float) -> float:
+    return math.floor(value * 1000.0 + 0.5) / 1000.0
+
+
 def build_area_metrics(
     metrics_by_path: dict[str, dict[str, float]],
 ) -> tuple[TerminalEvaluationMetric, ...]:
@@ -521,3 +724,67 @@ def _required_payload_number(
     if nonnegative and number < 0:
         raise OptimizationObservationError("terminal metric payload is invalid")
     return number
+
+
+def _power_summary_metric(
+    row: dict[str, Any], source_id: str, metric_id: str
+) -> TerminalEvaluationMetric:
+    corner = row["corner"]
+    return metric_record(
+        metric_id,
+        _required_payload_number(row["power"], (source_id,), nonnegative=True),
+        "uW",
+        EvaluationMetricCategory.PPA,
+        EvaluationMetricRole.REPORT,
+        EvaluationMetricDirection.LOWER_IS_BETTER,
+        (f"sta_ecc/feature/{corner}/power_summary.json",),
+        corner,
+    )
+
+
+def _worst_power_metric(
+    rows: tuple[dict[str, Any], ...], source_id: str, metric_id: str
+) -> TerminalEvaluationMetric:
+    worst = max(
+        rows,
+        key=lambda row: _required_payload_number(row["power"], (source_id,), nonnegative=True),
+    )
+    metric = _power_summary_metric(worst, source_id, metric_id)
+    return metric.model_copy(update={"corner": worst["corner"]})
+
+
+def _corner_metric(
+    payload: dict[str, Any],
+    path: tuple[str, ...],
+    metric_id: str,
+    unit: str,
+    corner: str,
+    source_ref: str,
+) -> TerminalEvaluationMetric:
+    direction = (
+        EvaluationMetricDirection.HIGHER_IS_BETTER
+        if metric_id
+        in {
+            "sta_setup_wns",
+            "sta_setup_tns",
+            "sta_hold_wns",
+            "sta_hold_tns",
+            "sta_frequency",
+        }
+        else EvaluationMetricDirection.LOWER_IS_BETTER
+    )
+    return metric_record(
+        metric_id,
+        _required_payload_number(
+            payload,
+            path,
+            nonnegative=metric_id
+            in {"sta_setup_violation_count", "sta_hold_violation_count", "sta_frequency"},
+        ),
+        unit,
+        EvaluationMetricCategory.CORNER_ROBUSTNESS,
+        EvaluationMetricRole.REPORT,
+        direction,
+        (source_ref,),
+        corner,
+    )

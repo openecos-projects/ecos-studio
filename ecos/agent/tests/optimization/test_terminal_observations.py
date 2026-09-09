@@ -69,6 +69,32 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
     assert by_id[("ppa", "die_area", None)].value == 3000
     assert by_id[("ppa", "core_area", None)].value == 2500
     assert by_id[("ppa", "sta_standard_cell_area", None)].value == 1140
+    assert by_id[("routing_diagnostic", "place_hpwl", None)].value == 4315.0
+    assert by_id[("routing_diagnostic", "place_grwl", None)].value == 3812.0
+    assert by_id[("routing_diagnostic", "total_clock_wirelength", None)].value == 950.0
+    clock_period_ns = 1000.0 / 672.0 + 8.5
+    assert by_id[("qor", "qor_timing_quality", None)].value == pytest.approx(
+        50.0 + 50.0 * (0.2 / (0.05 * clock_period_ns)), abs=0.001
+    )
+    assert by_id[("qor", "qor_interconnect_quality", None)].value == pytest.approx(
+        100.0 * (1.0 - 0.55)
+    )
+    assert by_id[("qor", "qor_area_quality", None)].value == 100.0
+    assert by_id[("qor", "qor_robustness_quality", None)].value == pytest.approx(
+        100.0 * (1.0 - 0.5 * ((8.9 - 6.8) / clock_period_ns)), abs=0.001
+    )
+    assert "qor_power_quality" not in {
+        metric_id for _, metric_id, _ in by_id
+    }
+    summary = (
+        0.30 * by_id[("qor", "qor_timing_quality", None)].value
+        + 0.25 * by_id[("qor", "qor_interconnect_quality", None)].value
+        + 0.15 * by_id[("qor", "qor_area_quality", None)].value
+        + 0.15 * by_id[("qor", "qor_robustness_quality", None)].value
+    ) / 0.85
+    assert by_id[("qor", "qor_summary_balanced", None)].value == pytest.approx(
+        summary, abs=0.01
+    )
     assert observation.objective_metrics == {
         ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 0.0,
         ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 1.0,

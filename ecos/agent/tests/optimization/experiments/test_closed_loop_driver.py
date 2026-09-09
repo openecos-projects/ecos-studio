@@ -116,6 +116,7 @@ def test_metric_comparison_reports_reference_best_and_noise() -> None:
         "route_wirelength": 0.1,
         "sta_frequency": 0.0,
         "sta_typical_leakage_power": 0.05,
+        "qor_summary_balanced": 1.0,
     }
 
     comparison = build_metric_comparison(reference, (worse, best, rejected), epsilon)
@@ -135,6 +136,9 @@ def test_metric_comparison_reports_reference_best_and_noise() -> None:
     assert rows["route_la_total_overflow"]["beyond_noise"] is None
     assert rows["gui_overall_qor_score"]["best"] is None
     assert rows["gui_overall_qor_score"]["beyond_noise"] is None
+    assert rows["qor_summary_balanced"]["epsilon"] == 1.0
+    assert rows["qor_summary_balanced"]["best"] is None
+    assert rows["qor_summary_balanced"]["beyond_noise"] is None
 
 
 def test_metric_comparison_without_started_candidates_keeps_reference() -> None:
