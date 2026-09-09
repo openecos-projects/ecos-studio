@@ -507,6 +507,7 @@ export interface DashboardQphysDimension {
   display: string
   percent: number | null
   tone: DashboardTone
+  reason: string | null
 }
 
 export interface DashboardDiagnosisIntervention {
@@ -555,6 +556,13 @@ export function buildDashboardQphys(
     percent:
       dimension.value === null ? null : Math.max(0, Math.min(100, dimension.value)),
     tone: qphysTone(dimension.value, dimension.state),
+    reason:
+      dimension.value === null
+        ? (dimension.features.find((feature) => feature.value === null)?.interpretation ??
+          (dimension.key === 'power'
+            ? 'No power budget or signoff power.'
+            : 'Insufficient evidence.'))
+        : null,
   }))
 }
 

@@ -170,13 +170,122 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function isNullableFinite(value: unknown): boolean {
+  return value === null || isFiniteNumber(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isFeatureSource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.metric === 'string' &&
+    typeof value.path === 'string' &&
+    typeof value.selector === 'string'
+  )
+}
+
+function isFeature(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.feature_id === 'string' &&
+    isNullableFinite(value.value) &&
+    typeof value.unit === 'string' &&
+    typeof value.formula === 'string' &&
+    typeof value.classification === 'string' &&
+    typeof value.semantic_class === 'string' &&
+    ['PASS', 'FAIL', 'WATCH', 'OPPORTUNITY', 'UNKNOWN', 'NOT_APPLICABLE'].includes(
+      value.state as string,
+    ) &&
+    isStringArray(value.input_metric_ids) &&
+    Array.isArray(value.input_source_artifacts) &&
+    value.input_source_artifacts.every(isFeatureSource) &&
+    (value.interpretation === undefined || typeof value.interpretation === 'string')
+  )
+}
+
 function isDimension(value: unknown): value is QorReportDimension {
   if (!isRecord(value)) return false
   return (
     typeof value.key === 'string' &&
     (value.value === null || isFiniteNumber(value.value)) &&
+    ['PASS', 'FAIL', 'WATCH', 'OVER_PROVISIONED', 'OPPORTUNITY', 'UNKNOWN'].includes(
+      value.state as string,
+    ) &&
+    Array.isArray(value.features) &&
+    value.features.every(isFeature)
+  )
+}
+
+function isTimingSlack(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    isNullableFinite(value.ws_ns) &&
+    isNullableFinite(value.wns_ns) &&
+    isNullableFinite(value.tns_ns) &&
+    (value.nvp === null || (Number.isInteger(value.nvp) && (value.nvp as number) >= 0)) &&
+    (value.worst_corner === null || typeof value.worst_corner === 'string')
+  )
+}
+
+function isGate(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.id === 'string' &&
+    typeof value.stage === 'string' &&
+    ['passed', 'failed', 'unavailable'].includes(value.state as string) &&
+    typeof value.predicate === 'string' &&
+    typeof value.blocks_tapeout === 'boolean' &&
+    isStringArray(value.metrics) &&
+    (value.availability === null ||
+      ['not_verified', 'corrupt'].includes(value.availability as string)) &&
+    (value.timing_slack === null || isTimingSlack(value.timing_slack))
+  )
+}
+
+function isIntervention(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.hypothesis === 'string' &&
+    ['TIER_1_FEASIBILITY', 'TIER_2_BOTTLENECK', 'TIER_3_OPPORTUNITY'].includes(
+      value.tier as string,
+    ) &&
+    ['HIGH', 'MEDIUM', 'LOW'].includes(value.confidence as string) &&
+    (value.parameter_knob === null || typeof value.parameter_knob === 'string') &&
+    (value.validation_procedure === null ||
+      typeof value.validation_procedure === 'string')
+  )
+}
+
+function isDiagnosis(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  return (
+    typeof value.diagnosis_id === 'string' &&
     typeof value.state === 'string' &&
-    Array.isArray(value.features)
+    isFiniteNumber(value.severity) &&
+    value.severity >= 0 &&
+    value.severity <= 1 &&
+    ['HIGH', 'MEDIUM', 'LOW'].includes(value.diagnosis_confidence as string) &&
+    isStringArray(value.trigger_features) &&
+    Array.isArray(value.supporting_metrics) &&
+    value.supporting_metrics.every(
+      (metric) =>
+        isRecord(metric) &&
+        typeof metric.name === 'string' &&
+        (metric.value === null ||
+          typeof metric.value === 'string' ||
+          isFiniteNumber(metric.value)) &&
+        typeof metric.unit === 'string' &&
+        typeof metric.source === 'string',
+    ) &&
+    typeof value.interpretation === 'string' &&
+    isStringArray(value.affected_dimensions) &&
+    Array.isArray(value.interventions) &&
+    value.interventions.every(isIntervention) &&
+    ['HIGH', 'MEDIUM', 'LOW'].includes(value.intervention_confidence as string) &&
+    (value.validation_required === null || typeof value.validation_required === 'string')
   )
 }
 
@@ -195,28 +304,61 @@ export function parseQorReport(text: string | null | undefined): QorReportV3 | n
   }
   if (!isRecord(parsed)) return null
   if (parsed.schema_version !== 3 || parsed.scoring_engine !== 'qor-v3') return null
-  if (typeof parsed.design !== 'string' || typeof parsed.timestamp !== 'string')
+  if (
+    typeof parsed.design !== 'string' ||
+    typeof parsed.workspace !== 'string' ||
+    typeof parsed.timestamp !== 'string' ||
+    typeof parsed.profile !== 'string' ||
+    !isNullableFinite(parsed.tclk_ns)
+  )
     return null
   if (!isRecord(parsed.feasibility) || !isRecord(parsed.evidence)) return null
   if (!isRecord(parsed.qor_record) || !isRecord(parsed.scalar_summary)) return null
   for (const key of QPHYS_KEYS) {
-    if (!isDimension(parsed.qor_record[key])) return null
+    if (!isDimension(parsed.qor_record[key]) || parsed.qor_record[key].key !== key)
+      return null
   }
   if (
+    !['PASS', 'PHYSICAL_FAIL', 'NOT_VERIFIED', 'UNKNOWN'].includes(
+      parsed.feasibility.status as string,
+    ) ||
     !Array.isArray(parsed.feasibility.gates) ||
-    typeof parsed.feasibility.status !== 'string' ||
-    typeof parsed.evidence.state !== 'string'
+    !parsed.feasibility.gates.every(isGate) ||
+    !['HIGH', 'MODERATE', 'LIMITED', 'INSUFFICIENT', 'NOT_VERIFIED'].includes(
+      parsed.evidence.state as string,
+    )
   ) {
     return null
   }
   if (
-    (parsed.scalar_summary.score !== null &&
-      !isFiniteNumber(parsed.scalar_summary.score)) ||
-    typeof parsed.scalar_summary.status !== 'string' ||
-    !Array.isArray(parsed.diagnoses)
+    !isNullableFinite(parsed.evidence.index) ||
+    !isNullableFinite(parsed.evidence.integrity) ||
+    !isNullableFinite(parsed.evidence.coverage) ||
+    !isNullableFinite(parsed.evidence.consistency) ||
+    !isNullableFinite(parsed.scalar_summary.score) ||
+    !['GREEN', 'YELLOW', 'ORANGE', 'RED', 'FAIL', 'NOT_RATED'].includes(
+      parsed.scalar_summary.status as string,
+    ) ||
+    typeof parsed.scalar_summary.profile !== 'string' ||
+    !isRecord(parsed.scalar_summary.weights) ||
+    !Object.values(parsed.scalar_summary.weights).every(isFiniteNumber) ||
+    !Array.isArray(parsed.diagnoses) ||
+    !parsed.diagnoses.every(isDiagnosis)
   ) {
     return null
   }
   if (!isRecord(parsed.inflation) || !isRecord(parsed.flow_steps)) return null
+  if (
+    !isNullableFinite(parsed.inflation.i_place) ||
+    !isNullableFinite(parsed.inflation.i_route) ||
+    !isNullableFinite(parsed.inflation.i_total) ||
+    !isNullableFinite(parsed.inflation.congestion_severity) ||
+    !['EXACT_COMPATIBLE', 'MAPPED_COMPATIBLE', 'INCOMPATIBLE'].includes(
+      parsed.inflation.compatibility_status as string,
+    ) ||
+    !Object.values(parsed.flow_steps).every((value) => typeof value === 'string') ||
+    !isStringArray(parsed.config_warnings)
+  )
+    return null
   return parsed as unknown as QorReportV3
 }

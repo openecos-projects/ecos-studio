@@ -912,11 +912,28 @@ function buildV3ComparisonSummary(
   qorTrendSummary: ProjectQorTrendSummary,
 ): ProjectComparisonSummary {
   const bestRatedWorkspace = qorTrendSummary.workspaces
-    .filter((workspace) => workspace.overallScore !== null)
+    .filter(
+      (workspace) =>
+        workspace.overallScore !== null && workspace.signoffReadiness.scoreEligible,
+    )
     .sort((left, right) => (right.overallScore ?? -1) - (left.overallScore ?? -1))[0]
   const explicitBest = manifest?.best_workspace?.workspace_id
+  const explicitBestSummary = explicitBest
+    ? qorTrendSummary.workspaces.find(
+        (workspace) => workspace.workspaceId === explicitBest,
+      )
+    : undefined
+  const eligibleExplicitBest =
+    explicitBestSummary === undefined ||
+    (explicitBestSummary.overallScore !== null &&
+      explicitBestSummary.signoffReadiness.scoreEligible)
+      ? explicitBest
+      : undefined
   const bestWorkspaceId =
-    bestRatedWorkspace?.workspaceId ?? explicitBest ?? workspaces[0]?.workspace_id ?? ''
+    bestRatedWorkspace?.workspaceId ??
+    eligibleExplicitBest ??
+    workspaces[0]?.workspace_id ??
+    ''
   return {
     bestWorkspaceId,
     bestReason: bestRatedWorkspace
