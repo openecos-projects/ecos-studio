@@ -155,7 +155,7 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
-          if (args.includes('-tvf')) {
+          if (args.some((flag) => flag === '-tvf' || flag === '-tf')) {
             child.stdout.emit(
               'data',
               '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
@@ -230,7 +230,7 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
-          if (args.includes('-tvf')) {
+          if (args.some((flag) => flag === '-tvf' || flag === '-tf')) {
             child.stdout.emit(
               'data',
               '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
@@ -297,7 +297,7 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
-          if (args.includes('-tvf')) {
+          if (args.some((flag) => flag === '-tvf' || flag === '-tf')) {
             child.stdout.emit(
               'data',
               '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
@@ -368,7 +368,7 @@ describe('CodexDependencyService', () => {
       const child = new FakeChild()
       queueMicrotask(async () => {
         if (command === 'tar') {
-          if (args.includes('-tvf')) {
+          if (args.some((flag) => flag === '-tvf' || flag === '-tf')) {
             child.stdout.emit(
               'data',
               '-rw-r--r-- codex/codex 100 2024-01-01 00:00 codex-cli\n',
