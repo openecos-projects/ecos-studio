@@ -13,7 +13,9 @@ import {
 } from '@/components/projectStepAnalysis.fixture'
 import {
   buildDashboardAttention,
+  buildDashboardDiagnoses,
   buildDashboardHealth,
+  buildDashboardQphys,
   buildDashboardRecommendation,
   buildDashboardWorkspaceRows,
   countAttentionBySeverity,
@@ -353,5 +355,43 @@ describe('dashboard formatting helpers', () => {
     expect(dashboardGridTemplate([populated, empty])).toBe(
       'minmax(148px, 1.05fr) 92px 62px 76px 84px minmax(96px, 1fr) minmax(82px, 0.8fr) 78px',
     )
+  })
+})
+
+describe('buildDashboardQphys', () => {
+  it('projects the ECC-scored five-coordinate record with tones', () => {
+    const rows = buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_a')
+
+    expect(rows.map((row) => row.key)).toEqual(['timing', 'interconnect', 'area'])
+    expect(rows[0]).toMatchObject({ value: 100, display: '100.0', tone: 'good' })
+    expect(rows[1]).toMatchObject({ value: 52, state: 'WATCH', tone: 'warn' })
+    // Null coordinates read as N/A, never a fabricated zero.
+    expect(rows[2]).toMatchObject({ value: null, display: 'N/A', tone: 'neutral' })
+  })
+
+  it('returns nothing for workspaces without a report', () => {
+    expect(buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_b')).toEqual([])
+    expect(buildDashboardQphys(trendSummaryWithScoresFixture(), null)).toEqual([])
+  })
+})
+
+describe('buildDashboardDiagnoses', () => {
+  it('surfaces severity-ordered diagnoses with their intervention hypotheses', () => {
+    const diagnoses = buildDashboardDiagnoses(trendSummaryWithScoresFixture(), 'ws_a')
+
+    expect(diagnoses).toHaveLength(1)
+    expect(diagnoses[0]).toMatchObject({
+      id: 'diag.place.congestion',
+      stateLabel: 'Watch',
+      tone: 'warn',
+    })
+    expect(diagnoses[0]?.interventions[0]).toMatchObject({
+      tierLabel: 'Quality limiter',
+      validation: 'Rerun placement and compare.',
+    })
+  })
+
+  it('returns nothing for workspaces without a report', () => {
+    expect(buildDashboardDiagnoses(trendSummaryWithScoresFixture(), 'ws_c')).toEqual([])
   })
 })

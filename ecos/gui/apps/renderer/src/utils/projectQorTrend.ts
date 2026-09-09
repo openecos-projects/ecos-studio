@@ -3,6 +3,8 @@ import type {
   ProjectStepStatus,
   ProjectWorkspaceStatus,
 } from './projectManagement'
+import { adaptQorReport, emptyAdaptedQor, isQorReportStale } from './qorReportAdapter'
+import { parseQorReport } from '@ecos-studio/shared'
 
 export type QorDimension =
   | 'timing'
@@ -35,6 +37,8 @@ export interface ProjectQorWorkspaceInput {
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
+  /** Workspace-level ``home/qor_report.json`` written by ECC (scoring authority). */
+  qorReportText?: string | null
   stepStatuses: Partial<Record<FlowStep, ProjectStepStatus>>
 }
 
@@ -82,7 +86,7 @@ export interface ProjectQorMetricRating {
 }
 
 export interface ProjectQorSignoffGroup {
-  step: 'RCX' | 'STA'
+  step: FlowStep
   id: string
   status: QorGateStatus
   gate: boolean
@@ -93,6 +97,55 @@ export interface ProjectQorSignoffReadiness {
   scoreEligible: boolean
   reasonCodes: string[]
   groups: ProjectQorSignoffGroup[]
+}
+
+/**
+ * The five physical QoR coordinates of the ECC-QoR draft 3 record
+ * (Q_T, Q_I, Q_A, Q_P, Q_R). Scores come only from the ECC-written
+ * ``home/qor_report.json``; the GUI never recomputes them.
+ */
+export type QphysKey = 'timing' | 'interconnect' | 'area' | 'power' | 'robustness'
+
+export type QorScalarStatus = 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
+
+export interface QphysScoreFeature {
+  featureId: string
+  value: number | null
+  state: string
+  interpretation: string
+}
+
+export interface QphysScore {
+  key: QphysKey
+  value: number | null
+  state: string
+  features: QphysScoreFeature[]
+}
+
+export interface ProjectQorDiagnosisInterventionView {
+  hypothesis: string
+  tier: 'TIER_1_FEASIBILITY' | 'TIER_2_BOTTLENECK' | 'TIER_3_OPPORTUNITY'
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  parameterKnob: string | null
+  validationProcedure: string | null
+}
+
+export interface ProjectQorDiagnosisView {
+  diagnosisId: string
+  state: string
+  severity: number
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  interpretation: string
+  affectedDimensions: string[]
+  interventions: ProjectQorDiagnosisInterventionView[]
+}
+
+export interface ProjectQorEvidenceView {
+  index: number | null
+  state: string
+  integrity: number | null
+  coverage: number | null
+  consistency: number | null
 }
 
 export interface ProjectQorSignoffComparisonContext {
@@ -200,8 +253,15 @@ export interface ProjectQorTrendWorkspaceSummary {
   gateStatus: QorGateStatus
   signoffReadiness: ProjectQorSignoffReadiness
   signoffComparison: ProjectQorSignoffComparisonContext
-  areaScoringStep: FlowStep | null
-  dimensionScores: Partial<Record<QorDimension, number>>
+  /** Five-coordinate physical QoR record from the ECC report. */
+  dimensionScores: Partial<Record<QphysKey, number>>
+  /** 'qor-v3' when a current ECC report was consumed; null otherwise. */
+  scoringEngine: 'qor-v3' | null
+  /** Profile the ECC report scored under. Null without a report. */
+  profile: string | null
+  qphys: QphysScore[]
+  diagnoses: ProjectQorDiagnosisView[]
+  evidence: ProjectQorEvidenceView | null
   records: ProjectQorMetricRecord[]
   /** Full per-step records used for baseline comparison counts in Home. */
   comparisonRecords?: ProjectQorMetricRecord[]
@@ -224,31 +284,6 @@ export interface ProjectQorTrendSummary {
   risks: ProjectQorRisk[]
   timingClosure: ProjectQorTimingSummary
   unsupportedModules: ProjectQorUnsupportedModule[]
-}
-
-export interface ProjectQorScoreMetricDetail {
-  step: FlowStep
-  metricName: string
-  displayName: string
-  value: number
-  unit?: string
-  score: number
-}
-
-export interface ProjectQorScoreDimensionDetail {
-  dimension: QorDimension
-  label: string
-  score: number
-  configuredWeight: number
-  effectiveWeight: number
-  contribution: number
-  metrics: ProjectQorScoreMetricDetail[]
-}
-
-export interface ProjectQorScoreDetail {
-  overallScore: number | null
-  gateStatus: QorGateStatus
-  dimensions: ProjectQorScoreDimensionDetail[]
 }
 
 export interface ProjectQorTrendOptions {
@@ -434,14 +469,6 @@ type QorMetricConfidence = ProjectQorMetricRecord['confidence']
 type QorMetricProjectRole = ProjectQorMetricRecord['projectRole']
 type QorMetricStepRole = ProjectQorMetricRecord['stepRole']
 
-interface QorMetricDefinition {
-  metricName: string
-  displayName: string
-  unit?: string
-  dimension: QorDimension
-  polarity: QorPolarity
-}
-
 const QOR_FLOW_STEPS: FlowStep[] = [
   'Synth',
   'Floor',
@@ -482,525 +509,14 @@ const QOR_PROJECT_ROLES: QorMetricProjectRole[] = ['final', 'trend', 'gate', 'no
 
 const QOR_STEP_ROLES: QorMetricStepRole[] = ['primary', 'secondary', 'detail', 'hidden']
 
-const QOR_METRIC_REGISTRY: Record<string, QorMetricDefinition> = {
-  'cell area': {
-    metricName: 'synthesis_cell_area',
-    displayName: 'Synthesis Cell Area',
-    unit: 'um^2',
-    dimension: 'area_cost',
-    polarity: 'lower_is_better',
-  },
-  'cell number': {
-    metricName: 'synthesis_cell_count',
-    displayName: 'Synthesis Cell Count',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'wire number': {
-    metricName: 'synthesis_wire_count',
-    displayName: 'Synthesis Wire Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  'port number': {
-    metricName: 'synthesis_port_count',
-    displayName: 'Synthesis Port Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  'die area um 2': {
-    metricName: 'die_area',
-    displayName: 'Die Area',
-    unit: 'um^2',
-    dimension: 'area_cost',
-    polarity: 'lower_is_better',
-  },
-  'die width um': {
-    metricName: 'die_width',
-    displayName: 'Die Width',
-    unit: 'um',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'die height um': {
-    metricName: 'die_height',
-    displayName: 'Die Height',
-    unit: 'um',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'die util': {
-    metricName: 'die_utilization',
-    displayName: 'Die Utilization',
-    dimension: 'area_cost',
-    polarity: 'target_range',
-  },
-  die_utilization: {
-    metricName: 'die_utilization',
-    displayName: 'Die Utilization',
-    dimension: 'area_cost',
-    polarity: 'target_range',
-  },
-  'core area um 2': {
-    metricName: 'core_area',
-    displayName: 'Core Area',
-    unit: 'um^2',
-    dimension: 'area_cost',
-    polarity: 'lower_is_better',
-  },
-  'core util': {
-    metricName: 'core_utilization',
-    displayName: 'Core Utilization',
-    dimension: 'area_cost',
-    polarity: 'target_range',
-  },
-  'total instances': {
-    metricName: 'instance_count',
-    displayName: 'Instance Count',
-    dimension: 'area_cost',
-    polarity: 'trend_only',
-  },
-  'total nets': {
-    metricName: 'net_count',
-    displayName: 'Net Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  'total io pins': {
-    metricName: 'io_pin_count',
-    displayName: 'IO Pin Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  io_pin_count: {
-    metricName: 'io_pin_count',
-    displayName: 'IO Pin Count',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  hpwl: {
-    metricName: 'place_hpwl',
-    displayName: 'Place HPWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'gp hpwl': {
-    metricName: 'place_hpwl',
-    displayName: 'Place HPWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'dp hpwl': {
-    metricName: 'place_hpwl',
-    displayName: 'Place HPWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  grwl: {
-    metricName: 'place_grwl',
-    displayName: 'Place GRWL',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  flute: {
-    metricName: 'place_flute_wirelength',
-    displayName: 'Place FLUTE Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_congestion_egr_overflow_total: {
-    metricName: 'place_congestion_egr_overflow_total',
-    displayName: 'Place EGR Overflow Total',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'egr overflow total': {
-    metricName: 'place_congestion_egr_overflow_total',
-    displayName: 'Place EGR Overflow Total',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_congestion_egr_overflow_max: {
-    metricName: 'place_congestion_egr_overflow_max',
-    displayName: 'Place EGR Overflow Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'egr overflow max': {
-    metricName: 'place_congestion_egr_overflow_max',
-    displayName: 'Place EGR Overflow Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_rudy_utilization_max: {
-    metricName: 'place_rudy_utilization_max',
-    displayName: 'Place RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'rudy utilization max': {
-    metricName: 'place_rudy_utilization_max',
-    displayName: 'Place RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  place_lutrudy_utilization_max: {
-    metricName: 'place_lutrudy_utilization_max',
-    displayName: 'Place LUT-RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  'lutrudy utilization max': {
-    metricName: 'place_lutrudy_utilization_max',
-    displayName: 'Place LUT-RUDY Utilization Max',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  buffer_num: {
-    metricName: 'cts_buffer_count',
-    displayName: 'CTS Buffer Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  buffer_area: {
-    metricName: 'cts_buffer_area',
-    displayName: 'CTS Buffer Area',
-    unit: 'um^2',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  clock_path_max_buffer: {
-    metricName: 'clock_path_max_buffer',
-    displayName: 'Clock Path Max Buffer',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  clock_path_min_buffer: {
-    metricName: 'clock_path_min_buffer',
-    displayName: 'Clock Path Min Buffer',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  total_clock_wirelength: {
-    metricName: 'clock_wirelength',
-    displayName: 'Clock Wirelength',
-    unit: 'um',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  max_clock_wirelength: {
-    metricName: 'cts_clock_wirelength_max',
-    displayName: 'CTS Max Clock Wirelength',
-    unit: 'um',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  max_level_of_clock_tree: {
-    metricName: 'cts_clock_tree_max_level',
-    displayName: 'CTS Clock Tree Max Level',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  wire_len: {
-    metricName: 'route_wirelength',
-    displayName: 'Route Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  num_via: {
-    metricName: 'route_via_count',
-    displayName: 'Route Via Count',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_violation_count: {
-    metricName: 'route_dr_total_violation_count',
-    displayName: 'Route DR Violations',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_violation_num: {
-    metricName: 'route_dr_total_violation_count',
-    displayName: 'Route DR Violations',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_patch_count: {
-    metricName: 'route_dr_total_patch_count',
-    displayName: 'Route DR Patches',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_patch_num: {
-    metricName: 'route_dr_total_patch_count',
-    displayName: 'Route DR Patches',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_wirelength: {
-    metricName: 'route_dr_total_wirelength',
-    displayName: 'Route DR Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_wire_length: {
-    metricName: 'route_dr_total_wirelength',
-    displayName: 'Route DR Wirelength',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_dr_total_via_count: {
-    metricName: 'route_dr_total_via_count',
-    displayName: 'Route DR Via Count',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_via_num: {
-    metricName: 'route_dr_total_via_count',
-    displayName: 'Route DR Via Count',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_la_total_overflow: {
-    metricName: 'route_la_total_overflow',
-    displayName: 'Route LA Overflow',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  total_overflow: {
-    metricName: 'route_la_total_overflow',
-    displayName: 'Route LA Overflow',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
-  route_la_total_demand: {
-    metricName: 'route_la_total_demand',
-    displayName: 'Route LA Demand',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  total_demand: {
-    metricName: 'route_la_total_demand',
-    displayName: 'Route LA Demand',
-    dimension: 'routability_physical',
-    polarity: 'trend_only',
-  },
-  drc_num: {
-    metricName: 'drc_count',
-    displayName: 'DRC Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  lvs_count: {
-    metricName: 'lvs_count',
-    displayName: 'LVS Violation Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  rcx_spef_file_count: {
-    metricName: 'rcx_spef_file_count',
-    displayName: 'RCX SPEF File Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  spef_file_count: {
-    metricName: 'rcx_spef_file_count',
-    displayName: 'RCX SPEF File Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  rcx_expected_corner_count: {
-    metricName: 'rcx_expected_corner_count',
-    displayName: 'RCX Expected Corner Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'trend_only',
-  },
-  rcx_missing_corner_count: {
-    metricName: 'rcx_missing_corner_count',
-    displayName: 'RCX Missing Corner Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  missing_spef_count: {
-    metricName: 'rcx_missing_corner_count',
-    displayName: 'RCX Missing Corner Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-  sta_setup_wns: {
-    metricName: 'sta_setup_wns',
-    displayName: 'STA Setup WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  max_wns: {
-    metricName: 'sta_setup_wns',
-    displayName: 'STA Setup WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_setup_tns: {
-    metricName: 'sta_setup_tns',
-    displayName: 'STA Setup TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  max_tns: {
-    metricName: 'sta_setup_tns',
-    displayName: 'STA Setup TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_hold_wns: {
-    metricName: 'sta_hold_wns',
-    displayName: 'STA Hold WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  min_wns: {
-    metricName: 'sta_hold_wns',
-    displayName: 'STA Hold WNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_hold_tns: {
-    metricName: 'sta_hold_tns',
-    displayName: 'STA Hold TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  min_tns: {
-    metricName: 'sta_hold_tns',
-    displayName: 'STA Hold TNS',
-    unit: 'ns',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_frequency_mhz: {
-    metricName: 'sta_frequency_mhz',
-    displayName: 'STA Frequency',
-    unit: 'MHz',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  'frequency mhz': {
-    metricName: 'sta_frequency_mhz',
-    displayName: 'STA Frequency',
-    unit: 'MHz',
-    dimension: 'timing',
-    polarity: 'higher_is_better',
-  },
-  sta_corner_count: {
-    metricName: 'sta_corner_count',
-    displayName: 'STA Corner Count',
-    dimension: 'timing',
-    polarity: 'trend_only',
-  },
-  sta_expected_corner_count: {
-    metricName: 'sta_expected_corner_count',
-    displayName: 'STA Expected Corner Count',
-    dimension: 'timing',
-    polarity: 'trend_only',
-  },
-  sta_missing_corner_count: {
-    metricName: 'sta_missing_corner_count',
-    displayName: 'STA Missing Corner Count',
-    dimension: 'timing',
-    polarity: 'lower_is_better',
-  },
-  setup_violation_count: {
-    metricName: 'sta_setup_violation_count',
-    displayName: 'STA Setup Violation Count',
-    dimension: 'timing',
-    polarity: 'lower_is_better',
-  },
-  hold_violation_count: {
-    metricName: 'sta_hold_violation_count',
-    displayName: 'STA Hold Violation Count',
-    dimension: 'timing',
-    polarity: 'lower_is_better',
-  },
-  harden_artifact_missing_count: {
-    metricName: 'harden_artifact_missing_count',
-    displayName: 'Harden Missing Artifact Count',
-    dimension: 'clock_robustness_dfm',
-    polarity: 'lower_is_better',
-  },
-}
+const QPHYS_KEYS: QphysKey[] = ['timing', 'interconnect', 'area', 'power', 'robustness']
 
-const QOR_METRIC_IDS = new Set(
-  Object.values(QOR_METRIC_REGISTRY).map((definition) => definition.metricName),
-)
-
-const DIMENSION_WEIGHTS: Record<QorDimension, number> = {
-  timing: 0.35,
-  power_integrity: 0.25,
-  routability_physical: 0.2,
-  area_cost: 0.1,
-  clock_robustness_dfm: 0.1,
-  runtime: 0,
-}
-
-const DIMENSION_LABELS: Record<QorDimension, string> = {
-  timing: 'Timing',
-  power_integrity: 'Power / IR / EM',
-  routability_physical: 'Routability / Physical',
-  area_cost: 'Area',
-  clock_robustness_dfm: 'Clock / DFM',
-  runtime: 'Runtime',
-}
-
-const METRIC_FAIL_VALUES: Record<string, number> = {
-  drc_count: 10,
-  lvs_count: 10,
-  route_wirelength: 6000,
-  route_via_count: 2000,
-  cts_buffer_count: 20,
-  cts_buffer_area: 40,
-  clock_wirelength: 400000,
-  cts_clock_wirelength_max: 100000,
-  cts_clock_tree_max_level: 20,
-  die_area: 3000,
-  core_area: 2500,
-  core_utilization: 0.85,
-  synthesis_cell_area: 3000,
-  place_hpwl: 10000,
-  place_grwl: 12000,
-  place_flute_wirelength: 10000,
-  place_congestion_egr_overflow_total: 100,
-  place_congestion_egr_overflow_max: 20,
-  place_rudy_utilization_max: 1,
-  place_lutrudy_utilization_max: 1,
-  route_dr_total_violation_count: 50,
-  route_dr_total_patch_count: 100,
-  route_dr_total_wirelength: 6000,
-  route_dr_total_via_count: 2000,
-  route_la_total_overflow: 100,
-  rcx_missing_corner_count: 9,
-  sta_setup_wns: -0.2,
-  sta_setup_tns: -1,
-  sta_hold_wns: -0.2,
-  sta_hold_tns: -1,
-  sta_frequency_mhz: 100,
-  sta_setup_violation_count: 1,
-  sta_hold_violation_count: 1,
-  sta_missing_corner_count: 1,
-  harden_artifact_missing_count: 6,
+const QPHYS_LABELS: Record<QphysKey, string> = {
+  timing: 'Timing Quality',
+  interconnect: 'Interconnect',
+  area: 'Area Efficiency',
+  power: 'Power',
+  robustness: 'Robustness',
 }
 
 const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
@@ -1184,55 +700,46 @@ export function buildProjectQorTrendSummary(
   }
 }
 
+export interface ProjectQorScoreDimensionDetail {
+  key: QphysKey
+  label: string
+  value: number | null
+  state: string
+  features: QphysScoreFeature[]
+}
+
+export interface ProjectQorScoreDetail {
+  overallScore: number | null
+  gateStatus: QorGateStatus
+  profile: string | null
+  evidence: ProjectQorEvidenceView | null
+  dimensions: ProjectQorScoreDimensionDetail[]
+}
+
+/**
+ * Score detail straight from the ECC report's five-coordinate Qphys
+ * record. Features carry their own formulas and interpretations, so the
+ * GUI has nothing to recompute and nothing to invent.
+ */
 export function buildProjectQorScoreDetail(
   workspace: ProjectQorTrendWorkspaceSummary,
 ): ProjectQorScoreDetail {
-  const dimensions = QOR_DIMENSIONS.flatMap((dimension) => {
-    const score = workspace.dimensionScores[dimension]
-    const configuredWeight = DIMENSION_WEIGHTS[dimension]
-    if (score === undefined || configuredWeight <= 0) return []
-
-    const metrics = workspace.records.flatMap((record) => {
-      if (
-        !isRecordIncludedInDimensionScore(record, dimension, workspace.areaScoringStep)
-      ) {
-        return []
-      }
-      const metricScore = scoreRecord(record)
-      if (metricScore === null || record.value === null) return []
-      return [
-        {
-          step: record.step,
-          metricName: record.metricName,
-          displayName: record.displayName,
-          value: record.value,
-          unit: record.unit,
-          score: roundScore(metricScore),
-        },
-      ]
-    })
-
-    return [
-      {
-        dimension,
-        label: DIMENSION_LABELS[dimension],
-        score,
-        configuredWeight,
-        metrics,
-      },
-    ]
+  const dimensions = QPHYS_KEYS.map((key) => {
+    const qphys = workspace.qphys.find((candidate) => candidate.key === key) ?? null
+    return {
+      key,
+      label: QPHYS_LABELS[key],
+      value: qphys?.value ?? workspace.dimensionScores[key] ?? null,
+      state: qphys?.state ?? 'UNKNOWN',
+      features: qphys?.features ?? [],
+    }
   })
   return {
     overallScore: workspace.overallScore,
     gateStatus: workspace.gateStatus,
-    dimensions: dimensions.map((dimension) => {
-      const effectiveWeight = dimension.configuredWeight
-      return {
-        ...dimension,
-        effectiveWeight: roundScore(effectiveWeight * 100),
-        contribution: roundScore(dimension.score * effectiveWeight),
-      }
-    }),
+    profile: workspace.profile,
+    evidence: workspace.evidence,
+    dimensions,
   }
 }
 
@@ -1371,8 +878,22 @@ export function buildProjectQorTrendReport(
         rcx_corner_fingerprint: workspace.signoffComparison.rcxCornerFingerprint,
         sta_pvt_rc_fingerprint: workspace.signoffComparison.staPvtRcFingerprint,
       },
-      area_scoring_step: workspace.areaScoringStep,
+      scoring_engine: workspace.scoringEngine,
+      profile: workspace.profile,
       dimension_scores: workspace.dimensionScores,
+      qphys: workspace.qphys.map((dimension) => ({
+        key: dimension.key,
+        value: dimension.value,
+        state: dimension.state,
+        features: dimension.features.map((feature) => ({
+          feature_id: feature.featureId,
+          value: feature.value,
+          state: feature.state,
+          interpretation: feature.interpretation,
+        })),
+      })),
+      diagnoses: workspace.diagnoses,
+      evidence: workspace.evidence,
       record_count: workspace.records.length,
       records: workspace.records.map((record) => ({
         step: record.step,
@@ -1607,6 +1128,13 @@ function resolveExplicitBaselineWorkspace(
 function buildWorkspaceSummary(
   workspace: ProjectQorWorkspaceInput,
 ): ProjectQorTrendWorkspaceSummary {
+  // Scoring authority: the ECC-written workspace report. Metric texts stay
+  // a pure data channel (records, comparison, coverage) and never feed the
+  // score; without a current report the workspace is simply not rated.
+  const report = parseQorReport(workspace.qorReportText)
+  const stale = report !== null && isQorReportStale(report, workspace.stepStatuses)
+  const adapted = report !== null && !stale ? adaptQorReport(report) : emptyAdaptedQor()
+
   const records = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorMetrics({
       workspaceId: workspace.workspaceId,
@@ -1616,15 +1144,11 @@ function buildWorkspaceSummary(
     }),
   )
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
-  const areaScoringStep = resolveLastSuccessfulAreaStep(records, workspace.stepStatuses)
-  const projectRecords = selectProjectRecords(records, areaScoringStep)
+  const projectRecords = selectProjectRecords(records)
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter((step) => {
     if (step === 'LVS' && workspace.stepStatuses.LVS === undefined) return false
     return !workspace.stepMetricTexts[step]
   })
-  const blockingIssues = QOR_FLOW_STEPS.flatMap((step) =>
-    normalizeQorSummaryBlockingIssues(step, workspace.stepSummaryTexts?.[step]),
-  )
   const summaryMissingMetrics = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorSummaryMissingMetrics(step, workspace.stepSummaryTexts?.[step]),
   )
@@ -1641,7 +1165,6 @@ function buildWorkspaceSummary(
   const missingMetricCoverage = buildMissingMetricCoverage(
     records,
     summaryMissingMetrics,
-    areaScoringStep,
     workspace.stepStatuses,
   )
   const dataQuality = buildWorkspaceDataQuality(
@@ -1651,35 +1174,26 @@ function buildWorkspaceSummary(
     missingMetricCoverage,
     analysisIntegrityIssues,
   )
-  const gateStatus = resolveWorkspaceGateStatus(
-    workspace.stepStatuses,
-    workspace.stepSummaryTexts,
-    blockingIssues,
-  )
-  const signoffReadiness = resolveWorkspaceSignoffReadiness(workspace)
   const signoffComparison = resolveWorkspaceSignoffComparisonContext(workspace)
-  const effectiveGateStatus = combineGateStatus(gateStatus, signoffReadiness.status)
-  const dimensionScores = buildDimensionScores(projectRecords, areaScoringStep)
-  const weightedScore = weightedOverallScore(dimensionScores)
-  const overallScore =
-    signoffReadiness.scoreEligible && weightedScore !== null
-      ? roundScore(weightedScore)
-      : null
 
   return {
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     workspacePath: workspace.workspacePath,
-    status: workspaceStatus(workspace.status, overallScore, effectiveGateStatus),
-    overallScore,
-    gateStatus: effectiveGateStatus,
-    signoffReadiness,
+    status: workspaceStatus(workspace.status, adapted.scalarStatus),
+    overallScore: adapted.overallScore,
+    gateStatus: adapted.gateStatus,
+    signoffReadiness: adapted.signoffReadiness,
     signoffComparison,
-    areaScoringStep,
-    dimensionScores,
+    scoringEngine: adapted.scoringEngine,
+    profile: adapted.profile,
+    dimensionScores: adapted.dimensionScores,
+    qphys: adapted.qphys,
+    diagnoses: adapted.diagnoses,
+    evidence: adapted.evidence,
     records: projectRecords,
     comparisonRecords: records,
-    blockingIssues,
+    blockingIssues: adapted.blockingIssues,
     hotspots,
     timingConstraints,
     analysisIntegrityIssues,
@@ -1730,50 +1244,8 @@ function buildWorkspaceDataQuality(
   }
 }
 
-const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'LVS', 'RCX', 'STA']
-
-function workspaceGateSteps(
-  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
-): FlowStep[] {
-  return PROJECT_GATE_STEPS.filter((step) => stepStatuses[step] !== undefined)
-}
-
-function resolveWorkspaceGateStatus(
-  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
-  summaryTexts: ProjectQorWorkspaceInput['stepSummaryTexts'],
-  blockingIssues: ProjectQorBlockingIssue[],
-): QorGateStatus {
-  const knownStepStatuses = Object.values(stepStatuses).length > 0
-  if (!knownStepStatuses) {
-    return blockingIssues.length > 0 ? 'blocked' : 'unavailable'
-  }
-  if (blockingIssues.length > 0) return 'blocked'
-
-  const gateSteps = workspaceGateSteps(stepStatuses)
-  if (gateSteps.length === 0) return 'unavailable'
-
-  for (const step of gateSteps) {
-    if (!isCompletedStepStatus(stepStatuses[step])) return 'incomplete'
-    const status = qorSummaryStatus(summaryTexts?.[step])
-    if (status === 'blocked') return 'blocked'
-    if (status !== 'pass') return 'incomplete'
-  }
-  return 'pass'
-}
-
 function isCompletedStepStatus(status: ProjectStepStatus | undefined): boolean {
   return status === 'success' || status === 'reused'
-}
-
-function combineGateStatus(
-  baseStatus: QorGateStatus,
-  signoffStatus: QorGateStatus,
-): QorGateStatus {
-  if (baseStatus === 'blocked' || signoffStatus === 'blocked') return 'blocked'
-  if (baseStatus === 'incomplete' || signoffStatus === 'incomplete') return 'incomplete'
-  if (baseStatus === 'unavailable' || signoffStatus === 'unavailable')
-    return 'unavailable'
-  return 'pass'
 }
 
 export function resolveWorkspaceSignoffReadiness(
@@ -1880,12 +1352,10 @@ function stableStaPvtRcFingerprint(value: unknown): string | null {
 
 function selectProjectRecords(
   records: ProjectQorMetricRecord[],
-  areaScoringStep: FlowStep | null,
 ): ProjectQorMetricRecord[] {
   const selected = new Map<string, ProjectQorMetricRecord>()
   for (const record of records) {
     if (record.projectRole === 'none') continue
-    if (record.dimension === 'area_cost' && record.step !== areaScoringStep) continue
 
     const key = projectRecordKey(record)
     const current = selected.get(key)
@@ -1974,9 +1444,15 @@ function buildSignoffReadinessRisks(
 ): ProjectQorRisk[] {
   const readiness = workspace.signoffReadiness
   if (readiness.status === 'pass') return []
-  const step = readiness.reasonCodes.some((code) => code.startsWith('sta_'))
-    ? 'STA'
-    : 'RCX'
+  // Reason codes are signoff gate ids (GATE_DRC, GATE_SETUP_SLACK, ...);
+  // attribute the risk to the earliest blocking gate's step.
+  const step = readiness.reasonCodes.some((code) => code.includes('DRC'))
+    ? 'DRC'
+    : readiness.reasonCodes.some((code) => code.includes('LVS'))
+      ? 'LVS'
+      : readiness.reasonCodes.some((code) => code.includes('HARDEN'))
+        ? 'Harden'
+        : 'STA'
   const severity =
     readiness.status === 'blocked'
       ? 'critical'
@@ -1986,8 +1462,8 @@ function buildSignoffReadinessRisks(
   const message = readiness.reasonCodes.length
     ? readiness.reasonCodes.join(', ')
     : readiness.status === 'unavailable'
-      ? 'RCX and STA signoff readiness is unavailable.'
-      : `RCX and STA signoff readiness is ${readiness.status}.`
+      ? 'Signoff feasibility is unavailable without a current QoR report.'
+      : `Signoff feasibility is ${readiness.status}.`
   return [
     {
       workspaceId: workspace.workspaceId,
@@ -2010,7 +1486,6 @@ function buildWorkspaceDataQualityRisks(
   const referenceStep =
     quality.missingCompletedAnalysisSteps[0] ??
     workspace.analysisIntegrityIssues[0]?.step ??
-    workspace.areaScoringStep ??
     'Route'
   if (quality.status === 'incomplete' && quality.missingCompletedAnalysisSteps.length) {
     return [
@@ -2458,133 +1933,6 @@ function timingTriageState(
   return slackDeltaNs < 0 ? 'regressed' : 'improved'
 }
 
-function buildDimensionScores(
-  records: ProjectQorMetricRecord[],
-  areaScoringStep: FlowStep | null,
-): Partial<Record<QorDimension, number>> {
-  const scoredByDimension = new Map<QorDimension, number[]>()
-
-  for (const record of records) {
-    if (!isRecordIncludedInDimensionScore(record, record.dimension, areaScoringStep)) {
-      continue
-    }
-    const score = scoreRecord(record)
-    if (score === null) continue
-
-    const scores = scoredByDimension.get(record.dimension) ?? []
-    scores.push(score)
-    scoredByDimension.set(record.dimension, scores)
-  }
-
-  const entries = Array.from(scoredByDimension.entries()).map(([dimension, scores]) => [
-    dimension,
-    roundScore(average(scores)),
-  ])
-  return Object.fromEntries(entries)
-}
-
-function isRecordIncludedInDimensionScore(
-  record: ProjectQorMetricRecord,
-  dimension: QorDimension,
-  areaScoringStep: FlowStep | null,
-): boolean {
-  if (record.dimension !== dimension) return false
-  if (!record.rating.score) return false
-  return dimension !== 'area_cost' || record.step === areaScoringStep
-}
-
-function resolveLastSuccessfulAreaStep(
-  records: ProjectQorMetricRecord[],
-  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
-): FlowStep | null {
-  for (let index = QOR_FLOW_STEPS.length - 1; index >= 0; index -= 1) {
-    const step = QOR_FLOW_STEPS[index]!
-    if (
-      isCompletedStepStatus(stepStatuses[step]) &&
-      records.some(
-        (record) =>
-          record.step === step && record.dimension === 'area_cost' && record.rating.score,
-      )
-    ) {
-      return step
-    }
-  }
-  return null
-}
-
-function weightedOverallScore(
-  dimensionScores: Partial<Record<QorDimension, number>>,
-): number | null {
-  let weightedTotal = 0
-  let usedWeight = 0
-
-  for (const [dimension, score] of Object.entries(dimensionScores) as Array<
-    [QorDimension, number | undefined]
-  >) {
-    if (score === undefined) continue
-    const weight = DIMENSION_WEIGHTS[dimension]
-    if (weight <= 0) continue
-    weightedTotal += score * weight
-    usedWeight += weight
-  }
-
-  if (usedWeight === 0) return null
-  return weightedTotal
-}
-
-function scoreRecord(record: ProjectQorMetricRecord): number | null {
-  if (record.value === null || record.polarity === 'trend_only') return null
-  if (!QOR_METRIC_IDS.has(record.metricName)) return null
-
-  if (
-    record.metricName === 'sta_setup_wns' ||
-    record.metricName === 'sta_setup_tns' ||
-    record.metricName === 'sta_hold_wns' ||
-    record.metricName === 'sta_hold_tns'
-  ) {
-    const failValue = METRIC_FAIL_VALUES[record.metricName]
-    if (failValue === undefined || failValue >= 0) return null
-    if (record.value >= 0) return 100
-    return clampScore((100 * (record.value - failValue)) / -failValue)
-  }
-
-  if (record.polarity === 'target_range') {
-    if (record.metricName === 'core_utilization') {
-      return scoreTargetRange(
-        record.value,
-        0.45,
-        0.7,
-        METRIC_FAIL_VALUES.core_utilization,
-      )
-    }
-    return null
-  }
-
-  const failValue = METRIC_FAIL_VALUES[record.metricName]
-  if (!failValue || failValue <= 0) return null
-
-  if (record.polarity === 'lower_is_better') {
-    return clampScore((100 * (failValue - record.value)) / failValue)
-  }
-
-  if (record.polarity === 'higher_is_better') {
-    return clampScore((100 * record.value) / failValue)
-  }
-
-  return null
-}
-
-function scoreTargetRange(
-  value: number,
-  minTarget: number,
-  maxTarget: number,
-  failValue: number,
-): number {
-  if (value >= minTarget && value <= maxTarget) return 100
-  if (value < minTarget) return clampScore((100 * value) / minTarget)
-  return clampScore((100 * (failValue - value)) / (failValue - maxTarget))
-}
-
 function buildWorkspaceDeltas(
   workspaces: ProjectQorTrendWorkspaceSummary[],
   baselineWorkspaceId: string | null,
@@ -2707,13 +2055,13 @@ function recordsAreComparable(
   record: ProjectQorMetricRecord,
 ): boolean {
   if (record.step === 'RCX') {
+    // The v3 gate registry has no RCX tapeout gate; RCX envelope numbers
+    // compare only when both reports certify full corner coverage.
+    const hasFullCoverage = (workspace: ProjectQorTrendWorkspaceSummary) =>
+      workspace.evidence !== null && workspace.evidence.coverage === 1
     return (
-      current.signoffReadiness.groups.some(
-        (group) => group.step === 'RCX' && group.status === 'pass',
-      ) &&
-      baseline.signoffReadiness.groups.some(
-        (group) => group.step === 'RCX' && group.status === 'pass',
-      ) &&
+      hasFullCoverage(current) &&
+      hasFullCoverage(baseline) &&
       current.signoffComparison.rcxCornerFingerprint !== null &&
       current.signoffComparison.rcxCornerFingerprint ===
         baseline.signoffComparison.rcxCornerFingerprint
@@ -2847,7 +2195,6 @@ function buildMissingMetrics(
 function buildMissingMetricCoverage(
   records: ProjectQorMetricRecord[],
   summaryMissingMetrics: Array<{ step: FlowStep; metricName: string }>,
-  areaScoringStep: FlowStep | null,
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
 ): ProjectQorMissingMetricCoverage[] {
   const metricIdsByStep = new Map<FlowStep, Set<string>>()
@@ -2858,7 +2205,7 @@ function buildMissingMetricCoverage(
   }
 
   for (const metricName of buildMissingMetrics(records, stepStatuses)) {
-    const step = missingMetricProducerStep(metricName, areaScoringStep)
+    const step = missingMetricProducerStep(metricName)
     if (step) addMetric(step, metricName)
   }
   for (const metric of summaryMissingMetrics) {
@@ -2871,10 +2218,7 @@ function buildMissingMetricCoverage(
   })
 }
 
-function missingMetricProducerStep(
-  metricName: string,
-  areaScoringStep: FlowStep | null,
-): FlowStep | null {
+function missingMetricProducerStep(metricName: string): FlowStep | null {
   switch (metricName) {
     case 'route_wirelength':
     case 'route_via_count':
@@ -2891,7 +2235,7 @@ function missingMetricProducerStep(
       return 'CTS'
     case 'die_area':
     case 'core_utilization':
-      return areaScoringStep ?? 'Floor'
+      return 'Floor'
     default:
       return null
   }
@@ -2903,8 +2247,7 @@ function uniqueStrings(values: string[]): string[] {
 
 function workspaceStatus(
   workspaceStatus: ProjectWorkspaceStatus,
-  score: number | null,
-  gateStatus: QorGateStatus,
+  scalarStatus: QorScalarStatus,
 ): QorStatus {
   if (
     workspaceStatus === 'failed' ||
@@ -2914,13 +2257,20 @@ function workspaceStatus(
   ) {
     return workspaceStatus === 'failed' ? 'Red' : 'Blocked'
   }
-  if (gateStatus === 'blocked') return 'Orange'
-  if (gateStatus === 'incomplete') return 'Yellow'
-  if (score === null) return 'Blocked'
-  if (score >= 40) return 'Green'
-  if (score >= 25) return 'Yellow'
-  if (score >= 10) return 'Orange'
-  return 'Red'
+  switch (scalarStatus) {
+    case 'GREEN':
+      return 'Green'
+    case 'YELLOW':
+      return 'Yellow'
+    case 'ORANGE':
+      return 'Orange'
+    case 'FAIL':
+    case 'RED':
+      return 'Red'
+    default:
+      // NOT_RATED: no current ECC report means there is nothing to show.
+      return 'Blocked'
+  }
 }
 
 function parseJsonObject(
@@ -3609,18 +2959,6 @@ function compareProjectQorTimingCoverage(
 
 function compareDeltaMagnitude(left: ProjectQorDelta, right: ProjectQorDelta): number {
   return Math.abs(right.absoluteDelta) - Math.abs(left.absoluteDelta)
-}
-
-function average(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function clampScore(score: number): number {
-  return Math.max(0, Math.min(100, score))
-}
-
-function roundScore(score: number): number {
-  return Number(score.toFixed(1))
 }
 
 function roundMetric(value: number): number {

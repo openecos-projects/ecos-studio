@@ -79,6 +79,7 @@ export interface ProjectWorkspaceAnalysisInput {
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
+  qorReportText?: string | null
   flowText?: string | null
 }
 
@@ -495,6 +496,8 @@ export function buildProjectQorTrendForManifest(
         workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
       staTimingIssuesText:
         workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
+      qorReportText:
+        workspaceAnalysisInputs[workspace.workspace_id]?.qorReportText ?? null,
       stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
     })),
     {

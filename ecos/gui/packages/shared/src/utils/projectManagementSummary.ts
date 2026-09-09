@@ -76,8 +76,12 @@ export const projectManagementWorkspaceStepAnalysisSpecs = [
 export const projectManagementStaTimingIssuesPath =
   'sta_ecc/analysis/sta_timing_issues.json'
 
+/** Workspace-level QoR report written by ECC (ECC-QoR draft 3). */
+export const projectManagementQorReportPath = 'home/qor_report.json'
+
 export const projectManagementWorkspaceSummaryPaths = [
   'home/flow.json',
+  projectManagementQorReportPath,
   ...projectManagementWorkspaceStepAnalysisSpecs.flatMap((spec) => [
     spec.metricsPath,
     spec.summaryPath,

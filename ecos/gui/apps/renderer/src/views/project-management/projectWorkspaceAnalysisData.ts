@@ -5,6 +5,7 @@ import type {
   ProjectWorkspaceFlowStatesById,
 } from '@/utils/projectManagement'
 import {
+  projectManagementQorReportPath,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceSummaryPaths,
@@ -15,6 +16,7 @@ import { mapWithConcurrency } from './asyncConcurrency'
 
 const WORKSPACE_STEP_ANALYSIS_SPECS = projectManagementWorkspaceStepAnalysisSpecs
 const STA_TIMING_ISSUES_PATH = projectManagementStaTimingIssuesPath
+const QOR_REPORT_PATH = projectManagementQorReportPath
 const PROJECT_READ_CONCURRENCY = 2
 
 export async function readProjectManagementWorkspaceData(
@@ -152,6 +154,7 @@ function analysisInputFromValues(
       ]),
     ),
     staTimingIssuesText: values[STA_TIMING_ISSUES_PATH] ?? null,
+    qorReportText: values[QOR_REPORT_PATH] ?? null,
     flowText: values['home/flow.json'] ?? null,
   }
 }

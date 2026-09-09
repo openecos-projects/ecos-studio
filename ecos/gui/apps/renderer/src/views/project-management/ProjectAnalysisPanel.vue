@@ -173,6 +173,51 @@
           <p class="dash-recommend-reason">No workspace has an eligible QoR score yet.</p>
         </section>
 
+        <section
+          v-if="recommendedQphys.length > 0"
+          class="dash-qphys"
+          aria-label="Physical QoR record breakdown"
+        >
+          <header class="dash-section-head">
+            <span>QoR record breakdown</span>
+            <small>scored by ECC</small>
+          </header>
+          <div
+            v-for="dimension in recommendedQphys"
+            :key="dimension.key"
+            class="dash-qphys-row"
+          >
+            <span class="dash-qphys-label">{{ dimension.label }}</span>
+            <span
+              class="dash-qphys-bar"
+              role="img"
+              :aria-label="`${dimension.label} ${dimension.display} of 100`"
+            >
+              <i
+                :class="dashboardToneClass(dimension.tone)"
+                :style="{ width: `${dimension.percent ?? 0}%` }"
+              ></i>
+            </span>
+            <strong class="dash-qphys-value">{{ dimension.display }}</strong>
+            <small class="dash-qphys-state">{{ dimension.state }}</small>
+          </div>
+          <ul v-if="recommendedDiagnoses.length > 0" class="dash-diagnoses">
+            <li v-for="diagnosis in recommendedDiagnoses" :key="diagnosis.id">
+              <strong :class="dashboardToneClass(diagnosis.tone)">
+                {{ diagnosis.stateLabel }} · {{ diagnosis.id }}
+              </strong>
+              <p>{{ diagnosis.interpretation }}</p>
+              <p
+                v-for="intervention in diagnosis.interventions"
+                :key="intervention.hypothesis"
+                class="dash-diagnosis-hypothesis"
+              >
+                [{{ intervention.tierLabel }}] {{ intervention.hypothesis }}
+              </p>
+            </li>
+          </ul>
+        </section>
+
         <ProjectQorScoreChart
           :trend-points="project.qorTrendSummary.trendPoints"
           :baseline-workspace-id="project.qorTrendSummary.baselineWorkspaceId"
@@ -510,7 +555,9 @@ import {
 } from './projectAnalysisPresentation'
 import {
   buildDashboardAttention,
+  buildDashboardDiagnoses,
   buildDashboardHealth,
+  buildDashboardQphys,
   buildDashboardRecommendation,
   buildDashboardWorkspaceRows,
   countAttentionBySeverity,
@@ -615,6 +662,18 @@ const recommendedPpaMetrics = computed(() =>
   buildBestWorkspacePpaMetrics(
     dashboardMetricRows.value,
     recommendation.value?.workspaceId,
+  ),
+)
+const recommendedQphys = computed(() =>
+  buildDashboardQphys(
+    props.project.qorTrendSummary,
+    recommendation.value?.workspaceId ?? null,
+  ),
+)
+const recommendedDiagnoses = computed(() =>
+  buildDashboardDiagnoses(
+    props.project.qorTrendSummary,
+    recommendation.value?.workspaceId ?? null,
   ),
 )
 const workspaceRows = computed(() =>
