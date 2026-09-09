@@ -94,14 +94,14 @@ def run_experiment(
             run_root / design.design_id / "calibration",
             terminal_timeout_seconds,
         )
-        return design, workspace, reference, reference_runtime
+        return design, workspace, canonical, reference, reference_runtime
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         prepared = tuple(executor.map(prepare_design, manifest.designs))
 
     def run_treatments(treatments: Sequence[KnowledgeTreatmentConfig]):
         def run_design(item):
-            design, workspace, reference, reference_runtime = item
+            design, workspace, canonical, reference, reference_runtime = item
             results = {
                 treatment.treatment.value: _run_treatment(
                     design,
@@ -115,6 +115,7 @@ def run_experiment(
                     treatment=treatment,
                     provider_factory=provider_factory,
                     knowledge_case_pool_root=knowledge_case_pool_root,
+                    canonical=canonical,
                 )
                 for treatment in treatments
             }
@@ -419,7 +420,12 @@ def _run_treatment(
     treatment: KnowledgeTreatmentConfig,
     provider_factory: Callable[..., Any],
     knowledge_case_pool_root: Path | None = None,
+    canonical: TerminalObservation | None = None,
 ) -> dict[str, object]:
+    if canonical is None:
+        raise ValueError(
+            "treatment alignment requires the canonical workspace observation"
+        )
     output.mkdir(parents=True, exist_ok=True)
     episode_id = f"phase8-{run_id}-{design.design_id}-{treatment.treatment.value}"
     episode_root = workspace / ".agent" / "optimization" / episode_id
@@ -435,12 +441,17 @@ def _run_treatment(
     )
     provider.select_model(model)
     objective = _objective()
+    # Alignment must anchor on the workspace (canonical) observation: the
+    # runner rebuilds alignment from the workspace and compares whole objects,
+    # while a calibration replay clone carries drifting flow_tool_runtime /
+    # flow_peak_memory telemetry that can never match. `reference` (a replay
+    # observation) only feeds the trace baseline and the wall-time budget.
     runtime_context = {
         "workspace": str(workspace),
         "episode_id": episode_id,
         "objective": objective.model_dump(mode="json"),
         "objective_alignment": build_objective_alignment(
-            objective, reference
+            objective, canonical
         ).model_dump(mode="json"),
         "seed": seed,
         "reference_runtime_seconds": reference_runtime,
