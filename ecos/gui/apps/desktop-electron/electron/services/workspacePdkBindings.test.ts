@@ -4,25 +4,27 @@ import {
   prepareWorkspaceOpenBinding,
 } from './workspacePdkBindings'
 
-function createDependencies() {
+function createDependencies(
+  requirement: Record<string, unknown> = {
+    familyId: 'ics55',
+    version: '1.0.0',
+    mode: 'manual',
+    files: [
+      { fileId: 'tech', role: 'tech', reference: 'tech.lef' },
+      { fileId: 'lef', role: 'lef', reference: 'cells.lef' },
+      { fileId: 'lib', role: 'liberty', reference: 'typ.lib' },
+    ],
+    mpc: {
+      resourceId: 'mpc:frame',
+      version: '2.0.0',
+      designId: 'gcd',
+      sourceHash: 'hash',
+    },
+  },
+) {
   const callRuntime = vi
     .fn()
-    .mockResolvedValueOnce({
-      familyId: 'ics55',
-      version: '1.0.0',
-      mode: 'manual',
-      files: [
-        { fileId: 'tech', role: 'tech', reference: 'tech.lef' },
-        { fileId: 'lef', role: 'lef', reference: 'cells.lef' },
-        { fileId: 'lib', role: 'liberty', reference: 'typ.lib' },
-      ],
-      mpc: {
-        resourceId: 'mpc:frame',
-        version: '2.0.0',
-        designId: 'gcd',
-        sourceHash: 'hash',
-      },
-    })
+    .mockResolvedValueOnce(requirement)
     .mockResolvedValueOnce({
       projectId: 'proj_demo',
       projectRoot: '/projects/demo',
@@ -34,7 +36,9 @@ function createDependencies() {
       pdkInventoryService: {
         bindInstallation: vi.fn(),
         resolveBinding: vi.fn(),
-        validateWorkspace: vi.fn().mockResolvedValue({ root: '/pdks/ics55' }),
+        validateWorkspace: vi
+          .fn()
+          .mockResolvedValue({ root: '/pdks/ics55', version: '1.0.0' }),
       },
       resourceManagerService: {
         getResource: vi.fn().mockResolvedValue({
@@ -84,7 +88,37 @@ describe('prepareWorkspaceOpenBinding', () => {
     expect(dependencies.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
       projectId: 'proj_demo',
       projectRoot: '/projects/demo',
-      requirement: expect.objectContaining({ familyId: 'ics55', version: '1.0.0' }),
+      requirement: expect.objectContaining({ familyId: 'ics55', version: null }),
+    })
+  })
+
+  it('does not match ECC stdcell version against the inventory package version', async () => {
+    const { dependencies } = createDependencies({
+      familyId: 'ics55',
+      version: 'V1p10C100',
+      mode: 'default',
+    })
+    dependencies.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      root: '/pdks/ics55/1.10.102',
+      version: '1.10.102',
+    })
+
+    await expect(
+      prepareWorkspaceOpenBinding(dependencies, '/projects/demo/runs/workspace'),
+    ).resolves.toEqual({
+      directory: '/projects/demo/runs/workspace',
+      workspaceBindings: {
+        inputs: {},
+        pdk: {
+          root: '/pdks/ics55/1.10.102',
+          version: '1.10.102',
+        },
+      },
+    })
+    expect(dependencies.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement: { familyId: 'ics55', version: null, manualConfig: null },
     })
   })
 

@@ -122,9 +122,10 @@ export async function prepareWorkspaceOpenBinding(
     .catch(() => null)
   if (!project) return { directory }
   const { projectId, projectRoot } = project
+  // ECC pdk.version is the stdcell name, not the inventory package version.
   const pdkRequirement = {
     familyId: pdk.familyId,
-    version: typeof pdk.version === 'string' ? pdk.version : null,
+    version: null,
     manualConfig: manualPdkConfig(pdk),
   }
   try {
@@ -140,7 +141,7 @@ export async function prepareWorkspaceOpenBinding(
         inputs: {},
         pdk: {
           root: installation.root,
-          ...(pdkRequirement.version ? { version: pdkRequirement.version } : {}),
+          ...(installation.version ? { version: installation.version } : {}),
           ...manualPdkFiles(pdk, pdkRequirement, installation.root),
         },
         ...(mpcBinding ? { mpc: mpcBinding } : {}),
