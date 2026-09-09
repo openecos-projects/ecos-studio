@@ -32,6 +32,32 @@ class EvaluationMetricDirection(StrEnum):
     TREND_ONLY = "trend_only"
 
 
+# Wall-clock / RSS-sampler telemetry extracted from home/flow.json step rows.
+# They vary across replays of an identical flow by construction and are never
+# deterministic QoR evidence, so cross-run comparisons must exclude them.
+TELEMETRY_METRIC_IDS = frozenset(
+    {
+        "flow_tool_runtime",
+        "flow_peak_memory",
+        "flow_nonzero_peak_memory_stage_count",
+    }
+)
+
+
+def is_telemetry_metric(metric: TerminalEvaluationMetric) -> bool:
+    return metric.metric_id in TELEMETRY_METRIC_IDS
+
+
+def metric_comparison_key(metric: TerminalEvaluationMetric) -> tuple[str, str | None]:
+    """Cross-run identity of an evaluation metric row.
+
+    Per-corner rows repeat the same metric_id once per PVT corner; comparing or
+    collapsing by metric_id alone mistakes the corner spread (e.g. leakage
+    0.019 -> 80.6 across -40 C / 125 C) for replay noise.
+    """
+    return (metric.metric_id, metric.corner)
+
+
 class TerminalEvaluationMetric(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
