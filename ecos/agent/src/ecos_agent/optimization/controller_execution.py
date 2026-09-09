@@ -780,4 +780,10 @@ class ControllerExecutionMixin:
         return self._complete(OptimizationOutcomeKind.INDETERMINATE, receipt, record)
 
     def _next_intervention_id(self) -> str:
-        return f"intervention-{len(self.ledger.replay().entries) + 1}"
+        replay = self.ledger.replay()
+        started = sum(
+            1
+            for entry in replay.entries
+            if isinstance(entry.payload, OptimizationInterventionStart)
+        )
+        return f"intervention-{started + 1}"
