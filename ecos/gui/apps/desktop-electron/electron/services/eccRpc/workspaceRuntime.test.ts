@@ -206,6 +206,158 @@ describe('EccWorkspaceRuntime', () => {
     expect(service.isActive()).toBe(false)
   })
 
+  it('reuses a committed Step Configuration for the same Workspace Revision', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    const configuration = {
+      parameters: [
+        {
+          applies: 'cts',
+          default: 0.08,
+          description: 'CTS skew bound',
+          param: 'cts.skew_bound',
+          type: 'float',
+          value: 0.08,
+        },
+      ],
+      status: 'available' as const,
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    }
+    client.responses.push(configuration)
+
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        step: 'CTS',
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ status: 'available', workspaceRevision: 4 })
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        step: 'CTS',
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).resolves.toEqual(configuration)
+
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.step_configuration.read'),
+    ).toHaveLength(1)
+  })
+
+  it('coalesces in-flight Step Configuration reads for the same Revision', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    const pending = deferred<Record<string, unknown>>()
+    client.responses.push(pending.promise)
+
+    const first = service.readWorkspaceStepConfiguration({
+      step: 'CTS',
+      workspaceHandle: opened.workspaceHandle,
+    })
+    const second = service.readWorkspaceStepConfiguration({
+      step: 'CTS',
+      workspaceHandle: opened.workspaceHandle,
+    })
+    pending.resolve({
+      parameters: [],
+      status: 'available',
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ status: 'available', workspaceRevision: 4 }),
+      expect.objectContaining({ status: 'available', workspaceRevision: 4 }),
+    ])
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.step_configuration.read'),
+    ).toHaveLength(1)
+  })
+
+  it('invalidates cached Step Configuration after a Step Parameter update', async () => {
+    const { client, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push({
+      parameters: [
+        {
+          applies: 'cts',
+          default: 0.08,
+          description: '',
+          param: 'cts.skew_bound',
+          type: 'float',
+          value: 0.08,
+        },
+      ],
+      status: 'available',
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 4,
+    })
+    await service.readWorkspaceStepConfiguration({
+      step: 'CTS',
+      workspaceHandle: opened.workspaceHandle,
+    })
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 5,
+    })
+    await service.updateWorkspaceStepConfiguration({
+      commandId: 'step-configuration-1',
+      expectedWorkspaceRevision: 4,
+      parameters: { 'cts.skew_bound': 0.1 },
+      stepId: 'CTS',
+      workspaceHandle: opened.workspaceHandle,
+    })
+    client.responses.push({
+      parameters: [
+        {
+          applies: 'cts',
+          default: 0.08,
+          description: '',
+          param: 'cts.skew_bound',
+          type: 'float',
+          value: 0.1,
+        },
+      ],
+      status: 'available',
+      step: 'CTS',
+      stepId: 'CTS',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 5,
+    })
+
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        step: 'CTS',
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ workspaceRevision: 5 })
+    expect(
+      client.calls.filter((call) => call.method === 'workspace.step_configuration.read'),
+    ).toHaveLength(2)
+  })
+
   it('updates Step Parameters by identity without a file path', async () => {
     const { client, service } = createService()
     client.responses.push({

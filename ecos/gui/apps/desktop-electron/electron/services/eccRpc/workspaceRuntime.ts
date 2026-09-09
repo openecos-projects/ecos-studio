@@ -64,6 +64,7 @@ import {
   type RuntimeOperationMetadata,
 } from './workspaceRuntimeCommands'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
+import { WorkspaceStepConfigurationCache } from './workspaceStepConfigurationCache'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 
@@ -117,6 +118,8 @@ export class EccWorkspaceRuntime {
   private readonly sidecarLifecycle: RuntimeSidecarLifecycle
   private cachedSnapshot: Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'> | null =
     null
+  private readonly stepConfigurationCache =
+    new WorkspaceStepConfigurationCache<EccWorkspaceStepConfigurationReadResult>()
   private readonly commands: WorkspaceRuntimeCommands
   private queue = Promise.resolve()
   private ready = false
@@ -350,8 +353,12 @@ export class EccWorkspaceRuntime {
     return this.commands.validateWorkspaceSpec(request)
   }
 
-  updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<EccWorkspaceUpdateResult> {
-    return this.commands.updateWorkspace(request)
+  async updateWorkspace(
+    request: EccWorkspaceUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.commands.updateWorkspace(request)
+    this.stepConfigurationCache.clear()
+    return result
   }
 
   async updateWorkspaceConfiguration(
@@ -359,6 +366,7 @@ export class EccWorkspaceRuntime {
   ): Promise<EccWorkspaceUpdateResult> {
     const result = await this.commands.updateWorkspaceConfiguration(request)
     this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
     return result
   }
 
@@ -367,6 +375,7 @@ export class EccWorkspaceRuntime {
   ): Promise<EccWorkspaceUpdateResult> {
     const result = await this.commands.updateWorkspaceStepConfiguration(request)
     this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
     return result
   }
 
@@ -385,8 +394,14 @@ export class EccWorkspaceRuntime {
     }
   }
 
-  closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
-    return this.commands.closeWorkspace(request)
+  async closeWorkspace(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceCloseResult> {
+    try {
+      return await this.commands.closeWorkspace(request)
+    } finally {
+      this.stepConfigurationCache.clear()
+    }
   }
 
   workspaceHome(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult> {
@@ -400,7 +415,18 @@ export class EccWorkspaceRuntime {
   async readWorkspaceStepConfiguration(
     request: EccWorkspaceStepConfigurationReadRequest,
   ): Promise<EccWorkspaceStepConfigurationReadResult> {
-    return await this.commands.readWorkspaceStepConfiguration(request)
+    const session = this.sessions.require(request.workspaceHandle)
+    const workspaceId = session.eccWorkspaceId
+    const cacheKey =
+      workspaceId && session.workspaceRevision > 0
+        ? `${workspaceId}:${session.workspaceRevision}:${request.step}`
+        : null
+    if (!cacheKey) {
+      return await this.commands.readWorkspaceStepConfiguration(request)
+    }
+    return await this.stepConfigurationCache.load(cacheKey, () =>
+      this.commands.readWorkspaceStepConfiguration(request),
+    )
   }
 
   async readWorkspaceStepConfigurationForDirectory(
@@ -419,6 +445,7 @@ export class EccWorkspaceRuntime {
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const result = await this.commands.refreshConfig(request)
     this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
     return result
   }
 
@@ -427,6 +454,7 @@ export class EccWorkspaceRuntime {
   ): Promise<EccWorkspaceResetFlowResult> {
     const result = await this.commands.resetFlow(request)
     this.cachedSnapshot = null
+    this.stepConfigurationCache.clear()
     return result
   }
 
@@ -444,8 +472,12 @@ export class EccWorkspaceRuntime {
     return this.commands.layoutEditApply(request)
   }
 
-  layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult> {
-    return this.commands.layoutEditSave(request)
+  async layoutEditSave(
+    request: EccLayoutEditSaveRequest,
+  ): Promise<EccLayoutEditSaveResult> {
+    const result = await this.commands.layoutEditSave(request)
+    this.stepConfigurationCache.clear()
+    return result
   }
 
   layoutEditDiscard(
@@ -670,6 +702,7 @@ export class EccWorkspaceRuntime {
     this.managementHelloResult = null
     this.ready = false
     this.sessions.clearEccWorkspaceIds()
+    this.stepConfigurationCache.clear()
     this.operationTracker.rejectAll(
       new Error('ECC sidecar shut down before the operation completed.'),
     )
@@ -683,6 +716,7 @@ export class EccWorkspaceRuntime {
     this.managementHelloResult = null
     this.ready = false
     this.sessions.clearEccWorkspaceIds()
+    this.stepConfigurationCache.clear()
     this.operationTracker.rejectAll(
       new Error('ECC sidecar was terminated during Force quit.'),
     )
@@ -709,6 +743,7 @@ export class EccWorkspaceRuntime {
       this.managementHelloResult = null
       this.ready = false
       this.sessions.clearEccWorkspaceIds()
+      this.stepConfigurationCache.clear()
       this.operationTracker.reset(new Error('ECC sidecar client was replaced.'))
     }
     if (this.ready) return client
@@ -875,6 +910,7 @@ export class EccWorkspaceRuntime {
       this.managementHelloResult = null
       this.ready = false
       this.sessions.clearEccWorkspaceIds()
+      this.stepConfigurationCache.clear()
       this.operationTracker.rejectAll(
         new Error('ECC sidecar exited before the operation completed.'),
       )
@@ -932,6 +968,9 @@ export class EccWorkspaceRuntime {
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const committedRevision = protocolEvent.payload.workspaceRevision
     if (session && typeof committedRevision === 'number') {
+      if (committedRevision !== session.workspaceRevision) {
+        this.stepConfigurationCache.clear()
+      }
       this.sessions.updateRevision(session.workspaceHandle, committedRevision)
     }
     const isTerminal = this.operationTracker.track(protocolEvent)
