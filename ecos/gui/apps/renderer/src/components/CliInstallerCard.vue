@@ -47,6 +47,10 @@
       <p class="cli-installer__progress-text">{{ progressText }}</p>
     </div>
 
+    <p v-if="state?.warning" class="cli-installer__warning" role="status">
+      {{ state.warning }}
+    </p>
+
     <p v-if="state?.error" class="cli-installer__error selectable" role="alert">
       {{ state.error }}
     </p>
@@ -125,9 +129,16 @@ const message = computed(() => {
     case 'installing':
       return activeJob.value?.message ?? 'Installing the ECC bundle...'
     case 'ready':
+      if (state.value?.source === 'external') {
+        return state.value?.shimPath
+          ? 'Using an external ECC runtime; ECOS Studio will not modify it.'
+          : 'Using an external ECC runtime; ECOS Studio will not modify it. Install the shim to run ecos-ecc from a terminal.'
+      }
       return 'ecos-ecc is available from any external terminal.'
     case 'self-check-failed':
-      return 'The bundle is installed but its self-check failed. See the hint below.'
+      return state.value?.source === 'external'
+        ? 'The external ECC runtime self-check failed. See the hint below.'
+        : 'The bundle is installed but its self-check failed. See the hint below.'
     case 'failed':
       return 'The last install attempt failed. Retry, or start the GUI once to download the core component.'
     default:
@@ -348,6 +359,13 @@ function emptyState(): CliInstallState {
   color: var(--text-secondary);
   font-size: 0.6875rem;
   line-height: 1.4;
+}
+
+.cli-installer__warning {
+  margin: 0.65rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.45;
 }
 
 .cli-installer__error {

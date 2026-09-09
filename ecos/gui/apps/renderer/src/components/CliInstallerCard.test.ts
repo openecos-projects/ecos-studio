@@ -311,6 +311,58 @@ describe('CliInstallerCard', () => {
     expect(wrapper.text()).toContain('Install')
   })
 
+  it('describes an external runtime and keeps it read-only in the copy', async () => {
+    mocks.fetchStatus.mockResolvedValue(
+      baseState({
+        source: 'external',
+        versionDir: '/opt/ecc/v1.0.0',
+      }),
+    )
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Using an external ECC runtime')
+    expect(wrapper.text()).toContain('will not modify it')
+    expect(wrapper.text()).toContain('/opt/ecc/v1.0.0')
+    expect(wrapper.text()).toContain('Reinstall')
+    expect(wrapper.text()).toContain('Uninstall')
+  })
+
+  it('hints at the shim install when an external runtime has no shim', async () => {
+    mocks.fetchStatus.mockResolvedValue(
+      baseState({
+        source: 'external',
+        versionDir: '/opt/ecc/v1.0.0',
+        shimPath: null,
+      }),
+    )
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Install the shim to run ecos-ecc from a terminal')
+  })
+
+  it('renders a non-blocking warning for external version drift', async () => {
+    mocks.fetchStatus.mockResolvedValue(
+      baseState({
+        source: 'external',
+        versionDir: '/opt/ecc/v2.0.0',
+        installedVersion: '2.0.0',
+        warning:
+          'The external ECC runtime reports version 2.0.0, but this release is tested against 0.1.0-alpha.11.',
+      }),
+    )
+    const wrapper = mount(CliInstallerCard)
+    await flushPromises()
+
+    const warning = wrapper.find('.cli-installer__warning')
+    expect(warning.exists()).toBe(true)
+    expect(warning.attributes('role')).toBe('status')
+    expect(warning.text()).toContain('2.0.0')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Ready')
+  })
+
   it('shows an unsupported warning without actions on non-Linux platforms', async () => {
     mocks.fetchStatus.mockResolvedValue(
       baseState({
