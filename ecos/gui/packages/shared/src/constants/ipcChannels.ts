@@ -73,6 +73,7 @@ export const desktopApiIpcChannels = {
     'workspace:retain-project-directory-replacement',
   workspaceScanPdkDirectory: 'workspace:scan-pdk-directory',
   workspaceScanRtlDirectory: 'workspace:scan-rtl-directory',
+  workspaceDiscoverHdlModules: 'workspace:discover-hdl-modules',
   workspaceListDesignFiles: 'workspace:list-design-files',
   workspaceAddDesignFiles: 'workspace:add-design-files',
   workspaceRemoveDesignFile: 'workspace:remove-design-file',

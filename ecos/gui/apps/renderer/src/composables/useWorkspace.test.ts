@@ -210,6 +210,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       retainProjectDirectoryReplacement: vi.fn(),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
+      discoverHdlModules: vi.fn(),
       listDesignFiles: vi.fn(),
       addDesignFiles: vi.fn(),
       removeDesignFile: vi.fn(),

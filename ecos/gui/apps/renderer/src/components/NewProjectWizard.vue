@@ -1310,18 +1310,20 @@
                         @input="!projectDesignName && (designNameTouched = true)"
                       />
                     </div>
-                    <div>
-                      <label
-                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                        >Top Module Name <span class="text-red-500">*</span></label
-                      >
-                      <input
-                        v-model="config.parameters.top_module"
-                        type="text"
-                        placeholder="top"
-                        class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-                      />
-                    </div>
+                    <TopModuleField
+                      :model-value="
+                        topModuleIsReadOnly
+                          ? committedTopModule
+                          : String(config.parameters.top_module ?? '')
+                      "
+                      :allow-free-text="topModuleAllowsFreeText"
+                      :candidates="topModuleCandidates"
+                      :message="topModuleFieldMessage"
+                      :readonly-input="topModuleIsReadOnly"
+                      :suggested="topModuleSuggested"
+                      @update:model-value="config.parameters.top_module = $event"
+                      @pick="onTopModulePicked"
+                    />
                     <div>
                       <label
                         class="mb-2 block text-sm font-semibold text-(--text-primary)"
@@ -1516,6 +1518,13 @@
               <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
               {{ stepFiveBlockedReason }}
             </p>
+            <p
+              v-else-if="currentStep === 6 && topModuleReturnToDesignFiles"
+              class="max-w-[52%] text-xs leading-5 text-red-500"
+            >
+              <i class="ri-error-warning-line mr-1" aria-hidden="true"></i>
+              {{ topModuleFieldMessage }}
+            </p>
             <div v-else></div>
 
             <div class="flex items-center gap-3">
@@ -1527,7 +1536,16 @@
                 Cancel
               </button>
               <button
-                v-if="currentStep < steps.length"
+                v-if="currentStep === 6 && topModuleReturnToDesignFiles"
+                type="button"
+                class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90"
+                @click="jumpToStep(4)"
+              >
+                Return to Design Files
+                <i class="ri-arrow-left-line"></i>
+              </button>
+              <button
+                v-else-if="currentStep < steps.length"
                 type="button"
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
                 :disabled="!canProceed"
@@ -1540,7 +1558,7 @@
                 <i class="ri-arrow-right-line"></i>
               </button>
               <button
-                v-else
+                v-else-if="currentStep === steps.length"
                 type="button"
                 class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color) px-5 py-2.5 text-sm font-bold text-white transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
                 :disabled="!canProceed || isCreating"
@@ -1589,7 +1607,17 @@ import {
 } from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
 import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
+import TopModuleField from './TopModuleField.vue'
 import WorkspaceCatalogParameters from './WorkspaceCatalogParameters.vue'
+import {
+  canSubmitTopModule,
+  designInputFingerprint,
+  exclusiveDesignFilesReady,
+  exclusiveRtlFilelistPrefill,
+  nextTopModuleSelection,
+  topModuleBlockedReason,
+} from './topModuleConfirmation'
+import type { HdlModuleDiscoveryResult } from '@ecos-studio/shared'
 
 interface Emits {
   (e: 'close'): void
@@ -1682,6 +1710,33 @@ onBeforeUnmount(() => {
 const currentStep = ref(1)
 const highestStep = ref(1)
 const isCreating = ref(false)
+const topModuleDiscovery = ref<HdlModuleDiscoveryResult | null>(null)
+const topModuleDiscoverySeen = ref(false)
+const topModuleUserPickedOther = ref(false)
+const lastTopModuleSuggested = ref('')
+const lastTopModuleFingerprint = ref('')
+const lastTopModuleDesignName = ref('')
+let topModuleDiscoveryToken = 0
+const committedTopModule = String(
+  props.initialConfig?.parameters?.top_module ?? '',
+).trim()
+const projectManifestTopModule = ref('')
+const initialDesignInputFingerprint = designInputFingerprint({
+  filelist: String(
+    props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? '',
+  ),
+  originVerilog: String(
+    props.initialConfig?.origin_verilog ??
+      props.initialConfig?.source_config?.origin_verilog ??
+      '',
+  ),
+  rtlList: [
+    ...(props.initialConfig?.rtl_list ?? []),
+    ...(props.initialConfig?.source_config?.rtl_list ?? []),
+  ].filter(Boolean),
+  startsFromSynthesis:
+    (props.initialConfig?.flow_config?.start_step ?? 'Synthesis') === 'Synthesis',
+})
 const {
   explicitValues: explicitCatalogParameterValues,
   parameters: extraCreationParameters,
@@ -2227,14 +2282,15 @@ const designInputTypes = computed<DesignInputType[]>(() => {
         key: 'rtl',
         label: 'RTL',
         required: true,
-        description: 'Import RTL source files or scan an RTL source folder.',
+        description:
+          'Import RTL source files or scan an RTL source folder. RTL and filelist are exclusive.',
       },
       {
         key: 'filelist',
         label: 'Filelist',
         required: false,
         description:
-          'Use an existing filelist instead of manually selecting every RTL file.',
+          'Use an existing filelist instead of selecting RTL files. RTL and filelist are exclusive.',
       },
       {
         key: 'sdc',
@@ -2619,25 +2675,34 @@ function applyProjectDesignFileDefaults(
   baseDesign: ProjectManifest['base_design'] & Record<string, unknown>,
   parameters: Record<string, unknown>,
 ) {
-  if (
+  const projectFilelist = firstString(baseDesign.filelist, parameters.filelist)
+  const projectRtl =
     startsFromSynthesis.value &&
     Array.isArray(baseDesign.rtl_list) &&
     baseDesign.rtl_list.length > 0 &&
     !hasInitialRtlList()
-  ) {
-    const rtlList = uniquePaths(baseDesign.rtl_list)
-    manuallyAddedFiles.value = rtlList
-    config.value.rtl_list = rtlList
-  }
-
-  const projectFilelist = firstString(baseDesign.filelist, parameters.filelist)
-  if (
-    startsFromSynthesis.value &&
-    projectFilelist &&
-    !filelistPath.value &&
-    !hasInitialConfigValue('filelist')
-  ) {
-    filelistPath.value = projectFilelist
+      ? uniquePaths(baseDesign.rtl_list)
+      : []
+  if (startsFromSynthesis.value) {
+    const exclusive = exclusiveRtlFilelistPrefill(
+      projectRtl,
+      hasInitialConfigValue('filelist') ? filelistPath.value : projectFilelist,
+    )
+    if (!hasInitialRtlList()) {
+      manuallyAddedFiles.value = exclusive.rtlList
+      config.value.rtl_list = exclusive.rtlList
+    }
+    if (!filelistPath.value && !hasInitialConfigValue('filelist')) {
+      filelistPath.value = exclusive.filelist
+    } else if (
+      exclusive.filelist &&
+      exclusive.rtlList.length === 0 &&
+      !hasInitialRtlList()
+    ) {
+      filelistPath.value = exclusive.filelist
+      manuallyAddedFiles.value = []
+      config.value.rtl_list = []
+    }
   }
 
   const projectSdc = firstString(baseDesign.sdc, parameters.sdc)
@@ -2693,15 +2758,14 @@ function applyProjectParameterDefaults(
   manifest: ProjectManifest,
   parameters: Record<string, unknown>,
 ) {
-  setStringParameterDefault(
-    'top_module',
-    firstString(
-      parameters.top_module,
-      parameters.Top,
-      parameters['Top Module'],
-      manifest.base_design.top_module,
-    ),
+  const manifestTop = firstString(
+    parameters.top_module,
+    parameters.Top,
+    parameters['Top Module'],
+    manifest.base_design.top_module,
   )
+  projectManifestTopModule.value = manifestTop
+  setStringParameterDefault('top_module', manifestTop)
   setStringParameterDefault(
     'clock',
     firstString(parameters.clock, parameters.Clock, manifest.base_design.clock),
@@ -3112,6 +3176,9 @@ function syncRtlList() {
     ...directorySelectedFiles.value,
     ...manuallyAddedFiles.value,
   ])
+  if (startsFromSynthesis.value && config.value.rtl_list.length > 0) {
+    filelistPath.value = ''
+  }
   syncWorkspaceConfig()
 }
 
@@ -3173,7 +3240,16 @@ async function importDesignInput(type: DesignInputKey) {
     return
   }
 
-  if (type === 'filelist') filelistPath.value = file
+  if (type === 'filelist') {
+    filelistPath.value = file
+    if (startsFromSynthesis.value) {
+      config.value.rtl_list = []
+      manuallyAddedFiles.value = []
+      directorySelectedFiles.value = []
+      rtlSourceDirectory.value = null
+      scannedRtlFiles.value = []
+    }
+  }
   if (type === 'sdc') sdcPath.value = file
   if (type === 'def') config.value.origin_def = file
   if (type === 'verilog') config.value.origin_verilog = file
@@ -3247,7 +3323,7 @@ function getDesignInputStatus(type: DesignInputKey) {
 
 function designFilesReady() {
   if (startsFromSynthesis.value) {
-    return config.value.rtl_list.length > 0 || filelistPath.value.trim() !== ''
+    return exclusiveDesignFilesReady(config.value.rtl_list, filelistPath.value)
   }
   if (startsFromFloorplan.value) {
     return config.value.origin_verilog.trim() !== ''
@@ -3370,7 +3446,9 @@ function specReady() {
   const params = config.value.parameters
   const hasCoreFields =
     String(params.design || '').trim() !== '' &&
-    String(params.top_module || '').trim() !== '' &&
+    canSubmitTopModule(topModuleDiscovery.value, String(params.top_module || ''), {
+      readOnlyCommitted: topModuleIsReadOnly.value,
+    }) &&
     String(params.clock || '').trim() !== '' &&
     Number(params.frequency_max) > 0 &&
     Number(params.max_fanout) > 0
@@ -3463,6 +3541,9 @@ function nextStep() {
     if (currentStep.value === 5) {
       void ensurePdksLoaded()
     }
+    if (currentStep.value === 6) {
+      void refreshTopModuleDiscovery()
+    }
   }
 }
 
@@ -3471,6 +3552,9 @@ function jumpToStep(step: number) {
   highestStep.value = Math.max(highestStep.value, step)
   if (step === 5) {
     void ensurePdksLoaded()
+  }
+  if (step === 6) {
+    void refreshTopModuleDiscovery()
   }
 }
 
@@ -3487,7 +3571,122 @@ function prevStep() {
   }
 }
 
-async function createWorkspace() {
+async function refreshTopModuleDiscovery() {
+  const requestToken = ++topModuleDiscoveryToken
+  if (topModuleIsReadOnly.value) {
+    topModuleDiscovery.value = {
+      candidates: committedTopModule ? [committedTopModule] : [],
+      status: 'complete',
+      suggested: committedTopModule,
+    }
+    config.value.parameters.top_module = committedTopModule
+    return
+  }
+  const fingerprint = currentDesignInputFingerprint()
+  const pathsChanged = fingerprint !== lastTopModuleFingerprint.value
+  const designName = String(config.value.parameters.design || '').trim()
+  const designNameChanged = designName !== lastTopModuleDesignName.value
+  const request = startsFromSynthesis.value
+    ? exclusiveDesignFilesReady(config.value.rtl_list, filelistPath.value) &&
+      filelistPath.value.trim()
+      ? { filelistPath: filelistPath.value.trim(), designName }
+      : { rtlPaths: [...config.value.rtl_list], designName }
+    : { originVerilogPath: config.value.origin_verilog.trim(), designName }
+  const sourceTop = String(
+    props.initialConfig?.source_config?.parameters?.top_module ?? '',
+  ).trim()
+  try {
+    const result = await getDesktopApi().workspace.discoverHdlModules({
+      ...request,
+      manifestTopModule: projectManifestTopModule.value || undefined,
+      sourceTopModule: sourceTop || undefined,
+    })
+    if (requestToken !== topModuleDiscoveryToken) return
+    const nextValue = nextTopModuleSelection({
+      currentValue: String(config.value.parameters.top_module || ''),
+      designNameChanged,
+      pathsChanged,
+      previousSuggested: lastTopModuleSuggested.value,
+      result,
+      seenDropdown: topModuleDiscoverySeen.value,
+      userPickedOther: topModuleUserPickedOther.value,
+    })
+    topModuleDiscovery.value = result
+    lastTopModuleFingerprint.value = fingerprint
+    lastTopModuleDesignName.value = designName
+    lastTopModuleSuggested.value = result.suggested
+    if (result.status === 'complete' && result.candidates.length > 0) {
+      topModuleDiscoverySeen.value = true
+    }
+    if (pathsChanged) topModuleUserPickedOther.value = false
+    config.value.parameters.top_module = nextValue
+  } catch (error) {
+    if (requestToken !== topModuleDiscoveryToken) return
+    topModuleDiscovery.value = {
+      candidates: [],
+      reason: error instanceof Error ? error.message : 'HDL discovery failed.',
+      status: 'total_read_failure',
+      suggested: '',
+    }
+  }
+}
+
+function currentDesignInputFingerprint() {
+  return designInputFingerprint({
+    filelist: filelistPath.value,
+    originVerilog: config.value.origin_verilog,
+    rtlList: config.value.rtl_list,
+    startsFromSynthesis: startsFromSynthesis.value,
+  })
+}
+
+function onTopModulePicked(value: string) {
+  topModuleUserPickedOther.value = value !== topModuleSuggested.value
+}
+
+const topModuleIsReadOnly = computed(() => {
+  if (!lockWorkspaceDirectory.value || !committedTopModule) return false
+  return currentDesignInputFingerprint() === initialDesignInputFingerprint
+})
+const topModuleAllowsFreeText = computed(() => {
+  const result = topModuleDiscovery.value
+  return (
+    !topModuleIsReadOnly.value &&
+    (result?.status === 'incomplete' || result?.status === 'total_read_failure')
+  )
+})
+const topModuleCandidates = computed(() => topModuleDiscovery.value?.candidates ?? [])
+const topModuleSuggested = computed(() => topModuleDiscovery.value?.suggested ?? '')
+const topModuleFieldMessage = computed(() =>
+  topModuleIsReadOnly.value ? '' : topModuleBlockedReason(topModuleDiscovery.value),
+)
+const topModuleReturnToDesignFiles = computed(() => {
+  const result = topModuleDiscovery.value
+  if (topModuleIsReadOnly.value || !result) return false
+  return (
+    (result.status === 'complete' && result.candidates.length === 0) ||
+    result.status === 'partial_read_failure'
+  )
+})
+
+watch(currentStep, (step) => {
+  if (step === 6) void refreshTopModuleDiscovery()
+})
+
+watch(
+  () => [
+    filelistPath.value,
+    config.value.origin_verilog,
+    config.value.rtl_list.join('|'),
+    config.value.parameters.design,
+  ],
+  () => {
+    if (currentStep.value === 6) void refreshTopModuleDiscovery()
+  },
+)
+
+function createWorkspace() {
+  if (!specReady()) return
   syncWorkspaceConfig()
   isCreating.value = true
   try {

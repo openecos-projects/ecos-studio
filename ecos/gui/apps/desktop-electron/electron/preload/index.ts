@@ -305,6 +305,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),
     scanRtlDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanRtlDirectory, path),
+    discoverHdlModules: (request) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceDiscoverHdlModules, request),
     listDesignFiles: () => invokeDesktop(desktopApiIpcChannels.workspaceListDesignFiles),
     addDesignFiles: (sourcePaths) =>
       invokeDesktop(desktopApiIpcChannels.workspaceAddDesignFiles, sourcePaths),

@@ -2,14 +2,25 @@
   <AgentExecutionContractPanel
     :answered-option-id="answeredOptionId"
     :choice="choice"
-    :choice-disabled="choiceDisabled"
+    :choice-disabled="choiceDisabled || !canConfirmTopModule"
     :confirmation-text="confirmationText"
     :execution-state="executionState"
     :rows="specRows"
     :summary="committedSummary"
     :title="displayTitle"
     @select="emit('select', $event)"
-  />
+  >
+    <template #before-choice>
+      <TopModuleField
+        v-if="executionState === 'Review'"
+        v-model="confirmedTopModule"
+        :allow-free-text="topModuleAllowsFreeText"
+        :candidates="topModuleCandidates"
+        :message="topModuleMessage"
+        :suggested="topModuleSuggested"
+      />
+    </template>
+  </AgentExecutionContractPanel>
 </template>
 
 <script setup lang="ts">
@@ -18,10 +29,14 @@ import type {
   DesktopAgentChoice,
   DesktopAgentChoiceOption,
   DesktopAgentWorkspaceSetupContract,
+  HdlModuleDiscoveryResult,
 } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
+import { getDesktopApi } from '@/platform/desktop'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
+import TopModuleField from './TopModuleField.vue'
+import { canSubmitTopModule, topModuleBlockedReason } from './topModuleConfirmation'
 
 const props = defineProps<{
   answeredOptionId?: string
@@ -37,6 +52,9 @@ const emit = defineEmits<{
 }>()
 
 const submittedSetupId = ref('')
+const confirmedTopModule = ref('')
+const topModuleDiscovery = ref<HdlModuleDiscoveryResult | null>(null)
+let topModuleDiscoveryToken = 0
 const displayTitle = computed(() =>
   displayAgentContractTitle(props.contract?.title ?? ''),
 )
@@ -82,7 +100,7 @@ const specRows = computed<[string, string][]>(() => {
     ['PDK', contract.pdk],
     ['PDK Root', contract.pdk_root],
     ['PDK Config Mode', contract.pdk_config_mode],
-    ['Top Module', parameters.top_module],
+    ['Top Module', confirmedTopModule.value || parameters.top_module || '-'],
     ['Clock', parameters.clock],
     ['Frequency Max (MHz)', String(parameters.frequency_max)],
     ['Max Fanout', String(parameters.max_fanout)],
@@ -100,8 +118,19 @@ const specRows = computed<[string, string][]>(() => {
   ]
 })
 
+const topModuleCandidates = computed(() => topModuleDiscovery.value?.candidates ?? [])
+const topModuleSuggested = computed(() => topModuleDiscovery.value?.suggested ?? '')
+const topModuleAllowsFreeText = computed(() => {
+  const status = topModuleDiscovery.value?.status
+  return status === 'incomplete' || status === 'total_read_failure'
+})
+const topModuleMessage = computed(() => topModuleBlockedReason(topModuleDiscovery.value))
+const canConfirmTopModule = computed(() =>
+  canSubmitTopModule(topModuleDiscovery.value, confirmedTopModule.value),
+)
+
 watch(
-  [() => props.contract, () => props.createSetupId],
+  [() => props.contract, () => props.createSetupId, canConfirmTopModule],
   ([contract, setupId]) => {
     if (!setupId) {
       submittedSetupId.value = ''
@@ -109,11 +138,58 @@ watch(
     }
     if (!contract || setupId !== contract.setup_id || submittedSetupId.value === setupId)
       return
+    if (!canConfirmTopModule.value) return
     submittedSetupId.value = setupId
     emit('createWorkspace', workspaceConfig(contract), contract)
   },
   { immediate: true },
 )
+
+watch(
+  () => props.contract,
+  (contract) => {
+    confirmedTopModule.value = contract?.parameters.top_module ?? ''
+    void refreshTopModuleDiscovery()
+  },
+  { immediate: true },
+)
+
+async function refreshTopModuleDiscovery() {
+  const contract = props.contract
+  const requestToken = ++topModuleDiscoveryToken
+  if (!contract) {
+    topModuleDiscovery.value = null
+    return
+  }
+  try {
+    const result = await getDesktopApi().workspace.discoverHdlModules(
+      contract.filelist
+        ? {
+            designName: contract.parameters.design,
+            filelistPath: contract.filelist,
+          }
+        : {
+            designName: contract.parameters.design,
+            rtlPaths: contract.rtl_list,
+          },
+    )
+    if (requestToken !== topModuleDiscoveryToken) return
+    topModuleDiscovery.value = result
+    if (result.status === 'complete' && result.candidates.length > 0) {
+      confirmedTopModule.value = result.candidates.includes(confirmedTopModule.value)
+        ? confirmedTopModule.value
+        : result.suggested
+    }
+  } catch (error) {
+    if (requestToken !== topModuleDiscoveryToken) return
+    topModuleDiscovery.value = {
+      candidates: [],
+      reason: error instanceof Error ? error.message : 'HDL discovery failed.',
+      status: 'total_read_failure',
+      suggested: '',
+    }
+  }
+}
 
 function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): WorkspaceConfig {
   return {
@@ -123,7 +199,7 @@ function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): Workspac
     flow_config: contract.flow_config,
     origin_def: '',
     origin_verilog: '',
-    parameters: { ...contract.parameters },
+    parameters: { ...contract.parameters, top_module: confirmedTopModule.value },
     pdk: contract.pdk,
     pdk_config: contract.pdk_config,
     pdk_config_mode: contract.pdk_config_mode,

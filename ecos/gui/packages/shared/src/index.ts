@@ -157,6 +157,9 @@ export type {
   PdkDetectedFiles,
   ScannedPdkDirectory,
   ScannedRtlDirectory,
+  HdlModuleDiscoveryRequest,
+  HdlModuleDiscoveryResult,
+  HdlModuleDiscoveryStatus,
   VersionInfo,
   WorkspaceDirectoryReplacement,
   WorkspaceOpenOrFocusResult,
@@ -372,6 +375,7 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export { isVerilogIdentifier } from './utils/verilogIdentifier.ts'
 export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
   projectManagementStaTimingIssuesPath,

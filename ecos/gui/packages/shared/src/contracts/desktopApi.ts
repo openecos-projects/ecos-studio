@@ -127,6 +127,28 @@ export interface ScannedRtlDirectory {
   files: string[]
 }
 
+export type HdlModuleDiscoveryStatus =
+  | 'complete'
+  | 'partial_read_failure'
+  | 'total_read_failure'
+  | 'incomplete'
+
+export interface HdlModuleDiscoveryRequest {
+  designName?: string
+  filelistPath?: string
+  manifestTopModule?: string
+  originVerilogPath?: string
+  rtlPaths?: string[]
+  sourceTopModule?: string
+}
+
+export interface HdlModuleDiscoveryResult {
+  candidates: string[]
+  reason?: string
+  status: HdlModuleDiscoveryStatus
+  suggested: string
+}
+
 export interface VersionInfo {
   gui: string
   runtime: string
@@ -309,6 +331,9 @@ export interface DesktopApi {
     retainProjectDirectoryReplacement(replacementId: string): Promise<void>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
     scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    discoverHdlModules(
+      request: HdlModuleDiscoveryRequest,
+    ): Promise<HdlModuleDiscoveryResult>
     listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>
     addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult>
     removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null>

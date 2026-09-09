@@ -86,6 +86,8 @@ import {
   type DesktopShellSessionOptions,
   type ScannedPdkDirectory,
   type ScannedRtlDirectory,
+  type HdlModuleDiscoveryRequest,
+  type HdlModuleDiscoveryResult,
   type VersionInfo,
   type WorkspaceDirectoryReplacement,
   type WorkspaceOpenOrFocusResult,
@@ -303,6 +305,9 @@ export interface DesktopBridgeServices {
     requestProjectPathAccess(path: string): Promise<string>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
     scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    discoverHdlModules(
+      request: HdlModuleDiscoveryRequest,
+    ): Promise<HdlModuleDiscoveryResult>
     listDesignFiles(): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry[]>
     addDesignFiles(
       sourcePaths: string[],
@@ -1947,6 +1952,12 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.workspaceScanRtlDirectory, async (_event, path) => {
     return await services.workspaceService.scanRtlDirectory(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceDiscoverHdlModules, async (_event, request) => {
+    return await services.workspaceService.discoverHdlModules(
+      (request ?? {}) as HdlModuleDiscoveryRequest,
+    )
   })
 
   handle(desktopApiIpcChannels.workspaceListDesignFiles, async () => {

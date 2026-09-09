@@ -192,7 +192,6 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
         "",
         "",
         "",
-        "",
         "target overflow is 0.1",
     ):
         _send(provider, session_id, message)
@@ -633,7 +632,7 @@ def test_rerun_workspace_invalid_path_reemits_current_workspace_choice(
     )
 
 
-def test_workspace_contract_validation_failure_reemits_top_choice(
+def test_workspace_contract_skips_top_module_chat_prompt(
     tmp_path: Path,
 ) -> None:
     rtl, _filelist, _sdc, pdk = _write_workspace_inputs(tmp_path)
@@ -649,7 +648,7 @@ def test_workspace_contract_validation_failure_reemits_top_choice(
     session.workspace_setup = _proposal(
         workspace_name="ws_0001",
         design_name="gcd",
-        top_module="gcd",
+        top_module=None,
         clock_name="clk",
         frequency_mhz=100,
         max_fanout=32,
@@ -664,11 +663,19 @@ def test_workspace_contract_validation_failure_reemits_top_choice(
 
     _send(provider, session_id, "0.1")
 
-    assert session.phase == "workspace_top"
-    choice = _last_event(events, "choice")["choice"]
-    assert choice["title"] == "Top Module Name"
-    assert [option["value"] for option in choice["options"]] == ["gcd"]
-    assert _last_event(events, "status")["status"] == "awaiting_choice"
+    assert session.phase == "workspace_confirmation"
+    setup = next(
+        event["workspaceSetup"]
+        for event in events
+        if event["type"] == "workspace_setup"
+    )
+    assert setup["schema_version"] == "flow-agent.workspace_setup_contract.v2"
+    assert setup["parameters"]["top_module"] == ""
+    assert not any(
+        event.get("type") == "choice"
+        and str(event.get("choice", {}).get("title", "")) == "Top Module Name"
+        for event in events
+    )
 
 
 def test_workspace_parameter_request_uses_describe_change_prompt(
@@ -1026,10 +1033,14 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(
     assert pdk_choice["options"][0]["value"] == display_path(str(pdk))
 
     _send(provider, session_id, pdk_choice["options"][0]["value"])
-    assert session.phase == "workspace_top"
-    top_choice = _last_event(events, "choice")["choice"]
-    assert top_choice["options"][0]["label"].startswith("Use default:")
-    assert top_choice["allowFreeText"] is True
+    assert session.phase == "workspace_clock"
+    clock_choice = _last_event(events, "choice")["choice"]
+    assert clock_choice["title"] == "Clock Signal Name"
+    assert not any(
+        event.get("type") == "choice"
+        and str(event.get("choice", {}).get("title", "")) == "Top Module Name"
+        for event in events
+    )
 
 
 def test_workspace_confirmation_accepts_deterministic_frequency_and_workspace_name(

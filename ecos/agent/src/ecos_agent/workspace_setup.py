@@ -15,7 +15,6 @@ from ecos_agent.contracts import (
 )
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _WORKSPACE_ID = re.compile(r"^ws_(\d+)$")
-_MODULE = re.compile(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_$]*)\b", re.MULTILINE)
 _CLOCK = re.compile(r"\b(?:input|inout)\b[^;]*?\b([A-Za-z_][A-Za-z0-9_$]*(?:clk|clock)[A-Za-z0-9_$]*)\b", re.IGNORECASE)
 _SDC_PERIOD = re.compile(r"\bcreate_clock\b[^\n]*?\s-period\s+([0-9]+(?:\.[0-9]+)?)")
 _BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -270,14 +269,11 @@ def display_path(path: str) -> str:
         return str(candidate)
 
 
-def infer_design_defaults(rtl_path: str, sdc_path: str, design_name: str = "") -> dict[str, Any]:
+def infer_clock_and_frequency_defaults(rtl_path: str, sdc_path: str) -> dict[str, Any]:
     source = _without_verilog_comments(_read_text(rtl_path))
-    modules = _MODULE.findall(source)
-    top_module = design_name if design_name in modules else (modules[0] if modules else Path(rtl_path).stem)
     clock = _CLOCK.search(source)
     frequency_mhz = _frequency_from_sdc(sdc_path)
     return {
-        "top_module": top_module,
         "clock_name": clock.group(1) if clock else "clk",
         "frequency_mhz": frequency_mhz if frequency_mhz is not None else 50,
     }
@@ -361,11 +357,6 @@ def _validate_workspace_proposal(
         raise ValueError("Workspace Name must be provided")
     if not proposal.design_name:
         raise ValueError("Design Name must be provided")
-    if not proposal.top_module:
-        raise ValueError("Top Module Name must be provided")
-    modules = _MODULE.findall(_without_verilog_comments(_read_text(inputs.rtl_path)))
-    if proposal.top_module not in modules:
-        raise ValueError("Top Module Name must be declared by the RTL path")
 
 
 def _workspace_directory(inputs: WorkspaceInputs, proposal: GuiWorkspaceSetupProposal) -> str:

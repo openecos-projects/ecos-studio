@@ -14,12 +14,15 @@ import type {
   DesktopProjectDirectoryEntry,
   DesktopProjectTextFileChunk,
   DesktopProjectTextFileTail,
+  HdlModuleDiscoveryRequest,
+  HdlModuleDiscoveryResult,
   ScannedPdkDirectory,
   ScannedRtlDirectory,
   WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
 import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
+import { discoverHdlModules as discoverHdlModulesFromSources } from './hdlModuleDiscovery'
 import {
   addWorkspaceDesignFiles,
   getWorkspaceFilelistPath,
@@ -834,6 +837,12 @@ export class WorkspaceService {
 
   async scanRtlDirectory(path: string): Promise<ScannedRtlDirectory> {
     return await scanRtlDirectoryFiles(path)
+  }
+
+  async discoverHdlModules(
+    request: HdlModuleDiscoveryRequest,
+  ): Promise<HdlModuleDiscoveryResult> {
+    return await discoverHdlModulesFromSources(request)
   }
 
   async listDesignFiles(): Promise<WorkspaceDesignFileEntry[]> {

@@ -711,9 +711,6 @@ def _prompt_for_phase(session: Any) -> str:
         "workspace_pdk": pdk_prompt(
             session.language, _recommended_path(session, "pdk")
         ),
-        "workspace_top": default_value_prompt(
-            session.language, "Top Module Name", session.workspace_setup.top_module
-        ),
         "workspace_clock": default_value_prompt(
             session.language, "Clock Signal Name", session.workspace_setup.clock_name
         ),

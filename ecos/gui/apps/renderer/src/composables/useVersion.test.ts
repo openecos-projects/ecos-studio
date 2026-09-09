@@ -115,6 +115,11 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         rootPath: '',
         files: [],
       }),
+      discoverHdlModules: async () => ({
+        candidates: [],
+        status: 'complete',
+        suggested: '',
+      }),
       listDesignFiles: async () => [],
       addDesignFiles: async () => ({ added: [], skipped: [] }),
       removeDesignFile: async () => null,

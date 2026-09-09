@@ -66,7 +66,7 @@ from ecos_agent.workspace_setup import (
     derive_project_name,
     discover_ecos_pdk_paths,
     discover_design_file_candidates,
-    infer_design_defaults,
+    infer_clock_and_frequency_defaults,
     merge_workspace_inputs,
     merge_workspace_setup,
     normalize_identifier,
@@ -412,7 +412,6 @@ class EcosAgentProvider:
             "workspace_filelist": self._select_filelist,
             "workspace_sdc": self._select_sdc,
             "workspace_pdk": self._select_pdk,
-            "workspace_top": self._select_top_module,
             "workspace_clock": self._select_clock,
             "workspace_frequency": self._select_frequency,
             "workspace_max_fanout": self._select_max_fanout,
@@ -1299,15 +1298,7 @@ class EcosAgentProvider:
                 ),
             )
             return
-        session.phase = "workspace_top"
-        self._emit(
-            session,
-            "message",
-            default_value_prompt(
-                session.language, "Top Module Name", session.workspace_setup.top_module
-            ),
-        )
-        self._emit_phase_choice(session)
+        self._begin_clock_prompt(session)
 
     def _select_design_name(self, session: _Session, message: str) -> None:
         recommendation = (
@@ -1330,18 +1321,7 @@ class EcosAgentProvider:
         self._emit(session, "message", flow_end_prompt(session.language))
         self._emit_phase_choice(session)
 
-    def _select_top_module(self, session: _Session, message: str) -> None:
-        message = resolve_emptyable_answer(message)
-        try:
-            top_module = (
-                normalize_identifier(message, label="Top Module Name")
-                if message
-                else session.workspace_setup.top_module
-            )
-        except ValueError as exc:
-            self._repeat_setup_default(session, "Top Module Name", str(exc))
-            return
-        self._update_workspace_setup(session, top_module=top_module)
+    def _begin_clock_prompt(self, session: _Session) -> None:
         session.phase = "workspace_clock"
         self._emit(
             session,
@@ -1743,21 +1723,11 @@ class EcosAgentProvider:
                 "message",
                 invalid_value(session.language, "Workspace specification", str(exc)),
             )
-            session.phase = (
-                "workspace_top"
-                if "Top Module" in str(exc)
-                else "workspace_project_root"
-            )
+            session.phase = "workspace_project_root"
             self._emit(
                 session,
                 "message",
-                default_value_prompt(
-                    session.language,
-                    "Top Module Name",
-                    session.workspace_setup.top_module,
-                )
-                if session.phase == "workspace_top"
-                else project_root_prompt(
+                project_root_prompt(
                     session.language, creating=session.creating_project
                 ),
             )
@@ -1919,7 +1889,6 @@ class EcosAgentProvider:
         self._emit(session, "message", invalid_value(session.language, label, error))
         values = {
             "Design Name": session.workspace_setup.design_name,
-            "Top Module Name": session.workspace_setup.top_module,
             "Clock Signal Name": session.workspace_setup.clock_name,
         }
         self._emit(
@@ -1937,10 +1906,9 @@ class EcosAgentProvider:
         self._emit_phase_choice(session)
 
     def _apply_detected_defaults(self, session: _Session) -> None:
-        defaults = infer_design_defaults(
+        defaults = infer_clock_and_frequency_defaults(
             session.workspace_inputs.rtl_path,
             session.workspace_inputs.sdc_path,
-            session.workspace_setup.design_name or "",
         )
         self._update_workspace_setup(session, **defaults)
 
@@ -1957,9 +1925,7 @@ class EcosAgentProvider:
         )
         if proposal.rtl_path is None and proposal.sdc_path is None:
             return setup, inputs
-        defaults = infer_design_defaults(
-            inputs.rtl_path, inputs.sdc_path, setup.design_name or ""
-        )
+        defaults = infer_clock_and_frequency_defaults(inputs.rtl_path, inputs.sdc_path)
         updates = {
             key: value
             for key, value in defaults.items()
@@ -2180,13 +2146,6 @@ class EcosAgentProvider:
                     recommendation,
                     field="PDK",
                 )
-        elif session.phase == "workspace_top":
-            choice = default_value_choice(
-                session.language,
-                prompt_id,
-                "Top Module Name",
-                session.workspace_setup.top_module,
-            )
         elif session.phase == "workspace_clock":
             choice = default_value_choice(
                 session.language,
@@ -2318,7 +2277,6 @@ class EcosAgentProvider:
                 "workspace_filelist",
                 "workspace_sdc",
                 "workspace_pdk",
-                "workspace_top",
                 "workspace_clock",
                 "workspace_frequency",
                 "workspace_max_fanout",
