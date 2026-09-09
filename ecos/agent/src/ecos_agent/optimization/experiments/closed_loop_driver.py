@@ -50,8 +50,8 @@ BASELINE: dict[str, object] = {
     "density_weight": 0.00085,
 }
 
-# 时钟端口名来自各设计 SDC（已核实：gcd=clk，cia=E_CLK）。
-CLOCK = {"gcd": "clk", "cia": "E_CLK"}
+# 顶层模块名与设计 id 不同的设计（已对照各 rtl/ 源码核实），其余默认 design_id。
+TOP_MODULE = {"cordic": "CORDIC", "ov7670": "top"}
 
 _ACTIVE = {
     OptimizationEpisodeState.CREATED,
@@ -77,8 +77,16 @@ def _self_check() -> None:
     }, "baseline keys must match the Phase-8 frozen nine-key set"
     assert type(BASELINE["routability_opt"]) is bool
     assert all(
-        _RUN_ID.fullmatch(CLOCK[design]) is None or True for design in CLOCK
-    )
+        _RUN_ID.fullmatch(item) for item in TOP_MODULE
+    ), "top-module override keys must be valid design ids"
+
+
+def _clock_from_sdc(sdc: Path) -> str:
+    for line in sdc.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"\s*set\s+clk_port_name\s+(\S+)", line)
+        if match:
+            return match.group(1)
+    raise SystemExit(f"SDC has no clk_port_name: {sdc}")
 
 
 def load_design(designs_root: Path, design_id: str) -> DesignSpec:
@@ -92,8 +100,8 @@ def load_design(designs_root: Path, design_id: str) -> DesignSpec:
             raise SystemExit(f"missing design input: {path}")
     return DesignSpec(
         design_id=design_id,
-        top_module=design_id,
-        clock_name=CLOCK[design_id],
+        top_module=TOP_MODULE.get(design_id, design_id),
+        clock_name=_clock_from_sdc(sdc),
         filelist=filelist.resolve(),
         rtl_list=rtl,
         sdc=sdc.resolve(),
@@ -103,7 +111,7 @@ def load_design(designs_root: Path, design_id: str) -> DesignSpec:
 def main(provider_factory: Callable[..., Any]) -> int:
     _self_check()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--design", required=True, choices=("gcd", "cia"))
+    parser.add_argument("--design", required=True)
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--designs-root", type=Path, required=True)
     parser.add_argument("--pdk-root", type=Path, required=True)
@@ -116,6 +124,8 @@ def main(provider_factory: Callable[..., Any]) -> int:
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
     parser.add_argument("--episode-id", default=None)  # 同 id 重启 = resume
     args = parser.parse_args()
+    if not _RUN_ID.fullmatch(args.design):
+        raise SystemExit(f"design id is invalid: {args.design}")
 
     design = load_design(args.designs_root.resolve(), args.design)
     manifest = ExperimentManifest(
@@ -290,4 +300,6 @@ def main(provider_factory: Callable[..., Any]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from ecos_agent.codex.provider import CodexAppServerProposalProvider
+
+    sys.exit(main(CodexAppServerProposalProvider))
