@@ -16,6 +16,8 @@ export interface RuntimeSidecarLifecycleOptions {
  */
 export class RuntimeSidecarLifecycle {
   private diagnosticReleaseTimer: ReturnType<typeof setTimeout> | null = null
+  /** The asynchronous sidecar close that follows the retention timer. */
+  private diagnosticCloseTask: Promise<void> | null = null
   private finalSnapshotTask: Promise<void> | null = null
 
   constructor(private readonly options: RuntimeSidecarLifecycleOptions) {}
@@ -25,8 +27,9 @@ export class RuntimeSidecarLifecycle {
   }
 
   /** True while a failed operation is being retained for diagnostics. */
+  /** True during the retention timer AND the asynchronous close that follows. */
   hasDiagnosticRetention(): boolean {
-    return this.diagnosticReleaseTimer !== null
+    return this.diagnosticReleaseTimer !== null || this.diagnosticCloseTask !== null
   }
 
   waitForFinalSnapshot(): Promise<void> | null {
@@ -53,10 +56,18 @@ export class RuntimeSidecarLifecycle {
     this.diagnosticReleaseTimer = setTimeout(() => {
       this.diagnosticReleaseTimer = null
       if (this.options.hasActiveOperations()) return
-      void this.options.closeSidecar().then(
-        () => this.options.emitIdle(),
-        (error: unknown) => this.options.emitError(errorMessage(error)),
+      // Keep retention flagged while the asynchronous close is running.
+      const closeTask = this.options.closeSidecar().then(
+        () => {
+          this.diagnosticCloseTask = null
+          this.options.emitIdle()
+        },
+        (error: unknown) => {
+          this.diagnosticCloseTask = null
+          this.options.emitError(errorMessage(error))
+        },
       )
+      this.diagnosticCloseTask = closeTask
     }, timeoutMs)
   }
 

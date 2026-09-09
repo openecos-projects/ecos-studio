@@ -1873,6 +1873,8 @@ const pdkBaseline = ref<{
   pdkRequirement: PdkRequirement | null
   pdkRoot: string | null
   selectedPdkId: string | null
+  pdkSelections: string
+  pdkConfigMode: string
 } | null>(null)
 
 /**
@@ -1887,6 +1889,8 @@ function snapshotPdkBaseline(): void {
     pdkRequirement: config.value.pdk_requirement ?? null,
     pdkRoot: config.value.pdk_root ?? null,
     selectedPdkId: selectedPdkId.value || null,
+    pdkSelections: JSON.stringify(pdkSelections.value),
+    pdkConfigMode: pdkConfigMode.value as string,
   }
 }
 
@@ -1918,6 +1922,15 @@ function clearPreviousGenerationPdkState(): void {
   }
   if (baseline.selectedPdkId !== null && selectedPdkId.value === baseline.selectedPdkId) {
     selectedPdkId.value = ''
+  }
+  if (
+    baseline.pdkSelections !== undefined &&
+    JSON.stringify(pdkSelections.value) === baseline.pdkSelections
+  ) {
+    pdkSelections.value = { tech_lef: [], cell_lef: [], liberty: [] }
+  }
+  if (pdkConfigMode.value === (baseline.pdkConfigMode as 'default' | 'manual')) {
+    pdkConfigMode.value = 'default'
   }
   manifestPdkFamily.value = ''
   pdkBaseline.value = null

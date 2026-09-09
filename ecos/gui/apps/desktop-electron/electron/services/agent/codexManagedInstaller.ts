@@ -17,7 +17,7 @@ import { Readable } from 'node:stream'
 import { Buffer } from 'node:buffer'
 import type { DesktopCodexInstallProgressEvent } from '@ecos-studio/shared'
 
-import { type SpawnLike } from '../commandCapture'
+import { captureCommandOutput, type SpawnLike } from '../commandCapture'
 
 export type FetchLike = typeof fetch
 export type { SpawnLike }
@@ -103,7 +103,7 @@ export async function installManagedCodex(
   /** True when a failed restore left the backup as the only old copy. */
   let preservedBackup = false
   try {
-    await runTarExtract(context.spawnImpl, archivePath, extractDir)
+    await runTarExtract(captureCommandOutput, context.spawnImpl, archivePath, extractDir)
     const extractedBinary = await findExtractedCodexBinary(extractDir)
     if (!extractedBinary) {
       throw new Error('压缩包中未找到 Codex 可执行文件')
@@ -226,25 +226,23 @@ async function downloadCodexArchive(
 }
 
 async function runTarExtract(
+  capture: typeof captureCommandOutput,
   spawnImpl: SpawnLike,
   archivePath: string,
   destination: string,
 ): Promise<void> {
   await mkdir(destination, { recursive: true })
-  await new Promise<void>((resolve, reject) => {
-    const child = spawnImpl('tar', ['-xf', archivePath, '-C', destination], {
-      stdio: 'pipe',
-    })
-    let stderr = ''
-    child.stderr?.on('data', (chunk) => {
-      stderr += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
-    })
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`tar failed: ${stderr.trim() || `exit ${code}`}`))
-    })
-  })
+  const result = await capture(
+    'tar',
+    ['-xf', archivePath, '-C', destination],
+    { timeoutMs: 60_000 },
+    spawnImpl,
+  )
+  if (result.code !== 0) {
+    throw new Error(
+      `tar failed: ${result.stderr.trim() || `exit ${result.code ?? 'unknown'}`}`,
+    )
+  }
 }
 
 async function downloadToFile(
