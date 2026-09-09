@@ -129,8 +129,8 @@
           </div>
         </div>
       </div>
-      <!-- First-launch CLI setup guidance -->
-      <CliInstallerCard show-only-when-action-needed class="mb-8 w-full max-w-2xl" />
+      <!-- ECC command line tools: install, reinstall, and uninstall -->
+      <CliInstallerCard class="mb-8 w-full max-w-2xl" />
 
       <!-- Project Management entry -->
       <button

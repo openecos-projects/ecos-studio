@@ -1,5 +1,5 @@
 <template>
-  <section v-if="visible" class="cli-installer" aria-label="Command line tools">
+  <section class="cli-installer" aria-label="Command line tools">
     <div class="cli-installer__header">
       <div class="cli-installer__heading min-w-0 flex-1">
         <h3 class="cli-installer__title">Command line tools</h3>
@@ -85,13 +85,6 @@ import {
   type CliInstallerProgressEvent,
 } from '@/api/cliInstaller'
 
-const props = defineProps<{
-  /**
-   * Hide the card entirely once the CLI is usable (home page guidance mode).
-   */
-  showOnlyWhenActionNeeded?: boolean
-}>()
-
 const state = ref<CliInstallState | null>(null)
 /** Latest non-terminal progress event; cleared on done/error/cancelled. */
 const activeJob = ref<CliInstallerProgressEvent | null>(null)
@@ -140,19 +133,6 @@ const message = computed(() => {
     default:
       return ''
   }
-})
-
-const visible = computed(() => {
-  if (!props.showOnlyWhenActionNeeded) return true
-  const status = state.value?.status
-  const needsShim = status === 'dev-wrapper' && !state.value?.shimPath
-  return (
-    status === 'not-installed' ||
-    status === 'installing' ||
-    status === 'failed' ||
-    status === 'self-check-failed' ||
-    needsShim
-  )
 })
 
 const actionsVisible = computed(

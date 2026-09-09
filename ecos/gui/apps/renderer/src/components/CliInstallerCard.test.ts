@@ -73,15 +73,7 @@ describe('CliInstallerCard', () => {
     expect(wrapper.text()).toContain('Reinstall')
   })
 
-  it('is hidden in guidance mode once the CLI is ready', async () => {
-    const wrapper = mount(CliInstallerCard, {
-      props: { showOnlyWhenActionNeeded: true },
-    })
-    await flushPromises()
-    expect(wrapper.find('section').exists()).toBe(false)
-  })
-
-  it('shows guidance and an install action when not installed', async () => {
+  it('shows an install action when not installed', async () => {
     mocks.fetchStatus.mockResolvedValue(
       baseState({
         status: 'not-installed',
@@ -92,9 +84,7 @@ describe('CliInstallerCard', () => {
         selfCheck: null,
       }),
     )
-    const wrapper = mount(CliInstallerCard, {
-      props: { showOnlyWhenActionNeeded: true },
-    })
+    const wrapper = mount(CliInstallerCard)
     await flushPromises()
 
     expect(wrapper.find('section').exists()).toBe(true)
