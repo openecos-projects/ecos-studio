@@ -616,7 +616,9 @@ describe('CliInstallerService', () => {
     mkdirSync(outside, { recursive: true })
     const insideLink = join(dataDir, 'inside-link')
     symlinkSync(outside, insideLink)
-    rmSync(join(dataDir, 'current'))
+    // recursive: Node 23 (CI) refuses to rm a directory symlink without it,
+    // and rm on a symlink still unlinks rather than touching the target.
+    rmSync(join(dataDir, 'current'), { recursive: true, force: true })
     symlinkSync(insideLink, join(dataDir, 'current'))
 
     await service.regenerateEnvFile()
