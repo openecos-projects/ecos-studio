@@ -554,7 +554,7 @@ def test_alignment_freezes_the_acceptance_rule_and_refuses_old_episodes() -> Non
     alignment = build_objective_alignment(objective, _terminal(drc=2))
     payload = alignment.model_dump(mode="json")
 
-    assert payload["acceptance_rule"] == "ecos.incumbent_acceptance.v2"
+    assert payload["acceptance_rule"] == "ecos.incumbent_acceptance.v3"
     assert payload["protection_relative_tolerance"] == 0.01
     assert payload["protection_absolute_tolerance"] == 0.01
     assert payload["primary_metric_relative_tolerance"] == 1e-9

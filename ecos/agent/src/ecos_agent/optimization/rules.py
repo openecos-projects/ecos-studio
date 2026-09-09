@@ -57,6 +57,14 @@ _LATTICE_VALUES = {
 }
 _METRIC_RELATIVE_TOLERANCE = PROTECTION_RELATIVE_TOLERANCE
 _METRIC_ABSOLUTE_TOLERANCE = PROTECTION_ABSOLUTE_TOLERANCE
+# Incumbent tie-break after the frozen primary/preserve objective space:
+# power (frozen order) first, then delivered die area, then achieved STA
+# frequency. The flag marks higher-is-better metrics; the rest prefer lower.
+SELECTION_TIEBREAK_ORDER: tuple[tuple[ObjectiveMetric, bool], ...] = (
+    *((ObjectiveMetric(metric.value), False) for metric in POWER_SELECTION_ORDER),
+    (ObjectiveMetric.DIE_AREA, False),
+    (ObjectiveMetric.STA_FREQUENCY, True),
+)
 
 
 class IncumbentDecision(StrEnum):
@@ -443,24 +451,24 @@ def compare_incumbent(
             return IncumbentComparison(IncumbentDecision.CANDIDATE_BETTER, metric_id)
         if candidate_utility < incumbent_utility:
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
-    incumbent_evaluation = {
-        metric.metric_id: metric.value for metric in incumbent.evaluation_metrics
-    }
-    candidate_evaluation = {
-        metric.metric_id: metric.value for metric in candidate.evaluation_metrics
-    }
-    for metric_id in POWER_SELECTION_ORDER:
-        incumbent_value = incumbent_evaluation.get(metric_id.value)
-        candidate_value = candidate_evaluation.get(metric_id.value)
+    incumbent_values = incumbent.objective_metrics
+    candidate_values = candidate.objective_metrics
+    for metric_id, higher_is_better in SELECTION_TIEBREAK_ORDER:
+        incumbent_value = incumbent_values.get(metric_id)
+        candidate_value = candidate_values.get(metric_id)
         if (
             incumbent_value is None
             or candidate_value is None
             or not _meaningful_metric_change(incumbent_value, candidate_value)
         ):
             continue
+        incumbent_utility = objective_metric_utility(metric_id, incumbent_value)
+        candidate_utility = objective_metric_utility(metric_id, candidate_value)
+        if candidate_utility == incumbent_utility:
+            continue
         decision = (
             IncumbentDecision.CANDIDATE_BETTER
-            if candidate_value < incumbent_value
+            if candidate_utility > incumbent_utility
             else IncumbentDecision.INCUMBENT_RETAINED
         )
         return IncumbentComparison(decision, metric_id)

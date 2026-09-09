@@ -339,6 +339,21 @@ class TerminalObservation(_ContractModel):
             ]
             if len(matches) == 1:
                 values[metric_id] = matches[0].value
+        # Achieved STA frequency is corner-scoped evidence; the typical (or
+        # unscoped) corner is the comparison point, higher is better.
+        frequency = next(
+            (
+                item
+                for item in self.evaluation_metrics
+                if item.metric_id == ObjectiveMetric.STA_FREQUENCY.value
+                and item.corner in (None, "TYP_25/TYPICAL")
+                and item.unit == "MHz"
+                and item.direction == EvaluationMetricDirection.HIGHER_IS_BETTER
+            ),
+            None,
+        )
+        if frequency is not None:
+            values[ObjectiveMetric.STA_FREQUENCY] = frequency.value
         for metric_id in (
             ObjectiveMetric.DRC_COUNT,
             ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,

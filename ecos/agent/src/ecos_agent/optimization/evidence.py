@@ -2,7 +2,7 @@
 
 The rules here follow the ECC-QoR draft 3 specification
 (ecos/agent/docs/ecc_QoR_v3.pdf) without changing the frozen acceptance
-semantics of ``ecos.incumbent_acceptance.v2``:
+semantics of ``ecos.incumbent_acceptance.v3``:
 
 * missing or contradictory measurement evidence is never a physical failure
   (C1-C3 consistency checks, ``evidence`` semantics);
@@ -68,6 +68,7 @@ METRIC_NATURES: dict[str, MetricNature] = {
     "sta_typical_leakage_power": MetricNature.ESTIMATED,
     "sta_worst_dynamic_power": MetricNature.ESTIMATED,
     "sta_worst_leakage_power": MetricNature.ESTIMATED,
+    "sta_frequency": MetricNature.DIRECT,
     "gui_overall_qor_score": MetricNature.DERIVED,
 }
 

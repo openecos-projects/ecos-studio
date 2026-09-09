@@ -64,6 +64,7 @@ class ObjectiveMetric(StrEnum):
     STA_TYPICAL_LEAKAGE_POWER = "sta_typical_leakage_power"
     STA_WORST_DYNAMIC_POWER = "sta_worst_dynamic_power"
     STA_WORST_LEAKAGE_POWER = "sta_worst_leakage_power"
+    STA_FREQUENCY = "sta_frequency"
     GUI_OVERALL_QOR_SCORE = "gui_overall_qor_score"
 
 
@@ -103,7 +104,7 @@ POWER_OBJECTIVE_ORDER = tuple(
 )
 
 HIGHER_IS_BETTER_OBJECTIVES = frozenset(
-    (*TIMING_OBJECTIVE_ORDER, ObjectiveMetric.GUI_OVERALL_QOR_SCORE)
+    (*TIMING_OBJECTIVE_ORDER, ObjectiveMetric.STA_FREQUENCY, ObjectiveMetric.GUI_OVERALL_QOR_SCORE)
 )
 
 POWER_SELECTION_ORDER = tuple(PowerMetric)
