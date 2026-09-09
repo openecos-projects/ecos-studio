@@ -12,6 +12,13 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ path: '/workspace/home' }),
   useRouter: () => ({ push: vi.fn() }),
 }))
+vi.mock('@/composables/useWorkspace', () => ({
+  useWorkspace: () => ({
+    currentProject: { value: null },
+    openProject: vi.fn(),
+    showToast: vi.fn(),
+  }),
+}))
 
 describe('ShutdownStatusButton', () => {
   beforeEach(() => {

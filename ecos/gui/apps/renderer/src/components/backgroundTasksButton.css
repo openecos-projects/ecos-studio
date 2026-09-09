@@ -100,9 +100,7 @@
 .background-task-main:hover,
 .background-task-main:focus-visible,
 .background-task-cancel:hover,
-.background-task-cancel:focus-visible,
-.background-tasks-view:hover,
-.background-tasks-view:focus-visible {
+.background-task-cancel:focus-visible {
   background: var(--bg-tertiary);
   outline: none;
 }
@@ -180,22 +178,6 @@
   color: var(--text-secondary);
   font-size: 12px;
   text-align: center;
-}
-
-.background-tasks-view {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 6px;
-  padding: 7px;
-  border: 0;
-  border-top: 1px solid var(--border-color);
-  color: var(--text-primary);
-  background: transparent;
-  font-size: 12px;
-  cursor: pointer;
 }
 
 .background-tasks-popover-enter-active,

@@ -151,10 +151,6 @@
         </div>
 
         <div v-else class="background-tasks-empty">No background tasks</div>
-        <button type="button" class="background-tasks-view" @click="viewTasks">
-          <i class="ri-folder-chart-line" aria-hidden="true"></i>
-          View in Project Management
-        </button>
       </section>
     </Transition>
   </div>
@@ -168,15 +164,20 @@ import type {
 } from '@ecos-studio/shared'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
+import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import {
+  resolveProjectRouteContextForWorkspace,
+  workspaceRouteQueryFromProjectContext,
+} from '@/utils/projectManifestRegistration'
 import { useWorkspaceCreation } from '@/utils/workspaceNavigation'
 
-const route = useRoute()
 const router = useRouter()
 const store = useBackgroundOperationStore()
 const notifications = useNotificationStore()
+const { currentProject, openProject, showToast } = useWorkspace()
 const { creations, finalizations, operations } = storeToRefs(store)
 const workspaceCreation = useWorkspaceCreation()
 const open = ref(false)
@@ -257,24 +258,53 @@ function handleOverlay(event: Event): void {
   open.value = (event as CustomEvent<string>).detail === 'background-tasks'
 }
 
-function projectManagementPath(): string {
-  return route.path.startsWith('/workspace') ? '/workspace/projects' : '/projects'
-}
-
 function inspect(operation: EccBackgroundOperation): void {
   open.value = false
-  void router.push({
-    path: projectManagementPath(),
-    query: {
-      operationId: operation.operationId,
-      workspacePath: operation.workspaceDirectory,
-    },
-  })
+  void openWorkspace(operation.workspaceDirectory)
 }
 
-function viewTasks(): void {
-  open.value = false
-  void router.push({ path: projectManagementPath() })
+async function openWorkspace(workspacePath: string): Promise<void> {
+  const normalizedPath = normalizePath(workspacePath)
+  const originWorkspacePath = normalizePath(currentProject.value?.path ?? '')
+  if (originWorkspacePath === normalizedPath) {
+    await navigateToWorkspace(normalizedPath)
+    return
+  }
+  const workspaceName = workspaceLabel(normalizedPath)
+  const success = await openProject(
+    {
+      id: normalizedPath,
+      name: workspaceName,
+      path: normalizedPath,
+      lastOpened: new Date(),
+    },
+    {
+      shouldActivate: () =>
+        normalizePath(currentProject.value?.path ?? '') === originWorkspacePath,
+    },
+  )
+  if (success && normalizePath(currentProject.value?.path ?? '') === normalizedPath) {
+    await navigateToWorkspace(normalizedPath)
+    return
+  }
+  if (
+    !success &&
+    normalizePath(currentProject.value?.path ?? '') === originWorkspacePath
+  ) {
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace not opened',
+      detail: `${normalizedPath} is not available yet.`,
+    })
+  }
+}
+
+async function navigateToWorkspace(workspacePath: string): Promise<void> {
+  const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+  await router.push({
+    path: '/workspace/home',
+    query: workspaceRouteQueryFromProjectContext(workspacePath, projectContext),
+  })
 }
 
 async function cancel(operation: EccBackgroundOperation): Promise<void> {

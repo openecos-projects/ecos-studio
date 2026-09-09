@@ -10,17 +10,35 @@ import {
 } from '@/utils/workspaceNavigation'
 
 const testState = vi.hoisted(() => ({
+  currentProject: { path: '/projects/open/ws_open' } as { path: string } | null,
   execute: vi.fn(),
+  openProject: vi.fn(),
   push: vi.fn(),
-  route: { path: '/workspace/home' },
+  showToast: vi.fn(),
+}))
+const { discoverProjectForWorkspace } = vi.hoisted(() => ({
+  discoverProjectForWorkspace: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => testState.route,
   useRouter: () => ({ push: testState.push }),
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({ productCommands: { execute: testState.execute } }),
+}))
+vi.mock('@/composables/useWorkspace', () => ({
+  useWorkspace: () => ({
+    currentProject: {
+      get value() {
+        return testState.currentProject
+      },
+    },
+    openProject: testState.openProject,
+    showToast: testState.showToast,
+  }),
+}))
+vi.mock('@/utils/projectManagementRead', () => ({
+  discoverProjectForWorkspace,
 }))
 
 import BackgroundTasksButton from './BackgroundTasksButton.vue'
@@ -55,10 +73,20 @@ describe('BackgroundTasksButton', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    testState.currentProject = { path: '/projects/open/ws_open' }
     testState.execute.mockResolvedValue({
       accepted: true,
       operationId: 'operation-1',
       state: 'running',
+    })
+    testState.openProject.mockImplementation(async (project: { path: string }) => {
+      testState.currentProject = { path: project.path }
+      return true
+    })
+    discoverProjectForWorkspace.mockResolvedValue({
+      name: 'demo',
+      root_path: '/projects/demo',
+      workspaces: [{ workspace_path: '/projects/demo/ws_1' }],
     })
     vi.stubGlobal(
       'confirm',
@@ -83,21 +111,89 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
-  it('inspects a task in Project Management and cancels by its original identity', async () => {
+  it('opens the matching Workspace from a running task and cancels by its original identity', async () => {
     const store = useBackgroundOperationStore()
     store.operations = [operation()]
     const wrapper = mount(BackgroundTasksButton)
     await wrapper.get('.background-tasks-trigger').trigger('click')
 
     await wrapper.get('.background-task-main').trigger('click')
+    await vi.waitFor(() => {
+      expect(testState.openProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: '/projects/demo/ws_1',
+          path: '/projects/demo/ws_1',
+        }),
+        expect.objectContaining({ shouldActivate: expect.any(Function) }),
+      )
+    })
     expect(testState.push).toHaveBeenCalledWith({
-      path: '/workspace/projects',
+      path: '/workspace/home',
       query: {
-        operationId: 'operation-1',
-        workspacePath: '/projects/demo/ws_1',
+        projectRoot: '/projects/demo',
+        projectName: 'demo',
+        workspaceId: 'ws_1',
       },
     })
+    expect(wrapper.find('.background-tasks-view').exists()).toBe(false)
+    wrapper.unmount()
+  })
 
+  it('reuses the current window when that Workspace is already open', async () => {
+    testState.currentProject = { path: '/projects/demo/ws_1' }
+    const store = useBackgroundOperationStore()
+    store.operations = [operation()]
+    const wrapper = mount(BackgroundTasksButton)
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    await wrapper.get('.background-task-main').trigger('click')
+    await vi.waitFor(() => {
+      expect(testState.push).toHaveBeenCalledWith({
+        path: '/workspace/home',
+        query: {
+          projectRoot: '/projects/demo',
+          projectName: 'demo',
+          workspaceId: 'ws_1',
+        },
+      })
+    })
+    expect(testState.openProject).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not steal the window when opening the Workspace is deferred', async () => {
+    testState.openProject.mockImplementation(async () => true)
+    const store = useBackgroundOperationStore()
+    store.operations = [operation()]
+    const wrapper = mount(BackgroundTasksButton)
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    await wrapper.get('.background-task-main').trigger('click')
+    await vi.waitFor(() => {
+      expect(testState.openProject).toHaveBeenCalled()
+    })
+    expect(testState.push).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('reports when the matching Workspace cannot be opened', async () => {
+    testState.openProject.mockResolvedValue(false)
+    const store = useBackgroundOperationStore()
+    store.operations = [operation()]
+    const wrapper = mount(BackgroundTasksButton)
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    await wrapper.get('.background-task-main').trigger('click')
+    await vi.waitFor(() => {
+      expect(testState.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ summary: 'Workspace not opened' }),
+      )
+    })
+    expect(testState.push).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('cancels a running task by its original identity', async () => {
+    const store = useBackgroundOperationStore()
+    store.operations = [operation()]
+    const wrapper = mount(BackgroundTasksButton)
     await wrapper.get('.background-tasks-trigger').trigger('click')
     await wrapper.get('.background-task-cancel').trigger('click')
     expect(testState.execute).toHaveBeenCalledWith({
@@ -134,7 +230,7 @@ describe('BackgroundTasksButton', () => {
     wrapper.unmount()
   })
 
-  it('routes unfinished creation recovery to Project Management', async () => {
+  it('keeps unfinished creation recovery in the task list without a Project Management shortcut', async () => {
     const store = useBackgroundOperationStore()
     store.creations = [
       {
@@ -151,10 +247,8 @@ describe('BackgroundTasksButton', () => {
 
     expect(wrapper.text()).toContain('Application exited during creation.')
     expect(wrapper.find('.background-task-recovery-actions').exists()).toBe(false)
-    await wrapper.get('.background-tasks-view').trigger('click')
-    expect(testState.push).toHaveBeenCalledWith({
-      path: '/workspace/projects',
-    })
+    expect(wrapper.find('.background-tasks-view').exists()).toBe(false)
+    expect(testState.push).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
