@@ -95,7 +95,7 @@ def optimization_objective_summary_message(
     rationale_summary: str,
     objective_sha256: str,
     geometry_mode: str = "fixed",
-    advanced_parameters_enabled: bool = False,
+    advanced_parameters_enabled: bool = True,
 ) -> str:
     preserve = ", ".join(preserve_metrics) if preserve_metrics else "(none)"
     gates = ", ".join(signoff_gates) if signoff_gates else "(fixed by ECOS)"
@@ -104,7 +104,7 @@ def optimization_objective_summary_message(
         "已将目标规范化并冻结：\n"
         f"- 目标理解：{rationale_summary}\n"
         f"- 主指标：{primary_metric}\n"
-        "- 参数层：主要物理参数、策略开关；收敛参数仅在有收敛证据时使用\n"
+        "- 参数层：主要物理参数、策略开关、收敛参数\n"
         f"- 外形：{'固定（禁用两个 Floorplan 参数）' if geometry_mode == 'fixed' else '可变（允许 Floorplan 参数）'}\n"
         f"- 高级参数 density_weight：{'启用' if advanced_parameters_enabled else '禁用'}\n"
         f"- 保持指标：{preserve}\n"
@@ -113,7 +113,7 @@ def optimization_objective_summary_message(
         "Normalized and frozen objective:\n"
         f"- Interpretation: {rationale_summary}\n"
         f"- Primary metric: {primary_metric}\n"
-        "- Parameter layers: physical, strategy; convergence requires convergence evidence\n"
+        "- Parameter layers: physical, strategy, convergence\n"
         f"- Geometry: {geometry_mode} (Floorplan knobs {'disabled' if geometry_mode == 'fixed' else 'allowed'})\n"
         f"- Advanced density_weight: {'enabled' if advanced_parameters_enabled else 'disabled'}\n"
         f"- Preserve metrics: {preserve}\n"

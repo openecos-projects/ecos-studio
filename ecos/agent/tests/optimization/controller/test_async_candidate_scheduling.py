@@ -92,9 +92,10 @@ def test_p1_cross_layer_choice_is_legal_while_hard_permissions_hold(tmp_path):
     context = controller.planner.contexts[0]
     assert context.parameter_policy["active_layer"] == "physical"
     assert context.parameter_policy["layer_priority_is_advisory"] is True
-    # Hard permissions: geometry and advanced stay excluded regardless of advice.
+    # Hard permissions: geometry stays excluded regardless of advice.
     assert {a.knob_id.value for a in context.legal_actions} == {
-        "place.target_density", "place.cell_padding_x", "place.routability_opt",
+        "place.target_density", "place.target_overflow", "place.cell_padding_x",
+        "place.routability_opt", "place.density_weight",
     }
 
 

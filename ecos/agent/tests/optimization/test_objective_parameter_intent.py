@@ -33,7 +33,6 @@ def test_structured_area_scope_is_preserved(goal, metric):
     objective = freeze(goal, metric, policy={"geometry_mode": geometry})
     assert objective.primary_metric.value == metric
     assert objective.parameter_policy.geometry_mode == geometry
-    assert not objective.parameter_policy.advanced_parameters_enabled
 
 
 @pytest.mark.parametrize("goal", [
@@ -122,9 +121,15 @@ def test_summary_discloses_outline_and_advanced_settings():
     message = optimization_objective_summary_message(
         "zh", primary_metric="die_area", preserve_metrics=(), signoff_gates=(),
         rationale_summary="降低面积", objective_sha256="hash", geometry_mode="variable",
+        advanced_parameters_enabled=False,
     )
     assert "可变" in message and "density_weight：禁用" in message
-    assert "主要物理参数" in message and "收敛证据" in message
+    assert "主要物理参数" in message and "收敛参数" in message
+    enabled = optimization_objective_summary_message(
+        "zh", primary_metric="die_area", preserve_metrics=(), signoff_gates=(),
+        rationale_summary="降低面积", objective_sha256="hash", geometry_mode="variable",
+    )
+    assert "density_weight：启用" in enabled
 
 
 def test_fixed_geometry_does_not_consume_preserve_budget_before_drc_binding():
