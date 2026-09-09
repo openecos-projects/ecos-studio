@@ -26,14 +26,14 @@ describe('executeProductCommand Workspace creation', () => {
     expect(updateWorkspaceConfiguration).toHaveBeenCalledWith(payload)
   })
 
-  it('routes Step Options without exposing a configuration path', async () => {
+  it('routes Step Parameters without exposing a configuration path', async () => {
     const updateWorkspaceStepConfiguration = vi.fn().mockResolvedValue({
       workspaceRevision: 2,
     })
     const payload = {
       commandId: 'step-configuration-1',
       expectedWorkspaceRevision: 1,
-      options: { ifp: { thread_number: 8 } },
+      parameters: { 'floorplan.ifp.thread_number': 8 },
       stepId: 'Floorplan',
       workspaceHandle: 'handle-1',
     }
@@ -45,6 +45,27 @@ describe('executeProductCommand Workspace creation', () => {
       } as never),
     ).resolves.toEqual({ workspaceRevision: 2 })
     expect(updateWorkspaceStepConfiguration).toHaveBeenCalledWith(payload)
+  })
+
+  it('rejects a Step Configuration update that still uses options', async () => {
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.updateStepConfiguration',
+          payload: {
+            commandId: 'step-configuration-1',
+            expectedWorkspaceRevision: 1,
+            options: { ifp: { thread_number: 8 } },
+            stepId: 'Floorplan',
+            workspaceHandle: 'handle-1',
+          },
+        } as never,
+        {
+          ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+          runtime: { updateWorkspaceStepConfiguration: vi.fn() } as never,
+        } as never,
+      ),
+    ).rejects.toThrow('Product Command requires parameters')
   })
 
   it('rejects invalid optional Project identity fields at the command boundary', async () => {

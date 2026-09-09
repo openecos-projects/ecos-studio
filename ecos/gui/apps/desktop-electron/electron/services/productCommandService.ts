@@ -201,7 +201,7 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireString(payload, 'commandId')
       requireString(payload, 'workspaceHandle')
       requireString(payload, 'stepId')
-      requireRecord(payload, 'options')
+      requireRecord(payload, 'parameters')
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.cancel':
