@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import re
-import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +21,7 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     OptimizationEpisodeState,
+    TerminalObservation,
 )
 from ecos_agent.optimization.experiments.equal_budget import export_episode_traces
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
@@ -33,7 +33,9 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
 )
 from ecos_agent.optimization.experiments.knowledge_treatment_runner import _objective
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
+from ecos_agent.optimization.metrics.contracts import TELEMETRY_METRIC_IDS
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
+from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
 from ecos_agent.optimization.runtime import create_optimization_runner
 
 # 频率取各设计 SDC 的原始约束 100 MHz：ECC cf5db256 起 refresh_generated_sdc 会把
@@ -89,6 +91,50 @@ def _clock_from_sdc(sdc: Path) -> str:
         if match:
             return match.group(1)
     raise SystemExit(f"SDC has no clk_port_name: {sdc}")
+
+
+def write_noise_epsilon(calibration_dir: Path) -> dict[str, object]:
+    """Code-computed replay noise for the calibration replays.
+
+    Keys are (metric_id, corner) pairs and telemetry metrics are excluded, so
+    cross-corner PVT spread is never reported as replay drift (the 20260908
+    overnight manifest misattributed exactly that; see the erratum in
+    docs/overnight-report-20260908.md).
+    """
+    observation_paths = sorted(
+        calibration_dir.glob("default-replay-*/terminal-observation.v1.json")
+    )
+    if len(observation_paths) < 2:
+        raise SystemExit(
+            f"noise epsilon needs at least two replays under {calibration_dir}"
+        )
+    observations = [
+        TerminalObservation.model_validate_json(path.read_bytes())
+        for path in observation_paths
+    ]
+    profile = deterministic_noise_profile(observations)
+    nonzero_epsilon_keys = sorted(
+        key for key, value in profile["epsilon"].items() if value > 0
+    )
+    payload = {
+        "schema_version": "ecos.noise_epsilon.v1",
+        "comparison_key": "(metric_id, corner)",
+        "telemetry_excluded_metric_ids": sorted(TELEMETRY_METRIC_IDS),
+        "replay_count": len(observations),
+        "reference": profile["reference"],
+        "epsilon": profile["epsilon"],
+        "nonzero_epsilon_keys": nonzero_epsilon_keys,
+    }
+    artifact = calibration_dir / "noise-epsilon.v1.json"
+    artifact.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return {
+        "artifact": str(artifact),
+        "replay_count": len(observations),
+        "metric_key_count": len(profile["epsilon"]),
+        "drifting_metric_keys": nonzero_epsilon_keys,
+    }
 
 
 def load_design(designs_root: Path, design_id: str) -> DesignSpec:
@@ -176,8 +222,10 @@ def main(provider_factory: Callable[..., Any]) -> int:
         output / "calibration",
         args.terminal_timeout_seconds,
     )
+    noise_epsilon = write_noise_epsilon(output / "calibration")
     print(
-        f"[driver] calibration done: reference_runtime={reference_runtime:.1f}s",
+        f"[driver] calibration done: reference_runtime={reference_runtime:.1f}s "
+        f"noise_epsilon_drifting_keys={len(noise_epsilon['drifting_metric_keys'])}",
         flush=True,
     )
 
@@ -263,6 +311,7 @@ def main(provider_factory: Callable[..., Any]) -> int:
         "model": model,
         "seed": args.seed,
         "reference_runtime_seconds": reference_runtime,
+        "noise_epsilon": noise_epsilon,
         "planning_calls": planning_calls,
         "started_candidates": started_candidates,
         "terminal_artifacts_complete": started_candidates
@@ -295,9 +344,3 @@ def main(provider_factory: Callable[..., Any]) -> int:
         )
     )
     return 0
-
-
-if __name__ == "__main__":
-    from ecos_agent.codex.provider import CodexAppServerProposalProvider
-
-    sys.exit(main(CodexAppServerProposalProvider))
