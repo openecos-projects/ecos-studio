@@ -225,10 +225,6 @@ def main(provider_factory: Callable[..., Any]) -> int:
             "receipt_aware_planning": True,
             "agent_mode": args.agent_mode,
             "knowledge_case_shots": 0,
-            # ECC 54d0536 的并发候选生命周期存在隔离缺陷（intervention-1 的
-            # place 日志出现 intervention-2 的输出路径，place 被置 Incomplete，
-            # episode quarantine）。今晚固定串行，并发问题留给晨审修复。
-            "max_in_flight_candidates": 1,
         }
         runner = create_optimization_runner(runtime_context, provider)
         try:
