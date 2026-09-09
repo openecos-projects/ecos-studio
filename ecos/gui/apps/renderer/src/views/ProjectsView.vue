@@ -1758,6 +1758,9 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
       projectRoot: project.path,
       projectName: project.name,
       designName: project.designName,
+      ...(project.projectType === 'frontend' && project.frontendDesignKind
+        ? { frontendDesignKind: project.frontendDesignKind }
+        : {}),
       workspacePath: joinProjectPath(project.path, workspaceId),
       workspaceId,
     },

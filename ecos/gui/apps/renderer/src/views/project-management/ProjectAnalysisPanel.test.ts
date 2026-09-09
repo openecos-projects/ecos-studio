@@ -80,6 +80,35 @@ describe('ProjectAnalysisPanel dashboard health', () => {
     expect(wrapper.text()).not.toContain('Signoff')
   })
 
+  it('omits CPU simulation columns for generic RTL projects', () => {
+    const frontendAnalysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_b',
+        workspaceName: 'uart',
+        workspacePath: '/projects/uart/ws_b',
+        status: 'success',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'success' },
+          { stage: 'elab', status: 'success' },
+          { stage: 'lint', status: 'success' },
+        ],
+      },
+    ])
+    const wrapper = mountPanel(
+      projectFixture({
+        projectType: 'frontend',
+        frontendDesignKind: 'generic_rtl',
+        flowSteps: ['prepare', 'review', 'elab', 'lint'],
+        frontendAnalysis,
+      }),
+    )
+
+    expect(wrapper.findAll('.fe-stage-tabs button')).toHaveLength(4)
+    expect(wrapper.find('.fe-health-metrics').text()).not.toContain('Simulation')
+    expect(wrapper.find('.fe-compare-row.is-head').text()).not.toContain('Difftest')
+  })
+
   it('renders flow progress as workspaces complete, with the steps left as detail', () => {
     const wrapper = mountPanel()
 

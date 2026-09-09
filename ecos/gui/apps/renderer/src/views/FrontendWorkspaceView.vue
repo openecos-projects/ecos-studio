@@ -77,7 +77,9 @@
             isHomeView
               ? 'frontend'
               : isGlobalSrcView
-                ? 'CPU RTL'
+                ? isGenericRtl
+                  ? 'Design RTL'
+                  : 'CPU RTL'
                 : currentStep?.tool || '--'
           }}</span>
         </div>
@@ -146,10 +148,7 @@
                 <section class="workspace-home-card home-fill-card">
                   <div class="workspace-home-card__head">
                     <strong>Workspace Home</strong>
-                    <span
-                      >Choose a step from the left sidebar to inspect logs, reports,
-                      source, and waveforms.</span
-                    >
+                    <span>{{ workspaceHomeDescription }}</span>
                   </div>
                   <div class="workspace-home-card__body">
                     <div class="workspace-home-metric">
@@ -161,8 +160,8 @@
                       <strong>{{ latestActiveTool }}</strong>
                     </div>
                     <div class="workspace-home-metric">
-                      <span>Simulation</span>
-                      <strong>{{ simStepState }}</strong>
+                      <span>{{ isGenericRtl ? 'Profile' : 'Simulation' }}</span>
+                      <strong>{{ isGenericRtl ? 'General RTL' : simStepState }}</strong>
                     </div>
                   </div>
                 </section>
@@ -476,10 +475,8 @@
                     </header>
                     <div class="summary-metrics prepare-metrics">
                       <span
-                        >CPU RTL
-                        <strong>{{
-                          numberLabel(prepareInputs.cpu_rtl_files)
-                        }}</strong></span
+                        >{{ preparePrimaryRtlLabel }}
+                        <strong>{{ numberLabel(preparePrimaryRtlCount) }}</strong></span
                       >
                       <span
                         >Total RTL
@@ -1427,7 +1424,7 @@
                         <span>Diagnostics</span>
                         <strong>{{
                           lintScope === 'actionable'
-                            ? 'CPU and tool diagnostics'
+                            ? `${primaryRtlLabel} and tool diagnostics`
                             : 'All Verilator diagnostics'
                         }}</strong>
                       </div>
@@ -1437,7 +1434,7 @@
                           :class="{ active: lintScope === 'actionable' }"
                           @click="lintScope = 'actionable'"
                         >
-                          CPU {{ lintActionableDiagnostics.length }}
+                          {{ primaryRtlLabel }} {{ lintActionableDiagnostics.length }}
                         </button>
                         <button
                           type="button"
@@ -1483,7 +1480,7 @@
                         <i class="ri-checkbox-circle-line"></i>
                         <span>{{
                           lintScope === 'actionable'
-                            ? 'No CPU or tool lint diagnostics.'
+                            ? `No ${primaryRtlLabel.toLowerCase()} or tool lint diagnostics.`
                             : 'No Verilator lint diagnostics.'
                         }}</span>
                       </div>
@@ -2123,6 +2120,7 @@ interface PrepareReport {
   configuration?: PrepareInfoItem[]
   inputs?: {
     cpu_rtl_files?: number
+    design_rtl_files?: number
     total_rtl_files?: number
     incdirs?: number
     defines?: number
@@ -2133,6 +2131,14 @@ interface PrepareReport {
   }
   ownership?: Record<string, number>
   cpu_top_contract?: {
+    status?: string
+    module?: string
+    source?: string
+    ports?: Array<{ name?: string; direction?: string; width?: number }>
+    expected_ports?: number
+    differences?: Record<string, unknown>
+  }
+  design_top_contract?: {
     status?: string
     module?: string
     source?: string
@@ -2520,6 +2526,8 @@ const workspaceRuntimeReady = computed(
     Boolean(currentStepName.value) &&
     Boolean(currentStep.value),
 )
+const isGenericRtl = computed(() => config.frontend.designKind === 'generic_rtl')
+const primaryRtlLabel = computed(() => (isGenericRtl.value ? 'Design RTL' : 'CPU'))
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const isPrepareStep = computed(() => currentStepName.value.toLowerCase() === 'prepare')
 const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
@@ -2560,6 +2568,11 @@ const simStepState = computed(() => {
   const simStep = steps.value.find((step) => step.name.toLowerCase() === 'sim')
   return simStep?.state || 'Unstart'
 })
+const workspaceHomeDescription = computed(() =>
+  isGenericRtl.value
+    ? 'Choose a step from the left sidebar to inspect reports, source, QoR, and logs.'
+    : 'Choose a step from the left sidebar to inspect logs, reports, source, and waveforms.',
+)
 const currentStepDisplayState = computed(() =>
   runBusy.value && currentStep.value
     ? runPhaseDisplayLabel(runPhase.value)
@@ -2704,74 +2717,110 @@ const simRunSubtitle = computed(() => {
 const selectedDisassemblyPath = computed(
   () => selectedCase.value?.program?.disassembly || '',
 )
-const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
-  {
-    label: 'Design',
-    value: config.design || currentProject.value?.name || '--',
-    highlight: true,
-  },
-  { label: 'Top Module', value: config.topModule || '--' },
-  {
-    label: 'CPU Source',
-    value: displayCatalogId(
-      config.frontend.coreId || (config.frontend.cpuFilelist ? 'custom-filelist' : ''),
-    ),
-  },
-  {
-    label: 'CPU Wrapper',
-    value: displayCatalogId(
-      config.frontend.cpuWrapperTop || config.frontend.cpuWrapperContract || '',
-    ),
-  },
-  {
-    label: 'CPU Socket',
-    value: displayCatalogId(config.frontend.cpuSocketContract || ''),
-  },
-  {
-    label: 'SoC Harness',
-    value: displayCatalogId(
-      config.frontend.socHarnessId || config.frontend.socVariant || '',
-    ),
-  },
-  { label: 'Toolchain', value: displayCatalogId(config.frontend.toolchainId || '') },
-  { label: 'Test Suite', value: displayCatalogId(config.frontend.testSuiteId || '') },
-  { label: 'Clock', value: config.clock || '--' },
-  {
-    label: 'Target Frequency',
-    value: config.frequencyMax ? `${config.frequencyMax} MHz` : '--',
-  },
-  {
-    label: 'CPU Filelist',
-    value: config.frontend.cpuFilelist || config.frontend.inputFilelist || '--',
-    wide: true,
-  },
-  {
-    label: 'Default Cases',
-    value: config.frontend.simAllTests
-      ? 'All CPU tests'
-      : config.frontend.simProgramNames.length
-        ? config.frontend.simProgramNames.join(', ')
-        : '--',
-    wide: true,
-  },
-])
-const workspaceGuideItems = computed(() => [
-  {
-    icon: 'ri-cpu-line',
-    title: 'CPU and SoC contract',
-    text: `${displayCatalogId(config.frontend.coreId || 'Custom CPU')} runs through ${displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || 'Selected harness')}.`,
-  },
-  {
-    icon: 'ri-play-list-2-line',
-    title: 'Simulation workflow',
-    text: 'Run prepare first, then choose CPU Tests or CoreMark in Sim. Changed selections are marked stale until rerun.',
-  },
-  {
-    icon: 'ri-bug-line',
-    title: 'Debug loop',
-    text: 'Use Problems for diagnostics, Src for editable RTL, and Wave for waveform inspection.',
-  },
-])
+const frontendConfigItems = computed<FrontendConfigItem[]>(() => {
+  const common: FrontendConfigItem[] = [
+    {
+      label: 'Design',
+      value: config.design || currentProject.value?.name || '--',
+      highlight: true,
+    },
+    { label: 'Top Module', value: config.topModule || '--' },
+    { label: 'Clock', value: config.clock || '--' },
+    {
+      label: 'Target Frequency',
+      value: config.frequencyMax ? `${config.frequencyMax} MHz` : '--',
+    },
+  ]
+  if (isGenericRtl.value) {
+    return [
+      ...common,
+      {
+        label: 'Design Filelist',
+        value: config.frontend.inputFilelist || '--',
+        wide: true,
+      },
+    ]
+  }
+  return [
+    ...common.slice(0, 2),
+    {
+      label: 'CPU Source',
+      value: displayCatalogId(
+        config.frontend.coreId || (config.frontend.cpuFilelist ? 'custom-filelist' : ''),
+      ),
+    },
+    {
+      label: 'CPU Wrapper',
+      value: displayCatalogId(
+        config.frontend.cpuWrapperTop || config.frontend.cpuWrapperContract || '',
+      ),
+    },
+    {
+      label: 'CPU Socket',
+      value: displayCatalogId(config.frontend.cpuSocketContract || ''),
+    },
+    {
+      label: 'SoC Harness',
+      value: displayCatalogId(
+        config.frontend.socHarnessId || config.frontend.socVariant || '',
+      ),
+    },
+    { label: 'Toolchain', value: displayCatalogId(config.frontend.toolchainId || '') },
+    { label: 'Test Suite', value: displayCatalogId(config.frontend.testSuiteId || '') },
+    ...common.slice(2),
+    {
+      label: 'CPU Filelist',
+      value: config.frontend.cpuFilelist || config.frontend.inputFilelist || '--',
+      wide: true,
+    },
+    {
+      label: 'Default Cases',
+      value: config.frontend.simAllTests
+        ? 'All CPU tests'
+        : config.frontend.simProgramNames.length
+          ? config.frontend.simProgramNames.join(', ')
+          : '--',
+      wide: true,
+    },
+  ]
+})
+const workspaceGuideItems = computed(() =>
+  isGenericRtl.value
+    ? [
+        {
+          icon: 'ri-file-code-line',
+          title: 'Design inputs',
+          text: `${displayCatalogId(config.topModule || 'Selected top')} is analyzed from the configured RTL source set.`,
+        },
+        {
+          icon: 'ri-route-line',
+          title: 'Static verification flow',
+          text: 'Prepare, review, elaborate, and lint the RTL without a simulation harness.',
+        },
+        {
+          icon: 'ri-bug-line',
+          title: 'Review loop',
+          text: 'Use Problems for diagnostics, Src for RTL inspection, and QoR for quality gates.',
+        },
+      ]
+    : [
+        {
+          icon: 'ri-cpu-line',
+          title: 'CPU and SoC contract',
+          text: `${displayCatalogId(config.frontend.coreId || 'Custom CPU')} runs through ${displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || 'Selected harness')}.`,
+        },
+        {
+          icon: 'ri-play-list-2-line',
+          title: 'Simulation workflow',
+          text: 'Run prepare first, then choose CPU Tests or CoreMark in Sim. Changed selections are marked stale until rerun.',
+        },
+        {
+          icon: 'ri-bug-line',
+          title: 'Debug loop',
+          text: 'Use Problems for diagnostics, Src for editable RTL, and Wave for waveform inspection.',
+        },
+      ],
+)
 const availableCpuTests = computed(() => {
   const raw = detail.value?.summary?.available_cpu_tests
   return Array.isArray(raw) ? raw.map((item) => String(item)).filter(Boolean) : []
@@ -2792,14 +2841,27 @@ const prepareReadiness = computed(() => prepareReport.value?.readiness || {})
 const prepareConfiguration = computed(() => prepareReport.value?.configuration || [])
 const prepareInputs = computed(() => prepareReport.value?.inputs || {})
 const prepareInputSources = computed(() => prepareInputs.value.sources || [])
+const preparePrimaryRtlLabel = computed(() =>
+  isGenericRtl.value ? 'Design RTL' : 'CPU RTL',
+)
+const preparePrimaryRtlCount = computed(() =>
+  isGenericRtl.value
+    ? prepareInputs.value.design_rtl_files
+    : prepareInputs.value.cpu_rtl_files,
+)
 const prepareOwnershipRows = computed(() =>
   Object.entries(prepareReport.value?.ownership || {})
     .map(([ownership, count]) => ({ ownership, count: numberValue(count) }))
     .filter((item) => item.count > 0)
     .sort((a, b) => b.count - a.count),
 )
-const prepareCpuTopContract = computed(() => prepareReport.value?.cpu_top_contract || {})
+const prepareCpuTopContract = computed(() =>
+  isGenericRtl.value
+    ? prepareReport.value?.design_top_contract || {}
+    : prepareReport.value?.cpu_top_contract || {},
+)
 const prepareCpuTopContractDetail = computed(() => {
+  if (isGenericRtl.value) return 'Top module presence validated'
   const detected = prepareCpuTopContract.value.ports?.length || 0
   const expected = numberValue(prepareCpuTopContract.value.expected_ports)
   if (expected > 0) return `${detected} detected / ${expected} expected ports`
@@ -2827,8 +2889,8 @@ const prepareSummaryTiles = computed(() => [
     tone: prepareSummaryTone.value,
   },
   {
-    label: 'CPU RTL',
-    value: numberLabel(prepareInputs.value.cpu_rtl_files),
+    label: preparePrimaryRtlLabel.value,
+    value: numberLabel(preparePrimaryRtlCount.value),
     tone: 'neutral',
   },
   {
@@ -3066,7 +3128,10 @@ const humanSummaryMetrics = computed(() => {
   }
   if (isPrepareStep.value && prepareReport.value) {
     return [
-      { label: 'CPU RTL', value: numberLabel(prepareInputs.value.cpu_rtl_files) },
+      {
+        label: preparePrimaryRtlLabel.value,
+        value: numberLabel(preparePrimaryRtlCount.value),
+      },
       { label: 'Total RTL', value: numberLabel(prepareInputs.value.total_rtl_files) },
       { label: 'Contracts', value: prepareContractSummary.value },
       { label: 'Includes', value: numberLabel(prepareInputs.value.incdirs) },
@@ -3092,9 +3157,9 @@ const humanSummaryText = computed(() => {
   }
   if (isLintStep.value && lintReport.value) {
     if (lintActionableDiagnostics.value.length)
-      return 'Lint found CPU or tool diagnostics. Open Lint to inspect source locations.'
+      return `Lint found ${primaryRtlLabel.value.toLowerCase()} or tool diagnostics. Open Lint to inspect source locations.`
     if (lintHiddenDiagnostics.value)
-      return 'CPU lint is clean; infrastructure diagnostics remain available in the All view.'
+      return `${primaryRtlLabel.value} lint is clean; infrastructure diagnostics remain available in the All view.`
     return 'Lint completed without Verilator diagnostics.'
   }
   if (isPrepareStep.value && prepareReport.value) {
@@ -3142,10 +3207,14 @@ const humanNextAction = computed<{
   }
   if (isLintStep.value && lintReport.value) {
     return {
-      title: lintActionableDiagnostics.value.length ? 'Inspect Lint' : 'CPU Lint Clean',
+      title: lintActionableDiagnostics.value.length
+        ? 'Inspect Lint'
+        : `${primaryRtlLabel.value} Lint Clean`,
       detail: lintActionableDiagnostics.value.length
-        ? 'Open CPU and tool diagnostics before running simulation.'
-        : 'No actionable CPU lint diagnostics are reported.',
+        ? isGenericRtl.value
+          ? 'Open design RTL and tool diagnostics before continuing.'
+          : 'Open CPU and tool diagnostics before running simulation.'
+        : `No actionable ${primaryRtlLabel.value.toLowerCase()} lint diagnostics are reported.`,
       label: 'Lint',
       tab: 'lint',
     }
@@ -3183,7 +3252,9 @@ const reviewIssues = computed(() =>
 )
 const reviewActionableIssues = computed(() =>
   reviewIssues.value.filter(
-    (issue) => !issue.waived && (issue.ownership === 'cpu' || !issue.ownership),
+    (issue) =>
+      !issue.waived &&
+      (issue.ownership === (isGenericRtl.value ? 'design' : 'cpu') || !issue.ownership),
   ),
 )
 const reviewDelta = computed(() => reviewReport.value?.delta || {})
@@ -3341,8 +3412,9 @@ const reviewNextAction = computed<{
   if (sourceScanIssues.value.some((issue) => !issue.waived)) {
     return {
       title: 'Fix Source',
-      detail:
-        'Open source scan issues and clean the RTL coding/style risks before running simulation again.',
+      detail: isGenericRtl.value
+        ? 'Open source scan issues and clean the RTL coding or style risks before continuing.'
+        : 'Open source scan issues and clean the RTL coding or style risks before running simulation again.',
       label: 'Source Scan',
       mode: 'source',
     }
@@ -3358,8 +3430,9 @@ const reviewNextAction = computed<{
   }
   return {
     title: 'Looks Clean',
-    detail:
-      'No Review issue is currently reported. Continue with simulation or inspect source files.',
+    detail: isGenericRtl.value
+      ? 'No Review issue is currently reported. Continue to Elaboration or inspect source files.'
+      : 'No Review issue is currently reported. Continue with simulation or inspect source files.',
     label: 'Source Scan',
     mode: 'source',
   }
@@ -3367,7 +3440,7 @@ const reviewNextAction = computed<{
 const reviewStructuralQualityLabel = computed(() => {
   const gate = String(reviewStructuralQuality.value.gate || '').trim()
   const complexity = String(reviewStructuralQuality.value.complexity || '').trim()
-  if (!gate && !complexity) return 'CPU RTL parsed by Yosys precheck.'
+  if (!gate && !complexity) return `${primaryRtlLabel.value} parsed by Yosys precheck.`
   return `Gate: ${titleCase(gate || '--')} · Complexity: ${titleCase(complexity || '--')}`
 })
 const reviewStructuralTone = computed(() => {
@@ -3574,7 +3647,10 @@ const lintDiagnostics = computed<LintDiagnostic[]>(() => {
 })
 const lintActionableDiagnostics = computed(() =>
   lintDiagnostics.value.filter(
-    (item) => item.ownership === 'cpu' || item.ownership === 'tool' || item.actionable,
+    (item) =>
+      item.ownership === (isGenericRtl.value ? 'design' : 'cpu') ||
+      item.ownership === 'tool' ||
+      item.actionable,
   ),
 )
 const lintVisibleDiagnostics = computed(() =>
@@ -3634,14 +3710,30 @@ const lintSummaryTiles = computed(() => [
     tone: String(lintStatusLabel.value).toLowerCase() === 'pass' ? 'ok' : 'error',
   },
   {
-    label: 'CPU Errors',
-    value: numberLabel(lintSummary.value.cpu_errors),
-    tone: numberValue(lintSummary.value.cpu_errors) ? 'error' : 'ok',
+    label: `${isGenericRtl.value ? 'Design' : 'CPU'} Errors`,
+    value: numberLabel(
+      isGenericRtl.value ? lintSummary.value.design_errors : lintSummary.value.cpu_errors,
+    ),
+    tone: numberValue(
+      isGenericRtl.value ? lintSummary.value.design_errors : lintSummary.value.cpu_errors,
+    )
+      ? 'error'
+      : 'ok',
   },
   {
-    label: 'CPU Warnings',
-    value: numberLabel(lintSummary.value.cpu_warnings),
-    tone: numberValue(lintSummary.value.cpu_warnings) ? 'warning' : 'ok',
+    label: `${isGenericRtl.value ? 'Design' : 'CPU'} Warnings`,
+    value: numberLabel(
+      isGenericRtl.value
+        ? lintSummary.value.design_warnings
+        : lintSummary.value.cpu_warnings,
+    ),
+    tone: numberValue(
+      isGenericRtl.value
+        ? lintSummary.value.design_warnings
+        : lintSummary.value.cpu_warnings,
+    )
+      ? 'warning'
+      : 'ok',
   },
   {
     label: 'Actionable',

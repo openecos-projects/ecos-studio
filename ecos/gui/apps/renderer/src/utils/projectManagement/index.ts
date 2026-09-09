@@ -47,6 +47,7 @@ export function buildProjectManagementProject(
     return {
       ...buildBackendProjectManagementProject(project, null),
       projectType: 'frontend',
+      frontendDesignKind: 'cpu_core',
       flowSteps: ['prepare', 'review', 'elab', 'lint', 'sim'],
       frontendAnalysis: buildFrontendProjectAnalysis([]),
     }

@@ -19,7 +19,7 @@ const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
   'sim_programs_dir',
   'sim_tests_dir',
 ]
-const FRONTEND_FILELIST_FIELDS = ['cpu_filelist', 'soc_filelist']
+const FRONTEND_FILELIST_FIELDS = ['cpu_filelist', 'soc_filelist', 'input_filelist']
 
 interface ProjectReadScope {
   projectRoot: string

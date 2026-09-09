@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import {
   applyProjectManifestMutation,
   parseProjectManifest,
@@ -19,6 +19,7 @@ import {
   type WorkspaceBaselineSnapshot,
 } from './eccRpc/workspaceSnapshotLoader'
 import { isPathWithinRoot } from './pathScope'
+import { readWorkspaceParameters } from './workspaceParametersFile'
 
 export interface ProjectManifestScopeProvider {
   resolveProjectRoot(path: string): Promise<string>
@@ -90,16 +91,17 @@ export class ProjectManifestService {
       if (request.mutation.type === 'create' && currentManifest) {
         throw new Error('Project manifest already exists.')
       }
+      const mutation = await this.withImportedFrontendProfile(
+        currentManifest,
+        projectRoot,
+        request.mutation,
+      )
       const manifest =
-        request.mutation.type === 'record-replacement-backup'
-          ? this.applyReplacementBackupMutation(
-              currentManifest,
-              projectRoot,
-              request.mutation,
-            )
-          : request.mutation.type === 'select-qor-baseline'
-            ? await this.applyQorBaselineMutation(currentManifest, request.mutation)
-            : applyProjectManifestMutation(currentManifest, projectRoot, request.mutation)
+        mutation.type === 'record-replacement-backup'
+          ? this.applyReplacementBackupMutation(currentManifest, projectRoot, mutation)
+          : mutation.type === 'select-qor-baseline'
+            ? await this.applyQorBaselineMutation(currentManifest, mutation)
+            : applyProjectManifestMutation(currentManifest, projectRoot, mutation)
       const directoryReplacement =
         request.mutation.type === 'delete-workspace' && request.mutation.deleteDirectory
           ? await this.prepareManagedWorkspaceDeletion(
@@ -155,6 +157,53 @@ export class ProjectManifestService {
       }
       return { content, ...(cleanupPending ? { cleanupPending } : {}) }
     })
+  }
+
+  private async withImportedFrontendProfile(
+    manifest: ProjectManifest | null,
+    projectRoot: string,
+    mutation: ProjectManifestMutation,
+  ): Promise<ProjectManifestMutation> {
+    if (manifest?.project_type !== 'frontend' || mutation.type !== 'register-workspace') {
+      return mutation
+    }
+
+    const configuredKind =
+      mutation.input.config?.frontend_design_kind ??
+      mutation.input.config?.parameters?.frontend_design_kind
+    if (configuredKind !== undefined) return mutation
+
+    const workspacePath = resolve(mutation.input.workspacePath)
+    if (!isPathWithinRoot(workspacePath, projectRoot)) {
+      throw new Error('Frontend workspace must be inside the project root.')
+    }
+
+    let canonicalWorkspacePath: string
+    try {
+      canonicalWorkspacePath = await realpath(workspacePath)
+    } catch (error) {
+      // Workspace creation already supplies its profile. Preserve legacy callers
+      // that register a not-yet-materialized CPU workspace without config.
+      if (isNodeErrorWithCode(error, 'ENOENT')) return mutation
+      throw error
+    }
+    if (!isPathWithinRoot(canonicalWorkspacePath, projectRoot)) {
+      throw new Error('Frontend workspace resolves outside the project root.')
+    }
+
+    const parameters = await readWorkspaceParameters(canonicalWorkspacePath)
+    const frontendDesignKind =
+      parameters?.frontend_design_kind === 'generic_rtl' ? 'generic_rtl' : 'cpu_core'
+    return {
+      ...mutation,
+      input: {
+        ...mutation.input,
+        config: {
+          ...mutation.input.config,
+          frontend_design_kind: frontendDesignKind,
+        },
+      },
+    }
   }
 
   private applyReplacementBackupMutation(

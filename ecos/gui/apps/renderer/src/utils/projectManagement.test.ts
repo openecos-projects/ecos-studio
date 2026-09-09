@@ -445,6 +445,67 @@ describe('project management V3 model', () => {
     expect(createSelectionState(model).selectedStep).toBe('sim')
   })
 
+  it('uses the four-step profile for generic RTL frontend projects', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/uart',
+        name: 'uart',
+        designName: 'uart_top',
+        projectType: 'frontend',
+      }),
+      {
+        projectRoot: '/projects/uart',
+        workspacePath: '/projects/uart/ws_0001',
+        config: {
+          frontend_design_kind: 'generic_rtl',
+          parameters: { frontend_design_kind: 'generic_rtl' },
+        },
+      },
+    )
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+      {
+        ws_0001: {
+          prepare: 'success',
+          review: 'success',
+          elab: 'success',
+          lint: 'success',
+        },
+      },
+    )
+
+    expect(model.frontendDesignKind).toBe('generic_rtl')
+    expect(model.flowSteps).toEqual(['prepare', 'review', 'elab', 'lint'])
+    expect(model.workspaces[0]).toMatchObject({
+      endStep: 'lint',
+      status: 'success',
+    })
+    expect(model.workspaces[0]?.steps.map((step) => step.step)).toEqual([
+      'prepare',
+      'review',
+      'elab',
+      'lint',
+    ])
+    expect(createSelectionState(model).selectedStep).toBe('lint')
+  })
+
+  it('does not lock an empty frontend project to the legacy CPU profile', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/new-frontend',
+      name: 'new-frontend',
+      designName: 'top',
+      projectType: 'frontend',
+    })
+
+    const model = buildProjectManagementProject(
+      { ...project, projectType: 'frontend' },
+      manifest,
+    )
+
+    expect(model.frontendDesignKind).toBeUndefined()
+  })
+
   it('keeps frontend descendants adjacent to their parent workspace', () => {
     const firstRoot = registerWorkspaceInManifest(
       createProjectManifestDraft({

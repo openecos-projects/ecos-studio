@@ -1,7 +1,11 @@
 import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
-import { projectIdFromName, type DesignTool } from '@ecos-studio/shared'
+import {
+  projectIdFromName,
+  type DesignTool,
+  type FrontendDesignKind,
+} from '@ecos-studio/shared'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -91,6 +95,7 @@ export function closeWorkspaceApi(
 export function createWorkspaceApi(options: {
   directory?: string
   designTool?: DesignTool
+  frontend_design_kind?: FrontendDesignKind
   pdk?: string
   parameters?: Record<string, unknown>
   origin_def?: string
@@ -141,12 +146,48 @@ export function createWorkspaceApi(options: {
   core_id?: string
 }) {
   if (options.designTool === 'frontend') {
+    const designKind = options.frontend_design_kind || 'cpu_core'
+    const cpuRuntimePayload =
+      designKind === 'cpu_core'
+        ? {
+            core_id: options.core_id || '',
+            cpu_filelist: options.cpu_filelist || '',
+            cpu_rtl_files: options.cpu_rtl_files || [],
+            cpu_top_module: options.cpu_top_module || '',
+            sim_build_all_programs: options.sim_build_all_programs ?? false,
+            sim_build_test_script: options.sim_build_test_script || '',
+            sim_cflags: options.sim_cflags || [],
+            sim_compile_extra_cflags: options.sim_compile_extra_cflags || [],
+            sim_compile_mabi: options.sim_compile_mabi || '',
+            sim_compile_march: options.sim_compile_march || '',
+            sim_compile_opt_level: options.sim_compile_opt_level || '',
+            sim_compile_preset: options.sim_compile_preset || '',
+            sim_coremark_has_float: options.sim_coremark_has_float ?? false,
+            sim_coremark_iterations: options.sim_coremark_iterations || '',
+            sim_coremark_total_data_size: options.sim_coremark_total_data_size || '',
+            sim_cpp_sources: options.sim_cpp_sources || [],
+            sim_images: options.sim_images || [],
+            sim_ldflags: options.sim_ldflags || [],
+            sim_program_link_base: options.sim_program_link_base || '',
+            sim_program_names: options.sim_program_names || [],
+            sim_program_sources: options.sim_program_sources || [],
+            sim_programs_dir: options.sim_programs_dir || '',
+            sim_run_args: options.sim_run_args || [],
+            sim_soc_root: options.sim_soc_root || '',
+            sim_tests_dir: options.sim_tests_dir || '',
+            sim_tests_out_dir: options.sim_tests_out_dir || '',
+            soc_filelist: options.soc_filelist || '',
+            soc_harness_id: options.soc_harness_id || '',
+            soc_variant: options.soc_variant || '',
+            test_suite_id: options.test_suite_id || '',
+            testbench: options.testbench || '',
+            toolchain_id: options.toolchain_id || '',
+          }
+        : {}
     const payload = toDesktopBridgeData({
-      cpu_filelist: options.cpu_filelist || '',
-      cpu_rtl_files: options.cpu_rtl_files || [],
-      cpu_top_module: options.cpu_top_module || '',
       designTool: 'frontend',
       directory: options.directory || '',
+      frontend_design_kind: designKind,
       filelist: options.filelist || '',
       origin_def: options.origin_def || '',
       origin_verilog: options.origin_verilog || '',
@@ -154,35 +195,7 @@ export function createWorkspaceApi(options: {
       pdk: options.pdk || '',
       pdk_root: options.pdk_root || '',
       rtl_list: options.rtl_list || [],
-      sim_build_all_programs: options.sim_build_all_programs ?? false,
-      sim_build_test_script: options.sim_build_test_script || '',
-      sim_cflags: options.sim_cflags || [],
-      sim_compile_extra_cflags: options.sim_compile_extra_cflags || [],
-      sim_compile_mabi: options.sim_compile_mabi || '',
-      sim_compile_march: options.sim_compile_march || '',
-      sim_compile_opt_level: options.sim_compile_opt_level || '',
-      sim_compile_preset: options.sim_compile_preset || '',
-      sim_coremark_has_float: options.sim_coremark_has_float ?? false,
-      sim_coremark_iterations: options.sim_coremark_iterations || '',
-      sim_coremark_total_data_size: options.sim_coremark_total_data_size || '',
-      sim_cpp_sources: options.sim_cpp_sources || [],
-      sim_images: options.sim_images || [],
-      sim_ldflags: options.sim_ldflags || [],
-      sim_program_link_base: options.sim_program_link_base || '',
-      sim_program_names: options.sim_program_names || [],
-      sim_program_sources: options.sim_program_sources || [],
-      sim_programs_dir: options.sim_programs_dir || '',
-      sim_run_args: options.sim_run_args || [],
-      sim_soc_root: options.sim_soc_root || '',
-      sim_tests_dir: options.sim_tests_dir || '',
-      sim_tests_out_dir: options.sim_tests_out_dir || '',
-      soc_filelist: options.soc_filelist || '',
-      soc_harness_id: options.soc_harness_id || '',
-      soc_variant: options.soc_variant || '',
-      test_suite_id: options.test_suite_id || '',
-      testbench: options.testbench || '',
-      toolchain_id: options.toolchain_id || '',
-      core_id: options.core_id || '',
+      ...cpuRuntimePayload,
     })
     return getDesktopApi()
       .runtime.workspace.create({

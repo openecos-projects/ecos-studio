@@ -193,6 +193,7 @@
       :creating="wizardCreating"
       :initial-config="initialWizardConfig"
       :managed-workspace="managedWorkspaceCreation"
+      :design-kind-locked="managedFrontendDesignKindLocked"
       @close="closeWizard"
       @create="handleWizardCreate"
     />
@@ -229,6 +230,9 @@ const managedWorkspaceCreation = computed(
     Boolean(initialWizardConfig.value) &&
     Boolean(queryString(route.query.projectRoot)) &&
     Boolean(queryString(route.query.workspacePath)),
+)
+const managedFrontendDesignKindLocked = computed(() =>
+  Boolean(queryString(route.query.frontendDesignKind)),
 )
 
 const frontendProjects = computed(() => {
@@ -309,12 +313,29 @@ function prefillManagedProjectWorkspace(): void {
   const workspacePath = queryString(route.query.workspacePath)
   if (!workspacePath) return
   const designName = queryString(route.query.designName)
+  const frontendDesignKind = queryString(route.query.frontendDesignKind)
   initialWizardConfig.value = {
     directory: workspacePath,
     designTool: 'frontend',
+    ...(frontendDesignKind
+      ? {
+          frontend_design_kind:
+            frontendDesignKind === 'generic_rtl'
+              ? ('generic_rtl' as const)
+              : ('cpu_core' as const),
+        }
+      : {}),
     parameters: {
       design: designName || basenamePath(workspacePath),
       description: 'Created from Project Management',
+      ...(frontendDesignKind
+        ? {
+            frontend_design_kind:
+              frontendDesignKind === 'generic_rtl'
+                ? ('generic_rtl' as const)
+                : ('cpu_core' as const),
+          }
+        : {}),
     },
   }
   showWizard.value = true

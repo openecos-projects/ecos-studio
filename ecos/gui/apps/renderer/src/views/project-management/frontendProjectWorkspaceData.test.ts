@@ -112,4 +112,31 @@ describe('frontend project workspace data', () => {
       ]),
     )
   })
+
+  it('does not request simulation reports for generic RTL workspaces', async () => {
+    testState.readProjectManagementWorkspaceTexts.mockResolvedValue({
+      texts: { 'home/flow.json': '{"steps":[]}' },
+      unavailablePaths: [],
+    })
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/uart',
+        name: 'uart',
+        designName: 'uart_top',
+        projectType: 'frontend',
+      }),
+      {
+        projectRoot: '/projects/uart',
+        workspacePath: '/projects/uart/ws_0001',
+        config: { frontend_design_kind: 'generic_rtl' },
+      },
+    )
+
+    await readFrontendProjectWorkspaceData('/projects/uart', manifest)
+
+    const calls = testState.readProjectManagementWorkspaceTexts.mock.calls
+    const requestedPaths = calls[calls.length - 1]?.[2]
+    expect(requestedPaths).toContain('lint_verilator/report/frontend_detail.json')
+    expect(requestedPaths).not.toContain('sim_verilator/report/frontend_detail.json')
+  })
 })

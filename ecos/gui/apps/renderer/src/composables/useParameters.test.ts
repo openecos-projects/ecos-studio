@@ -138,6 +138,7 @@ describe('useParameters helpers', () => {
 
     expect(config.designTool).toBe('frontend')
     expect(config.frontend).toMatchObject({
+      designKind: 'cpu_core',
       coreId: 'custom-filelist',
       cpuFilelist: '/work/cpu/filelist.f',
       socHarnessId: 'ysyx-am',
@@ -148,10 +149,28 @@ describe('useParameters helpers', () => {
     })
     expect(transformConfigToParameters(config)).toMatchObject({
       'Design Tool': 'frontend',
+      frontend_design_kind: 'cpu_core',
       frontend_core_id: 'custom-filelist',
       cpu_filelist: '/work/cpu/filelist.f',
       soc_harness_id: 'ysyx-am',
     })
+  })
+
+  it('preserves the general RTL workspace profile', () => {
+    const config = transformParametersToConfig(
+      parseParametersData(
+        JSON.stringify({
+          'Design Tool': 'frontend',
+          frontend_design_kind: 'generic_rtl',
+          design: 'uart',
+          top_module: 'uart_top',
+          input_filelist: '/work/uart/design.f',
+        }),
+      ),
+    )
+
+    expect(config.frontend.designKind).toBe('generic_rtl')
+    expect(transformConfigToParameters(config).frontend_design_kind).toBe('generic_rtl')
   })
 
   it('pins routing layer fields to the ics55 MET2-MET5 route window', () => {

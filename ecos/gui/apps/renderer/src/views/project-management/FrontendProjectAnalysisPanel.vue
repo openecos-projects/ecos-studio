@@ -20,13 +20,13 @@
             <i :style="{ width: `${analysis.progressPercent}%` }"></i>
           </div>
         </div>
-        <dl class="fe-health-metrics">
+        <dl class="fe-health-metrics" :class="{ 'is-static-profile': isGenericRtl }">
           <div>
             <dt>Workspaces</dt>
             <dd>{{ analysis.completeWorkspaceCount }}/{{ analysis.workspaceCount }}</dd>
             <small>flow complete</small>
           </div>
-          <div>
+          <div v-if="!isGenericRtl">
             <dt>Simulation</dt>
             <dd :class="analysis.failedCases > 0 ? 'tone-bad' : 'tone-good'">
               {{ passRateLabel(analysis.passRate) }}
@@ -68,22 +68,31 @@
           <small>{{ analysis.workspaces.length }} total</small>
         </header>
         <div class="fe-compare-table" role="table" aria-label="Workspace comparison">
-          <div class="fe-compare-row is-head" role="row">
+          <div
+            class="fe-compare-row is-head"
+            :class="{ 'is-static-profile': isGenericRtl }"
+            role="row"
+          >
             <span role="columnheader">Workspace</span>
             <span role="columnheader">Progress</span>
             <span role="columnheader">QoR</span>
             <span role="columnheader">Errors</span>
             <span role="columnheader">Warnings</span>
-            <span role="columnheader">Simulation</span>
-            <span role="columnheader">Cycles</span>
-            <span role="columnheader">Difftest</span>
+            <template v-if="!isGenericRtl">
+              <span role="columnheader">Simulation</span>
+              <span role="columnheader">Cycles</span>
+              <span role="columnheader">Difftest</span>
+            </template>
           </div>
           <button
             v-for="workspace in analysis.workspaces"
             :key="workspace.workspaceId"
             type="button"
             class="fe-compare-row is-data"
-            :class="{ selected: workspace.workspaceId === selectedWorkspaceId }"
+            :class="{
+              selected: workspace.workspaceId === selectedWorkspaceId,
+              'is-static-profile': isGenericRtl,
+            }"
             role="row"
             @click="selectWorkspace(workspace.workspaceId)"
           >
@@ -112,11 +121,13 @@
             >
               {{ workspace.actionableWarnings }} actionable
             </span>
-            <span role="cell" :class="workspace.failedCases > 0 ? 'tone-bad' : ''">
-              {{ workspace.passedCases }}/{{ workspace.totalCases }}
-            </span>
-            <span role="cell">{{ numberLabel(workspace.cycles) }}</span>
-            <span role="cell">{{ workspace.difftestPassed }}</span>
+            <template v-if="!isGenericRtl">
+              <span role="cell" :class="workspace.failedCases > 0 ? 'tone-bad' : ''">
+                {{ workspace.passedCases }}/{{ workspace.totalCases }}
+              </span>
+              <span role="cell">{{ numberLabel(workspace.cycles) }}</span>
+              <span role="cell">{{ workspace.difftestPassed }}</span>
+            </template>
           </button>
         </div>
       </section>
@@ -328,11 +339,7 @@ import { computed, ref, watch } from 'vue'
 import FrontendQorInputSnapshot from '@/components/frontend/FrontendQorInputSnapshot.vue'
 import FrontendQorScoreBreakdown from '@/components/frontend/FrontendQorScoreBreakdown.vue'
 import { frontendQorGateEvidence } from '@/utils/frontendQor'
-import {
-  FRONTEND_FLOW_STEPS,
-  type ProjectManagementProject,
-  type ProjectStage,
-} from '@/utils/projectManagement'
+import type { ProjectManagementProject, ProjectStage } from '@/utils/projectManagement'
 import type {
   FrontendAnalysisFinding,
   FrontendAnalysisStage,
@@ -361,9 +368,12 @@ const emit = defineEmits<{
 
 const findingsExpanded = ref(false)
 const analysis = computed(() => props.project.frontendAnalysis!)
-const frontendStages = FRONTEND_FLOW_STEPS
+const isGenericRtl = computed(() => props.project.frontendDesignKind === 'generic_rtl')
+const frontendStages = computed(
+  () => props.project.flowSteps as readonly FrontendAnalysisStage[],
+)
 const activeStage = computed<FrontendAnalysisStage>(() =>
-  frontendStages.includes(props.selectedStep as FrontendAnalysisStage)
+  frontendStages.value.includes(props.selectedStep as FrontendAnalysisStage)
     ? (props.selectedStep as FrontendAnalysisStage)
     : 'prepare',
 )

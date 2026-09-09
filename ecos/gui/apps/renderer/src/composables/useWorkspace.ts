@@ -4,6 +4,7 @@ import type {
   DesktopSettingsValue,
   WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
+import { normalizeFrontendDesignKind } from '@ecos-studio/shared'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
@@ -1152,57 +1153,100 @@ export function useWorkspace() {
       let response: Awaited<ReturnType<typeof createWorkspaceApi>>
 
       if (designTool === 'frontend') {
-        const parameters = {
+        const frontendDesignKind = normalizeFrontendDesignKind(
+          creationConfig?.frontend_design_kind ?? frontendParams.frontend_design_kind,
+        )
+        const parameters: Record<string, unknown> = {
           ...frontendParams,
           Design: designName,
           'Design Tool': 'frontend',
+          frontend_design_kind: frontendDesignKind,
           'Top module':
-            frontendParams.top_module || frontendParams['Top module'] || 'ecos_sim_top',
-          Clock: frontendParams.clock || frontendParams.Clock || 'clk',
+            frontendParams.top_module ||
+            frontendParams['Top module'] ||
+            (frontendDesignKind === 'generic_rtl' ? 'top' : 'ecos_sim_top'),
+          Clock:
+            frontendDesignKind === 'generic_rtl'
+              ? (frontendParams.clock ?? frontendParams.Clock ?? '')
+              : frontendParams.clock || frontendParams.Clock || 'clk',
           'Frequency max [MHz]':
             frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
         }
+        if (frontendDesignKind === 'generic_rtl') {
+          for (const field of [
+            'cpu_filelist',
+            'cpu_top_module',
+            'frontend_core_id',
+            'core_id',
+            'soc_filelist',
+            'soc_harness_id',
+            'soc_variant',
+            'toolchain_id',
+            'test_suite_id',
+          ]) {
+            delete parameters[field]
+          }
+        }
+        const cpuRuntimeOptions =
+          frontendDesignKind === 'cpu_core'
+            ? {
+                core_id: String(
+                  frontendParams.frontend_core_id || frontendParams.core_id || '',
+                ),
+                cpu_filelist: String(frontendParams.cpu_filelist || ''),
+                cpu_rtl_files: creationConfig?.cpu_rtl_files || [],
+                cpu_top_module: String(frontendParams.cpu_top_module || ''),
+                sim_build_all_programs: Boolean(frontendParams.sim_build_all_programs),
+                sim_build_test_script: String(frontendParams.sim_build_test_script || ''),
+                sim_cflags: stringArray(frontendParams.sim_cflags),
+                sim_compile_extra_cflags: stringArray(
+                  frontendParams.sim_compile_extra_cflags,
+                ),
+                sim_compile_mabi: String(frontendParams.sim_compile_mabi || ''),
+                sim_compile_march: String(frontendParams.sim_compile_march || ''),
+                sim_compile_opt_level: String(frontendParams.sim_compile_opt_level || ''),
+                sim_compile_preset: String(frontendParams.sim_compile_preset || ''),
+                sim_coremark_has_float: Boolean(frontendParams.sim_coremark_has_float),
+                sim_coremark_iterations: String(
+                  frontendParams.sim_coremark_iterations || '',
+                ),
+                sim_coremark_total_data_size: String(
+                  frontendParams.sim_coremark_total_data_size || '',
+                ),
+                sim_cpp_sources: stringArray(frontendParams.sim_cpp_sources),
+                sim_images: stringArray(frontendParams.sim_images),
+                sim_ldflags: stringArray(frontendParams.sim_ldflags),
+                sim_program_names: stringArray(frontendParams.sim_program_names),
+                sim_program_sources: stringArray(frontendParams.sim_program_sources),
+                sim_program_link_base: String(frontendParams.sim_program_link_base || ''),
+                sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
+                sim_run_args: stringArray(frontendParams.sim_run_args),
+                sim_soc_root: String(frontendParams.sim_soc_root || ''),
+                sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
+                sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
+                soc_harness_id: String(frontendParams.soc_harness_id || ''),
+                soc_filelist: String(frontendParams.soc_filelist || ''),
+                soc_variant: String(frontendParams.soc_variant || 'soc1'),
+                testbench: String(frontendParams.testbench || ''),
+                toolchain_id: String(frontendParams.toolchain_id || ''),
+                test_suite_id: String(frontendParams.test_suite_id || ''),
+              }
+            : {}
 
         response = await createWorkspaceApi({
-          cpu_filelist: String(frontendParams.cpu_filelist || ''),
-          cpu_rtl_files: creationConfig?.cpu_rtl_files || [],
-          cpu_top_module: String(frontendParams.cpu_top_module || ''),
           designTool: 'frontend',
           directory: selectedPath,
+          filelist:
+            frontendDesignKind === 'generic_rtl' ? creationConfig?.filelist || '' : '',
+          frontend_design_kind: frontendDesignKind,
+          origin_verilog:
+            frontendDesignKind === 'generic_rtl'
+              ? creationConfig?.origin_verilog || ''
+              : '',
           parameters,
-          sim_build_all_programs: Boolean(frontendParams.sim_build_all_programs),
-          sim_build_test_script: String(frontendParams.sim_build_test_script || ''),
-          sim_cflags: stringArray(frontendParams.sim_cflags),
-          sim_compile_extra_cflags: stringArray(frontendParams.sim_compile_extra_cflags),
-          sim_compile_mabi: String(frontendParams.sim_compile_mabi || ''),
-          sim_compile_march: String(frontendParams.sim_compile_march || ''),
-          sim_compile_opt_level: String(frontendParams.sim_compile_opt_level || ''),
-          sim_compile_preset: String(frontendParams.sim_compile_preset || ''),
-          sim_coremark_has_float: Boolean(frontendParams.sim_coremark_has_float),
-          sim_coremark_iterations: String(frontendParams.sim_coremark_iterations || ''),
-          sim_coremark_total_data_size: String(
-            frontendParams.sim_coremark_total_data_size || '',
-          ),
-          sim_cpp_sources: stringArray(frontendParams.sim_cpp_sources),
-          sim_images: stringArray(frontendParams.sim_images),
-          sim_ldflags: stringArray(frontendParams.sim_ldflags),
-          sim_program_names: stringArray(frontendParams.sim_program_names),
-          sim_program_sources: stringArray(frontendParams.sim_program_sources),
-          sim_program_link_base: String(frontendParams.sim_program_link_base || ''),
-          sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
-          sim_run_args: stringArray(frontendParams.sim_run_args),
-          sim_soc_root: String(frontendParams.sim_soc_root || ''),
-          sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
-          sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
-          soc_harness_id: String(frontendParams.soc_harness_id || ''),
-          soc_filelist: String(frontendParams.soc_filelist || ''),
-          soc_variant: String(frontendParams.soc_variant || 'soc1'),
-          testbench: String(frontendParams.testbench || ''),
-          toolchain_id: String(frontendParams.toolchain_id || ''),
-          test_suite_id: String(frontendParams.test_suite_id || ''),
-          core_id: String(
-            frontendParams.frontend_core_id || frontendParams.core_id || '',
-          ),
+          rtl_list:
+            frontendDesignKind === 'generic_rtl' ? creationConfig?.rtl_list || [] : [],
+          ...cpuRuntimeOptions,
         })
       } else {
         const pdkName = creationConfig?.pdk || 'ics55'

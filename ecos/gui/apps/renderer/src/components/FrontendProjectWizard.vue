@@ -165,6 +165,46 @@
                   </div>
 
                   <div class="group">
+                    <label class="mb-3 block text-sm font-semibold text-(--text-primary)">
+                      Design Type <span class="text-red-500">*</span>
+                    </label>
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        v-for="option in frontendDesignOptions"
+                        :key="option.value"
+                        type="button"
+                        :disabled="managedWorkspace && designKindLocked"
+                        class="flex min-h-24 items-start gap-3 rounded-xl border bg-(--bg-secondary)/30 p-4 text-left transition-colors enabled:cursor-pointer enabled:hover:bg-(--bg-secondary)/70 disabled:cursor-default disabled:opacity-75"
+                        :class="
+                          frontendDesignKind === option.value
+                            ? 'border-(--accent-color) ring-2 ring-(--accent-color)/20'
+                            : 'border-(--border-color)'
+                        "
+                        @click="setFrontendDesignKind(option.value)"
+                      >
+                        <i
+                          :class="[
+                            option.icon,
+                            'mt-0.5 text-xl',
+                            frontendDesignKind === option.value
+                              ? 'text-(--accent-color)'
+                              : 'text-(--text-secondary)',
+                          ]"
+                        ></i>
+                        <span>
+                          <strong class="block text-sm text-(--text-primary)">{{
+                            option.label
+                          }}</strong>
+                          <small
+                            class="mt-1 block leading-relaxed text-(--text-secondary)"
+                            >{{ option.description }}</small
+                          >
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="group">
                     <label
                       class="mb-2 block text-sm font-semibold text-(--text-primary) transition-colors group-focus-within:text-(--accent-color)"
                     >
@@ -222,16 +262,23 @@
                     Verification Setup
                   </h2>
                   <p class="mt-2 text-(--text-secondary)">
-                    CPU source, harness, toolchain, and tests.
+                    {{
+                      isCpuCore
+                        ? 'CPU source, harness, toolchain, and tests.'
+                        : 'RTL sources and top-level elaboration contract.'
+                    }}
                   </p>
                 </div>
 
-                <div v-if="catalogLoading" class="state-panel">
+                <div v-if="isCpuCore && catalogLoading" class="state-panel">
                   <i class="ri-loader-4-line animate-spin"></i>
                   <span>Loading catalog</span>
                 </div>
 
-                <div v-else-if="catalogUnavailable" class="state-panel failed">
+                <div
+                  v-else-if="isCpuCore && catalogUnavailable"
+                  class="state-panel failed"
+                >
                   <i class="ri-error-warning-line"></i>
                   <span>{{ catalogError || 'Frontend catalog is unavailable.' }}</span>
                   <button type="button" class="text-action" @click="loadCatalog">
@@ -239,7 +286,7 @@
                   </button>
                 </div>
 
-                <div v-else class="space-y-8">
+                <div v-else-if="isCpuCore" class="space-y-8">
                   <section>
                     <div class="mb-3 flex items-center justify-between gap-3">
                       <label class="text-sm font-semibold text-(--text-primary)"
@@ -640,6 +687,246 @@
                     </div>
                   </section>
                 </div>
+
+                <div v-else class="space-y-8">
+                  <section class="grid grid-cols-1 gap-6 md:grid-cols-2">
+                    <div class="group">
+                      <label
+                        for="generic-top-module"
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                      >
+                        Top Module <span class="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="generic-top-module"
+                        v-model.trim="config.parameters.top_module"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="e.g. uart_top"
+                        :aria-invalid="Boolean(genericTopModuleError)"
+                        :class="[
+                          'w-full rounded-xl border bg-(--bg-secondary)/40 px-4 py-3.5 font-mono text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80 focus:outline-none',
+                          genericTopModuleError
+                            ? 'border-red-500 focus:border-red-500'
+                            : 'border-(--border-color) focus:border-(--accent-color)',
+                        ]"
+                      />
+                      <p v-if="genericTopModuleError" class="mt-2 text-xs text-red-500">
+                        {{ genericTopModuleError }}
+                      </p>
+                    </div>
+
+                    <div class="group">
+                      <label
+                        for="generic-clock"
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                      >
+                        Clock Signal
+                        <span class="font-normal text-(--text-secondary)"
+                          >(optional)</span
+                        >
+                      </label>
+                      <input
+                        id="generic-clock"
+                        v-model.trim="config.parameters.clock"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="e.g. clk"
+                        :aria-invalid="Boolean(genericClockError)"
+                        :class="[
+                          'w-full rounded-xl border bg-(--bg-secondary)/40 px-4 py-3.5 font-mono text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80 focus:outline-none',
+                          genericClockError
+                            ? 'border-red-500 focus:border-red-500'
+                            : 'border-(--border-color) focus:border-(--accent-color)',
+                        ]"
+                      />
+                      <p v-if="genericClockError" class="mt-2 text-xs text-red-500">
+                        {{ genericClockError }}
+                      </p>
+                    </div>
+                  </section>
+
+                  <section class="cpu-source-setup">
+                    <div
+                      class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <label class="text-sm font-semibold text-(--text-primary)">
+                          RTL Design Files <span class="text-red-500">*</span>
+                        </label>
+                        <p class="mt-1 text-xs text-(--text-secondary)">
+                          Provide a filelist or select Verilog/SystemVerilog files.
+                        </p>
+                      </div>
+                      <div
+                        class="cpu-source-mode"
+                        aria-label="RTL design file input method"
+                      >
+                        <button
+                          type="button"
+                          :class="{ active: genericSourceMode === 'filelist' }"
+                          @click="selectGenericSourceMode('filelist')"
+                        >
+                          <i class="ri-file-list-3-line"></i>
+                          <span>Use filelist</span>
+                        </button>
+                        <button
+                          type="button"
+                          :class="{ active: genericSourceMode === 'files' }"
+                          @click="selectGenericSourceMode('files')"
+                        >
+                          <i class="ri-folder-open-line"></i>
+                          <span>Select RTL files</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="genericSourceMode === 'filelist'" class="mt-5">
+                      <PathPicker
+                        label="RTL Source Filelist"
+                        required
+                        icon="ri-file-list-3-line"
+                        :model-value="config.filelist || ''"
+                        @browse="selectGenericFilelist"
+                      />
+                    </div>
+
+                    <div v-else class="cpu-source-browser">
+                      <div class="cpu-source-actions">
+                        <div class="cpu-source-icon">
+                          <i class="ri-folder-code-line"></i>
+                        </div>
+                        <div>
+                          <strong>Choose design RTL sources</strong>
+                          <p>
+                            Select the source and header files used by the top module.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          class="cpu-source-primary-action"
+                          @click="selectGenericRtlFiles"
+                        >
+                          <i class="ri-folder-open-line"></i>
+                          {{
+                            selectedGenericRtlFiles.length ? 'Add files' : 'Choose files'
+                          }}
+                        </button>
+                        <button
+                          v-if="selectedGenericRtlFiles.length"
+                          type="button"
+                          class="cpu-source-clear-action"
+                          @click="clearGenericRtlFiles"
+                        >
+                          Clear selection
+                        </button>
+                        <div class="cpu-source-summary">
+                          <span>Accepted formats</span>
+                          <strong>.v / .sv / headers</strong>
+                          <span>Selected</span>
+                          <strong>{{ selectedGenericRtlFiles.length }} files</strong>
+                        </div>
+                      </div>
+
+                      <div class="cpu-source-selection">
+                        <div class="cpu-source-selection-head">
+                          <div>
+                            <strong>Selected files</strong>
+                            <span>{{
+                              selectedGenericRtlFiles.length
+                                ? 'Ready for top-module validation'
+                                : 'No RTL files selected'
+                            }}</span>
+                          </div>
+                          <span class="cpu-source-count">{{
+                            selectedGenericRtlFiles.length
+                          }}</span>
+                        </div>
+                        <div
+                          v-if="!selectedGenericRtlFiles.length"
+                          class="cpu-source-empty"
+                        >
+                          <i class="ri-file-add-line"></i>
+                          <span>Your selected source files will appear here.</span>
+                        </div>
+                        <div v-else class="custom-scrollbar cpu-source-file-list">
+                          <div
+                            v-for="file in selectedGenericRtlFiles"
+                            :key="file"
+                            class="cpu-source-file-row"
+                          >
+                            <i :class="cpuRtlFileIcon(file)"></i>
+                            <div>
+                              <strong :title="file">{{ cpuRtlFileName(file) }}</strong>
+                              <span :title="cpuRtlFileDirectory(file)">{{
+                                cpuRtlFileDirectory(file)
+                              }}</span>
+                            </div>
+                            <button
+                              type="button"
+                              title="Remove file"
+                              @click="removeGenericRtlFile(file)"
+                            >
+                              <i class="ri-close-line"></i>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section
+                    class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/30 p-5"
+                  >
+                    <div
+                      class="flex items-center gap-2 text-sm font-semibold text-(--text-primary)"
+                    >
+                      <i class="ri-flow-chart text-(--accent-color)"></i>
+                      Generic RTL Flow
+                    </div>
+                    <div
+                      class="mt-4 flex flex-wrap items-center gap-2 text-xs font-medium text-(--text-secondary)"
+                    >
+                      <template v-for="(stage, index) in genericFlowStages" :key="stage">
+                        <span
+                          class="rounded-lg border border-(--border-color) bg-(--bg-primary)/70 px-3 py-2"
+                          >{{ stage }}</span
+                        >
+                        <i
+                          v-if="index < genericFlowStages.length - 1"
+                          class="ri-arrow-right-line"
+                        ></i>
+                      </template>
+                    </div>
+                  </section>
+
+                  <section
+                    v-if="validationIssues.length"
+                    class="validation-panel"
+                    :class="validationPanelClass"
+                  >
+                    <div class="validation-head">
+                      <i :class="validationIcon"></i>
+                      <div>
+                        <strong>{{ validationTitle }}</strong>
+                        <span>{{ validationSummary }}</span>
+                      </div>
+                    </div>
+                    <div class="validation-issues">
+                      <div
+                        v-for="issue in validationIssues"
+                        :key="`${issue.code}:${issue.field}:${issue.message}`"
+                        class="validation-issue"
+                        :class="issue.severity"
+                      >
+                        <i class="ri-close-circle-line"></i>
+                        <span>{{ issue.message }}</span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
               </section>
 
               <section v-else key="step3" class="mx-auto w-full max-w-2xl">
@@ -683,6 +970,10 @@
                       monospace
                       wide
                     />
+                    <ReviewItem
+                      label="Design Type"
+                      :value="isCpuCore ? 'CPU Core' : 'General RTL'"
+                    />
                   </ReviewSection>
 
                   <ReviewSection
@@ -690,68 +981,101 @@
                     icon="ri-file-list-3-line"
                     @edit="jumpToStep(2)"
                   >
-                    <ReviewItem label="CPU Source" :value="selectedCore?.name || '-'" />
-                    <ReviewItem
-                      v-if="selectedCoreId === CUSTOM_FILELIST_ID"
-                      label="CPU Top Module"
-                      :value="requiredCpuTopModule || '-'"
-                      monospace
-                    />
-                    <ReviewItem
-                      label="Core Capability"
-                      :value="
-                        capabilityLabel(
-                          validation?.normalized.core_capability ||
-                            selectedCore?.integration_level,
-                        )
-                      "
-                    />
-                    <ReviewItem
-                      label="SoC Harness"
-                      :value="selectedSocHarness?.name || '-'"
-                    />
-                    <ReviewItem label="Combination" :value="combinationSummary" wide />
-                    <ReviewItem
-                      label="Compatible Tests"
-                      :value="compatibleTestSuitesLabel"
-                    />
-                    <ReviewItem
-                      label="Toolchain"
-                      :value="selectedToolchain?.name || '-'"
-                    />
-                    <ReviewItem
-                      label="Test Suite"
-                      :value="selectedTestSuite?.name || '-'"
-                    />
-                    <ReviewItem label="CPU Input Method" :value="cpuSourceMethodLabel" />
-                    <ReviewItem
-                      label="CPU Design Files"
-                      :value="cpuSourceReviewValue"
-                      monospace
-                      wide
-                    />
-                    <ReviewItem
-                      label="CPU Reset PC"
-                      :value="requiredCpuResetVector || '-'"
-                      monospace
-                    />
-                    <ReviewItem
-                      label="Program Link Base"
-                      :value="defaultProgramLinkBase || '-'"
-                      monospace
-                    />
-                    <ReviewItem
-                      label="Boot Payload Base"
-                      :value="bootloaderPayloadLinkBase || '-'"
-                      monospace
-                      wide
-                    />
-                    <ReviewItem
-                      label="Default Flow"
-                      value="prepare -> elab -> lint -> sim"
-                      monospace
-                      wide
-                    />
+                    <template v-if="isCpuCore">
+                      <ReviewItem label="CPU Source" :value="selectedCore?.name || '-'" />
+                      <ReviewItem
+                        v-if="selectedCoreId === CUSTOM_FILELIST_ID"
+                        label="CPU Top Module"
+                        :value="requiredCpuTopModule || '-'"
+                        monospace
+                      />
+                      <ReviewItem
+                        label="Core Capability"
+                        :value="
+                          capabilityLabel(
+                            validation?.normalized.core_capability ||
+                              selectedCore?.integration_level,
+                          )
+                        "
+                      />
+                      <ReviewItem
+                        label="SoC Harness"
+                        :value="selectedSocHarness?.name || '-'"
+                      />
+                      <ReviewItem label="Combination" :value="combinationSummary" wide />
+                      <ReviewItem
+                        label="Compatible Tests"
+                        :value="compatibleTestSuitesLabel"
+                      />
+                      <ReviewItem
+                        label="Toolchain"
+                        :value="selectedToolchain?.name || '-'"
+                      />
+                      <ReviewItem
+                        label="Test Suite"
+                        :value="selectedTestSuite?.name || '-'"
+                      />
+                      <ReviewItem
+                        label="CPU Input Method"
+                        :value="cpuSourceMethodLabel"
+                      />
+                      <ReviewItem
+                        label="CPU Design Files"
+                        :value="cpuSourceReviewValue"
+                        monospace
+                        wide
+                      />
+                      <ReviewItem
+                        label="CPU Reset PC"
+                        :value="requiredCpuResetVector || '-'"
+                        monospace
+                      />
+                      <ReviewItem
+                        label="Program Link Base"
+                        :value="defaultProgramLinkBase || '-'"
+                        monospace
+                      />
+                      <ReviewItem
+                        label="Boot Payload Base"
+                        :value="bootloaderPayloadLinkBase || '-'"
+                        monospace
+                        wide
+                      />
+                      <ReviewItem
+                        label="Default Flow"
+                        value="prepare -> review -> elab -> lint -> sim"
+                        monospace
+                        wide
+                      />
+                    </template>
+                    <template v-else>
+                      <ReviewItem
+                        label="Top Module"
+                        :value="config.parameters.top_module || '-'"
+                        monospace
+                      />
+                      <ReviewItem
+                        label="Clock Signal"
+                        :value="config.parameters.clock || 'Not specified'"
+                        monospace
+                      />
+                      <ReviewItem
+                        label="RTL Input Method"
+                        :value="genericSourceMethodLabel"
+                      />
+                      <ReviewItem
+                        label="RTL Design Files"
+                        :value="genericSourceReviewValue"
+                        monospace
+                        wide
+                      />
+                      <ReviewItem
+                        label="Default Flow"
+                        value="prepare -> review -> elab -> lint"
+                        monospace
+                        wide
+                      />
+                    </template>
                   </ReviewSection>
 
                   <section
@@ -854,6 +1178,7 @@ import {
 import { waitForDesktopApi } from '@/platform/desktop'
 import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import type { WorkspaceConfig } from '../types'
+import { normalizeFrontendDesignKind, type FrontendDesignKind } from '@ecos-studio/shared'
 import {
   formatCpuTopModule,
   isVerilogIdentifier,
@@ -873,6 +1198,7 @@ interface FrontendParameters extends Record<string, unknown> {
   design: string
   description: string
   top_module: string
+  frontend_design_kind: FrontendDesignKind
   cpu_top_module: string
   clock: string
   frequency_max: number
@@ -896,12 +1222,14 @@ interface Emits {
 
 interface Props {
   creating?: boolean
+  designKindLocked?: boolean
   initialConfig?: Partial<WorkspaceConfig>
   managedWorkspace?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   creating: false,
+  designKindLocked: false,
   managedWorkspace: false,
 })
 const emit = defineEmits<Emits>()
@@ -939,6 +1267,8 @@ const selectedToolchainId = ref('')
 const selectedTestSuiteId = ref('')
 const cpuSourceMode = ref<CpuSourceMode>('filelist')
 const selectedCpuRtlFiles = ref<string[]>([])
+const genericSourceMode = ref<CpuSourceMode>('filelist')
+const selectedGenericRtlFiles = ref<string[]>([])
 const cpuSelectionConfirming = ref(false)
 const cpuSelectionMessage = ref('')
 let validationToken = 0
@@ -949,6 +1279,26 @@ const steps = [
   { id: 2, title: 'Verification Setup' },
   { id: 3, title: 'Review & Create' },
 ]
+const frontendDesignOptions: ReadonlyArray<{
+  value: FrontendDesignKind
+  label: string
+  description: string
+  icon: string
+}> = [
+  {
+    value: 'cpu_core',
+    label: 'CPU Core',
+    description: 'CPU verification with a SoC harness, tests, and simulation.',
+    icon: 'ri-cpu-line',
+  },
+  {
+    value: 'generic_rtl',
+    label: 'General RTL',
+    description: 'Static RTL review, elaboration, and lint for non-CPU modules.',
+    icon: 'ri-code-box-line',
+  },
+]
+const genericFlowStages = ['Prepare', 'RTL Review', 'Elaboration', 'Lint'] as const
 
 const catalog = ref<FrontendCatalogPayload>(createEmptyCatalog())
 
@@ -959,18 +1309,23 @@ const config = ref<FrontendWorkspaceConfig>(
 function createFrontendWorkspaceConfig(
   initialConfig?: Partial<WorkspaceConfig>,
 ): FrontendWorkspaceConfig {
+  const designKind = normalizeFrontendDesignKind(
+    initialConfig?.frontend_design_kind ??
+      initialConfig?.parameters?.frontend_design_kind,
+  )
   return {
     ...initialConfig,
     directory: initialConfig?.directory ?? '',
     designTool: 'frontend',
+    frontend_design_kind: designKind,
     pdk: initialConfig?.pdk ?? '',
     pdk_root: initialConfig?.pdk_root ?? '',
     parameters: {
       design: '',
       description: '',
-      top_module: 'ecos_sim_top',
+      top_module: designKind === 'generic_rtl' ? 'top' : 'ecos_sim_top',
       cpu_top_module: CUSTOM_CPU_TOP_MODULE,
-      clock: 'clk',
+      clock: designKind === 'generic_rtl' ? '' : 'clk',
       frequency_max: 100,
       cpu_filelist: '',
       soc_variant: '',
@@ -979,12 +1334,21 @@ function createFrontendWorkspaceConfig(
       toolchain_id: '',
       test_suite_id: '',
       ...initialConfig?.parameters,
+      frontend_design_kind: designKind,
     },
     origin_def: initialConfig?.origin_def ?? '',
     origin_verilog: initialConfig?.origin_verilog ?? '',
     rtl_list: [...(initialConfig?.rtl_list ?? [])],
+    filelist: initialConfig?.filelist ?? '',
   }
 }
+
+const frontendDesignKind = computed(() =>
+  normalizeFrontendDesignKind(
+    config.value.frontend_design_kind ?? config.value.parameters.frontend_design_kind,
+  ),
+)
+const isCpuCore = computed(() => frontendDesignKind.value === 'cpu_core')
 
 const selectedCore = computed(() =>
   normalizeCoreEntry(entryById(catalog.value.cores, selectedCoreId.value)),
@@ -1111,23 +1475,92 @@ const catalogUnavailable = computed(
     visibleSocHarnesses.value.length === 0,
 )
 
-const validationIssues = computed(() => [
-  ...(catalogError.value
+const genericTopModuleError = computed(() => {
+  const moduleName = config.value.parameters.top_module.trim()
+  if (!moduleName) return 'Top module is required'
+  if (!isVerilogIdentifier(moduleName)) {
+    return 'Top module must be a valid Verilog identifier'
+  }
+  return ''
+})
+const genericClockError = computed(() => {
+  const clock = config.value.parameters.clock.trim()
+  if (clock && !isVerilogIdentifier(clock)) {
+    return 'Clock signal must be a valid Verilog identifier'
+  }
+  return ''
+})
+const genericInputReady = computed(() =>
+  genericSourceMode.value === 'files'
+    ? selectedGenericRtlFiles.value.length > 0
+    : Boolean(config.value.filelist?.trim()),
+)
+const genericValidationIssues = computed<FrontendValidationIssue[]>(() => {
+  const issues: FrontendValidationIssue[] = []
+  if (genericTopModuleError.value) {
+    issues.push({
+      severity: 'error',
+      code: 'invalid_top_module',
+      field: 'top_module',
+      message: genericTopModuleError.value,
+    })
+  }
+  if (genericClockError.value) {
+    issues.push({
+      severity: 'error',
+      code: 'invalid_clock',
+      field: 'clock',
+      message: genericClockError.value,
+    })
+  }
+  if (!genericInputReady.value) {
+    issues.push({
+      severity: 'error',
+      code:
+        genericSourceMode.value === 'files'
+          ? 'missing_rtl_files'
+          : 'missing_rtl_filelist',
+      field: genericSourceMode.value === 'files' ? 'rtl_list' : 'filelist',
+      message:
+        genericSourceMode.value === 'files'
+          ? 'Select at least one RTL source file.'
+          : 'RTL source filelist is required.',
+    })
+  }
+  return issues
+})
+const genericSourceMethodLabel = computed(() =>
+  genericSourceMode.value === 'files' ? 'Selected RTL files' : 'Existing filelist',
+)
+const genericSourceReviewValue = computed(() =>
+  genericSourceMode.value === 'files'
+    ? `${selectedGenericRtlFiles.value.length} RTL files selected`
+    : config.value.filelist || '-',
+)
+
+const validationIssues = computed(() =>
+  isCpuCore.value
     ? [
-        {
-          severity: catalogUnavailable.value ? ('error' as const) : ('warning' as const),
-          code: 'catalog_load_failed',
-          field: 'catalog',
-          message: catalogError.value,
-        },
+        ...(catalogError.value
+          ? [
+              {
+                severity: catalogUnavailable.value
+                  ? ('error' as const)
+                  : ('warning' as const),
+                code: 'catalog_load_failed',
+                field: 'catalog',
+                message: catalogError.value,
+              },
+            ]
+          : []),
+        ...validationFallbackIssues.value,
+        ...(validation.value?.issues || []),
       ]
-    : []),
-  ...validationFallbackIssues.value,
-  ...(validation.value?.issues || []),
-])
+    : genericValidationIssues.value,
+)
 const validationOk = computed(
   () =>
-    Boolean(validation.value?.ok) &&
+    (isCpuCore.value ? Boolean(validation.value?.ok) : true) &&
     !validationIssues.value.some((issue) => issue.severity === 'error'),
 )
 const validationTitle = computed(() => {
@@ -1138,6 +1571,11 @@ const validationTitle = computed(() => {
   return 'Compatibility warning'
 })
 const validationSummary = computed(() => {
+  if (!isCpuCore.value) {
+    return validationOk.value
+      ? 'RTL sources are ready for static frontend analysis.'
+      : 'Complete the top-module and RTL source configuration.'
+  }
   if (validationBusy.value) return 'waiting for frontend runtime'
   if (validation.value?.summary) return validation.value.summary
   return 'Select a CPU source, SoC harness, toolchain, and test suite.'
@@ -1203,6 +1641,7 @@ const canProceed = computed(() => {
       )
     case 2:
     default:
+      if (!isCpuCore.value) return validationOk.value
       return (
         selectedCoreId.value !== '' &&
         selectedSocHarnessId.value !== '' &&
@@ -1216,7 +1655,9 @@ const canProceed = computed(() => {
   }
 })
 
-onMounted(loadCatalog)
+onMounted(() => {
+  if (isCpuCore.value) void loadCatalog()
+})
 
 watch(
   [
@@ -1228,10 +1669,15 @@ watch(
     selectedCpuRtlFiles,
     () => config.value.parameters.cpu_filelist,
     () => config.value.parameters.cpu_top_module,
+    genericSourceMode,
+    selectedGenericRtlFiles,
+    () => config.value.filelist,
+    () => config.value.parameters.top_module,
+    () => config.value.parameters.clock,
   ],
   () => {
     syncParameters()
-    void refreshValidation()
+    if (isCpuCore.value) void refreshValidation()
   },
 )
 
@@ -1269,6 +1715,7 @@ async function refreshValidation(): Promise<void> {
   const token = ++validationToken
   validationFallbackIssues.value = localValidationIssues()
   validation.value = null
+  if (!isCpuCore.value) return
   if (
     !selectedCoreId.value ||
     !selectedSocHarnessId.value ||
@@ -1350,6 +1797,9 @@ function resetCatalogSelection(): void {
 }
 
 function syncParameters(): void {
+  config.value.frontend_design_kind = frontendDesignKind.value
+  config.value.parameters.frontend_design_kind = frontendDesignKind.value
+  if (!isCpuCore.value) return
   config.value.parameters.frontend_core_id = selectedCoreId.value
   config.value.parameters.soc_harness_id = selectedSocHarnessId.value
   config.value.parameters.toolchain_id = selectedToolchainId.value
@@ -1514,6 +1964,80 @@ const selectCpuFilelist = async () => {
   }
 }
 
+function setFrontendDesignKind(kind: FrontendDesignKind): void {
+  if (
+    (props.managedWorkspace && props.designKindLocked) ||
+    kind === frontendDesignKind.value
+  )
+    return
+  config.value.frontend_design_kind = kind
+  config.value.parameters.frontend_design_kind = kind
+  if (kind === 'generic_rtl') {
+    config.value.parameters.top_module = 'top'
+    config.value.parameters.clock = ''
+    validation.value = null
+    validationFallbackIssues.value = []
+    return
+  }
+  config.value.parameters.top_module = 'ecos_sim_top'
+  config.value.parameters.clock = 'clk'
+  if (!catalog.value.cores.length) void loadCatalog()
+}
+
+const selectGenericFilelist = async () => {
+  const desktopApi = await waitForDesktopApi()
+  const result = await desktopApi.dialog.pickFiles({
+    multiple: false,
+    filters: [
+      {
+        name: 'Filelists',
+        extensions: ['f', 'fl', 'filelist'],
+      },
+    ],
+    title: 'Select RTL Filelist',
+  })
+  const selected = result?.[0]
+  if (selected) {
+    genericSourceMode.value = 'filelist'
+    config.value.filelist = selected
+  }
+}
+
+async function selectGenericSourceMode(mode: CpuSourceMode): Promise<void> {
+  genericSourceMode.value = mode
+  if (mode === 'files' && selectedGenericRtlFiles.value.length === 0) {
+    await selectGenericRtlFiles()
+  }
+}
+
+async function selectGenericRtlFiles(): Promise<void> {
+  const desktopApi = await waitForDesktopApi()
+  const result = await desktopApi.dialog.pickFiles({
+    multiple: true,
+    filters: [
+      {
+        name: 'RTL Sources',
+        extensions: ['v', 'sv', 'vh', 'svh'],
+      },
+    ],
+    title: 'Select RTL Files',
+  })
+  if (!result?.length) return
+  selectedGenericRtlFiles.value = [
+    ...new Set([...selectedGenericRtlFiles.value, ...result]),
+  ]
+}
+
+function removeGenericRtlFile(file: string): void {
+  selectedGenericRtlFiles.value = selectedGenericRtlFiles.value.filter(
+    (item) => item !== file,
+  )
+}
+
+function clearGenericRtlFiles(): void {
+  selectedGenericRtlFiles.value = []
+}
+
 async function selectCpuSourceMode(mode: CpuSourceMode): Promise<void> {
   cpuSourceMode.value = mode
   cpuSelectionMessage.value = ''
@@ -1667,6 +2191,29 @@ const handleStepClick = (targetStep: number) => {
 }
 
 const createProject = () => {
+  if (!isCpuCore.value) {
+    if (isCreating.value || !validationOk.value) return
+    syncParameters()
+    emit('create', {
+      ...config.value,
+      cpu_rtl_files: [],
+      designTool: 'frontend',
+      filelist: genericSourceMode.value === 'filelist' ? config.value.filelist : '',
+      frontend_design_kind: 'generic_rtl',
+      origin_verilog: '',
+      parameters: {
+        design: config.value.parameters.design,
+        description: config.value.parameters.description,
+        frontend_design_kind: 'generic_rtl',
+        top_module: config.value.parameters.top_module,
+        clock: config.value.parameters.clock,
+        frequency_max: config.value.parameters.frequency_max,
+      },
+      rtl_list:
+        genericSourceMode.value === 'files' ? [...selectedGenericRtlFiles.value] : [],
+    })
+    return
+  }
   if (
     isCreating.value ||
     !validationOk.value ||
@@ -1678,12 +2225,14 @@ const createProject = () => {
   emit('create', {
     ...config.value,
     designTool: 'frontend',
+    frontend_design_kind: 'cpu_core',
     cpu_rtl_files:
       requiresCpuInput.value && cpuSourceMode.value === 'files'
         ? [...selectedCpuRtlFiles.value]
         : [],
     parameters: {
       ...config.value.parameters,
+      frontend_design_kind: 'cpu_core',
       cpu_top_module:
         selectedCore.value.id === CUSTOM_FILELIST_ID ? configuredCpuTopModule.value : '',
       cpu_filelist:

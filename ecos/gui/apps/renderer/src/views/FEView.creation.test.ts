@@ -47,4 +47,12 @@ describe('frontend workspace creation lifecycle', () => {
     expect(wizardSource).toContain(':disabled="managedWorkspace"')
     expect(wizardSource).toContain('if (props.managedWorkspace) return')
   })
+
+  it('lets the first managed workspace choose a profile and locks later workspaces', () => {
+    expect(viewSource).toContain(':design-kind-locked="managedFrontendDesignKindLocked"')
+    expect(viewSource).toContain('route.query.frontendDesignKind')
+    expect(viewSource).toContain('...(frontendDesignKind')
+    expect(wizardSource).toContain(':disabled="managedWorkspace && designKindLocked"')
+    expect(wizardSource).toContain('props.managedWorkspace && props.designKindLocked')
+  })
 })

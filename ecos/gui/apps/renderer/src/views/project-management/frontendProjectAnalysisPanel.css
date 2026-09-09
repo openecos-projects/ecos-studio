@@ -98,6 +98,10 @@
   margin: 0;
 }
 
+.fe-health-metrics.is-static-profile {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .fe-health-metrics > div {
   display: grid;
   min-width: 0;
@@ -174,6 +178,11 @@
     80px 70px;
   align-items: stretch;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
+}
+
+.fe-compare-row.is-static-profile {
+  min-width: 620px;
+  grid-template-columns: minmax(150px, 1.35fr) minmax(110px, 1fr) 100px 70px 115px;
 }
 
 .fe-compare-row:last-child {

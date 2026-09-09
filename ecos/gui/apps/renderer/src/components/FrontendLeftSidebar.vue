@@ -338,7 +338,8 @@ const sidebarStages = computed<FrontendSidebarStage[]>(() => {
   const srcIndex = prepareIndex >= 0 ? prepareIndex + 1 : Math.min(1, stages.length)
   const withSrc = [...stages.slice(0, srcIndex), srcStage, ...stages.slice(srcIndex)]
   const simIndex = withSrc.findIndex((stage) => stage.path.toLowerCase() === 'sim')
-  const waveIndex = simIndex >= 0 ? simIndex + 1 : withSrc.length
+  if (simIndex < 0) return withSrc
+  const waveIndex = simIndex + 1
   return [...withSrc.slice(0, waveIndex), waveStage, ...withSrc.slice(waveIndex)]
 })
 

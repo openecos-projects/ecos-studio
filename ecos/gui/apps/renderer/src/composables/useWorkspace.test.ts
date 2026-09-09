@@ -2729,6 +2729,62 @@ describe('useWorkspace openProject', () => {
     )
   })
 
+  it('creates generic RTL workspaces without CPU or simulation configuration', async () => {
+    const workspace = useWorkspace()
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: { directory: '/work/uart' },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/uart',
+        designTool: 'frontend',
+        filelist: '/rtl/uart.f',
+        frontend_design_kind: 'generic_rtl',
+        pdk: '',
+        pdk_root: '',
+        parameters: {
+          clock: '',
+          design: 'uart',
+          frontend_design_kind: 'generic_rtl',
+          top_module: 'uart_top',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    const request = createWorkspaceApiMock.mock.calls[0]?.[0]
+    expect(request).toEqual(
+      expect.objectContaining({
+        filelist: '/rtl/uart.f',
+        frontend_design_kind: 'generic_rtl',
+        parameters: expect.objectContaining({
+          Clock: '',
+          frontend_design_kind: 'generic_rtl',
+          'Top module': 'uart_top',
+        }),
+      }),
+    )
+    for (const field of [
+      'core_id',
+      'cpu_filelist',
+      'cpu_rtl_files',
+      'cpu_top_module',
+      'sim_cpp_sources',
+      'soc_filelist',
+      'soc_harness_id',
+      'soc_variant',
+      'test_suite_id',
+      'toolchain_id',
+    ]) {
+      expect(request).not.toHaveProperty(field)
+    }
+  })
+
   it('invalidates freshly created workspace resources after activating the session', async () => {
     const workspace = useWorkspace()
     const before = { ...workspace.resourceVersions.value }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { parseProjectManifest } from '@ecos-studio/shared'
@@ -177,6 +177,89 @@ describe('ProjectManifestService', () => {
         mutation: { type: 'select-qor-baseline', workspaceId: 'ws_0001' },
       }),
     ).rejects.toThrow('QoR baselines are only available for backend projects')
+  })
+
+  it('adopts the profile of the first imported frontend workspace', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspacePath = join(projectRoot, 'ws_0001')
+    await mkdir(join(workspacePath, 'home'), { recursive: true })
+    await writeFile(
+      join(workspacePath, 'home', 'parameters.json'),
+      JSON.stringify({ frontend_design_kind: 'generic_rtl' }),
+      'utf8',
+    )
+    const service = createService(projectRoot)
+
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'create',
+        name: 'uart',
+        designName: 'uart_top',
+        projectType: 'frontend',
+      },
+    })
+    const result = await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: { projectRoot, workspacePath },
+      },
+    })
+
+    expect(parseProjectManifest(result.content)).toMatchObject({
+      base_design: { frontend_design_kind: 'generic_rtl' },
+      workspaces: [{ start_step: 'prepare', end_step: 'lint' }],
+    })
+  })
+
+  it('rejects an imported frontend workspace that conflicts with the project profile', async () => {
+    const projectRoot = await createTemporaryProject()
+    const genericWorkspace = join(projectRoot, 'ws_0001')
+    const cpuWorkspace = join(projectRoot, 'ws_0002')
+    await Promise.all(
+      [genericWorkspace, cpuWorkspace].map((workspacePath) =>
+        mkdir(join(workspacePath, 'home'), { recursive: true }),
+      ),
+    )
+    await writeFile(
+      join(genericWorkspace, 'home', 'parameters.json'),
+      JSON.stringify({ frontend_design_kind: 'generic_rtl' }),
+      'utf8',
+    )
+    await writeFile(
+      join(cpuWorkspace, 'home', 'parameters.json'),
+      JSON.stringify({ frontend_design_kind: 'cpu_core' }),
+      'utf8',
+    )
+    const service = createService(projectRoot)
+
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'create',
+        name: 'uart',
+        designName: 'uart_top',
+        projectType: 'frontend',
+      },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: { projectRoot, workspacePath: genericWorkspace },
+      },
+    })
+
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: {
+          type: 'register-workspace',
+          input: { projectRoot, workspacePath: cpuWorkspace },
+        },
+      }),
+    ).rejects.toThrow('Frontend project profile is locked to generic_rtl')
   })
 
   it('atomically synchronizes the selected baseline without replacing project design_name', async () => {

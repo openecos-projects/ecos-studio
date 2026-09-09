@@ -5,6 +5,7 @@ import {
   deleteWorkspaceFromManifest,
   nextProjectManifestStage,
   normalizeProjectManifestFlowStep,
+  normalizeProjectManifestStage,
   parseProjectManifest,
   projectManifestFlowSteps,
   projectManifestProfileFor,
@@ -121,6 +122,68 @@ describe('project manifest parsing', () => {
         baseDesign: { rtl_list: ['/work/cpu/rtl/cpu_top.sv'] },
       }),
     ).toThrow('QoR baselines are only available for backend projects')
+  })
+
+  it('locks generic RTL frontend projects to the four-step static profile', () => {
+    const draft = createProjectManifestDraft({
+      rootPath: '/work/uart',
+      name: 'uart',
+      designName: 'uart_top',
+      projectType: 'frontend',
+    })
+    const first = registerWorkspaceInManifest(draft, {
+      projectRoot: '/work/uart',
+      workspacePath: '/work/uart/ws_0001',
+      config: {
+        frontend_design_kind: 'generic_rtl',
+        filelist: '/work/uart/rtl/design.f',
+        parameters: {
+          frontend_design_kind: 'generic_rtl',
+          top_module: 'uart_top',
+        },
+      },
+    })
+
+    expect(first.base_design).toMatchObject({
+      frontend_design_kind: 'generic_rtl',
+      filelist: '/work/uart/rtl/design.f',
+      top_module: 'uart_top',
+    })
+    expect(first.workspaces[0]).toMatchObject({
+      start_step: 'prepare',
+      end_step: 'lint',
+    })
+    expect(projectManifestProfileFor('frontend', 'generic_rtl').flowSteps).toEqual([
+      'prepare',
+      'review',
+      'elab',
+      'lint',
+    ])
+    expect(normalizeProjectManifestStage('frontend', 'sim', 'generic_rtl')).toBe('lint')
+    expect(nextProjectManifestStage('frontend', 'sim', 'generic_rtl')).toBe('lint')
+
+    const bounded = registerWorkspaceInManifest(first, {
+      projectRoot: '/work/uart',
+      workspacePath: '/work/uart/ws_0002',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'sim',
+      startStep: 'sim',
+      endStep: 'sim',
+      config: { frontend_design_kind: 'generic_rtl' },
+    })
+    expect(bounded.workspaces[1]).toMatchObject({
+      source_workspace_id: 'ws_0001',
+      branch_from: { source_step: 'lint' },
+      start_step: 'lint',
+      end_step: 'lint',
+    })
+    expect(() =>
+      registerWorkspaceInManifest(first, {
+        projectRoot: '/work/uart',
+        workspacePath: '/work/uart/ws_0002',
+        config: { frontend_design_kind: 'cpu_core' },
+      }),
+    ).toThrow('Frontend project profile is locked to generic_rtl')
   })
 
   it('maps Timing Opt and post-route LEC boundaries to the preceding catalog step', () => {

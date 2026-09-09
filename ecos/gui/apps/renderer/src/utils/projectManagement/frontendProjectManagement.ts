@@ -1,6 +1,7 @@
 import {
+  normalizeFrontendDesignKind,
   normalizeProjectManifestStage,
-  projectManifestFrontendFlowSteps,
+  projectManifestProfileFor,
   type ProjectManifest,
   type ProjectManifestFrontendFlowStep,
   type ProjectManifestWorkspace,
@@ -24,7 +25,8 @@ import type {
   ProjectWorkspace,
 } from './model'
 
-export const FRONTEND_FLOW_STEPS = projectManifestFrontendFlowSteps
+export const FRONTEND_FLOW_STEPS = projectManifestProfileFor('frontend', 'cpu_core')
+  .flowSteps as readonly ProjectManifestFrontendFlowStep[]
 
 export function buildFrontendProjectManagementProject(
   project: Project | null | undefined,
@@ -32,6 +34,14 @@ export function buildFrontendProjectManagementProject(
   workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
   workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
 ): ProjectManagementProject {
+  const persistedDesignKind =
+    manifest.base_design.frontend_design_kind ??
+    manifest.base_design.parameters?.frontend_design_kind
+  const profileDesignKind = normalizeFrontendDesignKind(persistedDesignKind)
+  const frontendDesignKind =
+    persistedDesignKind || manifest.workspaces.length > 0 ? profileDesignKind : undefined
+  const flowSteps = projectManifestProfileFor('frontend', profileDesignKind)
+    .flowSteps as readonly ProjectManifestFrontendFlowStep[]
   const base = buildBackendProjectManagementProject(project, null)
   const lineage = sortWorkspacesByLineage(manifest.workspaces)
   const workspaces = lineage.map(({ workspace, depth }) =>
@@ -39,6 +49,7 @@ export function buildFrontendProjectManagementProject(
       workspace,
       workspaceFlowStates[workspace.workspace_id] ?? {},
       depth,
+      flowSteps,
     ),
   )
   const frontendAnalysis = buildFrontendProjectAnalysis(
@@ -72,6 +83,7 @@ export function buildFrontendProjectManagementProject(
     ...base,
     id: manifest.root_path,
     projectType: 'frontend',
+    ...(frontendDesignKind ? { frontendDesignKind } : {}),
     name: manifest.name,
     designName: manifest.design_name,
     path: manifest.root_path,
@@ -80,7 +92,7 @@ export function buildFrontendProjectManagementProject(
     objective: manifest.objectives.primary
       ? `${manifest.objectives.primary} objective`
       : 'verification objective',
-    flowSteps: FRONTEND_FLOW_STEPS,
+    flowSteps,
     bestWorkspaceId,
     workspaces,
     metricsRows: [],
@@ -99,6 +111,7 @@ function buildFrontendWorkspace(
   workspace: ProjectManifestWorkspace,
   flowStates: ProjectWorkspaceFlowStateMap,
   depth: number,
+  flowSteps: readonly ProjectManifestFrontendFlowStep[],
 ): ProjectWorkspace {
   const startStep = normalizeFrontendStage(workspace.start_step)
   const endStep = normalizeFrontendStage(workspace.end_step)
@@ -106,7 +119,7 @@ function buildFrontendWorkspace(
     ? normalizeFrontendStage(workspace.branch_from.source_step)
     : null
   const status = workspaceStatusFromFlow(workspace.status, flowStates)
-  const steps = FRONTEND_FLOW_STEPS.map((step) =>
+  const steps = flowSteps.map((step) =>
     buildFrontendStep(
       workspace,
       status,
@@ -115,6 +128,7 @@ function buildFrontendWorkspace(
       endStep,
       branchStep,
       flowStates,
+      flowSteps,
     ),
   )
 
@@ -132,7 +146,7 @@ function buildFrontendWorkspace(
     startStep,
     endStep,
     depth,
-    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStates),
+    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep, flowStates, flowSteps),
     steps,
   }
 }
@@ -145,10 +159,11 @@ function buildFrontendStep(
   endStep: ProjectManifestFrontendFlowStep,
   branchStep: ProjectManifestFrontendFlowStep | null,
   flowStates: ProjectWorkspaceFlowStateMap,
+  flowSteps: readonly ProjectManifestFrontendFlowStep[],
 ): ProjectStepCell {
-  const stepIndex = FRONTEND_FLOW_STEPS.indexOf(step)
-  const startIndex = FRONTEND_FLOW_STEPS.indexOf(startStep)
-  const endIndex = FRONTEND_FLOW_STEPS.indexOf(endStep)
+  const stepIndex = flowSteps.indexOf(step)
+  const startIndex = flowSteps.indexOf(startStep)
+  const endIndex = flowSteps.indexOf(endStep)
   const flowStatus = flowStates[step]
   let status: ProjectStepStatus
 
@@ -156,9 +171,7 @@ function buildFrontendStep(
   else if (workspace.status === 'archived') status = 'skipped'
   else if (stepIndex < startIndex) {
     status =
-      workspace.branch_from &&
-      branchStep &&
-      stepIndex <= FRONTEND_FLOW_STEPS.indexOf(branchStep)
+      workspace.branch_from && branchStep && stepIndex <= flowSteps.indexOf(branchStep)
         ? 'reused'
         : 'skipped'
   } else if (stepIndex > endIndex || Object.keys(flowStates).length > 0) {
@@ -181,14 +194,13 @@ function buildFlowStatusHint(
   startStep: ProjectManifestFrontendFlowStep,
   endStep: ProjectManifestFrontendFlowStep,
   flowStates: ProjectWorkspaceFlowStateMap,
+  flowSteps: readonly ProjectManifestFrontendFlowStep[],
 ): ProjectFlowStatusHint {
-  const startIndex = FRONTEND_FLOW_STEPS.indexOf(startStep)
-  const endIndex = FRONTEND_FLOW_STEPS.indexOf(endStep)
+  const startIndex = flowSteps.indexOf(startStep)
+  const endIndex = flowSteps.indexOf(endStep)
   const recordedFlow = Object.keys(flowStates).length > 0
   const configured = steps.filter((cell) => {
-    const index = FRONTEND_FLOW_STEPS.indexOf(
-      cell.step as ProjectManifestFrontendFlowStep,
-    )
+    const index = flowSteps.indexOf(cell.step as ProjectManifestFrontendFlowStep)
     if (index < startIndex || index > endIndex) return false
     return !recordedFlow || flowStates[cell.step] !== undefined
   })

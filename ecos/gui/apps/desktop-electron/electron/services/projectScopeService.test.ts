@@ -248,6 +248,63 @@ describe('ProjectScopeService', () => {
     })
   })
 
+  it('discovers general RTL sources from an external input filelist', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    const sourceRoot = await createTempDir('ecos-generic-source-')
+    const rtlDir = join(sourceRoot, 'rtl')
+    const sourceFile = join(rtlDir, 'uart.sv')
+    const filelist = join(sourceRoot, 'design.f')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(rtlDir, { recursive: true })
+    await writeFile(sourceFile, 'module uart; endmodule')
+    await writeFile(filelist, 'rtl/uart.sv')
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        frontend_design_kind: 'generic_rtl',
+        input_filelist: filelist,
+      }),
+    )
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(root)
+
+      await expect(service.listPendingExternalReadRoots()).resolves.toEqual([rtlDir])
+      await service.approvePendingExternalReadRoots(root, [rtlDir])
+      await expect(service.requestProjectPathAccess(sourceFile)).resolves.toBe(sourceFile)
+    })
+  })
+
+  it('discovers selected general RTL files from a generated workspace filelist', async () => {
+    const root = await createTempDir('ecos-project-root-')
+    const sourceRoot = await createTempDir('ecos-generic-source-')
+    const sourceFile = join(sourceRoot, 'counter.sv')
+    const generatedFilelist = join(root, 'origin', '.rtl_sources.f')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(join(root, 'origin'), { recursive: true })
+    await writeFile(sourceFile, 'module counter; endmodule')
+    await writeFile(generatedFilelist, sourceFile)
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        frontend_design_kind: 'generic_rtl',
+        input_filelist: generatedFilelist,
+      }),
+    )
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(root)
+
+      await expect(service.listPendingExternalReadRoots()).resolves.toEqual([sourceRoot])
+      await service.approvePendingExternalReadRoots(root, [sourceRoot])
+      await expect(service.requestProjectPathAccess(sourceFile)).resolves.toBe(sourceFile)
+    })
+  })
+
   it('keeps frontend filelist access scoped to discovered source directories', async () => {
     const root = await createTempDir('ecos-project-root-')
     const sourceRoot = await createTempDir('ecos-frontend-source-')

@@ -123,7 +123,13 @@ const FRONTEND_STAGE_LABELS: Record<FrontendAnalysisStage, string> = {
 }
 
 const COMPLETED_STATUSES = new Set<FrontendAnalysisStepStatus>(['success', 'reused'])
-const PREPARE_CONTRACT_SUCCESS_STATUSES = new Set(['ok', 'pass', 'success'])
+const PREPARE_CONTRACT_SUCCESS_STATUSES = new Set([
+  'ok',
+  'pass',
+  'success',
+  'module_only',
+  'not_required',
+])
 const PREPARE_CONTRACT_WARNING_STATUSES = new Set(['warning', 'stub', 'disabled'])
 
 export function buildFrontendProjectAnalysis(
@@ -194,17 +200,20 @@ function buildFrontendWorkspaceAnalysis(
   const elab = parseRecord(source.detailTexts?.elab)
   const lint = parseRecord(source.detailTexts?.lint)
   const sim = parseRecord(source.detailTexts?.sim)
+  const lintOwnership = stringAt(lint, ['summary', 'lint', 'actionable_ownership'])
+  const lintErrorField = lintOwnership === 'design' ? 'design_errors' : 'cpu_errors'
+  const lintWarningField = lintOwnership === 'design' ? 'design_warnings' : 'cpu_warnings'
   const errors =
     numberAt(review, ['summary', 'rtl_review', 'errors']) +
     numberAt(elab, ['summary', 'elab', 'errors']) +
-    numberAt(lint, ['summary', 'lint', 'cpu_errors'])
+    numberAt(lint, ['summary', 'lint', lintErrorField])
   const warnings =
     numberAt(review, ['summary', 'rtl_review', 'warnings']) +
     numberAt(elab, ['summary', 'elab', 'warnings']) +
     numberAt(lint, ['summary', 'lint', 'warnings'])
   const actionableWarnings =
     numberAt(review, ['summary', 'rtl_review', 'actionable_warnings']) +
-    numberAt(lint, ['summary', 'lint', 'cpu_warnings'])
+    numberAt(lint, ['summary', 'lint', lintWarningField])
   const totalCases = numberAt(sim, ['summary', 'total_cases'])
   const passedCases = numberAt(sim, ['summary', 'passed_cases'])
   const failedCases = numberAt(sim, ['summary', 'failed_cases'])
@@ -359,17 +368,23 @@ function stageMetrics(
     ]
   }
   if (stage === 'lint') {
+    const ownership = stringAt(detail, ['summary', 'lint', 'actionable_ownership'])
+    const isDesign = ownership === 'design'
     return [
       metric(
-        'cpu_errors',
-        'CPU errors',
-        numberAt(detail, ['summary', 'lint', 'cpu_errors']),
+        isDesign ? 'design_errors' : 'cpu_errors',
+        isDesign ? 'Design errors' : 'CPU errors',
+        numberAt(detail, ['summary', 'lint', isDesign ? 'design_errors' : 'cpu_errors']),
         true,
       ),
       metric(
-        'cpu_warnings',
-        'CPU warnings',
-        numberAt(detail, ['summary', 'lint', 'cpu_warnings']),
+        isDesign ? 'design_warnings' : 'cpu_warnings',
+        isDesign ? 'Design warnings' : 'CPU warnings',
+        numberAt(detail, [
+          'summary',
+          'lint',
+          isDesign ? 'design_warnings' : 'cpu_warnings',
+        ]),
         true,
       ),
       metric(
@@ -424,11 +439,12 @@ function stageFindings(
     })
   }
   if (stage === 'review') {
+    const reviewScope = stringAt(detail, ['review', 'scope']) || 'cpu'
     return arrayAt(detail, ['review', 'issues']).flatMap((issue, index) => {
       const item = recordValue(issue)
       if (!item || item.waived === true) return []
       const ownership = stringValue(item.ownership).toLowerCase()
-      if (ownership && ownership !== 'cpu') return []
+      if (ownership && ownership !== reviewScope) return []
       return [
         finding(workspaceId, stage, index, {
           severity: severityValue(item.severity),

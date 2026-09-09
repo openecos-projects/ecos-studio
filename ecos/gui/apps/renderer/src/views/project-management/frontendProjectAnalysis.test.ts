@@ -4,6 +4,47 @@ import { buildFrontendProjectAnalysis } from './frontendProjectAnalysis'
 const inputFingerprint = 'a'.repeat(64)
 
 describe('buildFrontendProjectAnalysis', () => {
+  it('keeps generic design findings and treats module-only top validation as ready', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_0001',
+        workspaceName: 'uart',
+        workspacePath: '/projects/uart/ws_0001',
+        status: 'success',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'success' },
+        ],
+        detailTexts: {
+          prepare: JSON.stringify({
+            summary: {
+              contracts: [{ id: 'design_top', status: 'module_only' }],
+            },
+          }),
+          review: JSON.stringify({
+            review: {
+              scope: 'design',
+              issues: [
+                {
+                  title: 'Wide fanout',
+                  severity: 'warning',
+                  ownership: 'design',
+                },
+                {
+                  title: 'Tool limitation',
+                  severity: 'warning',
+                  ownership: 'tool',
+                },
+              ],
+            },
+          }),
+        },
+      },
+    ])
+
+    expect(analysis.findings.map((finding) => finding.title)).toEqual(['Wide fanout'])
+  })
+
   it('builds frontend health, comparison, and actionable findings from ECC-FE details', () => {
     const analysis = buildFrontendProjectAnalysis([
       {

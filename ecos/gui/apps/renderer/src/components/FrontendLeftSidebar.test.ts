@@ -7,6 +7,7 @@ describe('FrontendLeftSidebar', () => {
     expect(source).toContain("virtualStage('Src', 'src'")
     expect(source).toContain("virtualStage('Wave', 'wave'")
     expect(source).toContain("stage.path !== 'configure' && stage.path !== 'tech'")
+    expect(source).toContain('if (simIndex < 0) return withSrc')
   })
 
   it('preserves project-management query parameters in workspace links', () => {

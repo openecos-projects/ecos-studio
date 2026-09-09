@@ -1,4 +1,8 @@
-import type { ProjectManifestStage, ProjectManifestType } from '@ecos-studio/shared'
+import type {
+  FrontendDesignKind,
+  ProjectManifestStage,
+  ProjectManifestType,
+} from '@ecos-studio/shared'
 import type {
   ProjectFlowStatusHint as BackendProjectFlowStatusHint,
   ProjectManagementProject as BackendProjectManagementProject,
@@ -36,6 +40,7 @@ export interface ProjectManagementProject extends Omit<
   'projectType' | 'workspaces'
 > {
   projectType: ProjectManifestType
+  frontendDesignKind?: FrontendDesignKind
   flowSteps: readonly ProjectStage[]
   workspaces: ProjectWorkspace[]
   frontendAnalysis: FrontendProjectAnalysis | null

@@ -62,4 +62,17 @@ describe('FrontendProjectWizard catalog ownership', () => {
     expect(wizardSource).not.toContain('cpuSelectionConfirmed')
     expect(wizardSource).not.toContain('.cpu_sources.f')
   })
+
+  it('supports a managed generic RTL profile without CPU catalog requirements', () => {
+    expect(wizardSource).toContain("value: 'generic_rtl'")
+    expect(wizardSource).toContain('General RTL')
+    expect(wizardSource).toContain('genericSourceMode')
+    expect(wizardSource).toContain('selectGenericFilelist')
+    expect(wizardSource).toContain('selectGenericRtlFiles')
+    expect(wizardSource).toContain("frontend_design_kind: 'generic_rtl'")
+    expect(wizardSource).toContain(
+      "const genericFlowStages = ['Prepare', 'RTL Review', 'Elaboration', 'Lint']",
+    )
+    expect(wizardSource).toContain('if (!isCpuCore.value)')
+  })
 })

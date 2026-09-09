@@ -71,6 +71,7 @@ export interface ParametersData {
   cpu_wrapper_top?: string
   toolchain_id?: string
   test_suite_id?: string
+  frontend_design_kind?: 'cpu_core' | 'generic_rtl'
   input_filelist?: string
   sim_program_names?: string[]
   sim_all_tests?: boolean
@@ -78,6 +79,7 @@ export interface ParametersData {
 
 /** 前端编辑用（驼峰） */
 export interface FrontendConfigData {
+  designKind?: 'cpu_core' | 'generic_rtl'
   coreId: string
   cpuWrapperId: string
   cpuWrapperContract: string
@@ -507,6 +509,8 @@ export function parseParametersRecord(raw: Record<string, unknown>): ParametersD
       raw.test_suite_id != null
         ? losslessString(raw.test_suite_id, 'test_suite_id')
         : undefined,
+    frontend_design_kind:
+      raw.frontend_design_kind === 'generic_rtl' ? 'generic_rtl' : 'cpu_core',
     input_filelist:
       raw.input_filelist != null
         ? losslessString(raw.input_filelist, 'input_filelist')
@@ -551,6 +555,14 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     bottomLayer: FIXED_BOTTOM_LAYER,
     topLayer: FIXED_TOP_LAYER,
     frontend: {
+      ...(data['Design Tool'] === 'frontend'
+        ? {
+            designKind:
+              data.frontend_design_kind === 'generic_rtl'
+                ? ('generic_rtl' as const)
+                : ('cpu_core' as const),
+          }
+        : {}),
       coreId: data.frontend_core_id || data.core_id || '',
       cpuWrapperId: data.cpu_wrapper_id || data.frontend_core_id || data.core_id || '',
       cpuWrapperContract: data.cpu_wrapper_contract || '',
@@ -603,6 +615,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
   out['Design Tool'] = config.designTool
   out.description = config.description
   if (config.designTool === 'frontend') {
+    out.frontend_design_kind = config.frontend.designKind ?? 'cpu_core'
     out.design = config.design
     out.top_module = config.topModule
     out.clock = config.clock

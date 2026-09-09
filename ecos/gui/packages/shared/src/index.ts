@@ -264,9 +264,11 @@ export {
   ensureProjectQorBaseline,
   isProjectManifestType,
   nextProjectManifestStage,
+  normalizeFrontendDesignKind,
   normalizeProjectManifestStage,
   parseProjectManifest,
   projectManifestFrontendFlowSteps,
+  projectManifestGenericRtlFlowSteps,
   projectIdFromName,
   projectManifestFlowSteps,
   projectManifestProfileFor,
@@ -278,6 +280,7 @@ export {
   synchronizeProjectBaseline,
 } from './utils/projectManifest.ts'
 export type {
+  FrontendDesignKind,
   ProjectManifest,
   ProjectManifestBaseDesign,
   ProjectManifestBaselineSyncInput,

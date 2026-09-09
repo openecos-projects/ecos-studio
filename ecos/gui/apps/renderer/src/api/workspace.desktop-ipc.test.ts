@@ -111,7 +111,7 @@ describe('workspace desktop bridge', () => {
   })
 
   it('forwards the CPU module independently from the frontend SoC top', async () => {
-    const create = vi.fn(async () => ({
+    const create = vi.fn(async (_request: unknown) => ({
       directory: '/workspace/frontend-demo',
       workspaceHandle: 'workspace-frontend-1',
     }))
@@ -146,6 +146,42 @@ describe('workspace desktop bridge', () => {
         },
       }),
     })
+  })
+
+  it('forwards generic RTL inputs and the selected frontend profile', async () => {
+    const create = vi.fn(async (_request: unknown) => ({
+      directory: '/workspace/uart',
+      workspaceHandle: 'workspace-generic-1',
+    }))
+    setWindow({ ecosDesktop: { runtime: { workspace: { create } } } })
+
+    const { createWorkspaceApi } = await import('./workspace')
+    await createWorkspaceApi({
+      designTool: 'frontend',
+      directory: '/workspace/uart',
+      filelist: '/rtl/uart.f',
+      frontend_design_kind: 'generic_rtl',
+      parameters: {
+        frontend_design_kind: 'generic_rtl',
+        'Top module': 'uart_top',
+      },
+      rtl_list: [],
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      designTool: 'frontend',
+      payload: expect.objectContaining({
+        filelist: '/rtl/uart.f',
+        frontend_design_kind: 'generic_rtl',
+        rtl_list: [],
+      }),
+    })
+    const request = create.mock.calls[0]?.[0] as {
+      payload?: Record<string, unknown>
+    }
+    expect(request.payload).not.toHaveProperty('cpu_filelist')
+    expect(request.payload).not.toHaveProperty('sim_cpp_sources')
+    expect(request.payload).not.toHaveProperty('soc_harness_id')
   })
 
   it('forwards workspace close requests with the GUI handle', async () => {
