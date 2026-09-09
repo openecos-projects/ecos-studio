@@ -45,13 +45,11 @@ export class RuntimeSidecarLifecycle {
     return this.finalSnapshotTask
   }
 
-  releaseAfterSuccessfulOperation(workspaceId: string): void {
+  async releaseAfterSuccessfulOperation(workspaceId: string): Promise<void> {
     if (
       this.finalSnapshotTask ||
       this.options.hasActiveOperations() ||
-      this.options.isStartWindow() ||
-      this.diagnosticReleaseTimer !== null ||
-      this.diagnosticCloseTask !== null
+      this.options.isStartWindow()
     ) {
       // A start RPC window is open; retry shortly so operation B (or its
       // registration) is not cut down by the snapshot/close below.
@@ -63,7 +61,23 @@ export class RuntimeSidecarLifecycle {
       }
       return
     }
+    // Cancel a pending diagnostic retention and wait for an in-flight close
+    // to settle, so the snapshot below is captured before the sidecar stops.
     this.cancelDiagnosticRelease()
+    let waited = 0
+    while (this.diagnosticCloseTask) {
+      await this.diagnosticCloseTask.catch(() => undefined)
+      this.cancelDiagnosticRelease()
+      if (++waited > 50) break
+    }
+    if (this.diagnosticCloseTask) {
+      // The close never settled; defer our release until a later drain.
+      this.releaseRetryTimer = setTimeout(() => {
+        this.releaseRetryTimer = null
+        this.releaseAfterSuccessfulOperation(workspaceId)
+      }, 200)
+      return
+    }
     const task = this.finishSuccessfulOperation(workspaceId)
     this.finalSnapshotTask = task
     void task.then(

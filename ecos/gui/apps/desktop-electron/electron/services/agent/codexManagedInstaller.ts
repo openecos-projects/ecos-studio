@@ -25,6 +25,8 @@ export type { SpawnLike }
 const GITHUB_LATEST_DOWNLOAD_BASE =
   'https://github.com/openai/codex/releases/latest/download'
 const OPENAI_RELEASES_BASE = 'https://releases.openai.com/codex'
+// Managed downloads must stay bounded (~512 MB).
+const MAX_MANAGED_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 export interface ManagedCodexInstallContext {
   arch: string
@@ -232,18 +234,46 @@ async function runTarExtract(
   destination: string,
 ): Promise<void> {
   await mkdir(destination, { recursive: true })
-  // List and validate members BEFORE extraction: reject absolute paths,
-  // `..` traversal, and links that escape the destination directory.
+
+  // Phase 1: member names (one per line) must all be relative and contained.
+  const names = await capture(
+    'tar',
+    ['-tf', archivePath],
+    { timeoutMs: 30_000 },
+    spawnImpl,
+  )
+  if (names.code !== 0 || names.timedOut) {
+    throw new Error(`tar failed: ${names.stderr.trim() || 'exit unknown'}`)
+  }
+  if (names.truncated) {
+    throw new Error('archive 成员列表被截断，拒绝解压')
+  }
+  for (const rawName of names.stdout.split('\n')) {
+    const member = rawName.trim()
+    if (!member) continue
+    const normalized = member.replace(/^\.\//, '')
+    if (
+      !normalized ||
+      normalized.startsWith('/') ||
+      normalized.split('/').includes('..')
+    ) {
+      throw new Error(`archive 包含不安全的成员路径: ${member}`)
+    }
+  }
+
+  // Phase 2: link scan. Parse failures or truncation are fail-closed.
   const listing = await capture(
     'tar',
     ['-tvf', archivePath],
     { timeoutMs: 30_000 },
     spawnImpl,
   )
-  if (listing.code !== 0 || listing.timedOut) {
-    throw new Error(`tar failed: ${listing.stderr.trim() || 'exit unknown'}`)
+  if (listing.code !== 0 || listing.timedOut || listing.truncated) {
+    throw new Error('archive 成员列表不完整或被截断，拒绝解压')
   }
   validateArchiveMembers(listing.stdout, destination)
+
+  // Phase 3: extraction (members validated above).
   const result = await capture(
     'tar',
     ['-xf', archivePath, '-C', destination],
@@ -251,9 +281,7 @@ async function runTarExtract(
     spawnImpl,
   )
   if (result.code !== 0) {
-    throw new Error(
-      `tar failed: ${result.stderr.trim() || `exit ${result.code ?? 'unknown'}`}`,
-    )
+    throw new Error(`tar failed: ${result.stderr.trim() || 'exit unknown'}`)
   }
 }
 
@@ -267,8 +295,11 @@ function validateArchiveMembers(listing: string, destination: string): void {
     const line = rawLine.trim()
     if (!line) continue
     // GNU tar -tv layout: mode owner/group size date time name[ -> target].
-    const prefixMatch = line.match(/^.{10}\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+/)
-    if (!prefixMatch) continue
+    // Names were already validated in phase 1; this pass only checks links.
+    const prefixMatch = line.match(/^.{10}\s+\S+\s+\S+\s+\S+\s+\S+\s+/)
+    if (!prefixMatch) {
+      throw new Error(`archive 成员列表包含无法解析的行: ${line}`)
+    }
     const rest = line.slice(prefixMatch[0].length)
     let name = rest
     let target: string | null = null
@@ -326,6 +357,14 @@ async function downloadToFile(
   let downloaded = 0
   nodeStream.on('data', (chunk: Buffer | string) => {
     downloaded += Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(chunk)
+    // Refuse runaway downloads (cap ~512 MB) so a compromised source cannot
+    // exhaust the disk before the integrity checks run.
+    if (downloaded > MAX_MANAGED_DOWNLOAD_BYTES) {
+      nodeStream.destroy(
+        new Error(`下载超过大小上限 (${MAX_MANAGED_DOWNLOAD_BYTES} bytes)`),
+      )
+      return
+    }
     if (Number.isFinite(totalBytes) && totalBytes > 0) {
       onProgress(Math.min(downloaded / totalBytes, 0.99))
     }

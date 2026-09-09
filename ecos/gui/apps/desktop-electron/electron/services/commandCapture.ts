@@ -18,6 +18,8 @@ export interface CommandCaptureResult {
   timedOut: boolean
   /** Spawn-level failure detail (ENOENT, permission, ...), if any. */
   error?: string
+  /** True when captured output hit the size cap and was truncated. */
+  truncated: boolean
 }
 
 export interface CommandCaptureOptions {
@@ -94,15 +96,23 @@ export async function captureCommandOutput(
                   stderr,
                   stdout,
                   timedOut,
+                  truncated,
                 }),
               FORCE_RESOLVE_AFTER_KILL_MS,
             )
           }, options.timeoutMs)
         : null
 
+    let truncated = false
     const appendCapped = (target: string, chunk: Buffer | string): string => {
-      if (target.length >= MAX_CAPTURED_OUTPUT_CHARS) return target
+      if (target.length >= MAX_CAPTURED_OUTPUT_CHARS) {
+        truncated = true
+        return target
+      }
       const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+      if (target.length + text.length > MAX_CAPTURED_OUTPUT_CHARS) {
+        truncated = true
+      }
       return `${target}${text.slice(0, MAX_CAPTURED_OUTPUT_CHARS - target.length)}`
     }
 
@@ -119,12 +129,13 @@ export async function captureCommandOutput(
         stderr,
         stdout,
         timedOut: false,
+        truncated,
       })
     })
     child.on('close', (code) => {
       // A process that only exits after the timeout fired must not surface
       // as a successful capture.
-      finish({ code: timedOut ? null : code, stderr, stdout, timedOut })
+      finish({ code: timedOut ? null : code, stderr, stdout, timedOut, truncated })
     })
   })
 }

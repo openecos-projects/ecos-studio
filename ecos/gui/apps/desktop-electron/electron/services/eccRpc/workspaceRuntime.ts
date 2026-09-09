@@ -108,6 +108,8 @@ export class EccWorkspaceRuntime {
   private inFlightCount = 0
   /** Start RPCs in flight (modern protocol); a config restart defers to them. */
   private startRpcCount = 0
+  /** Started operations the protocol has not registered yet (id -> since). */
+  private readonly unregisteredStarts = new Map<string, number>()
   private readonly operationTracker = new RuntimeOperationTracker()
   private readonly crashRecoveryAttempts = new Set<string>()
   private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
@@ -130,8 +132,10 @@ export class EccWorkspaceRuntime {
     this.sidecarLifecycle = new RuntimeSidecarLifecycle({
       isStartWindow: () => this.startRpcCount > 0,
       captureFinalSnapshot: async (workspaceId) => {
-        const client = this.client
-        if (!client) return
+        // Restart the sidecar on demand: a diagnostic retention close or an
+        // idle release may have stopped it, but the final snapshot must still
+        // be captured before the close settles.
+        const client = await this.ensureStarted()
         const snapshot = await client.call<
           Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>
         >('workspace.snapshot', { workspaceId })
@@ -241,9 +245,18 @@ export class EccWorkspaceRuntime {
   }
 
   hasPendingRuntimeWork(): boolean {
+    // Drop stale unregistered-start records after a bounded grace period.
+    const now = Date.now()
+    for (const [operationId, since] of this.unregisteredStarts) {
+      if (now - since > 60_000) this.unregisteredStarts.delete(operationId)
+      else if (this.operationTracker.hasOperation(operationId)) {
+        this.unregisteredStarts.delete(operationId)
+      }
+    }
     return (
       this.isActive() ||
       this.startRpcCount > 0 ||
+      this.unregisteredStarts.size > 0 ||
       this.sidecarLifecycle.hasFinalSnapshotTask() ||
       this.sidecarLifecycle.hasDiagnosticRetention() ||
       this.sidecarLifecycle.hasReleaseRetry()
@@ -662,6 +675,12 @@ export class EccWorkspaceRuntime {
     while (!this.operationTracker.hasOperation(operationId) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
+    if (!this.operationTracker.hasOperation(operationId)) {
+      // The started notification is missing: keep hasPendingRuntimeWork
+      // conservative (busy) until the protocol registers the operation or the
+      // record goes stale.
+      this.unregisteredStarts.set(operationId, Date.now())
+    }
   }
 
   private notifyDrainedIfIdle(): void {
@@ -922,6 +941,8 @@ export class EccWorkspaceRuntime {
     const terminalAlreadyRecorded = this.operationTracker.hasTerminalOperation(
       protocolEvent.operationId,
     )
+    // The protocol registered a previously unregistered started operation.
+    this.unregisteredStarts.delete(protocolEvent.operationId)
     const session = this.sessions.findByEccWorkspaceId(protocolEvent.workspaceId)
     const isTerminal = this.operationTracker.track(protocolEvent)
     if (
