@@ -8,6 +8,7 @@ const testState = vi.hoisted(() => ({
     path: '/workspace/floorplan',
     query: { projectRoot: '/projects/gcd' } as Record<string, unknown>,
   },
+  showToast: vi.fn(),
   updateWorkspaceStepConfigurationApi: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock('vue-router', () => ({ useRoute: () => testState.route }))
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: testState.currentProject,
+    showToast: testState.showToast,
     workspaceSession: testState.workspaceSession,
   }),
 }))
@@ -70,6 +72,7 @@ describe('useStepConfigInfo', () => {
     testState.workspaceSession = lifecycle.session
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.route.path = '/workspace/floorplan'
+    testState.showToast.mockReset()
     testState.readWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockReset()
     testState.updateWorkspaceStepConfigurationApi.mockResolvedValue({
@@ -269,6 +272,39 @@ describe('useStepConfigInfo', () => {
     expect(result.stepConfigSaveError.value).toBe('ECC rejected CTS parameters')
     expect(result.hasStepConfigChanges.value).toBe(true)
     expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(1)
+    expect(testState.showToast).toHaveBeenCalledWith({
+      severity: 'error',
+      summary: 'Failed to save parameters',
+      detail: 'ECC rejected CTS parameters',
+      life: 6000,
+    })
+  })
+
+  it('keeps the editor dirty and toasts an out-of-range Floorplan parameter', async () => {
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+      available({ 'floorplan.core_util': 0.7 }),
+    )
+    testState.updateWorkspaceStepConfigurationApi.mockRejectedValue(
+      new Error('value 1.3 out of range [0.01, 1.0] for floorplan.core_util'),
+    )
+
+    const result = scope.run(() => useStepConfigInfo())!
+    await vi.waitFor(() => expect(result.stepConfigDraft.value).not.toBeNull())
+    result.stepConfigDraft.value = { 'floorplan.core_util': 1.3 }
+
+    await expect(result.saveStepConfig()).resolves.toBe(false)
+
+    expect(result.stepConfigSaveError.value).toBe(
+      'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+    )
+    expect(result.hasStepConfigChanges.value).toBe(true)
+    expect(useWorkspaceLifecycle().session.value.workspaceRevision).toBe(1)
+    expect(testState.showToast).toHaveBeenCalledWith({
+      severity: 'error',
+      summary: 'Failed to save parameters',
+      detail: 'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+      life: 6000,
+    })
   })
 
   it('discards a response after the Workspace session changes', async () => {

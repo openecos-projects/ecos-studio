@@ -392,6 +392,75 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
+  it('does not emit flow lifecycle events when configuration update is rejected', async () => {
+    const { client, events, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push(
+      new Error('value 1.3 out of range [0.01, 1.0] for floorplan.core_util'),
+    )
+
+    await expect(
+      service.updateWorkspaceConfiguration({
+        commandId: 'configuration-1',
+        configuration: {
+          design: {},
+          parameters: { 'floorplan.core_util': 1.3 },
+          pdk: {},
+        },
+        expectedWorkspaceRevision: 1,
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).rejects.toMatchObject({
+      message: 'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+    })
+
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'operation.started' }),
+    )
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'operation.failed' }),
+    )
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'operation.completed' }),
+    )
+  })
+
+  it('does not emit flow lifecycle events when step configuration update is rejected', async () => {
+    const { client, events, service } = createService()
+    client.responses.push({
+      directory: '/work/demo',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 1,
+    })
+    const opened = await service.openWorkspace({ directory: '/work/demo' })
+    client.responses.push(
+      new Error('value 1.3 out of range [0.01, 1.0] for floorplan.core_util'),
+    )
+
+    await expect(
+      service.updateWorkspaceStepConfiguration({
+        commandId: 'step-configuration-1',
+        expectedWorkspaceRevision: 1,
+        parameters: { 'floorplan.core_util': 1.3 },
+        stepId: 'Floorplan',
+        workspaceHandle: opened.workspaceHandle,
+      }),
+    ).rejects.toMatchObject({
+      message: 'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+    })
+
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        method: 'workspace.step_configuration.update',
+      }),
+    )
+  })
+
   it('creates a workspace from a runtime-specific payload', async () => {
     const { client, service } = createService('/work/frontend')
     client.responses.push({ directory: '/work/frontend', workspaceId: 'frontend-1' })

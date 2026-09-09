@@ -86,6 +86,18 @@
           </div>
         </div>
 
+        <div
+          v-if="stepConfigSaveError"
+          class="mx-3 mt-3 shrink-0 rounded-lg border border-red-500/40 bg-red-500/10 p-3"
+        >
+          <div class="flex items-start gap-2">
+            <i class="ri-error-warning-line mt-0.5 shrink-0 text-lg text-red-400"></i>
+            <p class="text-[11px] leading-relaxed break-words text-red-300">
+              {{ stepConfigSaveError }}
+            </p>
+          </div>
+        </div>
+
         <!-- Resolved path + editor -->
         <template v-if="stepConfigPathResolved && !stepConfigReadError">
           <div

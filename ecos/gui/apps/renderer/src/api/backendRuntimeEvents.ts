@@ -78,7 +78,11 @@ export function connectBackendRuntimeEventSession(
     sink.onEvent(event)
 
     const terminalState = backendRuntimeEventTerminalState(event)
-    if (terminalState === 'failed' || terminalState === 'interrupted') {
+    const flowLifecycle = isFlowLifecycleEvent(event)
+    if (
+      flowLifecycle &&
+      (terminalState === 'failed' || terminalState === 'interrupted')
+    ) {
       const error = record(payload.error)
       sink.onFailure({
         code:
@@ -104,7 +108,7 @@ export function connectBackendRuntimeEventSession(
       kind === 'operation.rerun_prepared' ||
       kind === 'workspace.committed' ||
       kind === 'artifact.changed' ||
-      terminalState
+      (flowLifecycle && terminalState)
     ) {
       sink.onInvalidate(backendRuntimeEventStep(event))
     }
@@ -127,7 +131,7 @@ export function connectBackendRuntimeEventSession(
         workspaceRevision: revision,
       })
     }
-    if (terminalState) sink.onTerminal(event.workspaceDirectory)
+    if (flowLifecycle && terminalState) sink.onTerminal(event.workspaceDirectory)
   })
   client.connect()
   return client
@@ -194,6 +198,16 @@ export function backendRuntimeEventTerminalState(
   if (event.type === 'runtime.exited' && event.reason === 'unexpected')
     return 'interrupted'
   return null
+}
+
+function isFlowLifecycleEvent(event: DesignRuntimeEvent): boolean {
+  if (event.type === 'runtime.exited') return true
+  if (event.type === 'runtime.protocol') {
+    const kind = event.event.kind
+    return kind === 'flow' || kind === 'step'
+  }
+  if (!('method' in event) || typeof event.method !== 'string') return false
+  return event.method === 'flow.run' || event.method === 'flow.run_step'
 }
 
 export function backendRuntimeEventMessage(

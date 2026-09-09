@@ -2183,6 +2183,26 @@ describe('useWorkspace openProject', () => {
     )
   })
 
+  it('does not treat a configuration-update failure as a Flow failure', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const notifications = useNotificationStore()
+    const before = { ...workspace.resourceVersions.value }
+
+    onRuntimeEvent?.({
+      code: 'invalid_request',
+      designTool: 'backend',
+      message: 'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+      method: 'workspace.configuration.update',
+      operationId: 'operation-config',
+      type: 'operation.failed',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-demo',
+    })
+
+    expect(notifications.notifications.value).toEqual([])
+    expect(workspace.resourceVersions.value).toEqual(before)
+  })
+
   it('waits for the main-process terminal tracker when the renderer misses completion', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     let resolveTracker: ((operation: { state: string }) => void) | undefined

@@ -11,6 +11,7 @@ const {
   refreshConfigApi,
   runtimeEvents,
   resourceVersions,
+  showToast,
   workspaceSession,
   writeProjectTextFile,
   resolveProjectPathAccess,
@@ -38,6 +39,7 @@ const {
   readProjectTextFile: vi.fn(),
   refreshConfigApi: vi.fn(),
   runtimeEvents: { value: [] },
+  showToast: vi.fn(),
   resourceVersions: {
     __v_isRef: true,
     value: {
@@ -61,6 +63,7 @@ vi.mock('./useWorkspace', () => ({
     invalidateWorkspaceResources,
     runtimeEvents,
     resourceVersions,
+    showToast,
     workspaceSession,
   }),
 }))
@@ -204,6 +207,7 @@ describe('useParameters desktop bridge integration', () => {
     getWorkspaceRuntimeSnapshotApi.mockReset()
     executeProductCommand.mockReset()
     executeProductCommand.mockResolvedValue({ workspaceRevision: 2 })
+    showToast.mockReset()
     fetchSharedHomeData.mockReset()
     invalidateWorkspaceResources.mockClear()
     readProjectTextFile.mockReset()
@@ -810,6 +814,12 @@ describe('useParameters desktop bridge integration', () => {
 
     expect(writeProjectTextFile).not.toHaveBeenCalled()
     expect(parameters.error.value).toContain('Flow is running')
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'warn',
+      summary: 'Failed to save parameters',
+      detail: expect.stringContaining('Flow is running'),
+      life: 6000,
+    })
   })
 
   it('increments dependent resource versions only after a successful save', async () => {
@@ -970,6 +980,54 @@ describe('useParameters desktop bridge integration', () => {
     await expect(parameters.saveParameters()).resolves.toBe(false)
 
     expect(resourceVersions.value).toEqual(initialVersions)
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'error',
+      summary: 'Failed to save parameters',
+      detail: 'disk full',
+      life: 6000,
+    })
+  })
+
+  it('toasts an ECC range error without writing derived parameters', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+    currentProject.value = { path: '/workspace/demo', designTool: 'backend' }
+    workspaceSession.value = { workspaceId: 'workspace-demo' }
+    getWorkspaceRuntimeSnapshotApi.mockResolvedValue({
+      parameters: workspaceSnapshotParameters(),
+      home: {},
+    })
+    executeProductCommand.mockRejectedValue(
+      new Error('value 1.3 out of range [0.01, 1.0] for floorplan.core_util'),
+    )
+    const lifecycle = useWorkspaceLifecycle()
+    lifecycle.activateSession(lifecycle.currentSessionId.value, {
+      projectRoot: '/workspace/demo',
+      workspaceId: 'workspace-demo',
+      workspaceRevision: 1,
+    })
+    const parameters = useParameters()
+    await vi.waitFor(() => expect(parameters.config.design).toBe('demo'))
+
+    const initialVersions = { ...resourceVersions.value }
+    parameters.config.core.utilization = 1.3
+
+    await expect(parameters.saveParameters()).resolves.toBe(false)
+
+    expect(writeProjectTextFile).not.toHaveBeenCalled()
+    expect(parameters.error.value).toBe(
+      'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+    )
+    expect(resourceVersions.value).toEqual(initialVersions)
+    expect(lifecycle.session.value.workspaceRevision).toBe(1)
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'error',
+      summary: 'Failed to save parameters',
+      detail: 'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+      life: 6000,
+    })
   })
 
   it('keeps written parameters as the baseline when refresh config fails after save', async () => {

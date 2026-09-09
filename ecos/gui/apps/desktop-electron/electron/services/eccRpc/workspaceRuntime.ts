@@ -814,26 +814,31 @@ export class EccWorkspaceRuntime {
         operationId,
         workspaceHandle,
       }
+      const emitOperationLifecycle = isFlowOperationMethod(method)
       try {
-        this.emit({
-          logFile: this.sidecar.logFile ?? undefined,
-          method,
-          operationId,
-          ...metadata,
-          type: 'operation.started',
-          workspaceDirectory: runtimeDirectory ?? undefined,
-          workspaceHandle,
-        })
+        if (emitOperationLifecycle) {
+          this.emit({
+            logFile: this.sidecar.logFile ?? undefined,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.started',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        }
         const result = await operation()
-        this.emit({
-          logFile: this.sidecar.logFile ?? undefined,
-          method,
-          operationId,
-          ...metadata,
-          type: 'operation.completed',
-          workspaceDirectory: runtimeDirectory ?? undefined,
-          workspaceHandle,
-        })
+        if (emitOperationLifecycle) {
+          this.emit({
+            logFile: this.sidecar.logFile ?? undefined,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.completed',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        }
         return result
       } catch (error) {
         const normalized = normalizeRuntimeError(error, {
@@ -842,29 +847,31 @@ export class EccWorkspaceRuntime {
           operationId,
           workspaceHandle,
         })
-        if (this.cancelledOperationIds.has(operationId)) {
-          this.emit({
-            logFile: normalized.logFile,
-            method,
-            operationId,
-            ...metadata,
-            type: 'operation.cancelled',
-            workspaceDirectory: runtimeDirectory ?? undefined,
-            workspaceHandle,
-          })
-        } else {
-          this.emit({
-            code: normalized.code,
-            details: normalized.details,
-            logFile: normalized.logFile,
-            message: normalized.message,
-            method,
-            operationId,
-            ...metadata,
-            type: 'operation.failed',
-            workspaceDirectory: runtimeDirectory ?? undefined,
-            workspaceHandle,
-          })
+        if (emitOperationLifecycle) {
+          if (this.cancelledOperationIds.has(operationId)) {
+            this.emit({
+              logFile: normalized.logFile,
+              method,
+              operationId,
+              ...metadata,
+              type: 'operation.cancelled',
+              workspaceDirectory: runtimeDirectory ?? undefined,
+              workspaceHandle,
+            })
+          } else {
+            this.emit({
+              code: normalized.code,
+              details: normalized.details,
+              logFile: normalized.logFile,
+              message: normalized.message,
+              method,
+              operationId,
+              ...metadata,
+              type: 'operation.failed',
+              workspaceDirectory: runtimeDirectory ?? undefined,
+              workspaceHandle,
+            })
+          }
         }
         throw normalized
       } finally {
@@ -1097,6 +1104,10 @@ export class EccWorkspaceRuntime {
       listener(event)
     }
   }
+}
+
+function isFlowOperationMethod(method: string): boolean {
+  return method === 'flow.run' || method === 'flow.run_step'
 }
 
 function shutdownBarrierFrom(error: unknown): RuntimeShutdownBarrier | null {

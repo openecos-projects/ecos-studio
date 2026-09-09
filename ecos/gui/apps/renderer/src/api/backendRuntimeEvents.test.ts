@@ -19,7 +19,11 @@ vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({ runtime: { events: { onEvent: bridge.onEvent } } }),
 }))
 
-import { createBackendRuntimeEventClient } from './backendRuntimeEvents'
+import {
+  connectBackendRuntimeEventSession,
+  createBackendRuntimeEventClient,
+  type BackendRuntimeEventSink,
+} from './backendRuntimeEvents'
 
 describe('createBackendRuntimeEventClient', () => {
   afterEach(() => {
@@ -147,5 +151,80 @@ describe('createBackendRuntimeEventClient', () => {
     } as DesignRuntimeEvent)
 
     expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+function createSink(): BackendRuntimeEventSink & {
+  failures: unknown[]
+  invalidations: Array<string | undefined>
+} {
+  const failures: unknown[] = []
+  const invalidations: Array<string | undefined> = []
+  return {
+    failures,
+    invalidations,
+    isCurrent: () => true,
+    onEvent: vi.fn(),
+    onFailure: (failure) => {
+      failures.push(failure)
+    },
+    onInvalidate: (step) => {
+      invalidations.push(step)
+    },
+    onRevision: vi.fn(),
+    onRerunPrepared: vi.fn(),
+    onStepCommit: vi.fn(),
+    onTerminal: vi.fn(),
+  }
+}
+
+describe('connectBackendRuntimeEventSession', () => {
+  afterEach(() => {
+    bridge.reset()
+    vi.clearAllMocks()
+  })
+
+  it('does not treat a configuration-update failure as a Flow failure', () => {
+    const sink = createSink()
+    connectBackendRuntimeEventSession('workspace-handle', '/work/gcd', sink)
+
+    bridge.emit({
+      code: 'invalid_request',
+      designTool: 'backend',
+      message: 'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+      method: 'workspace.configuration.update',
+      operationId: 'operation-config',
+      type: 'operation.failed',
+      workspaceDirectory: '/work/gcd',
+      workspaceHandle: 'workspace-handle',
+    })
+
+    expect(sink.failures).toEqual([])
+    expect(sink.invalidations).toEqual([])
+  })
+
+  it('still reports a flow.run failure as a Flow failure', () => {
+    const sink = createSink()
+    connectBackendRuntimeEventSession('workspace-handle', '/work/gcd', sink)
+
+    bridge.emit({
+      code: 'command_failed',
+      designTool: 'backend',
+      message: 'Floorplan failed',
+      method: 'flow.run',
+      operationId: 'operation-flow',
+      type: 'operation.failed',
+      workspaceDirectory: '/work/gcd',
+      workspaceHandle: 'workspace-handle',
+    })
+
+    expect(sink.failures).toEqual([
+      expect.objectContaining({
+        message: 'Floorplan failed',
+        operationId: 'operation-flow',
+        terminalState: 'failed',
+      }),
+    ])
+    expect(sink.invalidations).toEqual([undefined])
   })
 })

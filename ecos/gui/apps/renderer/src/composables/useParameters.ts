@@ -474,6 +474,7 @@ export function useParameters() {
     currentProject,
     resourceVersions,
     invalidateWorkspaceResources,
+    showToast,
     workspaceSession,
   } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
@@ -548,7 +549,20 @@ export function useParameters() {
   function blockSaveWhileFlowRunning(projectPath = currentProject.value?.path): boolean {
     if (!isFlowExecutionActiveForWorkspace(projectPath)) return false
     error.value = FLOW_RUNNING_SAVE_BLOCKED_MESSAGE
+    notifyParameterSaveFailure(FLOW_RUNNING_SAVE_BLOCKED_MESSAGE, 'warn')
     return true
+  }
+
+  function notifyParameterSaveFailure(
+    detail: string,
+    severity: 'error' | 'warn' = 'error',
+  ): void {
+    showToast({
+      severity,
+      summary: 'Failed to save parameters',
+      detail,
+      life: 6000,
+    })
   }
 
   function applyParametersFileContent(fileContent: string): void {
@@ -899,10 +913,12 @@ export function useParameters() {
       })
 
       if (refreshResult?.response !== ResponseEnum.success) {
-        error.value = firstResponseMessage(
+        const refreshError = firstResponseMessage(
           refreshResult,
           'Refresh workspace config failed',
         )
+        error.value = refreshError
+        notifyParameterSaveFailure(refreshError)
         return false
       }
 
@@ -921,7 +937,9 @@ export function useParameters() {
         return false
       }
       console.error('Failed to save parameters:', err)
-      error.value = err instanceof Error ? err.message : String(err)
+      const saveError = err instanceof Error ? err.message : String(err)
+      error.value = saveError
+      notifyParameterSaveFailure(saveError)
       return false
     } finally {
       if (

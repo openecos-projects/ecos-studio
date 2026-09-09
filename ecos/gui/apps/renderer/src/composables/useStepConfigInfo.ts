@@ -81,7 +81,7 @@ function parameterDescriptions(records: unknown[]): Record<string, string> {
 
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
-  const { currentProject, workspaceSession } = useWorkspace()
+  const { currentProject, showToast, workspaceSession } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
   const { resourceVersions } = workspaceLifecycle
 
@@ -430,9 +430,23 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     return stableJsonSig(stepConfigDraft.value) !== stepConfigBaselineSig.value
   })
 
+  function notifyStepConfigSaveFailure(detail: string): void {
+    showToast({
+      severity: 'error',
+      summary: 'Failed to save parameters',
+      detail,
+      life: 6000,
+    })
+  }
+
+  function setStepConfigSaveError(detail: string): void {
+    stepConfigSaveError.value = detail
+    notifyStepConfigSaveFailure(detail)
+  }
+
   function blockStepConfigSaveWhileFlowRunning(): boolean {
     if (!isMutationLocked.value) return false
-    stepConfigSaveError.value = FLOW_RUNNING_SAVE_BLOCKED_MESSAGE
+    setStepConfigSaveError(FLOW_RUNNING_SAVE_BLOCKED_MESSAGE)
     return true
   }
 
@@ -451,7 +465,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       }
     }
     if (!stepConfigPathResolved.value || !step) {
-      stepConfigSaveError.value = 'No editable Step configuration is available'
+      setStepConfigSaveError('No editable Step configuration is available')
       return false
     }
     if (blockStepConfigSaveWhileFlowRunning()) {
@@ -467,20 +481,20 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         return false
       }
       if (!rawLooksValidJson(rawBeforeSave ?? '')) {
-        stepConfigSaveError.value = 'Step configuration must be valid JSON'
+        setStepConfigSaveError('Step configuration must be valid JSON')
         return false
       }
       if (draftBeforeSave === null) {
-        stepConfigSaveError.value = 'Nothing to save'
+        setStepConfigSaveError('Nothing to save')
         return false
       }
       if (!isRecord(draftBeforeSave)) {
-        stepConfigSaveError.value = 'Step configuration must be an object'
+        setStepConfigSaveError('Step configuration must be an object')
         return false
       }
       const expectedWorkspaceRevision = workspaceLifecycle.session.value.workspaceRevision
       if (typeof expectedWorkspaceRevision !== 'number') {
-        stepConfigSaveError.value = 'Workspace Revision is unavailable'
+        setStepConfigSaveError('Workspace Revision is unavailable')
         return false
       }
       const stepResult = await workspaceLifecycle.runForSession(sessionId, () =>
@@ -513,7 +527,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       return true
     } catch (e) {
       if (!canApply()) return false
-      stepConfigSaveError.value = e instanceof Error ? e.message : String(e)
+      setStepConfigSaveError(e instanceof Error ? e.message : String(e))
       return false
     } finally {
       setSavingForToken(false)
