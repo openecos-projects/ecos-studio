@@ -2549,6 +2549,11 @@ async function runProjectDefaultsLoad(projectRoot: string) {
   projectMpc.value = null
   projectManifestError.value = ''
   isLoadingProjectManifest.value = true
+  // A new generation invalidates the previous project's manifest-derived PDK
+  // state; clear it before the asynchronous read so even a failed read cannot
+  // leak the previous project's PDK context into this one.
+  clearManifestDerivedPdkState()
+  selectedPdkId.value = ''
 
   let manifest: ProjectManifest | null = null
   try {
@@ -2563,11 +2568,6 @@ async function runProjectDefaultsLoad(projectRoot: string) {
     return
   }
   if (loadGeneration !== projectManifestLoadGeneration) return
-
-  // A new project load invalidates the previous project's manifest-derived
-  // PDK state and selection so they cannot leak into this project.
-  clearManifestDerivedPdkState()
-  selectedPdkId.value = ''
 
   // Track the manifest family explicitly (including its absence) so the
   // default-PDK decision in ensurePdksLoaded sees authoritative information.

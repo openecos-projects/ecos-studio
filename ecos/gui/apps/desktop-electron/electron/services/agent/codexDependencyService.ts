@@ -297,6 +297,7 @@ export class CodexDependencyService {
     const extractDir = await mkdtemp(join(tmpdir(), 'ecos-codex-'))
     let stagedBin: string | null = null
     let backupBin: string | null = null
+    let verifiedVersion: string | null = null
     /** True once the staged binary replaced the target (rename succeeded). */
     let swapped = false
     /** True when a failed restore left the backup as the only old copy. */
@@ -317,8 +318,8 @@ export class CodexDependencyService {
 
       // Verify the downloaded binary BEFORE touching the installed one so a
       // failed install leaves the previous working version in place.
-      const extractedVersion = await this.readVersion(extractedBinary)
-      if (!extractedVersion || !/^codex[\s_-]/i.test(extractedVersion)) {
+      verifiedVersion = await this.readVersion(extractedBinary)
+      if (!verifiedVersion || !/^codex[\s_-]/i.test(verifiedVersion)) {
         throw new Error('下载内容不是有效的 Codex CLI')
       }
 
@@ -338,11 +339,6 @@ export class CodexDependencyService {
       await rename(stagedBin, targetBin)
       stagedBin = null
       swapped = true
-
-      const version = await this.readVersion(targetBin)
-      if (!version) {
-        throw new Error('安装完成但 Codex CLI 无法执行')
-      }
 
       if (this.managedBinPersister) {
         await this.managedBinPersister(targetBin)
@@ -400,11 +396,11 @@ export class CodexDependencyService {
     }
 
     // Emit done only after the transaction fully succeeded, so a throwing
-    // progress listener can never trigger the rollback path above.
-    const finalVersion = await this.readVersion(targetBin)
+    // progress listener can never trigger the rollback path above. The version
+    // was already verified inside the transaction on identical bytes.
     this.emitProgress({
       phase: 'done',
-      message: `Codex CLI ${finalVersion ?? ''} 已安装`,
+      message: `Codex CLI ${verifiedVersion ?? ''} 已安装`,
       progress: 1,
     })
     // Avoid getStatus()'s in-flight install short-circuit while installPromise is set.

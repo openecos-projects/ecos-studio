@@ -2514,11 +2514,6 @@ function requireSettingsRegistryService(
 }
 
 /**
- * Broadcast the registry state of the Codex binary after a write through the
- * legacy Codex IPC paths so the Preferences page converges when the AI chat
- * panel is the writer.
- */
-/**
  * Run a legacy Codex write serialized against the settings-registry
  * transactions of the same key, so a Preferences write cannot interleave with
  * it and broadcast a mixed value/status.
@@ -2532,6 +2527,11 @@ async function withCodexKeyTransaction<T>(
   return await registry.runExclusive(DESKTOP_CODEX_BIN_SETTING_KEY, operation)
 }
 
+/**
+ * Broadcast the registry state of the Codex binary after a write through the
+ * legacy Codex IPC paths so the Preferences page converges when the AI chat
+ * panel is the writer.
+ */
 async function notifyCodexBinSettingChanged(
   services: DesktopBridgeServices,
 ): Promise<void> {

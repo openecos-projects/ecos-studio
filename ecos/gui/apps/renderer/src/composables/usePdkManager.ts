@@ -92,6 +92,9 @@ export function usePdkManager() {
       isLoaded.value = true
       return true
     } catch (error) {
+      // Invalidate the cache so a later attempt reloads instead of trusting
+      // a snapshot that may be outdated by a failed refresh.
+      isLoaded.value = false
       console.error('[usePdkManager] Failed to load PDK Inventory:', error)
       return false
     }
@@ -105,7 +108,16 @@ export function usePdkManager() {
       })
       if (!path) return null
       const imported = await importPath(path)
-      await loadPdks(true)
+      if (!(await loadPdks(true))) {
+        showToast({
+          severity: 'warn',
+          summary: 'PDK',
+          detail:
+            'The PDK was imported but the inventory could not be refreshed. Please try again.',
+          life: 5000,
+        })
+        return null
+      }
       const linked = importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
       showToast({
         severity: 'success',
@@ -130,7 +142,16 @@ export function usePdkManager() {
   const importPdkByPath = async (path: string): Promise<ImportedPdk | null> => {
     try {
       const imported = await importPath(path)
-      await loadPdks(true)
+      if (!(await loadPdks(true))) {
+        showToast({
+          severity: 'warn',
+          summary: 'PDK',
+          detail:
+            'The PDK was imported but the inventory could not be refreshed. Please try again.',
+          life: 5000,
+        })
+        return null
+      }
       return importedPdks.value.find((pdk) => pdk.id === imported.id) ?? imported
     } catch (error) {
       if (error === pdkImportCancelled) return null

@@ -730,12 +730,15 @@ async function ensureCodexReady(): Promise<boolean> {
 let codexStatusRequestSeq = 0
 
 async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
+  // Advance the sequence in every branch (including an unavailable API) so a
+  // stale in-flight refresh can never overwrite a newer result.
+  const requestId = ++codexStatusRequestSeq
   const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) {
+    if (requestId !== codexStatusRequestSeq) return codexSetupStatus.value
     codexSetupStatus.value = null
     return null
   }
-  const requestId = ++codexStatusRequestSeq
   try {
     const status = await codex.getStatus()
     if (requestId !== codexStatusRequestSeq) return codexSetupStatus.value
