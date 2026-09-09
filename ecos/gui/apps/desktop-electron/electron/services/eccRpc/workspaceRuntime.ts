@@ -128,6 +128,7 @@ export class EccWorkspaceRuntime {
       (notification) => this.handleNotification(notification),
     )
     this.sidecarLifecycle = new RuntimeSidecarLifecycle({
+      isStartWindow: () => this.startRpcCount > 0,
       captureFinalSnapshot: async (workspaceId) => {
         const client = this.client
         if (!client) return

@@ -32,8 +32,8 @@ export interface ManagedCodexInstallContext {
   env: NodeJS.ProcessEnv
   fetchImpl: FetchLike
   spawnImpl: SpawnLike
-  /** Settings value before the install started (ABA guard for the commit). */
-  valueAtStart: string | null
+  /** Registry write revision at install start (ABA guard for the commit). */
+  baselineRevision: number | undefined
   onProgress(event: DesktopCodexInstallProgressEvent): void
   readVersion(bin: string): Promise<string | null>
   /**
@@ -41,7 +41,7 @@ export interface ManagedCodexInstallContext {
    * settings-registry key transaction and re-read the stored value, so a
    * Preferences write completed during the download wins.
    */
-  persist(binPath: string, valueAtStart: string | null): Promise<void>
+  persist(binPath: string, baselineRevision: number | undefined): Promise<void>
 }
 
 /**
@@ -140,7 +140,7 @@ export async function installManagedCodex(
     stagedBin = null
     swapped = true
 
-    await context.persist(targetBin, context.valueAtStart)
+    await context.persist(targetBin, context.baselineRevision)
   } catch (error) {
     // Roll back the swap: restore the previous managed version, or remove
     // the freshly replaced binary on a first-time install so a failed

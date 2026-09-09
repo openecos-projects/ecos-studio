@@ -53,7 +53,7 @@ export class CodexDependencyService {
    * write cannot interleave with registry writes of the same key.
    */
   private managedBinPersister:
-    | ((binPath: string, baselineValue: string | null) => Promise<void>)
+    | ((binPath: string, baselineRevision: number | undefined) => Promise<void>)
     | null = null
 
   constructor(options: CodexDependencyServiceOptions) {
@@ -86,7 +86,9 @@ export class CodexDependencyService {
   }
 
   setManagedBinPersister(
-    persist: ((binPath: string, baselineValue: string | null) => Promise<void>) | null,
+    persist:
+      | ((binPath: string, baselineRevision: number | undefined) => Promise<void>)
+      | null,
   ): void {
     this.managedBinPersister = persist
   }
@@ -203,14 +205,16 @@ export class CodexDependencyService {
     return await this.getStatus()
   }
 
-  async install(): Promise<DesktopCodexDependencyStatus> {
+  async install(options?: {
+    baselineRevision?: number
+  }): Promise<DesktopCodexDependencyStatus> {
     if (!this.platformSupportsInstall()) {
       throw new Error('当前平台暂不支持一键安装 Codex CLI')
     }
     if (this.installPromise) {
       return await this.installPromise
     }
-    this.installPromise = this.runInstall().finally(() => {
+    this.installPromise = this.runInstall(options?.baselineRevision).finally(() => {
       this.installPromise = null
     })
     return await this.installPromise
@@ -241,24 +245,26 @@ export class CodexDependencyService {
     }
   }
 
-  private async runInstall(): Promise<DesktopCodexDependencyStatus> {
+  private async runInstall(
+    baselineRevision?: number,
+  ): Promise<DesktopCodexDependencyStatus> {
     const assetName = linuxAssetName(this.arch)
     if (!assetName) {
       throw new Error(`不支持的 Linux 架构: ${this.arch}`)
     }
 
     const status = await installManagedCodex({
+      baselineRevision,
       arch: this.arch,
       installRoot: this.installRoot,
       env: this.env,
       fetchImpl: this.fetchImpl,
       spawnImpl: this.spawnImpl,
-      valueAtStart: await this.settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY),
       onProgress: (event) => this.emitProgress(event),
       readVersion: (bin) => this.readVersion(bin),
-      persist: (binPath, valueAtStart) =>
+      persist: (binPath) =>
         this.managedBinPersister
-          ? this.managedBinPersister(binPath, valueAtStart)
+          ? this.managedBinPersister(binPath, baselineRevision)
           : this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, binPath),
     })
     return status ?? (await this.probeStatus())

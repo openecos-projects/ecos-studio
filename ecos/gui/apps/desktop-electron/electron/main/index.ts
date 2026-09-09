@@ -342,14 +342,18 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     // The managed Codex install writes its binary path through the registry's
     // key transaction so it cannot interleave with a Preferences write.
     desktopServices.codexDependencyService.setManagedBinPersister(
-      (binPath, baselineValue) =>
+      (binPath, baselineRevision) =>
         settingsRegistryService.runExclusive(DESKTOP_CODEX_BIN_SETTING_KEY, async () => {
-          // Re-read inside the key queue: a Preferences write completed while
-          // the download ran is newer and must win over the managed result.
-          const current = await desktopServices.settingsStore.get<string>(
-            DESKTOP_CODEX_BIN_SETTING_KEY,
-          )
-          if (current !== baselineValue) return
+          // Revision CAS inside the key queue: a Preferences write completed
+          // while the download ran bumped the revision, so the managed result
+          // must not overwrite the user's newer choice (ABA-safe).
+          if (
+            baselineRevision !== undefined &&
+            settingsRegistryService.getRevision(DESKTOP_CODEX_BIN_SETTING_KEY) !==
+              baselineRevision
+          ) {
+            return
+          }
           await desktopServices.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, binPath)
         }),
     )

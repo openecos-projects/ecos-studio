@@ -66,6 +66,8 @@ export class SettingsRegistryService {
   private settling = false
   /** In-flight settlement pass; concurrent triggers share it. */
   private settlementTask: Promise<void> | null = null
+  /** Monotonic per-key write revision for optimistic concurrency checks. */
+  private readonly revisions = new Map<string, number>()
 
   constructor(options: SettingsRegistryServiceOptions) {
     this.broadcast = options.broadcast
@@ -175,6 +177,15 @@ export class SettingsRegistryService {
     })
   }
 
+  /**
+   * Monotonic write revision of one key. Callers capture it before starting a
+   * long operation and compare inside a key transaction to detect writes that
+   * happened in between (ABA-safe, unlike value comparison).
+   */
+  getRevision(key: string): number {
+    return this.revisions.get(key) ?? 0
+  }
+
   /** Run one key's write transaction after any already-queued write for it. */
   private enqueueWrite<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.writeQueues.get(key) ?? Promise.resolve()
@@ -216,42 +227,54 @@ export class SettingsRegistryService {
   private async runSettlement(): Promise<void> {
     this.settling = true
     try {
-      for (const key of Array.from(this.pendingApplyKeys)) {
-        if (this.isEccRuntimePoolBusy()) return
-        const descriptor = this.requireDescriptor(key)
-        const handler = this.handlers[key]
-        if (!descriptor || !handler) {
-          this.pendingApplyKeys.delete(key)
-          continue
-        }
-
-        await this.enqueueWrite(key, async () => {
-          if (!this.pendingApplyKeys.has(key)) return
+      // Loop until the pending set is stable: keys can become pending while
+      // this pass is running (their wakeup joins this shared task).
+      for (;;) {
+        const pending = Array.from(this.pendingApplyKeys)
+        if (pending.length === 0) return
+        let handled = 0
+        for (const key of pending) {
           if (this.isEccRuntimePoolBusy()) return
-          this.pendingApplyKeys.delete(key)
-          let status: DesktopSettingStatus
-          try {
-            const outcome = await handler.apply(await this.readStoredValue(key))
-            status = outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
-          } catch (error) {
-            status = { kind: 'error', error: errorFromException(error) }
+          const descriptor = this.requireDescriptor(key)
+          const handler = this.handlers[key]
+          if (!descriptor || !handler) {
+            this.pendingApplyKeys.delete(key)
+            handled++
+            continue
           }
-          if (status.kind === 'pending') {
-            // A runtime deferred again; leave the marker for the next drain.
-            this.pendingApplyKeys.add(key)
-            return
-          }
-          if (status.kind === 'error') {
-            this.applyFailures.set(key, {
-              error: status.error,
-              value: await this.readStoredValue(key),
-            })
-          } else {
-            this.applyFailures.delete(key)
-          }
-          const state = await this.stateFor(descriptor)
-          this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
-        })
+
+          await this.enqueueWrite(key, async () => {
+            if (!this.pendingApplyKeys.has(key)) return
+            if (this.isEccRuntimePoolBusy()) return
+            this.pendingApplyKeys.delete(key)
+            let status: DesktopSettingStatus
+            try {
+              const outcome = await handler.apply(await this.readStoredValue(key))
+              status = outcome === 'pending' ? { kind: 'pending' } : { kind: 'ok' }
+            } catch (error) {
+              status = { kind: 'error', error: errorFromException(error) }
+            }
+            if (status.kind === 'pending') {
+              // A runtime deferred again; leave the marker for the next drain.
+              this.pendingApplyKeys.add(key)
+              return
+            }
+            if (status.kind === 'error') {
+              this.applyFailures.set(key, {
+                error: status.error,
+                value: await this.readStoredValue(key),
+              })
+            } else {
+              this.applyFailures.delete(key)
+            }
+            const state = await this.stateFor(descriptor)
+            this.broadcast(desktopApiEventChannels.settingsRegistryChanged, state)
+          })
+          handled++
+        }
+        // Keys became pending while this pass ran; loop again unless every
+        // pending key re-deferred without any work being done.
+        if (handled === 0) return
       }
     } finally {
       this.settling = false
@@ -271,6 +294,7 @@ export class SettingsRegistryService {
     // Read the persisted value AFTER applying so apply-failure records key off
     // what is actually stored (handlers may canonicalize the input).
     const value = await this.readStoredValue(descriptor.key)
+    this.revisions.set(descriptor.key, (this.revisions.get(descriptor.key) ?? 0) + 1)
     if (status.kind === 'pending') {
       this.pendingApplyKeys.add(descriptor.key)
       // Re-check immediately: the pool may have drained while apply() ran, and

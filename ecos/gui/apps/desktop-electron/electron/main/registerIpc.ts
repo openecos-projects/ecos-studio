@@ -140,7 +140,9 @@ export interface DesktopBridgeServices {
   }
   codexDependencyService?: {
     getStatus(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
-    install(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    install(options?: {
+      baselineRevision?: number
+    }): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     login(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     recheck(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     setBinPath(
@@ -152,6 +154,7 @@ export interface DesktopBridgeServices {
   }
   settingsRegistryService?: {
     list(): Promise<DesktopSettingState[]>
+    getRevision(key: string): number
     notifyKeyChanged(key: string): Promise<void>
     reset(key: unknown): Promise<DesktopSettingWriteResult>
     runExclusive<T>(key: string, operation: () => Promise<T>): Promise<T>
@@ -2360,12 +2363,17 @@ export function registerIpc(
         sender.send(desktopApiEventChannels.agentCodexProgress, payload)
       }
     })
+    const baselineRevision = services.settingsRegistryService?.getRevision(
+      DESKTOP_CODEX_BIN_SETTING_KEY,
+    )
     try {
       // install() merges concurrent requests through a shared promise and must
       // stay outside the key transaction; only the post-install environment
       // sync runs inside the registry's queue so it cannot interleave with a
       // Preferences write.
-      const status = await requireCodexDependencyService(services).install()
+      const status = await requireCodexDependencyService(services).install({
+        baselineRevision,
+      })
       await withCodexKeyTransaction(services, () => applyCodexBinEnv(services))
       return status
     } finally {

@@ -7,6 +7,8 @@ export interface RuntimeSidecarLifecycleOptions {
   emitError(message: string): void
   emitIdle(): void
   hasActiveOperations(): boolean
+  /** True while a start RPC window is open; release paths retry until it closes. */
+  isStartWindow(): boolean
   diagnosticIdleTimeoutMs?: number
 }
 
@@ -19,6 +21,7 @@ export class RuntimeSidecarLifecycle {
   private diagnosticReleaseTimer: ReturnType<typeof setTimeout> | null = null
   /** The asynchronous sidecar close that follows the retention timer. */
   private diagnosticCloseTask: Promise<void> | null = null
+  private releaseRetryTimer: ReturnType<typeof setTimeout> | null = null
   private finalSnapshotTask: Promise<void> | null = null
 
   constructor(private readonly options: RuntimeSidecarLifecycleOptions) {}
@@ -38,7 +41,21 @@ export class RuntimeSidecarLifecycle {
   }
 
   releaseAfterSuccessfulOperation(workspaceId: string): void {
-    if (this.finalSnapshotTask || this.options.hasActiveOperations()) return
+    if (
+      this.finalSnapshotTask ||
+      this.options.hasActiveOperations() ||
+      this.options.isStartWindow()
+    ) {
+      // A start RPC window is open; retry shortly so operation B (or its
+      // registration) is not cut down by the snapshot/close below.
+      if (!this.releaseRetryTimer) {
+        this.releaseRetryTimer = setTimeout(() => {
+          this.releaseRetryTimer = null
+          this.releaseAfterSuccessfulOperation(workspaceId)
+        }, 200)
+      }
+      return
+    }
     this.cancelDiagnosticRelease()
     const task = this.finishSuccessfulOperation(workspaceId)
     this.finalSnapshotTask = task
@@ -62,7 +79,14 @@ export class RuntimeSidecarLifecycle {
       this.options.diagnosticIdleTimeoutMs ?? DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS
     this.diagnosticReleaseTimer = setTimeout(() => {
       this.diagnosticReleaseTimer = null
-      if (this.options.hasActiveOperations()) return
+      if (this.options.hasActiveOperations() || this.options.isStartWindow()) {
+        // Retry after the start window closes.
+        this.diagnosticReleaseTimer = setTimeout(() => {
+          this.diagnosticReleaseTimer = null
+          this.retainFailedOperationForDiagnostics()
+        }, 200)
+        return
+      }
       // Keep retention flagged while the asynchronous close is running. A
       // deferred close re-arms the retention window for another attempt.
       const closeTask = this.options.closeSidecar().then(
@@ -96,15 +120,19 @@ export class RuntimeSidecarLifecycle {
   private async finishSuccessfulOperation(workspaceId: string): Promise<void> {
     try {
       await this.options.captureFinalSnapshot(workspaceId)
-      await this.options.closeSidecar()
     } catch (error) {
       this.options.emitError(errorMessage(error))
+      return
+    }
+    const result = await this.options.closeSidecar()
+    if (!result.ok) {
+      // The sidecar deferred the shutdown; re-arm the retention window so a
+      // later attempt closes it once it really drains. No idle signal yet.
+      this.retainFailedOperationForDiagnostics()
     }
   }
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error
-    ? `Failed to persist final ECC snapshot: ${error.message}`
-    : 'Failed to persist final ECC snapshot.'
+  return error instanceof Error ? error.message : String(error)
 }
