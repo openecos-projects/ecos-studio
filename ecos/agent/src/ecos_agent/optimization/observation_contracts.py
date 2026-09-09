@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
+import statistics
+from typing import Literal, Sequence
 
 from pydantic import Field, field_validator, model_validator
 
@@ -15,6 +16,7 @@ from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricDirection,
     EvaluationMetricRole,
     TerminalEvaluationMetric,
+    is_telemetry_metric,
     safe_relative_ref,
 )
 from ecos_agent.optimization.contracts import (
@@ -509,3 +511,44 @@ class TimingGuardrailContract(_ContractModel):
             for item in self.references
             if item.metric_id == metric_id
         )
+
+
+def _metric_profile_key(metric: TerminalEvaluationMetric) -> str:
+    if metric.corner is None:
+        return metric.metric_id
+    return f"{metric.metric_id}@{metric.corner}"
+
+
+def deterministic_noise_profile(
+    observations: Sequence[TerminalObservation],
+) -> dict[str, dict[str, float]]:
+    """Cross-replay noise over evaluation metrics, keyed by (metric_id, corner).
+
+    Returns per key the median reference value and the max-minus-min epsilon.
+    Telemetry metrics (wall-clock / RSS sampling) are excluded: they vary
+    across replays of an identical flow by construction. Corner rows keep
+    their own key so cross-corner PVT spread (e.g. leakage across
+    -40 C / 125 C) is never reported as replay noise.
+    """
+    if len(observations) < 2:
+        raise ValueError("noise profile requires at least two observations")
+    rows = [
+        {
+            _metric_profile_key(metric): metric.value
+            for metric in item.evaluation_metrics
+            if not is_telemetry_metric(metric)
+        }
+        for item in observations
+    ]
+    keys = tuple(rows[0])
+    if any(tuple(row) != keys for row in rows[1:]):
+        raise ValueError("replay evaluation metrics are not structurally aligned")
+    return {
+        "reference": {
+            key: float(statistics.median(row[key] for row in rows)) for key in keys
+        },
+        "epsilon": {
+            key: max(row[key] for row in rows) - min(row[key] for row in rows)
+            for key in keys
+        },
+    }
