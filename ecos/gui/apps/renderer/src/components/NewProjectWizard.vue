@@ -3413,14 +3413,18 @@ function selectPdk(pdk: import('../types').ImportedPdk, options?: { auto?: boole
   // selections stay outside the baseline and survive generation switches.
   if (options?.auto) {
     // After syncWorkspaceConfig, pdk_requirement reflects the normalized
-    // form and pdkConfigMode the resolved mode; snapshot those actuals.
+    // form. Only include pdkConfigMode when the PDK actually forced manual
+    // mode (supportsEccDefaults === false); otherwise the mode was not
+    // changed by this selection.
     snapshotPdkBaseline({
       pdk: pdk.pdkId,
       pdkRoot: pdk.path,
       pdkInstallationId: pdk.id,
       selectedPdkId: pdk.id,
       pdkRequirement: config.value.pdk_requirement ?? null,
-      pdkConfigMode: pdkConfigMode.value,
+      ...(pdk.readiness !== 'ready' || !pdk.supportsEccDefaults
+        ? { pdkConfigMode: pdkConfigMode.value }
+        : {}),
     })
   }
 }
