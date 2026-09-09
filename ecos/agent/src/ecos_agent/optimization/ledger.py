@@ -293,7 +293,8 @@ class OptimizationTerminalOutcome(_LedgerModel):
                 IncumbentDecision.CANDIDATE_INELIGIBLE
             },
             OptimizationOutcomeKind.EVIDENCE_INVALID: {
-                IncumbentDecision.CANDIDATE_INELIGIBLE
+                IncumbentDecision.CANDIDATE_INELIGIBLE,
+                IncumbentDecision.EVIDENCE_LIMITED,
             },
             OptimizationOutcomeKind.TIMED_OUT_CANCELLED: {
                 IncumbentDecision.CANDIDATE_INELIGIBLE

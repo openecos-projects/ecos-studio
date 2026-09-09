@@ -42,3 +42,58 @@ def resolve_objective_intent(
     if physical_area and policy.geometry_mode != "variable":
         raise ValueError("Reducing physical area requires an explicitly variable outline policy.")
     return primary, policy
+
+
+_DRC_GOAL_MARKERS = (
+    "drc",
+    "design rule",
+    "design-rule",
+    "设计规则",
+    "规则违例",
+)
+
+
+def effective_preserve_metrics(
+    goal_text: str,
+    proposal: "OptimizationObjectiveProposal",
+    *,
+    geometry_fixed: bool = False,
+) -> "tuple[ObjectiveMetric, ...]":
+    """Freeze the user's binding preserve constraints after semantic cleanup.
+
+    Timing metrics drop out because shared WNS/TNS tolerances and
+    recovery/signoff gates already protect them; fixed geometry protects
+    area independently; an explicit DRC goal binds drc_count as a preserve
+    metric.  At most two preserve metrics survive.
+    """
+    from ecos_agent.optimization.contracts import (
+        TIMING_OBJECTIVE_ORDER,
+        ObjectiveMetric,
+    )
+
+    preserve_metrics = [
+        metric
+        for metric in proposal.preserve_metrics
+        if metric
+        not in (
+            *TIMING_OBJECTIVE_ORDER,
+            ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
+            ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
+        )
+    ]
+    if geometry_fixed:
+        preserve_metrics = [
+            metric for metric in preserve_metrics
+            if metric not in (ObjectiveMetric.DIE_AREA, ObjectiveMetric.CORE_AREA)
+        ]
+    mentions_drc = any(marker in goal_text.casefold() for marker in _DRC_GOAL_MARKERS)
+    drc_metric = ObjectiveMetric.DRC_COUNT
+    if (
+        mentions_drc
+        and proposal.primary_metric != drc_metric
+        and drc_metric not in preserve_metrics
+    ):
+        preserve_metrics.insert(0, drc_metric)
+    if len(preserve_metrics) > 2:
+        raise ValueError("optimization objective preserves too many metrics after DRC binding")
+    return tuple(preserve_metrics)
