@@ -354,47 +354,44 @@ async function downloadToFile(
   await mkdir(dirname(destination), { recursive: true })
   const totalHeader = response.headers.get('content-length')
   const totalBytes = totalHeader ? Number(totalHeader) : NaN
-  if (!response.body) {
-    const data = Buffer.from(await response.arrayBuffer())
-    await writeFile(destination, new Uint8Array(data))
-    onProgress(1)
-    return
-  }
 
-  if (!response.body) {
-    // Non-streaming response: enforce the size cap via the buffer.
-    const data = await response.arrayBuffer()
-    if (data.byteLength > MAX_MANAGED_DOWNLOAD_BYTES) {
-      throw new Error(`下载超过大小上限 (${MAX_MANAGED_DOWNLOAD_BYTES} bytes)`)
-    }
-    await writeFile(destination, new Uint8Array(data))
-    onProgress(1)
-    return
-  }
-
-  const nodeStream = Readable.fromWeb(
-    response.body as import('node:stream/web').ReadableStream,
-  )
-  const file = createWriteStream(destination)
-  let downloaded = 0
-  nodeStream.on('data', (chunk: Buffer | string) => {
-    downloaded += Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(chunk)
-    // Refuse runaway downloads (cap ~512 MB) so a compromised source cannot
-    // exhaust the disk before the integrity checks run.
-    if (downloaded > MAX_MANAGED_DOWNLOAD_BYTES) {
-      nodeStream.destroy(
-        new Error(`下载超过大小上限 (${MAX_MANAGED_DOWNLOAD_BYTES} bytes)`),
-      )
+  try {
+    if (!response.body) {
+      // Non-streaming response: enforce the size cap via the buffer.
+      const data = await response.arrayBuffer()
+      if (data.byteLength > MAX_MANAGED_DOWNLOAD_BYTES) {
+        throw new Error(`下载超过大小上限 (${MAX_MANAGED_DOWNLOAD_BYTES} bytes)`)
+      }
+      await writeFile(destination, new Uint8Array(data))
+      onProgress(1)
       return
     }
-    if (Number.isFinite(totalBytes) && totalBytes > 0) {
-      onProgress(Math.min(downloaded / totalBytes, 0.99))
-    }
-  })
-  nodeStream.on('data', () => armIdleTimer())
-  await pipeline(nodeStream, file)
-  if (idleTimer) clearTimeout(idleTimer)
-  onProgress(1)
+
+    const nodeStream = Readable.fromWeb(
+      response.body as import('node:stream/web').ReadableStream,
+    )
+    const file = createWriteStream(destination)
+    let downloaded = 0
+    nodeStream.on('data', (chunk: Buffer | string) => {
+      downloaded += Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(chunk)
+      // Refuse runaway downloads (cap ~512 MB) so a compromised source cannot
+      // exhaust the disk before the integrity checks run.
+      if (downloaded > MAX_MANAGED_DOWNLOAD_BYTES) {
+        nodeStream.destroy(
+          new Error(`下载超过大小上限 (${MAX_MANAGED_DOWNLOAD_BYTES} bytes)`),
+        )
+        return
+      }
+      if (Number.isFinite(totalBytes) && totalBytes > 0) {
+        onProgress(Math.min(downloaded / totalBytes, 0.99))
+      }
+    })
+    nodeStream.on('data', () => armIdleTimer())
+    await pipeline(nodeStream, file)
+    onProgress(1)
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer)
+  }
 }
 
 async function findExtractedCodexBinary(root: string): Promise<string | null> {

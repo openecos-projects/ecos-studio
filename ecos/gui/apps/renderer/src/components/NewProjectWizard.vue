@@ -2633,6 +2633,8 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
       ? { pdkRequirement: baseDesign.pdk_requirement }
       : {}),
     ...(selectedPdkId.value === baseDesign.pdk ? { selectedPdkId: baseDesign.pdk } : {}),
+    pdkSelections: { ...pdkSelections.value },
+    pdkConfigMode: pdkConfigMode.value,
   })
 }
 
