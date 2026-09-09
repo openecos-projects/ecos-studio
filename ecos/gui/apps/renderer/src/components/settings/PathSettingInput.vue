@@ -69,8 +69,11 @@ const placeholder = computed(() =>
 function commitDraft(value?: string): void {
   const next = (value ?? draftValue.value).trim()
   draftValue.value = next
-  if (next === (props.entry.value ?? '')) return
   committedValue.value = next
+  // The commit acknowledges the current draft: authoritative updates (the
+  // canonicalized echo of this write) may now replace it.
+  draftDirty.value = false
+  if (next === (props.entry.value ?? '')) return
   emit('commit', next)
 }
 

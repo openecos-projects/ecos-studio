@@ -330,13 +330,24 @@ function validateArchiveMembers(listing: string, destination: string): void {
   }
 }
 
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000
+
 async function downloadToFile(
   url: string,
   destination: string,
   fetchImpl: FetchLike,
   onProgress: (progress: number) => void,
 ): Promise<void> {
-  const response = await fetchImpl(url, { redirect: 'follow' })
+  // Abort the download when no bytes arrive for a while, so a stalled source
+  // cannot hold installPromise (and the UI) forever.
+  const controller = new AbortController()
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  const armIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(), DOWNLOAD_IDLE_TIMEOUT_MS)
+  }
+  armIdleTimer()
+  const response = await fetchImpl(url, { redirect: 'follow', signal: controller.signal })
   if (!response.ok) {
     throw new Error(`Download failed with ${response.status}: ${url}`)
   }
@@ -369,7 +380,9 @@ async function downloadToFile(
       onProgress(Math.min(downloaded / totalBytes, 0.99))
     }
   })
+  nodeStream.on('data', () => armIdleTimer())
   await pipeline(nodeStream, file)
+  if (idleTimer) clearTimeout(idleTimer)
   onProgress(1)
 }
 

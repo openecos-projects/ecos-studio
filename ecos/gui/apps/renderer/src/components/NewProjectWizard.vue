@@ -2562,7 +2562,6 @@ async function runProjectDefaultsLoad(projectRoot: string) {
   // state; clear it before the asynchronous read so even a failed read cannot
   // leak the previous project's PDK context into this one.
   clearPreviousGenerationPdkState()
-  selectedPdkId.value = ''
 
   let manifest: ProjectManifest | null = null
   try {
@@ -2972,8 +2971,13 @@ async function ensurePdksLoaded() {
     }
   }
   // Project manifest defaults load in the background and may carry explicit
-  // PDK information; wait for them so the decision below sees the full state.
-  if (projectDefaultsPromise) await projectDefaultsPromise
+  // PDK information; wait for the latest load (project switches start newer
+  // loads) so the decision below sees the full state.
+  while (projectDefaultsPromise) {
+    const current = projectDefaultsPromise
+    await current
+    if (projectDefaultsPromise === current) break
+  }
   if (pdkResolvedForGeneration.value === projectManifestLoadGeneration) return
   pdkResolvedForGeneration.value = projectManifestLoadGeneration
   const generation = projectManifestLoadGeneration

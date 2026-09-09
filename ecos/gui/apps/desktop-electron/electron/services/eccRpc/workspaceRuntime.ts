@@ -245,11 +245,11 @@ export class EccWorkspaceRuntime {
   }
 
   hasPendingRuntimeWork(): boolean {
-    // Drop stale unregistered-start records after a bounded grace period.
-    const now = Date.now()
-    for (const [operationId, since] of this.unregisteredStarts) {
-      if (now - since > 60_000) this.unregisteredStarts.delete(operationId)
-      else if (this.operationTracker.hasOperation(operationId)) {
+    // Unregistered starts stay busy until the protocol registers them (via
+    // handleNotification) — premature idle would let a config restart shut
+    // down a sidecar that may still be running the operation.
+    for (const operationId of this.unregisteredStarts.keys()) {
+      if (this.operationTracker.hasOperation(operationId)) {
         this.unregisteredStarts.delete(operationId)
       }
     }
