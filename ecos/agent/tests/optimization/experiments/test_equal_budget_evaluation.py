@@ -243,6 +243,10 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
     assert trace.drc == 0.0
     assert trace.timing == 0.0
     assert trace.congestion == 3.0
+    assert trace.wirelength == 4.0
+    assert trace.die_area is None
+    assert trace.hold_wns == 0.0
+    assert trace.qor_score is None
     assert trace.parameter_status == "effective"
     assert trace.actual_value == 0.8
     assert trace.requested_value == 0.2

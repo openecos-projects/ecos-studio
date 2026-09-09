@@ -21,9 +21,16 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     OptimizationEpisodeState,
+    ROUTABILITY_OBJECTIVE_ORDER,
     TerminalObservation,
+    TIMING_GUARDRAIL_ORDER,
+    TimingMetric,
 )
-from ecos_agent.optimization.experiments.equal_budget import export_episode_traces
+from ecos_agent.optimization.experiments.equal_budget import (
+    CandidateTrace,
+    _evaluation_value,
+    export_episode_traces,
+)
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
@@ -122,9 +129,12 @@ def _clock_from_sdc(sdc: Path) -> str:
 def write_noise_epsilon(calibration_dir: Path) -> dict[str, object]:
     """Code-computed replay noise for the calibration replays.
 
-    Keys are (metric_id, corner) pairs and telemetry metrics are excluded, so
-    cross-corner PVT spread is never reported as replay drift (the 20260908
-    overnight manifest misattributed exactly that; see the erratum in
+    Keys span the full candidate comparison space: non-telemetry evaluation
+    metrics (corner rows keep their own key), the routability objective trio,
+    and the timing guardrail, so every candidate-vs-reference delta —
+    overflow, power, area, frequency, WNS included — can be judged against a
+    replay epsilon (the 20260908 overnight manifest misattributed
+    cross-corner PVT spread as replay drift; see the erratum in
     docs/overnight-report-20260908.md).
     """
     observation_paths = sorted(
@@ -170,6 +180,77 @@ def write_noise_epsilon(calibration_dir: Path) -> dict[str, object]:
         "replay_count": len(observations),
         "metric_key_count": len(profile["epsilon"]),
         "drifting_metric_keys": nonzero_epsilon_keys,
+        "epsilon": profile["epsilon"],
+    }
+
+
+# Candidate-vs-reference comparison keys in episode summaries: metric key in
+# the noise profile -> CandidateTrace column carrying the candidate value.
+_COMPARISON_KEYS = (
+    ("route_wirelength", "wirelength"),
+    ("route_la_total_overflow", "congestion"),
+    ("drc_count", "drc"),
+    ("die_area", "die_area"),
+    ("sta_standard_cell_area", "area"),
+    ("sta_typical_dynamic_power", "dynamic_power"),
+    ("sta_typical_leakage_power", "leakage_power"),
+    ("sta_frequency", "frequency"),
+    ("sta_setup_wns", "timing"),
+    ("sta_hold_wns", "hold_wns"),
+    ("gui_overall_qor_score", "qor_score"),
+)
+
+
+def build_metric_comparison(
+    reference: TerminalObservation,
+    traces: tuple[CandidateTrace, ...],
+    epsilon: dict[str, float],
+) -> dict[str, object]:
+    """Free-run-style comparison table: canonical baseline vs best candidate.
+
+    The best candidate is the terminal-success candidate with the highest
+    frozen objective utility. ``beyond_noise`` is None where the key has no
+    replay epsilon or the candidate value is missing.
+    """
+    routability_keys = {metric.value for metric in ROUTABILITY_OBJECTIVE_ORDER}
+    guardrail_keys = {metric.value for metric in TIMING_GUARDRAIL_ORDER}
+
+    def reference_value(key: str) -> float | None:
+        if key in routability_keys:
+            return float(reference.metrics[ObjectiveMetric(key)])
+        if key in guardrail_keys:
+            return float(reference.timing_guardrail[TimingMetric(key)])
+        return _evaluation_value(reference.evaluation_metrics, key)
+
+    started = [
+        trace
+        for trace in traces
+        if trace.terminal_success and trace.terminal_utility is not None
+    ]
+    best = max(started, key=lambda trace: trace.terminal_utility, default=None)
+    rows: dict[str, object] = {}
+    for key, column in _COMPARISON_KEYS:
+        base = reference_value(key)
+        best_value = getattr(best, column) if best is not None else None
+        delta = (
+            best_value - base
+            if best_value is not None and base is not None
+            else None
+        )
+        rows[key] = {
+            "reference": base,
+            "best": best_value,
+            "delta": delta,
+            "epsilon": epsilon.get(key),
+            "beyond_noise": (
+                abs(delta) > epsilon[key]
+                if delta is not None and key in epsilon
+                else None
+            ),
+        }
+    return {
+        "best_candidate_id": best.candidate_id if best is not None else None,
+        "metrics": rows,
     }
 
 
@@ -347,6 +428,11 @@ def main(provider_factory: Callable[..., Any]) -> int:
         reference_observation=reference,
         objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
     )
+    metric_comparison = build_metric_comparison(
+        canonical,
+        traces,
+        noise_epsilon["epsilon"] if noise_epsilon else {},
+    )
     case_replay = EmpiricalCaseAuditStore(episode_root).verify()
     state_files = sorted(episode_root.glob("optimization-episode-state.v*.json"))
     if not state_files:
@@ -363,6 +449,7 @@ def main(provider_factory: Callable[..., Any]) -> int:
         "seed": args.seed,
         "reference_runtime_seconds": reference_runtime,
         "noise_epsilon": noise_epsilon,
+        "metric_comparison": metric_comparison,
         "planning_calls": planning_calls,
         "started_candidates": started_candidates,
         "terminal_artifacts_complete": started_candidates

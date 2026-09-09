@@ -66,6 +66,10 @@ class CandidateTrace:
     drc: float | None = None
     timing: float | None = None
     congestion: float | None = None
+    wirelength: float | None = None
+    die_area: float | None = None
+    hold_wns: float | None = None
+    qor_score: float | None = None
     requested_value: str | float | int | bool | None = None
     actual_value: float | int | bool | None = None
     parameter_status: Literal["effective", "inactive", "unknown"] = "unknown"
@@ -176,6 +180,18 @@ def build_candidate_trace(
             if terminal_observation is not None
             else None
         ),
+        wirelength=(
+            float(terminal_observation.metrics[ObjectiveMetric.ROUTE_WIRELENGTH])
+            if terminal_observation is not None
+            else None
+        ),
+        die_area=_evaluation_value(evaluation, "die_area"),
+        hold_wns=(
+            float(terminal_observation.timing_guardrail[TimingMetric.STA_HOLD_WNS])
+            if terminal_observation is not None
+            else None
+        ),
+        qor_score=_evaluation_value(evaluation, "gui_overall_qor_score"),
         requested_value=(receipt.requested.get("value") if receipt else None),
         actual_value=(receipt.actual_value if receipt else None),
         parameter_status=(receipt.status if receipt else "unknown"),

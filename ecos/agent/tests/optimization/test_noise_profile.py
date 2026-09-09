@@ -1,6 +1,10 @@
 import pytest
 
-from ecos_agent.optimization.contracts import TerminalObservation
+from ecos_agent.optimization.contracts import (
+    ObjectiveMetric,
+    TerminalObservation,
+    TimingMetric,
+)
 from ecos_agent.optimization.metrics.contracts import (
     TerminalEvaluationMetric,
 )
@@ -88,6 +92,31 @@ def test_noise_profile_reports_true_qor_drift_per_key() -> None:
     assert profile["reference"]["sta_setup_wns@MAX_125/Cworst"] == pytest.approx(
         8.3515
     )
+
+
+def test_noise_profile_covers_objective_and_guardrail_keys() -> None:
+    drifted = _terminal_observation().model_copy(
+        update={
+            "metrics": {
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 2.0,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 3.0,
+                ObjectiveMetric.ROUTE_WIRELENGTH: 4.5,
+            },
+            "timing_guardrail": {
+                metric: (0.1 if metric is TimingMetric.STA_HOLD_WNS else 0.0)
+                for metric in TimingMetric
+            },
+        }
+    )
+
+    profile = deterministic_noise_profile(
+        [_terminal_observation(), drifted]
+    )
+
+    assert profile["epsilon"]["route_wirelength"] == pytest.approx(0.5)
+    assert profile["epsilon"]["route_la_total_overflow"] == 0.0
+    assert profile["epsilon"]["sta_hold_wns"] == pytest.approx(0.1)
+    assert profile["reference"]["route_wirelength"] == pytest.approx(4.25)
 
 
 def test_noise_profile_rejects_single_replay_and_structure_drift() -> None:
