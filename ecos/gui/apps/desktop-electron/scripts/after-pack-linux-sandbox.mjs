@@ -25,27 +25,6 @@ exec "$BINARY" --no-sandbox "$@"
 `
 }
 
-export async function validatePackagedEcc(appOutDir) {
-  const eccPath = join(appOutDir, 'resources', 'binaries', 'ecc')
-  try {
-    const ecc = await stat(eccPath)
-    if (!ecc.isFile() || (ecc.mode & 0o111) === 0) {
-      throw new Error('not an executable file')
-    }
-    await execFileAsync(eccPath, ['rpc', 'serve', '--help'], { timeout: 10_000 })
-    const rpcRuntime = execFileAsync(
-      eccPath,
-      ['rpc', 'serve', '--stdio', '--persistent-db'],
-      { timeout: 10_000 },
-    )
-    rpcRuntime.child.stdin?.end()
-    await rpcRuntime
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`Packaged ECC RPC sidecar validation failed at ${eccPath}: ${reason}`)
-  }
-}
-
 export async function validatePackagedAgent(appOutDir) {
   const agentDirectory = join(appOutDir, 'resources', 'agent')
   const agentPath = join(agentDirectory, 'ecos-agent')
@@ -99,6 +78,7 @@ export default async function afterPackLinuxSandbox(context) {
     await chmod(executablePath, 0o755)
   }
 
-  await validatePackagedEcc(context.appOutDir)
+  // ECC is deliberately not packaged (slim build): it is acquired from the
+  // registry on first run, so only the bundled Agent is validated here.
   await validatePackagedAgent(context.appOutDir)
 }
