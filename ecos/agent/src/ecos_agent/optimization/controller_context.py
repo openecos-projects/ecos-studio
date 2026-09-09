@@ -185,7 +185,6 @@ class ControllerContextMixin:
         )
         parameter_policy = policy_payload(
             self._objective, search_layer,
-            convergence_evidence=self._has_convergence_evidence(observation),
             priority=layer_priority(
                 self._objective,
                 history=tuple(
@@ -472,15 +471,6 @@ class ControllerContextMixin:
             for knob in allowed_knobs(self._objective)
         )
 
-    @staticmethod
-    def _has_convergence_evidence(observation):
-        return any(
-            feature.feature_id == "place_final_density_overflow"
-            and feature.evidence_ref == "analysis/parameter_runtime_report.v2.json"
-            and type(feature.value) in (int, float) and feature.value >= 0
-            for feature in observation.state_evidence
-        )
-
     def _select_parameter_actions(self, domains, observation):
         available = tuple(
             LegalAction(knob_id=domain.knob_id, direction=direction)
@@ -495,7 +485,6 @@ class ControllerContextMixin:
                 if item.layer_signal is not None
             ),
             recovering=self.recovery_incomplete,
-            convergence_evidence=self._has_convergence_evidence(observation),
         )
 
     def planning_stage(self, observation, current_values):

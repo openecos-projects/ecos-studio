@@ -42,11 +42,12 @@ def test_fixed_task_exposes_every_permitted_layer_with_advisory_priority(tmp_pat
     context = instance.planner.contexts[0]
     # Every task-permitted knob stays selectable; the rotation only advises.
     assert {d.knob_id for d in context.effective_domains} == {
-        "place.target_density", "place.target_overflow",
-        "place.cell_padding_x", "place.routability_opt",
+        "place.target_density", "place.target_overflow", "place.cell_padding_x",
+        "place.routability_opt", "place.density_weight",
     }
     assert {a.knob_id for a in context.legal_actions} == {
-        "place.target_density", "place.cell_padding_x", "place.routability_opt",
+        "place.target_density", "place.target_overflow", "place.cell_padding_x",
+        "place.routability_opt", "place.density_weight",
     }
     assert context.parameter_policy["active_layer"] == "physical"
     assert context.parameter_policy["layer_priority_is_advisory"] is True
@@ -68,7 +69,6 @@ def test_area_task_recommends_floorplan_and_keeps_increase_only_policy(tmp_path)
 
 @pytest.mark.parametrize("knob,value", [
     ("floorplan.core_util", 0.7), ("floorplan.aspect_ratio", 1.2),
-    ("place.density_weight", 0.001),
 ])
 def test_forged_request_never_reaches_executor(tmp_path, knob, value):
     instance = controller(tmp_path)

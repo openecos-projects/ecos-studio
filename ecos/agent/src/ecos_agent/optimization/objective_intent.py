@@ -17,7 +17,7 @@ class OptimizationParameterPolicy(BaseModel):
         "ecos.optimization_parameter_policy.v1"
     )
     geometry_mode: Literal["fixed", "variable"] = "fixed"
-    advanced_parameters_enabled: StrictBool = False
+    advanced_parameters_enabled: StrictBool = True
 
 
 def resolve_objective_intent(

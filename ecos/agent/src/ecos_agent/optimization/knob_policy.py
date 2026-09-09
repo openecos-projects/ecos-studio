@@ -127,35 +127,30 @@ def select_search_actions(
     *,
     history: tuple[tuple[OptimizationKnob, SearchLayerSignal | str], ...] = (),
     recovering: bool = False,
-    convergence_evidence: bool = False,
 ) -> tuple[str, tuple[LegalAction, ...]]:
     """Return the recommended layer plus every task-permitted legal action.
 
     The historical layer rotation stays as a planning reference: the returned
     layer is only the first layer that still has feasible actions in the
     advisory priority order.  Hard permissions stay binding on the returned
-    actions: geometry mode, advanced opt-in, convergence evidence gating, and
-    the area-first direction policy for floorplan area knobs.
+    actions: geometry mode, advanced opt-in, and the area-first direction
+    policy for floorplan area knobs.
     """
     allowed = set(allowed_knobs(objective))
     available = tuple(action for action in available if action.knob_id in allowed)
     if objective is None:
         return "unrestricted_experiment", available
-    if not convergence_evidence:
-        available = tuple(action for action in available if action.knob_id != OptimizationKnob.TARGET_OVERFLOW)
-    if not available:
-        return "unavailable", ()
-    area_first = not recovering and objective.primary_metric in {
-        ObjectiveMetric.DIE_AREA, ObjectiveMetric.CORE_AREA,
-    }
-    if area_first:
-        available = tuple(
-            action for action in available
-            if not (
-                KNOB_ROLES[action.knob_id] == "floorplan_area"
-                and action.direction != StrategyDirection.INCREASE
-            )
+    available = tuple(
+        action for action in available
+        if not (
+            KNOB_ROLES[action.knob_id] == "floorplan_area"
+            and not recovering
+            and objective.primary_metric in {
+                ObjectiveMetric.DIE_AREA, ObjectiveMetric.CORE_AREA,
+            }
+            and action.direction != StrategyDirection.INCREASE
         )
+    )
     if not available:
         return "unavailable", ()
     priority = layer_priority(
@@ -169,21 +164,17 @@ def select_search_actions(
 
 def policy_payload(
     objective: OptimizationObjectiveContract | None, layer: str, *,
-    convergence_evidence: bool = False,
     priority: tuple[str, ...] = (),
 ) -> dict[str, object]:
     allowed = set(allowed_knobs(objective))
-    convergence_disabled = objective is not None and not convergence_evidence
     payload: dict[str, object] = {
         "active_layer": layer,
         "knobs": [
             {
                 "knob_id": knob.value,
                 "role": role,
-                "enabled": knob in allowed and not (role == "convergence" and convergence_disabled),
+                "enabled": knob in allowed,
                 "disabled_reason": (
-                    "placement_convergence_evidence_unavailable"
-                    if knob in allowed and role == "convergence" and convergence_disabled else
                     None if knob in allowed else
                     "parameter_policy_unavailable" if objective is not None and objective.parameter_policy is None else
                     "advanced_parameters_disabled" if role == "advanced" else
