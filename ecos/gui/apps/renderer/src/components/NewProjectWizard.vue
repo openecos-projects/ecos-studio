@@ -1866,28 +1866,61 @@ const validatingPdkId = ref('')
 const manifestPdkFamily = ref('')
 /** Manifest generation the PDK selection last resolved against. */
 const pdkResolvedForGeneration = ref(-1)
-/** Manifest-derived PDK fields, tracked so create mode can clear them. */
-const manifestPdkRoot = ref<string | null>(null)
-const manifestPdkRequirement = ref<PdkRequirement | null>(null)
+/** Baseline PDK state owned by the current manifest generation. */
+const pdkBaseline = ref<{
+  pdk: string | null
+  pdkInstallationId: string | null
+  pdkRequirement: PdkRequirement | null
+  pdkRoot: string | null
+  selectedPdkId: string | null
+} | null>(null)
 
 /**
  * Remove manifest-derived PDK values (tracked snapshots) from the config,
  * leaving any values the user entered themselves untouched.
  */
-function clearManifestDerivedPdkState(): void {
-  if (manifestPdkRoot.value && config.value.pdk_root === manifestPdkRoot.value) {
-    config.value.pdk_root = ''
+/**
+ * Snapshot of every PDK field the current manifest generation owns. A new
+ * generation clears exactly these fields, so user-entered values (which no
+ * longer match the baseline) are preserved.
+ */
+function snapshotPdkBaseline(): void {
+  pdkBaseline.value = {
+    pdk: config.value.pdk ?? null,
+    pdkInstallationId: config.value.pdk_installation_id ?? null,
+    pdkRequirement: config.value.pdk_requirement ?? null,
+    pdkRoot: config.value.pdk_root ?? null,
+    selectedPdkId: selectedPdkId.value || null,
+  }
+}
+
+function clearPreviousGenerationPdkState(): void {
+  const baseline = pdkBaseline.value
+  if (!baseline) return
+  if (baseline.pdk !== null && config.value.pdk === baseline.pdk) {
+    config.value.pdk = ''
   }
   if (
-    manifestPdkRequirement.value !== null &&
+    baseline.pdkInstallationId !== null &&
+    config.value.pdk_installation_id === baseline.pdkInstallationId
+  ) {
+    config.value.pdk_installation_id = ''
+  }
+  if (
+    baseline.pdkRequirement !== null &&
     JSON.stringify(config.value.pdk_requirement ?? null) ===
-      JSON.stringify(manifestPdkRequirement.value)
+      JSON.stringify(baseline.pdkRequirement)
   ) {
     config.value.pdk_requirement = undefined
   }
-  manifestPdkRoot.value = null
-  manifestPdkRequirement.value = null
+  if (baseline.pdkRoot !== null && config.value.pdk_root === baseline.pdkRoot) {
+    config.value.pdk_root = ''
+  }
+  if (baseline.selectedPdkId !== null && selectedPdkId.value === baseline.selectedPdkId) {
+    selectedPdkId.value = ''
+  }
   manifestPdkFamily.value = ''
+  pdkBaseline.value = null
 }
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
@@ -2552,7 +2585,7 @@ async function runProjectDefaultsLoad(projectRoot: string) {
   // A new generation invalidates the previous project's manifest-derived PDK
   // state; clear it before the asynchronous read so even a failed read cannot
   // leak the previous project's PDK context into this one.
-  clearManifestDerivedPdkState()
+  clearPreviousGenerationPdkState()
   selectedPdkId.value = ''
 
   let manifest: ProjectManifest | null = null
@@ -2605,16 +2638,17 @@ function applyProjectManifestDefaults(manifest: ProjectManifest) {
   }
   if (baseDesign.pdk_root && !hasInitialConfigValue('pdk_root')) {
     config.value.pdk_root = baseDesign.pdk_root
-    manifestPdkRoot.value = baseDesign.pdk_root
   }
   if (baseDesign.pdk_requirement && !hasInitialConfigValue('pdk_requirement')) {
     config.value.pdk_requirement = baseDesign.pdk_requirement
-    manifestPdkRequirement.value = baseDesign.pdk_requirement
   }
 
   applyProjectDesignFileDefaults(baseDesignRecord, parameters)
   applyProjectPdkResourceDefaults(baseDesignRecord)
   applyProjectParameterDefaults(manifest, parameters)
+  // Capture the applied state so a later generation clears exactly these
+  // fields (and anything auto-derived from them), never user modifications.
+  snapshotPdkBaseline()
 }
 
 function applyProjectFlowDefaults(
@@ -2858,7 +2892,7 @@ function setProjectMode(mode: ProjectMode) {
     // Create mode has no project manifest; drop the family and any
     // manifest-derived PDK fields so the default-PDK decision is not poisoned
     // by a previous selection.
-    clearManifestDerivedPdkState()
+    clearPreviousGenerationPdkState()
     delete projectContext.value.project_id
     projectContext.value.project_root = joinPath(
       projectParentPath.value,

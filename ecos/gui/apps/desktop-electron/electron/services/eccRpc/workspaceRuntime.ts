@@ -106,6 +106,8 @@ export class EccWorkspaceRuntime {
   private helloResult: EccRpcHelloResult | null = null
   private inFlightOperation: InFlightOperation | null = null
   private inFlightCount = 0
+  /** Start RPCs in flight (modern protocol); a config restart defers to them. */
+  private startRpcCount = 0
   private readonly operationTracker = new RuntimeOperationTracker()
   private readonly crashRecoveryAttempts = new Set<string>()
   private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
@@ -400,6 +402,18 @@ export class EccWorkspaceRuntime {
   async startFlowOperation(
     request: EccRuntimeStartFlowRequest,
   ): Promise<EccRuntimeOperation> {
+    this.startRpcCount += 1
+    try {
+      return await this.startFlowOperationRpc(request)
+    } finally {
+      this.startRpcCount -= 1
+      this.notifyDrainedIfIdle()
+    }
+  }
+
+  private async startFlowOperationRpc(
+    request: EccRuntimeStartFlowRequest,
+  ): Promise<EccRuntimeOperation> {
     this.clearCrashRecoverySuppression(request.workspaceHandle)
     const client = await this.ensureStarted()
     if (request.rerun) {
@@ -415,6 +429,18 @@ export class EccWorkspaceRuntime {
   }
 
   async startStepOperation(
+    request: EccRuntimeStartStepRequest,
+  ): Promise<EccRuntimeOperation> {
+    this.startRpcCount += 1
+    try {
+      return await this.startStepOperationRpc(request)
+    } finally {
+      this.startRpcCount -= 1
+      this.notifyDrainedIfIdle()
+    }
+  }
+
+  private async startStepOperationRpc(
     request: EccRuntimeStartStepRequest,
   ): Promise<EccRuntimeOperation> {
     this.clearCrashRecoverySuppression(request.workspaceHandle)
@@ -609,6 +635,12 @@ export class EccWorkspaceRuntime {
     }
   }
 
+  private notifyDrainedIfIdle(): void {
+    if (this.startRpcCount === 0 && !this.isActive()) {
+      for (const listener of Array.from(this.drainListeners)) listener()
+    }
+  }
+
   /**
    * Restart this runtime so it picks up a changed launch configuration.
    * Unlike releaseIdleSidecar, the idle check and shutdown run serialized on
@@ -620,7 +652,11 @@ export class EccWorkspaceRuntime {
    */
   async restartForConfigChange(): Promise<boolean> {
     return await this.runSerialized(async () => {
-      if (this.isActive() || this.sidecarLifecycle.hasFinalSnapshotTask()) {
+      if (
+        this.isActive() ||
+        this.startRpcCount > 0 ||
+        this.sidecarLifecycle.hasFinalSnapshotTask()
+      ) {
         return false
       }
       const result = await this.shutdown()
@@ -897,6 +933,15 @@ export class EccWorkspaceRuntime {
         protocolEvent.type === 'operation.cancelled')
     ) {
       this.sidecarLifecycle.retainFailedOperationForDiagnostics()
+    }
+    // Modern protocol operations are tracked outside the operation queue; a
+    // terminal event that leaves no active work still counts as a drain.
+    if (
+      isTerminal &&
+      !this.operationTracker.hasActiveOperations() &&
+      this.inFlightCount === 0
+    ) {
+      for (const listener of Array.from(this.drainListeners)) listener()
     }
     this.emit({
       event: protocolEvent,
