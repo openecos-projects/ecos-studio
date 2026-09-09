@@ -732,6 +732,31 @@ describe('external ECC override', () => {
     expect(executable).toBe(join(resourcesPath, 'binaries', 'ecc'))
   })
 
+  it('ignores an override whose ecc entry is a directory', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = createPackagedEcc(fixture.repoRoot)
+    // A searchable directory passes accessSync(X_OK) on POSIX but cannot be
+    // spawned, so it must not count as an executable override.
+    const externalBin = join(fixture.repoRoot, 'external-ecc')
+    mkdirSync(join(externalBin, 'ecc'), { recursive: true })
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ECC_BIN_DIR: externalBin,
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(executable).toBe(join(resourcesPath, 'binaries', 'ecc'))
+  })
+
   it('applies the override in development mode', () => {
     const fixture = createRepoFixture()
     writeFileSync(

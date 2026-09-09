@@ -1,4 +1,11 @@
-import { accessSync, chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import {
+  accessSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { constants as fsConstants } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -125,8 +132,11 @@ export function resolveExternalEccBinDir(
   const trimmed = value?.trim()
   if (!trimmed || !isAbsolute(trimmed)) return null
   try {
-    accessSync(join(trimmed, packagedEccExecutableName(platform)), fsConstants.X_OK)
-    return trimmed
+    const executable = join(trimmed, packagedEccExecutableName(platform))
+    accessSync(executable, fsConstants.X_OK)
+    // X_OK alone accepts a searchable directory on POSIX; the override must
+    // name a regular executable file.
+    return statSync(executable).isFile() ? trimmed : null
   } catch {
     return null
   }
