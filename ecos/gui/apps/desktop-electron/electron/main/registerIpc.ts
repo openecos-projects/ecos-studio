@@ -575,6 +575,19 @@ function serializeError(error: unknown): {
   }
 }
 
+function shouldSilenceIpcError(channel: string, error: unknown): boolean {
+  if (
+    channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile &&
+    isNodeErrorWithCode(error, 'ENOENT')
+  ) {
+    return true
+  }
+  return (
+    channel === desktopApiIpcChannels.projectManagementReadManifest &&
+    (isNodeErrorWithCode(error, 'ENOENT') || isNodeErrorWithCode(error, 'ENOTDIR'))
+  )
+}
+
 function summarizeIpcError(channel: string, args: unknown[], error: unknown): string {
   if (channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile) {
     return summarizeProjectBinaryReadError(String(args[0] ?? ''), error)
@@ -590,12 +603,7 @@ function wrapIpcHandler(channel: string, handler: IpcHandler): IpcHandler {
       try {
         return await handler(event, ...args)
       } catch (error) {
-        if (
-          !(
-            channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile &&
-            isNodeErrorWithCode(error, 'ENOENT')
-          )
-        ) {
+        if (!shouldSilenceIpcError(channel, error)) {
           electronLogger.warn(summarizeIpcError(channel, args, error), error)
         }
         return {

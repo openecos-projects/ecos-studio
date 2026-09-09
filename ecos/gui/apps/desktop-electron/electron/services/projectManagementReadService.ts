@@ -132,7 +132,12 @@ async function canonicalizeExistingDirectory(path: string): Promise<string> {
   const canonicalPath = await realpath(path)
   const pathStats = await stat(canonicalPath)
   if (!pathStats.isDirectory()) {
-    throw new Error(`Project management path is not a directory: ${path}`)
+    throw Object.assign(
+      new Error(`Project management path is not a directory: ${path}`),
+      {
+        code: 'ENOTDIR',
+      },
+    )
   }
   return canonicalPath
 }

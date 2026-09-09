@@ -3645,6 +3645,57 @@ describe('registerIpc', () => {
     expect(services.shellService.resize).toHaveBeenCalledWith('shell-1', 100, 28)
   })
 
+  it('returns a missing project manifest directory as an IPC error without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const path = '/tmp/gone-project'
+    const error = Object.assign(
+      new Error(`ENOENT: no such file or directory, realpath '${path}'`),
+      {
+        code: 'ENOENT',
+        path,
+      },
+    )
+    services.projectManagementReadService.readManifest.mockRejectedValue(error)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementReadManifest)?.(event, path),
+    ).resolves.toEqual({
+      error: {
+        code: 'ENOENT',
+        message: `ENOENT: no such file or directory, realpath '${path}'`,
+        name: 'Error',
+      },
+      ok: false,
+    })
+
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('returns a non-directory project root as an IPC error without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const path = '/tmp/not-a-project'
+    const error = Object.assign(
+      new Error(`Project management path is not a directory: ${path}`),
+      { code: 'ENOTDIR', path },
+    )
+    services.projectManagementReadService.readManifest.mockRejectedValue(error)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementReadManifest)?.(event, path),
+    ).resolves.toEqual({
+      error: {
+        code: 'ENOTDIR',
+        message: `Project management path is not a directory: ${path}`,
+        name: 'Error',
+      },
+      ok: false,
+    })
+
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
   it('returns a missing project binary file as an IPC error without warning', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }

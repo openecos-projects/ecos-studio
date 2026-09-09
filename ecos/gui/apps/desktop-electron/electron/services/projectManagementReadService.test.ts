@@ -226,6 +226,26 @@ describe('ProjectManagementReadService', () => {
     ).rejects.toThrow('not allowed')
   })
 
+  it('throws ENOTDIR when the project root exists but is not a directory', async () => {
+    const { projectRoot } = await createProject()
+    const filePath = join(projectRoot, 'not-a-project')
+    await writeFile(filePath, 'not a directory')
+    const service = createReadService()
+
+    await expect(service.readManifest(filePath)).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+  })
+
+  it('throws ENOENT when the project root directory is gone', async () => {
+    const missingRoot = join(tmpdir(), `ecos-project-management-missing-${Date.now()}`)
+    const service = createReadService()
+
+    await expect(service.readManifest(missingRoot)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
   it('requires a valid manifest before listing project root entries', async () => {
     const emptyRoot = await mkdtemp(join(tmpdir(), 'ecos-project-management-empty-'))
     temporaryDirectories.push(emptyRoot)

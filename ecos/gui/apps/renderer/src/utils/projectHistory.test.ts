@@ -13,21 +13,7 @@ const settingsSet = vi.fn(async (key: string, value: unknown) => {
 })
 const readManifest = vi.fn(async (projectRoot: string) => {
   if (projectRoot !== '/projects/gcd') return null
-  return {
-    schema_version: 1,
-    project_id: 'proj_gcd',
-    name: 'gcd',
-    design_name: 'gcd',
-    root_path: '/projects/gcd',
-    created_at: '2026-07-02T07:00:00.000Z',
-    updated_at: '2026-07-02T07:00:00.000Z',
-    base_design: { pdk: 'ics55', top_module: 'gcd', parameters: { design: 'gcd' } },
-    objectives: { primary: 'timing', directions: {} },
-    workspaces: [],
-    mpc: null,
-    best_workspace: null,
-    qor_baseline: null,
-  }
+  return gcdManifest()
 })
 
 vi.mock('@/platform/desktop', () => ({
@@ -54,12 +40,33 @@ function project(input: Partial<Project> & Pick<Project, 'name' | 'path'>): Proj
   }
 }
 
+function ioError(code: string, message = code): Error {
+  return Object.assign(new Error(message), { code })
+}
+
+function historyEntry(
+  path: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: path,
+    name: extra.name ?? path.split('/').pop(),
+    path,
+    lastOpened: extra.lastOpened ?? '2026-07-02T08:00:00.000Z',
+    ...extra,
+  }
+}
+
 describe('project history', () => {
   beforeEach(() => {
     settings.clear()
     settingsGet.mockClear()
     settingsSet.mockClear()
-    readManifest.mockClear()
+    readManifest.mockReset()
+    readManifest.mockImplementation(async (projectRoot: string) => {
+      if (projectRoot !== '/projects/gcd') return null
+      return gcdManifest()
+    })
   })
 
   it('loads stored project roots without re-reading workspace recent_projects', async () => {
@@ -86,6 +93,7 @@ describe('project history', () => {
 
     expect(settingsGet).toHaveBeenCalledWith('project_history')
     expect(settingsGet).not.toHaveBeenCalledWith('recent_projects')
+    expect(readManifest).toHaveBeenCalledWith('/projects/gcd')
     expect(history).toEqual([
       expect.objectContaining({
         id: '/projects/gcd',
@@ -167,6 +175,29 @@ describe('project history', () => {
     expect(await loadProjectHistory()).toHaveLength(1)
   })
 
+  it('prunes gone roots before remembering another project', async () => {
+    settings.set('project_history', [
+      historyEntry('/projects/missing', { name: 'missing' }),
+    ])
+    readManifest.mockImplementation(async (projectRoot: string) => {
+      if (projectRoot === '/projects/gcd') return gcdManifest()
+      throw ioError('ENOENT')
+    })
+
+    const history = await rememberProjectHistoryEntry(
+      project({
+        name: 'gcd',
+        path: '/projects/gcd',
+        lastOpened: new Date('2026-07-02T09:00:00.000Z'),
+      }),
+    )
+
+    expect(history).toEqual([expect.objectContaining({ path: '/projects/gcd' })])
+    expect(settings.get('project_history')).toEqual([
+      expect.objectContaining({ path: '/projects/gcd' }),
+    ])
+  })
+
   it('removes a project root from project_history only', async () => {
     settings.set('project_history', [
       {
@@ -193,4 +224,92 @@ describe('project history', () => {
       }),
     ])
   })
+
+  it('forgets stored roots whose directories are gone and writes the remainder', async () => {
+    settings.set('project_history', [
+      historyEntry('/projects/gcd'),
+      historyEntry('/projects/missing', { name: 'missing' }),
+    ])
+    readManifest.mockImplementation(async (projectRoot: string) => {
+      if (projectRoot === '/projects/gcd') return gcdManifest()
+      throw ioError('ENOENT')
+    })
+
+    const history = await loadProjectHistory()
+
+    expect(history).toEqual([expect.objectContaining({ path: '/projects/gcd' })])
+    expect(settings.get('project_history')).toEqual([
+      expect.objectContaining({ id: '/projects/gcd', path: '/projects/gcd' }),
+    ])
+  })
+
+  it('forgets stored roots that resolve to a non-directory', async () => {
+    settings.set('project_history', [historyEntry('/projects/gcd')])
+    readManifest.mockRejectedValue(ioError('ENOTDIR'))
+
+    await expect(loadProjectHistory()).resolves.toEqual([])
+    expect(settings.get('project_history')).toEqual([])
+  })
+
+  it('keeps a stored root when project.json is missing or the read is not gone', async () => {
+    settings.set('project_history', [
+      historyEntry('/projects/empty'),
+      historyEntry('/projects/denied'),
+    ])
+    readManifest.mockImplementation(async (projectRoot: string) => {
+      if (projectRoot === '/projects/empty') return null
+      throw ioError('EACCES')
+    })
+
+    const history = await loadProjectHistory()
+
+    expect(history.map((item) => item.path)).toEqual([
+      '/projects/empty',
+      '/projects/denied',
+    ])
+    expect(settingsSet).not.toHaveBeenCalled()
+  })
+
+  it('does not migrate recent_projects once project_history has been written as empty', async () => {
+    settings.set('project_history', [])
+    settings.set('recent_projects', [
+      historyEntry('/projects/gcd/ws_0001', { name: 'gcd/ws_0001' }),
+    ])
+
+    await expect(loadProjectHistory()).resolves.toEqual([])
+    expect(settingsGet).not.toHaveBeenCalledWith('recent_projects')
+    expect(readManifest).not.toHaveBeenCalled()
+  })
+
+  it('does not migrate recent_projects after auto-forgetting the last stored root', async () => {
+    settings.set('project_history', [
+      historyEntry('/projects/missing', { name: 'missing' }),
+    ])
+    settings.set('recent_projects', [
+      historyEntry('/projects/gcd/ws_0001', { name: 'gcd/ws_0001' }),
+    ])
+    readManifest.mockRejectedValue(ioError('ENOENT'))
+
+    await expect(loadProjectHistory()).resolves.toEqual([])
+    expect(settings.get('project_history')).toEqual([])
+    expect(settingsGet).not.toHaveBeenCalledWith('recent_projects')
+  })
 })
+
+function gcdManifest() {
+  return {
+    schema_version: 1,
+    project_id: 'proj_gcd',
+    name: 'gcd',
+    design_name: 'gcd',
+    root_path: '/projects/gcd',
+    created_at: '2026-07-02T07:00:00.000Z',
+    updated_at: '2026-07-02T07:00:00.000Z',
+    base_design: { pdk: 'ics55', top_module: 'gcd', parameters: { design: 'gcd' } },
+    objectives: { primary: 'timing', directions: {} },
+    workspaces: [],
+    mpc: null,
+    best_workspace: null,
+    qor_baseline: null,
+  }
+}
