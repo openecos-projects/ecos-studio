@@ -6,6 +6,8 @@ status: implemented
 
 本文定义 Backend Workspace Configuration 的产品边界、Runtime 读取路径和 Flow 并发行为。目标是删除重复的 Config 页面，保持 Workspace Configuration、Step Configuration、Workspace Execution State 和 Engineering Snapshot 的职责分离。
 
+产品入口的后续收敛见 [Backend Workspace Config Hub v1](./backend-workspace-config-hub-v1.zh-CN.md)：在不恢复旧 `/workspace/configure` 通用参数表、也不放宽身份字段轻量更新的前提下，把现有 Step Configuration 提升为可发现的 Config 中心。Top Module 创建时确认、同一输入上只读，见 [ADR 0046](../adr/0046-top-module-is-confirmed-at-create.md) 与 [Backend Create-time Top Module Confirmation v1](./backend-create-time-top-module-confirmation-v1.zh-CN.md)。
+
 ## Problem Statement
 
 当前 Workspace 有两套配置入口：Config 页面通过通用参数模型编辑 Workspace 配置，Step Configuration 又按 Flow Step 编辑同一组 canonical 参数。两套入口容易产生重复字段、手工维护的参数归属和默认值闪烁。
@@ -34,7 +36,7 @@ Flow 运行时，Update Workspace 在 UI 中禁用，并在提交时再次检查
 
 1. 作为 Backend 工程师，我希望 Workspace Configuration 只有一个 ECC 权威定义，从而不同页面不会解释出不同的配置。
 2. 作为 Studio 用户，我希望 Workspace 首页能看到当前已提交的配置摘要，从而不需要进入独立 Config 页面。
-3. 作为 Studio 用户，我希望 Config 页面被移除后，导航中不再出现 Config 项，从而产品入口与实际能力一致。
+3. 作为 Studio 用户，我希望 Config 页面被移除后，左侧 Flow 导航中不再出现 Config 步骤，从而旧配置页不会伪装成 Flow Step。菜单里的可发现 Config 中心由后续 Config Hub spec 定义。
 4. 作为 Studio 用户，我希望旧 Config URL 不会被误识别为 Flow Step，从而不会打开错误的步骤页面。
 5. 作为 Studio 用户，我希望 Update Workspace 向导仍可修改设计、PDK、输入和 Flow，从而结构性 Workspace 更新不受影响。
 6. 作为 Studio 用户，我希望 Update Workspace 菜单仍然可用，从而删除 Config 页面不会删除必要的 Workspace 替换能力。
@@ -98,7 +100,7 @@ Flow 运行时，Update Workspace 在 UI 中禁用，并在提交时再次检查
 ## Testing Decisions
 
 - 测试优先验证外部行为、领域结果、持久化 Revision、生命周期副作用和用户可见状态，不固定私有 helper、请求顺序或缓存内部结构。
-- Renderer 路由测试验证 Config 路由和 Config setup stage 不存在，旧路径不会挂载 Config 或动态 Flow Step，导航不显示 Config，Frontend 只读摘要仍可加载。
+- Renderer 路由测试验证 Config 路由和 Config setup stage 不存在，旧路径不会挂载 Config 或动态 Flow Step，左侧 Flow 导航不显示 Config 步骤，Frontend 只读摘要仍可加载。
 - Renderer `useStepConfigInfo` 测试验证当前 Workspace 使用 Handle 直连 API，Baseline 继续使用 Project Management；无 Handle 时不调用目录接口，Session active 后会读取；切换 Session 时丢弃迟到响应。
 - Renderer Step Configuration 测试验证读取不等待 final snapshot 的生命周期变化，Flow 未运行、运行中和收尾期间均可展示；不可配置 Step 显示 unavailable 而不是 Flow failed。
 - Renderer 参数测试验证权威快照到达前不暴露默认值，Workspace 关闭或切换时 loading 清零，旧 Session 的 finally 不会卡住新 Session。
@@ -116,7 +118,7 @@ Flow 运行时，Update Workspace 在 UI 中禁用，并在提交时再次检查
 ## Out of Scope
 
 - 不保留旧 `/workspace/configure` 的兼容重定向、书签迁移或历史记录修复。
-- 不建设新的 Config 页面、通用 Workspace Configuration 表单或第二套参数字段映射。
+- 不建设新的 Config 页面、通用 Workspace Configuration 表单或第二套参数字段映射。可发现的身份 + 步骤参数入口由 [Backend Workspace Config Hub v1](./backend-workspace-config-hub-v1.zh-CN.md) 在现有 Step Configuration 对话框上收敛，不恢复本 spec 删除的路由和 megatable。
 - 不在本 spec 中完成 Workspace Configuration canonical read DTO 的完整 Electron 查询缓存迁移，也不立即删除 `useParameters` 的编辑和保存分支。
 - 不保存所有 Workspace Revision 的配置历史，不从 stale Engineering Snapshot 恢复历史配置。
 - 不改变 Engineering Snapshot 的指标、QoR、Checklist、Signoff 或 Project Comparison 事实来源。
@@ -133,5 +135,5 @@ Flow 运行时，Update Workspace 在 UI 中禁用，并在提交时再次检查
 - 该边界与 Backend 系统架构中“Runtime Adapter 进程内调用 ECC、Electron 通过 stdio JSON-RPC 调用 Adapter”的关系一致；当前 Workspace Step Configuration 不需要额外启动 ECC sidecar 服务。
 - 该边界延续 Step Configuration read boundary、Step Configuration ECC command、configuration updates preserve stale results 以及 events-for-transient-state/queries-for-committed-facts 的既有决策。
 - “最新配置”和“旧结果”必须是两个独立投影：配置来自当前 Workspace Descriptor/Parameter Catalog，结果来自带 Revision 的 Engineering Snapshot。任何页面组合两者时都必须保留各自的来源和可用性。
-- 完成标准是：Config UI 和死阶段状态完全删除；当前和 Baseline Step Configuration 读取路径分离；Flow 期间更新冲突 fail closed；新旧 Workspace 事件隔离；默认值和 loading 不再闪烁或卡死；相关 ECC、Runtime Adapter、Electron 和 Renderer 检查通过。
+- 完成标准是：旧 Config 路由、通用参数表和死阶段状态完全删除；当前和 Baseline Step Configuration 读取路径分离；Flow 期间更新冲突 fail closed；新旧 Workspace 事件隔离；默认值和 loading 不再闪烁或卡死；相关 ECC、Runtime Adapter、Electron 和 Renderer 检查通过。后续 Config 中心只恢复可发现性，不撤回这些边界。
 - 本 spec 仅保存到本地仓库，不创建 Issue、不应用 `ready-for-agent` 标签、不 push、不创建 PR。
