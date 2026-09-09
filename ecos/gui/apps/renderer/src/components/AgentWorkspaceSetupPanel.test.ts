@@ -16,6 +16,16 @@ vi.mock('@/platform/desktop', () => ({
   }),
 }))
 
+const primevueStubs = {
+  Select: {
+    props: ['modelValue', 'placeholder', 'ariaLabel'],
+    inheritAttrs: false,
+    template: `<div role="combobox" :aria-label="ariaLabel || $attrs['aria-label']">{{
+      modelValue || placeholder || ''
+    }}</div>`,
+  },
+}
+
 function contract(
   overrides: Partial<DesktopAgentWorkspaceSetupContract> = {},
 ): DesktopAgentWorkspaceSetupContract {
@@ -76,14 +86,12 @@ describe('AgentWorkspaceSetupPanel top module confirmation', () => {
         },
       },
       global: {
-        stubs: { AgentChoiceCard: true },
+        stubs: { AgentChoiceCard: true, ...primevueStubs },
       },
     })
     await flushPromises()
-    expect(
-      (wrapper.get('select[aria-label="Top Module Name"]').element as HTMLSelectElement)
-        .value,
-    ).toBe('gcd_top')
+    expect(wrapper.find('input[placeholder="top"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="Top Module Name"]').text()).toContain('gcd_top')
     expect(
       wrapper
         .findComponent({ name: 'AgentExecutionContractPanel' })
@@ -102,6 +110,9 @@ describe('AgentWorkspaceSetupPanel top module confirmation', () => {
       props: {
         contract: contract(),
         createSetupId: 'setup-1',
+      },
+      global: {
+        stubs: { AgentChoiceCard: true, ...primevueStubs },
       },
     })
     await flushPromises()

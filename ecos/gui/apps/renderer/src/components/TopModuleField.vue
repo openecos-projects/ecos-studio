@@ -26,33 +26,35 @@
       class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
       @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     />
-    <div v-else class="space-y-2">
-      <input
-        v-if="orderedCandidates.length > 8"
-        v-model="filterText"
-        type="search"
-        aria-label="Filter Top Module candidates"
-        placeholder="Filter modules"
-        class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-      />
-      <select
-        :value="modelValue"
-        aria-label="Top Module Name"
-        class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-        @change="onSelect"
-      >
-        <option v-if="!modelValue" value="" disabled>Select a module</option>
-        <option v-for="name in filteredCandidates" :key="name" :value="name">
-          {{ name }}{{ name === suggested ? ' (suggested)' : '' }}
-        </option>
-      </select>
-    </div>
+    <Select
+      v-else
+      :model-value="modelValue || null"
+      :options="orderedCandidates"
+      filter
+      filter-placeholder="Filter modules"
+      placeholder="Select a module"
+      aria-label="Top Module Name"
+      fluid
+      append-to="body"
+      overlay-class="top-module-select-overlay"
+      class="top-module-select w-full"
+      @update:model-value="onSelect"
+    >
+      <template #value="{ value, placeholder }">
+        <span v-if="value">{{ optionLabel(String(value)) }}</span>
+        <span v-else class="text-(--text-secondary)">{{ placeholder }}</span>
+      </template>
+      <template #option="{ option }">
+        {{ optionLabel(option) }}
+      </template>
+    </Select>
     <p v-if="message" class="mt-2 text-xs" :class="messageClass">{{ message }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
+import Select from 'primevue/select'
 import { orderTopModuleCandidates } from './topModuleConfirmation'
 
 const props = withDefaults(
@@ -79,33 +81,42 @@ const emit = defineEmits<{
   pick: [value: string]
 }>()
 
-const filterText = ref('')
 const orderedCandidates = computed(() =>
   orderTopModuleCandidates(props.candidates, props.suggested),
 )
-const filteredCandidates = computed(() => {
-  const query = filterText.value.trim().toLowerCase()
-  const ordered = orderedCandidates.value
-  if (!query) return ordered
-  const matched = ordered.filter((name) => name.toLowerCase().includes(query))
-  if (
-    props.modelValue &&
-    ordered.includes(props.modelValue) &&
-    !matched.includes(props.modelValue)
-  ) {
-    return [props.modelValue, ...matched]
-  }
-  return matched
-})
 const messageClass = computed(() =>
   props.allowFreeText || props.readonly || props.readonlyInput
     ? 'text-(--text-secondary)'
     : 'text-red-500',
 )
 
-function onSelect(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  emit('update:modelValue', value)
-  emit('pick', value)
+function optionLabel(name: string): string {
+  return name === props.suggested ? `${name} (suggested)` : name
+}
+
+function onSelect(value: unknown) {
+  const next = typeof value === 'string' ? value : ''
+  emit('update:modelValue', next)
+  if (next) emit('pick', next)
 }
 </script>
+
+<style scoped>
+.top-module-select {
+  width: 100%;
+  border-radius: 0.5rem;
+  border-color: var(--border-color);
+  background: color-mix(in oklab, var(--bg-primary) 75%, transparent);
+}
+.top-module-select :deep(.p-select-label) {
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+</style>
+
+<style>
+.top-module-select-overlay {
+  z-index: 200;
+}
+</style>

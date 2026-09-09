@@ -68,12 +68,26 @@ vi.mock('@/utils/projectManagementRead', () => ({
   readProjectManagementManifest: wizardMocks.readProjectManagementManifest,
 }))
 
+const primevueStubs = {
+  Select: {
+    props: ['modelValue', 'options', 'placeholder', 'ariaLabel', 'filter'],
+    inheritAttrs: false,
+    template: `<div role="combobox" :aria-label="ariaLabel || $attrs['aria-label']">{{
+      modelValue || placeholder || ''
+    }}</div>`,
+  },
+}
+
 describe('NewProjectWizard behavior', () => {
   it('loads the ECC-backed Workspace Creation Model', async () => {
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
 
@@ -126,6 +140,7 @@ describe('NewProjectWizard behavior', () => {
         stubs: {
           DesignFileTransfer: true,
           PdkResourcePickerDialog: true,
+          ...primevueStubs,
         },
       },
     })
@@ -205,7 +220,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
 
@@ -255,7 +274,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     const wizard = wrapper.vm as unknown as {
@@ -297,7 +320,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     const wizard = wrapper.vm as unknown as {
@@ -356,7 +383,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
 
@@ -418,7 +449,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     await flushPromises()
@@ -435,7 +470,11 @@ describe('NewProjectWizard behavior', () => {
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     await flushPromises()
@@ -463,7 +502,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     await flushPromises()
@@ -477,10 +520,8 @@ describe('NewProjectWizard behavior', () => {
     expect(wizardMocks.discoverHdlModules).toHaveBeenCalled()
     expect(wrapper.text()).toContain('gcd_top')
     expect(wrapper.find('input[placeholder="top"]').exists()).toBe(false)
-    expect(
-      (wrapper.get('select[aria-label="Top Module Name"]').element as HTMLSelectElement)
-        .value,
-    ).toBe('gcd_top')
+    expect(wrapper.find('input[placeholder="Filter modules"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="Top Module Name"]').text()).toContain('gcd_top')
     wrapper.unmount()
   })
 
@@ -494,7 +535,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     await flushPromises()
@@ -533,7 +578,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     await flushPromises()
@@ -548,7 +597,7 @@ describe('NewProjectWizard behavior', () => {
     await flushPromises()
     expect(wizard.topModuleIsReadOnly).toBe(true)
     expect(wizard.config.parameters.top_module).toBe('gcd_top')
-    expect(wrapper.find('select[aria-label="Top Module Name"]').exists()).toBe(false)
+    expect(wrapper.find('.p-select').exists()).toBe(false)
     const topInput = wrapper.get('input[aria-label="Top Module Name"]')
     expect(topInput.attributes('readonly')).toBeDefined()
     expect((topInput.element as HTMLInputElement).value).toBe('gcd_top')
@@ -567,7 +616,11 @@ describe('NewProjectWizard behavior', () => {
         },
       },
       global: {
-        stubs: { DesignFileTransfer: true, PdkResourcePickerDialog: true },
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
       },
     })
     await flushPromises()
@@ -580,7 +633,8 @@ describe('NewProjectWizard behavior', () => {
     wizard.currentStep = 6
     await wizard.refreshTopModuleDiscovery()
     await flushPromises()
-    expect(wrapper.find('select[aria-label="Top Module Name"]').exists()).toBe(true)
+    expect(wrapper.find('input[placeholder="top"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="Top Module Name"]').text()).toContain('gcd_top')
     wrapper.unmount()
   })
 })

@@ -3700,7 +3700,6 @@ function createWorkspace() {
 <style scoped>
 .new-workspace-wizard-overlay {
   isolation: isolate;
-  contain: layout style paint;
 }
 
 .new-workspace-wizard-panel {
