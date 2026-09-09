@@ -134,6 +134,7 @@ export type {
   CliInstallState,
   CliInstallStatus,
   CliInstallerProgressEvent,
+  CliManagedInstallSource,
 } from './contracts/cliInstaller.ts'
 export {
   ECC_BUNDLE_RESOURCE_ID,

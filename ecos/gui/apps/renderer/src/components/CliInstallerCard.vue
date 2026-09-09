@@ -250,6 +250,7 @@ function emptyState(): CliInstallState {
     versionDir: null,
     shimPath: null,
     selfCheck: null,
+    warning: null,
     error: null,
   }
 }

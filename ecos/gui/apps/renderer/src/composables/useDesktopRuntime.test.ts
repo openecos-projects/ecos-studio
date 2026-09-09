@@ -281,6 +281,7 @@ const desktopBridge = {
       versionDir: null,
       shimPath: null,
       selfCheck: null,
+      warning: null,
       error: null,
     }),
     install: async () => {

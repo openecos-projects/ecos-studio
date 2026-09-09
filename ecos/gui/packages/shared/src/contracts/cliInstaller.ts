@@ -7,7 +7,18 @@ export type CliInstallStatus =
   | 'self-check-failed'
   | 'failed'
 
-export type CliInstallSource = 'bundled' | 'downloaded'
+/**
+ * Sources a managed bundle home install can have (and the only values the
+ * persisted install receipt accepts).
+ */
+export type CliManagedInstallSource = 'bundled' | 'downloaded'
+
+/**
+ * `external` describes a user-provided ECC runtime (e.g. `ECOS_ECC_BIN_DIR`)
+ * that ECOS Studio uses read-only: it never appears in receipts and
+ * uninstall only removes the shim.
+ */
+export type CliInstallSource = CliManagedInstallSource | 'external'
 
 export interface CliInstallSelfCheck {
   ok: boolean
@@ -33,6 +44,10 @@ export interface CliInstallSelfCheck {
  *   `versionDir`; `source`, `installedVersion` and `selfCheck` are set.
  *   They differ only in `selfCheck.ok` (environmental failure; see the
  *   remediation hint in `error`).
+ * - External runtime (`source: 'external'`): `versionDir` is the external
+ *   bin directory, `installedVersion` is best-effort (null when the version
+ *   could not be parsed), and a version drift against `expectedVersion` is
+ *   reported in `warning` — the runtime still counts as usable.
  */
 export interface CliInstallState {
   status: CliInstallStatus
@@ -42,6 +57,8 @@ export interface CliInstallState {
   versionDir: string | null
   shimPath: string | null
   selfCheck: CliInstallSelfCheck | null
+  /** Non-blocking notice (e.g. external runtime version drift). */
+  warning: string | null
   error: string | null
 }
 

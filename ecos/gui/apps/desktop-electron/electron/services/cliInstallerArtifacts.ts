@@ -7,7 +7,7 @@ import {
 } from 'node:fs'
 import { access, readFile } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
-import type { CliInstallSelfCheck, CliInstallSource } from '@ecos-studio/shared'
+import type { CliInstallSelfCheck, CliManagedInstallSource } from '@ecos-studio/shared'
 
 /**
  * Pure shell/env-file artifact generation for the ECC bundle installer:
@@ -18,7 +18,7 @@ import type { CliInstallSelfCheck, CliInstallSource } from '@ecos-studio/shared'
 export interface CliBundleInstallRecord {
   version: string
   sha256: string
-  source: CliInstallSource
+  source: CliManagedInstallSource
   installedAt: string
   selfCheck: CliInstallSelfCheck
 }

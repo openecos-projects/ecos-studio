@@ -47,6 +47,7 @@ function readyState(): CliInstallState {
     versionDir: '/data/ecc-runtime/1.0.0-abcdef12',
     shimPath: '/home/u/.local/bin/ecos-ecc',
     selfCheck: { ok: true, detail: 'ecc 1.0' },
+    warning: null,
     error: null,
   }
 }

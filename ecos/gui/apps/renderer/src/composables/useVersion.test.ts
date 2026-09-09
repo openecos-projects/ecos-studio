@@ -252,6 +252,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         versionDir: null,
         shimPath: null,
         selfCheck: null,
+        warning: null,
         error: null,
       }),
       install: async () => {

@@ -174,6 +174,7 @@ export class CliInstallerService {
       versionDir: null,
       shimPath: null,
       selfCheck: null,
+      warning: null,
       error: null,
     }
     if (this.platform !== 'linux') {
@@ -233,6 +234,7 @@ export class CliInstallerService {
         shimPath: null,
         selfCheck: install.selfCheck,
         status: 'failed',
+        warning: null,
         error:
           this.lastShimFailure ??
           'The ECC bundle is installed but the ecos-ecc shim is missing; reinstall to recreate it.',
@@ -246,6 +248,7 @@ export class CliInstallerService {
       shimPath,
       selfCheck: install.selfCheck,
       status: install.selfCheck.ok ? 'ready' : 'self-check-failed',
+      warning: null,
       error: install.selfCheck.ok
         ? null
         : (install.selfCheck.detail ??
