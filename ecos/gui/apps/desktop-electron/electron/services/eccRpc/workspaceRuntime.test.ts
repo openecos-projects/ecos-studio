@@ -1715,6 +1715,34 @@ describe('EccWorkspaceRuntime', () => {
       expect(sidecar.shutdownCount).toBe(1)
     })
 
+    it('defers while a modern start RPC is in flight instead of killing the launch', async () => {
+      const { client, service, sidecar } = createService('/work/demo')
+      client.responses.push(
+        { capabilities: [], eccVersion: '0.1.0', version: 1 },
+        { directory: '/work/demo', workspaceId: 'workspace-1' },
+      )
+      const workspace = await service.openWorkspace({ directory: '/work/demo' })
+      const startGate = deferred<unknown>()
+      client.responses.push(startGate.promise)
+      const startOperation = service
+        .startFlowOperation({
+          idempotencyKey: 'request-1',
+          workspaceHandle: workspace.workspaceHandle,
+        })
+        .catch((error: unknown) => error)
+      await waitForQueuedOperation()
+
+      // A config restart arriving while the start RPC is still open must not
+      // shut the sidecar down underneath the launching operation.
+      await expect(service.restartForConfigChange()).resolves.toBe(false)
+      expect(sidecar.shutdownCount).toBe(0)
+
+      startGate.resolve({ operationId: 'operation-1', state: 'queued' })
+      await startOperation
+      await expect(service.restartForConfigChange()).resolves.toBe(true)
+      expect(sidecar.shutdownCount).toBe(1)
+    })
+
     it('runs flows queued after the restart only once the sidecar shut down', async () => {
       const { client, service, sidecar } = createService('/work/demo')
       client.responses.push(

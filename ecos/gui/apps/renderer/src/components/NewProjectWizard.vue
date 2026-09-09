@@ -1876,10 +1876,6 @@ const pdkBaseline = ref<{
 } | null>(null)
 
 /**
- * Remove manifest-derived PDK values (tracked snapshots) from the config,
- * leaving any values the user entered themselves untouched.
- */
-/**
  * Snapshot of every PDK field the current manifest generation owns. A new
  * generation clears exactly these fields, so user-entered values (which no
  * longer match the baseline) are preserved.
@@ -1894,6 +1890,10 @@ function snapshotPdkBaseline(): void {
   }
 }
 
+/**
+ * Remove manifest-derived PDK values (tracked snapshots) from the config,
+ * leaving any values the user entered themselves untouched.
+ */
 function clearPreviousGenerationPdkState(): void {
   const baseline = pdkBaseline.value
   if (!baseline) return
@@ -3031,7 +3031,7 @@ async function ensurePdksLoaded() {
       if (generationChanged()) return
       const bound = importedPdks.value.find((pdk) => pdk.id === binding?.installationId)
       if (bound) {
-        selectPdk(bound)
+        selectPdk(bound, { auto: true })
         return
       }
     }
@@ -3039,7 +3039,7 @@ async function ensurePdksLoaded() {
       (pdk) => pdk.id === config.value.pdk_installation_id,
     )
     if (selected) {
-      selectPdk(selected)
+      selectPdk(selected, { auto: true })
       return
     }
     if (config.value.pdk_root) {
@@ -3048,22 +3048,22 @@ async function ensurePdksLoaded() {
         (pdk) => normalizePath(pdk.path) === configuredPdkRoot,
       )
       if (direct) {
-        selectPdk(direct)
+        selectPdk(direct, { auto: true })
         return
       }
-      try {
-        const scanned = await getDesktopApi().workspace.scanPdkDirectory(
-          config.value.pdk_root,
-        )
-        if (generationChanged()) return
-        const canonicalPdk = importedPdks.value.find(
-          (pdk) => normalizePath(pdk.path) === normalizePath(scanned.canonicalPath),
-        )
-        if (canonicalPdk) {
-          selectPdk(canonicalPdk)
-          return
-        }
-      } catch {}
+      // A scan failure (bridge/inventory error) propagates to the outer
+      // handler so the resolution is retried instead of being cached as done.
+      const scanned = await getDesktopApi().workspace.scanPdkDirectory(
+        config.value.pdk_root,
+      )
+      if (generationChanged()) return
+      const canonicalPdk = importedPdks.value.find(
+        (pdk) => normalizePath(pdk.path) === normalizePath(scanned.canonicalPath),
+      )
+      if (canonicalPdk) {
+        selectPdk(canonicalPdk, { auto: true })
+        return
+      }
       // Explicit pdk_root present but unresolved: leave the selection empty
       // instead of seeding the default over the workspace's explicit context.
       return
@@ -3099,7 +3099,7 @@ async function seedDefaultPdkInstallation(generation: number) {
   if (!defaultId || projectManifestLoadGeneration !== generation) return
   const defaultPdk = importedPdks.value.find((pdk) => pdk.id === defaultId)
   if (defaultPdk && projectManifestLoadGeneration === generation) {
-    selectPdk(defaultPdk)
+    selectPdk(defaultPdk, { auto: true })
   }
 }
 
@@ -3396,7 +3396,7 @@ function isPdkEligible(pdk?: import('../types').ImportedPdk): boolean {
   return pdk?.readiness === 'ready' || pdk?.readiness === 'unverified'
 }
 
-function selectPdk(pdk: import('../types').ImportedPdk) {
+function selectPdk(pdk: import('../types').ImportedPdk, options?: { auto?: boolean }) {
   selectedPdkId.value = pdk.id
   config.value.pdk = pdk.pdkId
   config.value.pdk_root = pdk.path
@@ -3410,6 +3410,10 @@ function selectPdk(pdk: import('../types').ImportedPdk) {
   if (pdk.readiness !== 'ready' || !pdk.supportsEccDefaults) {
     pdkConfigMode.value = 'manual'
   }
+  // An automatic selection is owned by the current manifest generation; the
+  // baseline must include it so a later generation clears it. User selections
+  // stay outside the baseline and survive generation switches.
+  if (options?.auto) snapshotPdkBaseline()
   syncWorkspaceConfig()
 }
 
