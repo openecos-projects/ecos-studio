@@ -74,11 +74,11 @@ export class SettingsRegistryService {
 
   async list(): Promise<DesktopSettingState[]> {
     await this.settleDeferredApplies()
-    const states: DesktopSettingState[] = []
-    for (const descriptor of SETTINGS_REGISTRY) {
-      states.push(await this.stateFor(descriptor))
-    }
-    return states
+    // Entries are independent: probe them concurrently but keep the registry
+    // order, so one slow executable probe cannot delay the whole page.
+    return await Promise.all(
+      SETTINGS_REGISTRY.map((descriptor) => this.stateFor(descriptor)),
+    )
   }
 
   async set(key: unknown, value: unknown): Promise<DesktopSettingWriteResult> {

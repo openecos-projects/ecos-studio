@@ -1,8 +1,9 @@
-import { spawn } from 'node:child_process'
 import { access, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-export type SpawnLike = typeof spawn
+import { captureCommandOutput, type SpawnLike } from '../commandCapture'
+
+export { type SpawnLike }
 
 export interface ExecutableProbeOptions {
   timeoutMs: number
@@ -53,13 +54,6 @@ export async function resolveExecutablePath(
   }
 }
 
-/** Upper bound for captured child output so a chatty process cannot exhaust memory. */
-const MAX_CAPTURED_OUTPUT_CHARS = 8_192
-/** Grace period between SIGTERM and SIGKILL when the probe times out. */
-const KILL_GRACE_MS = 1_000
-/** Hard backstop that resolves the probe even if the child ignores SIGKILL. */
-const FORCE_RESOLVE_AFTER_KILL_MS = 3_000
-
 /**
  * Confirm a path points at an executable and probe it with a version flag so a
  * broken binary is rejected before it is persisted or used to launch a sidecar.
@@ -68,103 +62,35 @@ export async function probeExecutableVersion(
   pathValue: string,
   args: string[],
   options: ExecutableProbeOptions,
-  spawnImpl: SpawnLike = spawn,
+  spawnImpl?: Parameters<typeof captureCommandOutput>[3],
 ): Promise<ExecutableProbeResult> {
   const resolved = await resolveExecutablePath(pathValue)
   if (!resolved) {
     return { ok: false, error: `路径不存在或不可执行: ${pathValue}` }
   }
 
-  return await new Promise<ExecutableProbeResult>((resolve) => {
-    // A new process group lets the timeout path terminate the whole tree, so
-    // descendants that inherited the pipes cannot outlive the probe.
-    const detached = process.platform !== 'win32'
-    const child = spawnImpl(resolved, args, {
-      detached,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    const timeoutError: ExecutableProbeResult = {
+  const capture = await captureCommandOutput(
+    resolved,
+    args,
+    { timeoutMs: options.timeoutMs },
+    spawnImpl,
+  )
+  if (capture.timedOut) {
+    return {
       ok: false,
       error: `探测可执行文件超时 (${Math.round(options.timeoutMs / 1000)}s): ${pathValue}`,
     }
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    let timedOut = false
-    let killTimer: ReturnType<typeof setTimeout> | null = null
-    let forceResolveTimer: ReturnType<typeof setTimeout> | null = null
-
-    const terminate = (signal: NodeJS.Signals): void => {
-      try {
-        if (detached && child.pid) {
-          process.kill(-child.pid, signal)
-          return
-        }
-      } catch {
-        // Fall through to the direct child kill.
-      }
-      child.kill(signal)
+  }
+  if (capture.code !== 0) {
+    const detail = capture.stderr.trim().split(/\r?\n/)[0] ?? ''
+    return {
+      ok: false,
+      error: `${pathValue} 退出码为 ${capture.code ?? 'unknown'}${detail ? `: ${detail}` : ''}`,
     }
-
-    const finish = (result: ExecutableProbeResult) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (killTimer) clearTimeout(killTimer)
-      if (forceResolveTimer) clearTimeout(forceResolveTimer)
-      resolve(result)
-    }
-
-    const timer = setTimeout(() => {
-      timedOut = true
-      terminate('SIGTERM')
-      // A child ignoring SIGTERM gets SIGKILL; a hard backstop keeps this
-      // promise bounded even when the process ignores every signal.
-      killTimer = setTimeout(() => {
-        terminate('SIGKILL')
-      }, KILL_GRACE_MS)
-      forceResolveTimer = setTimeout(
-        () => finish(timeoutError),
-        FORCE_RESOLVE_AFTER_KILL_MS,
-      )
-    }, options.timeoutMs)
-
-    const appendCapped = (target: string, chunk: Buffer | string): string => {
-      if (target.length >= MAX_CAPTURED_OUTPUT_CHARS) return target
-      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
-      return `${target}${text.slice(0, MAX_CAPTURED_OUTPUT_CHARS - target.length)}`
-    }
-
-    child.stdout?.on('data', (chunk: Buffer | string) => {
-      stdout = appendCapped(stdout, chunk)
-    })
-    child.stderr?.on('data', (chunk: Buffer | string) => {
-      stderr = appendCapped(stderr, chunk)
-    })
-    child.on('error', (error) => {
-      finish({ ok: false, error: `无法执行 ${pathValue}: ${error.message}` })
-    })
-    child.on('close', (code) => {
-      // Resolve only on actual exit so a terminated probe cannot leak its
-      // child or its listeners.
-      if (timedOut) {
-        finish(timeoutError)
-        return
-      }
-      if (code !== 0) {
-        const detail = stderr.trim().split(/\r?\n/)[0] ?? ''
-        finish({
-          ok: false,
-          error: `${pathValue} 退出码为 ${code ?? 'unknown'}${detail ? `: ${detail}` : ''}`,
-        })
-        return
-      }
-      const version = stdout.trim().split(/\r?\n/)[0]?.trim() ?? ''
-      if (!version) {
-        finish({ ok: false, error: `${pathValue} 未输出版本信息` })
-        return
-      }
-      finish({ ok: true, version })
-    })
-  })
+  }
+  const version = capture.stdout.trim().split(/\r?\n/)[0]?.trim() ?? ''
+  if (!version) {
+    return { ok: false, error: `${pathValue} 未输出版本信息` }
+  }
+  return { ok: true, version }
 }

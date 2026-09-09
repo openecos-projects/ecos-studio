@@ -24,6 +24,11 @@ export class RuntimeSidecarLifecycle {
     return this.finalSnapshotTask !== null
   }
 
+  /** True while a failed operation is being retained for diagnostics. */
+  hasDiagnosticRetention(): boolean {
+    return this.diagnosticReleaseTimer !== null
+  }
+
   waitForFinalSnapshot(): Promise<void> | null {
     return this.finalSnapshotTask
   }

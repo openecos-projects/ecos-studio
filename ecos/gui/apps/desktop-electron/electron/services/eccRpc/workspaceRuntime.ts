@@ -239,7 +239,11 @@ export class EccWorkspaceRuntime {
   }
 
   hasPendingRuntimeWork(): boolean {
-    return this.isActive() || this.sidecarLifecycle.hasFinalSnapshotTask()
+    return (
+      this.isActive() ||
+      this.sidecarLifecycle.hasFinalSnapshotTask() ||
+      this.sidecarLifecycle.hasDiagnosticRetention()
+    )
   }
 
   shutdownBarrier(): {
