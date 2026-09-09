@@ -341,10 +341,17 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     })
     // The managed Codex install writes its binary path through the registry's
     // key transaction so it cannot interleave with a Preferences write.
-    desktopServices.codexDependencyService.setManagedBinPersister((binPath) =>
-      settingsRegistryService.runExclusive(DESKTOP_CODEX_BIN_SETTING_KEY, () =>
-        desktopServices.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, binPath),
-      ),
+    desktopServices.codexDependencyService.setManagedBinPersister(
+      (binPath, baselineValue) =>
+        settingsRegistryService.runExclusive(DESKTOP_CODEX_BIN_SETTING_KEY, async () => {
+          // Re-read inside the key queue: a Preferences write completed while
+          // the download ran is newer and must win over the managed result.
+          const current = await desktopServices.settingsStore.get<string>(
+            DESKTOP_CODEX_BIN_SETTING_KEY,
+          )
+          if (current !== baselineValue) return
+          await desktopServices.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, binPath)
+        }),
     )
     // A deferred runtime apply settles as soon as the pool turns idle so open
     // settings pages stop showing 'pending' without waiting for a reload.

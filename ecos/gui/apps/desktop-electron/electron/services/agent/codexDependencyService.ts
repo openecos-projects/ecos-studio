@@ -67,7 +67,9 @@ export class CodexDependencyService {
    * routes it through the settings-registry key transaction so the install
    * write cannot interleave with registry writes of the same key.
    */
-  private managedBinPersister: ((binPath: string) => Promise<void>) | null = null
+  private managedBinPersister:
+    | ((binPath: string, baselineValue: string | null) => Promise<void>)
+    | null = null
 
   constructor(options: CodexDependencyServiceOptions) {
     this.env = options.env ?? process.env
@@ -98,7 +100,9 @@ export class CodexDependencyService {
     }
   }
 
-  setManagedBinPersister(persist: ((binPath: string) => Promise<void>) | null): void {
+  setManagedBinPersister(
+    persist: ((binPath: string, baselineValue: string | null) => Promise<void>) | null,
+  ): void {
     this.managedBinPersister = persist
   }
 
@@ -355,7 +359,10 @@ export class CodexDependencyService {
         return await this.probeStatus()
       }
       if (this.managedBinPersister) {
-        await this.managedBinPersister(targetBin)
+        // The persister runs inside the settings-registry key transaction and
+        // re-reads the stored value there, so a Preferences write completed
+        // during the download is never overwritten.
+        await this.managedBinPersister(targetBin, pathAtInstallStart)
       } else {
         await this.settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, targetBin)
       }

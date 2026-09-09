@@ -148,6 +148,9 @@ export class EccWorkspaceRuntime {
         })
       },
       emitIdle: () => {
+        // Lifecycle retention/snapshot work finishing is also a drain: the
+        // sidecar really is idle now, so deferred settings applies can settle.
+        for (const listener of Array.from(this.drainListeners)) listener()
         this.emit({
           type: 'runtime.idle',
           ...(this.boundDirectory ? { workspaceDirectory: this.boundDirectory } : {}),
