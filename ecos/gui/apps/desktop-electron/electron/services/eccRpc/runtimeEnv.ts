@@ -1,6 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { constants as fsConstants } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { resolveContainedSymlinkDir } from '../cliInstallerArtifacts'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
@@ -14,6 +15,11 @@ export interface EccRuntimeEnvOptions {
   userDataPath: string
   /** Host data home; defaults to XDG_DATA_HOME (or ~/.local/share). */
   dataHome?: string
+  /**
+   * Explicit external ECC bin directory (settings-ready injection point).
+   * Takes precedence over the ECOS_ECC_BIN_DIR environment variable.
+   */
+  externalEccBinDir?: string | null
 }
 
 function getPathKey(env: NodeJS.ProcessEnv): string {
@@ -106,6 +112,39 @@ function resolveBundleHomeRuntimeBin(options: EccRuntimeEnvOptions): string | nu
     : null
 }
 
+/**
+ * Validate an external ECC bin directory override (the ECOS_ECC_BIN_DIR
+ * environment variable or the explicit option): it must be an absolute path
+ * containing an executable `ecc`. Invalid values resolve to null, which
+ * ignores the override.
+ */
+export function resolveExternalEccBinDir(
+  value: string | null | undefined,
+  platform: RuntimePlatform,
+): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed || !isAbsolute(trimmed)) return null
+  try {
+    accessSync(join(trimmed, packagedEccExecutableName(platform)), fsConstants.X_OK)
+    return trimmed
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The external ECC bin directory when an override is configured, else null.
+ * The explicit option wins over the environment variable; an explicit value
+ * that fails validation disables the override entirely (no env fallback).
+ */
+function resolveExternalRuntimeBin(options: EccRuntimeEnvOptions): string | null {
+  const explicit = options.externalEccBinDir?.trim()
+  if (explicit) {
+    return resolveExternalEccBinDir(explicit, options.platform)
+  }
+  return resolveExternalEccBinDir(options.env.ECOS_ECC_BIN_DIR, options.platform)
+}
+
 function packagedEccLibraryEnv(
   env: NodeJS.ProcessEnv,
   binariesPath: string,
@@ -166,6 +205,11 @@ function resolveDevelopmentEccBinDir(options: EccRuntimeEnvOptions): string | nu
 export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | null {
   const executableName = packagedEccExecutableName(options.platform)
 
+  // An explicit external runtime wins every other resolution, in packaged
+  // and development mode alike.
+  const externalBin = resolveExternalRuntimeBin(options)
+  if (externalBin) return join(externalBin, executableName)
+
   if (options.isPackaged) {
     const packagedCandidate = join(resolvePackagedBinariesPath(options), executableName)
     if (existsSync(packagedCandidate)) {
@@ -185,11 +229,14 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
 }
 
 /**
- * Directory that wins the ECC runtime resolution (packaged binaries, bundle
- * home, or the development runtime-bin shim), or null when none is usable.
- * This is the directory createEccRuntimeEnv prepends to PATH.
+ * Directory that wins the ECC runtime resolution (external override,
+ * packaged binaries, bundle home, or the development runtime-bin shim), or
+ * null when none is usable. This is the directory createEccRuntimeEnv
+ * prepends to PATH.
  */
 export function resolveEccRuntimeBinDir(options: EccRuntimeEnvOptions): string | null {
+  const externalBin = resolveExternalRuntimeBin(options)
+  if (externalBin) return externalBin
   if (options.isPackaged) {
     return resolvePackagedRuntimeBin(options) ?? resolveBundleHomeRuntimeBin(options)
   }
@@ -197,10 +244,12 @@ export function resolveEccRuntimeBinDir(options: EccRuntimeEnvOptions): string |
 }
 
 export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.ProcessEnv {
+  const externalRuntimeBin = resolveExternalRuntimeBin(options)
+
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
     const bundleHomeRuntimeBin = resolveBundleHomeRuntimeBin(options)
-    const runtimeBin = packagedRuntimeBin ?? bundleHomeRuntimeBin
+    const runtimeBin = externalRuntimeBin ?? packagedRuntimeBin ?? bundleHomeRuntimeBin
     const libraryBinariesPath = runtimeBin ?? resolvePackagedBinariesPath(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
     const {
@@ -236,7 +285,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
     return { ...baseEnv }
   }
 
-  const developmentBinDir = resolveDevelopmentEccBinDir(options)
+  const developmentBinDir = externalRuntimeBin ?? resolveDevelopmentEccBinDir(options)
   if (!developmentBinDir) {
     return { ...options.env }
   }

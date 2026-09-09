@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -215,6 +216,8 @@ describe('createEccRuntimeEnv', () => {
       isPackaged: true,
       platform: 'linux',
       userDataPath: fixture.userDataPath,
+      // Hermetic: the host must not contribute a real bundle home.
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
     })
 
     expect(env.PATH).toBe('/usr/bin')
@@ -466,6 +469,8 @@ describe('createEccRuntimeEnv', () => {
       isPackaged: true,
       platform: 'linux',
       userDataPath: fixture.userDataPath,
+      // Hermetic: the host must not contribute a real bundle home.
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
     })
 
     expect(env).toEqual({ PATH: '/usr/bin' })
@@ -599,6 +604,181 @@ describe('bundle home symlink containment', () => {
     })
 
     expect(executable).toBeNull()
+  })
+})
+
+describe('external ECC override', () => {
+  function createExternalEccDir(parent: string): string {
+    const binDir = join(parent, 'external-ecc')
+    mkdirSync(join(binDir, '_internal', 'ecc_tools_bin', 'lib'), { recursive: true })
+    const executablePath = join(binDir, 'ecc')
+    writeFileSync(executablePath, '#!/bin/sh\necho external-ecc\n')
+    chmodSync(executablePath, 0o755)
+    return binDir
+  }
+
+  function createPackagedEcc(repoRoot: string): string {
+    const resourcesPath = join(repoRoot, 'packaged-resources')
+    mkdirSync(join(resourcesPath, 'binaries'), { recursive: true })
+    writeFileSync(join(resourcesPath, 'binaries', 'ecc'), '#!/bin/sh\n')
+    return resourcesPath
+  }
+
+  it('prefers the ECOS_ECC_BIN_DIR override over packaged binaries', () => {
+    const fixture = createRepoFixture()
+    const externalBin = createExternalEccDir(fixture.repoRoot)
+    const resourcesPath = createPackagedEcc(fixture.repoRoot)
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ECC_BIN_DIR: externalBin,
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(executable).toBe(join(externalBin, 'ecc'))
+  })
+
+  it('prefers the explicit option over the environment variable', () => {
+    const fixture = createRepoFixture()
+    const externalBin = createExternalEccDir(fixture.repoRoot)
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { ECOS_ECC_BIN_DIR: '/nonexistent', PATH: '/usr/bin' },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+      externalEccBinDir: externalBin,
+    })
+
+    expect(executable).toBe(join(externalBin, 'ecc'))
+  })
+
+  it('disables the override entirely when the explicit option is set but invalid', () => {
+    const fixture = createRepoFixture()
+    const externalBin = createExternalEccDir(fixture.repoRoot)
+    const resourcesPath = createPackagedEcc(fixture.repoRoot)
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ECC_BIN_DIR: externalBin,
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+      externalEccBinDir: join(fixture.repoRoot, 'missing-ecc'),
+    })
+
+    // No env fallback: an invalid explicit value means no override at all.
+    expect(executable).toBe(join(resourcesPath, 'binaries', 'ecc'))
+  })
+
+  it('ignores a relative override path', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = createPackagedEcc(fixture.repoRoot)
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ECC_BIN_DIR: 'relative/external-ecc',
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(executable).toBe(join(resourcesPath, 'binaries', 'ecc'))
+  })
+
+  it('ignores an override without an executable ecc', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = createPackagedEcc(fixture.repoRoot)
+    const emptyExternal = join(fixture.repoRoot, 'external-without-ecc')
+    mkdirSync(emptyExternal, { recursive: true })
+
+    const executable = resolveEccExecutable({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ECC_BIN_DIR: emptyExternal,
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(executable).toBe(join(resourcesPath, 'binaries', 'ecc'))
+  })
+
+  it('applies the override in development mode', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(
+      join(fixture.repoRoot, 'ecc', 'pyproject.toml'),
+      '[project]\nname = "ecc"\n',
+    )
+    const wrapperDir = join(fixture.repoRoot, 'ecos', 'scripts')
+    mkdirSync(wrapperDir, { recursive: true })
+    writeFileSync(join(wrapperDir, 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
+    const externalBin = createExternalEccDir(fixture.repoRoot)
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: { ECOS_ECC_BIN_DIR: externalBin, PATH: '/usr/bin' },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.PATH).toBe(`${externalBin}:/usr/bin`)
+    // The development runtime-bin shim is not materialized.
+    expect(existsSync(join(fixture.userDataPath, 'runtime-bin', 'ecc'))).toBe(false)
+  })
+
+  it('derives PATH and LD_LIBRARY_PATH from the external bin directory', () => {
+    const fixture = createRepoFixture()
+    const externalBin = createExternalEccDir(fixture.repoRoot)
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ECC_BIN_DIR: externalBin,
+        LD_LIBRARY_PATH: '/existing/libs',
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+      dataHome: join(fixture.repoRoot, 'empty-data-home'),
+    })
+
+    expect(env.PATH).toBe(`${externalBin}:/usr/bin`)
+    expect(env.LD_LIBRARY_PATH).toBe(
+      `${join(externalBin, '_internal', 'ecc_tools_bin', 'lib')}:/existing/libs`,
+    )
   })
 })
 
