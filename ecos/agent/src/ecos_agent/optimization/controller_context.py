@@ -744,3 +744,22 @@ class ControllerContextMixin:
             evidence=parsed,
         )
         self._persist()
+
+    def _append_proposal_observation(
+        self, planning_entry: OptimizationPlanningAuditEntry, proposal: OptimizationProposal
+    ) -> None:
+        """Persist structured proposal fields for knowledge mediation analysis."""
+        path = self.ledger.root / "optimization-proposal-observations.v1.jsonl"
+        action = proposal.action
+        payload = {
+            "schema_version": "ecos.optimization_proposal_observation.v1",
+            "planning_entry_sha256": planning_entry.entry_sha256,
+            "proposal_sha256": canonical_sha256(proposal.model_dump(mode="json")),
+            "decision": proposal.decision.value,
+            "action": action.model_dump(mode="json") if action else None,
+            "claim_id": None,
+            "binding_id": None,
+            "knowledge_refs": [ref.model_dump(mode="json") for ref in proposal.knowledge_refs],
+        }
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(payload, sort_keys=True) + "\n")
