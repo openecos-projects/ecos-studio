@@ -129,14 +129,15 @@ export type {
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
   DesktopCodexModelSource,
+  DesktopCodexSetApiKeyRequest,
   DesktopCodexSetBinPathRequest,
-  DesktopCodexSetGlmApiKeyRequest,
   DesktopCodexSetModelSourceRequest,
 } from './contracts/desktopCodex.ts'
 export {
   DESKTOP_CODEX_BIN_SETTING_KEY,
   DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY,
   DESKTOP_GLM_API_KEY_SETTING_KEY,
+  DESKTOP_OPENAI_API_KEY_SETTING_KEY,
 } from './contracts/desktopCodex.ts'
 export type {
   DesktopAgentActivity,

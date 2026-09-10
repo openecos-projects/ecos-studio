@@ -17,12 +17,12 @@
       @scroll.passive="onScrollContainerScroll"
     >
       <div
-        v-if="codexSetupStatus && codexSetupStatus.state !== 'ready'"
+        v-if="codexSetupCardStatus"
         class="flex h-full flex-col items-center justify-center px-4 py-10"
       >
         <AgentCodexSetupCard
           :busy="codexSetupBusy || isAgentConnecting"
-          :status="codexSetupStatus"
+          :status="codexSetupCardStatus"
           @install="installCodexCli"
           @login="loginCodexCli"
           @recheck="recheckCodexCli"
@@ -30,6 +30,7 @@
           @retry="retryAfterCodexReady"
           @set-source="setCodexModelSource"
           @set-glm-key="setGlmApiKey"
+          @set-openai-key="setOpenAIApiKey"
         />
       </div>
       <div
@@ -214,6 +215,7 @@
             :model-source="codexModelSource"
             @update="updateAgentModelSettings"
             @set-source="setCodexModelSource"
+            @configure="openCodexSetup"
           />
           <button
             v-if="isRunning"
@@ -335,7 +337,14 @@ const { messages } = storeToRefs(messageStore)
 const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
 const codexSetupBusy = ref(false)
 const codexModelSource = ref<DesktopCodexModelSource>('codex')
+const codexSetupManageOpen = ref(false)
 let unsubscribeCodexProgress: (() => void) | null = null
+const codexSetupCardStatus = computed(() =>
+  codexSetupStatus.value &&
+  (codexSetupStatus.value.state !== 'ready' || codexSetupManageOpen.value)
+    ? codexSetupStatus.value
+    : null,
+)
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
 const interactionPresentation = computed(() =>
@@ -980,7 +989,8 @@ async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null
   try {
     const status = await codex.getStatus()
     codexModelSource.value = status.modelSource ?? 'codex'
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
+    if (status.state === 'ready') codexSetupManageOpen.value = false
     return status
   } catch (error) {
     codexSetupStatus.value = {
@@ -1024,8 +1034,9 @@ async function installCodexCli(): Promise<void> {
   bindCodexProgress()
   try {
     const status = await codex.install()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
@@ -1047,7 +1058,8 @@ async function loginCodexCli(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.login()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
+    if (status.state === 'ready') codexSetupManageOpen.value = false
   } catch (error) {
     codexSetupStatus.value = {
       ...(codexSetupStatus.value ?? {
@@ -1069,8 +1081,9 @@ async function recheckCodexCli(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.recheck()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
@@ -1093,8 +1106,9 @@ async function setCodexModelSource(source: { source: 'codex' | 'glm' }): Promise
   try {
     const status = await codex.setModelSource({ source: source.source })
     codexModelSource.value = status.modelSource ?? source.source
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
@@ -1116,8 +1130,9 @@ async function setGlmApiKey(apiKey: string): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.setGlmApiKey({ apiKey })
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
@@ -1135,6 +1150,37 @@ async function setGlmApiKey(apiKey: string): Promise<void> {
   }
 }
 
+async function setOpenAIApiKey(apiKey: string): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  try {
+    const status = await codex.setOpenAIApiKey({ apiKey })
+    codexSetupStatus.value = status
+    if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
+      const sessionId = agentSessionId.value
+      if (sessionId) await startProviderSession(sessionId)
+    }
+  } catch (error) {
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function openCodexSetup(): Promise<void> {
+  codexSetupManageOpen.value = true
+  await refreshCodexStatus()
+}
+
 async function pickCodexBin(): Promise<void> {
   const desktopApi = getOptionalDesktopApi()
   const codex = desktopApi?.agent?.codex
@@ -1147,8 +1193,9 @@ async function pickCodexBin(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.setBinPath({ path: selected })
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }

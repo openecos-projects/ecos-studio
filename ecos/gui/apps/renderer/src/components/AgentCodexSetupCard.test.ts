@@ -112,9 +112,51 @@ describe('AgentCodexSetupCard', () => {
     expect(wrapper.text()).not.toContain('智谱 API Key')
     const codexButton = wrapper
       .findAll('button')
-      .find((button) => button.text().startsWith('Codex 账号'))
+      .find((button) => button.text().startsWith('Codex API'))
     expect(codexButton).toBeTruthy()
     await codexButton!.trigger('click')
     expect(wrapper.emitted('set-source')).toEqual([[{ source: 'codex' }]])
+  })
+
+  it('collects a codex API key and emits it as the primary flow', async () => {
+    const status: DesktopCodexDependencyStatus = {
+      apiKeyConfigured: false,
+      authState: 'unauthenticated',
+      binPath: '/managed/bin/codex',
+      message: 'Codex CLI 已就绪。填入 API Key，或点击“打开登录”使用账号。',
+      modelSource: 'codex',
+      platformSupportsInstall: true,
+      state: 'installed_needs_login',
+      version: 'codex-cli 0.1.0',
+    }
+    const wrapper = mount(AgentCodexSetupCard, { props: { status } })
+
+    expect(wrapper.text()).toContain('待登录')
+    const login = wrapper.findAll('button').find((button) => button.text() === '打开登录')
+    expect(login).toBeTruthy()
+
+    const input = wrapper.find('#codex-setup-openai-key')
+    expect(input.attributes('placeholder')).toContain('无需账号登录')
+    await input.setValue(' sk-test ')
+    await wrapper.find('form.codex-setup__key-form').trigger('submit')
+    expect(wrapper.emitted('set-openai-key')).toEqual([['sk-test']])
+  })
+
+  it('marks a configured key as replaceable', () => {
+    const status: DesktopCodexDependencyStatus = {
+      apiKeyConfigured: true,
+      authState: 'authenticated',
+      binPath: '/managed/bin/codex',
+      message: 'Codex API Key 已配置，Codex CLI 已就绪。',
+      modelSource: 'codex',
+      platformSupportsInstall: true,
+      state: 'ready',
+      version: 'codex-cli 0.1.0',
+    }
+    const wrapper = mount(AgentCodexSetupCard, { props: { status } })
+
+    expect(wrapper.find('#codex-setup-openai-key').attributes('placeholder')).toContain(
+      '已配置（输入可更换）',
+    )
   })
 })

@@ -64,8 +64,8 @@ import type {
 import type {
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
+  DesktopCodexSetApiKeyRequest,
   DesktopCodexSetBinPathRequest,
-  DesktopCodexSetGlmApiKeyRequest,
   DesktopCodexSetModelSourceRequest,
 } from './desktopCodex.ts'
 
@@ -437,7 +437,10 @@ export interface DesktopApi {
         request: DesktopCodexSetModelSourceRequest,
       ): Promise<DesktopCodexDependencyStatus>
       setGlmApiKey(
-        request: DesktopCodexSetGlmApiKeyRequest,
+        request: DesktopCodexSetApiKeyRequest,
+      ): Promise<DesktopCodexDependencyStatus>
+      setOpenAIApiKey(
+        request: DesktopCodexSetApiKeyRequest,
       ): Promise<DesktopCodexDependencyStatus>
       onProgress(
         listener: (event: DesktopCodexInstallProgressEvent) => void,

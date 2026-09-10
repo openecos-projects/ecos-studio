@@ -149,6 +149,7 @@ export const desktopApiIpcChannels = {
   agentCodexSetBinPath: 'agent:codex-set-bin-path',
   agentCodexSetModelSource: 'agent:codex-set-model-source',
   agentCodexSetGlmApiKey: 'agent:codex-set-glm-api-key',
+  agentCodexSetOpenAIApiKey: 'agent:codex-set-openai-api-key',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',

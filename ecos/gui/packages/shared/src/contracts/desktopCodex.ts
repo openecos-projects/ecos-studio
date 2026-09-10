@@ -11,6 +11,7 @@ export type DesktopCodexAuthState = 'authenticated' | 'unauthenticated' | 'unkno
 
 export interface DesktopCodexDependencyStatus {
   authState: DesktopCodexAuthState
+  apiKeyConfigured?: boolean
   binPath?: string
   message?: string
   modelSource?: DesktopCodexModelSource
@@ -35,10 +36,11 @@ export interface DesktopCodexSetModelSourceRequest {
   source: DesktopCodexModelSource
 }
 
-export interface DesktopCodexSetGlmApiKeyRequest {
+export interface DesktopCodexSetApiKeyRequest {
   apiKey: string
 }
 
 export const DESKTOP_CODEX_BIN_SETTING_KEY = 'agent.codexBin'
 export const DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY = 'agent.modelSource'
 export const DESKTOP_GLM_API_KEY_SETTING_KEY = 'agent.glmApiKey'
+export const DESKTOP_OPENAI_API_KEY_SETTING_KEY = 'agent.openaiApiKey'

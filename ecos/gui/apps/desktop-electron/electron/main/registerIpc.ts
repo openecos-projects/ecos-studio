@@ -158,6 +158,9 @@ export interface DesktopBridgeServices {
     setGlmApiKey(
       apiKey: string,
     ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    setOpenAIApiKey(
+      apiKey: string,
+    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
   }
@@ -2434,8 +2437,15 @@ export function registerIpc(
   })
 
   handle(desktopApiIpcChannels.agentCodexSetGlmApiKey, async (_event, request) => {
-    const apiKey = readGlmApiKeyRequest(request)
+    const apiKey = readApiKeyRequest(request, 'GLM')
     const status = await requireCodexDependencyService(services).setGlmApiKey(apiKey)
+    await applyCodexBinEnv(services)
+    return status
+  })
+
+  handle(desktopApiIpcChannels.agentCodexSetOpenAIApiKey, async (_event, request) => {
+    const apiKey = readApiKeyRequest(request, 'Codex')
+    const status = await requireCodexDependencyService(services).setOpenAIApiKey(apiKey)
     await applyCodexBinEnv(services)
     return status
   })
@@ -2595,12 +2605,12 @@ function readCodexModelSourceRequest(value: unknown): 'codex' | 'glm' {
   throw new Error('Invalid Codex model source request')
 }
 
-function readGlmApiKeyRequest(value: unknown): string {
+function readApiKeyRequest(value: unknown, label: string): string {
   if (typeof value === 'string') return value
   if (isRecord(value) && typeof value.apiKey === 'string') {
     return value.apiKey
   }
-  throw new Error('Invalid GLM API key request')
+  throw new Error(`Invalid ${label} API key request`)
 }
 
 function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {

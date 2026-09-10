@@ -10,6 +10,7 @@ import {
 import {
   DESKTOP_CODEX_BIN_SETTING_KEY,
   DESKTOP_GLM_API_KEY_SETTING_KEY,
+  DESKTOP_OPENAI_API_KEY_SETTING_KEY,
 } from '@ecos-studio/shared'
 
 class MemorySettingsStore implements CodexDependencySettingsStore {
@@ -250,6 +251,7 @@ describe('CodexDependencyService', () => {
       ECOS_AGENT_CODEX_BIN: codexBin,
       CODEX_HOME: undefined,
       ZAI_API_KEY: undefined,
+      OPENAI_API_KEY: undefined,
       PATH: `${binDir}:/usr/bin:/bin`,
     })
     expect(spawn.mock.calls[0]?.[2]?.env?.PATH).toBe(`${binDir}:/usr/bin:/bin`)
@@ -402,7 +404,57 @@ describe('CodexDependencyService', () => {
       ECOS_AGENT_CODEX_BIN: codexBin,
       CODEX_HOME: undefined,
       ZAI_API_KEY: undefined,
+      OPENAI_API_KEY: undefined,
       PATH: binDir,
+    })
+  })
+
+  it('makes the codex source ready via API key without any login check', async () => {
+    const root = await createRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const codexBin = join(binDir, 'codex')
+    await writeFile(codexBin, '#!/bin/sh\necho codex 1.0\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn((_command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+    const settingsStore = new MemorySettingsStore()
+    const service = new CodexDependencyService({
+      env: { PATH: binDir, HOME: root },
+      installRoot: join(root, 'managed'),
+      glmConfigRoot: join(root, 'glm-home'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    const status = await service.setOpenAIApiKey(' sk-test ')
+    expect(status).toMatchObject({
+      state: 'ready',
+      authState: 'authenticated',
+      apiKeyConfigured: true,
+      modelSource: 'codex',
+    })
+    await expect(
+      settingsStore.get<string>(DESKTOP_OPENAI_API_KEY_SETTING_KEY),
+    ).resolves.toBe('sk-test')
+    expect(spawn.mock.calls.some((call) => call[1]?.[0] === 'login')).toBe(false)
+    await expect(service.resolveEnvironmentForAgent()).resolves.toMatchObject({
+      ECOS_AGENT_CODEX_BIN: codexBin,
+      OPENAI_API_KEY: 'sk-test',
+      CODEX_HOME: undefined,
+      ZAI_API_KEY: undefined,
     })
   })
 })
