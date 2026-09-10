@@ -78,6 +78,9 @@ describe('AgentCodexSetupCard', () => {
     expect(
       wrapper.findAll('button').some((button) => button.text() === '我已完成登录'),
     ).toBe(false)
+    expect(
+      wrapper.findAll('button').some((button) => button.text() === '选择本地 codex'),
+    ).toBe(false)
 
     const sourceButtons = wrapper
       .findAll('button')
