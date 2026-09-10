@@ -152,6 +152,12 @@ export interface DesktopBridgeServices {
     setBinPath(
       pathValue: string,
     ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    setModelSource(
+      source: import('@ecos-studio/shared').DesktopCodexModelSource,
+    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
+    setGlmApiKey(
+      apiKey: string,
+    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
   }
@@ -2420,6 +2426,20 @@ export function registerIpc(
     return status
   })
 
+  handle(desktopApiIpcChannels.agentCodexSetModelSource, async (_event, request) => {
+    const source = readCodexModelSourceRequest(request)
+    const status = await requireCodexDependencyService(services).setModelSource(source)
+    await applyCodexBinEnv(services)
+    return status
+  })
+
+  handle(desktopApiIpcChannels.agentCodexSetGlmApiKey, async (_event, request) => {
+    const apiKey = readGlmApiKeyRequest(request)
+    const status = await requireCodexDependencyService(services).setGlmApiKey(apiKey)
+    await applyCodexBinEnv(services)
+    return status
+  })
+
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -2566,6 +2586,21 @@ function readCodexBinPathRequest(value: unknown): string {
     return value.path
   }
   throw new Error('Invalid Codex binary path request')
+}
+
+function readCodexModelSourceRequest(value: unknown): 'codex' | 'glm' {
+  if (isRecord(value) && (value.source === 'codex' || value.source === 'glm')) {
+    return value.source
+  }
+  throw new Error('Invalid Codex model source request')
+}
+
+function readGlmApiKeyRequest(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (isRecord(value) && typeof value.apiKey === 'string') {
+    return value.apiKey
+  }
+  throw new Error('Invalid GLM API key request')
 }
 
 function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {

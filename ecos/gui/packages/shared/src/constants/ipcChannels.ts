@@ -147,6 +147,8 @@ export const desktopApiIpcChannels = {
   agentCodexLogin: 'agent:codex-login',
   agentCodexRecheck: 'agent:codex-recheck',
   agentCodexSetBinPath: 'agent:codex-set-bin-path',
+  agentCodexSetModelSource: 'agent:codex-set-model-source',
+  agentCodexSetGlmApiKey: 'agent:codex-set-glm-api-key',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',

@@ -58,4 +58,63 @@ describe('AgentCodexSetupCard', () => {
       wrapper.findAll('button').some((button) => button.text() === '选择本地 codex'),
     ).toBe(true)
   })
+
+  it('shows the GLM key form instead of login when GLM source is selected', async () => {
+    const status: DesktopCodexDependencyStatus = {
+      authState: 'unauthenticated',
+      binPath: '/managed/bin/codex',
+      message: '已选择 GLM 模型来源',
+      modelSource: 'glm',
+      platformSupportsInstall: true,
+      state: 'installed_needs_login',
+      version: 'codex-cli 0.1.0',
+    }
+    const wrapper = mount(AgentCodexSetupCard, { props: { status } })
+
+    expect(wrapper.text()).toContain('待配置')
+    expect(wrapper.findAll('button').some((button) => button.text() === '打开登录')).toBe(
+      false,
+    )
+    expect(
+      wrapper.findAll('button').some((button) => button.text() === '我已完成登录'),
+    ).toBe(false)
+
+    const sourceButtons = wrapper
+      .findAll('button')
+      .filter((button) => button.text().startsWith('GLM API'))
+    expect(sourceButtons).toHaveLength(1)
+    await sourceButtons[0]!.trigger('click')
+    expect(wrapper.emitted('set-source')).toEqual([[{ source: 'glm' }]])
+
+    const input = wrapper.find('#codex-setup-glm-key')
+    expect(input.exists()).toBe(true)
+    await input.setValue(' test-key ')
+    const save = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存并使用 GLM')
+    expect(save).toBeTruthy()
+    expect(save!.attributes('disabled')).toBeUndefined()
+    await wrapper.find('form.codex-setup__key-form').trigger('submit')
+    expect(wrapper.emitted('set-glm-key')).toEqual([['test-key']])
+  })
+
+  it('shows the codex source as active by default and keeps the login flow', async () => {
+    const status: DesktopCodexDependencyStatus = {
+      authState: 'authenticated',
+      binPath: '/managed/bin/codex',
+      message: 'Codex CLI 已就绪。',
+      platformSupportsInstall: true,
+      state: 'ready',
+      version: 'codex-cli 0.1.0',
+    }
+    const wrapper = mount(AgentCodexSetupCard, { props: { status } })
+
+    expect(wrapper.text()).not.toContain('智谱 API Key')
+    const codexButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().startsWith('Codex 账号'))
+    expect(codexButton).toBeTruthy()
+    await codexButton!.trigger('click')
+    expect(wrapper.emitted('set-source')).toEqual([[{ source: 'codex' }]])
+  })
 })
