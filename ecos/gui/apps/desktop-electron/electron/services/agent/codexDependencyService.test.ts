@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, chmod, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,7 +7,10 @@ import {
   CodexDependencyService,
   type CodexDependencySettingsStore,
 } from './codexDependencyService'
-import { DESKTOP_CODEX_BIN_SETTING_KEY } from '@ecos-studio/shared'
+import {
+  DESKTOP_CODEX_BIN_SETTING_KEY,
+  DESKTOP_GLM_API_KEY_SETTING_KEY,
+} from '@ecos-studio/shared'
 
 class MemorySettingsStore implements CodexDependencySettingsStore {
   private readonly values = new Map<string, unknown>()
@@ -245,9 +248,162 @@ describe('CodexDependencyService', () => {
     await expect(service.setBinPath(codexBin)).resolves.toMatchObject({ state: 'ready' })
     await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
       ECOS_AGENT_CODEX_BIN: codexBin,
+      CODEX_HOME: undefined,
+      ZAI_API_KEY: undefined,
       PATH: `${binDir}:/usr/bin:/bin`,
     })
     expect(spawn.mock.calls[0]?.[2]?.env?.PATH).toBe(`${binDir}:/usr/bin:/bin`)
+  })
+
+  it('reports needs-key status in GLM mode without invoking codex login', async () => {
+    const root = await createRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const codexBin = join(binDir, 'codex')
+    await writeFile(codexBin, '#!/bin/sh\necho codex 1.0\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn((command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+          child.emit('close', 0)
+          return
+        }
+        child.emit('close', 1)
+      })
+      return child as never
+    })
+    const service = new CodexDependencyService({
+      env: { PATH: binDir, HOME: root },
+      installRoot: join(root, 'managed'),
+      glmConfigRoot: join(root, 'glm-home'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore: new MemorySettingsStore(),
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await service.setModelSource('glm')
+    await expect(service.getStatus()).resolves.toMatchObject({
+      state: 'installed_needs_login',
+      authState: 'unauthenticated',
+      modelSource: 'glm',
+    })
+    expect(spawn.mock.calls.some((call) => call[1]?.[0] === 'login')).toBe(false)
+
+    await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
+      ECOS_AGENT_CODEX_BIN: codexBin,
+      CODEX_HOME: join(root, 'glm-home'),
+      ZAI_API_KEY: undefined,
+      PATH: binDir,
+    })
+  })
+
+  it('stores the GLM key, writes the managed config home, and reports ready', async () => {
+    const root = await createRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const codexBin = join(binDir, 'codex')
+    await writeFile(codexBin, '#!/bin/sh\necho codex 1.0\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn((_command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+    const settingsStore = new MemorySettingsStore()
+    const glmConfigRoot = join(root, 'glm-home')
+    const service = new CodexDependencyService({
+      env: { PATH: binDir, HOME: root },
+      installRoot: join(root, 'managed'),
+      glmConfigRoot,
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    const status = await service.setGlmApiKey(' test-key ')
+    expect(status).toMatchObject({
+      state: 'ready',
+      authState: 'authenticated',
+      modelSource: 'glm',
+    })
+    await expect(
+      settingsStore.get<string>(DESKTOP_GLM_API_KEY_SETTING_KEY),
+    ).resolves.toBe('test-key')
+    const configToml = await readFile(join(glmConfigRoot, 'config.toml'), 'utf8')
+    expect(configToml).toContain('model = "glm-5.3"')
+    expect(configToml).toContain('env_key = "ZAI_API_KEY"')
+    expect(configToml).not.toContain('test-key')
+    const modelsJson = JSON.parse(
+      await readFile(join(glmConfigRoot, 'models.json'), 'utf8'),
+    )
+    expect(modelsJson.models.map((model: { slug: string }) => model.slug)).toEqual([
+      'glm-5.3',
+      'glm-5.3-flash',
+    ])
+    await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
+      ECOS_AGENT_CODEX_BIN: codexBin,
+      CODEX_HOME: glmConfigRoot,
+      ZAI_API_KEY: 'test-key',
+      PATH: binDir,
+    })
+  })
+
+  it('switching back to codex mode clears GLM environment overrides', async () => {
+    const root = await createRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const codexBin = join(binDir, 'codex')
+    await writeFile(codexBin, '#!/bin/sh\necho codex 1.0\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn((_command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+    const settingsStore = new MemorySettingsStore()
+    await settingsStore.set(DESKTOP_GLM_API_KEY_SETTING_KEY, 'test-key')
+    const service = new CodexDependencyService({
+      env: { PATH: binDir, HOME: root },
+      installRoot: join(root, 'managed'),
+      glmConfigRoot: join(root, 'glm-home'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await service.setModelSource('glm')
+    await expect(service.resolveEnvironmentForAgent()).resolves.toMatchObject({
+      CODEX_HOME: join(root, 'glm-home'),
+      ZAI_API_KEY: 'test-key',
+    })
+    await service.setModelSource('codex')
+    await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
+      ECOS_AGENT_CODEX_BIN: codexBin,
+      CODEX_HOME: undefined,
+      ZAI_API_KEY: undefined,
+      PATH: binDir,
+    })
   })
 })
 

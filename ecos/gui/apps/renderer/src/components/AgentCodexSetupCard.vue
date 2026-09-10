@@ -21,6 +21,53 @@
       </div>
     </dl>
 
+    <div class="codex-setup__source" role="radiogroup" aria-label="模型来源">
+      <span class="codex-setup__source-label">模型来源</span>
+      <div class="codex-setup__source-options">
+        <button
+          v-for="option in sourceOptions"
+          :key="option.value"
+          type="button"
+          class="codex-setup__source-option"
+          role="radio"
+          :aria-checked="currentSource === option.value"
+          :class="{
+            'codex-setup__source-option--active': currentSource === option.value,
+          }"
+          :disabled="busy"
+          @click="emit('set-source', { source: option.value })"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+    </div>
+
+    <form
+      v-if="currentSource === 'glm'"
+      class="codex-setup__key-form"
+      @submit.prevent="submitGlmKey"
+    >
+      <label class="codex-setup__key-label" for="codex-setup-glm-key">智谱 API Key</label>
+      <input
+        id="codex-setup-glm-key"
+        v-model="glmApiKey"
+        type="password"
+        class="codex-setup__key-input"
+        autocomplete="off"
+        spellcheck="false"
+        :placeholder="
+          keyConfigured ? '已配置（输入可更换）' : '粘贴智谱 GLM Coding Plan API Key'
+        "
+      />
+      <button
+        type="submit"
+        class="codex-setup__action codex-setup__action--primary"
+        :disabled="busy || !glmApiKey.trim()"
+      >
+        保存并使用 GLM
+      </button>
+    </form>
+
     <div
       v-if="status.state === 'installing' || status.progressMessage"
       class="codex-setup__progress"
@@ -63,7 +110,11 @@
         :disabled="busy"
         @click="emit('recheck')"
       >
-        {{ status.state === 'installed_needs_login' ? '我已完成登录' : '重新检测' }}
+        {{
+          currentSource !== 'glm' && status.state === 'installed_needs_login'
+            ? '我已完成登录'
+            : '重新检测'
+        }}
       </button>
       <button
         type="button"
@@ -87,8 +138,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { DesktopCodexDependencyStatus } from '@ecos-studio/shared'
+import { computed, ref } from 'vue'
+import type {
+  DesktopCodexDependencyStatus,
+  DesktopCodexModelSource,
+  DesktopCodexSetModelSourceRequest,
+} from '@ecos-studio/shared'
 
 const props = defineProps<{
   busy?: boolean
@@ -101,9 +156,31 @@ const emit = defineEmits<{
   'pick-bin': []
   recheck: []
   retry: []
+  'set-source': [request: DesktopCodexSetModelSourceRequest]
+  'set-glm-key': [apiKey: string]
 }>()
 
-const defaultMessage = 'ECOS Agent 依赖 Codex CLI 生成建议。请先完成安装与登录。'
+const defaultMessage = 'ECOS Agent 依赖 Codex CLI 生成建议。请先完成安装与配置。'
+
+const glmApiKey = ref('')
+
+const currentSource = computed<DesktopCodexModelSource>(
+  () => props.status.modelSource ?? 'codex',
+)
+
+const keyConfigured = computed(
+  () => currentSource.value === 'glm' && props.status.authState === 'authenticated',
+)
+
+const sourceOptions: Array<{ value: DesktopCodexModelSource; label: string }> = [
+  { value: 'codex', label: 'Codex 账号（GPT 系列）' },
+  { value: 'glm', label: 'GLM API（智谱）' },
+]
+
+function submitGlmKey(): void {
+  const key = glmApiKey.value.trim()
+  if (key) emit('set-glm-key', key)
+}
 
 const stateLabel = computed(() => {
   switch (props.status.state) {
@@ -112,7 +189,7 @@ const stateLabel = computed(() => {
     case 'installing':
       return '安装中'
     case 'installed_needs_login':
-      return '待登录'
+      return currentSource.value === 'glm' ? '待配置' : '待登录'
     case 'ready':
       return '已就绪'
     case 'error':
@@ -132,11 +209,12 @@ const showInstall = computed(
 
 const showLogin = computed(
   () =>
-    props.status.state === 'installed_needs_login' ||
-    (Boolean(props.status.binPath) &&
-      props.status.authState !== 'authenticated' &&
-      props.status.state !== 'missing' &&
-      props.status.state !== 'installing'),
+    currentSource.value !== 'glm' &&
+    (props.status.state === 'installed_needs_login' ||
+      (Boolean(props.status.binPath) &&
+        props.status.authState !== 'authenticated' &&
+        props.status.state !== 'missing' &&
+        props.status.state !== 'installing')),
 )
 </script>
 
@@ -208,6 +286,81 @@ const showLogin = computed(
 .codex-setup__meta-row dd {
   margin: 0;
   color: var(--text-primary);
+}
+
+.codex-setup__source {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.codex-setup__source-label {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.codex-setup__source-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  flex: 1;
+  padding: 0.125rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: var(--bg-primary);
+}
+
+.codex-setup__source-option {
+  padding: 0.3rem 0.4rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.codex-setup__source-option--active {
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--bg-primary));
+  color: var(--text-primary);
+}
+
+.codex-setup__source-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.codex-setup__key-form {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.codex-setup__key-label {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.codex-setup__key-input {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.codex-setup__key-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
 }
 
 .codex-setup__progress {

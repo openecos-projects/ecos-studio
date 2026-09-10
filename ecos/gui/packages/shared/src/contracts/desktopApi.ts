@@ -65,6 +65,8 @@ import type {
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
+  DesktopCodexSetGlmApiKeyRequest,
+  DesktopCodexSetModelSourceRequest,
 } from './desktopCodex.ts'
 
 export type DesktopSettingsValue =
@@ -430,6 +432,12 @@ export interface DesktopApi {
       recheck(): Promise<DesktopCodexDependencyStatus>
       setBinPath(
         request: DesktopCodexSetBinPathRequest,
+      ): Promise<DesktopCodexDependencyStatus>
+      setModelSource(
+        request: DesktopCodexSetModelSourceRequest,
+      ): Promise<DesktopCodexDependencyStatus>
+      setGlmApiKey(
+        request: DesktopCodexSetGlmApiKeyRequest,
       ): Promise<DesktopCodexDependencyStatus>
       onProgress(
         listener: (event: DesktopCodexInstallProgressEvent) => void,

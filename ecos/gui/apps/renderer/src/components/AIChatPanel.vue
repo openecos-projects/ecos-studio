@@ -28,6 +28,8 @@
           @recheck="recheckCodexCli"
           @pick-bin="pickCodexBin"
           @retry="retryAfterCodexReady"
+          @set-source="setCodexModelSource"
+          @set-glm-key="setGlmApiKey"
         />
       </div>
       <div
@@ -209,7 +211,9 @@
             :busy="activeUi.modelSettingsBusy"
             :disabled="isRunning || isAgentConnecting"
             :error="activeUi.modelSettingsError"
+            :model-source="codexModelSource"
             @update="updateAgentModelSettings"
+            @set-source="setCodexModelSource"
           />
           <button
             v-if="isRunning"
@@ -261,6 +265,7 @@ import type {
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
+  DesktopCodexModelSource,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentModelSettingsMenu from './AgentModelSettingsMenu.vue'
@@ -329,6 +334,7 @@ const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
 const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
 const codexSetupBusy = ref(false)
+const codexModelSource = ref<DesktopCodexModelSource>('codex')
 let unsubscribeCodexProgress: (() => void) | null = null
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
@@ -973,6 +979,7 @@ async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null
   }
   try {
     const status = await codex.getStatus()
+    codexModelSource.value = status.modelSource ?? 'codex'
     codexSetupStatus.value = status.state === 'ready' ? null : status
     return status
   } catch (error) {
@@ -1073,6 +1080,55 @@ async function recheckCodexCli(): Promise<void> {
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function setCodexModelSource(source: { source: 'codex' | 'glm' }): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  try {
+    const status = await codex.setModelSource({ source: source.source })
+    codexModelSource.value = status.modelSource ?? source.source
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+    if (status.state === 'ready') {
+      const sessionId = agentSessionId.value
+      if (sessionId) await startProviderSession(sessionId)
+    }
+  } catch (error) {
+    codexSetupStatus.value = {
+      authState: 'unknown',
+      message: agentErrorMessage(error),
+      platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
+      state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function setGlmApiKey(apiKey: string): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  try {
+    const status = await codex.setGlmApiKey({ apiKey })
+    codexSetupStatus.value = status.state === 'ready' ? null : status
+    if (status.state === 'ready') {
+      const sessionId = agentSessionId.value
+      if (sessionId) await startProviderSession(sessionId)
+    }
+  } catch (error) {
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
     }
   } finally {
     codexSetupBusy.value = false

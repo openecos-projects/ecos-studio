@@ -5,12 +5,15 @@ export type DesktopCodexDependencyState =
   | 'ready'
   | 'error'
 
+export type DesktopCodexModelSource = 'codex' | 'glm'
+
 export type DesktopCodexAuthState = 'authenticated' | 'unauthenticated' | 'unknown'
 
 export interface DesktopCodexDependencyStatus {
   authState: DesktopCodexAuthState
   binPath?: string
   message?: string
+  modelSource?: DesktopCodexModelSource
   platformSupportsInstall: boolean
   progressMessage?: string
   progressRatio?: number
@@ -28,4 +31,14 @@ export interface DesktopCodexSetBinPathRequest {
   path: string
 }
 
+export interface DesktopCodexSetModelSourceRequest {
+  source: DesktopCodexModelSource
+}
+
+export interface DesktopCodexSetGlmApiKeyRequest {
+  apiKey: string
+}
+
 export const DESKTOP_CODEX_BIN_SETTING_KEY = 'agent.codexBin'
+export const DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY = 'agent.modelSource'
+export const DESKTOP_GLM_API_KEY_SETTING_KEY = 'agent.glmApiKey'

@@ -42,6 +42,32 @@
       </div>
 
       <p v-if="error" class="model-settings__error" role="status">{{ error }}</p>
+
+      <div
+        v-if="modelSource"
+        class="model-settings__source"
+        role="radiogroup"
+        aria-label="模型来源"
+      >
+        <p class="model-settings__source-label">模型来源</p>
+        <div class="model-settings__source-options">
+          <button
+            v-for="option in modelSourceOptions"
+            :key="option.value"
+            type="button"
+            class="model-settings__source-option"
+            role="radio"
+            :aria-checked="modelSource === option.value"
+            :class="{
+              'model-settings__source-option--active': modelSource === option.value,
+            }"
+            :disabled="busy"
+            @click="selectSource(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <Teleport to="body">
@@ -82,6 +108,8 @@ import type {
   DesktopAgentModelSettings,
   DesktopAgentReasoningEffort,
   DesktopAgentSetModelSettingsRequest,
+  DesktopCodexModelSource,
+  DesktopCodexSetModelSourceRequest,
 } from '@ecos-studio/shared'
 
 const props = defineProps<{
@@ -89,12 +117,19 @@ const props = defineProps<{
   disabled?: boolean
   error?: string
   settings?: DesktopAgentModelSettings
+  modelSource?: DesktopCodexModelSource
 }>()
 const emit = defineEmits<{
   update: [
     settings: Pick<DesktopAgentSetModelSettingsRequest, 'model' | 'reasoningEffort'>,
   ]
+  'set-source': [request: DesktopCodexSetModelSourceRequest]
 }>()
+
+const modelSourceOptions: Array<{ value: DesktopCodexModelSource; label: string }> = [
+  { value: 'codex', label: 'Codex（GPT）' },
+  { value: 'glm', label: 'GLM（智谱）' },
+]
 
 const rootRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
@@ -191,6 +226,11 @@ function close(): void {
 function select(value: string): void {
   if (activeFlyout.value === 'model') emit('update', { model: value })
   else emit('update', { reasoningEffort: value as DesktopAgentReasoningEffort })
+  close()
+}
+
+function selectSource(source: DesktopCodexModelSource): void {
+  emit('set-source', { source })
   close()
 }
 
@@ -351,6 +391,49 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
   color: var(--danger-color);
   font-size: 0.6875rem;
   line-height: 1.4;
+}
+
+.model-settings__source {
+  margin-top: 0.4rem;
+  padding: 0.45rem 0.45rem 0.3rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.model-settings__source-label {
+  margin: 0 0 0.3rem;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.model-settings__source-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.model-settings__source-option {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.model-settings__source-option--active {
+  border-color: color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+  color: var(--text-primary);
+}
+
+.model-settings__source-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 @media (max-width: 640px) {
