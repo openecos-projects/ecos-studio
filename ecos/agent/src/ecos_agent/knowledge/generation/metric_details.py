@@ -220,7 +220,7 @@ METRIC_DETAILS: dict[str, MetricDetail] = {
     "sta_setup_wns": (
         "The worst setup worst negative slack across parseable STA corners, in nanoseconds.",
         "ECC reads each corner `/summary/setup/wns`, selects the numerical minimum, and records the responsible corner in the signoff facts.",
-        "Worst means the smallest number, not the greatest absolute magnitude. Missing or unparseable corners do not enter the aggregate and instead reduce coverage.",
+        "Worst means the smallest number, not the greatest absolute magnitude. Missing or unparseable corners do not enter the aggregate and instead reduce coverage. Corner-to-corner spread inside a single observation is normal PVT dispersion, not replay drift; comparisons across observations must pair identical corners instead of mixing aggregates with single-corner values.",
         ("ecc.metrics", "ecc.sta_qor"),
     ),
     "sta_setup_tns": (
@@ -244,7 +244,7 @@ METRIC_DETAILS: dict[str, MetricDetail] = {
     "sta_frequency_mhz": (
         "The lowest valid analyzed setup frequency across parseable STA corners, in MHz.",
         "ECC reads `/summary/setup/frequency_mhz` from each available corner and publishes the numerical minimum after rejecting nonpositive values.",
-        "It does not derive a clock frequency from WNS, and incomplete corner coverage remains a separate signoff limitation.",
+        "It does not derive a clock frequency from WNS, and incomplete corner coverage remains a separate signoff limitation. The published minimum is an aggregate and is not comparable against any single-corner frequency; quoting one corner's value against this metric or against another observation requires pairing the identical corner.",
         ("ecc.metrics", "ecc.sta_qor"),
     ),
     "harden_artifact_missing_count": (

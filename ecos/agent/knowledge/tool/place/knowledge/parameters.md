@@ -80,7 +80,7 @@
 
 **Meaning:** The random seed.
 
-**Role:** It initializes Python, Torch, and CUDA random state for reproducible initial perturbations.
+**Role:** It initializes Python, Torch, and CUDA random state for reproducible initial perturbations. Under a fixed seed the placement chain is bitwise-deterministic, producing identical signoff QoR across replays, so a seed change is a real QoR variable rather than measurement noise; ECOS pins candidate reruns to the workspace baseline seed so cross-candidate comparisons stay seed-matched.
 
 <a id="parameter.dreamplace.result_dir"></a>
 ## parameter.dreamplace.result_dir
