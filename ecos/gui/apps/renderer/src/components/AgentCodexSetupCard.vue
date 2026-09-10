@@ -79,9 +79,7 @@
         class="codex-setup__key-input"
         autocomplete="off"
         spellcheck="false"
-        :placeholder="
-          keyConfigured ? '已配置（输入可更换）' : '粘贴 API Key，无需账号登录'
-        "
+        :placeholder="keyConfigured ? '已配置（输入可更换）' : '粘贴 API Key'"
       />
       <button
         type="submit"
@@ -120,25 +118,12 @@
         一键安装
       </button>
       <button
-        v-if="showLogin"
-        type="button"
-        class="codex-setup__action codex-setup__action--primary"
-        :disabled="busy"
-        @click="emit('login')"
-      >
-        打开登录
-      </button>
-      <button
         type="button"
         class="codex-setup__action"
         :disabled="busy"
         @click="emit('recheck')"
       >
-        {{
-          currentSource !== 'glm' && status.state === 'installed_needs_login'
-            ? '我已完成登录'
-            : '重新检测'
-        }}
+        重新检测
       </button>
       <button
         type="button"
@@ -176,7 +161,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   install: []
-  login: []
   'pick-bin': []
   recheck: []
   retry: []
@@ -214,8 +198,8 @@ const stateLabel = computed(() => {
       return '未安装'
     case 'installing':
       return '安装中'
-    case 'installed_needs_login':
-      return currentSource.value === 'glm' ? '待配置' : '待登录'
+    case 'needs_api_key':
+      return '待配置'
     case 'ready':
       return '已就绪'
     case 'error':
@@ -231,16 +215,6 @@ const showInstall = computed(
     (props.status.state === 'missing' ||
       props.status.state === 'error' ||
       props.status.state === 'installing'),
-)
-
-const showLogin = computed(
-  () =>
-    currentSource.value !== 'glm' &&
-    (props.status.state === 'installed_needs_login' ||
-      (Boolean(props.status.binPath) &&
-        props.status.authState !== 'authenticated' &&
-        props.status.state !== 'missing' &&
-        props.status.state !== 'installing')),
 )
 </script>
 

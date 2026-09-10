@@ -89,11 +89,6 @@ describe('CodexDependencyService', () => {
           child.emit('close', 0)
           return
         }
-        if (args[0] === 'login' && args[1] === 'status') {
-          child.stdout.emit('data', 'Logged in\n')
-          child.emit('close', 0)
-          return
-        }
         child.emit('close', 1)
       })
       return child as never
@@ -110,9 +105,9 @@ describe('CodexDependencyService', () => {
     })
 
     await expect(service.getStatus()).resolves.toMatchObject({
-      state: 'ready',
+      state: 'needs_api_key',
       binPath: settingsBin,
-      authState: 'authenticated',
+      authState: 'unauthenticated',
     })
   })
 
@@ -167,11 +162,6 @@ describe('CodexDependencyService', () => {
           child.emit('close', 0)
           return
         }
-        if (args[0] === 'login' && args[1] === 'status') {
-          child.stderr.emit('data', 'Not logged in\n')
-          child.emit('close', 1)
-          return
-        }
         child.emit('close', 0)
       })
       return child as never
@@ -189,7 +179,7 @@ describe('CodexDependencyService', () => {
     })
 
     const status = await service.install()
-    expect(status.state).toBe('installed_needs_login')
+    expect(status.state).toBe('needs_api_key')
     expect(status.binPath).toBe(join(root, 'managed', 'bin', 'codex'))
     await expect(settingsStore.get<string>(DESKTOP_CODEX_BIN_SETTING_KEY)).resolves.toBe(
       join(root, 'managed', 'bin', 'codex'),
@@ -230,7 +220,6 @@ describe('CodexDependencyService', () => {
             child.emit('close', 0)
             return
           }
-          child.stdout.emit('data', 'Logged in\n')
           child.emit('close', 0)
         })
         return child as never
@@ -246,7 +235,9 @@ describe('CodexDependencyService', () => {
       homedir: () => root,
     })
 
-    await expect(service.setBinPath(codexBin)).resolves.toMatchObject({ state: 'ready' })
+    await expect(service.setBinPath(codexBin)).resolves.toMatchObject({
+      state: 'needs_api_key',
+    })
     await expect(service.resolveEnvironmentForAgent()).resolves.toEqual({
       ECOS_AGENT_CODEX_BIN: codexBin,
       CODEX_HOME: undefined,
@@ -257,7 +248,7 @@ describe('CodexDependencyService', () => {
     expect(spawn.mock.calls[0]?.[2]?.env?.PATH).toBe(`${binDir}:/usr/bin:/bin`)
   })
 
-  it('reports needs-key status in GLM mode without invoking codex login', async () => {
+  it('reports needs-key status in GLM mode', async () => {
     const root = await createRoot()
     const binDir = join(root, 'bin')
     await mkdir(binDir, { recursive: true })
@@ -290,7 +281,7 @@ describe('CodexDependencyService', () => {
 
     await service.setModelSource('glm')
     await expect(service.getStatus()).resolves.toMatchObject({
-      state: 'installed_needs_login',
+      state: 'needs_api_key',
       authState: 'unauthenticated',
       modelSource: 'glm',
     })

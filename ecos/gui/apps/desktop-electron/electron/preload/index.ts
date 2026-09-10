@@ -504,7 +504,6 @@ const desktopApi: DesktopApi = {
     codex: {
       getStatus: () => invokeDesktop(desktopApiIpcChannels.agentCodexGetStatus),
       install: () => invokeDesktop(desktopApiIpcChannels.agentCodexInstall),
-      login: () => invokeDesktop(desktopApiIpcChannels.agentCodexLogin),
       recheck: () => invokeDesktop(desktopApiIpcChannels.agentCodexRecheck),
       setBinPath: (request: DesktopCodexSetBinPathRequest) =>
         invokeDesktop(desktopApiIpcChannels.agentCodexSetBinPath, request),

@@ -361,7 +361,6 @@ describe('preload desktop bridge contract', () => {
 
     await expect(bridge.agent.codex.getStatus()).resolves.toEqual(status)
     await expect(bridge.agent.codex.install()).resolves.toEqual(status)
-    await expect(bridge.agent.codex.login()).resolves.toEqual(status)
     await expect(bridge.agent.codex.recheck()).resolves.toEqual(status)
     await expect(bridge.agent.codex.setBinPath({ path: '/bin/codex' })).resolves.toEqual(
       status,
@@ -377,7 +376,6 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.agentCodexInstall,
     )
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopApiIpcChannels.agentCodexLogin)
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.agentCodexRecheck,
     )

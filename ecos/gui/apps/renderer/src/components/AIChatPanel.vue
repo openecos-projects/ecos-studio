@@ -24,7 +24,6 @@
           :busy="codexSetupBusy || isAgentConnecting"
           :status="codexSetupCardStatus"
           @install="installCodexCli"
-          @login="loginCodexCli"
           @recheck="recheckCodexCli"
           @pick-bin="pickCodexBin"
           @retry="retryAfterCodexReady"
@@ -1045,29 +1044,6 @@ async function installCodexCli(): Promise<void> {
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: true,
-      state: 'error',
-    }
-  } finally {
-    codexSetupBusy.value = false
-  }
-}
-
-async function loginCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
-  if (!codex) return
-  codexSetupBusy.value = true
-  try {
-    const status = await codex.login()
-    codexSetupStatus.value = status
-    if (status.state === 'ready') codexSetupManageOpen.value = false
-  } catch (error) {
-    codexSetupStatus.value = {
-      ...(codexSetupStatus.value ?? {
-        authState: 'unknown',
-        platformSupportsInstall: false,
-        state: 'error',
-      }),
-      message: agentErrorMessage(error),
       state: 'error',
     }
   } finally {
