@@ -177,7 +177,7 @@ describe('ProjectsView project management surface', () => {
 
     expect(rowSource).toContain('project-tree-actions')
     expect(rowSource).toContain('class="row-primary-action"')
-    expect(rowSource).toContain('<span>New</span>')
+    expect(rowSource).toContain('<span>New Workspace</span>')
     expect(rowSource).toContain('class="row-action-menu"')
     expect(rowSource).toContain('Import workspace')
     expect(rowSource).toContain('Remove project')
@@ -367,6 +367,7 @@ describe('ProjectsView project management surface', () => {
   it('uses an explicit Open action with an up-right icon for workspace rows', () => {
     expect(source).toContain('<i class="ri-arrow-right-up-line" aria-hidden="true"></i>')
     expect(source).toContain('class="row-primary-action"')
+    expect(source).toContain('<span>New Workspace</span>')
     expect(projectStyles).toContain('.circle-action i')
     expect(projectStyles).not.toContain('.circle-glyph')
   })

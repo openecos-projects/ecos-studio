@@ -369,6 +369,7 @@
   font: inherit;
   font-size: 10px;
   font-weight: 760;
+  white-space: nowrap;
 }
 
 .row-primary-action i {

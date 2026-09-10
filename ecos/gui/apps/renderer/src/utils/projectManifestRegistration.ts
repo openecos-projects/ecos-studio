@@ -2,11 +2,14 @@ import type { WorkspaceConfig } from '@/types'
 import { waitForDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { rememberProjectHistoryEntry } from '@/utils/projectHistory'
 import { parseProjectManifest } from '@ecos-studio/shared'
 
 export interface ProjectRouteContext {
   projectRoot: string
   projectName?: string
+  mode?: 'select' | 'create'
+  projectId?: string
 }
 
 export interface ProjectManagedWorkspaceRegistrationInput {
@@ -34,6 +37,14 @@ export function projectContextFromWorkspaceConfig(
     projectName:
       typeof projectContext.project_name === 'string'
         ? projectContext.project_name
+        : undefined,
+    mode:
+      projectContext.mode === 'select' || projectContext.mode === 'create'
+        ? projectContext.mode
+        : undefined,
+    projectId:
+      typeof projectContext.project_id === 'string'
+        ? projectContext.project_id
         : undefined,
   }
 }
@@ -128,8 +139,11 @@ export async function resolveManagedProjectContext(options: {
 export async function registerProjectManagedWorkspace(
   input: ProjectManagedWorkspaceRegistrationInput,
 ): Promise<void> {
+  const projectContext =
+    input.projectContext ??
+    (input.config ? projectContextFromWorkspaceConfig(input.config) : null)
   const projectRoot =
-    input.projectContext?.projectRoot || queryString(input.routeQuery?.projectRoot)
+    projectContext?.projectRoot || queryString(input.routeQuery?.projectRoot)
   const workspacePath = normalizePath(input.workspacePath)
   if (!projectRoot || !workspacePath) return
 
@@ -147,11 +161,28 @@ export async function registerProjectManagedWorkspace(
     }
 
     const projectName =
-      input.projectContext?.projectName ||
+      projectContext?.projectName ||
       queryString(input.routeQuery?.projectName) ||
       basenamePath(registeredProjectRoot) ||
       'project'
-    await mutateProjectManifest(registeredProjectRoot, {
+    const isCreatingFrontendProject =
+      input.config?.designTool === 'frontend' && projectContext?.mode === 'create'
+    if (isCreatingFrontendProject) {
+      const existingManifest = await readOptionalProjectTextFile('project.json', {
+        projectPath: registeredProjectRoot,
+      })
+      if (existingManifest) {
+        throw new Error(`A project.json already exists at ${registeredProjectRoot}.`)
+      }
+      await mutateProjectManifest(registeredProjectRoot, {
+        type: 'create',
+        name: projectName,
+        designName: String(input.config?.parameters.design || projectName),
+        projectType: 'frontend',
+      })
+    }
+
+    const manifest = await mutateProjectManifest(registeredProjectRoot, {
       type: 'register-workspace',
       input: {
         projectRoot: registeredProjectRoot,
@@ -172,6 +203,20 @@ export async function registerProjectManagedWorkspace(
         config: input.config,
       },
     })
+    if (input.config?.designTool === 'frontend') {
+      try {
+        await rememberProjectHistoryEntry({
+          id: manifest.root_path,
+          name: manifest.name,
+          path: manifest.root_path,
+          lastOpened: new Date(),
+          projectType: 'frontend',
+          topModule: manifest.base_design.top_module,
+        })
+      } catch (error) {
+        console.warn('Failed to remember frontend project history entry.', error)
+      }
+    }
   } catch (error) {
     console.warn('Failed to update project manifest after workspace creation.', error)
     warn(

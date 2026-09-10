@@ -155,7 +155,7 @@
                       @click="createWorkspaceForProject(project.model)"
                     >
                       <i class="ri-add-line" aria-hidden="true"></i>
-                      <span>New</span>
+                      <span>New Workspace</span>
                     </button>
                     <button
                       type="button"

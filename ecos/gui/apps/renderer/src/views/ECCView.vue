@@ -246,6 +246,7 @@ const showAllProjects = ref(false)
 type ProjectWorkspaceInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
+  lockProjectContext?: boolean
 }
 
 const initialWizardConfig = ref<ProjectWorkspaceInitialConfig | undefined>(undefined)
@@ -346,6 +347,8 @@ const prefillWorkspaceDirectory = async () => {
   initialWizardConfig.value = mergeBranchInitialConfig(
     {
       directory: workspacePath,
+      managedWorkspaceRoot: projectRoot ? normalizePath(projectRoot) : undefined,
+      lockProjectContext: Boolean(projectRoot),
       origin_def: originDef,
       origin_verilog: originVerilog,
       pdk: sourceWorkspaceConfig?.pdk,
@@ -588,6 +591,7 @@ function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | un
   return {
     managedWorkspaceRoot: normalizePath(projectRoot),
     deriveDirectoryFromDesign: true,
+    lockProjectContext: true,
     parameters: {
       description: 'Created from Project Management',
       design: queryString(route.query.designName),

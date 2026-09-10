@@ -15,6 +15,7 @@ const registerProjectRoot = vi.fn()
 const registerProjectReadRoot = vi.fn()
 const mutateProjectManifest = vi.fn()
 const readOptionalProjectTextFile = vi.fn()
+const rememberProjectHistoryEntry = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: vi.fn(async () => ({
@@ -34,15 +35,22 @@ vi.mock('@/utils/projectFiles', () => ({
     readOptionalProjectTextFile(...args),
 }))
 
+vi.mock('@/utils/projectHistory', () => ({
+  rememberProjectHistoryEntry: (...args: unknown[]) =>
+    rememberProjectHistoryEntry(...args),
+}))
+
 describe('projectManifestRegistration', () => {
   beforeEach(() => {
     registerProjectRoot.mockReset()
     registerProjectReadRoot.mockReset()
     mutateProjectManifest.mockReset()
     readOptionalProjectTextFile.mockReset()
+    rememberProjectHistoryEntry.mockReset()
     registerProjectRoot.mockImplementation(async (path: string) => path)
     mutateProjectManifest.mockResolvedValue(undefined)
     readOptionalProjectTextFile.mockResolvedValue(null)
+    rememberProjectHistoryEntry.mockResolvedValue([])
   })
 
   it('derives project context from wizard project_context payload', () => {
@@ -59,7 +67,85 @@ describe('projectManifestRegistration', () => {
     expect(projectContextFromWorkspaceConfig(config)).toEqual({
       projectRoot: '/projects/gcd',
       projectName: 'gcd',
+      mode: 'select',
+      projectId: undefined,
     })
+  })
+
+  it('creates a frontend project manifest before registering its first workspace', async () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/frontend-demo',
+      name: 'frontend-demo',
+      designName: 'cpu_top',
+      projectType: 'frontend',
+      now: '2026-09-09T00:00:00.000Z',
+    })
+    mutateProjectManifest.mockResolvedValue(manifest)
+    const config = {
+      directory: '/projects/frontend-demo/ws_0001',
+      designTool: 'frontend',
+      pdk: '',
+      pdk_root: '',
+      origin_def: '',
+      origin_verilog: '',
+      rtl_list: [],
+      parameters: { design: 'cpu_top' },
+      project_context: {
+        mode: 'create',
+        project_name: 'frontend-demo',
+        project_root: '/projects/frontend-demo',
+        project_json_path: '/projects/frontend-demo/project.json',
+      },
+    } as WorkspaceConfig
+
+    await registerProjectManagedWorkspace({
+      workspacePath: config.directory,
+      config,
+    })
+
+    expect(mutateProjectManifest).toHaveBeenNthCalledWith(1, '/projects/frontend-demo', {
+      type: 'create',
+      name: 'frontend-demo',
+      designName: 'cpu_top',
+      projectType: 'frontend',
+    })
+    expect(mutateProjectManifest).toHaveBeenNthCalledWith(
+      2,
+      '/projects/frontend-demo',
+      expect.objectContaining({ type: 'register-workspace' }),
+    )
+    expect(rememberProjectHistoryEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/projects/frontend-demo',
+        projectType: 'frontend',
+      }),
+    )
+  })
+
+  it('does not overwrite an existing project manifest in create mode', async () => {
+    const warnings: string[] = []
+    readOptionalProjectTextFile.mockResolvedValue('{}')
+    const config = {
+      directory: '/projects/frontend-demo/ws_0001',
+      designTool: 'frontend',
+      parameters: { design: 'cpu_top' },
+      project_context: {
+        mode: 'create',
+        project_name: 'frontend-demo',
+        project_root: '/projects/frontend-demo',
+        project_json_path: '/projects/frontend-demo/project.json',
+      },
+    } as WorkspaceConfig
+
+    await registerProjectManagedWorkspace({
+      workspacePath: config.directory,
+      config,
+      projectContext: projectContextFromWorkspaceConfig(config),
+      onWarning: (summary) => warnings.push(summary),
+    })
+
+    expect(mutateProjectManifest).not.toHaveBeenCalled()
+    expect(warnings).toEqual(['Project manifest not updated'])
   })
 
   it('mutates project.json when a project-managed workspace is registered', async () => {

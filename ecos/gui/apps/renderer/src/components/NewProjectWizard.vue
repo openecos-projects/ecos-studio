@@ -103,8 +103,11 @@
                 <header v-else class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Project Setup</h2>
                   <p class="mt-2 text-sm text-(--text-secondary)">
-                    Choose the project that will own this workspace, or define a project
-                    root for a new project.
+                    {{
+                      lockProjectContext
+                        ? 'Create a workspace in the selected backend project.'
+                        : 'Choose the project that will own this workspace, or define a project root for a new project.'
+                    }}
                   </p>
                 </header>
 
@@ -137,6 +140,7 @@
                   class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
                 >
                   <div
+                    v-if="!lockProjectContext"
                     class="mb-5 inline-flex rounded-lg border border-(--border-color) bg-(--bg-primary)/80 p-1"
                   >
                     <button
@@ -177,10 +181,16 @@
                           readonly
                           type="text"
                           placeholder="/projects/gcd_backend"
-                          class="min-w-0 flex-1 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none"
+                          :class="[
+                            'min-w-0 flex-1 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none',
+                            lockProjectContext
+                              ? 'cursor-default opacity-75'
+                              : 'cursor-pointer',
+                          ]"
                           @click="selectProjectRoot"
                         />
                         <button
+                          v-if="!lockProjectContext"
                           type="button"
                           class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-4 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors duration-200 hover:bg-(--bg-secondary)"
                           @click="selectProjectRoot"
@@ -192,7 +202,7 @@
                     </div>
 
                     <div
-                      v-if="projectHistory.length > 0"
+                      v-if="!lockProjectContext && projectHistory.length > 0"
                       class="rounded-lg border border-(--border-color) bg-(--bg-primary)/55 p-3"
                     >
                       <div class="mb-3 flex items-center justify-between gap-3">
@@ -238,13 +248,13 @@
                       </div>
                     </div>
                     <p
-                      v-else-if="isLoadingProjectHistory"
+                      v-else-if="!lockProjectContext && isLoadingProjectHistory"
                       class="text-xs text-(--text-secondary)"
                     >
                       Loading recent projects...
                     </p>
                     <p
-                      v-else-if="projectHistoryError"
+                      v-else-if="!lockProjectContext && projectHistoryError"
                       class="text-xs text-(--text-secondary)"
                     >
                       {{ projectHistoryError }}
@@ -259,7 +269,11 @@
                         v-model="projectContext.project_name"
                         type="text"
                         placeholder="gcd_backend"
-                        class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
+                        :readonly="lockProjectContext"
+                        :class="[
+                          'w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)',
+                          lockProjectContext ? 'cursor-default opacity-75' : '',
+                        ]"
                       />
                     </div>
                   </div>
@@ -1593,6 +1607,7 @@ interface Emits {
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
+  lockProjectContext?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
   suggestedWorkspaceName?: string
@@ -1660,11 +1675,14 @@ const wizardTitle = computed(() => props.title || 'New Workspace')
 const standaloneWorkspace = computed(() =>
   Boolean(props.initialConfig?.standaloneWorkspace),
 )
+const lockProjectContext = computed(() =>
+  Boolean(props.initialConfig?.lockProjectContext && !standaloneWorkspace.value),
+)
 
 onMounted(() => {
   document.addEventListener('keydown', handleWizardKeydown)
   if (standaloneWorkspace.value) return
-  void loadProjectHistoryEntries()
+  if (!lockProjectContext.value) void loadProjectHistoryEntries()
   void applyProjectDefaultsForProject(projectContext.value.project_root)
 })
 
@@ -2809,6 +2827,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function setProjectMode(mode: ProjectMode) {
+  if (lockProjectContext.value) return
   projectContext.value.mode = mode
   if (mode === 'create') {
     projectManifestLoadGeneration += 1
@@ -2828,6 +2847,7 @@ function setProjectMode(mode: ProjectMode) {
 }
 
 async function selectProjectFromHistory(project: Project) {
+  if (lockProjectContext.value) return
   const projectRoot = normalizePath(project.path)
   projectContext.value.mode = 'select'
   projectContext.value.project_root = projectRoot
@@ -2837,6 +2857,7 @@ async function selectProjectFromHistory(project: Project) {
 }
 
 async function selectProjectRoot() {
+  if (lockProjectContext.value) return
   const result = await getDesktopApi().dialog.pickDirectory({
     title: 'Select Project Root',
   })
@@ -2850,6 +2871,7 @@ async function selectProjectRoot() {
 }
 
 async function selectProjectParentPath() {
+  if (lockProjectContext.value) return
   const result = await getDesktopApi().dialog.pickDirectory({
     title: 'Select Project Parent Path',
   })
