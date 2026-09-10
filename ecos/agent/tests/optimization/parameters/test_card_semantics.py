@@ -34,6 +34,7 @@ def test_parameter_cards_are_flat_under_optimization() -> None:
     }
     assert {path.name for path in CARD_ROOT.iterdir()} == {
         "manifest.json",
+        "state-rule-manifest.v1.json",
         *(f"{knob.value}.json" for knob in OptimizationKnob),
     }
 
