@@ -5,7 +5,7 @@
 
 **Calculation:** ECC reads each corner `/summary/setup/wns`, selects the numerical minimum, and records the responsible corner in the signoff facts.
 
-**Boundary:** Worst means the smallest number, not the greatest absolute magnitude. Missing or unparseable corners do not enter the aggregate and instead reduce coverage.
+**Boundary:** Worst means the smallest number, not the greatest absolute magnitude. Missing or unparseable corners do not enter the aggregate and instead reduce coverage. Corner-to-corner spread inside a single observation is normal PVT dispersion, not replay drift; comparisons across observations must pair identical corners instead of mixing aggregates with single-corner values.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.sta_qor**
 
@@ -49,6 +49,6 @@
 
 **Calculation:** ECC reads `/summary/setup/frequency_mhz` from each available corner and publishes the numerical minimum after rejecting nonpositive values.
 
-**Boundary:** It does not derive a clock frequency from WNS, and incomplete corner coverage remains a separate signoff limitation.
+**Boundary:** It does not derive a clock frequency from WNS, and incomplete corner coverage remains a separate signoff limitation. The published minimum is an aggregate and is not comparable against any single-corner frequency; quoting one corner's value against this metric or against another observation requires pairing the identical corner.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**, **ecc.sta_qor**
