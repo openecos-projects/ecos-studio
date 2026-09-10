@@ -37,7 +37,7 @@ afterEach(async () => {
 })
 
 describe('afterPackLinuxSandbox', () => {
-  it('wraps the Linux executable so it can add --no-sandbox before Chromium starts', async () => {
+  it('wraps the Linux executable to disable the sandbox without shifting user arguments', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     const executablePath = join(appOutDir, 'ecos-studio')
@@ -59,7 +59,12 @@ describe('afterPackLinuxSandbox', () => {
     const wrapperScript = await readFile(executablePath, 'utf8')
 
     expect(renamedBinary).toBe('binary-placeholder')
-    expect(wrapperScript).toContain('exec "$BINARY" --no-sandbox "$@"')
+    // The fallback must disable the sandbox through the environment: any
+    // switch injected before "$@" would occupy argv[1] and break the
+    // --cli pass-through dispatch in the Electron main process.
+    expect(wrapperScript).toContain('ELECTRON_DISABLE_SANDBOX=1')
+    expect(wrapperScript).not.toContain('"$BINARY" --')
+    expect(wrapperScript).toContain('exec "$BINARY" "$@"')
     expect(wrapperScript).toContain('helper_mode')
   })
 

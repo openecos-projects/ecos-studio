@@ -21,7 +21,12 @@ if [ -r "$HELPER" ]; then
   fi
 fi
 
-exec "$BINARY" --no-sandbox "$@"
+# Disable the sandbox via the environment, not a prepended --no-sandbox
+# switch: an injected switch would shift user arguments and break argv-based
+# dispatch such as the --cli pass-through.
+ELECTRON_DISABLE_SANDBOX=1
+export ELECTRON_DISABLE_SANDBOX
+exec "$BINARY" "$@"
 `
 }
 
