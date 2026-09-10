@@ -3199,7 +3199,7 @@ impl LoadedViewer {
     fn query_mode_picker(&mut self, ui: &mut egui::Ui) {
         egui::ComboBox::from_id_salt("chip_viewer_query_input_mode")
             .selected_text(match self.query_input_mode {
-                QueryInputMode::Search => format!("⌕ {}", self.search_mode.label()),
+                QueryInputMode::Search => format!("Search: {}", self.search_mode.label()),
                 QueryInputMode::ShapeId => "# Shape ID".to_string(),
             })
             .width(98.0)
@@ -3238,18 +3238,15 @@ impl LoadedViewer {
     }
 
     fn query_send_button(&self, ui: &mut egui::Ui) -> egui::Response {
-        let icon = match self.query_input_mode {
-            QueryInputMode::Search => "⌕",
-            QueryInputMode::ShapeId => "➤",
+        let label = match self.query_input_mode {
+            QueryInputMode::Search => "Search",
+            QueryInputMode::ShapeId => "Select",
         };
-        ui.add_sized(
-            egui::vec2(34.0, 34.0),
-            egui::Button::new(egui::RichText::new(icon).size(19.0).strong()),
-        )
-        .on_hover_text(match self.query_input_mode {
-            QueryInputMode::Search => "Search and locate",
-            QueryInputMode::ShapeId => "Select shape id",
-        })
+        ui.add(egui::Button::new(egui::RichText::new(label).strong()))
+            .on_hover_text(match self.query_input_mode {
+                QueryInputMode::Search => "Search and locate",
+                QueryInputMode::ShapeId => "Select shape id",
+            })
     }
 
     fn submit_query(&mut self) {
