@@ -110,6 +110,12 @@
 
 ---
 
+## 问题 4（自查发现）：GLM 模式下“选择本地 codex”选了也不生效
+
+GLM 模式现在忽略 settings 级 codex 二进制（问题 1 修复），但卡片上仍显示
+“选择本地 codex”按钮，选了文件对模型源毫无影响——又一个“点了没反应”。
+修复：GLM 模式下隐藏该按钮（仅 codex 模式提供），卡片测试补充断言。
+
 ## 附带核查（未发现问题的部分）
 
 - GLM 结构化输出：objective proposal 的 `outputSchema` 走 GLM Responses API 正常
