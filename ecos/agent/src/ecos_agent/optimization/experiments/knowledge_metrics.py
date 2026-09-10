@@ -42,3 +42,15 @@ def build_feedback_ledger(rows: Iterable[Mapping[str, object]]) -> list[dict[str
             "confidence": "high" if terminal.get("outside", 0) and not terminal.get("tie", 0) else "unknown",
         })
     return ledger
+
+
+def exact_action(row: Mapping[str, object]) -> tuple[object, object, object] | None:
+    if row.get("knob") is None or row.get("direction") is None:
+        return None
+    return row["knob"], row["direction"], row.get("requested_value")
+
+
+def action_divergence(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
+    actions = [exact_action(row) for row in rows]
+    observed = [action for action in actions if action is not None]
+    return {"observed": len(observed), "unique_actions": len(set(observed)), "divergent": len(set(observed)) > 1}
