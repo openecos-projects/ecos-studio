@@ -11,10 +11,10 @@ from typing import Mapping, Sequence
 from ecos_agent.optimization.experiments.baselines import ONLINE_BASELINE_METHODS, BaselineMethod
 from ecos_agent.optimization.contracts import (
     ROUTABILITY_OBJECTIVE_ORDER,
+    TIMING_GUARDRAIL_ORDER,
     TerminalObservation,
     TimingMetric,
 )
-from ecos_agent.optimization.experiments.gate0 import compare_observations
 
 _MAX_EXACT_BLOCKS = 20
 _BOOTSTRAP_SAMPLES = 10_000
@@ -157,6 +157,32 @@ def _terminal_metrics(observation: TerminalObservation) -> dict[str, float]:
             for metric in TimingMetric
         },
     }
+
+
+def compare_observations(
+    reference: Mapping[str, float],
+    candidate: TerminalObservation,
+    epsilon: Mapping[str, float],
+) -> str:
+    if not candidate.eligible_for_incumbent:
+        return "candidate_ineligible"
+    metrics = _terminal_metrics(candidate)
+    required = {
+        item.value for item in (*ROUTABILITY_OBJECTIVE_ORDER, *TIMING_GUARDRAIL_ORDER)
+    }
+    if set(reference) != required or set(epsilon) != required:
+        raise ValueError("noise comparison metrics are incomplete")
+    for metric in TIMING_GUARDRAIL_ORDER:
+        key = metric.value
+        if metrics[key] < reference[key] - epsilon[key]:
+            return "timing_regression"
+    for metric in ROUTABILITY_OBJECTIVE_ORDER:
+        key = metric.value
+        if metrics[key] < reference[key] - epsilon[key]:
+            return "better"
+        if metrics[key] > reference[key] + epsilon[key]:
+            return "worse"
+    return "noise_tie"
 
 
 def _unit_interval(value: object) -> float:
