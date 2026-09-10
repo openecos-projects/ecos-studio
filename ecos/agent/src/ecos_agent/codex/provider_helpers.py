@@ -244,6 +244,25 @@ def _text_sha256(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+_RESPONSE_EXCERPT_LIMIT = 8192
+_RESPONSE_EXCERPT_SEPARATOR = "\n...[excerpt truncated]...\n"
+
+
+def _response_excerpt(value: str | None) -> str | None:
+    """Bound a raw model response for audit persistence on parse failures."""
+    if value is None:
+        return None
+    if len(value) <= _RESPONSE_EXCERPT_LIMIT:
+        return value
+    tail = _RESPONSE_EXCERPT_LIMIT - len(_RESPONSE_EXCERPT_SEPARATOR)
+    head = tail // 2
+    return (
+        value[:head]
+        + _RESPONSE_EXCERPT_SEPARATOR
+        + value[-(tail - head):]
+    )
+
+
 def _runtime_workspace_roots(roots: Iterable[str | Path]) -> tuple[str, ...]:
     normalized = tuple(
         dict.fromkeys(str(Path(root).expanduser().resolve()) for root in roots)

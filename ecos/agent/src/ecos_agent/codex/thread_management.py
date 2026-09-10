@@ -9,6 +9,7 @@ from ecos_agent.codex.provider_helpers import (
     _model_reasoning_efforts,
     _read_only_thread_config,
     _build_prompt,
+    _response_excerpt,
     ToolPolicy,
 )
 from ecos_agent.codex.rpc import CodexProviderError, _read_nested_string, _JsonLineRpcProcessClient
@@ -42,15 +43,18 @@ class CodexThreadManagementMixin:
                     **envelope, envelope_sha256=canonical_sha256(envelope)
                 )
         text = self._run_turn(prompt, output_schema, tool_policy=tool_policy)
+        self._last_response_text = text
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
             self._runtime_status.validation(False)
+            self._parse_failure_excerpt = _response_excerpt(text)
             raise CodexProviderError(
                 "Codex assistant content is not valid JSON", failure_class="parse_error"
             ) from exc
         if not isinstance(payload, dict):
             self._runtime_status.validation(False)
+            self._parse_failure_excerpt = _response_excerpt(text)
             raise CodexProviderError(
                 "Codex assistant JSON must be an object", failure_class="parse_error"
             )

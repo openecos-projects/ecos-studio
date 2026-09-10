@@ -60,6 +60,7 @@ from ecos_agent.codex.provider_helpers import (
     _normalize_v2_domains,
     _read_only_thread_config,
     _require_all_schema_properties,
+    _response_excerpt,
     _runtime_workspace_roots,
     _source_search_output_schema,
     _stage_catalog,
@@ -169,6 +170,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         self._status_snapshots = StatusSnapshots()
         self._runtime_status = RequestTelemetry()
         self._last_turn_usage: dict[str, int] | None = None
+        self._last_response_text: str | None = None
+        self._parse_failure_excerpt: str | None = None
 
     def propose_v2(
         self,
@@ -269,6 +272,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         with self._state_lock:
             self._completed_turn = None
             self._planning_evidence = None
+            self._parse_failure_excerpt = None
             self._planning_envelope = PlanningProviderEnvelope(
                 **envelope_payload,
                 envelope_sha256=canonical_sha256(envelope_payload),
@@ -539,6 +543,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             raise
         except Exception as exc:
             self._runtime_status.validation(False)
+            self._parse_failure_excerpt = _response_excerpt(self._last_response_text)
             raise CodexProviderError(
                 "Codex GUI proposal failed schema validation",
                 failure_class="parse_error",
@@ -654,6 +659,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             self._completed_turn = None
             envelope = self._planning_envelope
             self._planning_envelope = None
+            parse_failure_excerpt = self._parse_failure_excerpt
+            self._parse_failure_excerpt = None
         if completed_turn is None:
             return
         if envelope is None:
@@ -670,6 +677,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 response_sha256=response_sha256,
                 diagnostics_sha256=diagnostics_sha256,
                 envelope=envelope,
+                response_excerpt=parse_failure_excerpt,
             )
 
     def _ensure_client(self) -> _JsonLineRpcProcessClient:

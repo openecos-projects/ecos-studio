@@ -322,12 +322,91 @@ def test_planner_fails_closed_on_invalid_proposal(
     provider = _provider(tmp_path)
     invalid = _proposal_v2(_context(), _domain())
     invalid["action"] = None
-    monkeypatch.setattr(provider, "_request_json", lambda **_kwargs: invalid)
+    raw = json.dumps(invalid)
+
+    def request(**kwargs: object) -> dict[str, object]:
+        provider._last_response_text = raw
+        provider._completed_turn = (f"thread-{tmp_path.name}", "turn", HASH)
+        return invalid
+
+    monkeypatch.setattr(provider, "_request_json", request)
 
     with pytest.raises(CodexProviderError, match="schema validation") as error:
         provider.propose_v2(_context(), _domain())
 
     assert error.value.failure_class == "parse_error"
+    evidence = provider.consume_planning_evidence()
+    assert evidence is not None
+    assert evidence.response_excerpt == raw
+
+
+def test_planner_keeps_response_excerpt_on_invalid_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    raw = "I propose density 0.9, not JSON."
+
+    def run_turn(*_args: object, **_kwargs: object) -> str:
+        provider._completed_turn = (f"thread-{tmp_path.name}", "turn", HASH)
+        return raw
+
+    monkeypatch.setattr(provider, "_run_turn", run_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: None)
+    monkeypatch.setattr(
+        provider, "_ensure_thread", lambda _client: f"thread-{tmp_path.name}"
+    )
+
+    with pytest.raises(CodexProviderError, match="not valid JSON"):
+        provider.propose_v2(_context(), _domain())
+
+    evidence = provider.consume_planning_evidence()
+    assert evidence is not None
+    assert evidence.response_excerpt == raw
+
+
+def test_planner_evidence_has_no_excerpt_on_accepted_proposal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+
+    def request(**kwargs: object) -> dict[str, object]:
+        provider._completed_turn = (f"thread-{tmp_path.name}", "turn", HASH)
+        return _proposal_v2(_context(), _domain())
+
+    monkeypatch.setattr(provider, "_request_json", request)
+
+    provider.propose_v2(_context(), _domain())
+
+    evidence = provider.consume_planning_evidence()
+    assert evidence is not None
+    assert evidence.response_excerpt is None
+
+
+def test_response_excerpt_is_bounded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    provider = _provider(tmp_path)
+    oversized = "x" * 100_000
+
+    def run_turn(*_args: object, **_kwargs: object) -> str:
+        provider._completed_turn = (f"thread-{tmp_path.name}", "turn", HASH)
+        return oversized
+
+    monkeypatch.setattr(provider, "_run_turn", run_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: None)
+    monkeypatch.setattr(
+        provider, "_ensure_thread", lambda _client: f"thread-{tmp_path.name}"
+    )
+
+    with pytest.raises(CodexProviderError, match="not valid JSON"):
+        provider.propose_v2(_context(), _domain())
+
+    evidence = provider.consume_planning_evidence()
+    assert evidence is not None
+    assert evidence.response_excerpt is not None
+    assert len(evidence.response_excerpt) <= 8192
+    assert "[excerpt truncated]" in evidence.response_excerpt
+    assert evidence.response_excerpt.endswith("x")
 
 
 def test_planner_has_only_exact_value_lane(
