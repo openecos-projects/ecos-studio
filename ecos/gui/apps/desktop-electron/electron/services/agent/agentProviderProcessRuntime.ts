@@ -104,8 +104,10 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
 
   /**
    * Merge runtime overrides (e.g. settings-backed ECOS_AGENT_CODEX_BIN).
-   * Restarts the provider child when an override value changes so the next
-   * request spawns with the updated environment.
+   * Restarts the provider child whenever the effective environment changes so
+   * the next request spawns with the updated environment — model-source
+   * switches change CODEX_HOME/API-key vars while the codex binary stays the
+   * same, and the child must not keep serving from the stale environment.
    */
   syncEnvironmentOverrides(overrides: AgentProviderEnvOverrides): void {
     const next: NodeJS.ProcessEnv = {
@@ -119,10 +121,9 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         next[key] = value
       }
     }
-    const previousCodex = this.env.ECOS_AGENT_CODEX_BIN
-    const nextCodex = next.ECOS_AGENT_CODEX_BIN
+    const previous = this.env
     this.env = next
-    if (previousCodex !== nextCodex && this.child) {
+    if (this.child && stableEnvKey(previous) !== stableEnvKey(next)) {
       this.disposeChildForEnvReload()
     }
   }
@@ -1670,4 +1671,12 @@ function readEventText(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= 4096
     ? value
     : null
+}
+
+function stableEnvKey(env: NodeJS.ProcessEnv): string {
+  return JSON.stringify(
+    Object.keys(env)
+      .sort()
+      .map((key) => [key, env[key]]),
+  )
 }

@@ -385,14 +385,19 @@ export class CodexDependencyService {
   }
 
   private async resolveBinPath(): Promise<string | null> {
-    const fromSettings = await this.settingsStore.get<string>(
-      DESKTOP_CODEX_BIN_SETTING_KEY,
-    )
-    if (typeof fromSettings === 'string' && fromSettings.trim()) {
-      const validated = await this.validateExecutable(
-        expandUserPath(fromSettings.trim(), this.resolveHomedir),
+    // GLM mode injects a managed CODEX_HOME; a user-selected codex wrapper
+    // that exports its own CODEX_HOME would silently defeat it, so the
+    // settings-level binary override only applies in codex mode.
+    if ((await this.readModelSource()) !== 'glm') {
+      const fromSettings = await this.settingsStore.get<string>(
+        DESKTOP_CODEX_BIN_SETTING_KEY,
       )
-      if (validated) return validated
+      if (typeof fromSettings === 'string' && fromSettings.trim()) {
+        const validated = await this.validateExecutable(
+          expandUserPath(fromSettings.trim(), this.resolveHomedir),
+        )
+        if (validated) return validated
+      }
     }
 
     const fromEnv = this.env.ECOS_AGENT_CODEX_BIN

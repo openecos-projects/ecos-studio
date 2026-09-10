@@ -989,7 +989,6 @@ async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null
     const status = await codex.getStatus()
     codexModelSource.value = status.modelSource ?? 'codex'
     codexSetupStatus.value = status
-    if (status.state === 'ready') codexSetupManageOpen.value = false
     return status
   } catch (error) {
     codexSetupStatus.value = {
