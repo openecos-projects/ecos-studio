@@ -175,9 +175,9 @@ git -C ecc merge-tree --write-tree --name-only HEAD origin/yell/update_cli
 
 推论：沿用这个声明器时，四个新报告不会以对应的 STA `report_text` Artifact 被声明；依赖已声明 Artifact 的 Studio 读取路径可能缺失它们。需要用新工具真实输出验证，不应只依靠仍制造旧文件名的测试。
 
-上游 [qor_report.py][up-qor] 又复制了一套 GUI 评分权重、阈值和步骤目录映射，通过现有 metrics 文件计算报表；本地 [qor.py](../../ecc/chipcompiler/engine/qor.py) 已从提交的 analysis 计算工程事实，Snapshot 还区分 current 与 stale。两者在步骤集合、gate 来源、缺失结果和 stale 结果上可能给出不同答案。
+上游 [qor_report.py][up-qor] 曾复制 GUI 评分权重、阈值和步骤目录映射，通过现有 metrics 文件计算报表；本地 [qor.py](../../ecc/chipcompiler/engine/qor.py) 已从提交的 analysis 计算工程事实，Snapshot 还区分 current 与 stale。两者在步骤集合、gate 来源、缺失结果和 stale 结果上可能给出不同答案。
 
-已确认处理：CLI 与 Studio 保留不同的观察边界。`ecc report qor` 继续按需读取当前 Workspace Analysis，Studio 继续只使用 Step commit 时生成的 Engineering Snapshot；本次不改变任一产品的数据生命周期。为避免评分规则漂移，从两套实现中抽取一个无 I/O 的 `chipcompiler.engine.qor_scoring` 模块，统一 metric 选择、area scoring Step、单指标阈值、维度聚合、权重和 overall score。CLI 保留报告状态与文本格式，`engine.qor` 保留 Snapshot assessment 组装；两边把各自读取并验证的 schema-v3 metric records 交给同一个纯评分接口。
+已确认处理：评分规则抽到无 I/O 的 `chipcompiler.engine.qor_scoring`（metric 选择、area scoring Step、阈值、维度聚合、权重、overall score）。CLI 报告与 Snapshot `qorAssessment` 都调用 `score_qor`；Studio GUI 不再维护第二套阈值表。观察边界仍不同：`ecc report qor` 按需读当前 Workspace Analysis，Studio 只使用 Step commit 时的 Engineering Snapshot。CLI 保留报告状态与文本，`engine.qor` 保留 Snapshot assessment 组装。
 
 STA Artifact 仍是独立兼容修复。已确认本地 Snapshot 声明器直接复用上游 `chipcompiler.tools.ecc.sta_qor` 的文件名常量：`qor_summary.rpt` 和四个 `timing_max_*` 报告始终作为预期 Artifact 声明，`power.rpt` 仅在实际存在时声明；删除本地硬编码与旧 `timing_max.rpt`。不扩展 Artifact contract，也不增加 `required` 字段。
 

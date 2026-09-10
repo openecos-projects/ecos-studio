@@ -59,7 +59,7 @@ backendProjectComparison -> qorAnalysis
 `qorAnalysis` 是以下事实的唯一生产解释位置：
 
 - 指标解析、规范单位和 polarity。
-- score、gate 和当前阈值 60。
+- score、gate 和阈值：消费 Engineering Snapshot `qorAssessment`（由 ECC `chipcompiler.engine.qor_scoring` 计算），不在 GUI 再算一遍。
 - improvement、regression、unchanged 和 not-comparable。
 - Workspace 与单 baseline 的 delta。
 - Project recommendation、risk、regression 和数据质量。

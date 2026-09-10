@@ -132,9 +132,9 @@ ECC 拥有一份 Parameter Catalog、一套 Descriptor 读写、一套 Flow/Warn
 - **State preservation:** Step 在 ledger、Engineering Snapshot、CLI 和 Studio 中保持 Warning；resume 将其视为已完成，但不改写为 Success。
 - **Aggregate status:** Warning 计入 Flow completion 和 branch eligibility，不计入 successful-Step count 或 success ratio。全部完成且包含 Warning 时聚合为 Completed with warnings。
 - **Comparison and Signoff:** Project Comparison 可以使用 Warning Step 的 current result 并保留标签；Signoff Readiness 继续由 checklist 独立决定。
-- **QoR scoring module:** 抽取一个无 I/O 的 `chipcompiler.engine.qor_scoring`，统一 metric selection、area scoring Step、thresholds、dimension aggregation、weights 和 overall score。
+- **QoR scoring module:** 评分规则只在无 I/O 的 `chipcompiler.engine.qor_scoring`：metric selection、area scoring Step、thresholds、dimension aggregation、weights 和 overall score。不要在 GUI 或 CLI 再维护一份阈值表。
 - **QoR lifecycle boundary:** CLI `report qor` 继续按需读取当前 Workspace Analysis；Studio 继续只消费 Step commit 形成的 Engineering Snapshot。共享评分不改变两个产品的观察生命周期。
-- **QoR presentation:** CLI 保留 report status 和 text generation，Snapshot QoR 模块保留 assessment assembly；二者把各自读取并验证的 schema-v3 metric records 交给纯评分模块。
+- **QoR presentation:** CLI 保留 report status 和 text generation，Snapshot QoR 模块保留 assessment assembly；二者把各自读取并验证的 schema-v3 metric records 交给同一个 `score_qor`。
 - **STA Artifact names:** Snapshot 和 Signoff 直接复用 STA tool owner 定义的 report-name constants，不在 engine 中维护重复列表。
 - **Expected STA reports:** `qor_summary.rpt` 和四个 `timing_max_{in2out,in2reg,reg2out,reg2reg}.rpt` 始终声明为预期 Artifact；`power.rpt` 只在实际存在时声明。
 - **No artifact contract expansion:** 不增加 Artifact `required` 字段，不识别 legacy `timing_max.rpt`。
