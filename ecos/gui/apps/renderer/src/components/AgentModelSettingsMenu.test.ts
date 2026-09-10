@@ -56,4 +56,22 @@ describe('AgentModelSettingsMenu', () => {
     await nextTick()
     expect(wrapper.emitted('update')?.[1]).toEqual([{ reasoningEffort: 'low' }])
   })
+
+  it('shows the model source switch and an API config entry when provided', async () => {
+    const wrapper = mount(AgentModelSettingsMenu, {
+      props: { settings, modelSource: 'glm' },
+    })
+    await wrapper.get('.model-settings__trigger').trigger('click')
+
+    const sourceButtons = wrapper.findAll('.model-settings__source-option')
+    expect(sourceButtons).toHaveLength(2)
+    expect(sourceButtons[1]!.classes()).toContain('model-settings__source-option--active')
+
+    await sourceButtons[0]!.trigger('click')
+    expect(wrapper.emitted('set-source')).toEqual([[{ source: 'codex' }]])
+
+    await wrapper.get('.model-settings__trigger').trigger('click')
+    await wrapper.get('.model-settings__configure').trigger('click')
+    expect(wrapper.emitted('configure')).toHaveLength(1)
+  })
 })

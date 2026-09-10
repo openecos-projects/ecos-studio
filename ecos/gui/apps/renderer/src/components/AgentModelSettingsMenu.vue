@@ -67,6 +67,9 @@
             {{ option.label }}
           </button>
         </div>
+        <button type="button" class="model-settings__configure" @click="openApiConfig()">
+          API 配置…
+        </button>
       </div>
     </div>
 
@@ -124,6 +127,7 @@ const emit = defineEmits<{
     settings: Pick<DesktopAgentSetModelSettingsRequest, 'model' | 'reasoningEffort'>,
   ]
   'set-source': [request: DesktopCodexSetModelSourceRequest]
+  configure: []
 }>()
 
 const modelSourceOptions: Array<{ value: DesktopCodexModelSource; label: string }> = [
@@ -231,6 +235,11 @@ function select(value: string): void {
 
 function selectSource(source: DesktopCodexModelSource): void {
   emit('set-source', { source })
+  close()
+}
+
+function openApiConfig(): void {
+  emit('configure')
   close()
 }
 
@@ -434,6 +443,26 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 .model-settings__source-option:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.model-settings__configure {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-settings__configure:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  color: var(--text-primary);
 }
 
 @media (max-width: 640px) {

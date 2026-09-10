@@ -45,7 +45,7 @@
     <form
       v-if="currentSource === 'glm'"
       class="codex-setup__key-form"
-      @submit.prevent="submitGlmKey"
+      @submit.prevent="submitKey('glm')"
     >
       <label class="codex-setup__key-label" for="codex-setup-glm-key">智谱 API Key</label>
       <input
@@ -65,6 +65,30 @@
         :disabled="busy || !glmApiKey.trim()"
       >
         保存并使用 GLM
+      </button>
+    </form>
+
+    <form v-else class="codex-setup__key-form" @submit.prevent="submitKey('codex')">
+      <label class="codex-setup__key-label" for="codex-setup-openai-key">
+        Codex API Key（OpenAI 兼容）
+      </label>
+      <input
+        id="codex-setup-openai-key"
+        v-model="openAIApiKey"
+        type="password"
+        class="codex-setup__key-input"
+        autocomplete="off"
+        spellcheck="false"
+        :placeholder="
+          keyConfigured ? '已配置（输入可更换）' : '粘贴 API Key，无需账号登录'
+        "
+      />
+      <button
+        type="submit"
+        class="codex-setup__action codex-setup__action--primary"
+        :disabled="busy || !openAIApiKey.trim()"
+      >
+        保存并使用 Codex
       </button>
     </form>
 
@@ -158,28 +182,30 @@ const emit = defineEmits<{
   retry: []
   'set-source': [request: DesktopCodexSetModelSourceRequest]
   'set-glm-key': [apiKey: string]
+  'set-openai-key': [apiKey: string]
 }>()
 
 const defaultMessage = 'ECOS Agent 依赖 Codex CLI 生成建议。请先完成安装与配置。'
 
 const glmApiKey = ref('')
+const openAIApiKey = ref('')
 
 const currentSource = computed<DesktopCodexModelSource>(
   () => props.status.modelSource ?? 'codex',
 )
 
-const keyConfigured = computed(
-  () => currentSource.value === 'glm' && props.status.authState === 'authenticated',
-)
+const keyConfigured = computed(() => props.status.apiKeyConfigured === true)
 
 const sourceOptions: Array<{ value: DesktopCodexModelSource; label: string }> = [
-  { value: 'codex', label: 'Codex 账号（GPT 系列）' },
+  { value: 'codex', label: 'Codex API（GPT 系列）' },
   { value: 'glm', label: 'GLM API（智谱）' },
 ]
 
-function submitGlmKey(): void {
-  const key = glmApiKey.value.trim()
-  if (key) emit('set-glm-key', key)
+function submitKey(source: DesktopCodexModelSource): void {
+  const key = (source === 'glm' ? glmApiKey.value : openAIApiKey.value).trim()
+  if (!key) return
+  if (source === 'glm') emit('set-glm-key', key)
+  else emit('set-openai-key', key)
 }
 
 const stateLabel = computed(() => {

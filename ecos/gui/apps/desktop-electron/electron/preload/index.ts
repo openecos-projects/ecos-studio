@@ -24,8 +24,8 @@ import type {
   DesktopShellSessionOptions,
   DesktopAgentEvent,
   DesktopCodexInstallProgressEvent,
+  DesktopCodexSetApiKeyRequest,
   DesktopCodexSetBinPathRequest,
-  DesktopCodexSetGlmApiKeyRequest,
   DesktopCodexSetModelSourceRequest,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
@@ -510,8 +510,10 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.agentCodexSetBinPath, request),
       setModelSource: (request: DesktopCodexSetModelSourceRequest) =>
         invokeDesktop(desktopApiIpcChannels.agentCodexSetModelSource, request),
-      setGlmApiKey: (request: DesktopCodexSetGlmApiKeyRequest) =>
+      setGlmApiKey: (request: DesktopCodexSetApiKeyRequest) =>
         invokeDesktop(desktopApiIpcChannels.agentCodexSetGlmApiKey, request),
+      setOpenAIApiKey: (request: DesktopCodexSetApiKeyRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentCodexSetOpenAIApiKey, request),
       onProgress: (listener) =>
         subscribeToDesktopEvent(
           desktopApiEventChannels.agentCodexProgress,

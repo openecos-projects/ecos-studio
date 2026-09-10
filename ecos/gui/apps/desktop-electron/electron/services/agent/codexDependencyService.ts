@@ -19,6 +19,7 @@ import {
   DESKTOP_CODEX_BIN_SETTING_KEY,
   DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY,
   DESKTOP_GLM_API_KEY_SETTING_KEY,
+  DESKTOP_OPENAI_API_KEY_SETTING_KEY,
   type DesktopCodexAuthState,
   type DesktopCodexDependencyStatus,
   type DesktopCodexInstallProgressEvent,
@@ -143,6 +144,7 @@ export class CodexDependencyService {
         ? 'authenticated'
         : 'unauthenticated'
       return {
+        apiKeyConfigured: Boolean(apiKey),
         authState,
         binPath: resolved,
         message: apiKey
@@ -155,12 +157,30 @@ export class CodexDependencyService {
       }
     }
 
+    // Codex source: a configured API key wins over account login so both
+    // sources share the same “paste a key to use it” configuration model.
+    const openAIApiKey = await this.readOpenAIApiKey()
+    if (openAIApiKey) {
+      return {
+        apiKeyConfigured: true,
+        authState: 'authenticated',
+        binPath: resolved,
+        message: 'Codex API Key 已配置，Codex CLI 已就绪。',
+        modelSource,
+        platformSupportsInstall: this.platformSupportsInstall(),
+        state: 'ready',
+        version,
+      }
+    }
+
     const authState = await this.detectAuthState(resolved)
     if (authState === 'unauthenticated') {
       return {
+        apiKeyConfigured: false,
         authState,
         binPath: resolved,
-        message: 'Codex CLI 已就绪，但尚未登录。请完成登录后再使用 Agent。',
+        message:
+          'Codex CLI 已就绪。填入 API Key，或点击“打开登录”使用账号后再使用 Agent。',
         modelSource,
         platformSupportsInstall: this.platformSupportsInstall(),
         state: 'installed_needs_login',
@@ -169,11 +189,12 @@ export class CodexDependencyService {
     }
 
     return {
+      apiKeyConfigured: false,
       authState,
       binPath: resolved,
       message:
         authState === 'unknown'
-          ? '已找到 Codex CLI。若 Agent 仍提示需要登录，请点击“打开登录”。'
+          ? '已找到 Codex CLI。填入 API Key 或点击“打开登录”后使用 Agent。'
           : 'Codex CLI 已就绪。',
       modelSource,
       platformSupportsInstall: this.platformSupportsInstall(),
@@ -223,6 +244,17 @@ export class CodexDependencyService {
     return await this.getStatus()
   }
 
+  async setOpenAIApiKey(apiKey: string): Promise<DesktopCodexDependencyStatus> {
+    const trimmed = apiKey.trim()
+    if (!trimmed) {
+      throw new Error('Codex API Key 不能为空')
+    }
+    // Saving a key implies the Codex source and skips account login entirely.
+    await this.settingsStore.set(DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY, 'codex')
+    await this.settingsStore.set(DESKTOP_OPENAI_API_KEY_SETTING_KEY, trimmed)
+    return await this.getStatus()
+  }
+
   private async readModelSource(): Promise<DesktopCodexModelSource> {
     const stored = await this.settingsStore.get<string>(
       DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY,
@@ -231,7 +263,15 @@ export class CodexDependencyService {
   }
 
   private async readGlmApiKey(): Promise<string | null> {
-    const stored = await this.settingsStore.get<string>(DESKTOP_GLM_API_KEY_SETTING_KEY)
+    return await this.readTrimmedSetting(DESKTOP_GLM_API_KEY_SETTING_KEY)
+  }
+
+  private async readOpenAIApiKey(): Promise<string | null> {
+    return await this.readTrimmedSetting(DESKTOP_OPENAI_API_KEY_SETTING_KEY)
+  }
+
+  private async readTrimmedSetting(key: string): Promise<string | null> {
+    const stored = await this.settingsStore.get<string>(key)
     return typeof stored === 'string' && stored.trim() ? stored.trim() : null
   }
 
@@ -286,14 +326,19 @@ export class CodexDependencyService {
         ECOS_AGENT_CODEX_BIN: binPath,
         CODEX_HOME: this.glmConfigRoot,
         ZAI_API_KEY: (await this.readGlmApiKey()) ?? undefined,
+        OPENAI_API_KEY: undefined,
         PATH: prependPath(dirname(binPath), this.env.PATH),
       }
     }
-    // Codex mode: clear stale GLM overrides so switching sources is clean.
+    // Codex mode: clear stale GLM overrides so switching sources is clean, and
+    // pass the configured API key when present. When no key is configured the
+    // variable is left untouched so a shell-provided key still works.
+    const openAIApiKey = await this.readOpenAIApiKey()
     return {
       ECOS_AGENT_CODEX_BIN: binPath,
       CODEX_HOME: undefined,
       ZAI_API_KEY: undefined,
+      ...(openAIApiKey ? { OPENAI_API_KEY: openAIApiKey } : {}),
       PATH: prependPath(dirname(binPath), this.env.PATH),
     }
   }
