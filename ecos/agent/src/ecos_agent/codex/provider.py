@@ -697,6 +697,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 env=self.env,
                 timeout_seconds=self.timeout_seconds,
                 diagnostics_path=self.diagnostics_path,
+                stderr_path=(
+                    self.diagnostics_path.with_suffix(".stderr.log")
+                    if self.diagnostics_path is not None
+                    else None
+                ),
             )
             self._client.start()
             self._client.request(

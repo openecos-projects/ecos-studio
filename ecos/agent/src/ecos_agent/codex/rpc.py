@@ -43,6 +43,7 @@ class _JsonLineRpcProcessClient:
         env: Mapping[str, str],
         timeout_seconds: int,
         diagnostics_path: Path | None = None,
+        stderr_path: Path | None = None,
     ) -> None:
         self.command = command
         self.args = args
@@ -56,6 +57,8 @@ class _JsonLineRpcProcessClient:
         self._process: subprocess.Popen[str] | None = None
         self._reader: threading.Thread | None = None
         self._stderr_reader: threading.Thread | None = None
+        self._stderr_path = stderr_path
+        self._stderr_file = None
         self._diagnostics = (
             _RpcDiagnostics(diagnostics_path) if diagnostics_path is not None else None
         )
@@ -64,6 +67,8 @@ class _JsonLineRpcProcessClient:
     def start(self) -> None:
         if self._process is not None:
             return
+        if self._stderr_path is not None:
+            self._stderr_file = self._stderr_path.open("w", encoding="utf-8")
         try:
             self._process = subprocess.Popen(
                 [self.command, *self.args],
@@ -71,7 +76,11 @@ class _JsonLineRpcProcessClient:
                 env=self.env,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=(
+                    self._stderr_file
+                    if self._stderr_file is not None
+                    else subprocess.PIPE
+                ),
                 text=True,
                 bufsize=1,
             )
@@ -81,8 +90,13 @@ class _JsonLineRpcProcessClient:
             ) from exc
         self._reader = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader.start()
-        self._stderr_reader = threading.Thread(target=self._drain_stderr, daemon=True)
-        self._stderr_reader.start()
+        if self._stderr_file is None:
+            # Without a file the stderr pipe must still be drained, or a full
+            # pipe buffer blocks the app-server mid-write.
+            self._stderr_reader = threading.Thread(
+                target=self._drain_stderr, daemon=True
+            )
+            self._stderr_reader.start()
 
     def close(self) -> None:
         process = self._process

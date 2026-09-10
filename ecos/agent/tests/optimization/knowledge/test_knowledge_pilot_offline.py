@@ -333,3 +333,117 @@ def test_offline_pilot_binds_protocol_manifest() -> None:
     tampered["budget"] = {"planning_call_limit": 1}
     with pytest.raises(ValueError, match="hash mismatch"):
         validate_protocol_manifest(tampered)
+
+
+def _support_catalog(*, anti: bool = False):
+    from ecos_agent.optimization.contracts import OptimizationOutcomeKind  # noqa: F401
+    from ecos_agent.optimization.knowledge.compiler import GeneralDomainClaim, StatePredicate
+    from tests.optimization.support import support_catalog as _catalog
+
+    base = _catalog(REFERENCE)
+    if not anti:
+        return base
+    claim = base.claims[0].model_copy(
+        update={
+            "anti_predicates": (
+                StatePredicate(
+                    feature_id="synthetic_gate",
+                    op="true",
+                    rule_ref="rules.boolean.true.v1",
+                    required=False,
+                ),
+            )
+        }
+    )
+    return type(base)(
+        catalog_sha256=base.catalog_sha256, claims=(claim,), bindings=base.bindings
+    )
+
+
+def test_derive_bank_contexts_covers_control_strata() -> None:
+    from ecos_agent.optimization.experiments.frozen_contexts import validate_context_bank
+    from ecos_agent.optimization.experiments.knowledge_pilot import derive_bank_contexts
+
+    catalog = _support_catalog()
+    contexts = derive_bank_contexts(
+        captured=_planning_context(),
+        catalog=catalog,
+        candidate_refs=(REFERENCE,),
+        design_id="gcd",
+        episode_id="bank-capture-test",
+    )
+    strata = {context["stratum"]: context for context in contexts}
+    assert set(strata) == {
+        "knowledge_opportunity",
+        "stale_binding",
+        "missing_required_evidence",
+        "no_supported_action",
+    }
+    assert strata["knowledge_opportunity"]["expected_behavior"] == "action"
+    assert "actions=1" in strata["knowledge_opportunity"]["label_evidence"]
+    assert strata["stale_binding"]["expected_behavior"] == "block_reject"
+    assert "stale_binding" in strata["stale_binding"]["label_evidence"]
+    assert strata["missing_required_evidence"]["expected_behavior"] == "unknown"
+    validate_context_bank(contexts, design_id="gcd")
+
+
+def test_derive_bank_contexts_includes_anti_condition_variant() -> None:
+    from ecos_agent.optimization.experiments.knowledge_pilot import derive_bank_contexts
+
+    contexts = derive_bank_contexts(
+        captured=_planning_context(),
+        catalog=_support_catalog(anti=True),
+        candidate_refs=(REFERENCE,),
+        design_id="gcd",
+        episode_id="bank-capture-test",
+    )
+    strata = {context["stratum"]: context for context in contexts}
+    assert "anti_condition" in strata
+    assert strata["anti_condition"]["expected_behavior"] == "block_reject"
+    assert "anti_condition" in strata["anti_condition"]["label_evidence"]
+
+
+def test_derived_bank_runs_through_offline_pilot_gate() -> None:
+    from ecos_agent.optimization.experiments.knowledge_pilot import derive_bank_contexts
+
+    contexts = derive_bank_contexts(
+        captured=_planning_context(),
+        catalog=_support_catalog(anti=True),
+        candidate_refs=(REFERENCE,),
+        design_id="gcd",
+        episode_id="bank-capture-test",
+    )
+    payload = run_offline_pilot(
+        design_id="gcd", contexts=contexts, provider_factory=_ScriptedProvider
+    )
+    gate = payload["gate"]
+    assert gate["negative_controls_rejected"] is True
+    assert gate["knowledge_opportunity_contexts"] == 1
+    assert gate["offline_gate_pass"] is True
+
+
+def test_offline_pilot_trips_breaker_and_keeps_denominator() -> None:
+    class _AlwaysFailingProvider(_ScriptedProvider):
+        def propose_v2(self, context, domains):
+            self.calls += 1
+            raise RuntimeError("app-server wedged")
+
+    contexts = [
+        _context(),
+        _context(stratum="stale_binding", expected="block_reject", with_view=False),
+        _context(stratum="no_supported_action", expected="abstain", with_view=False),
+    ]
+    provider = _AlwaysFailingProvider()
+    payload = run_offline_pilot(
+        design_id="gcd", contexts=contexts, provider_factory=lambda: provider
+    )
+    rows = payload["rows"]
+    assert len(rows) == 9
+    assert [row["decision"] for row in rows[:3]] == [
+        "provider_error",
+        "provider_error",
+        "provider_error",
+    ]
+    assert all(row["decision"] == "not_started" for row in rows[3:])
+    assert provider.calls == 3
+    assert payload["summary"]["rows"] == 9
