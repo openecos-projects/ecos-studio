@@ -196,6 +196,7 @@ class ControllerPlanningMixin:
 
         assert planner_turn is not None
         proposal = planner_turn.proposal
+        self._append_proposal_observation(planning_entry, proposal)
 
         rejection_reason = validate_planner_proposal(
             proposal,
