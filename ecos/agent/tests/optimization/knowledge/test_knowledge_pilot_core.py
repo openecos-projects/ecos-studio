@@ -14,6 +14,7 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
     validate_protocol_manifest,
     validate_design_ids,
 )
+from ecos_agent.optimization.experiments.knowledge_metrics import build_feedback_ledger
 
 
 def test_protocol_is_limited_to_gcd_and_vm80() -> None:
@@ -90,3 +91,8 @@ def test_planning_audit_does_not_claim_proposal_binding() -> None:
     assert result["planning_calls"] == 1
     assert result["knowledge_payload_calls"] == 1
     assert result["claim_bound_proposals_observed"] is False
+
+
+def test_feedback_ledger_is_conservative_without_terminal_effect() -> None:
+    result = build_feedback_ledger([{"claim_id": "c", "receipt_status": "effective", "terminal_delta_vs_epsilon": "tie"}])
+    assert result[0]["confidence"] == "unknown"

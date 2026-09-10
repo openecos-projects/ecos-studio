@@ -21,3 +21,24 @@ def summarize_mediation(rows: Iterable[Mapping[str, object]]) -> dict[str, objec
         "claim_bound_rows": claim_bound,
         "claim_bound_ratio": claim_bound / len(values) if values else 0.0,
     }
+
+
+def build_feedback_ledger(rows: Iterable[Mapping[str, object]]) -> list[dict[str, object]]:
+    """Aggregate observed outcomes by claim without inventing missing evidence."""
+    grouped: dict[str, list[Mapping[str, object]]] = {}
+    for row in rows:
+        claim = row.get("claim_id")
+        if claim is not None:
+            grouped.setdefault(str(claim), []).append(row)
+    ledger = []
+    for claim_id, values in sorted(grouped.items()):
+        receipts = Counter(str(row.get("receipt_status", "unknown")) for row in values)
+        terminal = Counter(str(row.get("terminal_delta_vs_epsilon", "unobserved")) for row in values)
+        ledger.append({
+            "claim_id": claim_id,
+            "observations": len(values),
+            "receipt_status_counts": dict(sorted(receipts.items())),
+            "terminal_delta_counts": dict(sorted(terminal.items())),
+            "confidence": "high" if terminal.get("outside", 0) and not terminal.get("tie", 0) else "unknown",
+        })
+    return ledger
