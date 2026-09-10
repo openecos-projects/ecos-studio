@@ -119,4 +119,35 @@ describe('AgentWorkspaceSetupPanel top module confirmation', () => {
     expect(wrapper.emitted('createWorkspace')).toBeUndefined()
     wrapper.unmount()
   })
+
+  it('emits filelist-only workspace config when both RTL and filelist are present', async () => {
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: {
+        contract: contract({
+          filelist: '/design/gcd.f',
+          rtl_list: ['/rtl/gcd.v'],
+        }),
+        createSetupId: 'setup-1',
+        choice: {
+          allowFreeText: false,
+          options: [
+            { id: '1', label: 'Confirm', value: '1' },
+            { id: '2', label: 'Cancel', value: '2' },
+          ],
+          promptId: 'confirm-1',
+          title: 'Confirm workspace',
+          variant: 'buttons',
+        },
+      },
+      global: {
+        stubs: { AgentChoiceCard: true, ...primevueStubs },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.emitted('createWorkspace')?.[0]?.[0]).toMatchObject({
+      filelist: '/design/gcd.f',
+      rtl_list: [],
+    })
+    wrapper.unmount()
+  })
 })

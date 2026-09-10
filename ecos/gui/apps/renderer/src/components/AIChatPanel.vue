@@ -216,7 +216,7 @@ import {
 } from './workspaceParameterUpdateExecution'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
-import { resolveAgentTabContext } from '@/stores/agentTabContext'
+import { existingTabIdForMode, resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
@@ -596,14 +596,21 @@ watch(
 )
 
 function currentTabContext() {
-  const workspacePath = currentProject.value?.path
+  const isHome = props.shell === 'home'
+  const workspacePath = isHome ? undefined : currentProject.value?.path
   return resolveAgentTabContext({
-    shell: props.shell === 'home' ? 'home' : 'workspace',
+    shell: isHome ? 'home' : 'workspace',
     currentWorkspacePath: workspacePath,
-    currentWorkspaceName: currentProject.value?.name ?? baseName(workspacePath),
+    currentWorkspaceName: isHome
+      ? undefined
+      : (currentProject.value?.name ?? baseName(workspacePath)),
     currentProjectRoot: queryString(route.query.projectRoot) || undefined,
     routeProjectRoot: queryString(route.query.projectRoot) || undefined,
-    step: typeof route.params.step === 'string' ? route.params.step : undefined,
+    step: isHome
+      ? undefined
+      : typeof route.params.step === 'string'
+        ? route.params.step
+        : undefined,
   })
 }
 
@@ -622,16 +629,22 @@ async function connectAgent(): Promise<void> {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
   agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
+  await ensureShellTab()
+}
 
-  if (agentShell.tabs.length === 0) {
+async function ensureShellTab(): Promise<void> {
+  const mode = props.shell === 'home' ? 'home' : 'workspace'
+  const tabId = existingTabIdForMode(agentShell.tabs, mode, agentShell.activeTabId)
+  if (!tabId) {
     await createChatTab()
     return
   }
-
-  const active = agentShell.activeTab
-  if (active && !active.started) {
-    await startProviderSession(active.id)
+  if (agentShell.activeTabId !== tabId) {
+    agentShell.activateTab(tabId)
+    messageStore.setActiveSessionId(tabId)
   }
+  const tab = agentShell.tabs.find((candidate) => candidate.id === tabId)
+  if (tab && !tab.started) await startProviderSession(tab.id)
 }
 
 async function createChatTab(): Promise<void> {

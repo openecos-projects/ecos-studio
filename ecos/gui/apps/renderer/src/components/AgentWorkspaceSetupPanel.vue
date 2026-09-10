@@ -36,7 +36,11 @@ import { getDesktopApi } from '@/platform/desktop'
 import { displayAgentContractTitle } from './agentContractDisplay'
 import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 import TopModuleField from './TopModuleField.vue'
-import { canSubmitTopModule, topModuleBlockedReason } from './topModuleConfirmation'
+import {
+  canSubmitTopModule,
+  exclusiveRtlFilelistPrefill,
+  topModuleBlockedReason,
+} from './topModuleConfirmation'
 
 const props = defineProps<{
   answeredOptionId?: string
@@ -192,10 +196,14 @@ async function refreshTopModuleDiscovery() {
 }
 
 function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): WorkspaceConfig {
+  const exclusive = exclusiveRtlFilelistPrefill(
+    contract.rtl_list,
+    contract.filelist ?? '',
+  )
   return {
     design_input_mode: 'rtl',
     directory: contract.directory,
-    filelist: contract.filelist,
+    filelist: exclusive.filelist || undefined,
     flow_config: contract.flow_config,
     origin_def: '',
     origin_verilog: '',
@@ -205,7 +213,7 @@ function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): Workspac
     pdk_config_mode: contract.pdk_config_mode,
     pdk_root: contract.pdk_root,
     project_context: contract.project_context,
-    rtl_list: [...contract.rtl_list],
+    rtl_list: exclusive.rtlList,
     sdc: contract.sdc,
   }
 }

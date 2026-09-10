@@ -8,6 +8,14 @@ describe('AIChatPanel Workspace parameter contract', () => {
     expect(source).toContain('executeConfirmedWorkspaceParameterUpdate(contract, {')
   })
 
+  it('opens a Home tab without the leftover workspace path', () => {
+    expect(source).toContain('existingTabIdForMode')
+    expect(source).toContain("const isHome = props.shell === 'home'")
+    expect(source).toContain(
+      'const workspacePath = isHome ? undefined : currentProject.value?.path',
+    )
+  })
+
   it('does not parse or write Workspace configuration files', () => {
     expect(source).not.toContain('applyWorkspaceParameterWrites')
     expect(source).not.toContain('syncWorkspaceParameterWrites')

@@ -205,6 +205,8 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
     assert "execute" not in provider.__dict__
     assert setup["schema_version"] == "flow-agent.workspace_setup_contract.v2"
     assert setup["directory"] == str(project_root / "ws_0001")
+    assert setup["filelist"] == str(filelist)
+    assert setup["rtl_list"] == []
     assert setup["parameters"]["design"] == "gcd"
     assert setup["project_context"]["project_root"] == str(project_root)
     assert setup["parameters"]["target_overflow"] == 0.1

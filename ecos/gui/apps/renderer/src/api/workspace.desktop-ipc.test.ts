@@ -115,6 +115,33 @@ describe('workspace desktop bridge', () => {
     )
   })
 
+  it('omits RTL inputs when a filelist is present', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/filelist',
+        filelist: '/design/sources.f',
+        origin_def: '',
+        origin_verilog: '/rtl/top.v',
+        parameters: { design: 'demo', top_module: 'top' },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: ['/rtl/top.v'],
+        sdc: '/constraints/top.sdc',
+      },
+      '/workspace/filelist',
+    )
+
+    expect(options.workspaceSpec.inputs).toEqual([
+      { inputId: 'filelist', role: 'filelist' },
+      { inputId: 'sdc', role: 'sdc' },
+    ])
+    expect(options.workspaceBindings.inputs).toEqual({
+      filelist: '/design/sources.f',
+      sdc: '/constraints/top.sdc',
+    })
+  })
+
   it('keeps a synthesis-only Flow range when endpoints are inferred', async () => {
     const { backendWorkspaceOptions } = await import('./workspace')
     const options = backendWorkspaceOptions(

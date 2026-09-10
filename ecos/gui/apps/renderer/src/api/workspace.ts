@@ -89,7 +89,7 @@ export function backendWorkspaceOptions(
     inputBindings[inputId] = path
   }
   if (config.filelist) addInput('filelist', 'filelist', config.filelist)
-  config.rtl_list.forEach((path, index) => addInput(`rtl-${index + 1}`, 'rtl', path))
+  else config.rtl_list.forEach((path, index) => addInput(`rtl-${index + 1}`, 'rtl', path))
   if (!config.filelist && !config.rtl_list.length) {
     addInput(
       config.design_input_mode === 'post_synthesis' ? 'netlist' : 'rtl-main',

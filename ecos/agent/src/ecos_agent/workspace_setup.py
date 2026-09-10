@@ -293,6 +293,7 @@ def workspace_setup_contract(
     if start_index > end_index:
         raise ValueError("workspace flow start must not follow its end")
     workspace_directory = _workspace_directory(inputs, proposal)
+    filelist = inputs.filelist_path or None
     return {
         "schema_version": "flow-agent.workspace_setup_contract.v2",
         "title": "Workspace 运行方案" if language == "zh" else "Workspace run plan",
@@ -301,8 +302,8 @@ def workspace_setup_contract(
         "directory": workspace_directory,
         "pdk": "ics55",
         "pdk_root": inputs.pdk_root,
-        "rtl_list": [inputs.rtl_path],
-        "filelist": inputs.filelist_path or None,
+        "rtl_list": [] if filelist else [inputs.rtl_path],
+        "filelist": filelist,
         "sdc": inputs.sdc_path or None,
         "origin_def": "",
         "origin_verilog": "",
