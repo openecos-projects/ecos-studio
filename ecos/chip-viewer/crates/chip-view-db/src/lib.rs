@@ -13,6 +13,7 @@ pub use chipgeom_reader::{
     GroupMetadata, MasterMetadata, NetMetadata, SiteMetadata, ViaMetadata,
 };
 use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
+use regex::Regex;
 use rstar::{RTree, RTreeObject, AABB};
 
 pub struct ChipViewDb {
@@ -601,6 +602,14 @@ impl OwnerNameIndex {
 
     pub fn query(&self, name: &str) -> Vec<ShapeId> {
         self.by_name.get(name).cloned().unwrap_or_default()
+    }
+
+    pub fn query_pattern(&self, pattern: &Regex) -> Vec<ShapeId> {
+        self.by_name
+            .iter()
+            .filter(|(name, _)| pattern.is_match(name))
+            .flat_map(|(_, shape_ids)| shape_ids.iter().copied())
+            .collect()
     }
 
     pub fn query_owner(&self, owner_type: u8, owner_id: u64) -> Vec<ShapeId> {
@@ -1745,6 +1754,10 @@ impl ChipViewDb {
         self.name_index.query(name)
     }
 
+    pub fn query_owner_name_pattern(&self, pattern: &Regex) -> Vec<ShapeId> {
+        self.name_index.query_pattern(pattern)
+    }
+
     pub fn query_owner_shapes(&self, owner_type: OwnerType, owner_id: u64) -> Vec<ShapeId> {
         self.name_index.query_owner(owner_type as u8, owner_id)
     }
@@ -1759,6 +1772,25 @@ impl ChipViewDb {
             .map(|owner_type| *owner_type as u8)
             .collect();
         self.query_owner_name(name)
+            .into_iter()
+            .filter(|shape_id| {
+                self.find_shape(*shape_id)
+                    .and_then(|shape| self.owner_for_shape(shape))
+                    .is_some_and(|owner| owner_type_values.contains(&owner.owner_type))
+            })
+            .collect()
+    }
+
+    pub fn query_owner_name_for_owner_types_pattern(
+        &self,
+        pattern: &Regex,
+        owner_types: &[OwnerType],
+    ) -> Vec<ShapeId> {
+        let owner_type_values: Vec<u8> = owner_types
+            .iter()
+            .map(|owner_type| *owner_type as u8)
+            .collect();
+        self.query_owner_name_pattern(pattern)
             .into_iter()
             .filter(|shape_id| {
                 self.find_shape(*shape_id)

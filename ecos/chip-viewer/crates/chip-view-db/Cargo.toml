@@ -10,3 +10,4 @@ bytemuck.workspace = true
 chipgeom-format = { path = "../chipgeom-format" }
 chipgeom-reader = { path = "../chipgeom-reader" }
 rstar.workspace = true
+regex.workspace = true
