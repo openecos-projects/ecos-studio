@@ -1,0 +1,9 @@
+{
+  "schema_version": "ecos.state_rule_manifest.v1",
+  "rules": {
+    "rules.evidence.present.v1": {"required_evidence": "observation"},
+    "rules.trend.increasing.v1": {"required_evidence": "trajectory", "noise_aware": true},
+    "rules.trend.decreasing.v1": {"required_evidence": "trajectory", "noise_aware": true}
+  },
+  "scope": ["gcd"]
+}
