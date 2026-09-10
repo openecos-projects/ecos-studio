@@ -9,6 +9,7 @@ from ecos_agent.optimization.experiments.knowledge_metrics import action_diverge
 from ecos_agent.optimization.experiments.knowledge_mediation import read_jsonl, summarize_planning_audit
 from ecos_agent.optimization.experiments.frozen_contexts import validate_context_bank
 from ecos_agent.optimization.experiments.knowledge_protocol import validate_design_ids
+from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -23,7 +24,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     designs = validate_design_ids(args.design)
     if args.command == "preflight":
-        payload = {"schema_version": "ecos.knowledge_pilot_preflight.v1", "design_ids": list(designs)}
+        manifest = load_state_rule_manifest()
+        payload = {
+            "schema_version": "ecos.knowledge_pilot_preflight.v1",
+            "design_ids": list(designs),
+            "cohort_role": "pilot_only",
+            "state_rule_manifest_sha256": manifest.manifest_sha256,
+            "trend_noise_tolerance": manifest.trend_noise_tolerance,
+        }
     elif args.command == "offline":
         if args.contexts is None or args.mediation is None:
             parser.error("offline requires --contexts JSON and --mediation JSONL")

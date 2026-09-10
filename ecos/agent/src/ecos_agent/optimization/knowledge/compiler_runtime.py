@@ -29,12 +29,15 @@ from ecos_agent.optimization.knowledge.compiler import (
     KnowledgeMatch,
     KnowledgeSupportCatalog,
     OptimizationStateEvidenceRequest,
+    StateRuleSpec,
+    StateRuleManifest,
     StateEvidenceFeature,
     StatePredicate,
     StateValue,
     SupportedActionView,
     SupportedKnowledgeAction,
     VersionBoundToolBinding,
+    load_state_rule_manifest,
 )
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
@@ -49,11 +52,15 @@ def build_state_evidence_request(
     current_values: Mapping[str, bool | int | float],
     primary_metric: ObjectiveMetric | None = None,
     preserve_metrics: tuple[ObjectiveMetric, ...] = (),
+    objective_contract_sha256: str | None = None,
+    toolchain_sha256: str | None = None,
+    state_rule_manifest_sha256: str | None = None,
     incumbent: TerminalObservation | None = None,
     reference_metrics: Mapping[str, float] | None = None,
     reference_sha256: str | None = None,
     historical_metrics: tuple[Mapping[str, float], ...] = (),
     history_sha256: tuple[str, ...] = (),
+    trend_epsilon: float = 0.0,
     extra_features: tuple[StateEvidenceFeature, ...] = (),
 ) -> OptimizationStateEvidenceRequest:
     observation_ref = ObservationReference(
@@ -127,7 +134,11 @@ def build_state_evidence_request(
         ),
         observation_ref.sha256,
     )
-    _add_trend_features(features, observation, historical_metrics, observation_ref.sha256)
+    if trend_epsilon < 0:
+        raise ValueError("trend epsilon must be non-negative")
+    _add_trend_features(
+        features, observation, historical_metrics, observation_ref.sha256, trend_epsilon
+    )
     for feature in extra_features:
         if feature.feature_id in features:
             raise ValueError("extra state evidence duplicates a derived feature")
@@ -139,6 +150,9 @@ def build_state_evidence_request(
         current_stage=observation.stage,
         primary_metric=primary_metric,
         preserve_metrics=preserve_metrics,
+        objective_contract_sha256=objective_contract_sha256,
+        toolchain_sha256=toolchain_sha256,
+        state_rule_manifest_sha256=state_rule_manifest_sha256,
         history_sha256=history_sha256,
         features=tuple(features[key] for key in sorted(features)),
     )
@@ -157,6 +171,10 @@ def compile_supported_action_view(
     ranked_keys = _reference_keys(retrieval_ranked_refs)
     if len(candidate_keys) != len(candidate_refs) or not ranked_keys <= candidate_keys:
         raise ValueError("knowledge candidate references are invalid")
+    if state.state_rule_manifest_sha256 is not None:
+        manifest = load_state_rule_manifest()
+        if state.state_rule_manifest_sha256 != manifest.manifest_sha256:
+            raise ValueError("state evidence references a stale state-rule manifest")
     claims = {
         (claim.claim_ref.entity_id, claim.claim_ref.chunk_sha256): claim
         for claim in catalog.claims
@@ -325,6 +343,13 @@ def _match_claim(
     features: Mapping[str, StateValue],
     legal: set[tuple[str, StrategyDirection]],
 ) -> tuple[KnowledgeApplicability, tuple[str, ...]]:
+    if claim.objectives:
+        if state.primary_metric is None:
+            return KnowledgeApplicability.BLOCKED, ("objective_unverified",)
+        if state.primary_metric not in claim.objectives and not (
+            set(state.preserve_metrics) & set(claim.objectives)
+        ):
+            return KnowledgeApplicability.BLOCKED, ("objective_mismatch",)
     if state.current_stage.value.casefold() not in {
         stage.casefold() for stage in claim.stages
     }:
@@ -333,6 +358,11 @@ def _match_claim(
         return KnowledgeApplicability.BLOCKED, ("unsupported_action",)
     if binding.claim_sha256 != claim.claim_sha256:
         return KnowledgeApplicability.BLOCKED, ("stale_binding",)
+    if (
+        state.toolchain_sha256 is not None
+        and state.toolchain_sha256 != binding.toolchain_ref
+    ):
+        return KnowledgeApplicability.BLOCKED, ("toolchain_mismatch",)
     anti = [_evaluate(item, features) for item in claim.anti_predicates]
     if any(value is True for value in anti):
         return KnowledgeApplicability.BLOCKED, ("anti_condition",)
@@ -350,10 +380,11 @@ def _match_claim(
     if not supported:
         return KnowledgeApplicability.BLOCKED, ("unsupported_action",)
     weak = any(value is None for value in (*state_matches, *anti))
-    return (
-        KnowledgeApplicability.WEAK if weak else KnowledgeApplicability.PASS,
-        ("optional_observation_missing",) if weak else (),
-    )
+    reasons = ["optional_observation_missing"] if weak else []
+    if state.toolchain_sha256 is None:
+        weak = True
+        reasons.append("toolchain_unverified")
+    return (KnowledgeApplicability.WEAK if weak else KnowledgeApplicability.PASS, tuple(reasons))
 
 
 def knowledge_support_catalog_from_bundles(
@@ -369,6 +400,10 @@ def knowledge_support_catalog_from_bundles(
         GeneralDomainClaim.model_validate(item["claim"])
         for item in raw_support
     )
+    manifest = load_state_rule_manifest()
+    for claim in claims:
+        for predicate in (*claim.state_predicates, *claim.anti_predicates):
+            manifest.require_known_rule(predicate.rule_ref)
     bindings = tuple(
         VersionBoundToolBinding.model_validate(item["binding"])
         for item in raw_support
@@ -457,6 +492,7 @@ def _add_trend_features(
     observation: StageObservation,
     history: tuple[Mapping[str, float], ...],
     observation_sha256: str,
+    trend_epsilon: float = 0.0,
 ) -> None:
     if not history:
         return
@@ -466,9 +502,13 @@ def _add_trend_features(
         if metric_id not in previous:
             continue
         delta = current - previous[metric_id]
+        if abs(delta) <= trend_epsilon:
+            trend = "stable"
+        else:
+            trend = "increasing" if delta > 0 else "decreasing"
         feature_id = f"trend.{metric_id}"
         features[feature_id] = StateEvidenceFeature(
             feature_id=feature_id,
-            value="increasing" if delta > 0 else "decreasing" if delta < 0 else "stable",
+            value=trend,
             evidence_sha256=evidence_sha256,
         )

@@ -61,6 +61,7 @@ from ecos_agent.optimization.execution import (
 from ecos_agent.optimization.knowledge.compiler import (
     build_state_evidence_request,
     compile_supported_action_view,
+    load_state_rule_manifest,
 )
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditReplay,
@@ -247,6 +248,7 @@ class ControllerContextMixin:
             )
             supported_action_view = None
         else:
+            state_rule_manifest = load_state_rule_manifest()
             supported_action_view = compile_supported_action_view(
                 state=build_state_evidence_request(
                     task_id=retrieval.request.task_id,
@@ -255,6 +257,12 @@ class ControllerContextMixin:
                     current_values=current_values,
                     primary_metric=active_primary_metric,
                     preserve_metrics=active_preserve_metrics,
+                    objective_contract_sha256=(
+                        self._objective.contract_sha256
+                        if self._objective is not None
+                        else None
+                    ),
+                    state_rule_manifest_sha256=state_rule_manifest.manifest_sha256,
                     incumbent=self._incumbent,
                     historical_metrics=tuple(
                         {
@@ -272,6 +280,7 @@ class ControllerContextMixin:
                         )
                         for item in history
                     ),
+                    trend_epsilon=state_rule_manifest.trend_noise_tolerance,
                 ),
                 catalog=retrieval.support_catalog,
                 candidate_refs=retrieval.candidate_refs,
