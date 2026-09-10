@@ -552,6 +552,12 @@ class SupportedActionView(_Model):
 
     def planner_payload(self) -> dict[str, object]:
         exposed = _reference_keys(self.exposed_claim_refs)
+        truncated = _reference_keys(self.truncated_claim_refs)
+        # Blocked/unknown matches must reach the planner or abstention on a
+        # knowledge rejection is inexpressible; truncated refs stay ledger-bound.
+        inactionable = frozenset(
+            {KnowledgeApplicability.BLOCKED, KnowledgeApplicability.UNKNOWN}
+        )
         return {
             "schema_version": "ecos.supported_action_view.planner.v1",
             "state": self.state.model_dump(mode="json"),
@@ -566,6 +572,12 @@ class SupportedActionView(_Model):
                 item.model_dump(mode="json")
                 for item in self.matches
                 if _reference_key(item.claim_ref) in exposed
+            ],
+            "inactionable_matches": [
+                item.model_dump(mode="json")
+                for item in self.matches
+                if item.applicability in inactionable
+                and _reference_key(item.claim_ref) not in truncated
             ],
             "actions": [item.model_dump(mode="json") for item in self.actions],
             "audit_sha256": self.view_sha256,

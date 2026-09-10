@@ -264,6 +264,17 @@ def test_compiler_fails_closed_on_missing_and_anti_condition_evidence() -> None:
     assert blocked.actions == ()
     assert blocked.matches[0].applicability == KnowledgeApplicability.BLOCKED
     assert "anti_condition" in blocked.matches[0].reason_codes
+    blocked_payload = blocked.planner_payload()
+    assert [
+        (item["applicability"], list(item["reason_codes"]))
+        for item in blocked_payload["inactionable_matches"]
+    ] == [("blocked", ["anti_condition"])]
+    missing_payload = missing.planner_payload()
+    assert missing_payload["inactionable_matches"][0]["applicability"] == "unknown"
+    assert (
+        "missing_observation"
+        in missing_payload["inactionable_matches"][0]["reason_codes"]
+    )
 
 
 def test_compiler_rejects_stale_binding_and_unsupported_legal_action() -> None:
