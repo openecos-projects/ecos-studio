@@ -134,6 +134,14 @@ export interface QorReportInflation {
   compatibility_status: 'EXACT_COMPATIBLE' | 'MAPPED_COMPATIBLE' | 'INCOMPATIBLE'
 }
 
+export interface QorReportPowerObservation {
+  total_uw: number | null
+  budget_uw: number | null
+  source_path: string | null
+  source_kind: 'signoff' | 'synthesis' | null
+  corner: string | null
+}
+
 export interface QorReportV3 {
   schema_version: 3
   scoring_engine: 'qor-v3'
@@ -148,6 +156,8 @@ export interface QorReportV3 {
   scalar_summary: QorReportScalarSummary
   diagnoses: QorReportDiagnosis[]
   inflation: QorReportInflation
+  /** Raw power observation; optional for reports written before this field. */
+  power?: QorReportPowerObservation
   /** Persisted flow-step state snapshot at report build time, keyed by
    * step name; compared against the live flow ledger for staleness. */
   flow_steps: Record<string, string>
@@ -289,6 +299,19 @@ function isDiagnosis(value: unknown): boolean {
   )
 }
 
+function isPowerObservation(value: unknown): value is QorReportPowerObservation {
+  if (!isRecord(value)) return false
+  return (
+    isNullableFinite(value.total_uw) &&
+    isNullableFinite(value.budget_uw) &&
+    (value.source_path === null || typeof value.source_path === 'string') &&
+    (value.source_kind === null ||
+      value.source_kind === 'signoff' ||
+      value.source_kind === 'synthesis') &&
+    (value.corner === null || typeof value.corner === 'string')
+  )
+}
+
 /**
  * Parse and structurally validate report text. Returns null for missing,
  * malformed, or foreign-version payloads — callers treat null as "no
@@ -348,6 +371,7 @@ export function parseQorReport(text: string | null | undefined): QorReportV3 | n
     return null
   }
   if (!isRecord(parsed.inflation) || !isRecord(parsed.flow_steps)) return null
+  if (parsed.power !== undefined && !isPowerObservation(parsed.power)) return null
   if (
     !isNullableFinite(parsed.inflation.i_place) ||
     !isNullableFinite(parsed.inflation.i_route) ||

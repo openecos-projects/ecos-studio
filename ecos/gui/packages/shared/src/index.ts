@@ -110,6 +110,7 @@ export type {
   QorReportFeasibilityGate,
   QorReportInflation,
   QorReportIntervention,
+  QorReportPowerObservation,
   QorReportScalarSummary,
   QorReportSupportingMetric,
   QorReportTimingSlack,

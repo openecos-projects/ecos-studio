@@ -12,6 +12,7 @@ import type {
 } from '@/utils/projectManagement'
 import {
   QOR_SCORE_THRESHOLD,
+  type ProjectQorTrendWorkspaceSummary,
   type ProjectQorTrendSummary,
   type QphysKey,
   QorGateStatus,
@@ -558,12 +559,39 @@ export function buildDashboardQphys(
     tone: qphysTone(dimension.value, dimension.state),
     reason:
       dimension.value === null
-        ? (dimension.features.find((feature) => feature.value === null)?.interpretation ??
-          (dimension.key === 'power'
-            ? 'No power budget or signoff power.'
-            : 'Insufficient evidence.'))
+        ? dimension.key === 'power'
+          ? powerReason(workspace.power)
+          : (dimension.features.find((feature) => feature.value === null)
+              ?.interpretation ?? 'Insufficient evidence.')
         : null,
   }))
+}
+
+function powerReason(power: ProjectQorTrendWorkspaceSummary['power']): string {
+  if (!power || power.total_uw === null) {
+    return power?.budget_uw === null || power?.budget_uw === undefined
+      ? 'No power budget or signoff power.'
+      : `Power budget ${(power.budget_uw / 1e6).toFixed(3)} W declared; no signoff power.`
+  }
+
+  const source =
+    power.source_kind === 'signoff'
+      ? 'Signoff power'
+      : power.source_kind === 'synthesis'
+        ? 'Synthesis power'
+        : 'Observed power'
+  const corner = power.corner ? ` (${power.corner})` : ''
+  const total = formatPower(power.total_uw)
+  if (power.budget_uw === null) {
+    return `${source}${corner}: ${total}; no power budget declared.`
+  }
+  return `${source}${corner}: ${total} of ${formatPower(power.budget_uw)} budget.`
+}
+
+function formatPower(valueUw: number): string {
+  const watts = valueUw / 1e6
+  if (watts >= 1) return `${watts.toFixed(3)} W`
+  return `${(valueUw / 1e3).toFixed(3)} mW`
 }
 
 function qphysTone(value: number | null, state: string): DashboardTone {

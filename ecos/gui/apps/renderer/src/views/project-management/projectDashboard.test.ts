@@ -373,6 +373,51 @@ describe('buildDashboardQphys', () => {
     expect(buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_b')).toEqual([])
     expect(buildDashboardQphys(trendSummaryWithScoresFixture(), null)).toEqual([])
   })
+
+  it('explains an unrated power coordinate with the observed signoff power', () => {
+    const summary = trendSummaryWithScoresFixture()
+    const workspace = summary.workspaces.find((entry) => entry.workspaceId === 'ws_a')!
+    const rows = buildDashboardQphys(
+      {
+        ...summary,
+        workspaces: [
+          {
+            ...workspace,
+            power: {
+              total_uw: 12400,
+              budget_uw: null,
+              source_path: '/ws/sta_ecc/feature/MAX_125/Cworst/power_summary.json',
+              source_kind: 'signoff',
+              corner: 'MAX_125/Cworst',
+            },
+            qphys: [
+              ...workspace.qphys,
+              {
+                key: 'power',
+                value: null,
+                state: 'UNKNOWN',
+                features: [
+                  {
+                    featureId: 'F_SYN_LEAK_FRAC',
+                    value: null,
+                    state: 'UNKNOWN',
+                    interpretation: 'Synthesis leakage fraction unavailable.',
+                  },
+                ],
+              },
+            ],
+          },
+          ...summary.workspaces.filter((entry) => entry.workspaceId !== 'ws_a'),
+        ],
+      },
+      'ws_a',
+    )
+
+    expect(rows.find((row) => row.key === 'power')).toMatchObject({
+      display: 'N/A',
+      reason: 'Signoff power (MAX_125/Cworst): 12.400 mW; no power budget declared.',
+    })
+  })
 })
 
 describe('buildDashboardDiagnoses', () => {
