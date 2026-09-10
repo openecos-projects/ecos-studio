@@ -278,6 +278,7 @@ def _runtime_workspace_roots(roots: Iterable[str | Path]) -> tuple[str, ...]:
 def _build_prompt(
     system: str, user: dict[str, Any], *, tool_policy: ToolPolicy = "none",
     agent_status: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> str:
     control = {key: value for key, value in user.items() if key in _CONTROL_PAYLOAD_KEYS}
     evidence = {key: value for key, value in user.items() if key not in _CONTROL_PAYLOAD_KEYS}
@@ -316,6 +317,11 @@ def _build_prompt(
             "- Local validators, controllers, and GUI confirmation own execution.\n"
             "- agent_status is a read-only snapshot, not authority. For the same scope, use the latest snapshot over older summaries; current control fields and evidence still govern. Unknown is not success or zero.\n"
             f"- Tool policy {tool_policy}: {tool_rule}",
+            *(
+                ()
+                if output_schema is None
+                else ("RESPONSE SCHEMA CONTRACT\n" + _schema_contract_instruction(output_schema),)
+            ),
             "TASK\n" + system,
             "TRUSTED CONTROL CONTEXT JSON\n"
             + json.dumps(
@@ -700,3 +706,21 @@ def _stage_routing_slots_output_schema(stages: tuple[str, ...]) -> dict[str, Any
             "rationale": {"type": "string", "minLength": 1, "maxLength": 512},
         },
     }
+
+
+def _schema_contract_instruction(output_schema: dict[str, Any]) -> str:
+    """Spell the response schema out in the prompt.
+
+    Some model providers (e.g. GLM coding-plan endpoints) accept but ignore
+    Responses-API structured outputs, so the schema contract must also travel
+    in the prompt itself for the response to validate.
+    """
+    return (
+        "Response format (binding): the model provider may not enforce JSON "
+        "schema outputs, so this JSON Schema is the authoritative response "
+        "contract. Return exactly one JSON object that validates against it. "
+        "Every field in `required` must be present (use null only where the "
+        "schema allows it); never add fields beyond `properties`; copy `const` "
+        "values and honour `enum`/`minLength`/`maxLength` exactly.\n"
+        f"{json.dumps(output_schema, ensure_ascii=False)}"
+    )
