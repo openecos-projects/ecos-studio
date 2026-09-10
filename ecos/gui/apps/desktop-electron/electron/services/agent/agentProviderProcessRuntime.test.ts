@@ -201,6 +201,48 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('reloads the provider child when the model-source environment changes', async () => {
+    const harness = createSpawnHarness()
+    const env = { HOME: '/home/tester', PATH: '/tools/bin' }
+    const runtime = new AgentProviderProcessRuntime({
+      env,
+      manifest: {
+        command: 'ecos-agent-provider',
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const stale = runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.children).toHaveLength(1)
+
+    // GLM -> codex source switch: same binary, different CODEX_HOME/API keys.
+    runtime.syncEnvironmentOverrides({
+      ECOS_AGENT_CODEX_BIN: '/usr/bin/codex',
+      CODEX_HOME: undefined,
+      ZAI_API_KEY: undefined,
+      OPENAI_API_KEY: 'sk-test',
+      PATH: '/tools/bin:/usr/bin',
+    })
+    await expect(stale).rejects.toThrow('restarted')
+    expect(harness.children[0].kill).toHaveBeenCalled()
+
+    void runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.spawn).toHaveBeenLastCalledWith('ecos-agent-provider', [], {
+      cwd: '/plugins/ecos-agent',
+      env: {
+        ...env,
+        ECOS_AGENT_CODEX_BIN: '/usr/bin/codex',
+        OPENAI_API_KEY: 'sk-test',
+        PATH: '/tools/bin:/usr/bin',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  })
+
   it('includes a bounded provider stderr diagnostic when the process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

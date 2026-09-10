@@ -198,6 +198,7 @@ class _JsonLineRpcProcessClient:
         completed_items: list[str] = []
         completed_turn: dict[str, Any] | None = None
         token_usage: dict[str, int] | None = None
+        last_turn_error: str | None = None
         while time.monotonic() < idle_deadline:
             remaining = max(0.01, idle_deadline - time.monotonic())
             try:
@@ -208,8 +209,13 @@ class _JsonLineRpcProcessClient:
                 self._record("turn_wait_timeout")
                 telemetry.status = "failed"
                 activity_projector.finish("failed")
+                detail = (
+                    f"; last provider error: {last_turn_error}"
+                    if last_turn_error
+                    else ""
+                )
                 raise CodexProviderError(
-                    f"Timed out waiting for Codex turn {turn_id} completion",
+                    f"Timed out waiting for Codex turn {turn_id} completion{detail}",
                     failure_class="timeout",
                 ) from exc
             method = notification.get("method")
@@ -239,12 +245,15 @@ class _JsonLineRpcProcessClient:
             activity_projector.handle(method, params)
             if method == "error":
                 will_retry = params.get("willRetry") is True
-                self._record(
-                    "turn_error_received",
-                    error_code=self._error_code(params),
-                    will_retry=will_retry,
-                )
+                error_message = self._error_message(params)
                 if will_retry:
+                    if error_message:
+                        last_turn_error = error_message
+                    self._record(
+                        "turn_error_received",
+                        error_code=self._error_code(params),
+                        will_retry=will_retry,
+                    )
                     continue
                 error_message = self._error_message(params)
                 activity_projector.finish("failed")
@@ -288,8 +297,9 @@ class _JsonLineRpcProcessClient:
                     )
                 return text, token_usage
         telemetry.status = "failed"
+        detail = f"; last provider error: {last_turn_error}" if last_turn_error else ""
         raise CodexProviderError(
-            f"Timed out waiting for Codex turn {turn_id} completion",
+            f"Timed out waiting for Codex turn {turn_id} completion{detail}",
             failure_class="timeout",
         )
 

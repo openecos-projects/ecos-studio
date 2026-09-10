@@ -248,6 +248,49 @@ describe('CodexDependencyService', () => {
     expect(spawn.mock.calls[0]?.[2]?.env?.PATH).toBe(`${binDir}:/usr/bin:/bin`)
   })
 
+  it('ignores the settings codex binary override in GLM mode', async () => {
+    const root = await createRoot()
+    const binDir = join(root, 'bin')
+    await mkdir(binDir, { recursive: true })
+    const settingsBin = join(binDir, 'wrapper-codex')
+    const pathBin = join(binDir, 'codex')
+    await writeFile(settingsBin, '#!/bin/sh\necho wrapper 1.0\n')
+    await writeFile(pathBin, '#!/bin/sh\necho path 1.0\n')
+    await chmod(settingsBin, 0o755)
+    await chmod(pathBin, 0o755)
+
+    const spawn = vi.fn((_command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 0.1.0\n')
+        }
+        child.emit('close', 0)
+      })
+      return child as never
+    })
+    const settingsStore = new MemorySettingsStore()
+    await settingsStore.set(DESKTOP_CODEX_BIN_SETTING_KEY, settingsBin)
+    const service = new CodexDependencyService({
+      env: { PATH: binDir, HOME: root },
+      installRoot: join(root, 'managed'),
+      glmConfigRoot: join(root, 'glm-home'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore,
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await service.setModelSource('glm')
+    const status = await service.getStatus()
+    expect(status.binPath).toBe(pathBin)
+    await expect(service.resolveEnvironmentForAgent()).resolves.toMatchObject({
+      ECOS_AGENT_CODEX_BIN: pathBin,
+      CODEX_HOME: join(root, 'glm-home'),
+    })
+  })
+
   it('reports needs-key status in GLM mode', async () => {
     const root = await createRoot()
     const binDir = join(root, 'bin')

@@ -304,3 +304,26 @@ def test_final_turn_error_includes_server_message(tmp_path) -> None:
 
     with pytest.raises(CodexProviderError, match="authentication required"):
         client.wait_for_turn_text("turn-1")
+
+
+def test_turn_timeout_carries_last_retriable_error(tmp_path) -> None:
+    client = _JsonLineRpcProcessClient(
+        command="codex",
+        args=[],
+        cwd=tmp_path,
+        env={},
+        timeout_seconds=1,
+    )
+    client._notifications.put(
+        {
+            "method": "error",
+            "params": {
+                "turnId": "turn-1",
+                "willRetry": True,
+                "error": {"message": "Connection failed: error sending request"},
+            },
+        }
+    )
+
+    with pytest.raises(CodexProviderError, match="error sending request"):
+        client.wait_for_turn_text("turn-1")
