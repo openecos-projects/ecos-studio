@@ -361,6 +361,9 @@ class PlanningProviderEvidence(_ContractModel):
     response_sha256: str
     diagnostics_sha256: str | None = None
     envelope: PlanningProviderEnvelope
+    # Additive field: bounded raw response kept only when schema parsing failed,
+    # so a rejected planner turn can be attributed without the response body.
+    response_excerpt: str | None = None
 
     @field_validator("thread_id", "turn_id")
     @classmethod
@@ -374,6 +377,13 @@ class PlanningProviderEvidence(_ContractModel):
     def validate_hash(cls, value: str | None) -> str | None:
         if value is not None and not _SHA256.fullmatch(value):
             raise ValueError("planning provider evidence hash is invalid")
+        return value
+
+    @field_validator("response_excerpt")
+    @classmethod
+    def validate_response_excerpt(cls, value: str | None) -> str | None:
+        if value is not None and (not value or len(value) > 8192):
+            raise ValueError("planning provider response excerpt is invalid")
         return value
 
 
