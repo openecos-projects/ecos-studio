@@ -126,6 +126,7 @@
         重新检测
       </button>
       <button
+        v-if="currentSource !== 'glm'"
         type="button"
         class="codex-setup__action"
         :disabled="busy"
