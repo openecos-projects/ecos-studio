@@ -1,4 +1,4 @@
-import { spawn as spawnChild, type SpawnOptions } from 'node:child_process'
+import { spawn as spawnChild } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import {
   access,
@@ -138,67 +138,24 @@ export class CodexDependencyService {
       }
     }
 
-    if (modelSource === 'glm') {
-      const apiKey = await this.readGlmApiKey()
-      const authState: DesktopCodexAuthState = apiKey
-        ? 'authenticated'
-        : 'unauthenticated'
-      return {
-        apiKeyConfigured: Boolean(apiKey),
-        authState,
-        binPath: resolved,
-        message: apiKey
-          ? 'GLM API Key 已配置，Codex CLI 已就绪。'
-          : '已选择 GLM 模型来源。请填入智谱 API Key 后使用 Agent。',
-        modelSource,
-        platformSupportsInstall: this.platformSupportsInstall(),
-        state: authState === 'authenticated' ? 'ready' : 'installed_needs_login',
-        version,
-      }
-    }
-
-    // Codex source: a configured API key wins over account login so both
-    // sources share the same “paste a key to use it” configuration model.
-    const openAIApiKey = await this.readOpenAIApiKey()
-    if (openAIApiKey) {
-      return {
-        apiKeyConfigured: true,
-        authState: 'authenticated',
-        binPath: resolved,
-        message: 'Codex API Key 已配置，Codex CLI 已就绪。',
-        modelSource,
-        platformSupportsInstall: this.platformSupportsInstall(),
-        state: 'ready',
-        version,
-      }
-    }
-
-    const authState = await this.detectAuthState(resolved)
-    if (authState === 'unauthenticated') {
-      return {
-        apiKeyConfigured: false,
-        authState,
-        binPath: resolved,
-        message:
-          'Codex CLI 已就绪。填入 API Key，或点击“打开登录”使用账号后再使用 Agent。',
-        modelSource,
-        platformSupportsInstall: this.platformSupportsInstall(),
-        state: 'installed_needs_login',
-        version,
-      }
-    }
-
+    // Both sources share the same configuration model: paste an API key.
+    const apiKey =
+      modelSource === 'glm' ? await this.readGlmApiKey() : await this.readOpenAIApiKey()
+    const authState: DesktopCodexAuthState = apiKey ? 'authenticated' : 'unauthenticated'
     return {
-      apiKeyConfigured: false,
+      apiKeyConfigured: Boolean(apiKey),
       authState,
       binPath: resolved,
-      message:
-        authState === 'unknown'
-          ? '已找到 Codex CLI。填入 API Key 或点击“打开登录”后使用 Agent。'
-          : 'Codex CLI 已就绪。',
+      message: apiKey
+        ? modelSource === 'glm'
+          ? 'GLM API Key 已配置，Codex CLI 已就绪。'
+          : 'Codex API Key 已配置，Codex CLI 已就绪。'
+        : modelSource === 'glm'
+          ? '已选择 GLM 模型来源。请填入智谱 API Key 后使用 Agent。'
+          : 'Codex CLI 已就绪。请填入 API Key 后使用 Agent。',
       modelSource,
       platformSupportsInstall: this.platformSupportsInstall(),
-      state: 'ready',
+      state: authState === 'authenticated' ? 'ready' : 'needs_api_key',
       version,
     }
   }
@@ -249,7 +206,7 @@ export class CodexDependencyService {
     if (!trimmed) {
       throw new Error('Codex API Key 不能为空')
     }
-    // Saving a key implies the Codex source and skips account login entirely.
+    // Saving a key implies the Codex source — this is the “保存并使用 Codex” action.
     await this.settingsStore.set(DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY, 'codex')
     await this.settingsStore.set(DESKTOP_OPENAI_API_KEY_SETTING_KEY, trimmed)
     return await this.getStatus()
@@ -293,27 +250,6 @@ export class CodexDependencyService {
       this.installPromise = null
     })
     return await this.installPromise
-  }
-
-  async login(): Promise<DesktopCodexDependencyStatus> {
-    if ((await this.readModelSource()) === 'glm') {
-      // GLM authenticates with an API key, not a ChatGPT login.
-      return await this.getStatus()
-    }
-    const bin = await this.resolveBinPath()
-    if (!bin) {
-      throw new Error('请先安装或选择 Codex CLI')
-    }
-    await this.runCommand(bin, ['login'], {
-      env: this.commandEnv(bin),
-      stdio: 'ignore',
-      detached: true,
-    }).catch(() => {
-      // Browser login may keep the process attached; launching is best-effort.
-    })
-    // Detached spawn returns immediately; give auth files a brief chance to appear
-    // only if the user already completed login in another session.
-    return await this.getStatus()
   }
 
   async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
@@ -511,34 +447,6 @@ export class CodexDependencyService {
     }
   }
 
-  private async detectAuthState(bin: string): Promise<DesktopCodexAuthState> {
-    try {
-      const { stdout, stderr } = await this.runCommandCapture(bin, ['login', 'status'], {
-        env: this.commandEnv(bin),
-        timeoutMs: 8_000,
-      })
-      const text = `${stdout}\n${stderr}`.toLowerCase()
-      if (/not logged|unauthenticated|signed out|no .*auth|login required/.test(text)) {
-        return 'unauthenticated'
-      }
-      if (/logged in|authenticated|signed in|active.*session|auth.*ok/.test(text)) {
-        return 'authenticated'
-      }
-    } catch {
-      // Fall through to auth file probe.
-    }
-
-    const authPath = join(this.resolveHomedir(), '.codex', 'auth.json')
-    try {
-      await access(authPath)
-      const info = await stat(authPath)
-      if (info.isFile() && info.size > 2) return 'authenticated'
-    } catch {
-      // ignore
-    }
-    return 'unknown'
-  }
-
   private emitProgress(event: DesktopCodexInstallProgressEvent): void {
     this.lastProgress = event
     for (const listener of this.progressListeners) {
@@ -564,29 +472,6 @@ export class CodexDependencyService {
       child.on('close', (code) => {
         if (code === 0) resolve()
         else reject(new Error(`tar failed: ${stderr.trim() || `exit ${code}`}`))
-      })
-    })
-  }
-
-  private runCommand(
-    command: string,
-    args: string[],
-    options: SpawnOptions,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = this.spawnImpl(command, args, {
-        ...options,
-        env: options.env ?? this.env,
-      })
-      child.on('error', reject)
-      if (options.detached) {
-        child.unref()
-        resolve()
-        return
-      }
-      child.on('close', (code) => {
-        if (code === 0) resolve()
-        else reject(new Error(`${command} exited with code ${code ?? 'unknown'}`))
       })
     })
   }

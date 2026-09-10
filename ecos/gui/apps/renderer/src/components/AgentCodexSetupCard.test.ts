@@ -24,23 +24,23 @@ describe('AgentCodexSetupCard', () => {
     expect(wrapper.emitted('install')).toHaveLength(1)
   })
 
-  it('offers login when the CLI is installed but unauthenticated', async () => {
+  it('offers the key form when the CLI is installed but unauthenticated', () => {
     const status: DesktopCodexDependencyStatus = {
       authState: 'unauthenticated',
       binPath: '/managed/bin/codex',
-      message: '尚未登录',
+      message: 'Codex CLI 已就绪。请填入 API Key 后使用 Agent。',
       platformSupportsInstall: true,
-      state: 'installed_needs_login',
+      state: 'needs_api_key',
       version: 'codex-cli 0.1.0',
     }
     const wrapper = mount(AgentCodexSetupCard, { props: { status } })
 
-    expect(wrapper.text()).toContain('待登录')
+    expect(wrapper.text()).toContain('待配置')
     expect(wrapper.text()).toContain('/managed/bin/codex')
-    const login = wrapper.findAll('button').find((button) => button.text() === '打开登录')
-    expect(login).toBeTruthy()
-    await login!.trigger('click')
-    expect(wrapper.emitted('login')).toHaveLength(1)
+    expect(wrapper.find('#codex-setup-openai-key').exists()).toBe(true)
+    expect(wrapper.findAll('button').some((button) => button.text() === '打开登录')).toBe(
+      false,
+    )
   })
 
   it('hides install on platforms without one-click support', () => {
@@ -66,7 +66,7 @@ describe('AgentCodexSetupCard', () => {
       message: '已选择 GLM 模型来源',
       modelSource: 'glm',
       platformSupportsInstall: true,
-      state: 'installed_needs_login',
+      state: 'needs_api_key',
       version: 'codex-cli 0.1.0',
     }
     const wrapper = mount(AgentCodexSetupCard, { props: { status } })
@@ -98,7 +98,7 @@ describe('AgentCodexSetupCard', () => {
     expect(wrapper.emitted('set-glm-key')).toEqual([['test-key']])
   })
 
-  it('shows the codex source as active by default and keeps the login flow', async () => {
+  it('shows the codex source as active by default', async () => {
     const status: DesktopCodexDependencyStatus = {
       authState: 'authenticated',
       binPath: '/managed/bin/codex',
@@ -123,20 +123,18 @@ describe('AgentCodexSetupCard', () => {
       apiKeyConfigured: false,
       authState: 'unauthenticated',
       binPath: '/managed/bin/codex',
-      message: 'Codex CLI 已就绪。填入 API Key，或点击“打开登录”使用账号。',
+      message: 'Codex CLI 已就绪。请填入 API Key 后使用 Agent。',
       modelSource: 'codex',
       platformSupportsInstall: true,
-      state: 'installed_needs_login',
+      state: 'needs_api_key',
       version: 'codex-cli 0.1.0',
     }
     const wrapper = mount(AgentCodexSetupCard, { props: { status } })
 
-    expect(wrapper.text()).toContain('待登录')
-    const login = wrapper.findAll('button').find((button) => button.text() === '打开登录')
-    expect(login).toBeTruthy()
+    expect(wrapper.text()).toContain('待配置')
 
     const input = wrapper.find('#codex-setup-openai-key')
-    expect(input.attributes('placeholder')).toContain('无需账号登录')
+    expect(input.attributes('placeholder')).toBe('粘贴 API Key')
     await input.setValue(' sk-test ')
     await wrapper.find('form.codex-setup__key-form').trigger('submit')
     expect(wrapper.emitted('set-openai-key')).toEqual([['sk-test']])

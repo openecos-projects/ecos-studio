@@ -147,7 +147,6 @@ export interface DesktopBridgeServices {
   codexDependencyService?: {
     getStatus(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     install(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
-    login(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     recheck(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     setBinPath(
       pathValue: string,
@@ -2414,12 +2413,6 @@ export function registerIpc(
       unsubscribe()
       await applyCodexBinEnv(services)
     }
-  })
-
-  handle(desktopApiIpcChannels.agentCodexLogin, async () => {
-    const status = await requireCodexDependencyService(services).login()
-    await applyCodexBinEnv(services)
-    return status
   })
 
   handle(desktopApiIpcChannels.agentCodexSetBinPath, async (_event, request) => {

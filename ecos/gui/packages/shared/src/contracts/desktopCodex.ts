@@ -1,7 +1,7 @@
 export type DesktopCodexDependencyState =
   | 'missing'
   | 'installing'
-  | 'installed_needs_login'
+  | 'needs_api_key'
   | 'ready'
   | 'error'
 

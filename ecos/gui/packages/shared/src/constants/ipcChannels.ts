@@ -144,7 +144,6 @@ export const desktopApiIpcChannels = {
   agentInterrupt: 'agent:interrupt',
   agentCodexGetStatus: 'agent:codex-get-status',
   agentCodexInstall: 'agent:codex-install',
-  agentCodexLogin: 'agent:codex-login',
   agentCodexRecheck: 'agent:codex-recheck',
   agentCodexSetBinPath: 'agent:codex-set-bin-path',
   agentCodexSetModelSource: 'agent:codex-set-model-source',

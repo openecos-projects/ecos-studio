@@ -428,7 +428,6 @@ export interface DesktopApi {
     codex?: {
       getStatus(): Promise<DesktopCodexDependencyStatus>
       install(): Promise<DesktopCodexDependencyStatus>
-      login(): Promise<DesktopCodexDependencyStatus>
       recheck(): Promise<DesktopCodexDependencyStatus>
       setBinPath(
         request: DesktopCodexSetBinPathRequest,
