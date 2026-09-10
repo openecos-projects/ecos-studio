@@ -5,6 +5,7 @@ import type {
 } from './projectManagement'
 import { adaptQorReport, emptyAdaptedQor, isQorReportStale } from './qorReportAdapter'
 import { parseQorReport } from '@ecos-studio/shared'
+import type { QorReportPowerObservation } from '@ecos-studio/shared'
 
 export type QorDimension =
   | 'timing'
@@ -262,6 +263,8 @@ export interface ProjectQorTrendWorkspaceSummary {
   qphys: QphysScore[]
   diagnoses: ProjectQorDiagnosisView[]
   evidence: ProjectQorEvidenceView | null
+  /** Raw power observation from the ECC report, when available. */
+  power?: QorReportPowerObservation | null
   records: ProjectQorMetricRecord[]
   /** Full per-step records used for baseline comparison counts in Home. */
   comparisonRecords?: ProjectQorMetricRecord[]
@@ -1191,6 +1194,7 @@ function buildWorkspaceSummary(
     qphys: adapted.qphys,
     diagnoses: adapted.diagnoses,
     evidence: adapted.evidence,
+    power: adapted.power,
     records: projectRecords,
     comparisonRecords: records,
     blockingIssues: adapted.blockingIssues,

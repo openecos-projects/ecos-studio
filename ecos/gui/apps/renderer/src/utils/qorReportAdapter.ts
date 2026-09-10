@@ -2,6 +2,7 @@ import {
   parseQorReport,
   type QorReportDiagnosis,
   type QorReportFeasibilityGate,
+  type QorReportPowerObservation,
   type QorReportV3,
 } from '@ecos-studio/shared'
 import type { FlowStep, ProjectStepStatus } from './projectManagement'
@@ -126,6 +127,7 @@ export interface AdaptedQorScoring {
   qphys: QphysScore[]
   diagnoses: ProjectQorDiagnosisView[]
   evidence: ProjectQorEvidenceView | null
+  power: QorReportPowerObservation | null
   profile: string | null
   scoringEngine: 'qor-v3' | null
 }
@@ -159,6 +161,7 @@ export function emptyAdaptedQor(): AdaptedQorScoring {
     qphys: [],
     diagnoses: [],
     evidence: null,
+    power: null,
     profile: null,
     scoringEngine: null,
   }
@@ -243,6 +246,7 @@ export function adaptQorReport(report: QorReportV3): AdaptedQorScoring {
       coverage: report.evidence.coverage,
       consistency: report.evidence.consistency,
     },
+    power: report.power ?? null,
     profile: report.scalar_summary.profile,
     scoringEngine: 'qor-v3',
   }

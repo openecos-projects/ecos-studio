@@ -107,6 +107,29 @@ describe('adaptQorReport', () => {
       area: 92,
       robustness: 88,
     })
+    expect(adapted.power).toBeNull()
+  })
+
+  it('preserves the raw power observation for the breakdown', () => {
+    const report = parseQorReport(
+      buildQorReportText({
+        power: {
+          total_uw: 12400,
+          budget_uw: null,
+          source_path: '/ws/sta_ecc/feature/MAX_125/Cworst/power_summary.json',
+          source_kind: 'signoff',
+          corner: 'MAX_125/Cworst',
+        },
+      }),
+    )!
+
+    expect(adaptQorReport(report).power).toEqual({
+      total_uw: 12400,
+      budget_uw: null,
+      source_path: '/ws/sta_ecc/feature/MAX_125/Cworst/power_summary.json',
+      source_kind: 'signoff',
+      corner: 'MAX_125/Cworst',
+    })
   })
 
   it('turns failed feasibility gates into blocking issues on the right step', () => {
