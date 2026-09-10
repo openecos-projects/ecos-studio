@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Literal
@@ -34,7 +36,11 @@ from ecos_agent.optimization.contracts import (
     StrategyDirection,
     TerminalObservation,
 )
-from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
+from ecos_agent.optimization.parameters.semantics import (
+    CARD_ROOT,
+    card_hash,
+    load_parameter_cards,
+)
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -57,6 +63,74 @@ _RULE_REGISTRY = MappingProxyType(
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class StateRuleSpec(_Model):
+    op: str
+    required_evidence: Literal["observation", "trajectory"]
+    noise_tolerance: StrictFloat = Field(ge=0.0)
+    trend_window: StrictInt | None = Field(default=None, ge=1)
+    positive_control: str
+    negative_control: str
+
+
+class StateRuleManifest(_Model):
+    """Frozen per-rule boundaries; claims may only cite rules frozen here."""
+
+    schema_version: Literal["ecos.state_rule_manifest.v1"] = (
+        "ecos.state_rule_manifest.v1"
+    )
+    scope: tuple[str, ...] = Field(min_length=1)
+    rules: Mapping[str, StateRuleSpec]
+
+    @model_validator(mode="after")
+    def validate_frozen_registry(self) -> StateRuleManifest:
+        if set(self.rules) != set(_RULE_REGISTRY):
+            raise ValueError("state rule manifest must freeze exactly the rule registry")
+        for rule_id, spec in self.rules.items():
+            if _RULE_REGISTRY[rule_id] != spec.op:
+                raise ValueError(f"state rule manifest op mismatch for {rule_id}")
+            trend = rule_id.startswith("rules.trend.")
+            if trend != (spec.required_evidence == "trajectory"):
+                raise ValueError(f"state rule manifest evidence mismatch for {rule_id}")
+            if trend != (spec.trend_window is not None):
+                raise ValueError(f"state rule manifest trend window mismatch for {rule_id}")
+        return self
+
+    @property
+    def manifest_sha256(self) -> str:
+        payload = {
+            "schema_version": self.schema_version,
+            "scope": list(self.scope),
+            "rules": {key: self.rules[key].model_dump(mode="json") for key in sorted(self.rules)},
+        }
+        return canonical_sha256(payload)
+
+    @property
+    def trend_noise_tolerance(self) -> float:
+        tolerances = {
+            spec.noise_tolerance
+            for rule_id, spec in self.rules.items()
+            if rule_id.startswith("rules.trend.")
+        }
+        if len(tolerances) != 1:
+            raise ValueError("trend rules must share one frozen noise tolerance")
+        return tolerances.pop()
+
+    def require_known_rule(self, rule_ref: str) -> None:
+        if rule_ref not in self.rules:
+            raise ValueError("state predicate rule is outside the frozen manifest")
+
+
+STATE_RULE_MANIFEST_PATH = CARD_ROOT / "state-rule-manifest.v1.json"
+
+
+def load_state_rule_manifest(path: Path | None = None) -> StateRuleManifest:
+    """Load the frozen state-rule manifest bundled with the knowledge cards."""
+    value = json.loads(
+        (path or STATE_RULE_MANIFEST_PATH).read_text(encoding="utf-8")
+    )
+    return StateRuleManifest.model_validate(value)
 
 
 class KnowledgeApplicability(StrEnum):
@@ -152,6 +226,7 @@ class GeneralDomainClaim(_Model):
     claim_sha256: str
     evidence_kind: Literal["literature", "source_derived_hypothesis"] = "literature"
     stages: tuple[str, ...] = Field(min_length=1)
+    objectives: tuple[ObjectiveMetric, ...] = ()
     state_predicates: tuple[StatePredicate, ...] = Field(min_length=1)
     anti_predicates: tuple[StatePredicate, ...] = ()
     required_evidence: tuple[str, ...] = ()
@@ -173,6 +248,15 @@ class GeneralDomainClaim(_Model):
         if len(set(value)) != len(value) or any(not _ID.fullmatch(item) for item in value):
             raise ValueError("claim stages are invalid")
         return value
+
+    @field_validator("objectives")
+    @classmethod
+    def validate_objectives(
+        cls, value: tuple[ObjectiveMetric, ...]
+    ) -> tuple[ObjectiveMetric, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("claim objectives must be unique")
+        return tuple(sorted(value))
 
     @field_validator(
         "required_evidence", "action_intents", "evidence_refs", "expected_effects", "guardrails"
@@ -333,6 +417,9 @@ class OptimizationStateEvidenceRequest(_Model):
     current_stage: ECCStepName
     primary_metric: ObjectiveMetric | None = None
     preserve_metrics: tuple[ObjectiveMetric, ...] = ()
+    objective_contract_sha256: str | None = None
+    toolchain_sha256: str | None = None
+    state_rule_manifest_sha256: str | None = None
     history_sha256: tuple[str, ...] = ()
     features: tuple[StateEvidenceFeature, ...]
 
@@ -341,6 +428,17 @@ class OptimizationStateEvidenceRequest(_Model):
     def validate_task_id(cls, value: str) -> str:
         if not _ID.fullmatch(value):
             raise ValueError("state evidence task id is invalid")
+        return value
+
+    @field_validator(
+        "objective_contract_sha256",
+        "toolchain_sha256",
+        "state_rule_manifest_sha256",
+    )
+    @classmethod
+    def validate_optional_hash(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("state evidence compatibility hash is invalid")
         return value
 
     @field_validator("retrieval_request_sha256", "history_sha256")
