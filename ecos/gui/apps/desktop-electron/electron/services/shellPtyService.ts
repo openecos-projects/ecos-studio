@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -50,6 +51,12 @@ export interface ShellPtyServiceOptions {
   envProvider?: RuntimeEnvProvider
   platform?: ShellPlatform
   ptyBackend?: PtyBackend
+  /**
+   * Directory prepended to PATH in interactive shells so the generated
+   * ecos-ecc shim (and the user's other tools there) resolve by name. Linux
+   * only; defaults to ~/.local/bin, null disables the prepend.
+   */
+  userBinDir?: string | null
 }
 
 interface ShellSessionRecord {
@@ -83,6 +90,7 @@ export class ShellPtyService {
   private readonly envProvider?: RuntimeEnvProvider
   private readonly platform: ShellPlatform
   private readonly ptyBackend: PtyBackend
+  private readonly userBinDir?: string | null
   private readonly sessions = new Map<string, ShellSessionRecord>()
 
   constructor(options: ShellPtyServiceOptions = {}) {
@@ -90,6 +98,7 @@ export class ShellPtyService {
     this.envProvider = options.envProvider
     this.platform = options.platform ?? process.platform
     this.ptyBackend = options.ptyBackend ?? { spawn: spawnPty }
+    this.userBinDir = options.userBinDir
   }
 
   async createSession(
@@ -169,17 +178,35 @@ export class ShellPtyService {
 
   private async resolveEnv(): Promise<NodeJS.ProcessEnv> {
     if (!this.envProvider) {
-      return this.env
+      return this.withUserBinDir(this.env)
     }
 
     try {
-      return await this.envProvider()
+      return this.withUserBinDir(await this.envProvider())
     } catch (error) {
       electronLogger.debug(
         '[shell] env provider failed: %s',
         error instanceof Error ? error.message : String(error),
       )
-      return this.env
+      return this.withUserBinDir(this.env)
     }
+  }
+
+  private resolveUserBinDir(): string | null {
+    if (this.userBinDir !== undefined) return this.userBinDir
+    return this.platform === 'linux' ? join(homedir(), '.local', 'bin') : null
+  }
+
+  /**
+   * Put the user bin dir first so tools the user installed there (including
+   * our ecos-ecc shim) win by name, matching the usual login-shell PATH
+   * convention. Existing entries keep their order and duplicates are skipped.
+   */
+  private withUserBinDir(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const binDir = this.resolveUserBinDir()
+    if (!binDir) return env
+    const current = env.PATH ?? ''
+    if (current.split(':').includes(binDir)) return env
+    return { ...env, PATH: current ? `${binDir}:${current}` : binDir }
   }
 }
