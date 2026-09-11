@@ -45,11 +45,11 @@ describe('ProjectExecutionStatus', () => {
 
   it('keeps the full running-step label available as the tooltip', () => {
     const wrapper = mount(ProjectExecutionStatus, {
-      props: { operations: [operation({ state: 'running', step: 'Legalization' })] },
+      props: { operations: [operation({ state: 'running', step: 'Post-route LEC' })] },
     })
     expect(wrapper.get('[role="status"]').attributes('title')).toBe(
-      'Legalization running',
+      'Post-route LEC running',
     )
-    expect(wrapper.text()).toContain('Legalization running')
+    expect(wrapper.text()).toContain('Post-route LEC running')
   })
 })

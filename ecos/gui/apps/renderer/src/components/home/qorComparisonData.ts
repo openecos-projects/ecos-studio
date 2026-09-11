@@ -194,3 +194,58 @@ function scoreComparisonState(
   if (currentScore < baselineScore) return 'regression'
   return 'neutral'
 }
+
+export function formatQorValue(value: number | null | undefined, unit?: string): string {
+  if (value === null || value === undefined) return '--'
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3)
+  return unit ? `${formatted} ${unit}` : formatted
+}
+
+export function formatQorScore(score: number | null | undefined): string {
+  if (score === null || score === undefined) return 'N/A'
+  return Number.isInteger(score) ? String(score) : score.toFixed(1)
+}
+
+export function qorDeltaLabel(delta: {
+  absoluteDelta: number | null
+  relativeDeltaPct: number | null
+  state: HomeQorComparisonTone
+  unit?: string
+}): string {
+  if (delta.absoluteDelta === null) return 'Not compared'
+  if (delta.state === 'neutral') return 'Unchanged'
+  const direction = delta.state === 'improvement' ? 'Improved' : 'Regressed'
+  const amount = formatQorValue(Math.abs(delta.absoluteDelta), delta.unit)
+  const percent =
+    delta.relativeDeltaPct === null ? '' : ` (${Math.abs(delta.relativeDeltaPct)}%)`
+  return `${direction} by ${amount}${percent}`
+}
+
+export function qorMetricComparisonLabel(metric: {
+  absoluteDelta: number | null
+  relativeDeltaPct: number | null
+  state: HomeQorComparisonTone
+  unit?: string
+  isDirectional: boolean
+  polarity: string | null
+  baselinePolarity: string | null
+}): string {
+  if (!metric.isDirectional) {
+    if (metric.baselinePolarity === null) return 'No baseline available'
+    return metric.polarity === metric.baselinePolarity
+      ? 'No directional QoR rule'
+      : 'QoR rule changed'
+  }
+  return qorDeltaLabel(metric)
+}
+
+export function qorScoreComparisonLabel(
+  currentScore: number | null,
+  baselineScore: number | null,
+): string {
+  if (currentScore === null || baselineScore === null) return 'Unavailable'
+  const delta = currentScore - baselineScore
+  if (delta === 0) return 'Unchanged'
+  const direction = delta > 0 ? 'Improved' : 'Regressed'
+  return `${direction} ${Math.abs(delta).toFixed(1)}`
+}

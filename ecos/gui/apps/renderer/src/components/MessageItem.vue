@@ -381,67 +381,21 @@
       </div>
     </div>
 
-    <!-- 全屏查阅 Lightbox：HTML / JSON / 纯文本 / 图片（对所有消息类型通用） -->
-    <Teleport to="body">
-      <Transition name="lightbox">
-        <div
-          v-if="reportLightbox.visible"
-          class="info-html-lightbox-overlay"
-          tabindex="-1"
-          @click="closeReportLightbox"
-        >
-          <div class="info-html-lightbox-content" @click.stop>
-            <div class="info-html-lightbox-header">
-              <span class="info-html-lightbox-title">{{ reportLightbox.title }}</span>
-              <button
-                type="button"
-                class="info-html-lightbox-close"
-                aria-label="关闭"
-                @click="closeReportLightbox"
-              >
-                <i class="ri-close-line"></i>
-              </button>
-            </div>
-            <div
-              class="info-html-lightbox-body"
-              :class="{
-                'info-html-lightbox-body--image': reportLightbox.mode === 'image',
-              }"
-            >
-              <div
-                v-if="reportLightbox.mode === 'image'"
-                class="info-image-lightbox-wrapper"
-              >
-                <img
-                  :src="reportLightbox.body"
-                  :alt="reportLightbox.title"
-                  class="info-image-lightbox-img"
-                />
-              </div>
-              <div
-                v-else-if="reportLightbox.mode === 'html'"
-                class="info-html-lightbox-inner markdown-body"
-                v-html="reportLightbox.body"
-              ></div>
-              <pre
-                v-else
-                class="info-report-lightbox-pre"
-              ><code>{{ reportLightbox.body }}</code></pre>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ChatArtifactLightbox
+      :view="reportLightbox.visible ? reportLightbox : null"
+      @close="closeReportLightbox"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import type { DesktopAgentChoiceOption } from '@ecos-studio/shared'
 import type { Message } from '../types'
 import AgentChoiceCard from './AgentChoiceCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
+import ChatArtifactLightbox from './ChatArtifactLightbox.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
@@ -537,22 +491,6 @@ function openReportLightbox(
 function closeReportLightbox() {
   reportLightbox.value.visible = false
 }
-
-function onDocumentKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && reportLightbox.value.visible) {
-    closeReportLightbox()
-    e.preventDefault()
-    e.stopPropagation()
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', onDocumentKeydown)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', onDocumentKeydown)
-})
 
 function onNestedReportWheel(e: WheelEvent) {
   const el = e.currentTarget as HTMLElement | null
@@ -883,25 +821,6 @@ function csvRows(content: string): string[][] {
   font-size: inherit;
 }
 
-/* Lightbox 内纯文本报告：18px 等宽 */
-.info-report-lightbox-pre {
-  margin: 0;
-  padding: 0;
-  font-size: 18px;
-  line-height: 1.45;
-  white-space: pre;
-  word-break: normal;
-  overflow-wrap: normal;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  color: var(--text-primary);
-}
-
-.info-report-lightbox-pre code {
-  font-size: inherit;
-  font-family: inherit;
-}
-
 /* HTML 报告嵌入：缩小字号（相对原 11px 纯文本略小） */
 .info-html-embed--compact {
   font-size: 10px;
@@ -989,137 +908,5 @@ function csvRows(content: string): string[][] {
 
 .image-fs-overlay-btn:hover {
   background: rgba(0, 0, 0, 0.75);
-}
-
-/* HTML 报告查阅 Lightbox（与 HomeView 图表预览一致） */
-.info-html-lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 20000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.72);
-  box-sizing: border-box;
-}
-
-.info-html-lightbox-content {
-  width: min(98vw, 1760px);
-  max-height: min(92vh, 960px);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
-}
-
-.info-html-lightbox-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.info-html-lightbox-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.info-html-lightbox-close {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.info-html-lightbox-close:hover {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-.info-html-lightbox-body {
-  flex: 1;
-  min-height: 0;
-  padding: 12px;
-  background: var(--bg-primary);
-  overflow: auto;
-}
-
-/* 图片模式：居中展示，背景更暗 */
-.info-html-lightbox-body--image {
-  padding: 0;
-  background: #0b0b0f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-}
-
-.info-image-lightbox-wrapper {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  box-sizing: border-box;
-}
-
-.info-image-lightbox-img {
-  /* 显式以视口单位限制尺寸，避免依赖父级 height:100%（父级仅有 max-height 时会失效） */
-  max-width: min(96vw, 1720px);
-  max-height: min(calc(92vh - 52px), 900px);
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  display: block;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.info-html-lightbox-inner {
-  font-size: 18px;
-  line-height: 1.5;
-  color: var(--text-primary);
-}
-
-.info-html-lightbox-inner :deep(pre) {
-  font-size: inherit;
-}
-
-.lightbox-enter-active,
-.lightbox-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.lightbox-enter-from,
-.lightbox-leave-to {
-  opacity: 0;
-}
-
-.lightbox-enter-active .info-html-lightbox-content,
-.lightbox-leave-active .info-html-lightbox-content {
-  transition: transform 0.2s ease;
-}
-
-.lightbox-enter-from .info-html-lightbox-content,
-.lightbox-leave-to .info-html-lightbox-content {
-  transform: scale(0.96);
 }
 </style>

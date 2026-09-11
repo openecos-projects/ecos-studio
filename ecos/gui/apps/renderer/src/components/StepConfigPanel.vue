@@ -12,9 +12,6 @@
           · {{ stepConfigParameterCount }}
           {{ stepConfigParameterCount === 1 ? 'parameter' : 'parameters' }}
         </span>
-        <span v-if="workspaceRevision !== null" class="ml-2 normal-case">
-          · Revision {{ workspaceRevision }}
-        </span>
       </p>
     </div>
 
@@ -123,9 +120,6 @@
                     }}{{
                       baseline.baselineSource.value === 'default' ? ' (default)' : ''
                     }}
-                    <template v-if="baseline.workspaceRevision.value !== null">
-                      · Revision {{ baseline.workspaceRevision.value }}
-                    </template>
                     · read-only
                   </span>
                   <span
@@ -346,7 +340,6 @@ const {
   loading,
   error,
   runtimeMessages,
-  workspaceRevision,
   isEmpty,
   refetch,
   stepConfigPathResolved,

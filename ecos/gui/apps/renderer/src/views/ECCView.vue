@@ -176,8 +176,8 @@
                   >
                     {{
                       project.committedFreshness === 'stale'
-                        ? `Stale · last verified r${project.committedRevision}`
-                        : `Last verified · r${project.committedRevision}`
+                        ? 'Stale · last verified'
+                        : 'Last verified'
                     }}
                   </span>
                 </div>

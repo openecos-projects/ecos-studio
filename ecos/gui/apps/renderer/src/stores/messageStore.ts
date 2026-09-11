@@ -7,6 +7,7 @@ import type {
   DesktopAgentExecutionContract,
 } from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
+import { sameCapturedFlowStep } from '@/composables/flowRunArtifacts'
 import { isEphemeralToolContent } from '../components/agentToolSteps'
 
 // 生成唯一 ID
@@ -154,9 +155,10 @@ export const useMessageStore = defineStore('messages', () => {
   /**
    * 添加 Info 消息（展示结构化数据）
    */
-  const addInfoMessage = (infoData: InfoData): string => {
+  const addInfoMessage = (infoData: InfoData, sessionId?: string): string => {
     const id = generateId()
-    requireActiveMessages().push({
+    const bucket = sessionId ? sessionMessages(sessionId) : requireActiveMessages()
+    bucket.push({
       id,
       role: 'assistant',
       content: `${infoData.title} - ${infoData.step}`,
@@ -332,9 +334,10 @@ export const useMessageStore = defineStore('messages', () => {
   /**
    * 添加 Map 消息（展示热力图/密度图）
    */
-  const addMapMessage = (mapData: MapData): string => {
+  const addMapMessage = (mapData: MapData, sessionId?: string): string => {
     const id = generateId()
-    requireActiveMessages().push({
+    const bucket = sessionId ? sessionMessages(sessionId) : requireActiveMessages()
+    bucket.push({
       id,
       role: 'assistant',
       content: `${mapData.title} - ${mapData.step}`,
@@ -391,15 +394,13 @@ export const useMessageStore = defineStore('messages', () => {
     if (!sessionId) return false
     const bucket = messagesBySessionId.value[sessionId]
     if (!bucket) return false
-    const steps = new Set(
-      stepNames.map((step) => step.trim().toLowerCase()).filter(Boolean),
-    )
-    if (steps.size === 0) return clearSessionGuiArtifacts(sessionId)
+    const steps = stepNames.map((step) => step.trim()).filter(Boolean)
+    if (steps.length === 0) return clearSessionGuiArtifacts(sessionId)
 
     const isAffectedArtifact = (message: Message): boolean => {
       if (!message.isGuiArtifact) return false
       const step = message.infoData?.step ?? message.mapData?.step ?? ''
-      return steps.has(step.trim().toLowerCase())
+      return steps.some((candidate) => sameCapturedFlowStep(candidate, step))
     }
     const next = bucket.filter((message) => !isAffectedArtifact(message))
     if (next.length === bucket.length) return false

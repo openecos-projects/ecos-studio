@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildHomeQorDetailModel,
+  formatQorScore,
+  formatQorValue,
   homeQorFlowStepForLabel,
+  qorMetricComparisonLabel,
+  qorScoreComparisonLabel,
   summarizeHomeQorComparison,
 } from './qorComparisonData'
 import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
@@ -190,5 +194,33 @@ describe('Home QoR comparison data', () => {
         },
       ],
     })
+  })
+
+  it('formats scores, values, and comparison labels for the detail dialog', () => {
+    expect(formatQorScore(88)).toBe('88')
+    expect(formatQorScore(88.04)).toBe('88.0')
+    expect(formatQorValue(60.824, 'MB')).toBe('60.824 MB')
+    expect(
+      qorMetricComparisonLabel({
+        absoluteDelta: 0.246,
+        relativeDeltaPct: 0.404446,
+        state: 'regression',
+        unit: 'MB',
+        isDirectional: true,
+        polarity: 'lower_is_better',
+        baselinePolarity: 'lower_is_better',
+      }),
+    ).toBe('Regressed by 0.246 MB (0.404446%)')
+    expect(qorScoreComparisonLabel(88, 87.7)).toBe('Improved 0.3')
+    expect(
+      qorMetricComparisonLabel({
+        absoluteDelta: null,
+        relativeDeltaPct: null,
+        state: 'neutral',
+        isDirectional: false,
+        polarity: 'trend_only',
+        baselinePolarity: 'trend_only',
+      }),
+    ).toBe('No directional QoR rule')
   })
 })

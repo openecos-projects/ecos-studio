@@ -37,7 +37,7 @@ Backend Workspace 的身份、配置摘要、Flow 和 Checklist 目前由多个 
 9. 某个 section 的文件缺失、损坏或超限时，该 section 显示可恢复的问题，其他 section 不受影响。
 10. 未知 Step 和未知状态使用通用展示，不导致页面失败，也不通过字符串猜测目录或工具。
 11. 工程师查看 Flow 日志时，仍可使用现有日志选择、tail 和分块读取能力。
-12. Runtime 等待 GUI 完成 Step 渲染时，Overview 的单个 section 失败不会阻止 `operation.ack_step_rendered`。
+12. Renderer 不存在或查询 section 失败时，后台 Flow 仍可继续执行；运行状态通过 Runtime Adapter projection 恢复。
 
 ## 功能要求
 
@@ -196,7 +196,9 @@ Electron 内部复用现有 `WorkspaceResourceService`。一次未缓存 Query �
 
 ### BW-12 现有执行链路
 
-保留 `waiting_for_gui_sync`、`gui_sync_degraded` 和 `operation.ack_step_rendered`。`backendWorkspaceSession` 替换旧 Core refresh task 后，Overview section 失败不能阻止 ACK。
+本 spec 不定义 Flow Operation 的状态机或执行门控。Runtime Adapter 提供可丢失的瞬态 projection，Engineering Snapshot 提供已提交事实；查询 section、Renderer 生命周期和资源加载都不阻塞 Flow。
+
+执行生命周期见 [Backend Runtime Architecture v1](../../../docs/specs/backend-runtime-architecture-v1.md)。
 
 `useWorkspace` 的打开、关闭和 Runtime readiness 行为不变。Backend 页面不再从 `resourceVersions`、路径或 raw Runtime Event 推导已提交工程事实。
 
@@ -236,7 +238,7 @@ Electron 内部复用现有 `WorkspaceResourceService`。一次未缓存 Query �
 - 同 Context refresh 保留旧数据；Context 切换清空旧数据。
 - Electron 先失效再通知 Renderer。
 - Runtime 瞬态 projection 不修改 committed ReadModel。
-- Overview section 失败仍完成现有 GUI ACK。
+- Overview section 失败不会清空其他成功 section，也不会改变已提交 Flow 状态。
 - Flow Log 的选择、tail、chunk 和 Runtime Event 行为保持。
 - Frontend Workspace 相关回归测试保持通过。
 
@@ -247,7 +249,7 @@ Electron 内部复用现有 `WorkspaceResourceService`。一次未缓存 Query �
 - [x] 同一业务事实只有 Electron 中的一条生产解释路径。
 - [x] 一次 cache miss 只构建一次 Resource Index。
 - [x] 同 generation 的相同并发查询只执行一次。
-- [x] section 失败不会清空其他成功 section，也不会阻止 GUI ACK。
+- [x] section 失败不会清空其他成功 section，也不会改变已提交 Flow 状态。
 - [x] 已迁移 Backend 旧代码和旧测试全部删除。
 - [x] Frontend Workspace 文件和行为不变。
 - [x] 没有新增 Worker、事件总线、通用缓存框架或状态库。

@@ -101,7 +101,7 @@ describe('dashboard data presentation', () => {
         'The flow is running. Some steps have updated results; others still reflect the previous configuration.',
     },
   ])(
-    'explains $status results with running=$running and puts revisions in the detail',
+    'explains $status results with running=$running without exposing revision numbers',
     ({ status, running, message }) => {
       const notice = workspaceResultFreshnessNotice(
         {
@@ -115,9 +115,11 @@ describe('dashboard data presentation', () => {
       )
       expect(notice?.message).toBe(message)
       expect(notice?.detail).toBe(
-        'Current configuration: Revision 16. Previous results: Revision 15 (read-only).' +
-          (status === 'mixed' ? ' Updated steps use Revision 16.' : ''),
+        status === 'mixed'
+          ? 'Some steps already use the current configuration; others still show previous results until they are rerun.'
+          : 'The current configuration has changed. Previous results are shown read-only until the remaining steps are rerun.',
       )
+      expect(notice?.detail).not.toMatch(/Revision \d/)
     },
   )
 

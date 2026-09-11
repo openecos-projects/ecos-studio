@@ -1,10 +1,14 @@
 import type { WorkspaceStepResource } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import {
+  addCapturedFlowStep,
+  capturedFlowStepSetHas,
+  deleteCapturedFlowStep,
   flowStepArtifactFingerprint,
   flowStepRunArtifacts,
   isSuccessfulFlowState,
   isSuccessfulFlowStep,
+  sameCapturedFlowStep,
 } from './flowRunArtifacts'
 
 function stepResource(
@@ -71,6 +75,25 @@ describe('flow run artifacts', () => {
     expect(artifacts.layout?.path).toBe('/workspace/sta_ecc/output/design_sta.png')
   })
 
+  it('keeps a declared layout path while the image is still being written', () => {
+    const artifacts = flowStepRunArtifacts(
+      stepResource({
+        resources: {
+          ...stepResource().resources,
+          output: {
+            image: {
+              ...stepResource().resources.output.image!,
+              exists: false,
+            },
+          },
+        },
+      }),
+    )
+
+    expect(artifacts.layout?.path).toBe('/workspace/sta_ecc/output/design_sta.png')
+    expect(artifacts.layout?.exists).toBe(false)
+  })
+
   it('recognizes supported success states and detects changed run output', () => {
     const initial = stepResource({ state: 'Completed' })
     const changed = stepResource({
@@ -92,5 +115,17 @@ describe('flow run artifacts', () => {
     expect(flowStepArtifactFingerprint(changed)).not.toBe(
       flowStepArtifactFingerprint(initial),
     )
+  })
+
+  it('treats GUI path, ECC step, and resource-index names as one step', () => {
+    const steps = new Set<string>()
+    addCapturedFlowStep(steps, 'Timing optimization')
+
+    expect(sameCapturedFlowStep('Timing optimization', 'Timing Opt')).toBe(true)
+    expect(capturedFlowStepSetHas(steps, 'Timing Opt')).toBe(true)
+    expect(capturedFlowStepSetHas(steps, 'place')).toBe(false)
+
+    deleteCapturedFlowStep(steps, 'Timing Opt')
+    expect(capturedFlowStepSetHas(steps, 'Timing optimization')).toBe(false)
   })
 })

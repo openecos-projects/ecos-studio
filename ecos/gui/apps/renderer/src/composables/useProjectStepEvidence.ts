@@ -75,7 +75,7 @@ export function useProjectStepEvidence(
         ? {
             icon: 'ri-history-line',
             tone: 'stale',
-            label: `Configuration updated to Revision ${currentWorkspace.value?.analysis.resultState?.workspaceRevision}. ${props.selectedStep} needs a rerun; previous results are excluded from comparison.`,
+            label: `Configuration updated. ${props.selectedStep} needs a rerun; previous results are excluded from comparison.`,
           }
         : null
     const value = findings.value
@@ -87,7 +87,7 @@ export function useProjectStepEvidence(
         label: `Findings unavailable · ${findingsIssueLabel(value.issue.code)}`,
       }
     const previous = readOnly.value
-      ? `Configuration updated to Revision ${data.value?.currentWorkspaceRevision}. Showing read-only results from Revision ${data.value?.workspaceRevision}.`
+      ? 'Configuration updated. Showing read-only results from the previous run.'
       : null
     if (value.status === 'stale')
       return {
@@ -139,7 +139,7 @@ function findingsIssueLabel(code: string): string {
   if (code === 'FINDINGS_ARTIFACT_TOO_LARGE') return 'artifact too large'
   if (code === 'FINDINGS_ARTIFACT_INVALID_JSON') return 'invalid artifact JSON'
   if (code === 'FINDINGS_SNAPSHOT_REVISION_CHANGED') return 'snapshot changed'
-  if (code === 'ARTIFACT_REVISION_MISMATCH') return 'artifact revision changed'
+  if (code === 'ARTIFACT_REVISION_MISMATCH') return 'artifact changed'
   if (code === 'FINDINGS_STEP_UNAVAILABLE') return 'step results unavailable'
   if (code === 'FINDINGS_WORKSPACE_UNAVAILABLE') return 'workspace results unavailable'
   return 'read failed'

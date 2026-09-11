@@ -208,9 +208,9 @@ class WorkspaceSpecRuntimeMixin:
         else:
             readiness = {"ready": True}
 
-        from chipcompiler.engine.workspace_flow import build_flow_for_workspace
+        from ecos_runtime_adapter.workspace_api import _build_flow_for_workspace
 
-        build_flow_for_workspace(workspace, create_step_workspaces=False)
+        _build_flow_for_workspace(workspace, create_step_workspaces=False)
         session = self.sessions.open_session(
             workspace.directory,
             workspace=workspace,

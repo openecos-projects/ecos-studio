@@ -5,6 +5,7 @@ import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
 import { getStepMetadata } from '@/api/type'
+import { selectedFlowLogSegment } from '@/components/workbench/flowLogSelection'
 import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import { useSubflow } from '@/composables/useSubflow'
 import { useRoute } from 'vue-router'
@@ -40,9 +41,9 @@ const currentStepLogNode = computed<FlowStatusNode | null>(() => {
 
   const metadata = getStepMetadata(stepKey)
   const label = metadata?.label ?? stepKey
-  const segment = flowLogSegments.value.find(
-    (item) => item.stepName.trim().toLowerCase() === label.trim().toLowerCase(),
-  )
+  const segment =
+    selectedFlowLogSegment(flowLogSegments.value, stepKey) ??
+    selectedFlowLogSegment(flowLogSegments.value, label)
   return {
     id: `workspace-log:${metadata?.path ?? stepKey}`,
     label: segment?.stepName ?? label,

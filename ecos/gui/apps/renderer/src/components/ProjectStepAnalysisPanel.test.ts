@@ -854,10 +854,10 @@ describe('ProjectStepAnalysisPanel', () => {
       },
     })
     expect(wrapper.get('.verdict-badge').text()).toBe('Previous result')
-    expect(wrapper.get('.findings-read-status').text()).toContain('Revision 5')
     expect(wrapper.get('.findings-read-status').text()).toContain(
-      'read-only results from Revision 4',
+      'Showing read-only results from the previous run',
     )
+    expect(wrapper.get('.findings-read-status').text()).not.toContain('Revision')
     expect(wrapper.get('.step-body').text()).toContain('Previous wirelength')
     expect(wrapper.find('.metric-delta').exists()).toBe(false)
     await openCompare(wrapper)

@@ -41,11 +41,11 @@
       @update:model-value="onSelect"
     >
       <template #value="{ value, placeholder }">
-        <span v-if="value">{{ optionLabel(String(value)) }}</span>
+        <span v-if="value">{{ value }}</span>
         <span v-else class="text-(--text-secondary)">{{ placeholder }}</span>
       </template>
       <template #option="{ option }">
-        {{ optionLabel(option) }}
+        {{ option }}
       </template>
     </Select>
     <p v-if="message" class="mt-2 text-xs" :class="messageClass">{{ message }}</p>
@@ -89,10 +89,6 @@ const messageClass = computed(() =>
     ? 'text-(--text-secondary)'
     : 'text-red-500',
 )
-
-function optionLabel(name: string): string {
-  return name === props.suggested ? `${name} (suggested)` : name
-}
 
 function onSelect(value: unknown) {
   const next = typeof value === 'string' ? value : ''

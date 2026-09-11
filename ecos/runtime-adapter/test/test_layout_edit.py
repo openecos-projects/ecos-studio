@@ -217,7 +217,9 @@ def _open_api(monkeypatch, tmp_path, *, with_db=False, with_editor_workspace=Fal
         flow_calls.append(flow)
         return flow
 
-    monkeypatch.setattr("ecos_runtime_adapter.workspace_api.build_flow_for_workspace", build_flow)
+    monkeypatch.setattr(
+        "ecos_runtime_adapter.workspace_api._build_flow_for_workspace", build_flow
+    )
     registry = WorkspaceSessionRegistry()
     snapshot = create_engineering_snapshot(workspace)
     session = registry.open_session(

@@ -30,7 +30,7 @@ export function previousProjectResultLabel(
     previous.stepCount > 0 && previous.completedStepCount === previous.stepCount
       ? 'completed'
       : `${previous.completedStepCount}/${previous.stepCount} steps completed`
-  return `Previous run ${progress} · Rev ${previous.workspaceRevision}`
+  return `Previous run ${progress}`
 }
 
 export function pendingProjectStep(

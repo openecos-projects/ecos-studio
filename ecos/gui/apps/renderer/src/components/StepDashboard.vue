@@ -26,8 +26,8 @@
         v-if="data.staleRevision"
         class="step-dashboard-stale"
         role="status"
-        :title="`Previous results: Revision ${data.staleRevision} (read-only). The current configuration has changed since this run.`"
-        :aria-description="`Previous results: Revision ${data.staleRevision} (read-only). The current configuration has changed since this run.`"
+        title="These step results are from the previous configuration and are read-only until this step is rerun."
+        aria-description="These step results are from the previous configuration and are read-only until this step is rerun."
       >
         <i class="ri-history-line" aria-hidden="true" />
         Configuration changed since the last run. These step results reflect the previous

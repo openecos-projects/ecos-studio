@@ -1,6 +1,6 @@
 # Backend GUI 重构标准
 
-状态：设计已确认，尚未开始实现
+状态：查询重构已实现；执行生命周期以 Backend Runtime Architecture v1 为准
 
 确认日期：2026-08-30
 
@@ -320,9 +320,9 @@ Project Comparison Context 记录上次 Query 使用的 Workspace root 集合。
 
 ## 与现有执行链路的关系
 
-首批保留 `waiting_for_gui_sync`、`gui_sync_degraded` 和 `operation.ack_step_rendered`。删除旧 Core refresh task 后，`backendWorkspaceSession` 注册一个 Overview refresh task；section 失败不能阻止 ACK。
+Backend Query 只消费 Runtime Adapter 提供的瞬态执行投影，并将其与已提交的 ReadModel 分开。Flow 的启动、提交、取消和恢复由 [Backend Runtime Architecture v1](../../docs/specs/backend-runtime-architecture-v1.md) 定义；查询模块不拥有执行状态，也不提供 Renderer ACK。
 
-这只是行为保持约束，不代表 GUI render ACK 属于目标查询架构。Execution Lifecycle 后续单独评审。
+Renderer、查询刷新和资源加载不能成为 ECC 继续执行的条件。
 
 `useWorkspace` 的打开、关闭、runtime readiness 和 Frontend 依赖保持不变。Backend 页面不再从 `resourceVersions`、路径或 raw runtime payload 推导 committed 工程事实。
 
@@ -364,7 +364,7 @@ Project Comparison Context 记录上次 Query 使用的 Workspace root 集合。
 - 同 Context refresh 保留旧 projection，切换 Context 立即清空。
 - Electron 先失效再通知 Renderer。
 - Project Comparison 跨窗口依赖失效。
-- GUI ACK 行为保持。
+- Runtime 瞬态 projection 与 committed ReadModel 分离。
 
 旧 composable 内部 ref、cache 和 watch 测试随旧实现删除。真实用户行为测试改为通过新 interface 驱动；纯 parser 保留少量边界测试；IPC、Pinia session 和 Vue 页面只保留必要集成与交互检查。
 

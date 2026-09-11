@@ -15,6 +15,7 @@
       ref="scrollContainerRef"
       class="custom-scrollbar agent-chat__scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3"
       @scroll.passive="onScrollContainerScroll"
+      @click="onScrollContainerClick"
     >
       <div
         v-if="codexSetupStatus && codexSetupStatus.state !== 'ready'"
@@ -79,16 +80,23 @@
               @continue-select="handleWorkspaceContinueChoice"
               @parameter-select="handleWorkspaceParameterChoice"
             />
-            <MessageItem
-              v-for="msg in turn.responses"
-              :key="msg.id"
-              :message="msg"
-              :choice-interactive="msg.choice?.promptId === activeChoicePromptId"
-              :choice-disabled="isRunning"
-              @img-load="onImageLoad"
-              @choice="handleMessageChoice"
-              class="message-item w-full max-w-full min-w-0"
-            />
+            <template v-for="item in turn.responses" :key="item.id">
+              <ChatStepArtifactGroup
+                v-if="isChatStepArtifactGroup(item)"
+                :step="item.step"
+                :messages="item.messages"
+                @img-load="onImageLoad"
+              />
+              <MessageItem
+                v-else
+                :message="item"
+                :choice-interactive="item.choice?.promptId === activeChoicePromptId"
+                :choice-disabled="isRunning"
+                @img-load="onImageLoad"
+                @choice="handleMessageChoice"
+                class="message-item w-full max-w-full min-w-0"
+              />
+            </template>
             <div
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
@@ -196,6 +204,7 @@ import type {
   DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import ChatStepArtifactGroup from './ChatStepArtifactGroup.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
 import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
@@ -209,7 +218,7 @@ import {
 } from './agentSessionUi'
 import { choiceSelectionText } from './agentChoiceDisplay'
 import { displayAgentContractTitle } from './agentContractDisplay'
-import { groupMessagesIntoTurns } from './chatTurns'
+import { groupMessagesIntoTurns, isChatStepArtifactGroup } from './chatTurns'
 import {
   confirmedExecutionToken,
   executeConfirmedWorkspaceParameterUpdate,
@@ -262,7 +271,7 @@ const {
 } = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
 const { runAllFlow } = useFlowRunner()
-const agentFlowProgress = useAgentFlowProgress(
+const liveAgentFlowProgress = useAgentFlowProgress(
   (message) => {
     const sessionId = agentSessionId.value
     if (message.startsWith('Live flow progress is unavailable')) {
@@ -272,11 +281,17 @@ const agentFlowProgress = useAgentFlowProgress(
     messageStore.appendToolProgress(message, sessionId ?? undefined)
   },
   () => {
-    // ECC terminal events are the only source of runtime-driven refreshes.
     invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
   },
   backendRuntimeEvents,
 )
+const agentFlowProgress =
+  props.shell === 'home'
+    ? liveAgentFlowProgress
+    : {
+        start: async () => undefined,
+        stop: () => undefined,
+      }
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const agentSessionId = computed({
@@ -1159,6 +1174,12 @@ const isNearBottom = (): boolean => {
 
 function onScrollContainerScroll(): void {
   stickToBottom.value = isNearBottom()
+}
+
+function onScrollContainerClick(event: MouseEvent): void {
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('[aria-expanded]')) return
+  stickToBottom.value = false
 }
 
 /**

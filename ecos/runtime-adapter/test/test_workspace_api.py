@@ -103,7 +103,7 @@ class DummyFlow:
     def create_step_workspaces(self):
         self.created = True
 
-    def run_steps(self, *, rerun=False):
+    def run_steps(self, *, rerun=False, observer=None):
         self.run_steps_calls.append(rerun)
         success = True
         for workspace_step in self.workspace_steps:
@@ -126,7 +126,7 @@ class DummyFlow:
                 break
         return self.engine_db.create_db_engine(workspace_step)
 
-    def run_step(self, workspace_step, *, rerun=False):
+    def run_step(self, workspace_step, *, rerun=False, observer=None):
         name = (
             workspace_step if isinstance(workspace_step, str) else workspace_step.name
         )
@@ -1084,7 +1084,7 @@ def test_reset_flow_waits_for_session_mutation_lock(monkeypatch, tmp_path):
         return SimpleNamespace()
 
     monkeypatch.setattr(
-        "ecos_runtime_adapter.workspace_api.build_flow_for_workspace", build_flow
+        "ecos_runtime_adapter.workspace_api._build_flow_for_workspace", build_flow
     )
     monkeypatch.setattr(
         "chipcompiler.data.prepare_workspace_for_rerun",
@@ -1676,8 +1676,8 @@ def test_flow_run_sizer_boundary_exception_captures_post_sizer_db(
         {"name": "Legalization", "tool": "ecc"},
     )
 
-    def run_steps_raises_after_post_sizer_db(self, *, rerun=False):
-        del rerun
+    def run_steps_raises_after_post_sizer_db(self, *, rerun=False, observer=None):
+        del rerun, observer
         self.engine_db.close()
         self.engine_db = DummyEngineDB(self)
         self.engine_db.create_db_engine(self.workspace_steps[-1])
@@ -1790,8 +1790,8 @@ def test_flow_run_step_sizer_exception_clears_closed_session_db(
         {"name": "Timing optimization", "tool": "sizer"},
     )
 
-    def run_step_raises_after_sizer_boundary(self, workspace_step, *, rerun=False):
-        del workspace_step, rerun
+    def run_step_raises_after_sizer_boundary(self, workspace_step, *, rerun=False, observer=None):
+        del workspace_step, rerun, observer
         self.engine_db.close()
         self.engine_db = None
         raise ValueError("sizer failure")

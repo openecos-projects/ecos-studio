@@ -17,12 +17,9 @@ const props = defineProps<{
   resultState?: ProjectWorkspace['resultState']
 }>()
 const previous = computed(() => previousProjectResultLabel(props.resultState))
-const statusTitle = computed(() => {
-  const revision = props.resultState
-    ? `Current configuration: Revision ${props.resultState.workspaceRevision}`
-    : ''
-  return [props.hint.label, previous.value, revision].filter(Boolean).join(' · ')
-})
+const statusTitle = computed(() =>
+  [props.hint.label, previous.value].filter(Boolean).join(' · '),
+)
 </script>
 
 <style scoped>

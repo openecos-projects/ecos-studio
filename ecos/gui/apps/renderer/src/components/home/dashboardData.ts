@@ -226,13 +226,15 @@ export function workspaceResultFreshnessNotice(
 ): { message: string; detail: string } | null {
   if (!freshness || freshness.status === 'current' || !freshness.staleRevision)
     return null
-  const detail = `Current configuration: Revision ${freshness.currentRevision}. Previous results: Revision ${freshness.staleRevision} (read-only).`
+  const detail =
+    'The current configuration has changed. Previous results are shown read-only until the remaining steps are rerun.'
   if (freshness.status === 'mixed') {
     return {
       message: executionActive
         ? 'The flow is running. Some steps have updated results; others still reflect the previous configuration.'
         : 'Some results still reflect the previous configuration. Rerun the remaining steps to update them.',
-      detail: `${detail} Updated steps use Revision ${freshness.currentRevision}.`,
+      detail:
+        'Some steps already use the current configuration; others still show previous results until they are rerun.',
     }
   }
   return {

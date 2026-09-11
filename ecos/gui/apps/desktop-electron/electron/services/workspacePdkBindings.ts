@@ -9,6 +9,7 @@ import {
   type PdkRequirement,
   type PdkResolveBindingRequest,
   type PdkWorkspaceValidationRequest,
+  type ProjectManifest,
   validateMpcSpec,
 } from '@ecos-studio/shared'
 
@@ -19,6 +20,9 @@ export interface WorkspacePdkBindingDependencies {
     validateWorkspace(
       request: PdkWorkspaceValidationRequest,
     ): Promise<PdkInstallationSnapshot>
+  }
+  projectManagementReadService?: {
+    readManifest(projectRoot: string): Promise<ProjectManifest | null>
   }
   eccRuntimeService?: {
     callRuntime?<T>(method: string, params: Record<string, unknown>): Promise<T>
@@ -33,13 +37,18 @@ export async function prepareWorkspaceCreateBinding(
   dependencies: WorkspacePdkBindingDependencies,
   request: EccWorkspaceCreateRequest,
 ): Promise<EccWorkspaceCreateRequest> {
-  if (!request.pdkRequirement) {
+  const projectRoot = request.projectRoot ?? ''
+  const persistedRequirement =
+    !request.pdkRequirement && projectRoot && dependencies.projectManagementReadService
+      ? (await dependencies.projectManagementReadService.readManifest(projectRoot))
+          ?.base_design.pdk_requirement
+      : undefined
+  const requirement = request.pdkRequirement ?? persistedRequirement
+  if (!requirement) {
     throw new Error('PDK Requirement is required for backend workspace creation')
   }
 
-  const projectRoot = request.projectRoot ?? ''
   const projectId = request.projectId ?? ''
-  const requirement = request.pdkRequirement
   const binding = await dependencies.pdkInventoryService.resolveBinding({
     projectId,
     projectRoot,

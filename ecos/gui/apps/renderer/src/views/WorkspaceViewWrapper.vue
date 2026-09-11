@@ -21,12 +21,14 @@ import { clearBaselineStepConfigCache } from '../composables/useBaselineStepConf
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
 import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 import { useWorkspace } from '../composables/useWorkspace'
+import { useWorkspaceAgentFlowCapture } from '../composables/workspaceAgentFlowCapture'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 const { currentProject, workspaceSession } = useWorkspace()
 const agentShell = useAgentShellStore()
 const backendWorkspaceSession = useBackendWorkspaceSession()
+useWorkspaceAgentFlowCapture()
 const workspaceViewKey = computed(
   () => `${currentProject.value?.path ?? ''}:${workspaceSession.value.sessionId}`,
 )

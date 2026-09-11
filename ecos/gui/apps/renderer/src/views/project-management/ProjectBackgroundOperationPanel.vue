@@ -4,8 +4,8 @@
     class="operation-shell"
     aria-label="Background Operation"
   >
-    <div class="operation-panel">
-      <div class="operation-heading">
+    <div class="operation-panel" :class="{ attention: needsAttention }">
+      <div class="operation-identity">
         <span class="operation-state" role="status">
           <i :class="stateIcon" aria-hidden="true"></i>
           {{ stateText }}
@@ -20,16 +20,8 @@
 
       <dl v-if="operation" class="operation-facts">
         <div>
-          <dt>Operation</dt>
-          <dd :title="operation.operationId">{{ operation.operationId }}</dd>
-        </div>
-        <div>
           <dt>Workspace</dt>
           <dd :title="operation.workspaceDirectory">{{ workspaceName }}</dd>
-        </div>
-        <div>
-          <dt>Revision</dt>
-          <dd>Revision {{ operation.workspaceRevision ?? '-' }}</dd>
         </div>
         <div>
           <dt>Started</dt>
@@ -56,16 +48,6 @@
           {{ operation.cancelRequested ? 'Cancelling' : 'Cancel' }}
         </button>
         <button
-          v-if="operation"
-          type="button"
-          class="operation-action"
-          :disabled="logStatus === 'loading'"
-          @click="loadLogs"
-        >
-          <i class="ri-file-text-line" aria-hidden="true"></i>
-          {{ logStatus === 'loading' ? 'Loading Logs' : 'View Logs' }}
-        </button>
-        <button
           v-if="finalization?.state === 'snapshot-failed'"
           type="button"
           class="operation-action"
@@ -85,17 +67,13 @@
           Open Workspace
         </button>
       </div>
-      <pre v-if="logContent" class="operation-log" aria-label="Runtime log">{{
-        logContent
-      }}</pre>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
-import { getDesktopApi } from '@/platform/desktop'
+import { computed, ref } from 'vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 
@@ -109,9 +87,6 @@ const store = useBackgroundOperationStore()
 const notifications = useNotificationStore()
 const { finalizations, operations } = storeToRefs(store)
 const busy = ref(false)
-const logContent = ref('')
-const logStatus = ref<'idle' | 'loading'>('idle')
-let logRequestSequence = 0
 const normalizedWorkspacePath = computed(() => normalizePath(props.workspacePath))
 const operation = computed(() =>
   operations.value.find(
@@ -133,52 +108,17 @@ const workspaceName = computed(
       .split(/[\\/]/)
       .pop() || props.workspacePath,
 )
+const needsAttention = computed(() => finalization.value?.state === 'snapshot-failed')
 const stateText = computed(() => {
   if (operation.value?.cancelRequested) return 'Cancelling'
   if (operation.value) return operation.value.state === 'queued' ? 'Queued' : 'Running'
-  return finalization.value?.state === 'snapshot-failed'
-    ? 'Needs attention'
-    : 'Finalizing'
+  return needsAttention.value ? 'Needs attention' : 'Finalizing'
 })
 const stateIcon = computed(() => {
-  if (finalization.value?.state === 'snapshot-failed') return 'ri-error-warning-line'
+  if (needsAttention.value) return 'ri-error-warning-line'
   if (finalization.value) return 'ri-save-3-line'
-  return operation.value?.state === 'queued' ? 'ri-time-line' : 'ri-play-circle-line'
+  return operation.value?.state === 'queued' ? 'ri-time-line' : 'ri-loader-4-line'
 })
-
-watch(
-  () => [props.workspacePath, props.operationIds.join('\0')],
-  () => {
-    logRequestSequence += 1
-    logContent.value = ''
-    logStatus.value = 'idle'
-  },
-)
-
-async function loadLogs(): Promise<void> {
-  const current = operation.value
-  const runtime = getDesktopApi().ecc?.runtime
-  if (!current || !runtime) return
-  const sequence = ++logRequestSequence
-  logStatus.value = 'loading'
-  try {
-    const result = await runtime.operationLog({
-      operationId: current.operationId,
-      workspaceHandle: current.workspaceHandle,
-    })
-    if (sequence !== logRequestSequence) return
-    logContent.value = `${result.truncated ? '[Earlier output omitted]\n' : ''}${result.content}`
-  } catch (error) {
-    if (sequence !== logRequestSequence) return
-    notifications.addNotification({
-      message: error instanceof Error ? error.message : String(error),
-      severity: 'error',
-      title: 'Runtime log unavailable',
-    })
-  } finally {
-    if (sequence === logRequestSequence) logStatus.value = 'idle'
-  }
-}
 
 async function cancelOperation(): Promise<void> {
   const current = operation.value
@@ -235,71 +175,79 @@ function formatTime(timestamp: number): string {
 <style scoped>
 .operation-shell {
   min-width: 0;
+  flex: 0 0 auto;
   container-type: inline-size;
 }
 
 .operation-panel {
   display: grid;
-  grid-template-columns: minmax(140px, max-content) minmax(0, 1fr) max-content;
-  gap: 10px 14px;
+  grid-template-columns: minmax(128px, max-content) minmax(0, 1fr) max-content;
+  gap: 8px 16px;
   align-items: center;
   min-width: 0;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-color);
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 18%, var(--border-color));
+  border-radius: 8px;
   color: var(--text-primary);
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--accent-color) 6%, var(--bg-primary));
 }
 
-.operation-log {
-  grid-column: 1 / -1;
-  max-height: 220px;
-  margin: 0;
-  padding: 10px;
-  overflow: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  font: 11px/1.5 monospace;
-  white-space: pre-wrap;
+.operation-panel.attention {
+  border-color: color-mix(in srgb, var(--danger-color, #d85d5d) 32%, var(--border-color));
+  background: color-mix(in srgb, var(--danger-color, #d85d5d) 8%, var(--bg-primary));
 }
 
-.operation-heading {
-  display: flex;
+.operation-identity {
+  display: grid;
   min-width: 0;
-  flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
-.operation-heading strong,
+.operation-identity strong,
 .operation-kind {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.operation-heading strong {
+.operation-identity strong {
   font-size: 13px;
+  font-weight: 720;
+  line-height: 1.2;
 }
 
 .operation-kind,
-.operation-state,
 .operation-facts dt {
   color: var(--text-secondary);
   font-size: 10px;
+  font-weight: 650;
 }
 
 .operation-state {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
   color: var(--accent-color);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.operation-state i {
+  font-size: 13px;
+}
+
+.operation-panel.attention .operation-state {
+  color: var(--danger-color, #d85d5d);
 }
 
 .operation-facts {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  min-width: 0;
   margin: 0;
 }
 
@@ -314,17 +262,21 @@ function formatTime(timestamp: number): string {
 
 .operation-facts dd {
   overflow: hidden;
-  margin-top: 2px;
+  margin-top: 1px;
   color: var(--text-primary);
   font-size: 11px;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .operation-issue {
+  grid-column: 1 / -1;
+  min-width: 0;
   margin: 0;
-  color: var(--error-color, #e45757);
+  color: var(--danger-color, #d85d5d);
   font-size: 11px;
+  line-height: 1.35;
 }
 
 .operation-actions {
@@ -339,19 +291,37 @@ function formatTime(timestamp: number): string {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 8px;
+  min-height: 26px;
+  padding: 0 10px;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  background: transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
   font-size: 11px;
+  font-weight: 720;
   white-space: nowrap;
   cursor: pointer;
 }
 
+.operation-action:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent-color) 44%, transparent);
+}
+
 .operation-action.primary {
-  border-color: var(--accent-color);
-  color: var(--accent-color);
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent-color) 70%, transparent);
+  background: var(--accent-color);
+}
+
+.operation-action.primary:hover:not(:disabled) {
+  color: #fff;
+  background: color-mix(in srgb, var(--accent-color) 88%, var(--text-primary));
+}
+
+.operation-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 72%, transparent);
+  outline-offset: 1px;
 }
 
 .operation-action:disabled {
@@ -359,9 +329,9 @@ function formatTime(timestamp: number): string {
   opacity: 0.45;
 }
 
-@container (max-width: 1100px) {
+@container (max-width: 980px) {
   .operation-panel {
-    grid-template-columns: minmax(140px, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) max-content;
   }
 
   .operation-facts {
@@ -369,14 +339,34 @@ function formatTime(timestamp: number): string {
   }
 }
 
-@container (max-width: 720px) {
+@container (max-width: 640px) {
   .operation-panel {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .operation-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .operation-actions {
     min-width: 0;
     justify-content: flex-start;
+  }
+}
+
+.operation-state .ri-loader-4-line {
+  animation: operation-spin 1s linear infinite;
+}
+
+@keyframes operation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .operation-state .ri-loader-4-line {
+    animation: none;
   }
 }
 </style>

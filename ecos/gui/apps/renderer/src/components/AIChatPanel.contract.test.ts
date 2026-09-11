@@ -16,6 +16,18 @@ describe('AIChatPanel Workspace parameter contract', () => {
     )
   })
 
+  it('folds flow GUI artifacts by step instead of rendering each card inline', () => {
+    expect(source).toContain('ChatStepArtifactGroup')
+    expect(source).toContain('isChatStepArtifactGroup(item)')
+    expect(source).toContain(':messages="item.messages"')
+    expect(source).toContain('onScrollContainerClick')
+  })
+
+  it('does not own workspace GUI flow capture from the chat panel', () => {
+    expect(source).not.toContain('startFlowRunArtifactCapture')
+    expect(source).not.toContain('useWorkspaceAgentFlowCapture')
+  })
+
   it('does not parse or write Workspace configuration files', () => {
     expect(source).not.toContain('applyWorkspaceParameterWrites')
     expect(source).not.toContain('syncWorkspaceParameterWrites')

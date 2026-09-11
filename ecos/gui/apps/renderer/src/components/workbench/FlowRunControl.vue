@@ -49,7 +49,6 @@
 import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
 import { useCurrentStage } from '@/composables/useCurrentStage'
-import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
@@ -61,7 +60,6 @@ const rerunConfirmationVisible = ref(false)
 const preparingRerun = ref(false)
 const { currentStage } = useCurrentStage()
 const { isRunning, runFlow, runAllFlow } = useFlowRunner()
-const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
 const {
   dynamicFlowStages,
   refreshFlowStages,
@@ -138,20 +136,14 @@ async function executeRun(rerun: boolean): Promise<void> {
     }
   }
 
-  const capture = startFlowRunArtifactCapture({
-    stepNames: isHomeStage.value
-      ? dynamicFlowStages.value.map((stage) => stage.path)
-      : [currentStage.value],
-  })
-
   if (isHomeStage.value) {
     setFirstRunStepOngoing({ resetAll: rerun })
-    if (!(await runAllFlow({ rerun }))) capture.stop()
+    await runAllFlow({ rerun })
     return
   }
 
   setRunStepOngoingByPath(currentStage.value)
-  if (!(await runFlow({ rerun, resetDependents: rerun }))) capture.stop()
+  await runFlow({ rerun, resetDependents: rerun })
 }
 
 async function canRerunCurrentStep(): Promise<boolean> {

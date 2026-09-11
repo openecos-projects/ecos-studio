@@ -27,6 +27,7 @@ describe('TopModuleField', () => {
     expect(wrapper.find('input[placeholder="top"]').exists()).toBe(false)
     expect(wrapper.find('input[placeholder="Filter modules"]').exists()).toBe(false)
     expect(wrapper.get('[aria-label="Top Module Name"]').text()).toContain('gcd')
+    expect(wrapper.text()).not.toContain('(suggested)')
     wrapper.unmount()
   })
 

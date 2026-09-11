@@ -22,13 +22,10 @@ function createDependencies(
     },
   },
 ) {
-  const callRuntime = vi
-    .fn()
-    .mockResolvedValueOnce(requirement)
-    .mockResolvedValueOnce({
-      projectId: 'proj_demo',
-      projectRoot: '/projects/demo',
-    })
+  const callRuntime = vi.fn().mockResolvedValueOnce(requirement).mockResolvedValueOnce({
+    projectId: 'proj_demo',
+    projectRoot: '/projects/demo',
+  })
   return {
     callRuntime,
     dependencies: {
@@ -39,6 +36,9 @@ function createDependencies(
         validateWorkspace: vi
           .fn()
           .mockResolvedValue({ root: '/pdks/ics55', version: '1.0.0' }),
+      },
+      projectManagementReadService: {
+        readManifest: vi.fn(),
       },
       resourceManagerService: {
         getResource: vi.fn().mockResolvedValue({
@@ -135,6 +135,38 @@ describe('prepareWorkspaceOpenBinding', () => {
 })
 
 describe('prepareWorkspaceCreateBinding', () => {
+  it('reuses the persisted Project PDK requirement when the request omits it', async () => {
+    const { dependencies } = createDependencies()
+    const requirement = { familyId: 'ics55', manualConfig: null, version: null }
+    dependencies.projectManagementReadService!.readManifest = vi.fn().mockResolvedValue({
+      base_design: { pdk_requirement: requirement },
+    })
+    dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({})
+
+    await prepareWorkspaceCreateBinding(dependencies, {
+      commandId: 'create-1',
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      targetDirectory: '/projects/demo/runs/workspace',
+      workspaceBindings: { inputs: {}, pdk: { root: '/renderer/pdk' } },
+      workspaceSpec: { pdk: { familyId: 'ics55', mode: 'default' } },
+    })
+
+    expect(dependencies.projectManagementReadService.readManifest).toHaveBeenCalledWith(
+      '/projects/demo',
+    )
+    expect(dependencies.pdkInventoryService.resolveBinding).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement,
+    })
+    expect(dependencies.pdkInventoryService.validateWorkspace).toHaveBeenCalledWith({
+      projectId: 'proj_demo',
+      projectRoot: '/projects/demo',
+      requirement,
+    })
+  })
+
   it('resolves the portable MPC requirement instead of trusting presentation placeholders', async () => {
     const { dependencies } = createDependencies()
     dependencies.pdkInventoryService.resolveBinding.mockResolvedValue({})

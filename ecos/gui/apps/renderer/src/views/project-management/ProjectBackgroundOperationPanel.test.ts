@@ -5,13 +5,9 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { execute, operationLog } = vi.hoisted(() => ({
-  execute: vi.fn(),
-  operationLog: vi.fn(),
-}))
+const execute = vi.hoisted(() => vi.fn())
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
-    ecc: { runtime: { operationLog } },
     productCommands: { execute },
   }),
 }))
@@ -51,9 +47,8 @@ describe('ProjectBackgroundOperationPanel', () => {
     )
   })
 
-  it('loads bounded Runtime logs only after explicit inspection', async () => {
+  it('does not expose Runtime log inspection from the Project task strip', () => {
     useBackgroundOperationStore().operations = [operation()]
-    operationLog.mockResolvedValue({ content: 'route completed', truncated: true })
     const wrapper = mount(ProjectBackgroundOperationPanel, {
       props: {
         operationIds: ['operation-1'],
@@ -61,18 +56,8 @@ describe('ProjectBackgroundOperationPanel', () => {
       },
     })
 
-    expect(operationLog).not.toHaveBeenCalled()
-    await wrapper
-      .findAll('.operation-action')
-      .find((button) => button.text().includes('View Logs'))!
-      .trigger('click')
-
-    expect(operationLog).toHaveBeenCalledWith({
-      operationId: 'operation-1',
-      workspaceHandle: 'handle-1',
-    })
-    expect(wrapper.text()).toContain('Earlier output omitted')
-    expect(wrapper.text()).toContain('route completed')
+    expect(wrapper.text()).not.toContain('View Logs')
+    expect(wrapper.find('[aria-label="Runtime log"]').exists()).toBe(false)
   })
 
   it('shows only the revision-matched Operation selected by Project Comparison', async () => {
@@ -85,8 +70,9 @@ describe('ProjectBackgroundOperationPanel', () => {
     })
 
     expect(wrapper.text()).toContain('STA')
-    expect(wrapper.text()).toContain('Revision 7')
-    expect(wrapper.text()).toContain('operation-1')
+    expect(wrapper.text()).not.toContain('Rev')
+    expect(wrapper.text()).not.toContain('Revision')
+    expect(wrapper.text()).not.toContain('operation-1')
     await wrapper.get('button[aria-label="Cancel background Flow"]').trigger('click')
     expect(execute).toHaveBeenCalledWith({
       command: 'workspace.cancel',
@@ -107,6 +93,29 @@ describe('ProjectBackgroundOperationPanel', () => {
     expect(wrapper.emitted('open-workspace')).toHaveLength(1)
     expect(wrapper.get('.operation-actions').text()).toContain('Open Workspace')
     expect(wrapper.get('.operation-actions').text()).toContain('Cancel')
-    expect(wrapper.get('.operation-actions').text()).toContain('View Logs')
+    expect(wrapper.get('.operation-actions').text()).not.toContain('View Logs')
+  })
+
+  it('marks snapshot failures as attention and keeps Retry Snapshot', () => {
+    useBackgroundOperationStore().finalizations = [
+      {
+        issue: 'Snapshot write failed.',
+        state: 'snapshot-failed',
+        workspaceDirectory: '/projects/demo/ws_1',
+        workspaceHandle: 'handle-1',
+        workspaceId: 'engineering-1',
+      },
+    ]
+    const wrapper = mount(ProjectBackgroundOperationPanel, {
+      props: {
+        operationIds: [],
+        workspacePath: '/projects/demo/ws_1',
+      },
+    })
+
+    expect(wrapper.get('.operation-panel').classes()).toContain('attention')
+    expect(wrapper.text()).toContain('Needs attention')
+    expect(wrapper.text()).toContain('Retry Snapshot')
+    expect(wrapper.text()).not.toContain('View Logs')
   })
 })

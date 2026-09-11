@@ -1,4 +1,5 @@
 import type { WorkspaceResourceFile, WorkspaceStepResource } from '@ecos-studio/shared'
+import { sameFlowStepName } from '@/api/type'
 
 export interface FlowStepRunArtifacts {
   reports: WorkspaceResourceFile[]
@@ -9,6 +10,34 @@ type ReportResource = WorkspaceResourceFile | Record<string, WorkspaceResourceFi
 
 export function flowStepKey(stepName: string): string {
   return stepName.trim().toLowerCase()
+}
+
+/** True when GUI path, ECC step, and resource-index names refer to one step. */
+export function sameCapturedFlowStep(left: string, right: string): boolean {
+  return sameFlowStepName(left, right)
+}
+
+export function capturedFlowStepSetHas(
+  steps: ReadonlySet<string>,
+  stepName: string,
+): boolean {
+  if (steps.has(flowStepKey(stepName))) return true
+  for (const existing of steps) {
+    if (sameCapturedFlowStep(existing, stepName)) return true
+  }
+  return false
+}
+
+export function addCapturedFlowStep(steps: Set<string>, stepName: string): void {
+  const key = flowStepKey(stepName)
+  if (!key || capturedFlowStepSetHas(steps, key)) return
+  steps.add(key)
+}
+
+export function deleteCapturedFlowStep(steps: Set<string>, stepName: string): void {
+  for (const existing of steps) {
+    if (sameCapturedFlowStep(existing, stepName)) steps.delete(existing)
+  }
 }
 
 export function isSuccessfulFlowState(state: string): boolean {
@@ -41,10 +70,13 @@ export function flowStepRunArtifacts(step: WorkspaceStepResource): FlowStepRunAr
     )
     .sort((left, right) => left.path.localeCompare(right.path))
 
-  const layout = step.resources.output.image
+  // Keep a declared layout path even before the file appears. The runtime can
+  // commit the step before KLayout finishes writing the PNG; capture retries
+  // that path on the terminal inspection instead of treating it as absent.
+  const layout = step.resources.output.image ?? null
   return {
     reports,
-    layout: layout?.exists ? layout : null,
+    layout,
   }
 }
 

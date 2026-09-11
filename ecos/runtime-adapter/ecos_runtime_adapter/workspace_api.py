@@ -11,18 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar
 
-from chipcompiler.engine.workspace_flow import (
-    build_flow_for_workspace,
-)
-from chipcompiler.engine.workspace_flow import (
-    init_db_engine_for_workspace_step as _init_db_engine_for_workspace_step,
-)
-from chipcompiler.engine.workspace_flow import (
-    success_state as _success_state,
-)
-from chipcompiler.engine.workspace_flow import (
-    workspace_step_from_flow as _workspace_step_from_flow,
-)
+from chipcompiler.data import StateEnum
 from chipcompiler.utility.path import path_is_within, stringify_paths
 
 from ecos_runtime_adapter.errors import RuntimeApiError
@@ -187,7 +176,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 request.expected_workspace_revision,
             )
             self._release_session_db(session)
-            engine_flow = build_flow_for_workspace(session.workspace)
+            engine_flow = _build_flow_for_workspace(session.workspace)
             self._prepare_workspace_for_rerun(session.workspace, engine_flow)
             revision = self._commit_workspace_snapshot(session, "workspace.reset")
             return {
@@ -415,7 +404,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                 step_already_succeeded = not request.rerun and engine_flow.check_state(
                     name=workspace_step.name,
                     tool=workspace_step.tool,
-                    state=_success_state(),
+                    state=StateEnum.Success,
                 )
                 if not step_already_succeeded:
                     _init_db_engine_for_workspace_step(engine_flow, workspace_step)
@@ -636,7 +625,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                     reused=True,
                 )
 
-            engine_flow = build_flow_for_workspace(session.workspace)
+            engine_flow = _build_flow_for_workspace(session.workspace)
             if db_handle is not None:
                 engine_flow.engine_db = db_handle
 
@@ -711,7 +700,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
                         },
                     )
 
-                engine_flow = build_flow_for_workspace(session.workspace)
+                engine_flow = _build_flow_for_workspace(session.workspace)
                 workspace_step = engine_flow.get_workspace_step(request.step)
                 if workspace_step is None:
                     raise RuntimeApiError("command_failed", f"step not found: {request.step}")
@@ -976,7 +965,7 @@ class WorkspaceRuntimeApi(WorkspaceSpecRuntimeMixin):
         *,
         attach_session_db: bool,
     ):
-        engine_flow = build_flow_for_workspace(session.workspace)
+        engine_flow = _build_flow_for_workspace(session.workspace)
         if attach_session_db:
             engine_flow.engine_db = session.db_handle
         return engine_flow
@@ -2208,3 +2197,76 @@ def _close_db_handle(db_handle) -> None:
     close = getattr(db_handle, "close", None)
     if callable(close):
         close()
+
+
+def _build_flow_for_workspace(workspace, *, create_step_workspaces: bool = True):
+    import chipcompiler.engine as engine_api
+
+    engine_flow = engine_api.EngineFlow(workspace=workspace)
+    if not engine_flow.has_init():
+        raise ValueError("Workspace has no committed Flow")
+    if create_step_workspaces:
+        engine_flow.create_step_workspaces()
+    return engine_flow
+
+
+def _workspace_step_from_flow(workspace, name: str):
+    previous_step = None
+    loader = getattr(workspace.flow, "steps", None)
+    steps = loader() if callable(loader) else workspace.flow.data.get("steps", [])
+    for flow_step in steps:
+        workspace_step = _build_workspace_step_for_info(workspace, flow_step, previous_step)
+        if flow_step.get("name") == name:
+            return workspace_step
+        if workspace_step is not None:
+            previous_step = workspace_step
+    return None
+
+
+def _build_workspace_step_for_info(workspace, flow_step, previous_step):
+    step_name = flow_step.get("name")
+    tool = flow_step.get("tool")
+    if not step_name or not tool:
+        return None
+    if previous_step is None:
+        input_def = workspace.design.origin_def
+        input_verilog = workspace.design.origin_verilog
+        input_db = None
+    else:
+        input_def = previous_step.output.def_ or ""
+        input_verilog = previous_step.output.verilog or ""
+        input_db = previous_step.output.db or ""
+    builder = _load_tool_builder(tool)
+    if builder is None or not hasattr(builder, "build_step"):
+        return None
+    return builder.build_step(
+        workspace=workspace,
+        step_name=step_name,
+        input_def=input_def,
+        input_verilog=input_verilog,
+        input_db=input_db,
+    )
+
+
+def _load_tool_builder(tool):
+    import importlib
+
+    module_alias = {
+        "klayout": "klayout_tool",
+        "dreamplace": "ecc_dreamplace",
+        "sizer": "ecc_sizer",
+    }
+    module_name = module_alias.get(tool, tool)
+    return importlib.import_module(f"chipcompiler.tools.{module_name}.builder")
+
+
+def _init_db_engine_for_workspace_step(engine_flow, workspace_step):
+    engine_db = getattr(engine_flow, "engine_db", None)
+    if engine_db is None:
+        from chipcompiler.engine import EngineDB
+
+        engine_db = EngineDB(workspace=engine_flow.workspace)
+        engine_flow.engine_db = engine_db
+    elif engine_db.has_init():
+        return True
+    return engine_db.create_db_engine(step=workspace_step)
