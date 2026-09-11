@@ -39,7 +39,12 @@ from ecos_agent.optimization.experiments.frozen_contexts import (
     build_frozen_context,
     validate_context_bank,
 )
-from ecos_agent.optimization.experiments.knowledge_mediation import read_jsonl, summarize_planning_audit
+from ecos_agent.optimization.experiments.knowledge_mediation import (
+    audit_planning_calls,
+    missing_evidence_reason_counts,
+    read_jsonl,
+    summarize_planning_audit,
+)
 from ecos_agent.optimization.experiments.knowledge_metrics import (
     build_feedback_ledger,
     offline_gate,
@@ -53,6 +58,7 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
 from ecos_agent.optimization.experiments.knowledge_treatments import (
     ZERO_SHOT_GATE_TREATMENTS,
 )
+from ecos_agent.optimization.experiments.closed_loop_driver import load_design
 from ecos_agent.optimization.knowledge.compiler import (
     KnowledgeSupportCatalog,
     OptimizationStateEvidenceRequest,
@@ -802,6 +808,9 @@ def main(argv: list[str] | None = None, provider_factory: Callable[[], Any] | No
         item.add_argument("--design", nargs="+", required=True)
         item.add_argument("--mediation", type=Path)
         item.add_argument("--output", type=Path)
+        if command == "preflight":
+            item.add_argument("--effective-manifest", type=Path)
+            item.add_argument("--run-manifest", type=Path)
     offline = sub.add_parser("offline")
     offline.add_argument("--design", required=True)
     offline.add_argument("--contexts", type=Path, required=True)
@@ -821,13 +830,32 @@ def main(argv: list[str] | None = None, provider_factory: Callable[[], Any] | No
     )
     if args.command == "preflight":
         manifest = load_state_rule_manifest()
+        designs_root = Path(__file__).resolve().parents[4] / "experiments" / "designs"
+        design_checks = {}
+        for design_id in designs:
+            design = load_design(designs_root, design_id)
+            design_checks[design_id] = {
+                "top_module": design.top_module,
+                "clock_name": design.clock_name,
+                "filelist": str(design.filelist),
+                "sdc": str(design.sdc),
+                "rtl_count": len(design.rtl_list),
+            }
         payload = {
             "schema_version": "ecos.knowledge_pilot_preflight.v1",
             "design_ids": list(designs),
             "cohort_role": "pilot_only",
             "state_rule_manifest_sha256": manifest.manifest_sha256,
             "trend_noise_tolerance": manifest.trend_noise_tolerance,
+            "design_checks": design_checks,
         }
+        if args.effective_manifest:
+            effective = json.loads(args.effective_manifest.read_text(encoding="utf-8"))
+            pdk_root = effective.get("pdk_root")
+            payload["environment_checks"] = {"effective_manifest": str(args.effective_manifest), "pdk_root": pdk_root, "pdk_root_exists": bool(pdk_root and Path(pdk_root).is_dir())}
+        if args.run_manifest:
+            run = json.loads(args.run_manifest.read_text(encoding="utf-8"))
+            payload.setdefault("environment_checks", {})["run_manifest"] = {k: run.get(k) for k in ("ecc_revision", "pdk_revision", "seed")}
     elif args.command == "bank":
         designs = validate_design_ids([args.design])
         episode_id = args.episode_id or (
@@ -869,7 +897,14 @@ def main(argv: list[str] | None = None, provider_factory: Callable[[], Any] | No
             parser.error("audit requires --mediation JSONL")
         rows = read_jsonl(args.mediation)
         if "planning-provider-audit" in args.mediation.name:
-            payload = summarize_planning_audit(rows)
+            proposal_path = args.mediation.with_name("optimization-proposal-observations.v1.jsonl")
+            proposal_rows = read_jsonl(proposal_path) if proposal_path.exists() else []
+            calls = audit_planning_calls(rows, proposal_rows)
+            payload = {
+                **summarize_planning_audit(rows, proposal_rows),
+                "calls": calls,
+                "missing_evidence_reason_counts": missing_evidence_reason_counts(calls),
+            }
         else:
             selected = [row for row in rows if row.get("design_id") in designs]
             payload = {**summarize_mediation(selected), "feedback_ledger": build_feedback_ledger(selected)}
