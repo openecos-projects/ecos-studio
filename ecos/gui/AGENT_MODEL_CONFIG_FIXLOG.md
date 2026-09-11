@@ -110,39 +110,6 @@
 
 ---
 
-## 问题 5：GLM 端点不支持结构化输出，quick start / 受控自动优化的多个 provider 调用返回不合法 JSON
-
-### 现象（quick start 与受控自动优化全链路逐调用验证时发现）
-用真实 key 对 GLM 逐个驱动 GUI agent 的 6 类 provider 调用：
-`respond_to_gui_chat` 通过，但 `propose_stage_routing`、`propose_source_search`、
-`propose_gui_workspace_setup` 全部 schema 校验失败（quick start 的路由/检索/工作区
-环节会挂），受控自动优化的 `propose_v2` 待验证。
-
-### 根因
-抓取 GLM 原始返回发现：模型返回**语义正确但不符合 schema 契约**的 JSON
-（漏掉 `required` 字段、自行发明 `stages` 字段、缺 `schema_version`/`rationale`）。
-直接调用 GLM `/api/v1/responses` 对照实验证实：该端点**接受但完全忽略
-`text.format` 结构化输出**（strict 与否均忽略，自由作答）。之前 objective/chat
-能通过只是因为其系统提示词恰好详细描述了字段。GPT 端点严格遵循 schema，
-所以此前没有暴露。
-
-### 修复（模型无关，对 GPT 无行为影响）
-`ecos/agent/src/ecos_agent/codex/provider_helpers.py` + `thread_management.py`：
-`_build_prompt` 新增可选 `output_schema` 参数，把 JSON Schema 以
-"RESPONSE SCHEMA CONTRACT" 区段（声明为绑定契约：required 必须齐全、
-禁止发明字段、const/enum/minLength/maxLength 必须遵守）注入 POLICY 与 TASK
-之间、上下文 JSON 之前；`_request_json` 传入 schema，使审计 envelope 的
-prompt 与实际发送内容保持一致。
-
-### 验证（真实 key，两源全矩阵）
-- GLM 源 6/6 通过：gui_chat 14.5s、stage_routing 6.7s、source_search 7.9s、
-  workspace_setup 8.9s、propose_v2（受控自动优化主循环）93.5s、objective 11.5s。
-- GPT 源回归：stage_routing 9.5s ✓、propose_v2 84.3s ✓（decision=continue,
-  insufficient_evidence，结论合理）。
-- `ecos/agent` 单测：`test_codex_proposal_provider.py + tests/codex/ + tests/gui/`
-  172 passed；全量 1140 passed（4 个 `test_package_architecture.py` 失败为并行
-  会话提交 `7ec23f61` 引入/遗留，与本项目无关，stash 对照实验确认）。
-
 ## 问题 4（自查发现）：GLM 模式下“选择本地 codex”选了也不生效
 
 GLM 模式现在忽略 settings 级 codex 二进制（问题 1 修复），但卡片上仍显示
