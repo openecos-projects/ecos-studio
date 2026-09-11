@@ -10,7 +10,6 @@ from ecos_agent.codex.provider_helpers import (
     _read_only_thread_config,
     _build_prompt,
     _response_excerpt,
-    _schema_contract_instruction,
     ToolPolicy,
 )
 from ecos_agent.codex.rpc import CodexProviderError, _read_nested_string, _JsonLineRpcProcessClient
@@ -35,10 +34,7 @@ class CodexThreadManagementMixin:
         thread_id = self._ensure_thread(self._ensure_client())
         status = self._status_snapshots.build(user, thread_id)
         status["runtime"] = self._runtime_status.snapshot(thread_id)
-        prompt = _build_prompt(
-            system, user, tool_policy=tool_policy, agent_status=status,
-            output_schema=output_schema,
-        )
+        prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
         with self._state_lock:
             if self._planning_envelope is not None:
                 envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
