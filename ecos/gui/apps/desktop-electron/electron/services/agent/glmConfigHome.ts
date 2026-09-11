@@ -71,7 +71,7 @@ function catalogEntry(
     slug: model.slug,
     display_name: model.displayName,
     description: model.description,
-    default_reasoning_level: priority === 0 ? 'high' : 'medium',
+    default_reasoning_level: 'high',
     supported_reasoning_levels: [
       { effort: 'low', description: 'Fast responses with lighter reasoning' },
       { effort: 'medium', description: 'Balances speed and reasoning depth' },
@@ -124,7 +124,7 @@ export function buildGlmConfigToml(configHome: string): string {
   const catalogPath = join(configHome, 'models.json')
   return [
     '# Managed by ECOS Studio. Regenerated when the GLM model source is selected.',
-    'model = "glm-5.3"',
+    'model = "glm-5.3-flash"',
     'model_provider = "ZAI"',
     'model_reasoning_effort = "high"',
     `model_catalog_json = "${catalogPath}"`,
