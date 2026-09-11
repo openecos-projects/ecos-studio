@@ -69,10 +69,8 @@ export function printCliUsage(): void {
  * "Error:" prefix for CLI diagnostics: red on an interactive terminal, plain
  * text when stderr is piped or NO_COLOR is set, so captured logs stay clean.
  */
-function cliErrorPrefix(): string {
-  return process.stderr.isTTY && !process.env.NO_COLOR
-    ? '\x1b[31mError:\x1b[0m'
-    : 'Error:'
+export function cliErrorPrefix(env: NodeJS.ProcessEnv, isTTY: boolean): string {
+  return isTTY && !env.NO_COLOR ? '\x1b[31mError:\x1b[0m' : 'Error:'
 }
 
 const SIGNAL_NUMBERS: Record<string, number> = {
@@ -119,7 +117,7 @@ export async function runCliCommand(
   const executable = dependencies.resolveExecutable()
   if (!executable) {
     log(
-      `${cliErrorPrefix()} The ECC core component is not ready. Start the ECOS Studio GUI once to download it, then retry.`,
+      `${cliErrorPrefix(dependencies.env, process.stderr.isTTY)} The ECC core component is not ready. Start the ECOS Studio GUI once to download it, then retry.`,
     )
     return 1
   }

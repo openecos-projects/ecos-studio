@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applyHeadlessDisplayHint,
+  cliErrorPrefix,
   parseCliInvocation,
   runCliCommand,
   type CliRunDependencies,
@@ -88,6 +89,20 @@ describe('parseCliInvocation', () => {
       command: '',
       args: [],
     })
+  })
+})
+
+describe('cliErrorPrefix', () => {
+  it('colors the label red on an interactive terminal', () => {
+    expect(cliErrorPrefix({}, true)).toBe('\x1b[31mError:\x1b[0m')
+  })
+
+  it('stays plain when stderr is not a terminal', () => {
+    expect(cliErrorPrefix({}, false)).toBe('Error:')
+  })
+
+  it('stays plain when NO_COLOR is set', () => {
+    expect(cliErrorPrefix({ NO_COLOR: '1' }, true)).toBe('Error:')
   })
 })
 
