@@ -866,7 +866,8 @@ function isNetlistSize(value: number | null): value is number {
 }
 
 /**
- * Parses the yosys_lec result JSON (`output/<design>_<step>_result.json`).
+ * Parses the LEC result JSON (`output/<design>_<step>_result.json`), shared by
+ * the yosys_lec and kepler_formal engines.
  * `backendStatus` is the Electron-computed ECC-equivalent status
  * (missing/incomplete/stale/proven, rehashed against the current netlists) and
  * wins over the recorded status whenever present.

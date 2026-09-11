@@ -20,9 +20,10 @@ describe('sameFlowStepName', () => {
 })
 
 describe('formatStepToolName', () => {
-  it('labels the Yosys LEC tool and falls back to the raw tool name', () => {
+  it('labels the LEC tools and falls back to the raw tool name', () => {
     expect(formatStepToolName('yosys_lec')).toBe('Yosys LEC')
     expect(formatStepToolName('YOSYS_LEC')).toBe('Yosys LEC')
+    expect(formatStepToolName('kepler_formal')).toBe('Kepler Formal')
     expect(formatStepToolName('unknown_tool')).toBe('unknown_tool')
     expect(formatStepToolName('')).toBe('')
   })

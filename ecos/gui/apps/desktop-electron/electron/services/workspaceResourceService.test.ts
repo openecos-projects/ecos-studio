@@ -387,6 +387,35 @@ describe('WorkspaceResourceService', () => {
     expect(step.resources.output.def).toBeUndefined()
   })
 
+  it('indexes the kepler_formal result JSON, log, reports, and subflow', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'postRouteLec', tool: 'kepler_formal', state: 'Success' },
+    ])
+    const stepDirectory = join(root, 'postRouteLec_kepler_formal')
+    await mkdir(join(stepDirectory, 'output'), { recursive: true })
+    await writeJson(join(stepDirectory, 'output', 'gcd_postRouteLec_result.json'), {
+      status: 'proven',
+    })
+    await mkdir(join(stepDirectory, 'report'), { recursive: true })
+    await writeFile(join(stepDirectory, 'report', 'equiv_status.rpt'), 'status', 'utf8')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const step = index.flow.steps[0]!
+
+    expect(step.directory).toBe(stepDirectory)
+    expect(step.resources.output.result).toMatchObject({
+      path: join(stepDirectory, 'output', 'gcd_postRouteLec_result.json'),
+      exists: true,
+      kind: 'output',
+    })
+    expect(step.resources.report['rpt:equiv_status.rpt']).toMatchObject({
+      path: join(stepDirectory, 'report', 'equiv_status.rpt'),
+      exists: true,
+    })
+  })
+
   it('revalidates a proven LEC result against the current netlists', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [

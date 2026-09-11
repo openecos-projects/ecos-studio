@@ -709,7 +709,7 @@ describe('prepareWorkspaceRerun', () => {
       ['drc', 'ecc', 'Unstart'],
       ['lvs', 'ecc', 'Unstart'],
       ['filler', 'ecc', 'Unstart'],
-      ['postRouteLec', 'yosys_lec', 'Unstart'],
+      ['postRouteLec', 'kepler_formal', 'Unstart'],
       ['RCX', 'ecc', 'Unstart'],
       ['sta', 'ecc', 'Unstart'],
       ['Harden', 'ecc', 'Unstart'],

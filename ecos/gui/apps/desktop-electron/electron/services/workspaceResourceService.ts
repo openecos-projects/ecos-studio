@@ -356,7 +356,7 @@ export class WorkspaceResourceService {
         join(root, 'config', 'dreamplace_ecc.json'),
         'config',
       )
-    } else if (toolKey === 'yosys_lec') {
+    } else if (isLecTool(toolKey)) {
       addLecResources(resources, directory, design, step.name)
     } else if (isFrontendTool(toolKey)) {
       addFrontendResources(resources, directory, design, step.name)
@@ -618,7 +618,7 @@ export class WorkspaceResourceService {
     steps: WorkspaceStepResource[],
     design: string,
   ): Promise<StepInfoBuildResult> {
-    if (step.tool.toLowerCase() !== 'yosys_lec') {
+    if (!isLecTool(step.tool)) {
       return stepInfo(buildAnalysisInfo(step))
     }
     return stepInfo({
@@ -1192,6 +1192,12 @@ function addLecResources(
   )
 }
 
+/** Tools that own the lec/postRouteLec equivalence-checking steps. */
+function isLecTool(tool: string): boolean {
+  const normalized = tool.trim().toLowerCase()
+  return normalized === 'yosys_lec' || normalized === 'kepler_formal'
+}
+
 /** ECC publishes step netlists as output/<design>_<step>.v.gz (sizer stem underscored). */
 function stepOutputVerilogPath(step: WorkspaceStepResource, design: string): string {
   const stem =
@@ -1212,7 +1218,7 @@ function lecExpectedGatePath(
   )
   for (let index = stepIndex - 1; index >= 0; index -= 1) {
     const candidate = steps[index]!
-    if (candidate.tool.toLowerCase() === 'yosys_lec') continue
+    if (isLecTool(candidate.tool)) continue
     return stepOutputVerilogPath(candidate, design)
   }
   return null

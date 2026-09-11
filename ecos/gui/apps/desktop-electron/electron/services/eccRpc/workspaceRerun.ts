@@ -81,7 +81,7 @@ const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = 
   drc: 'ecc',
   lvs: 'ecc',
   filler: 'ecc',
-  postRouteLec: 'yosys_lec',
+  postRouteLec: 'kepler_formal',
   RCX: 'ecc',
   sta: 'ecc',
   Harden: 'ecc',
@@ -369,7 +369,7 @@ async function verifyWorkspaceRerunContract(
   )
   // LEC stages publish an equivalence result JSON instead of layout outputs.
   const isLecResultArtifact =
-    targetTool === 'yosys_lec' &&
+    (targetTool === 'yosys_lec' || targetTool === 'kepler_formal') &&
     contract.source_stage_artifact === `${stageOutputPrefix}_result.json`
   if (!isStageArtifact && !isLecResultArtifact) {
     throw new Error('Workspace rerun source artifact does not match the completed stage.')
