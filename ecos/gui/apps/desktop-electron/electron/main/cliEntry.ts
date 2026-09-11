@@ -65,6 +65,16 @@ export function printCliUsage(): void {
   console.error("Only the 'ecc' command is supported in this release.")
 }
 
+/**
+ * "Error:" prefix for CLI diagnostics: red on an interactive terminal, plain
+ * text when stderr is piped or NO_COLOR is set, so captured logs stay clean.
+ */
+function cliErrorPrefix(): string {
+  return process.stderr.isTTY && !process.env.NO_COLOR
+    ? '\x1b[31mError:\x1b[0m'
+    : 'Error:'
+}
+
 const SIGNAL_NUMBERS: Record<string, number> = {
   SIGHUP: 1,
   SIGINT: 2,
@@ -109,7 +119,7 @@ export async function runCliCommand(
   const executable = dependencies.resolveExecutable()
   if (!executable) {
     log(
-      'The ECC core component is not ready. Start the ECOS Studio GUI once to download it, then retry.',
+      `${cliErrorPrefix()} The ECC core component is not ready. Start the ECOS Studio GUI once to download it, then retry.`,
     )
     return 1
   }

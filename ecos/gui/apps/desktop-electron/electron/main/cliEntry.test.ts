@@ -139,6 +139,8 @@ describe('runCliCommand', () => {
 
     expect(code).toBe(1)
     expect(log).toHaveBeenCalledWith(expect.stringContaining('not ready'))
+    // Plain or red depending on the terminal; the label is always present.
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Error:'))
     expect(dependencies.buildRuntimeEnv).not.toHaveBeenCalled()
   })
 
