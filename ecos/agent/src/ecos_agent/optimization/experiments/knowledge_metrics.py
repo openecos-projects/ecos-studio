@@ -24,7 +24,11 @@ def summarize_mediation(rows: Iterable[Mapping[str, object]]) -> dict[str, objec
 
 
 def build_feedback_ledger(rows: Iterable[Mapping[str, object]]) -> list[dict[str, object]]:
-    """Aggregate observed outcomes by claim without inventing missing evidence."""
+    """Aggregate observed outcomes by claim without inventing missing evidence.
+
+    ``terminal_delta`` is signed on the minimized primary metric, so a
+    positive promoted delta is a harmful effect, not a realized one.
+    """
     grouped: dict[str, list[Mapping[str, object]]] = {}
     for row in rows:
         claim = row.get("claim_id")
@@ -34,14 +38,72 @@ def build_feedback_ledger(rows: Iterable[Mapping[str, object]]) -> list[dict[str
     for claim_id, values in sorted(grouped.items()):
         receipts = Counter(str(row.get("receipt_status", "unknown")) for row in values)
         terminal = Counter(str(row.get("terminal_delta_vs_epsilon", "unobserved")) for row in values)
+        promotions = Counter(
+            str(row.get("promotion_decision")) for row in values
+        )
+        promoted = [row for row in values if row.get("promotion_decision") == "promote"]
+        requested_actual_consistent = _requested_actual_consistent(values)
+        contradiction = _contradiction_status(promoted)
         ledger.append({
             "claim_id": claim_id,
             "observations": len(values),
             "receipt_status_counts": dict(sorted(receipts.items())),
             "terminal_delta_counts": dict(sorted(terminal.items())),
+            "promotion_decision_counts": dict(sorted(promotions.items())),
+            "requested_actual_consistent": requested_actual_consistent,
+            "contradiction_status": contradiction,
             "confidence": "high" if terminal.get("outside", 0) and not terminal.get("tie", 0) else "unknown",
+            "decision": _ledger_decision(
+                requested_actual_consistent, contradiction, terminal
+            ),
         })
     return ledger
+
+
+def _requested_actual_consistent(values: list[Mapping[str, object]]) -> bool | None:
+    comparable = [
+        row
+        for row in values
+        if row.get("requested_value") is not None and row.get("actual_value") is not None
+    ]
+    if not comparable:
+        return None
+    return all(
+        row.get("requested_value") == row.get("actual_value") for row in comparable
+    )
+
+
+def _contradiction_status(promoted: list[Mapping[str, object]]) -> str:
+    observed = [
+        row for row in promoted if row.get("terminal_delta_vs_epsilon") != "unobserved"
+    ]
+    if not promoted or not observed:
+        return "unknown"
+    if all(row.get("terminal_delta_vs_epsilon") == "tie" for row in observed):
+        return "unrealized"
+    if any(
+        row.get("terminal_delta_vs_epsilon") == "outside"
+        and isinstance(row.get("terminal_delta"), (int, float))
+        and not isinstance(row.get("terminal_delta"), bool)
+        and float(row["terminal_delta"]) > 0
+        for row in observed
+    ):
+        return "contradicted"
+    return "unknown"
+
+
+def _ledger_decision(
+    consistent: bool | None,
+    contradiction: str,
+    terminal: Counter[str],
+) -> str:
+    if contradiction == "contradicted":
+        return "contradicted"
+    if consistent is False:
+        return "weak"
+    if consistent and terminal.get("outside", 0) and not terminal.get("tie", 0):
+        return "keep"
+    return "unknown"
 
 
 def exact_action(row: Mapping[str, object]) -> tuple[object, object, object] | None:
