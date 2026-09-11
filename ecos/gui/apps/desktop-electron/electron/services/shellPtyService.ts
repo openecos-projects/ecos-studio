@@ -200,13 +200,16 @@ export class ShellPtyService {
   /**
    * Put the user bin dir first so tools the user installed there (including
    * our ecos-ecc shim) win by name, matching the usual login-shell PATH
-   * convention. Existing entries keep their order and duplicates are skipped.
+   * convention. An entry already present elsewhere is moved to the front so
+   * a stale same-name command in an earlier directory cannot shadow the
+   * shim; other entries (including empty segments) keep their order.
    */
   private withUserBinDir(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const binDir = this.resolveUserBinDir()
     if (!binDir) return env
     const current = env.PATH ?? ''
-    if (current.split(':').includes(binDir)) return env
-    return { ...env, PATH: current ? `${binDir}:${current}` : binDir }
+    if (current === '') return { ...env, PATH: binDir }
+    const rest = current.split(':').filter((entry) => entry !== binDir)
+    return { ...env, PATH: [binDir, ...rest].join(':') }
   }
 }

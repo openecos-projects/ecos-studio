@@ -330,7 +330,7 @@ describe('ShellPtyService', () => {
     )
   })
 
-  it('does not duplicate the user bin dir when PATH already contains it', async () => {
+  it('moves the user bin dir to the front when PATH already contains it later', async () => {
     const fakePty = new FakePty()
     const ptyBackend = {
       spawn: vi.fn(() => fakePty),
@@ -338,7 +338,7 @@ describe('ShellPtyService', () => {
     const service = new ShellPtyService({
       env: {
         HOME: '/home/ecos',
-        PATH: '/home/ecos/.local/bin:/usr/bin',
+        PATH: '/usr/local/bin:/home/ecos/.local/bin:/usr/bin',
         SHELL: '/bin/bash',
       },
       platform: 'linux',
@@ -353,7 +353,35 @@ describe('ShellPtyService', () => {
       [],
       expect.objectContaining({
         env: expect.objectContaining({
-          PATH: '/home/ecos/.local/bin:/usr/bin',
+          PATH: '/home/ecos/.local/bin:/usr/local/bin:/usr/bin',
+        }),
+      }),
+    )
+  })
+
+  it('handles an empty PATH without leaving a trailing separator', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        SHELL: '/bin/bash',
+      },
+      platform: 'linux',
+      ptyBackend,
+      userBinDir: '/home/ecos/.local/bin',
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/home/ecos/.local/bin',
         }),
       }),
     )
