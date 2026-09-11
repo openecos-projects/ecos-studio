@@ -1664,6 +1664,7 @@ describe('ResourceManagerService', () => {
     const pdksDir = join(root, 'data', 'pdks')
     const packagedBin = join(root, 'packaged', 'binaries')
     const yosysRoot = join(toolsDir, 'yosys', '2026-05-13')
+    const keplerRoot = join(toolsDir, 'kepler-formal', '1.0.0')
     const slangRoot = join(toolsDir, 'slang', '10.0')
     const verilatorRoot = join(toolsDir, 'verilator', '5.050')
     const eccFeRoot = join(toolsDir, 'ecc-fe', '0.1.0-alpha.0-ecos')
@@ -1676,6 +1677,8 @@ describe('ResourceManagerService', () => {
     const missingRoot = join(toolsDir, 'missing', '1.0')
     const ics55Root = join(pdksDir, 'ics55', '1.10.100')
     await mkdir(join(yosysRoot, 'bin'), { recursive: true })
+    await mkdir(join(keplerRoot, 'lib'), { recursive: true })
+    await writeFile(join(keplerRoot, 'kepler-formal'), '#!/bin/sh\n', 'utf8')
     await mkdir(join(slangRoot, 'bin'), { recursive: true })
     await createInstalledVerilatorRoot(verilatorRoot)
     await createInstalledEccFeRoot(eccFeRoot)
@@ -1780,6 +1783,7 @@ describe('ResourceManagerService', () => {
     await writeFile(join(inactiveRoot, 'bin', 'inactive'), '#!/bin/sh\n', 'utf8')
     await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
     await chmod(join(yosysRoot, 'bin', 'verilator'), 0o755)
+    await chmod(join(keplerRoot, 'kepler-formal'), 0o755)
     await chmod(join(slangRoot, 'bin', 'slang'), 0o755)
     await chmod(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), 0o755)
     await chmod(join(duplicateRoot, 'bin', 'duplicate'), 0o755)
@@ -1796,6 +1800,15 @@ describe('ResourceManagerService', () => {
             path: yosysRoot,
             executable: 'bin/yosys',
             detected_executables: ['bin/yosys', 'bin/verilator'],
+            active: true,
+            managed: true,
+          },
+          'tool:kepler-formal': {
+            type: 'tool',
+            name: 'kepler-formal',
+            version: '1.0.0',
+            path: keplerRoot,
+            executable: 'kepler-formal',
             active: true,
             managed: true,
           },
@@ -1937,6 +1950,7 @@ describe('ResourceManagerService', () => {
       packagedBin,
       join(verilatorRoot, 'bin'),
       join(yosysRoot, 'bin'),
+      keplerRoot,
       join(duplicateRoot, 'bin'),
       join(slangRoot, 'bin'),
       join(eccFeRoot, 'bin'),
@@ -1945,6 +1959,7 @@ describe('ResourceManagerService', () => {
     ])
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(yosysRoot)
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(yosysRoot)
+    expect(env.CHIPCOMPILER_KEPLER_FORMAL_ROOT).toBe(keplerRoot)
     expect(env.ECOS_SLANG).toBe(join(slangRoot, 'bin', 'slang'))
     expect(env.ECOS_VERILATOR).toBe(join(verilatorRoot, 'bin', 'verilator'))
     expect(env.VERILATOR_ROOT).toBe(join(verilatorRoot, 'share', 'verilator'))

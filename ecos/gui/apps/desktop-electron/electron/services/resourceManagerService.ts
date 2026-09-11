@@ -532,6 +532,7 @@ export class ResourceManagerService {
     const toolBinDirs: string[] = []
     const preferredToolBinDirs: string[] = []
     let activeYosysRoot: string | null = null
+    let activeKeplerFormalRoot: string | null = null
     let activeSurferRoot: string | null = null
     const frontendResourceRoots: string[] = []
     let activeSocRoot: string | null = null
@@ -598,6 +599,9 @@ export class ResourceManagerService {
       if (runtimeTools.has('yosys')) {
         activeYosysRoot = entry.path
       }
+      if (runtimeTools.has('kepler-formal')) {
+        activeKeplerFormalRoot = entry.path
+      }
       const slangExecutable = runtimeTools.get('slang')
       if (slangExecutable) {
         env.ECOS_SLANG = slangExecutable
@@ -648,6 +652,9 @@ export class ResourceManagerService {
     if (activeYosysRoot) {
       env.CHIPCOMPILER_OSS_CAD_DIR = activeYosysRoot
       env.ECOS_ELECTRON_OSS_CAD_DIR = activeYosysRoot
+    }
+    if (activeKeplerFormalRoot) {
+      env.CHIPCOMPILER_KEPLER_FORMAL_ROOT = activeKeplerFormalRoot
     }
     if (activeSurferRoot) {
       env.ECOS_SURFER_ASSETS_PATH = activeSurferRoot
@@ -3855,6 +3862,7 @@ function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
   if (normalized === 'verilator') capabilities.add('verilator')
   if (normalized === 'riscv-toolchain') capabilities.add('riscv-toolchain')
   if (normalized === 'ecc-fe') capabilities.add('ecc-fe')
+  if (normalized === 'kepler-formal') capabilities.add('kepler-formal')
 
   for (const executable of [entry.executable, ...entry.detected_executables]) {
     const name = basename(executable)
@@ -3862,6 +3870,7 @@ function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
     if (name === 'slang') capabilities.add('slang')
     if (name === 'verilator') capabilities.add('verilator')
     if (name === 'ecc-fe') capabilities.add('ecc-fe')
+    if (name === 'kepler-formal') capabilities.add('kepler-formal')
     if (name.endsWith('gcc') && detectRiscvPrefix([executable], '')) {
       capabilities.add('riscv-toolchain')
     }
@@ -4057,6 +4066,11 @@ function preferredExecutableNames(normalizedName: string): string[] {
   }
   if (normalizedName === 'yosys' || normalizedName === 'oss-cad-suite') {
     return ['bin/yosys', 'yosys']
+  }
+  if (normalizedName === 'kepler-formal') {
+    // Prefer the root launcher: it prepends the bundled lib/ to
+    // LD_LIBRARY_PATH for the raw bin/kepler-formal binary.
+    return ['kepler-formal', 'bin/kepler-formal']
   }
   if (normalizedName === 'riscv-toolchain') {
     return [

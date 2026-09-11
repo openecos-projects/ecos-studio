@@ -30,6 +30,7 @@ const TOOL_HEALTH_POLICIES: Readonly<Record<string, readonly ToolHealthMarker[]>
     executable('bin/riscv64-unknown-elf-objcopy'),
   ],
   'ecc-fe': [executable('bin/ecc-fe'), directory('fecompiler')],
+  'kepler-formal': [executable('kepler-formal'), directory('lib')],
   'ecc-fe-soc-ysyx-am': [
     file('manifest.json'),
     file('catalog.json'),
