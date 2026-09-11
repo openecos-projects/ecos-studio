@@ -379,7 +379,7 @@ describe('CodexDependencyService', () => {
       settingsStore.get<string>(DESKTOP_GLM_API_KEY_SETTING_KEY),
     ).resolves.toBe('test-key')
     const configToml = await readFile(join(glmConfigRoot, 'config.toml'), 'utf8')
-    expect(configToml).toContain('model = "glm-5.3"')
+    expect(configToml).toContain('model = "glm-5.3-flash"')
     expect(configToml).toContain('env_key = "ZAI_API_KEY"')
     expect(configToml).not.toContain('test-key')
     const modelsJson = JSON.parse(
