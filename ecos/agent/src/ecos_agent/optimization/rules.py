@@ -215,6 +215,7 @@ def terminal_candidate_is_promotable(
     recovery_active: bool = False,
     semantic_objective: OptimizationObjectiveContract | None = None,
     baseline_geometry: GeometrySnapshot | None = None,
+    receipt_aware_planning: bool = True,
 ) -> bool:
     recovery_eligible = False
     if recovery_active and candidate is not None and objective_alignment is not None:
@@ -223,6 +224,11 @@ def terminal_candidate_is_promotable(
             recovery_eligible = True
         except ObjectiveAlignmentError:
             recovery_eligible = False
+    # RQ1 system-level ablation: the requested-only arm drops the
+    # effective-receipt promotion gate.  Receipts are still recorded; only the
+    # promotion consumer changes, keeping both arms on one evidence chain.
+    # The gate stays inside the conjunction so duck-typed receipt probes keep
+    # their original short-circuit behaviour.
     return bool(
         geometry_constraint_error(semantic_objective, baseline_geometry, candidate) is None
         and candidate is not None
@@ -232,8 +238,13 @@ def terminal_candidate_is_promotable(
         and comparison is not None
         and comparison.decision in PROMOTING_DECISIONS
         and requested is not None
-        and parameter_receipt is not None
-        and native_receipt_is_effective(parameter_receipt)
+        and (
+            not receipt_aware_planning
+            or (
+                parameter_receipt is not None
+                and native_receipt_is_effective(parameter_receipt)
+            )
+        )
     )
 
 
@@ -248,6 +259,7 @@ def classify_terminal_candidate(
     requested: RequestedKnobValue | None,
     parameter_receipt: ParameterApplicationReceipt | None,
     baseline_geometry: GeometrySnapshot | None = None,
+    receipt_aware_planning: bool = True,
 ) -> TerminalCandidateClassification:
     comparison: IncumbentComparison | None = None
     recovering = bool(
@@ -289,9 +301,13 @@ def classify_terminal_candidate(
         comparison = IncumbentComparison(
             IncumbentDecision.CANDIDATE_INELIGIBLE, None
         )
-    if requested is not None and (
-        parameter_receipt is None
-        or not native_receipt_is_effective(parameter_receipt)
+    if (
+        receipt_aware_planning
+        and requested is not None
+        and (
+            parameter_receipt is None
+            or not native_receipt_is_effective(parameter_receipt)
+        )
     ):
         comparison = IncumbentComparison(
             IncumbentDecision.CANDIDATE_INELIGIBLE, None
@@ -311,6 +327,7 @@ def classify_terminal_candidate(
             recovery_active=recovering,
             semantic_objective=semantic_objective,
             baseline_geometry=baseline_geometry,
+            receipt_aware_planning=receipt_aware_planning,
         ),
     )
 

@@ -355,6 +355,13 @@ def main(provider_factory: Callable[..., Any]) -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--agent-mode", default="full_agent")
+    parser.add_argument(
+        "--planning-evidence",
+        choices=("receipt-aware", "requested-only"),
+        default="receipt-aware",
+        help="RQ1 system-level arm: requested-only also drops the "
+        "effective-receipt promotion gate (D1 ablation)",
+    )
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
     parser.add_argument(
         "--calibration-replays",
@@ -471,7 +478,7 @@ def main(provider_factory: Callable[..., Any]) -> int:
             ).model_dump(mode="json"),
             "seed": args.seed,
             "reference_runtime_seconds": reference_runtime,
-            "receipt_aware_planning": True,
+            "receipt_aware_planning": args.planning_evidence == "receipt-aware",
             "agent_mode": args.agent_mode,
             "knowledge_case_shots": 0,
         }
@@ -520,6 +527,7 @@ def main(provider_factory: Callable[..., Any]) -> int:
         "design_id": args.design,
         "episode_id": episode_id,
         "agent_mode": args.agent_mode,
+        "planning_evidence": args.planning_evidence,
         "model": model,
         "seed": args.seed,
         "reference_runtime_seconds": reference_runtime,
