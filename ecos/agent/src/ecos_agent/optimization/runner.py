@@ -308,6 +308,7 @@ class OptimizationEpisodeRunner:
             objective_alignment=self._controller.objective_alignment,
             requested=record.requested if record is not None else None,
             parameter_receipt=receipt.parameter_application_receipt,
+            receipt_aware_planning=self._controller.receipt_aware_planning,
         )
         comparison = classification.comparison
         completed = self._controller.complete_terminal(

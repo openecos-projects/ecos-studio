@@ -617,6 +617,7 @@ class ControllerExecutionMixin:
             recovery_active=self.recovery_incomplete,
             semantic_objective=self._objective,
             baseline_geometry=self._baseline_geometry,
+            receipt_aware_planning=self.receipt_aware_planning,
         )
         active_objective = self.active_objective
         next_active_objective = active_objective
