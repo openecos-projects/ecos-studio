@@ -31,6 +31,10 @@ from ecos_agent.optimization.experiments.equal_budget import (
     _evaluation_value,
     export_episode_traces,
 )
+from ecos_agent.optimization.experiments.baseline_runner import (
+    BaselineProposalProvider,
+)
+from ecos_agent.optimization.experiments.baselines import BaselineMethod
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
@@ -342,7 +346,7 @@ def load_design(designs_root: Path, design_id: str) -> DesignSpec:
     )
 
 
-def main(provider_factory: Callable[..., Any]) -> int:
+def main(provider_factory: Callable[..., Any] | None) -> int:
     _self_check()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--design", required=True)
@@ -355,6 +359,13 @@ def main(provider_factory: Callable[..., Any]) -> int:
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--agent-mode", default="full_agent")
+    parser.add_argument(
+        "--baseline-method",
+        choices=tuple(method.value for method in BaselineMethod),
+        default=None,
+        help="drive the episode with a deterministic baseline policy instead "
+        "of the LLM provider (Agent-necessity arm); same execution contract",
+    )
     parser.add_argument(
         "--planning-evidence",
         choices=("receipt-aware", "requested-only"),
@@ -448,16 +459,27 @@ def main(provider_factory: Callable[..., Any]) -> int:
             f"episode already exists: {episode_id}; pass --episode-id to resume"
         )
 
-    provider = provider_factory(
-        cwd=workspace,
-        env=dict(os.environ),
-        runtime_workspace_roots=(workspace,),
-        diagnostics_path=output / "codex-diagnostics.jsonl",
-        ephemeral=True,
-    )
+    if args.baseline_method:
+        provider = BaselineProposalProvider(
+            args.baseline_method, design_id=args.design, seed=args.seed
+        )
+    elif provider_factory is not None:
+        provider = provider_factory(
+            cwd=workspace,
+            env=dict(os.environ),
+            runtime_workspace_roots=(workspace,),
+            diagnostics_path=output / "codex-diagnostics.jsonl",
+            ephemeral=True,
+        )
+    else:
+        raise SystemExit(
+            "either --baseline-method or an LLM provider factory is required"
+        )
     try:
         model = args.model
-        if args.reasoning_effort:
+        if args.baseline_method:
+            model = None
+        elif args.reasoning_effort:
             # set_model_settings 内部会先 select_model 再校验 effort 合法性
             provider.set_model_settings(
                 model=model, reasoning_effort=args.reasoning_effort
@@ -528,6 +550,11 @@ def main(provider_factory: Callable[..., Any]) -> int:
         "episode_id": episode_id,
         "agent_mode": args.agent_mode,
         "planning_evidence": args.planning_evidence,
+        "planner_policy": (
+            f"baseline:{args.baseline_method}"
+            if args.baseline_method
+            else "llm"
+        ),
         "model": model,
         "seed": args.seed,
         "reference_runtime_seconds": reference_runtime,
