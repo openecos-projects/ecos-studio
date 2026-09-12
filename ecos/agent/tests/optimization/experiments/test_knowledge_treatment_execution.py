@@ -289,7 +289,7 @@ def test_phase8_calibration_stops_after_two_identical_replays(
     _patch_calibration(monkeypatch, tmp_path, lambda _workspace: observation)
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(calls))
 
-    reference, runtime = runner._calibrate(
+    reference, runtime, _epsilon = runner._calibrate(
         manifest,
         design,
         workspace,
@@ -362,7 +362,7 @@ def test_phase8_calibration_reuses_cached_replays_for_unchanged_context(
 
     replay_calls: list = []
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", _replay_client(replay_calls))
-    reference, runtime = runner._calibrate(
+    reference, runtime, _epsilon = runner._calibrate(
         manifest, design, workspace, observation, calibration, 1.0
     )
 

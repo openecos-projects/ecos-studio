@@ -76,6 +76,8 @@ class ControllerRecoveryMixin:
         knowledge_case_shots: Literal[0, 3] = 0,
         knowledge_case_pool_root: Path | None = None,
         max_in_flight_candidates: Literal[1, 2] = 1,
+        design_id: str | None = None,
+        trend_noise_epsilon: Mapping[str, float] | None = None,
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file():
@@ -142,6 +144,10 @@ class ControllerRecoveryMixin:
         controller.episode_id = snapshot.episode_id
         controller.checkpoint_id = snapshot.checkpoint_id
         controller.mode = snapshot.mode
+        controller._trend_noise_epsilon = controller._validated_trend_noise_epsilon(
+            trend_noise_epsilon
+        )
+        controller._episode_design_id = controller._manifest_scope_check(design_id)
         if snapshot.knowledge_case_shots != knowledge_case_shots:
             raise OptimizationEpisodeControllerError(
                 "knowledge case shots do not match the recovered episode"

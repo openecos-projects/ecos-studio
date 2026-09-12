@@ -86,7 +86,7 @@ def run_experiment(
         canonical = _ensure_workspace(
             manifest, design, workspace, terminal_timeout_seconds
         )
-        reference, reference_runtime = _calibrate(
+        reference, reference_runtime, noise_epsilon = _calibrate(
             manifest,
             design,
             workspace,
@@ -94,14 +94,21 @@ def run_experiment(
             run_root / design.design_id / "calibration",
             terminal_timeout_seconds,
         )
-        return design, workspace, canonical, reference, reference_runtime
+        return design, workspace, canonical, reference, reference_runtime, noise_epsilon
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         prepared = tuple(executor.map(prepare_design, manifest.designs))
 
     def run_treatments(treatments: Sequence[KnowledgeTreatmentConfig]):
         def run_design(item):
-            design, workspace, canonical, reference, reference_runtime = item
+            (
+                design,
+                workspace,
+                canonical,
+                reference,
+                reference_runtime,
+                noise_epsilon,
+            ) = item
             results = {
                 treatment.treatment.value: _run_treatment(
                     design,
@@ -116,6 +123,7 @@ def run_experiment(
                     provider_factory=provider_factory,
                     knowledge_case_pool_root=knowledge_case_pool_root,
                     canonical=canonical,
+                    noise_epsilon=noise_epsilon,
                 )
                 for treatment in treatments
             }
@@ -421,6 +429,7 @@ def _run_treatment(
     provider_factory: Callable[..., Any],
     knowledge_case_pool_root: Path | None = None,
     canonical: TerminalObservation | None = None,
+    noise_epsilon: dict[str, float] | None = None,
 ) -> dict[str, object]:
     if canonical is None:
         raise ValueError(
@@ -456,6 +465,7 @@ def _run_treatment(
         "seed": seed,
         "reference_runtime_seconds": reference_runtime,
         "receipt_aware_planning": treatment.receipt_aware_planning,
+        "trend_noise_epsilon": noise_epsilon,
         "agent_mode": treatment.agent_mode,
         "knowledge_case_shots": treatment.knowledge_case_shots,
     }

@@ -115,6 +115,29 @@ class OptimizationRuntimeContext(BaseModel):
     receipt_aware_planning: StrictBool = True
     seed: StrictInt = 0
     max_in_flight_candidates: Literal[1, 2] = 2
+    # Per-metric calibrated replay epsilon (noise-epsilon.v1.json); a
+    # full-agent episode for a manifest-scoped design must provide it.
+    trend_noise_epsilon: dict[str, float] | None = None
+
+    @field_validator("trend_noise_epsilon")
+    @classmethod
+    def validate_trend_noise_epsilon(
+        cls, value: dict[str, float] | None
+    ) -> dict[str, float] | None:
+        if value is None:
+            return None
+        for key, epsilon in value.items():
+            if (
+                not key
+                or isinstance(epsilon, bool)
+                or not isinstance(epsilon, (int, float))
+                or not math.isfinite(epsilon)
+                or epsilon < 0
+            ):
+                raise ValueError(
+                    "trend noise epsilon entries must be finite and non-negative"
+                )
+        return dict(value)
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -327,6 +350,7 @@ def _recover_or_create_controller(
             parent_manifest,
             execution_context,
             knowledge_case_pool_root,
+            design_id,
         )
     if any(path.is_file() for path in legacy_state_paths):
         raise OptimizationRuntimeError(
@@ -370,6 +394,7 @@ def _recover_controller(
     parent_manifest: str,
     execution_context: Mapping[str, object],
     knowledge_case_pool_root: Path | None,
+    design_id: str | None = None,
 ) -> OptimizationEpisodeController:
     memory_store.verify_episode_scope(ledger_root)
     controller = OptimizationEpisodeController.recover(
@@ -384,6 +409,8 @@ def _recover_controller(
         knowledge_case_shots=runtime.knowledge_case_shots,
         knowledge_case_pool_root=knowledge_case_pool_root,
         max_in_flight_candidates=runtime.max_in_flight_candidates,
+        design_id=design_id,
+        trend_noise_epsilon=runtime.trend_noise_epsilon,
     )
     if controller.objective != runtime.objective:
         raise OptimizationRuntimeError(

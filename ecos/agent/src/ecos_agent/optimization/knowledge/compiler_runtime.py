@@ -60,7 +60,7 @@ def build_state_evidence_request(
     reference_sha256: str | None = None,
     historical_metrics: tuple[Mapping[str, float], ...] = (),
     history_sha256: tuple[str, ...] = (),
-    trend_epsilon: float = 0.0,
+    trend_epsilon: float | Mapping[str, float] = 0.0,
     extra_features: tuple[StateEvidenceFeature, ...] = (),
 ) -> OptimizationStateEvidenceRequest:
     observation_ref = ObservationReference(
@@ -134,7 +134,11 @@ def build_state_evidence_request(
         ),
         observation_ref.sha256,
     )
-    if trend_epsilon < 0:
+    if isinstance(trend_epsilon, Mapping):
+        for metric_id, value in trend_epsilon.items():
+            if not metric_id or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError("trend noise epsilon entries must be finite and non-negative")
+    elif trend_epsilon < 0:
         raise ValueError("trend epsilon must be non-negative")
     _add_trend_features(
         features, observation, historical_metrics, observation_ref.sha256, trend_epsilon
@@ -492,7 +496,7 @@ def _add_trend_features(
     observation: StageObservation,
     history: tuple[Mapping[str, float], ...],
     observation_sha256: str,
-    trend_epsilon: float = 0.0,
+    trend_epsilon: float | Mapping[str, float] = 0.0,
 ) -> None:
     if not history:
         return
@@ -501,8 +505,21 @@ def _add_trend_features(
     for metric_id, current in observation.metrics.items():
         if metric_id not in previous:
             continue
+        if isinstance(trend_epsilon, Mapping):
+            # Fail closed: a calibrated episode must carry the frozen
+            # noise-epsilon artifact entry for every trended metric rather
+            # than silently falling back to a zero tolerance.
+            epsilon = trend_epsilon.get(metric_id)
+            if epsilon is None:
+                raise ValueError(
+                    "calibrated trend noise epsilon is missing for metric "
+                    f"{metric_id}; provide the frozen noise-epsilon.v1.json "
+                    "from this design's default-replay calibration"
+                )
+        else:
+            epsilon = trend_epsilon
         delta = current - previous[metric_id]
-        if abs(delta) <= trend_epsilon:
+        if abs(delta) <= epsilon:
             trend = "stable"
         else:
             trend = "increasing" if delta > 0 else "decreasing"
