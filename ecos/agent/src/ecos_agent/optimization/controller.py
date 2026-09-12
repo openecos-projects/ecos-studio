@@ -323,23 +323,25 @@ class OptimizationEpisodeController(
     def _manifest_scope_check(self, design_id: str | None) -> str | None:
         """Gate knowledge-consuming episodes on manifest scope and calibration.
 
-        Fail closed: a production full-agent episode for a design inside the
-        frozen state-rule manifest scope must carry its calibrated
-        per-metric trend epsilon (noise-epsilon.v1.json); episodes without
-        calibration must not silently fall back to a zero tolerance.
+        Fail closed: a full-agent episode for a design inside the frozen
+        state-rule manifest scope must carry its calibrated per-metric trend
+        epsilon (noise-epsilon.v1.json); episodes without calibration must
+        not silently fall back to a zero tolerance.  Knowledge-free modes
+        never compile the supported-action view, so the manifest does not
+        constrain them.
         """
         if design_id is None:
             return None
         if not _ID.fullmatch(design_id):
             raise OptimizationEpisodeControllerError("design id is invalid")
+        if self.mode != OptimizationAgentMode.FULL_AGENT:
+            return design_id
         manifest = load_state_rule_manifest()
         if design_id not in manifest.scope:
             raise OptimizationEpisodeControllerError(
                 f"design is outside the frozen state-rule manifest scope: {design_id}"
             )
-        if self.mode == OptimizationAgentMode.FULL_AGENT and (
-            self._trend_noise_epsilon is None
-        ):
+        if self._trend_noise_epsilon is None:
             raise OptimizationEpisodeControllerError(
                 "full-agent episode lacks the calibrated trend noise epsilon; "
                 "run the default-replay noise calibration (noise-epsilon.v1.json) "

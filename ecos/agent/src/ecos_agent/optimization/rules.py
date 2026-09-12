@@ -224,11 +224,7 @@ def terminal_candidate_is_promotable(
             recovery_eligible = True
         except ObjectiveAlignmentError:
             recovery_eligible = False
-    # RQ1 system-level ablation: the requested-only arm drops the
-    # effective-receipt promotion gate.  Receipts are still recorded; only the
-    # promotion consumer changes, keeping both arms on one evidence chain.
-    # The gate stays inside the conjunction so duck-typed receipt probes keep
-    # their original short-circuit behaviour.
+    # RQ1 requested-only arm: drop the receipt gate, keep short-circuit order.
     return bool(
         geometry_constraint_error(semantic_objective, baseline_geometry, candidate) is None
         and candidate is not None
@@ -301,13 +297,8 @@ def classify_terminal_candidate(
         comparison = IncumbentComparison(
             IncumbentDecision.CANDIDATE_INELIGIBLE, None
         )
-    if (
-        receipt_aware_planning
-        and requested is not None
-        and (
-            parameter_receipt is None
-            or not native_receipt_is_effective(parameter_receipt)
-        )
+    if requested is not None and receipt_aware_planning and (
+        parameter_receipt is None or not native_receipt_is_effective(parameter_receipt)
     ):
         comparison = IncumbentComparison(
             IncumbentDecision.CANDIDATE_INELIGIBLE, None
