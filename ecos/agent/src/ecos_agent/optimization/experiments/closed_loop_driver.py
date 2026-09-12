@@ -424,7 +424,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     canonical = _ensure_workspace(
         manifest, design, workspace, args.terminal_timeout_seconds
     )
-    reference, reference_runtime = _calibrate(
+    reference, reference_runtime, _calibration_epsilon = _calibrate(
         manifest,
         design,
         workspace,
@@ -501,6 +501,9 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             "seed": args.seed,
             "reference_runtime_seconds": reference_runtime,
             "receipt_aware_planning": args.planning_evidence == "receipt-aware",
+            "trend_noise_epsilon": (
+                noise_epsilon["epsilon"] if noise_epsilon else None
+            ),
             "agent_mode": args.agent_mode,
             "knowledge_case_shots": 0,
         }

@@ -203,7 +203,7 @@ def test_phase8_blocks_few_shot_until_zero_shot_gate_passes(
     monkeypatch.setattr(
         module,
         "_calibrate",
-        lambda *_args: (_terminal_observation(), 1.0),
+        lambda *_args: (_terminal_observation(), 1.0, {}),
     )
     monkeypatch.setattr(
         module,

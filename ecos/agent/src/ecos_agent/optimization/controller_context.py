@@ -279,7 +279,11 @@ class ControllerContextMixin:
                         )
                         for item in history
                     ),
-                    trend_epsilon=state_rule_manifest.trend_noise_tolerance,
+                    trend_epsilon=(
+                        self._trend_noise_epsilon
+                        if self._trend_noise_epsilon is not None
+                        else state_rule_manifest.trend_noise_tolerance
+                    ),
                 ),
                 catalog=retrieval.support_catalog,
                 candidate_refs=retrieval.candidate_refs,

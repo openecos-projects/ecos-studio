@@ -395,7 +395,7 @@ def _calibrate(
     output: Path,
     timeout: float,
     replays: int = _DEFAULT_REPLAYS,
-) -> tuple[TerminalObservation, float]:
+) -> tuple[TerminalObservation, float, dict[str, float]]:
     output.mkdir(parents=True, exist_ok=True)
     _ensure_noise_context(manifest, workspace, output)
     observations = []
@@ -428,7 +428,23 @@ def _calibrate(
             raise ValueError("Phase 8 default replay runtime is invalid")
         observations.append(observation)
         runtimes.append(float(runtime))
-    return observations[0], statistics.median(runtimes)
+    profile = deterministic_noise_profile(observations)
+    epsilon = {
+        key: float(value)
+        for key, value in profile["epsilon"].items()
+        if not isinstance(value, bool)
+    }
+    _write_json(
+        output / "noise-epsilon.v1.json",
+        {
+            "schema_version": "ecos.noise_epsilon.v1",
+            "comparison_key": "(metric_id, corner)",
+            "replay_count": len(observations),
+            "reference": profile["reference"],
+            "epsilon": epsilon,
+        },
+    )
+    return observations[0], statistics.median(runtimes), epsilon
 
 
 def _ensure_noise_context(

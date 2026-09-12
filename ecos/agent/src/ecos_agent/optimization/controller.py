@@ -66,6 +66,7 @@ from ecos_agent.optimization.execution import (
 from ecos_agent.optimization.knowledge.compiler import (
     build_state_evidence_request,
     compile_supported_action_view,
+    load_state_rule_manifest,
 )
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAuditReplay,
@@ -185,6 +186,8 @@ class OptimizationEpisodeController(
         knowledge_case_shots: Literal[0, 3] = 0,
         knowledge_case_pool_root: Path | None = None,
         max_in_flight_candidates: Literal[1, 2] = 1,
+        design_id: str | None = None,
+        trend_noise_epsilon: Mapping[str, float] | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -196,6 +199,10 @@ class OptimizationEpisodeController(
                 "receipt-aware planning flag is invalid"
             )
         self.receipt_aware_planning = receipt_aware_planning
+        self._trend_noise_epsilon = self._validated_trend_noise_epsilon(
+            trend_noise_epsilon
+        )
+        self._episode_design_id = self._manifest_scope_check(design_id)
         if type(max_in_flight_candidates) is not int or max_in_flight_candidates not in {
             1, 2,
         }:
@@ -294,6 +301,51 @@ class OptimizationEpisodeController(
     @property
     def state(self) -> OptimizationEpisodeState:
         return self._state
+
+    def _validated_trend_noise_epsilon(
+        self, trend_noise_epsilon: Mapping[str, float] | None
+    ) -> dict[str, float] | None:
+        if trend_noise_epsilon is None:
+            return None
+        for key, value in trend_noise_epsilon.items():
+            if (
+                not key
+                or isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise OptimizationEpisodeControllerError(
+                    "trend noise epsilon entries must be finite and non-negative"
+                )
+        return dict(trend_noise_epsilon)
+
+    def _manifest_scope_check(self, design_id: str | None) -> str | None:
+        """Gate knowledge-consuming episodes on manifest scope and calibration.
+
+        Fail closed: a production full-agent episode for a design inside the
+        frozen state-rule manifest scope must carry its calibrated
+        per-metric trend epsilon (noise-epsilon.v1.json); episodes without
+        calibration must not silently fall back to a zero tolerance.
+        """
+        if design_id is None:
+            return None
+        if not _ID.fullmatch(design_id):
+            raise OptimizationEpisodeControllerError("design id is invalid")
+        manifest = load_state_rule_manifest()
+        if design_id not in manifest.scope:
+            raise OptimizationEpisodeControllerError(
+                f"design is outside the frozen state-rule manifest scope: {design_id}"
+            )
+        if self.mode == OptimizationAgentMode.FULL_AGENT and (
+            self._trend_noise_epsilon is None
+        ):
+            raise OptimizationEpisodeControllerError(
+                "full-agent episode lacks the calibrated trend noise epsilon; "
+                "run the default-replay noise calibration (noise-epsilon.v1.json) "
+                f"for design {design_id}"
+            )
+        return design_id
 
     @property
     def pending_execution_ids(self) -> tuple[str, ...]:
