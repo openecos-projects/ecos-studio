@@ -97,9 +97,9 @@ function readHostInfo(path: string): string {
   }
 }
 
-function requireEccRuntimeAdapter(executable: string | null): string {
+function requireEccExecutable(executable: string | null): string {
   if (!executable) {
-    throw new Error('ECOS ECC Runtime Adapter is unavailable on this platform')
+    throw new Error('ECC executable is unavailable on this platform')
   }
   return executable
 }
@@ -152,15 +152,12 @@ function getDesktopServices() {
     userDataPath: app.getPath('userData'),
   }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
-  const eccRuntimeAdapterExecutable = resolveEccExecutable(eccRuntimeOptions)
-  if (eccRuntimeAdapterExecutable) {
-    electronLogger.info(
-      '[runtime] Using ECOS ECC Runtime Adapter %s',
-      eccRuntimeAdapterExecutable,
-    )
+  const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
+  if (eccExecutable) {
+    electronLogger.info('[runtime] Using ECC executable %s', eccExecutable)
   } else {
     electronLogger.warn(
-      '[runtime] ECOS ECC Runtime Adapter is unavailable on this platform or installation',
+      '[runtime] ECC executable is unavailable on this platform or installation',
     )
   }
   const appInfoService = new AppInfoService({
@@ -176,7 +173,7 @@ function getDesktopServices() {
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
-        command: requireEccRuntimeAdapter(eccRuntimeAdapterExecutable),
+        command: requireEccExecutable(eccExecutable),
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
@@ -199,10 +196,10 @@ function getDesktopServices() {
     projectScopeProvider: projectScopeService,
   })
   const frontendRpcCore = new EccRpcRuntimeService({
-    adapterManagementRpc: true,
+    managementRpc: true,
     createSidecar: (directory, onEvent) =>
       new EccRpcSidecarProcess({
-        adapterManagementRpc: true,
+        managementRpc: true,
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),

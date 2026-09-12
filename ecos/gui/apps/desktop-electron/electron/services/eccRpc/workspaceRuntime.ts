@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import type {
   EccFlowRunRequest,
   EccFlowRunResult,
@@ -65,6 +66,7 @@ import {
 } from './workspaceRuntimeCommands'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 import { WorkspaceStepConfigurationCache } from './workspaceStepConfigurationCache'
+import { readPersistedEngineeringSnapshot } from './engineeringSnapshotReader'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
 
@@ -79,7 +81,7 @@ export interface EccWorkspaceRuntimeOptions {
     onNotification: (notification: JsonRpcNotificationPayload) => void,
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
-  adapterManagementRpc?: boolean
+  managementRpc?: boolean
   lazyWorkspaceOpen?: boolean
   sessions?: WorkspaceSessionRegistry
 }
@@ -260,7 +262,7 @@ export class EccWorkspaceRuntime {
   ): Promise<T> {
     return this.enqueue(method, undefined, async () => {
       const client = await this.ensureStarted()
-      if (method === 'rpc.hello' && this.options.adapterManagementRpc) {
+      if (method === 'rpc.hello' && this.options.managementRpc) {
         return this.managementHelloResult as T
       }
       return await client.call<T>(method, params, options)
@@ -615,15 +617,26 @@ export class EccWorkspaceRuntime {
   async engineeringSnapshot(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccPersistedEngineeringSnapshot> {
+    const session = this.sessions.require(request.workspaceHandle)
+    if (!existsSync(session.directory)) {
+      return await this.readLegacyEngineeringSnapshot(request, session.eccWorkspaceId)
+    }
+    return await readPersistedEngineeringSnapshot(
+      session.directory,
+      session.eccWorkspaceId ?? undefined,
+    )
+  }
+
+  private async readLegacyEngineeringSnapshot(
+    request: EccWorkspaceHandleRequest,
+    workspaceId: string | null,
+  ): Promise<EccPersistedEngineeringSnapshot> {
     const client = await this.ensureStarted()
-    const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
     const snapshot = await client.call<Record<string, unknown>>(
       'workspace.engineering_snapshot',
-      {
-        workspaceId,
-      },
+      workspaceId ? { workspaceId } : {},
     )
-    const validated = validateEngineeringSnapshot(snapshot, workspaceId)
+    const validated = validateEngineeringSnapshot(snapshot, workspaceId ?? undefined)
     if (!validated.ok) throw new Error(validated.issue.code)
     const { artifacts, flow, qor, signoff } = validated.sections
     if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)
@@ -682,7 +695,7 @@ export class EccWorkspaceRuntime {
   }
 
   async shutdown(): Promise<RuntimeShutdownResult> {
-    if (!this.options.adapterManagementRpc && this.isActive()) {
+    if (!this.options.managementRpc && this.isActive()) {
       return {
         deferred: true,
         ok: false,
@@ -748,24 +761,11 @@ export class EccWorkspaceRuntime {
     }
     if (this.ready) return client
 
-    if (this.options.adapterManagementRpc) {
-      const helloResult = await client.call<{
-        adapterVersion?: number
-        capabilities: string[]
-      }>('rpc.hello', { version: 1 })
+    if (this.options.managementRpc) {
+      const helloResult = await client.call<Record<string, unknown>>('rpc.hello', {
+        version: 1,
+      })
       this.managementHelloResult = helloResult
-      if (helloResult.adapterVersion !== undefined) {
-        const missing = [
-          'runtime.adapter.v1',
-          'workspace-spec.v1',
-          'engineering-snapshot.v1',
-        ].filter((capability) => !helloResult.capabilities.includes(capability))
-        if (missing.length) {
-          throw new Error(
-            `ECC Runtime Adapter is missing capabilities: ${missing.join(', ')}`,
-          )
-        }
-      }
     }
     this.ready = true
     this.emit({

@@ -79,7 +79,7 @@ function createService(
   directory = '/work/demo',
   options: Pick<
     ConstructorParameters<typeof EccWorkspaceRuntime>[0],
-    'adapterManagementRpc' | 'lazyWorkspaceOpen'
+    'managementRpc' | 'lazyWorkspaceOpen'
   > = {},
 ) {
   const client = new FakeRpcClient()
@@ -698,7 +698,7 @@ describe('EccWorkspaceRuntime', () => {
 
   it('cancels the matching in-flight operation and emits a cancelled event', async () => {
     const { client, events, service, sidecar } = createService('/work/frontend', {
-      adapterManagementRpc: true,
+      managementRpc: true,
     })
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },

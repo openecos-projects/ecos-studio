@@ -67,10 +67,14 @@ describe('EccRpcSidecarProcess', () => {
 
     await sidecar.start()
 
-    expect(spawn).toHaveBeenCalledWith('ecc', ['--stdio', '--persistent-db'], {
-      env: { PATH: '/bin' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    expect(spawn).toHaveBeenCalledWith(
+      'ecc',
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      {
+        env: { PATH: '/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
   })
 
   it('uses a runtime-specific launch resolver', async () => {
@@ -113,7 +117,7 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(spawn).toHaveBeenCalledWith(
       '/tmp/packaged/binaries/ecc',
-      ['--stdio', '--persistent-db'],
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
       {
         env: { PATH: '/home/ecos/.local/bin:/bin' },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -145,7 +149,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => children.shift()!)
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
-      adapterManagementRpc: true,
+      managementRpc: true,
       envProvider: async () => runtimeEnv,
       spawn,
     })
@@ -165,10 +169,14 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(secondClient).not.toBe(firstClient)
     expect(spawn).toHaveBeenCalledTimes(2)
-    expect(spawn).toHaveBeenLastCalledWith('ecc', ['--stdio', '--persistent-db'], {
-      env: { PATH: '/tools/v2/bin' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    expect(spawn).toHaveBeenLastCalledWith(
+      'ecc',
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      {
+        env: { PATH: '/tools/v2/bin' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
   })
 
   it('reuses the last successful environment when the provider temporarily fails', async () => {
@@ -216,7 +224,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => child)
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
-      adapterManagementRpc: true,
+      managementRpc: true,
       envProvider: async () => runtimeEnv,
       shutdownTimeoutMs: 25,
       spawn,
@@ -248,7 +256,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
-      adapterManagementRpc: true,
+      managementRpc: true,
       envProvider: async () => runtimeEnv,
       shutdownTimeoutMs: 25,
       spawn: () => child,
@@ -312,7 +320,7 @@ describe('EccRpcSidecarProcess', () => {
   it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
-      adapterManagementRpc: true,
+      managementRpc: true,
       spawn: () => child,
     })
     await sidecar.start()
@@ -334,7 +342,7 @@ describe('EccRpcSidecarProcess', () => {
   it('waits for the sidecar process to exit after rpc.shutdown is acknowledged', async () => {
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
-      adapterManagementRpc: true,
+      managementRpc: true,
       spawn: () => child,
     })
     await sidecar.start()
@@ -356,7 +364,7 @@ describe('EccRpcSidecarProcess', () => {
     await expect(shutdown).resolves.toBeUndefined()
   })
 
-  it('terminates the Backend Adapter without a management RPC', async () => {
+  it('terminates the backend runtime without a management RPC', async () => {
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
     await sidecar.start()
@@ -519,7 +527,7 @@ describe('EccRpcSidecarProcess', () => {
     vi.useFakeTimers()
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
-      adapterManagementRpc: true,
+      managementRpc: true,
       shutdownTimeoutMs: 25,
       spawn: () => child,
     })

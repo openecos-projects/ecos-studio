@@ -396,10 +396,10 @@ describe('createEccRuntimeEnv', () => {
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
-  it('resolves the packaged Runtime Adapter executable by absolute path', () => {
+  it('resolves the packaged ECC executable by absolute path', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
-    const packagedEcc = join(resourcesPath, 'binaries', 'ecos-ecc-runtime-adapter')
+    const packagedEcc = join(resourcesPath, 'binaries', 'ecc')
     mkdirSync(join(resourcesPath, 'binaries'), { recursive: true })
     writeFileSync(packagedEcc, '#!/usr/bin/env bash\n')
 
@@ -418,12 +418,12 @@ describe('createEccRuntimeEnv', () => {
     expect(executable).toBe(packagedEcc)
   })
 
-  it('does not create or resolve a fake Runtime Adapter executable on Windows', () => {
+  it('does not create or resolve a development ECC executable on Windows', () => {
     const fixture = createRepoFixture()
     writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
     mkdirSync(join(fixture.repoRoot, 'ecos', 'scripts'), { recursive: true })
     writeFileSync(
-      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-runtime-adapter-wrapper.sh'),
+      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh'),
       '#!/usr/bin/env bash\n',
     )
 
@@ -437,14 +437,10 @@ describe('createEccRuntimeEnv', () => {
         userDataPath: fixture.userDataPath,
       }),
     ).toBeNull()
-    expect(
-      existsSync(
-        join(fixture.userDataPath, 'runtime-bin', 'ecos-ecc-runtime-adapter.exe'),
-      ),
-    ).toBe(false)
+    expect(existsSync(join(fixture.userDataPath, 'runtime-bin', 'ecc.cmd'))).toBe(false)
   })
 
-  it('resolves the development Runtime Adapter shim by absolute path', () => {
+  it('resolves the development ECC shim by absolute path', () => {
     const fixture = createRepoFixture()
     writeFileSync(
       join(fixture.repoRoot, 'ecc', 'pyproject.toml'),
@@ -452,7 +448,7 @@ describe('createEccRuntimeEnv', () => {
     )
     mkdirSync(join(fixture.repoRoot, 'ecos', 'scripts'), { recursive: true })
     writeFileSync(
-      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-runtime-adapter-wrapper.sh'),
+      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh'),
       '#!/usr/bin/env bash\n',
     )
 
@@ -467,9 +463,7 @@ describe('createEccRuntimeEnv', () => {
       userDataPath: fixture.userDataPath,
     })
 
-    expect(executable).toBe(
-      join(fixture.userDataPath, 'runtime-bin', 'ecos-ecc-runtime-adapter'),
-    )
+    expect(executable).toBe(join(fixture.userDataPath, 'runtime-bin', 'ecc'))
   })
 
   it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {

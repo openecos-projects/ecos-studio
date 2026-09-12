@@ -70,22 +70,6 @@ build_ecc() {
 
 }
 
-build_runtime_adapter() {
-  cd "$REPO_ROOT/ecc"
-  # Runtime transport dependencies belong to the Studio adapter, even though
-  # the adapter is bundled with the ECC PyInstaller environment.
-  uv pip install --python .venv/bin/python -r "$REPO_ROOT/ecos/runtime-adapter/requirements.txt"
-  if [ "${ECOS_USE_NIX:-}" = "1" ]; then
-    nix develop "$REPO_ROOT" --command bash -lc \
-      'ECOS_ECC_ENTRYPOINT="$REPO_ROOT/ecos/runtime-adapter/main.py" ECOS_ECC_BINARY_NAME="ecos-ecc-runtime-adapter" ECOS_PYINSTALLER_MODE="onefile" uv run pyinstaller ecc.spec --clean --noconfirm'
-    return
-  fi
-  ECOS_ECC_ENTRYPOINT="$REPO_ROOT/ecos/runtime-adapter/main.py" \
-    ECOS_ECC_BINARY_NAME="ecos-ecc-runtime-adapter" \
-    ECOS_PYINSTALLER_MODE="onefile" \
-    uv run pyinstaller ecc.spec --clean --noconfirm
-}
-
 build_chip_viewer() {
   cd "$REPO_ROOT/ecos/chip-viewer"
 
@@ -115,7 +99,6 @@ validate_packaged_binaries() {
 
   local required_files=(
     "$binary_dir/ecc"
-    "$binary_dir/ecos-ecc-runtime-adapter"
     "$binary_dir/chip-viewer-native"
   )
 
@@ -147,7 +130,6 @@ validate_packaged_binaries() {
 }
 
 build_ecc
-build_runtime_adapter
 build_chip_viewer
 build_agent_provider
 
@@ -155,7 +137,6 @@ cd "$REPO_ROOT"
 rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/{agent,binaries}
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
-cp ecc/dist/ecos-ecc-runtime-adapter ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/agent/dist/ecos-agent ecos/gui/apps/desktop-electron/resources/agent
 cp ecos/agent/agent-provider.packaged.json ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json

@@ -36,7 +36,7 @@ export type EccRpcSidecarSpawn = (
 ) => SpawnedEccRpcSidecar
 
 export interface EccRpcSidecarProcessOptions {
-  adapterManagementRpc?: boolean
+  managementRpc?: boolean
   command?: string
   commandArgs?: string[]
   env?: NodeJS.ProcessEnv
@@ -154,7 +154,12 @@ export class EccRpcSidecarProcess {
     const launch = this.options.resolveLaunch
       ? await this.options.resolveLaunch(baseEnv)
       : {
-          args: this.options.commandArgs ?? ['--stdio', '--persistent-db'],
+          args: this.options.commandArgs ?? [
+            'rpc',
+            'serve',
+            '--stdio',
+            '--persistent-db',
+          ],
           command: this.command,
         }
     const env = launch.env ?? baseEnv
@@ -338,7 +343,7 @@ export class EccRpcSidecarProcess {
       this.clearForceKillTimer()
       const client = this.client
       const shutdownResult =
-        this.options.adapterManagementRpc && client
+        this.options.managementRpc && client
           ? await this.requestShutdown(client)
           : { kind: 'failed' as const }
       if (shutdownResult.kind === 'deferred') {

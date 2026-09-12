@@ -6,31 +6,31 @@ import afterPackLinuxSandbox from './after-pack-linux-sandbox.mjs'
 
 const tempDirs: string[] = []
 
-async function writeRuntimeAdapter(appOutDir: string): Promise<void> {
+async function writeEccExecutable(appOutDir: string): Promise<void> {
   const binariesDir = join(appOutDir, 'resources', 'binaries')
-  const adapterPath = join(binariesDir, 'ecos-ecc-runtime-adapter')
+  const eccPath = join(binariesDir, 'ecc')
   await mkdir(binariesDir, { recursive: true })
   await writeFile(
-    adapterPath,
-    '#!/bin/sh\nif [ "$1" = --help ]; then exit 0; fi\n[ "$1" = --stdio ] && [ "$2" = --persistent-db ] || exit 64\n',
+    eccPath,
+    '#!/bin/sh\nif [ "$1" = --help ]; then exit 0; fi\n[ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --stdio ] && [ "$4" = --persistent-db ] || exit 64\n',
   )
-  await chmod(adapterPath, 0o755)
+  await chmod(eccPath, 0o755)
 }
 
-async function writeHelpOnlyRuntimeAdapter(appOutDir: string): Promise<void> {
+async function writeHelpOnlyEccExecutable(appOutDir: string): Promise<void> {
   const binariesDir = join(appOutDir, 'resources', 'binaries')
-  const adapterPath = join(binariesDir, 'ecos-ecc-runtime-adapter')
+  const eccPath = join(binariesDir, 'ecc')
   await mkdir(binariesDir, { recursive: true })
-  await writeFile(adapterPath, '#!/bin/sh\n[ "$1" = --help ] || exit 64\n')
-  await chmod(adapterPath, 0o755)
+  await writeFile(eccPath, '#!/bin/sh\n[ "$1" = --help ] || exit 64\n')
+  await chmod(eccPath, 0o755)
 }
 
-async function writeInvalidRuntimeAdapter(appOutDir: string): Promise<void> {
+async function writeInvalidEccExecutable(appOutDir: string): Promise<void> {
   const binariesDir = join(appOutDir, 'resources', 'binaries')
-  const adapterPath = join(binariesDir, 'ecos-ecc-runtime-adapter')
+  const eccPath = join(binariesDir, 'ecc')
   await mkdir(binariesDir, { recursive: true })
-  await writeFile(adapterPath, '#!/bin/sh\nexit 64\n')
-  await chmod(adapterPath, 0o755)
+  await writeFile(eccPath, '#!/bin/sh\nexit 64\n')
+  await chmod(eccPath, 0o755)
 }
 
 async function writePackagedAgent(appOutDir: string): Promise<void> {
@@ -69,7 +69,7 @@ describe('afterPackLinuxSandbox', () => {
     tempDirs.push(appOutDir)
     const executablePath = join(appOutDir, 'ecos-studio')
     await writeFile(executablePath, 'binary-placeholder')
-    await writeRuntimeAdapter(appOutDir)
+    await writeEccExecutable(appOutDir)
     await writePackagedAgent(appOutDir)
 
     await afterPackLinuxSandbox({
@@ -91,7 +91,7 @@ describe('afterPackLinuxSandbox', () => {
     expect(wrapperScript).toContain('helper_mode')
   })
 
-  it('rejects Linux packaging when the ECC runtime adapter is absent', async () => {
+  it('rejects Linux packaging when the ECC executable is absent', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
@@ -107,14 +107,14 @@ describe('afterPackLinuxSandbox', () => {
           executableName: 'ecos-studio',
         },
       }),
-    ).rejects.toThrow('Packaged ECC runtime adapter validation failed')
+    ).rejects.toThrow('Packaged ECC executable validation failed')
   })
 
-  it('rejects Linux packaging when the ECC runtime adapter has no CLI', async () => {
+  it('rejects Linux packaging when the ECC executable has no CLI', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
-    await writeInvalidRuntimeAdapter(appOutDir)
+    await writeInvalidEccExecutable(appOutDir)
     await writePackagedAgent(appOutDir)
 
     await expect(
@@ -128,14 +128,14 @@ describe('afterPackLinuxSandbox', () => {
           executableName: 'ecos-studio',
         },
       }),
-    ).rejects.toThrow('Packaged ECC runtime adapter validation failed')
+    ).rejects.toThrow('Packaged ECC executable validation failed')
   })
 
-  it('rejects Linux packaging when the ECC runtime adapter cannot start', async () => {
+  it('rejects Linux packaging when the ECC executable cannot start', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
-    await writeHelpOnlyRuntimeAdapter(appOutDir)
+    await writeHelpOnlyEccExecutable(appOutDir)
     await writePackagedAgent(appOutDir)
 
     await expect(
@@ -149,14 +149,14 @@ describe('afterPackLinuxSandbox', () => {
           executableName: 'ecos-studio',
         },
       }),
-    ).rejects.toThrow('Packaged ECC runtime adapter validation failed')
+    ).rejects.toThrow('Packaged ECC executable validation failed')
   })
 
   it('rejects Linux packaging when the bundled Agent provider is absent', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
-    await writeRuntimeAdapter(appOutDir)
+    await writeEccExecutable(appOutDir)
 
     await expect(
       afterPackLinuxSandbox({

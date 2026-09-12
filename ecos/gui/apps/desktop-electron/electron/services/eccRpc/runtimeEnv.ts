@@ -38,12 +38,6 @@ function packagedEccExecutableName(platform: RuntimePlatform): string {
   return platform === 'win32' ? 'ecc.cmd' : 'ecc'
 }
 
-function packagedRuntimeAdapterName(platform: RuntimePlatform): string {
-  return platform === 'win32'
-    ? 'ecos-ecc-runtime-adapter.exe'
-    : 'ecos-ecc-runtime-adapter'
-}
-
 function resolvePackagedRuntimeBin(options: EccRuntimeEnvOptions): string | null {
   const binariesPath = resolvePackagedBinariesPath(options)
   return existsSync(join(binariesPath, packagedEccExecutableName(options.platform)))
@@ -109,19 +103,6 @@ function ensureRepoEccDevShim(
   return runtimeBin
 }
 
-function ensureRepoRuntimeAdapterDevShim(
-  userDataPath: string,
-  wrapperScript: string,
-): string {
-  const runtimeBin = join(userDataPath, 'runtime-bin')
-  mkdirSync(runtimeBin, { recursive: true })
-  const name = packagedRuntimeAdapterName('linux')
-  const shimPath = join(runtimeBin, name)
-  writeFileSync(shimPath, `#!/usr/bin/env bash\nexec "${wrapperScript}" "$@"\n`)
-  chmodSync(shimPath, 0o755)
-  return runtimeBin
-}
-
 function resolveDevelopmentEccBinDir(options: EccRuntimeEnvOptions): string | null {
   const repoRoot = findRepoRootFromAppPath(options.appPath)
   if (!repoRoot) {
@@ -137,8 +118,7 @@ function resolveDevelopmentEccBinDir(options: EccRuntimeEnvOptions): string | nu
 }
 
 export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | null {
-  if (options.platform !== 'linux') return null
-  const executableName = packagedRuntimeAdapterName(options.platform)
+  const executableName = packagedEccExecutableName(options.platform)
 
   if (options.isPackaged) {
     const candidate = join(resolvePackagedBinariesPath(options), executableName)
@@ -147,9 +127,8 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
 
   const repoRoot = findRepoRootFromAppPath(options.appPath)
   if (!repoRoot) return null
-  const wrapper = join(repoRoot, 'ecos', 'scripts', 'ecc-runtime-adapter-wrapper.sh')
-  if (!existsSync(wrapper)) return null
-  const developmentBinDir = ensureRepoRuntimeAdapterDevShim(options.userDataPath, wrapper)
+  const developmentBinDir = resolveDevelopmentEccBinDir(options)
+  if (!developmentBinDir) return null
 
   const candidate = join(developmentBinDir, executableName)
   return existsSync(candidate) ? candidate : null

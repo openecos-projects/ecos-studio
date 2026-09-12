@@ -58,6 +58,10 @@ import type { JsonRpcNotificationPayload } from './jsonRpcClient'
 import type { RuntimeShutdownResult } from './runtimeClient'
 import { RuntimeOperationProjection } from './runtimeOperationProjection'
 import { mapStepConfigurationReadResult } from './stepConfigurationResult'
+import {
+  hasPersistedWorkspace,
+  readPersistedEngineeringSnapshot,
+} from './engineeringSnapshotReader'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -69,7 +73,7 @@ export interface EccRpcRuntimeServiceOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
-  adapterManagementRpc?: boolean
+  managementRpc?: boolean
 }
 
 /**
@@ -557,6 +561,9 @@ export class EccRpcRuntimeService {
     directory: string,
   ): Promise<EccEngineeringSnapshot> {
     const key = normalizeWorkspacePath(directory)
+    if (hasPersistedWorkspace(key)) {
+      return await readPersistedEngineeringSnapshot(key)
+    }
     const workspaceHandle = [...this.handleToDirectory].find(
       ([, candidateDirectory]) => candidateDirectory === key,
     )?.[0]
@@ -590,7 +597,7 @@ export class EccRpcRuntimeService {
           this.options.createSidecar(key, onEvent, onNotification),
         directory: key,
         lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
-        adapterManagementRpc: this.options.adapterManagementRpc,
+        managementRpc: this.options.managementRpc,
         onEvent: (event) => this.emit(event),
       })
       this.runtimes.set(key, runtime)
@@ -628,7 +635,7 @@ export class EccRpcRuntimeService {
         createSidecar: (onEvent, onNotification) =>
           this.options.createSidecar(null, onEvent, onNotification),
         directory: null,
-        adapterManagementRpc: this.options.adapterManagementRpc,
+        managementRpc: this.options.managementRpc,
         onEvent: (event) => this.emit(event),
       })
     }
