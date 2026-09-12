@@ -16,7 +16,7 @@ from ecos_agent.optimization.contracts import (
     RequestedKnobValue,
     StrategyDirection,
 )
-from ecos_agent.optimization.experiments.baseline_runner import (
+from ecos_agent.optimization.experiments.baseline_provider import (
     BaselineProposalProvider,
 )
 from ecos_agent.optimization.parameters.contracts import (

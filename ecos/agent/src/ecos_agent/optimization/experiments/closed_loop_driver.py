@@ -31,7 +31,7 @@ from ecos_agent.optimization.experiments.equal_budget import (
     _evaluation_value,
     export_episode_traces,
 )
-from ecos_agent.optimization.experiments.baseline_runner import (
+from ecos_agent.optimization.experiments.baseline_provider import (
     BaselineProposalProvider,
 )
 from ecos_agent.optimization.experiments.baselines import BaselineMethod

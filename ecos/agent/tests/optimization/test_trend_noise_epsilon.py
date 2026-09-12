@@ -20,7 +20,6 @@ from ecos_agent.optimization.controller import (
 from ecos_agent.optimization.knowledge.compiler_runtime import (
     build_state_evidence_request,
 )
-from ecos_agent.optimization.runtime import OptimizationRuntimeContext
 
 
 def _observation_with_metric(metric_id: str, value: float) -> StageObservation:
@@ -79,15 +78,22 @@ def test_negative_epsilon_entries_are_rejected() -> None:
         )
 
 
-def test_runtime_context_rejects_invalid_epsilon_entries() -> None:
-    with pytest.raises(ValueError, match="non-negative"):
-        OptimizationRuntimeContext(
-            episode_id="episode-1",
-            workspace="/tmp/ws",
-            objective=None,
-            objective_alignment=None,
-            trend_noise_epsilon={"route_wirelength": -2.0},
+def test_controller_rejects_invalid_epsilon_entries() -> None:
+    controller = _bare_controller(OptimizationAgentMode.FULL_AGENT)
+    with pytest.raises(
+        OptimizationEpisodeControllerError, match="finite and non-negative"
+    ):
+        controller._validated_trend_noise_epsilon({"route_wirelength": -2.0})
+    with pytest.raises(
+        OptimizationEpisodeControllerError, match="finite and non-negative"
+    ):
+        controller._validated_trend_noise_epsilon({"": 1.0})
+    assert (
+        controller._validated_trend_noise_epsilon(
+            {"route_wirelength": 0.0, "route_la_total_overflow": 1.5}
         )
+        == {"route_wirelength": 0.0, "route_la_total_overflow": 1.5}
+    )
 
 
 def _bare_controller(mode: OptimizationAgentMode) -> OptimizationEpisodeController:
