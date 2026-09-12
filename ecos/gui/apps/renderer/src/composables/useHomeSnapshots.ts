@@ -19,6 +19,9 @@ export interface HomeLayoutThumbnail {
 const layoutUrls = new Map<string, string>()
 const layoutSteps = new Set([
   'floorplan',
+  'prefloorplan',
+  'macroplacement',
+  'postfloorplan',
   'place',
   'cts',
   'legalization',
@@ -57,6 +60,7 @@ export function useHomeSnapshots() {
   const loading = ref(false)
   const error = ref<string | null>(null)
   let requestVersion = 0
+  let lastViewKey: string | null = null
 
   async function refresh(): Promise<void> {
     const contextId = session.workspaceContextId
@@ -69,6 +73,12 @@ export function useHomeSnapshots() {
         ? revisionSection.data.workspaceRevision
         : null
     const version = ++requestVersion
+    const viewKey =
+      currentProject.value && contextId
+        ? `${currentProject.value.path.replace(/\\/g, '/')}\u0000${contextId}`
+        : null
+    const viewChanged = viewKey !== lastViewKey
+    lastViewKey = viewKey
     if (
       !currentProject.value ||
       !contextId ||
@@ -78,8 +88,11 @@ export function useHomeSnapshots() {
       !flowSection ||
       (flowSection.status !== 'ready' && flowSection.status !== 'partial')
     ) {
-      clearHomeSnapshotCache()
-      layoutThumbnails.value = []
+      if (viewChanged) {
+        clearHomeSnapshotCache()
+        layoutThumbnails.value = []
+      }
+      error.value = revision === null ? 'WORKSPACE_REVISION_UNAVAILABLE' : null
       loading.value = false
       return
     }
@@ -150,6 +163,7 @@ export function useHomeSnapshots() {
                 result.artifact.issues[0]?.code ?? 'ARTIFACT_READ_FAILED',
               )
             }
+            if (result.artifact.data.artifactId !== artifact.artifactId) return null
             const content = result.artifact.data
             url = URL.createObjectURL(
               new Blob([content.bytes.slice()], { type: content.mimeType }),

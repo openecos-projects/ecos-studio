@@ -79,6 +79,7 @@ export function useStepDashboardData() {
   const loading = ref(false)
   const error = ref<string | null>(null)
   let requestVersion = 0
+  let lastViewKey: string | null = null
 
   const currentStep = computed(() => {
     const param = route.params.step
@@ -100,14 +101,22 @@ export function useStepDashboardData() {
     const contextId = session.workspaceContextId
     const revision = committedRevision()
     const version = ++requestVersion
+    const viewKey =
+      projectPath && contextId && stepId
+        ? `${projectPath.replace(/\\/g, '/')}\u0000${contextId}\u0000${stepId.toLowerCase()}`
+        : null
+    const viewChanged = viewKey !== lastViewKey
+    lastViewKey = viewKey
     if (!projectPath || !stepId || !contextId || revision === null) {
-      data.value = null
+      if (viewChanged) data.value = null
+      error.value = revision === null ? 'WORKSPACE_REVISION_UNAVAILABLE' : null
       loading.value = false
       return
     }
     const key = cacheKey(projectPath, contextId, stepId, revision)
     const cached = stepDashboardCache.get(key)
-    data.value = cached ?? null
+    if (cached) data.value = cached
+    else if (viewChanged) data.value = null
     loading.value = true
     error.value = null
     try {
@@ -120,7 +129,7 @@ export function useStepDashboardData() {
       const detail = readyDetail(result, contextId, revision)
       if (!detail) {
         error.value = result.detail.issues[0]?.code ?? 'WORKSPACE_STEP_DETAIL_UNAVAILABLE'
-        if (!cached) data.value = null
+        if (!cached && viewChanged) data.value = null
         return
       }
       const next = snapshotStepDashboardData(detail)
@@ -141,7 +150,8 @@ export function useStepDashboardData() {
           version !== requestVersion ||
           artifact.workspaceContextId !== contextId ||
           artifact.workspaceRevision !== artifactRevision ||
-          artifact.artifact.status !== 'ready'
+          artifact.artifact.status !== 'ready' ||
+          artifact.artifact.data.artifactId !== artifactId
         ) {
           return null
         }
@@ -205,7 +215,7 @@ export function useStepDashboardData() {
     } catch (cause) {
       if (version !== requestVersion) return
       error.value = cause instanceof Error ? cause.message : String(cause)
-      if (!cached) data.value = null
+      if (!cached && viewChanged) data.value = null
     } finally {
       if (version === requestVersion) loading.value = false
     }

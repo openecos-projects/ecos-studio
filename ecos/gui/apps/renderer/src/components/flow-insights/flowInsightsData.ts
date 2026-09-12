@@ -117,7 +117,8 @@ export interface StepResourcesModel {
 
 const FLOW_STEP_CANONICAL_KEYS: Array<[RegExp, string]> = [
   [/^synth/i, 'Synth'],
-  [/^floorplan/i, 'Floor'],
+  [/^(?:pre|post)?floorplan/i, 'Floor'],
+  [/^macroplacement/i, 'Floor'],
   [/^place/i, 'Place'],
   [/^cts/i, 'CTS'],
   [/^legal/i, 'Legal'],

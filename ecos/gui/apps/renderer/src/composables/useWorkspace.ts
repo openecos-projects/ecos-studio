@@ -149,6 +149,7 @@ function scheduleStepRefresh(options: {
   void finishRuntimeStepRender({
     eventId: options.eventId,
     operationId: options.operationId,
+    workspaceHandle: options.workspaceHandle,
     step: options.step,
     stepCommitId: options.stepCommitId ?? options.eventId,
     workspaceRevision: options.workspaceRevision,

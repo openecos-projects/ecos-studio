@@ -225,6 +225,16 @@ describe('snapshotStepDashboardData', () => {
     expect(result.layoutAvailability).toBe('missing')
   })
 
+  it.each(['preFloorplan', 'macroPlacement', 'postFloorplan'])(
+    'maps %s to the Floorplan insight domain',
+    (step) => {
+      const source = detail(step)
+      source.analysis.metrics = [metric('die_area', 100)]
+
+      expect(snapshotStepDashboardData(source).floorplanInsights).not.toBeNull()
+    },
+  )
+
   it('shows invalidated evidence from its stale Revision until rerun succeeds', () => {
     const source = detail('Place')
     source.step.state = 'not-started'

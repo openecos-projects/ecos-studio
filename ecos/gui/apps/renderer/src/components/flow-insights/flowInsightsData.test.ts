@@ -51,6 +51,9 @@ function insightSteps(
 describe('flow insights data', () => {
   it('normalizes step keys and parses runtime / memory fallbacks', () => {
     expect(canonicalStepKey('sta_ecc')).toBe('STA')
+    expect(canonicalStepKey('preFloorplan')).toBe('Floor')
+    expect(canonicalStepKey('macroPlacement')).toBe('Floor')
+    expect(canonicalStepKey('postFloorplan')).toBe('Floor')
     expect(parseRuntimeSeconds('0:3:35')).toBe(215)
     expect(parseRuntimeSeconds('0:1:6')).toBe(66)
     expect(parsePeakMemoryMb(11482.379)).toBe(11482.379)

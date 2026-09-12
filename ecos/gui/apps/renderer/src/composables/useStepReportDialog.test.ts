@@ -45,7 +45,10 @@ describe('useStepReportDialog', () => {
     testState.getArtifact.mockResolvedValue({
       workspaceContextId: 'context-a',
       workspaceRevision: 9,
-      artifact: { status: 'ready', data: { text: 'report body' } },
+      artifact: {
+        status: 'ready',
+        data: { artifactId: 'report-place', text: 'report body' },
+      },
     })
     const scope = effectScope()
     const dialog = scope.run(() => useStepReportDialog(ref('Place'), ref('Place')))!
@@ -75,7 +78,10 @@ describe('useStepReportDialog', () => {
     resolve({
       workspaceContextId: 'context-a',
       workspaceRevision: 9,
-      artifact: { status: 'ready', data: { text: 'stale report' } },
+      artifact: {
+        status: 'ready',
+        data: { artifactId: 'report-place', text: 'stale report' },
+      },
     })
     await pending
 

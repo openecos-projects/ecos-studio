@@ -60,7 +60,11 @@ export function useStepReportDialog(
       ) {
         return
       }
-      if (result.artifact.status !== 'ready' || result.artifact.data.text === undefined) {
+      if (
+        result.artifact.status !== 'ready' ||
+        result.artifact.data.artifactId !== report.artifactId ||
+        result.artifact.data.text === undefined
+      ) {
         throw new Error(result.artifact.issues[0]?.code ?? 'Report is unavailable.')
       }
       reportDialog.value.content = result.artifact.data.text

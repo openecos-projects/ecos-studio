@@ -84,7 +84,8 @@ async function readBackendLayoutBlobUrl(stepName: string): Promise<string | null
   if (
     result.workspaceContextId !== overview.workspaceContextId ||
     result.workspaceRevision !== workspaceRevision ||
-    result.artifact.status !== 'ready'
+    result.artifact.status !== 'ready' ||
+    result.artifact.data.artifactId !== layout.artifactId
   ) {
     return null
   }

@@ -39,6 +39,13 @@ import {
 } from './snapshotFlowInsights'
 import { designStatistics, physicalInsights } from './stepDashboardPhysicalSnapshot'
 
+const FLOORPLAN_STEP_NAMES = new Set([
+  'floorplan',
+  'prefloorplan',
+  'macroplacement',
+  'postfloorplan',
+])
+
 export interface StepDashboardReport {
   artifactId: string
   directory: string
@@ -303,7 +310,7 @@ export function snapshotStepDashboardData(
         truncated: false,
       },
     ),
-    floorplanInsights: normalizedStep === 'floorplan' ? physical : null,
+    floorplanInsights: FLOORPLAN_STEP_NAMES.has(normalizedStep) ? physical : null,
     hardenInsights:
       normalizedStep === 'harden' && hardenArtifacts.length
         ? {

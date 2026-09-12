@@ -158,6 +158,40 @@ describe('useStepDashboardData', () => {
     })
   })
 
+  it('retains the last committed data while a newer revision refreshes', async () => {
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => expect(dashboard.data.value?.step).toBe('Place'))
+
+    let resolveCurrent!: (result: BackendWorkspaceStepDetailResult) => void
+    testState.getStepDetail.mockReturnValue(
+      new Promise<BackendWorkspaceStepDetailResult>((resolve) => {
+        resolveCurrent = resolve
+      }),
+    )
+    testState.session!.projection.data.revision.data.workspaceRevision = 10
+
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(true))
+    expect(dashboard.data.value?.step).toBe('Place')
+
+    resolveCurrent(detailResult(10))
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+    expect(dashboard.data.value?.staleRevision).toBeNull()
+  })
+
+  it('retains the last committed data while the revision is temporarily unavailable', async () => {
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => expect(dashboard.data.value?.step).toBe('Place'))
+
+    testState.session!.projection.data.revision = {
+      status: 'unavailable',
+      issues: [{ code: 'ENGINEERING_SNAPSHOT_READ_FAILED' }],
+    }
+
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+    expect(dashboard.data.value?.step).toBe('Place')
+    expect(dashboard.error.value).toBe('WORKSPACE_REVISION_UNAVAILABLE')
+  })
+
   it('rejects a response from another Snapshot revision', async () => {
     testState.getStepDetail.mockResolvedValue(detailResult(8))
     const dashboard = scope.run(() => useStepDashboardData())!
@@ -257,6 +291,7 @@ describe('useStepDashboardData', () => {
           status: 'ready',
           issues: [],
           data: {
+            artifactId,
             bytes: new Uint8Array([1, 2, 3]),
             mimeType: 'image/png',
             ...(artifactId.startsWith('timing_summary')
