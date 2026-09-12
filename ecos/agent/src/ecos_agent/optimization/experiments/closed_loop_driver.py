@@ -39,7 +39,19 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     _filelist_refs,
 )
 from ecos_agent.optimization.experiments.knowledge_treatment_runner import _objective
+from ecos_agent.optimization.experiments.knowledge_mediation import (
+    EPISODE_AUDIT_SCHEMA_VERSION,
+    audit_episode_mediation,
+    missing_evidence_reason_counts,
+    read_jsonl,
+    summarize_episode_mediation,
+)
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
+from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.ledger import (
+    OptimizationInterventionStart,
+    OptimizationLedger,
+)
 from ecos_agent.optimization.metrics.contracts import TELEMETRY_METRIC_IDS
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
 from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
@@ -181,6 +193,54 @@ def write_noise_epsilon(calibration_dir: Path) -> dict[str, object]:
         "metric_key_count": len(profile["epsilon"]),
         "drifting_metric_keys": nonzero_epsilon_keys,
         "epsilon": profile["epsilon"],
+    }
+
+
+def _build_mediation_audit(
+    *,
+    episode_root: Path,
+    design_id: str,
+    reference_observation: TerminalObservation,
+    noise_epsilon: dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Join the episode's persisted chains into one mediation audit artifact."""
+    observation_path = episode_root / "optimization-proposal-observations.v1.jsonl"
+    if not observation_path.is_file():
+        return None
+    ledger = OptimizationLedger(episode_root).replay()
+    planning = OptimizationPlanningAudit(episode_root).replay()
+    decisions = OptimizationDecisionAudit(episode_root).replay()
+    epsilon = None
+    if noise_epsilon:
+        metric_epsilon = noise_epsilon.get("epsilon")
+        if isinstance(metric_epsilon, dict):
+            value = metric_epsilon.get(ObjectiveMetric.ROUTE_WIRELENGTH.value)
+            if isinstance(value, (int, float)):
+                epsilon = float(value)
+    calls = audit_episode_mediation(
+        design_id=design_id,
+        planning_entries=planning.entries,
+        proposal_rows=read_jsonl(observation_path),
+        decision_rows=decisions.entries,
+        starts=tuple(
+            entry.payload
+            for entry in ledger.entries
+            if isinstance(entry.payload, OptimizationInterventionStart)
+        ),
+        outcomes={
+            item.intervention_id: item for item in ledger.terminal_outcomes
+        },
+        reference_observation=reference_observation,
+        objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH.value,
+        epsilon=epsilon,
+    )
+    return {
+        "schema_version": EPISODE_AUDIT_SCHEMA_VERSION,
+        "design_id": design_id,
+        "objective_metric": ObjectiveMetric.ROUTE_WIRELENGTH.value,
+        "calls": calls,
+        "summary": summarize_episode_mediation(calls),
+        "missing_evidence_reason_counts": missing_evidence_reason_counts(calls),
     }
 
 
@@ -443,6 +503,12 @@ def main(provider_factory: Callable[..., Any]) -> int:
         noise_epsilon["epsilon"] if noise_epsilon else {},
     )
     case_replay = EmpiricalCaseAuditStore(episode_root).verify()
+    mediation = _build_mediation_audit(
+        episode_root=episode_root,
+        design_id=args.design,
+        reference_observation=canonical,
+        noise_epsilon=noise_epsilon,
+    )
     state_files = sorted(episode_root.glob("optimization-episode-state.v*.json"))
     if not state_files:
         raise SystemExit(f"episode state file missing under {episode_root}")
@@ -466,6 +532,7 @@ def main(provider_factory: Callable[..., Any]) -> int:
         "budget": budget_snapshot,
         "traces": [item.__dict__ for item in traces],
         "case_selections": len(case_replay.selections),
+        "knowledge_mediation": mediation,
         "episode_state": json.loads(
             state_files[-1].read_text("utf-8")
         ),
@@ -474,6 +541,11 @@ def main(provider_factory: Callable[..., Any]) -> int:
         json.dumps(summary, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",
     )
+    if mediation is not None:
+        (output / "knowledge-mediation-audit.v1.json").write_text(
+            json.dumps(mediation, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
     print(
         json.dumps(
             {

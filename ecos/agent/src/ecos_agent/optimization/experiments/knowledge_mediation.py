@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import json
 from pathlib import Path
@@ -102,6 +102,198 @@ AUDIT_CALL_SCHEMA_VERSION = "ecos.knowledge_planning_call_audit.v1"
 # exist once a receipt/terminal chain is joined per candidate execution.
 _EXECUTION_LINK_REASONS = ("receipt_link", "terminal_observation_link", "promotion_decision")
 
+# Reason tags used when a live episode artifact chain can actually supply the
+# links; only genuinely missing pieces are reported.
+_PROPOSAL_LINK_REASONS = ("context_fingerprint", "proposal_observation", "requested_value")
+
+EPISODE_AUDIT_SCHEMA_VERSION = "ecos.knowledge_mediation_audit.v1"
+
+
+def audit_episode_mediation(
+    *,
+    design_id: str,
+    planning_entries: Sequence[object],
+    proposal_rows: Sequence[dict[str, object]],
+    decision_rows: Sequence[object],
+    starts: Sequence[object],
+    outcomes: "Mapping[str, object]",
+    reference_observation: object,
+    objective_metric: str,
+    epsilon: float | None = None,
+    treatment: str = "closed_loop_episode",
+) -> list[dict[str, object]]:
+    """Join one live episode's artifact chain into per-planning-call mediation rows.
+
+    Unlike :func:`audit_planning_calls` (offline artifacts, links always
+    missing), every link here is filled from the episode's own persisted
+    records: proposal observations (context fingerprint, claim four-tuple,
+    requested value), decision audit (approval), intervention starts
+    (proposal hash), and terminal outcomes (receipt, terminal observation,
+    incumbent decision).  Only genuinely missing pieces are reported in
+    ``missing_evidence_reason``; an unbound (claim-free) proposal is legal and
+    is reported through ``claim_bound=false`` instead of an error.
+    """
+    observations = {
+        str(row.get("planning_entry_sha256")): row for row in proposal_rows
+    }
+    decisions_by_entry: dict[str, object] = {}
+    for decision in decision_rows:
+        decisions_by_entry[str(_attr(decision, "planning_entry_sha256"))] = decision
+    starts_by_proposal: dict[str, object] = {}
+    for start in starts:
+        starts_by_proposal.setdefault(
+            str(_attr(start, "proposal_sha256")), start
+        )
+    reference_value = _metric_value(reference_observation, objective_metric)
+    audited: list[dict[str, object]] = []
+    for index, entry in enumerate(planning_entries, 1):
+        entry_sha = str(_attr(entry, "entry_sha256"))
+        row = observations.get(entry_sha)
+        decision = decisions_by_entry.get(entry_sha)
+        missing: list[str] = []
+        if row is None:
+            missing.append("proposal_observation")
+        fingerprint = row.get("context_fingerprint") if row else None
+        if not fingerprint:
+            missing.append("context_fingerprint")
+        knob = row.get("requested_knob_id") if row else None
+        requested_value = row.get("requested_value") if row else None
+        if row is not None and knob is None and requested_value is None:
+            decision_requested = _attr(decision, "requested")
+            knob = getattr(decision_requested, "knob_id", None) if decision_requested else None
+            knob = getattr(knob, "value", knob) if knob is not None else None
+            requested_value = (
+                getattr(decision_requested, "value", None)
+                if decision_requested
+                else None
+            )
+            if knob is None and requested_value is None:
+                missing.append("requested_value")
+        claim_id = row.get("claim_id") if row else None
+        binding_id = row.get("binding_id") if row else None
+        claim_bound = bool(claim_id and binding_id)
+        start = (
+            starts_by_proposal.get(str(row.get("proposal_sha256")))
+            if row is not None
+            else None
+        )
+        intervention_id = _attr(start, "intervention_id") if start else None
+        outcome = outcomes.get(str(intervention_id)) if intervention_id else None
+        receipt = _attr(outcome, "parameter_application_receipt") if outcome else None
+        receipt_status = getattr(receipt, "status", None) if receipt else None
+        actual_value = getattr(receipt, "actual_value", None) if receipt else None
+        terminal_observation = (
+            _attr(outcome, "terminal_observation") if outcome else None
+        )
+        terminal_value = _metric_value(terminal_observation, objective_metric)
+        terminal_delta = (
+            terminal_value - reference_value
+            if terminal_value is not None and reference_value is not None
+            else None
+        )
+        promotion_decision = _attr(outcome, "incumbent_decision") if outcome else None
+        promotion_decision = (
+            getattr(promotion_decision, "value", promotion_decision)
+            if promotion_decision is not None
+            else None
+        )
+        if receipt_status is None:
+            missing.append("receipt_link")
+        if terminal_observation is None:
+            missing.append("terminal_observation_link")
+        if promotion_decision is None:
+            missing.append("promotion_decision")
+        action = row.get("action") if row else None
+        direction = action.get("direction") if isinstance(action, dict) else None
+        matched_claims = [
+            str(ref.get("entity_id"))
+            for ref in ((row.get("knowledge_refs") if row else None) or [])
+            if isinstance(ref, dict) and ref.get("entity_id")
+        ]
+        all_links_present = not missing
+        audited.append(
+            {
+                "schema_version": AUDIT_CALL_SCHEMA_VERSION,
+                "planning_call": index,
+                "planning_entry_sha256": entry_sha,
+                "design_id": design_id,
+                "treatment": treatment,
+                "intervention_id": intervention_id,
+                "context_fingerprint": fingerprint,
+                "matched_claim_ids": matched_claims,
+                "support_status": (
+                    "matched" if matched_claims and row is not None else "unknown"
+                ),
+                "claim_id": claim_id,
+                "binding_id": binding_id,
+                "claim_bound": claim_bound,
+                "knob": knob,
+                "direction": direction,
+                "requested_value": requested_value,
+                "actual_value": actual_value,
+                "receipt_status": receipt_status,
+                "terminal_delta": terminal_delta,
+                "terminal_delta_vs_epsilon": (
+                    classify_terminal_delta(terminal_delta, epsilon)
+                    if epsilon is not None
+                    else ("unobserved" if terminal_delta is None else "no_epsilon")
+                ),
+                "promotion_decision": promotion_decision,
+                "counts_toward_knowledge_attribution": (
+                    claim_bound and all_links_present
+                ),
+                "missing_evidence_reason": ",".join(missing) if missing else None,
+            }
+        )
+    return audited
+
+
+def _attr(value: object, name: str) -> object:
+    return getattr(value, name, None)
+
+
+def _metric_value(observation: object, metric_id: str) -> float | None:
+    """Read one objective metric value from a terminal observation."""
+    if observation is None:
+        return None
+    metrics = getattr(observation, "objective_metrics", None)
+    if not isinstance(metrics, Mapping):
+        return None
+    for key, value in metrics.items():
+        if getattr(key, "value", key) == metric_id:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def summarize_episode_mediation(
+    calls: Sequence[dict[str, object]],
+) -> dict[str, object]:
+    """Aggregate episode mediation calls into the audit summary view."""
+    missing_counts = missing_evidence_reason_counts(calls)
+    return {
+        "schema_version": "ecos.knowledge_mediation_audit_summary.v1",
+        "planning_calls": len(calls),
+        "claim_bound_proposals_observed": any(
+            call.get("claim_bound") for call in calls
+        ),
+        "claim_bound_proposal_rows": sum(
+            bool(call.get("claim_bound")) for call in calls
+        ),
+        "attributable_rows": sum(
+            bool(call.get("counts_toward_knowledge_attribution")) for call in calls
+        ),
+        "activated_rows": sum(
+            call.get("receipt_status") == "effective" for call in calls
+        ),
+        "terminal_response_rows": sum(
+            call.get("terminal_delta") is not None for call in calls
+        ),
+        "missing_evidence_reason_counts": missing_counts,
+    }
+
 
 def audit_planning_calls(
     rows: Sequence[dict[str, object]],
@@ -170,6 +362,9 @@ def missing_evidence_reason_counts(
     """Breakdown of why planning calls do or do not count toward attribution."""
     counts: dict[str, int] = {}
     for call in calls:
-        reason = str(call.get("missing_evidence_reason", ""))
-        counts[reason] = counts.get(reason, 0) + 1
+        reason = call.get("missing_evidence_reason")
+        if not reason:
+            continue
+        key = str(reason)
+        counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items()))
