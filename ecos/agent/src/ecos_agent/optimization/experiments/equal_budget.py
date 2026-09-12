@@ -26,6 +26,8 @@ from ecos_agent.optimization.ledger import (
     OptimizationPlanningProviderEvidenceAudit,
 )
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
+from ecos_agent.optimization.experiments.statistics import success_curve_auc
+from ecos_agent.optimization.rules import PROMOTING_DECISIONS
 
 Mode = Literal["requested-only", "receipt-aware"]
 
@@ -80,9 +82,13 @@ class CandidateTrace:
     qor_robustness: float | None = None
     qor_summary: float | None = None
     requested_value: str | float | int | bool | None = None
+    requested_knob: str | None = None
     actual_value: float | int | bool | None = None
     parameter_status: Literal["effective", "inactive", "unknown"] = "unknown"
     parameter_reason: str | None = None
+    # Feasible = signoff-eligible terminal; promoted = became the incumbent.
+    feasible: bool = False
+    promoted: bool = False
     stale_rule: bool = False
     fail_closed: bool = False
     proposal_outcome: str | None = None
@@ -213,9 +219,15 @@ def build_candidate_trace(
         qor_robustness=_evaluation_value(evaluation, "qor_robustness_quality"),
         qor_summary=_evaluation_value(evaluation, "qor_summary_balanced"),
         requested_value=(receipt.requested.get("value") if receipt else None),
+        requested_knob=(receipt.requested.get("knob_id") if receipt else None),
         actual_value=(receipt.actual_value if receipt else None),
         parameter_status=(receipt.status if receipt else "unknown"),
         parameter_reason=(receipt.reason if receipt else "Parameter receipt is missing."),
+        feasible=(
+            terminal_success
+            and terminal_observation is not None
+            and terminal_observation.eligible_for_incumbent
+        ),
         receipt_status="ok" if receipt else "missing",
         runtime_seconds=runtime_seconds,
         peak_memory_mb=peak_memory_mb,
@@ -304,6 +316,12 @@ def export_episode_traces(
             replace(
                 trace,
                 requested_value=start.requested.value,
+                requested_knob=start.requested.knob_id.value,
+                promoted=(
+                    outcome.incumbent_decision in PROMOTING_DECISIONS
+                    if outcome.incumbent_decision is not None
+                    else False
+                ),
                 proposal_outcome=(
                     "repair"
                     if decision.planner_source == "repair"
@@ -527,6 +545,138 @@ def evaluate_equal_budget(
         runtime_seconds=sum(item.runtime_seconds for item in selected),
         peak_memory_mb=max((item.peak_memory_mb for item in selected), default=0.0),
     )
+
+
+def summarize_candidate_metrics(
+    traces: Iterable[CandidateTrace],
+    *,
+    mode: Mode,
+) -> dict[str, object]:
+    """Run-level comparison metrics over one episode's candidate sequence.
+
+    Produces the RQ1 comparison-layer quantities the raw ledger stores but no
+    other module aggregates: application/response signature repeats,
+    success@k (cumulative over started candidates, feasible = signoff-eligible
+    terminal), first feasible candidate index, best feasible QoR utility, the
+    requested-vs-actual deviation spectrum, and mispromotion events.  A
+    promoted candidate without an effective receipt is an implementation
+    defect on the receipt-aware path and fails loudly here.
+    """
+    started = [item for item in traces if item.started]
+    application_signatures = [
+        (item.requested_knob, item.requested_value)
+        for item in started
+        if item.requested_knob is not None and item.requested_value is not None
+    ]
+    response_signatures = [
+        (item.requested_knob, item.actual_value, item.parameter_status)
+        for item in started
+        if item.requested_knob is not None
+    ]
+
+    def _repeat_report(signatures: list[tuple[object, ...]]) -> dict[str, object]:
+        unique = len(set(signatures))
+        repeats = len(signatures) - unique
+        return {
+            "observed": len(signatures),
+            "unique": unique,
+            "repeat_count": repeats,
+            "repeat_rate": repeats / len(signatures) if signatures else 0.0,
+        }
+
+    feasible_indices = [
+        index for index, item in enumerate(started, 1) if item.feasible
+    ]
+    success_at_k = {
+        k: any(item.feasible for item in started[:k])
+        for k in range(1, len(started) + 1)
+    }
+    feasible_rows = [item for item in started if item.feasible]
+    best_feasible = (
+        max(feasible_rows, key=lambda item: item.terminal_utility)
+        if feasible_rows and all(
+            item.terminal_utility is not None for item in feasible_rows
+        )
+        else None
+    )
+    if feasible_rows and any(
+        item.terminal_utility is None for item in feasible_rows
+    ):
+        raise ValueError("feasible candidate traces must carry terminal utility")
+    mispromotions = [
+        item for item in started
+        if item.promoted and item.parameter_status != "effective"
+    ]
+    if mode == "receipt-aware" and mispromotions:
+        raise ValueError(
+            "receipt-aware episode promoted candidates without an effective "
+            "receipt: "
+            + ", ".join(item.candidate_id for item in mispromotions)
+        )
+    return {
+        "schema_version": "ecos.optimization_candidate_metrics.v1",
+        "mode": mode,
+        "started_candidates": len(started),
+        "application_signature_repeats": _repeat_report(application_signatures),
+        "response_signature_repeats": _repeat_report(response_signatures),
+        "success_at_k": success_at_k,
+        "auc_success_at_n": (
+            success_curve_auc(success_at_k) if success_at_k else None
+        ),
+        "first_feasible_candidate_index": (
+            feasible_indices[0] if feasible_indices else None
+        ),
+        "best_feasible_candidate_id": (
+            best_feasible.candidate_id if best_feasible is not None else None
+        ),
+        "best_feasible_terminal_utility": (
+            best_feasible.terminal_utility if best_feasible is not None else None
+        ),
+        "feasible_candidates": len(feasible_rows),
+        "mispromotion_events": len(mispromotions),
+        "requested_actual_deviation_spectrum": _deviation_spectrum(started),
+    }
+
+
+def _deviation_spectrum(started: list[CandidateTrace]) -> dict[str, object]:
+    """Per-knob requested-vs-actual deviation statistics (numeric knobs only)."""
+    by_knob: dict[str, list[float]] = {}
+    skipped_boolean = 0
+    for item in started:
+        if (
+            item.requested_knob is None
+            or item.actual_value is None
+            or isinstance(item.requested_value, bool)
+            or isinstance(item.actual_value, bool)
+            or not isinstance(item.requested_value, (int, float))
+        ):
+            if item.requested_knob is not None and isinstance(
+                item.actual_value, bool
+            ):
+                skipped_boolean += 1
+            continue
+        by_knob.setdefault(item.requested_knob, []).append(
+            float(item.actual_value) - float(item.requested_value)
+        )
+    spectrum: dict[str, object] = {}
+    for knob, deltas in sorted(by_knob.items()):
+        spectrum[knob] = {
+            "observed": len(deltas),
+            "min_delta": min(deltas),
+            "median_delta": sorted(deltas)[len(deltas) // 2]
+            if len(deltas) % 2
+            else (
+                sorted(deltas)[len(deltas) // 2 - 1]
+                + sorted(deltas)[len(deltas) // 2]
+            )
+            / 2,
+            "max_delta": max(deltas),
+            "zero_delta_count": sum(delta == 0 for delta in deltas),
+        }
+    return {
+        "knobs": spectrum,
+        "boolean_knob_values_skipped": skipped_boolean,
+    }
 
 
 def _simple_regret_by_design(

@@ -3,7 +3,116 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
+
+_PROMOTING_DECISIONS = frozenset(
+    {"initialized", "candidate_better", "recovery_progress", "parity_objective_improved"}
+)
+
+
+def expected_effect_realization(
+    proposal_rows: Sequence[Mapping[str, object]],
+    mediation_calls: Sequence[Mapping[str, object]],
+    *,
+    objective_metric: str,
+) -> dict[str, object]:
+    """Run-level expected-effect realization over promoted proposals.
+
+    Join scope: mediation calls carry ``planning_entry_sha256`` and the one
+    audited terminal delta; proposal observations declare ``expected_effects``.
+    A promoted candidate whose declared effect on the audited metric was not
+    realized (terminal tie or opposite direction) counts as CONTRADICTED --
+    promotion is not hypothesis support.
+    """
+    effects_by_entry = {
+        str(row.get("planning_entry_sha256")): row.get("expected_effects") or []
+        for row in proposal_rows
+    }
+    denominator = 0
+    realized = 0
+    contradicted = 0
+    unobserved = 0
+    for call in mediation_calls:
+        if call.get("promotion_decision") not in _PROMOTING_DECISIONS:
+            continue
+        effects = effects_by_entry.get(str(call.get("planning_entry_sha256")), [])
+        matching = [
+            effect
+            for effect in effects
+            if isinstance(effect, Mapping)
+            and effect.get("metric_id") == objective_metric
+            and effect.get("direction") in {"increase", "decrease"}
+        ]
+        if not matching:
+            continue
+        denominator += 1
+        delta = call.get("terminal_delta")
+        verdict = str(call.get("terminal_delta_vs_epsilon"))
+        if verdict in {"unobserved", "no_epsilon"} or not isinstance(
+            delta, (int, float)
+        ):
+            unobserved += 1
+            continue
+        moved_down = float(delta) < 0
+        expected_down = any(
+            effect.get("direction") == "decrease" for effect in matching
+        )
+        expected_up = any(
+            effect.get("direction") == "increase" for effect in matching
+        )
+        if (verdict == "outside" and moved_down and expected_down) or (
+            verdict == "outside" and not moved_down and expected_up
+        ):
+            realized += 1
+        else:
+            contradicted += 1
+    return {
+        "schema_version": "ecos.knowledge_expected_effect_rates.v1",
+        "objective_metric": objective_metric,
+        "promoted_with_declared_effects": denominator,
+        "realized": realized,
+        "contradicted": contradicted,
+        "unobserved": unobserved,
+        "contradicted_rate": contradicted / denominator if denominator else None,
+    }
+
+
+def abstention_rate(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Run-level correct-abstention ratio over non-action expected behavior."""
+    controls = [
+        row for row in rows if row.get("expected_behavior") not in {None, "action"}
+    ]
+    scored = [row for row in controls if isinstance(row.get("correct"), bool)]
+    correct = sum(bool(row.get("correct")) for row in scored)
+    return {
+        "schema_version": "ecos.knowledge_abstention_rate.v1",
+        "non_action_rows": len(controls),
+        "scored_rows": len(scored),
+        "correct_abstentions": correct,
+        "correct_abstention_ratio": correct / len(scored) if scored else None,
+    }
+
+
+def truncation_loss(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Aggregate post-match truncation of compiled supported-action views."""
+    scoped = [
+        row for row in rows if isinstance(row.get("truncated_claim_refs"), list)
+    ]
+    truncated_rows = sum(
+        bool(row.get("truncated_claim_refs")) for row in scoped
+    )
+    truncated_refs = sum(
+        len(row.get("truncated_claim_refs")) for row in scoped
+    )
+    return {
+        "schema_version": "ecos.knowledge_truncation_loss.v1",
+        "views_with_truncation_field": len(scoped),
+        "rows_with_truncation": truncated_rows,
+        "truncated_claim_ref_count": truncated_refs,
+        "truncation_row_ratio": (
+            truncated_rows / len(scoped) if scoped else None
+        ),
+    }
 
 
 def summarize_mediation(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
