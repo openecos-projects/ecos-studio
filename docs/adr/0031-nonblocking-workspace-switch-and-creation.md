@@ -54,7 +54,7 @@ The waits removed from normal navigation are the implicit `workspace.close` chai
 - If the user leaves Project Management while a request is pending, the wizard collapses to a Topbar pending Tip. It does not force a later route change.
 - The pending Tip states that creation is in progress and duplicate submission is disabled. It disappears on success or failure; failures use an explicit error notification.
 - Closing the application or window while a Flow or creation is in flight shows a native prompt with the affected Workspace names, Flow Step progress, and pending creation count. The safe action keeps the window open and waits for completion and final snapshot cleanup. No force-terminate action is shown initially.
-- After 30 seconds of waiting, a `Force quit` action may appear with an explicit warning that unsynchronized local details or runtime logs may be lost. Force quit first performs best-effort Operation cancel/IPC flush for a short fixed window, then terminates without waiting indefinitely.
+- After safe draining begins, a `Force quit` action is immediately available with an explicit warning that unsynchronized local details or runtime logs may be lost. Force quit first performs best-effort Operation cancel and state flush for up to three seconds, then terminates without waiting indefinitely.
 - If a pending creation cannot confirm its result during force quit, it is recorded as unfinished. Its directory is not automatically deleted. On the next start it is shown as `unfinished creation` with `continue initialization` and `abandon registration`; abandoning removes only the newly added manifest entry and never deletes pre-existing files.
 
 ## Lock inventory for implementation
