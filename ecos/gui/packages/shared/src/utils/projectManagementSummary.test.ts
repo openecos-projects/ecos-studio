@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,
+  projectManagementWorkspaceReadablePathsFor,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceSummaryPathsFor,
 } from './projectManagementSummary'
 
 describe('projectManagementWorkspaceSummaryPaths', () => {
@@ -35,6 +39,34 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
         expect.arrayContaining([spec.metricsPath, spec.summaryPath, spec.hotspotsPath]),
       )
     }
+  })
+})
+
+describe('frontend project management summary paths', () => {
+  it('uses the five ECC-FE detail and QoR artifact triplets plus flow state', () => {
+    expect(
+      projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => spec.step),
+    ).toEqual(['prepare', 'review', 'elab', 'lint', 'sim'])
+    expect(projectManagementFrontendWorkspaceSummaryPaths).toHaveLength(21)
+    for (const spec of projectManagementFrontendWorkspaceStepAnalysisSpecs) {
+      expect(projectManagementFrontendWorkspaceSummaryPaths).toEqual(
+        expect.arrayContaining([
+          spec.detailPath,
+          spec.metricsPath,
+          spec.summaryPath,
+          spec.hotspotsPath,
+        ]),
+      )
+    }
+    expect(projectManagementWorkspaceSummaryPathsFor('frontend')).toBe(
+      projectManagementFrontendWorkspaceSummaryPaths,
+    )
+    expect(projectManagementWorkspaceSummaryPathsFor('backend')).toBe(
+      projectManagementWorkspaceSummaryPaths,
+    )
+    expect(projectManagementWorkspaceReadablePathsFor('frontend')).toBe(
+      projectManagementFrontendWorkspaceSummaryPaths,
+    )
   })
 })
 
@@ -79,6 +111,9 @@ describe('projectManagementWorkspaceStepConfigPaths', () => {
     )
     expect(new Set(projectManagementWorkspaceReadablePaths).size).toBe(
       projectManagementWorkspaceReadablePaths.length,
+    )
+    expect(projectManagementWorkspaceReadablePathsFor('backend')).toBe(
+      projectManagementWorkspaceReadablePaths,
     )
   })
 })

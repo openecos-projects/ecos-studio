@@ -353,6 +353,16 @@ export function createRuntimeEventClient(
         handleNotification(response)
       }
     })
+    if (designTool === 'frontend') {
+      void desktopApi.runtime.events
+        .replay({ designTool, workspaceHandle: workspaceId })
+        .catch((error: unknown) => {
+          console.warn(
+            `Failed to replay frontend runtime events for workspace ${workspaceId}:`,
+            error,
+          )
+        })
+    }
     setState('connected')
     console.log(
       `${designTool} runtime event stream connected for workspace: ${workspaceId}`,

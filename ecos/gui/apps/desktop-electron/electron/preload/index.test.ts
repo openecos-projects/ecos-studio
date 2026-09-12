@@ -69,6 +69,11 @@ async function loadDesktopBridge() {
     menu: {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
+    runtime: {
+      events: {
+        replay(request: unknown): Promise<void>
+      }
+    }
     workspace: {
       openWaveformExternal(path: string): Promise<void>
       readProjectTextFile(path: string): Promise<unknown>
@@ -107,10 +112,27 @@ describe('preload desktop bridge contract', () => {
             runStep: expect.any(Function),
           }),
         }),
+        runtime: expect.objectContaining({
+          events: expect.objectContaining({
+            replay: expect.any(Function),
+          }),
+        }),
         workspace: expect.objectContaining({
           readProjectTextFile: expect.any(Function),
         }),
       }),
+    )
+  })
+
+  it('invokes runtime event replay through the isolated bridge', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { designTool: 'frontend', workspaceHandle: 'frontend-1' }
+
+    await bridge.runtime.events.replay(request)
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.designRuntimeEventsReplay,
+      request,
     )
   })
 

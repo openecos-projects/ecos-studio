@@ -107,6 +107,7 @@ function createService(options: {
   layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
   modifiedTimes?: Record<string, number>
   openLogFile?: (path: string, flags: string) => number
+  platform?: NodeJS.Platform
   readTextFile?: ChipViewerServiceOptions['readTextFile']
   resourcesPath?: string
   spawnProcess?: ChipViewerServiceOptions['spawnProcess']
@@ -231,7 +232,7 @@ function createService(options: {
     isPackaged: options.isPackaged ?? false,
     layoutEditRuntime,
     openLogFile,
-    platform: 'linux',
+    platform: options.platform ?? 'linux',
     readTextFile:
       options.readTextFile ??
       (async (path) => {
@@ -1257,6 +1258,31 @@ describe('ChipViewerService', () => {
     )
   })
 
+  it('launches a packaged view-only chip viewer without ECC', async () => {
+    const resourcesPath = 'C:\\Program Files\\ECOS Studio\\resources'
+    const binaryDir = join(resourcesPath, 'binaries')
+    const viewer = join(binaryDir, 'chip-viewer-native.exe')
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [viewer, GEOMETRY_MANIFEST],
+      isPackaged: true,
+      platform: 'win32',
+      resourcesPath,
+    })
+
+    await service.open({
+      mode: 'view',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).toHaveBeenCalledWith(
+      viewer,
+      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
+      expect.any(Object),
+    )
+  })
+
   it('reports missing packaged ecc-tools runtime payload before launching the viewer', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
@@ -1275,6 +1301,7 @@ describe('ChipViewerService', () => {
 
     await expect(
       service.open({
+        mode: 'edit',
         projectPath: PROJECT_ROOT,
         step: STEP_NAME,
       }),
@@ -1287,7 +1314,6 @@ describe('ChipViewerService', () => {
   it('reports missing packaged chip viewer binaries before PATH fallback details', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
-    const ecc = join(binaryDir, 'ecc')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const { service } = createService({
       env: {
@@ -1303,8 +1329,6 @@ describe('ChipViewerService', () => {
         projectPath: PROJECT_ROOT,
         step: STEP_NAME,
       }),
-    ).rejects.toThrow(
-      `Packaged chip viewer binaries are incomplete. Missing: ${ecc}, ${viewer}`,
-    )
+    ).rejects.toThrow(`Packaged chip viewer binaries are incomplete. Missing: ${viewer}`)
   })
 })

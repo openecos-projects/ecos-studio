@@ -68,6 +68,7 @@ const FLOW_STEP_SEQUENCE = [
   'Harden',
 ] as const
 const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
+const LEGACY_REMOVED_FLOW_STEPS = new Set(['fixFanout'])
 const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
 /** Default tool names when extending a short source flow to the catalog end. */
 const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
@@ -1274,11 +1275,13 @@ function parseWorkspaceFlow(flowText: string): {
   try {
     const data = JSON.parse(flowText) as { steps?: unknown }
     if (!Array.isArray(data.steps)) throw new Error('steps are missing')
-    const steps = data.steps.map((value) => {
+    const parsedSteps = data.steps.map((value) => {
+      const name = (value as { name?: unknown })?.name
       if (
         typeof value !== 'object' ||
         value === null ||
-        !FLOW_STEPS.has((value as { name?: unknown }).name as string) ||
+        typeof name !== 'string' ||
+        (!FLOW_STEPS.has(name) && !LEGACY_REMOVED_FLOW_STEPS.has(name)) ||
         typeof (value as { tool?: unknown }).tool !== 'string' ||
         !/^[A-Za-z0-9_-]+$/.test((value as { tool: string }).tool) ||
         typeof (value as { state?: unknown }).state !== 'string'
@@ -1287,9 +1290,10 @@ function parseWorkspaceFlow(flowText: string): {
       }
       return value as WorkspaceFlowStep
     })
-    if (new Set(steps.map((step) => step.name)).size !== steps.length) {
+    if (new Set(parsedSteps.map((step) => step.name)).size !== parsedSteps.length) {
       throw new Error('step names are duplicated')
     }
+    const steps = parsedSteps.filter((step) => !LEGACY_REMOVED_FLOW_STEPS.has(step.name))
     data.steps = steps
     return { data: data as { steps: WorkspaceFlowStep[] }, steps }
   } catch (error) {

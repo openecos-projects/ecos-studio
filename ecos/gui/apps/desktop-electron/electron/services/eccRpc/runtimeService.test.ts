@@ -43,6 +43,8 @@ class FakeRpcClient implements EccRpcRuntimeClient {
     this.workspaceId = workspaceId
   }
 
+  capabilities = ['workspace.recover_interrupted']
+
   async call<T>(
     method: string,
     params?: Record<string, unknown>,
@@ -54,7 +56,7 @@ class FakeRpcClient implements EccRpcRuntimeClient {
 
     if (method === 'rpc.hello') {
       return {
-        capabilities: [],
+        capabilities: this.capabilities,
         eccVersion: '0.1.0',
         version: 1,
       } as T
@@ -122,7 +124,7 @@ class FakeSidecar implements EccRpcRuntimeSidecar {
   }
 }
 
-function createPool() {
+function createPool(capabilities = ['workspace.recover_interrupted']) {
   const events: EccRuntimeEvent[] = []
   const sidecars = new Map<string | null, FakeSidecar>()
   const clients = new Map<string | null, FakeRpcClient>()
@@ -137,6 +139,7 @@ function createPool() {
     createSidecar: (directory, onEvent, onNotification) => {
       createCount += 1
       const client = new FakeRpcClient(directory, `id-${directory ?? 'control'}`)
+      client.capabilities = capabilities
       const sidecar = new FakeSidecar(client, directory)
       clients.set(directory, client)
       sidecars.set(directory, sidecar)
@@ -297,6 +300,18 @@ describe('EccRpcRuntimeService pool', () => {
     ])
   })
 
+  it('skips interrupted recovery when the sidecar does not advertise it', async () => {
+    const pool = createPool([])
+
+    await pool.service.openWorkspace({ directory: '/work/demo' })
+
+    expect(
+      pool
+        .clientFor('/work/demo')
+        .calls.filter((call) => call.method === 'workspace.recover_interrupted'),
+    ).toEqual([])
+  })
+
   it('reuses one sidecar for the same directory and creates one per directory', async () => {
     const pool = createPool()
     await pool.service.openWorkspace({ directory: '/work/demo' })
@@ -397,7 +412,7 @@ describe('EccRpcRuntimeService pool', () => {
   it('routes rpc.hello and rpc.ping through a control runtime without workspace sidecars', async () => {
     const pool = createPool()
     await expect(pool.service.rpcHello()).resolves.toEqual({
-      capabilities: [],
+      capabilities: ['workspace.recover_interrupted'],
       eccVersion: '0.1.0',
       version: 1,
     })

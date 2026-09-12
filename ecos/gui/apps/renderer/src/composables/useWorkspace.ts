@@ -889,7 +889,10 @@ export function useWorkspace() {
         connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
 
         // 恢复运行状态：检查ECC runtime中是否有正在运行的operations
-        if (!isFlowExecutionActiveForWorkspace(canonicalProjectRoot)) {
+        if (
+          requestedDesignTool === 'backend' &&
+          !isFlowExecutionActiveForWorkspace(canonicalProjectRoot)
+        ) {
           try {
             const desktopApi = await waitForDesktopApi()
             if (desktopApi.ecc.runtime?.snapshot) {

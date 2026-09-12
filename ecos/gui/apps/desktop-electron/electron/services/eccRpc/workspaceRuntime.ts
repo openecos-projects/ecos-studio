@@ -72,6 +72,7 @@ export interface EccWorkspaceRuntimeOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   diagnosticIdleTimeoutMs?: number
+  forwardLegacyFlowOperationId?: boolean
   lazyWorkspaceOpen?: boolean
   sessions?: WorkspaceSessionRegistry
   snapshotLoader?: (
@@ -109,6 +110,7 @@ export class EccWorkspaceRuntime {
   private readonly operationTracker = new RuntimeOperationTracker()
   private readonly crashRecoveryAttempts = new Set<string>()
   private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
+  private readonly interruptedLegacyOperationIds = new Set<string>()
   private readonly pendingRecoveryEvents: EccRuntimeEvent[] = []
   private readonly sidecarLifecycle: RuntimeSidecarLifecycle
   private readonly snapshotCache = new WorkspaceSnapshotCache()
@@ -161,6 +163,7 @@ export class EccWorkspaceRuntime {
       resolveEccWorkspaceId: (workspaceHandle) =>
         this.resolveEccWorkspaceId(workspaceHandle),
       sessions: this.sessions,
+      shouldForwardLegacyFlowOperationId: () => this.shouldForwardLegacyFlowOperationId(),
       sidecar: this.sidecar,
     })
   }
@@ -382,13 +385,18 @@ export class EccWorkspaceRuntime {
     return this.enqueue(
       'flow.run_step',
       workspaceHandle,
-      async () => {
+      async (operationId) => {
         const client = await this.ensureStarted()
         if (rerun) this.sidecar.relocateLogFileFrom?.(this.boundDirectory)
         const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
         return await client.call<EccFlowRunStepResult>(
           'flow.run_step',
-          { ...payload, rerun, workspaceId },
+          {
+            ...payload,
+            rerun,
+            workspaceId,
+            ...(this.shouldForwardLegacyFlowOperationId() ? { operationId } : {}),
+          },
           { timeoutMs: 0 },
         )
       },
@@ -534,6 +542,9 @@ export class EccWorkspaceRuntime {
     operationId = '',
   ): Promise<RecoveredOperation[]> {
     const client = await this.ensureStarted()
+    if (!this.helloResult?.capabilities.includes('workspace.recover_interrupted')) {
+      return []
+    }
     const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
     const result = await client.call<{ recovered: RecoveredOperation[] }>(
       'workspace.recover_interrupted',
@@ -629,6 +640,13 @@ export class EccWorkspaceRuntime {
     return client
   }
 
+  private shouldForwardLegacyFlowOperationId(): boolean {
+    return Boolean(
+      this.options.forwardLegacyFlowOperationId &&
+      this.helloResult?.capabilities.includes('workspace.recover_interrupted'),
+    )
+  }
+
   private async resolveEccWorkspaceId(workspaceHandle: string): Promise<string> {
     const session = this.sessions.require(workspaceHandle)
     if (session.eccWorkspaceId) {
@@ -661,6 +679,7 @@ export class EccWorkspaceRuntime {
         operationId,
         workspaceHandle,
       }
+      let failed = false
       try {
         this.emit({
           logFile: this.sidecar.logFile ?? undefined,
@@ -671,7 +690,7 @@ export class EccWorkspaceRuntime {
           workspaceDirectory: runtimeDirectory ?? undefined,
           workspaceHandle,
         })
-        const result = await operation()
+        const result = await operation(operationId)
         this.emit({
           logFile: this.sidecar.logFile ?? undefined,
           method,
@@ -683,6 +702,7 @@ export class EccWorkspaceRuntime {
         })
         return result
       } catch (error) {
+        failed = true
         const normalized = normalizeRuntimeError(error, {
           logFile: this.sidecar.logFile,
           method,
@@ -715,11 +735,23 @@ export class EccWorkspaceRuntime {
         }
         throw normalized
       } finally {
+        const recoverLegacyInterruption =
+          failed && this.interruptedLegacyOperationIds.delete(operationId)
+        if (!failed) this.interruptedLegacyOperationIds.delete(operationId)
         this.cancelledOperationIds.delete(operationId)
         if (this.inFlightOperation?.operationId === operationId) {
           this.inFlightOperation = null
         }
         this.inFlightCount = Math.max(0, this.inFlightCount - 1)
+        if (recoverLegacyInterruption && workspaceHandle) {
+          const recoveryKey = this.crashRecoveryKey(workspaceHandle, operationId)
+          const recovery = this.startCrashRecovery(
+            recoveryKey,
+            workspaceHandle,
+            operationId,
+          )
+          if (recovery) await recovery
+        }
       }
     }
 
@@ -760,6 +792,9 @@ export class EccWorkspaceRuntime {
       this.operationTracker.rejectAll(
         new Error('ECC sidecar exited before the operation completed.'),
       )
+      if (event.reason === 'unexpected' && inFlight && !interruptedOperationId) {
+        this.interruptedLegacyOperationIds.add(inFlight.operationId)
+      }
       this.emit(
         workspaceHandle
           ? {
@@ -878,8 +913,23 @@ export class EccWorkspaceRuntime {
     }
   }
 
-  private flushPendingRecoveryEvents(): void {
-    for (const event of this.pendingRecoveryEvents.splice(0)) this.emit(event)
+  replayPendingRecoveryEvents(workspaceHandle: string): void {
+    this.sessions.require(workspaceHandle)
+    this.flushPendingRecoveryEvents(workspaceHandle)
+  }
+
+  private flushPendingRecoveryEvents(workspaceHandle?: string): void {
+    const retained: EccRuntimeEvent[] = []
+    for (const event of this.pendingRecoveryEvents.splice(0)) {
+      const eventWorkspaceHandle =
+        'workspaceHandle' in event ? event.workspaceHandle : undefined
+      if (workspaceHandle && eventWorkspaceHandle !== workspaceHandle) {
+        retained.push(event)
+      } else {
+        this.emit(event)
+      }
+    }
+    this.pendingRecoveryEvents.push(...retained)
   }
 
   private crashRecoveryKey(workspaceHandle: string, operationId: string): string {

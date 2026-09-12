@@ -26,7 +26,7 @@ PLACE_SOURCE_PATHS = {
     "ecc.feature_parser": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/parser/feature_parser_eval.cpp",
     "ecc.density": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/density/density_eval.cpp",
     "ecc.wirelength": "ecc/chipcompiler/thirdparty/ecc-tools/src/evaluation/src/module/wirelength/wirelength_eval.cpp",
-    "gui.place_metrics": "ecos/gui/apps/renderer/src/utils/projectManagement.ts",
+    "gui.place_metrics": "ecos/gui/apps/renderer/src/utils/backendProjectManagement.ts",
     "gui.map_gallery": "ecos/gui/apps/desktop-electron/electron/services/workspaceResourceService.ts",
     "ecc.builder": "ecc/chipcompiler/tools/ecc/builder.py",
     "dreamplace.utility": "ecc/chipcompiler/tools/ecc_dreamplace/utility.py",

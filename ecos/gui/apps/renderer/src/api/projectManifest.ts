@@ -1,6 +1,9 @@
-import type { ProjectManifestMutation } from '@ecos-studio/shared'
+import {
+  parseProjectManifest,
+  type ProjectManifest,
+  type ProjectManifestMutation,
+} from '@ecos-studio/shared'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { parseProjectManifest, type ProjectManifest } from '@/utils/projectManagement'
 
 export async function mutateProjectManifest(
   projectRoot: string,

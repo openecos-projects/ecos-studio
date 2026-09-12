@@ -1,5 +1,5 @@
+import type { ProjectManifest } from '@ecos-studio/shared'
 import type {
-  ProjectManifest,
   ProjectWorkspaceAnalysisInput,
   ProjectWorkspaceAnalysisInputsById,
   ProjectWorkspaceFlowStatesById,

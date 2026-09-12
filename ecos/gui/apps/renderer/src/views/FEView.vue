@@ -45,7 +45,7 @@
         </button>
 
         <button
-          @click="showWizard = true"
+          @click="openWizard"
           class="group flex min-w-[180px] cursor-pointer flex-col items-center gap-3 rounded-xl border border-(--border-color) bg-(--bg-secondary) px-8 py-6 shadow-sm transition-all hover:-translate-y-1 hover:scale-[1.02] hover:border-(--accent-color) hover:bg-(--bg-sidebar) hover:shadow-(--accent-color)/5 hover:shadow-lg"
         >
           <div
@@ -191,6 +191,8 @@
     <FrontendProjectWizard
       v-if="showWizard"
       :creating="wizardCreating"
+      :initial-config="initialWizardConfig"
+      :lock-project-context="projectManagementWorkspaceCreation"
       @close="closeWizard"
       @create="handleWizardCreate"
     />
@@ -199,24 +201,41 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import FrontendProjectWizard from '../components/FrontendProjectWizard.vue'
 import FrontendExperimentalBanner from '../components/frontend/FrontendExperimentalBanner.vue'
 import { useWorkspace } from '../composables/useWorkspace'
+import { waitForDesktopApi } from '@/platform/desktop'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
+import {
+  projectContextFromWorkspaceConfig,
+  registerProjectManagedWorkspace,
+  type ProjectRouteContext,
+} from '@/utils/projectManifestRegistration'
 
 const router = useRouter()
+const route = useRoute()
 const {
+  currentProject,
   recentProjects,
   openProject,
   newProject,
   loadRecentProjects,
   removeRecentProject,
+  showToast,
 } = useWorkspace()
 
 const showWizard = ref(false)
 const wizardCreating = ref(false)
 const showAllProjects = ref(false)
+const initialWizardConfig = ref<Partial<WorkspaceConfig> | undefined>(undefined)
+const projectManagementWorkspaceCreation = computed(() =>
+  Boolean(
+    queryString(route.query.workspacePath) &&
+    initialWizardConfig.value?.project_context?.project_root,
+  ),
+)
 
 const frontendProjects = computed(() => {
   return recentProjects.value.filter((project) => project.designTool === 'frontend')
@@ -230,6 +249,7 @@ const displayedProjects = computed(() => {
 
 onMounted(async () => {
   await loadRecentProjects()
+  prefillManagedProjectWorkspace()
 })
 
 const goBack = () => {
@@ -250,24 +270,128 @@ const handleRemoveRecent = async (projectId: string) => {
   await removeRecentProject(projectId)
 }
 
+const openWizard = () => {
+  initialWizardConfig.value = undefined
+  showWizard.value = true
+}
+
 const handleWizardCreate = async (config: WorkspaceConfig) => {
   if (wizardCreating.value) return
   wizardCreating.value = true
   try {
+    if (!(await frontendProjectTargetAvailable(config))) return
     const success = await newProject({
       ...config,
       designTool: 'frontend',
     })
     if (!success) return
+    const workspacePath = currentProject.value?.path ?? config.directory
+    const projectContext = projectContextFromWorkspaceConfig(config)
+    await registerProjectManagedWorkspace({
+      workspacePath,
+      config,
+      projectContext,
+      routeQuery: route.query,
+      onWarning: (summary, detail) => {
+        showToast({ severity: 'warn', summary, detail })
+      },
+    })
     showWizard.value = false
-    await router.push('/workspace')
+    initialWizardConfig.value = undefined
+    await router.push({
+      path: '/workspace/home',
+      query: workspaceRouteQuery(workspacePath, projectContext),
+    })
   } finally {
     wizardCreating.value = false
   }
 }
 
+async function frontendProjectTargetAvailable(config: WorkspaceConfig): Promise<boolean> {
+  const context = config.project_context
+  if (context?.mode !== 'create') return true
+
+  const projectRoot = normalizePath(context.project_root)
+  if (!projectRoot) return false
+  try {
+    const desktopApi = await waitForDesktopApi()
+    if (!(await desktopApi.workspace.pathExists(projectRoot))) return true
+    if (!(await readProjectManagementManifest(projectRoot))) return true
+
+    showToast({
+      severity: 'error',
+      summary: 'Project already exists',
+      detail: 'Use Select Project to add a workspace to the existing frontend project.',
+    })
+    return false
+  } catch (error) {
+    console.warn('Failed to validate the frontend project target.', error)
+    showToast({
+      severity: 'error',
+      summary: 'Project path is unavailable',
+      detail: 'Choose another project parent path or verify directory permissions.',
+    })
+    return false
+  }
+}
+
 const closeWizard = () => {
-  if (!wizardCreating.value) showWizard.value = false
+  if (wizardCreating.value) return
+  showWizard.value = false
+  initialWizardConfig.value = undefined
+  if (queryString(route.query.projectRoot)) void router.push('/projects')
+}
+
+function prefillManagedProjectWorkspace(): void {
+  const workspacePath = queryString(route.query.workspacePath)
+  if (!workspacePath) return
+  const projectRoot = normalizePath(queryString(route.query.projectRoot))
+  const designName = queryString(route.query.designName)
+  initialWizardConfig.value = {
+    directory: workspacePath,
+    designTool: 'frontend',
+    parameters: {
+      design: designName || basenamePath(workspacePath),
+      description: 'Created from Project Management',
+    },
+    project_context: projectRoot
+      ? {
+          mode: 'select',
+          project_name: queryString(route.query.projectName) || basenamePath(projectRoot),
+          project_root: projectRoot,
+          project_json_path: `${projectRoot}/project.json`,
+        }
+      : undefined,
+  }
+  showWizard.value = true
+}
+
+function workspaceRouteQuery(
+  workspacePath: string,
+  projectContext: ProjectRouteContext | null,
+) {
+  const projectRoot = projectContext?.projectRoot
+  if (!projectRoot) return {}
+  return {
+    projectRoot,
+    projectName: projectContext.projectName || basenamePath(projectRoot),
+    workspaceId: basenamePath(workspacePath),
+  }
+}
+
+function queryString(value: unknown): string {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
+  return typeof value === 'string' ? value : ''
+}
+
+function basenamePath(path: string): string {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? ''
+}
+
+function normalizePath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.endsWith('/') && normalized.length > 1) return normalized.slice(0, -1)
+  return normalized
 }
 
 const formatDate = (date: Date) => {

@@ -921,7 +921,47 @@ describe('WorkspaceService', () => {
   })
 })
 
+describe('readWorkspaceParameters', () => {
+  it('authorizes reads before probing for a workspace config file', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const outsideWorkspace = join(directory, '..', 'outside-workspace')
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+    projectScopeProvider.requestProjectPathAccess = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('Refusing to grant access outside current project root'),
+      )
+
+    await expect(service.readWorkspaceParameters(outsideWorkspace)).rejects.toThrow(
+      /outside current project root/,
+    )
+    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+      join(outsideWorkspace, 'home', 'params.toml'),
+    )
+  })
+})
+
 describe('editWorkspaceParameters', () => {
+  it('authorizes the workspace before probing for its config file', async () => {
+    const directory = await createTempDir('ecos-workspace-service-')
+    const outsideWorkspace = join(directory, '..', 'outside-workspace')
+    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
+    projectScopeProvider.requestWritableProjectPathAccess = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('Refusing to grant access outside current project root'),
+      )
+
+    await expect(
+      service.editWorkspaceParameters(outsideWorkspace, [
+        { json_path: ['design'], value: 'x' },
+      ]),
+    ).rejects.toThrow(/outside current project root/)
+    expect(projectScopeProvider.requestWritableProjectPathAccess).toHaveBeenCalledWith(
+      join(outsideWorkspace, 'home', 'params.toml'),
+    )
+  })
+
   it('refuses to edit parameters through a symlinked config file', async () => {
     const directory = await createTempDir('ecos-workspace-service-')
     const homeDir = join(directory, 'home')
@@ -982,6 +1022,28 @@ describe('applyWorkspaceParameterWrites', () => {
       replacementJournalDirectory: join(rootPath, '.workspace-replacement-journals'),
     })
   }
+
+  it('authorizes the workspace before probing parameter write targets', async () => {
+    const directory = await createTempDir('ecos-workspace-service-apply-scope-')
+    const outsideWorkspace = join(directory, '..', 'outside-workspace')
+    const projectScopeProvider = createProjectScopeProvider(directory, directory)
+    projectScopeProvider.requestWritableProjectPathAccess = vi
+      .fn()
+      .mockRejectedValue(
+        new Error('Refusing to grant access outside current project root'),
+      )
+    const service = new WorkspaceService({
+      projectScopeProvider,
+      replacementJournalDirectory: join(directory, '.workspace-replacement-journals'),
+    })
+
+    await expect(
+      service.applyWorkspaceParameterWrites(outsideWorkspace, []),
+    ).rejects.toThrow(/outside current project root/)
+    expect(projectScopeProvider.requestWritableProjectPathAccess).toHaveBeenCalledWith(
+      join(outsideWorkspace, 'home', 'params.toml'),
+    )
+  })
 
   it('rolls back the parameter file when a later step-config write fails', async () => {
     const directory = await createTempDir('ecos-workspace-service-apply-rollback-')

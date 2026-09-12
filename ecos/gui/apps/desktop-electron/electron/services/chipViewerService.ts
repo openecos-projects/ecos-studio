@@ -110,7 +110,7 @@ const defaultSpawnProcess: SpawnProcess = (file, args, options) =>
   spawnProcessCallback(file, args, options)
 
 interface ChipViewerBinaries {
-  eccPath: string
+  eccPath?: string
   viewerPath: string
 }
 
@@ -587,7 +587,7 @@ export class ChipViewerService {
     const mode = normalizeChipViewerMode(request.mode)
     const snapshotInputs = await this.resolveSnapshotInputs(projectPath, request.step)
     await this.requireSavedGeometry(snapshotInputs, request.step)
-    const binaries = this.resolveBinaries()
+    const binaries = this.resolveBinaries(mode)
 
     let viewerManifestPath = snapshotInputs.manifestPath
     let editCommandDirectory: string | undefined
@@ -1285,6 +1285,9 @@ export class ChipViewerService {
     binaries: ChipViewerBinaries,
     snapshotInputs: SnapshotInputs,
   ): Promise<void> {
+    if (!binaries.eccPath) {
+      throw new Error('ECC is required to refresh layout artifacts in edit mode.')
+    }
     await this.ensureDirectory(dirname(snapshotInputs.imagePath))
     await this.execFile(binaries.eccPath, [
       'layout-image',
@@ -1360,15 +1363,16 @@ export class ChipViewerService {
     )
   }
 
-  private resolveBinaries(): ChipViewerBinaries {
+  private resolveBinaries(mode: ChipViewerMode): ChipViewerBinaries {
+    const requiresEcc = mode === 'edit'
     if (this.isPackaged) {
-      const packaged = this.resolvePackagedBinaries()
+      const packaged = this.resolvePackagedBinaries(requiresEcc)
       if (packaged.binaries) {
         return packaged.binaries
       }
 
       try {
-        return this.resolvePathBinaries()
+        return this.resolvePathBinaries(requiresEcc)
       } catch (error) {
         throw new Error(
           `Packaged chip viewer binaries are incomplete. Missing: ${packaged.missingPaths.join(
@@ -1380,10 +1384,10 @@ export class ChipViewerService {
       }
     }
 
-    return this.resolveDevBinaries()
+    return this.resolveDevBinaries(requiresEcc)
   }
 
-  private resolvePackagedBinaries(): PackagedBinaryResolution {
+  private resolvePackagedBinaries(requiresEcc: boolean): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const eccPath = join(binaryDir, executableName('ecc', this.platform))
     const viewerPath = join(
@@ -1392,13 +1396,15 @@ export class ChipViewerService {
     )
     const runtimePayloadPaths = packagedRuntimePayloadPaths(binaryDir, this.platform)
 
-    const missingPaths = [eccPath, viewerPath, ...runtimePayloadPaths].filter(
-      (path) => !this.fileExists(path),
-    )
+    const requiredPaths = [
+      viewerPath,
+      ...(requiresEcc ? [eccPath, ...runtimePayloadPaths] : []),
+    ]
+    const missingPaths = requiredPaths.filter((path) => !this.fileExists(path))
 
     if (missingPaths.length === 0) {
       return {
-        binaries: { eccPath, viewerPath },
+        binaries: { ...(requiresEcc ? { eccPath } : {}), viewerPath },
         missingPaths: [],
       }
     }
@@ -1409,12 +1415,12 @@ export class ChipViewerService {
     }
   }
 
-  private resolvePathBinaries(): ChipViewerBinaries {
-    const eccPath = this.resolveCommandFromPath('ecc')
+  private resolvePathBinaries(requiresEcc: boolean): ChipViewerBinaries {
     const viewerPath = this.resolveCommandFromPath('chip-viewer-native')
+    const eccPath = requiresEcc ? this.resolveCommandFromPath('ecc') : null
 
-    if (eccPath && viewerPath) {
-      return { eccPath, viewerPath }
+    if (viewerPath && (!requiresEcc || eccPath)) {
+      return { ...(eccPath ? { eccPath } : {}), viewerPath }
     }
 
     throw new Error('Chip viewer binaries were not found on PATH.')
@@ -1434,24 +1440,27 @@ export class ChipViewerService {
     return null
   }
 
-  private resolveDevBinaries(): ChipViewerBinaries {
+  private resolveDevBinaries(requiresEcc: boolean): ChipViewerBinaries {
     let repoRoot: string
     try {
       repoRoot = this.findRepoRoot()
     } catch {
-      return this.resolvePathBinaries()
+      return this.resolvePathBinaries(requiresEcc)
     }
     const eccWrapperPath = join(repoRoot, 'ecos/scripts/ecc-wrapper.sh')
     const viewerWrapperPath = join(repoRoot, 'ecos/scripts/chip-viewer-native-wrapper.sh')
 
-    if (!this.fileExists(eccWrapperPath) || !this.fileExists(viewerWrapperPath)) {
+    if (
+      !this.fileExists(viewerWrapperPath) ||
+      (requiresEcc && !this.fileExists(eccWrapperPath))
+    ) {
       throw new Error(
         `Chip viewer wrappers were not found under ${join(repoRoot, 'ecos/scripts')}. ${BUILD_HINT}`,
       )
     }
 
     return {
-      eccPath: eccWrapperPath,
+      ...(requiresEcc ? { eccPath: eccWrapperPath } : {}),
       viewerPath: viewerWrapperPath,
     }
   }

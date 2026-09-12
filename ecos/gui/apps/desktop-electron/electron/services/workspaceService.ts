@@ -488,9 +488,12 @@ export class WorkspaceService {
   async readWorkspaceParameters(
     workspacePath: string,
   ): Promise<Record<string, unknown> | null> {
-    const location = await locateWorkspaceParametersFile(workspacePath)
-    if (!location) return null
     try {
+      await this.projectScopeProvider.requestProjectPathAccess(
+        join(workspacePath, 'home', WORKSPACE_CONFIG_BASENAME),
+      )
+      const location = await locateWorkspaceParametersFile(workspacePath)
+      if (!location) return null
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
         location.path,
       )
@@ -514,6 +517,19 @@ export class WorkspaceService {
     workspacePath: string,
     edits: { json_path: (string | number)[]; value: unknown }[],
   ): Promise<{ format: 'toml' | 'json'; path: string }> {
+    await this.projectScopeProvider.requestWritableProjectPathAccess(
+      join(workspacePath, 'home', WORKSPACE_CONFIG_BASENAME),
+    )
+    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
+    const [canonicalWorkspace, canonicalRoot] = await Promise.all([
+      realpath(workspacePath),
+      realpath(authorizingRoot),
+    ])
+    if (canonicalWorkspace !== canonicalRoot) {
+      throw new Error(
+        'Refusing to edit workspace parameters: the target is not the active workspace',
+      )
+    }
     const location = await locateWorkspaceParametersFile(workspacePath)
     if (!location) {
       throw new Error(`Workspace parameters file not found under: ${workspacePath}`)
@@ -525,16 +541,6 @@ export class WorkspaceService {
       // refuse it, matching ECC's own refusal to write through symlinks.
       throw new Error(
         `Refusing to edit workspace parameters through a symlink: ${location.path}`,
-      )
-    }
-    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
-    const [canonicalWorkspace, canonicalRoot] = await Promise.all([
-      realpath(workspacePath),
-      realpath(authorizingRoot),
-    ])
-    if (canonicalWorkspace !== canonicalRoot) {
-      throw new Error(
-        'Refusing to edit workspace parameters: the target is not the active workspace',
       )
     }
     const canonicalPath =
@@ -579,6 +585,9 @@ export class WorkspaceService {
     writes: DesktopAgentWorkspaceParameterWrite[],
   ): Promise<void> {
     const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
+    await this.projectScopeProvider.requestWritableProjectPathAccess(
+      join(workspacePath, 'home', WORKSPACE_CONFIG_BASENAME),
+    )
     const [canonicalWorkspace, canonicalRoot] = await Promise.all([
       realpath(workspacePath),
       realpath(authorizingRoot),

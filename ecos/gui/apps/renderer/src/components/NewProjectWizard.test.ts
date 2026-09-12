@@ -37,6 +37,14 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('joinPath(managedWorkspaceRoot.value, workspaceName)')
   })
 
+  it('locks project selection for an existing project workspace entry', () => {
+    expect(source).toContain('lockProjectContext?: boolean')
+    expect(source).toContain('const lockProjectContext = computed')
+    expect(source).toContain('v-if="!lockProjectContext"')
+    expect(source).toContain(':readonly="lockProjectContext"')
+    expect(source).toContain('if (lockProjectContext.value) return')
+  })
+
   it('offers project history entries when selecting a project', () => {
     expect(source).toContain('loadProjectHistory')
     expect(source).toContain('projectHistory')
