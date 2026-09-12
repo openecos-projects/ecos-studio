@@ -92,6 +92,9 @@ export const desktopApiIpcChannels = {
   pdkInventoryLocate: 'pdk-inventory:locate',
   pdkInventoryRemove: 'pdk-inventory:remove',
   pdkInventoryResolveBinding: 'pdk-inventory:resolve-binding',
+  cliInstallerGetStatus: 'cli-installer:get-status',
+  cliInstallerInstall: 'cli-installer:install',
+  cliInstallerUninstall: 'cli-installer:uninstall',
   designRuntimeCancel: 'design-runtime:cancel',
   designRuntimeRpcHello: 'design-runtime:rpc-hello',
   designRuntimeRpcPing: 'design-runtime:rpc-ping',
@@ -160,6 +163,7 @@ export const desktopApiEventChannels = {
   eccEvent: 'ecc:event',
   agentEvent: 'agent:event',
   agentCodexProgress: 'agent:codex-progress',
+  cliInstallerProgress: 'cli-installer:progress',
   shellData: 'shell:data',
   shellExit: 'shell:exit',
 } as const

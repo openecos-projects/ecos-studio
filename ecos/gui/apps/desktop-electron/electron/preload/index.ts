@@ -25,6 +25,7 @@ import type {
   DesktopAgentEvent,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
+  CliInstallerProgressEvent,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
@@ -503,6 +504,18 @@ const desktopApi: DesktopApi = {
           },
         ),
     },
+  },
+  cliInstaller: {
+    getStatus: () => invokeDesktop(desktopApiIpcChannels.cliInstallerGetStatus),
+    install: () => invokeDesktop(desktopApiIpcChannels.cliInstallerInstall),
+    uninstall: () => invokeDesktop(desktopApiIpcChannels.cliInstallerUninstall),
+    onProgress: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.cliInstallerProgress,
+        (_event, payload: unknown) => {
+          listener(payload as CliInstallerProgressEvent)
+        },
+      ),
   },
   shell: {
     createSession: (options: DesktopShellSessionOptions) =>

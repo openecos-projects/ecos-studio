@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
+import { applyHeadlessDisplayHint, parseCliInvocation, runCliCommand } from './cliEntry'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
@@ -11,7 +12,12 @@ import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProvid
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
-import { createEccRuntimeEnv, resolveEccExecutable } from '../services/eccRpc/runtimeEnv'
+import {
+  createEccRuntimeEnv,
+  resolveEccExecutable,
+  resolveExternalEccBinDir,
+} from '../services/eccRpc/runtimeEnv'
+import type { EccRuntimeEnvOptions } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
@@ -22,6 +28,8 @@ import {
 } from '../services/frontendRpcRuntime'
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { ChipViewerService } from '../services/chipViewerService'
+import { CliInstallerService } from '../services/cliInstallerService'
+import { desktopApiEventChannels } from '@ecos-studio/shared'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -48,7 +56,17 @@ import {
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
 
-const gotSingleInstanceLock = app.requestSingleInstanceLock()
+/**
+ * CLI pass-through launches (`--cli ecc ...`) are dispatched before the
+ * single-instance lock is consulted: they run as independent processes,
+ * including on headless machines and while the GUI is running.
+ */
+const cliInvocation = parseCliInvocation(process.argv)
+if (cliInvocation) {
+  applyHeadlessDisplayHint(process.env)
+}
+
+const gotSingleInstanceLock = cliInvocation || app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
   app.quit()
 }
@@ -59,6 +77,7 @@ let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
+  cliInstallerService: CliInstallerService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
@@ -131,6 +150,7 @@ function getDesktopServices() {
     isPackaged: app.isPackaged,
     platform: process.platform,
     userDataPath: app.getPath('userData'),
+    externalEccBinDir: resolveExternalEccOverride(),
   }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
   const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
@@ -156,14 +176,46 @@ function getDesktopServices() {
   })
   const resourceManagerService = new ResourceManagerService()
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
-  const runtimeEnvProvider = () =>
-    resourceManagerService.createRuntimeEnv(runtimeEnv, {
+  const cliInstallerService = new CliInstallerService({
+    resourceManager: resourceManagerService,
+    env: process.env,
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    userDataPath: app.getPath('userData'),
+    externalBinDir: resolveExternalEccOverride(),
+  })
+  const runtimeEnvProvider = () => {
+    // Rebuild the base env on every resolution so a bundle acquired (or
+    // refreshed) by the CLI installer contributes fresh PATH and
+    // LD_LIBRARY_PATH entries — the packaged mount or bundle home may not
+    // have existed at startup.
+    const baseEccEnv = createEccRuntimeEnv(eccRuntimeOptions)
+    return resourceManagerService.createRuntimeEnv(baseEccEnv, {
       platform: process.platform,
     })
+  }
   const eccRuntimeService = new EccRpcRuntimeService({
     createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
-        command: eccExecutable ?? 'ecc',
+        // Re-resolve the executable on every start so a bundle downloaded by
+        // the CLI installer (or refreshed by drift sync) is picked up without
+        // an app restart. While first-use acquisition is still running there
+        // is deliberately no PATH fallback: launching a wrong/unavailable
+        // binary would be harder to diagnose than a clear error.
+        resolveLaunch: async () => {
+          const executable = resolveEccExecutable(eccRuntimeOptions)
+          if (!executable) {
+            throw new Error(
+              'The ECC core component is not ready yet. Wait for the first-use download to finish (see Command line tools) and try again.',
+            )
+          }
+          return {
+            command: executable,
+            args: ['rpc', 'serve', '--stdio', '--persistent-db'],
+          }
+        },
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
@@ -253,6 +305,7 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
+    cliInstallerService,
     frontendRpcRuntimeService,
     chipViewerService,
     codexDependencyService,
@@ -293,6 +346,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      cliInstallerService: desktopServices.cliInstallerService,
       codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
         await launchWindow({
@@ -343,7 +397,105 @@ function handleLaunchError(error: unknown): void {
   app.quit()
 }
 
-if (gotSingleInstanceLock) {
+/**
+ * The external ECC override shared by the installer service and every
+ * runtime resolution (ECOS_ECC_BIN_DIR today; the settings page will feed
+ * the same seam). Resolved once so an invalid value warns exactly once.
+ */
+let externalEccOverride: string | null | undefined
+
+function resolveExternalEccOverride(): string | null {
+  if (externalEccOverride !== undefined) return externalEccOverride
+  const raw = process.env.ECOS_ECC_BIN_DIR
+  externalEccOverride = resolveExternalEccBinDir(raw, process.platform)
+  if (raw?.trim() && !externalEccOverride) {
+    electronLogger.warn('[cli-installer] Ignoring invalid ECOS_ECC_BIN_DIR %s', raw)
+  }
+  return externalEccOverride
+}
+
+function cliEccRuntimeOptions(): EccRuntimeEnvOptions {
+  return {
+    appPath: app.getAppPath(),
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...(app.isPackaged ? { ECOS_ELECTRON_RESOURCES_PATH: process.resourcesPath } : {}),
+    },
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    userDataPath: app.getPath('userData'),
+    externalEccBinDir: resolveExternalEccOverride(),
+  }
+}
+
+/**
+ * Startup maintenance for the host CLI: refresh the bundle on drift in the
+ * background, and acquire the bundle on first use when the package does not
+ * embed it (slim packages).
+ */
+function startCliInstallerStartupTasks(): void {
+  const cliInstaller = getDesktopServices().cliInstallerService
+  if (!cliInstaller) return
+  // Broadcast installer progress to every window: startup acquisition runs
+  // outside any IPC request, so the renderer cards rely on this channel.
+  cliInstaller.onProgress((event) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(desktopApiEventChannels.cliInstallerProgress, event)
+      }
+    }
+  })
+  void cliInstaller.checkSyncOnStartup()
+  if (!resolveEccExecutable(cliEccRuntimeOptions())) {
+    electronLogger.info('[cli-installer] No ECC bundle resolved; acquiring on first use')
+    // installShim so the host command is usable immediately after the
+    // first-use download instead of waiting for an explicit reinstall.
+    void cliInstaller
+      .ensureBundle({ installShim: true })
+      .then((versionDir) => {
+        electronLogger.info(
+          '[cli-installer] First-use acquisition installed %s',
+          versionDir,
+        )
+      })
+      .catch((error: unknown) => {
+        electronLogger.warn(
+          '[cli-installer] First-use acquisition failed: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      })
+  }
+}
+
+if (cliInvocation) {
+  void app
+    .whenReady()
+    .then(async () => {
+      const resourceManager = new ResourceManagerService()
+      const exitCode = await runCliCommand(cliInvocation, {
+        env: process.env,
+        platform: process.platform,
+        resolveExecutable: () => resolveEccExecutable(cliEccRuntimeOptions()),
+        buildRuntimeEnv: async () =>
+          await resourceManager.createRuntimeEnv(
+            createEccRuntimeEnv(cliEccRuntimeOptions()),
+            { platform: process.platform },
+          ),
+      })
+      app.exit(exitCode)
+    })
+    .catch((error: unknown) => {
+      electronLogger.error(
+        '[cli] %s failed: %s',
+        cliInvocation.command,
+        error instanceof Error ? error.message : String(error),
+      )
+      app.exit(1)
+    })
+}
+
+if (!cliInvocation && gotSingleInstanceLock) {
   app.on('second-instance', (_event, argv) => {
     void runAfterAppReady(
       () => app.whenReady(),
@@ -374,6 +526,8 @@ if (gotSingleInstanceLock) {
         void launchWindow().catch(handleLaunchError)
       },
     })
+
+    startCliInstallerStartupTasks()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -10,16 +10,6 @@ DRY_RUN=false
 
 REQUIRED_ENTRIES=(
   "resources/binaries/chip-viewer-native"
-  "resources/binaries/ecc"
-  "resources/binaries/_internal/ecc_tools_bin"
-  "resources/binaries/_internal/ecc_tools_bin/lib"
-  "resources/binaries/_internal/ecc_tools_bin/ecc_py.cpython-311-x86_64-linux-gnu.so"
-  "resources/binaries/_internal/ecc_tools_bin/lib/libgeometry_db.so"
-  "resources/binaries/_internal/ecc_tools_bin/lib/libidb.so"
-  "resources/binaries/_internal/dreamplace/Params.py"
-  "resources/binaries/_internal/dreamplace/Placer.py"
-  "resources/binaries/_internal/dreamplace/ops/place_io/place_io_cpp.cpython-311-x86_64-linux-gnu.so"
-  "resources/binaries/_internal/torch/lib/libtorch.so"
 )
 
 usage() {
@@ -27,9 +17,9 @@ usage() {
 Usage: chip-viewer-appimage-smoke.sh [options]
 
 Inspect the ECOS Studio AppImage and fail if required chip viewer runtime
-payload files are missing.
-Required payload includes chip-viewer-native, ecc,
-and the packaged ecc_tools_bin runtime libraries.
+payload files are missing. ECC is deliberately not packaged (slim build):
+it is acquired from the registry on first run, so only chip-viewer-native
+is required here.
 
 Options:
   --appimage <path>   AppImage path. Defaults to the desktop-electron release.

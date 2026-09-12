@@ -129,6 +129,9 @@
           </div>
         </div>
       </div>
+      <!-- ECC command line tools: install, reinstall, and uninstall -->
+      <CliInstallerCard class="mb-8 w-full max-w-2xl" />
+
       <!-- Project Management entry -->
       <button
         @click="navigateToProjects"
@@ -148,6 +151,7 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import CliInstallerCard from '@/components/CliInstallerCard.vue'
 
 const router = useRouter()
 

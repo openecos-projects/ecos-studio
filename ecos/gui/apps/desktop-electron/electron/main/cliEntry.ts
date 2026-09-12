@@ -1,0 +1,157 @@
+import { spawn } from 'node:child_process'
+import type { SpawnOptions } from 'node:child_process'
+import { statSync } from 'node:fs'
+
+/**
+ * CLI pass-through entry (`ecos-studio --cli <command> [args...]`).
+ *
+ * Parsed and dispatched before the GUI single-instance lock is consulted so
+ * a CLI invocation is always an independent process, even while the GUI
+ * runs. Kept free of Electron imports so it stays unit-testable.
+ */
+
+export interface CliCommand {
+  command: string
+  args: string[]
+}
+
+/**
+ * Recognize a `--cli` invocation. `--cli` must be the first user argument;
+ * unpackaged (electron default-app) launches prefix argv with the entry
+ * script ('.', or a *.js/*.mjs/*.cjs/*.asar file), which is skipped.
+ * Anything else in that position (e.g. a workspace directory) means this is
+ * not a CLI launch.
+ *
+ * Returns null when the launch is not a CLI invocation, and a command with
+ * an empty `command` when `--cli` was given without a command (treated as
+ * invalid by runCliCommand).
+ */
+export function parseCliInvocation(argv: readonly string[]): CliCommand | null {
+  const hasDefaultAppPrefix =
+    argv.length > 2 && (argv[1] === '.' || isEntryScriptFile(argv[1]))
+  const cliIndex = hasDefaultAppPrefix ? 2 : 1
+  if (argv[cliIndex] !== '--cli') return null
+  const [command = '', ...args] = argv.slice(cliIndex + 1)
+  return { command, args }
+}
+
+function isEntryScriptFile(pathValue: unknown): boolean {
+  if (typeof pathValue !== 'string' || !/\.(js|mjs|cjs|asar)$/.test(pathValue)) {
+    return false
+  }
+  // Workspace directories can legitimately end in .js; only an existing
+  // regular file is an entry script.
+  try {
+    return statSync(pathValue).isFile()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Append the headless ozone platform switch when no display server is
+ * reachable, so Electron can boot its main process on headless machines.
+ * Returns true when the hint was applied.
+ */
+export function applyHeadlessDisplayHint(env: NodeJS.ProcessEnv): boolean {
+  if (env.ELECTRON_OZONE_PLATFORM_HINT) return false
+  if (env.DISPLAY || env.WAYLAND_DISPLAY) return false
+  env.ELECTRON_OZONE_PLATFORM_HINT = 'headless'
+  return true
+}
+
+export function printCliUsage(): void {
+  console.error('Usage: ECOS-Studio --cli ecc [args...]')
+  console.error("Only the 'ecc' command is supported in this release.")
+}
+
+/**
+ * "Error:" prefix for CLI diagnostics: red on an interactive terminal, plain
+ * text when stderr is piped or NO_COLOR is set, so captured logs stay clean.
+ */
+export function cliErrorPrefix(env: NodeJS.ProcessEnv, isTTY: boolean): string {
+  return isTTY && !env.NO_COLOR ? '\x1b[31mError:\x1b[0m' : 'Error:'
+}
+
+const SIGNAL_NUMBERS: Record<string, number> = {
+  SIGHUP: 1,
+  SIGINT: 2,
+  SIGQUIT: 3,
+  SIGTERM: 15,
+}
+
+function exitCodeForSignal(signal: string | null): number {
+  if (!signal) return 1
+  return 128 + (SIGNAL_NUMBERS[signal.toUpperCase()] ?? 1)
+}
+
+export interface CliRunDependencies {
+  env: NodeJS.ProcessEnv
+  platform: NodeJS.Platform
+  /** Resolved exactly like the ECC RPC sidecar resolves its executable. */
+  resolveExecutable: () => string | null
+  /** Built exactly like the ECC RPC sidecar's spawn env. */
+  buildRuntimeEnv: () => Promise<NodeJS.ProcessEnv>
+  spawn?: typeof spawn
+  log?: (message: string) => void
+}
+
+/**
+ * Run the pass-through command, forwarding stdio, SIGINT/SIGTERM, and the
+ * child's exit code. Returns the process exit code.
+ */
+export async function runCliCommand(
+  cli: CliCommand,
+  dependencies: CliRunDependencies,
+): Promise<number> {
+  const { log = console.error } = dependencies
+  if (cli.command !== 'ecc') {
+    printCliUsage()
+    return 2
+  }
+  if (dependencies.platform !== 'linux') {
+    log('warning: ECC does not support this platform yet; --cli requires Linux.')
+    return 1
+  }
+
+  const executable = dependencies.resolveExecutable()
+  if (!executable) {
+    log(
+      `${cliErrorPrefix(dependencies.env, process.stderr.isTTY)} The ECC core component is not ready. Start the ECOS Studio GUI once to download it, then retry.`,
+    )
+    return 1
+  }
+
+  const env = await dependencies.buildRuntimeEnv()
+  const spawnImpl = dependencies.spawn ?? spawn
+  const options: SpawnOptions & { stdio: 'inherit'; env: NodeJS.ProcessEnv } = {
+    env,
+    stdio: 'inherit',
+  }
+
+  return await new Promise<number>((resolve) => {
+    const child = spawnImpl(executable, cli.args, options)
+    // Keep the signal names distinct: forwarding SIGINT as SIGTERM would
+    // change the child's exit status (130 vs 143).
+    const signalHandlers: Array<[NodeJS.Signals, () => void]> = [
+      ['SIGINT', () => child.kill('SIGINT')],
+      ['SIGTERM', () => child.kill('SIGTERM')],
+    ]
+    for (const [signal, handler] of signalHandlers) {
+      process.on(signal, handler)
+    }
+    const settle = (code: number): void => {
+      for (const [signal, handler] of signalHandlers) {
+        process.off(signal, handler)
+      }
+      resolve(code)
+    }
+    child.on('error', (error: Error) => {
+      log(`Failed to launch ${executable}: ${error.message}`)
+      settle(1)
+    })
+    child.on('close', (code: number | null, signal: string | null) => {
+      settle(code ?? exitCodeForSignal(signal))
+    })
+  })
+}
