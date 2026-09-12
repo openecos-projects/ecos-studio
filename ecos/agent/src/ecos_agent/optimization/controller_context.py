@@ -33,7 +33,6 @@ from ecos_agent.optimization.contracts import (
     OptimizationEpisodeState,
     OptimizationKnob,
     OptimizationObjectiveContract,
-    OptimizationProposal,
     PlanningProviderEvidence,
     ProposalAction,
     ProposalContextRef,
@@ -755,19 +754,42 @@ class ControllerContextMixin:
         self._persist()
 
     def _append_proposal_observation(
-        self, planning_entry: OptimizationPlanningAuditEntry, proposal: OptimizationProposal
+        self,
+        planning_entry: OptimizationPlanningAuditEntry,
+        turn: OptimizationPlannerTurn,
     ) -> None:
         """Persist structured proposal fields for knowledge mediation analysis."""
         path = self.ledger.root / "optimization-proposal-observations.v1.jsonl"
+        proposal = turn.proposal
         action = proposal.action
+        v2_action = turn.proposal_v2.action if turn.proposal_v2 else None
         payload = {
             "schema_version": "ecos.optimization_proposal_observation.v1",
             "planning_entry_sha256": planning_entry.entry_sha256,
             "proposal_sha256": canonical_sha256(proposal.model_dump(mode="json")),
             "decision": proposal.decision.value,
             "action": action.model_dump(mode="json") if action else None,
-            "claim_id": None,
-            "binding_id": None,
+            "claim_id": v2_action.claim_id if v2_action else None,
+            "binding_id": v2_action.binding_id if v2_action else None,
+            "claim_sha256": v2_action.claim_sha256 if v2_action else None,
+            "binding_sha256": v2_action.binding_sha256 if v2_action else None,
+            "requested_knob_id": (
+                turn.requested.knob_id.value if turn.requested else None
+            ),
+            "requested_value": turn.requested.value if turn.requested else None,
+            "expected_effects": (
+                [
+                    effect.model_dump(mode="json")
+                    for effect in v2_action.expected_effects
+                ]
+                if v2_action
+                else []
+            ),
+            "context_fingerprint": (
+                planning_entry.effective_domains[0].context_sha256
+                if planning_entry.effective_domains
+                else None
+            ),
             "knowledge_refs": [ref.model_dump(mode="json") for ref in proposal.knowledge_refs],
         }
         with path.open("a", encoding="utf-8") as stream:
