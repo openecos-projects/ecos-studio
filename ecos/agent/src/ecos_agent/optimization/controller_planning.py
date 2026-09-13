@@ -127,7 +127,9 @@ class ControllerPlanningMixin:
                 proposal=None,
                 validation_result="rejected",
                 rejection_reason=(
-                    str(exc) if isinstance(exc, EffectiveDomainError) else "proposal_schema"
+                    str(exc)
+                    if isinstance(exc, (EffectiveDomainError, ProposalProviderError))
+                    else "proposal_schema"
                 ),
                 requested=None,
                 state=self._state,
