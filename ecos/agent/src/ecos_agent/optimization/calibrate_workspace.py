@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from ecos_agent.optimization.runtime import OptimizationRuntimeError, _ecc_execu
 
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 _MIN_REPLAYS = 2
+_PROGRESS_INTERVAL_SECONDS = 30.0
 
 
 def write_noise_epsilon_artifact(
@@ -57,8 +59,38 @@ def _terminal_observation(workspace: Path) -> TerminalObservation:
     return observation
 
 
+def _scoped_progress(
+    progress: Callable[[str], None], index: int, replays: int
+) -> Callable[[str], None]:
+    prefix = f"noise calibration replay {index}/{replays}: "
+    return lambda message: progress(prefix + message)
+
+
+def _heartbeat_emitter(
+    progress: Callable[[str], None]
+) -> Callable[[dict[str, object] | None], None]:
+    started = time.monotonic()
+    last_report = [0.0]
+
+    def heartbeat(status: dict[str, object] | None) -> None:
+        now = time.monotonic()
+        if now - last_report[0] < _PROGRESS_INTERVAL_SECONDS:
+            return
+        last_report[0] = now
+        elapsed = int(now - started)
+        state = status.get("state") if isinstance(status, dict) else None
+        suffix = f", ECC state: {state}" if isinstance(state, str) else ""
+        progress(f"flow running, elapsed {elapsed // 60}m{elapsed % 60:02d}s{suffix}")
+
+    return heartbeat
+
+
 def _run_replay(
-    workspace: Path, replay_root: Path, index: int, timeout_seconds: float
+    workspace: Path,
+    replay_root: Path,
+    index: int,
+    timeout_seconds: float,
+    progress: Callable[[str], None] | None = None,
 ) -> TerminalObservation:
     observation_path = replay_root / "terminal-observation.v1.json"
     if observation_path.is_file():
@@ -79,13 +111,18 @@ def _run_replay(
         operation = client._request(
             "operation.start_flow", request, timeout_seconds=30.0
         )
+        if progress is not None:
+            progress("flow rerun started")
         if operation.get("state") not in _TERMINAL_STATES:
             operation_id = operation.get("operationId")
             if not isinstance(operation_id, str) or not operation_id:
                 raise OptimizationRuntimeError(
                     "ECC start_flow response has no operation id"
                 )
-            terminal = client.wait_for_terminal(operation_id, timeout_seconds)
+            heartbeat = _heartbeat_emitter(progress) if progress is not None else None
+            terminal = client.wait_for_terminal(
+                operation_id, timeout_seconds, poll_callback=heartbeat
+            )
             if terminal is None:
                 raise OptimizationRuntimeError(
                     f"default replay {index} timed out after {timeout_seconds}s"
@@ -127,16 +164,27 @@ def calibrate(
     for index in range(1, replays + 1):
         if should_stop is not None and should_stop():
             raise OptimizationRuntimeError("noise calibration cancelled")
+        scoped = (
+            _scoped_progress(progress, index, replays)
+            if progress is not None
+            else None
+        )
+        if progress is not None:
+            progress(
+                f"preparing replay {index}/{replays}: copying the workspace and "
+                "rerunning the default-parameter flow"
+            )
         observations.append(
             _run_replay(
                 workspace,
                 calibration_dir / f"default-replay-{index}",
                 index,
                 timeout_seconds,
+                progress=scoped,
             )
         )
         if progress is not None:
-            progress(f"noise calibration replay {index}/{replays} finished")
+            progress(f"replay {index}/{replays} finished")
     payload = write_noise_epsilon_artifact(
         tuple(observations), optimization_root / "noise-epsilon.v1.json"
     )
