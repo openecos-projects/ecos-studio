@@ -11,25 +11,25 @@ vi.mock('@/platform/desktop', () => ({
   })),
 }))
 
-vi.mock('@/utils/projectManagement', () => ({
-  parseProjectManifest: vi.fn((content: string) => JSON.parse(content)),
-}))
-
 describe('mutateProjectManifest', () => {
   beforeEach(() => {
     mutate.mockReset()
     mutate.mockResolvedValue({
       content: JSON.stringify({
         schema_version: 1,
+        project_type: 'backend',
         project_id: 'proj_demo',
         name: 'demo',
+        design_name: 'demo',
         root_path: '/projects/demo',
         created_at: '2026-07-17T00:00:00.000Z',
         updated_at: '2026-07-17T00:00:00.000Z',
         base_design: { rtl_list: [], parameters: {} },
         objectives: { primary: 'timing', directions: {} },
         workspaces: [],
+        mpc: null,
         best_workspace: null,
+        qor_baseline: null,
       }),
     })
   })
@@ -62,7 +62,7 @@ describe('mutateProjectManifest', () => {
 
     expect(() => structuredClone(mutation)).toThrow('could not be cloned')
 
-    await mutateProjectManifest('/projects/demo', mutation)
+    const manifest = await mutateProjectManifest('/projects/demo', mutation)
 
     expect(mutate).toHaveBeenCalledWith({
       projectRoot: '/projects/demo',
@@ -77,5 +77,6 @@ describe('mutateProjectManifest', () => {
       },
     })
     expect(() => structuredClone(mutate.mock.calls[0]?.[0])).not.toThrow()
+    expect(manifest.project_type).toBe('backend')
   })
 })

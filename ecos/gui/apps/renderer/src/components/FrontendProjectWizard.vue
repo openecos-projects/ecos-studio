@@ -110,99 +110,314 @@
                 key="step1"
                 class="mx-auto w-full max-w-2xl"
               >
-                <div class="mb-10">
-                  <h2 class="text-2xl font-bold text-(--text-primary)">Project Basics</h2>
-                  <p class="mt-2 text-(--text-secondary)">Name and location.</p>
+                <div class="mb-8">
+                  <h2 class="text-2xl font-bold text-(--text-primary)">
+                    Project & Workspace
+                  </h2>
+                  <p class="mt-2 text-(--text-secondary)">
+                    {{
+                      lockProjectContext
+                        ? 'Create a workspace in the selected frontend project.'
+                        : 'Choose the frontend project that will own this workspace.'
+                    }}
+                  </p>
                 </div>
 
-                <div class="space-y-8">
-                  <div class="group">
-                    <label
-                      class="mb-2 block text-sm font-semibold text-(--text-primary) transition-colors group-focus-within:text-(--accent-color)"
+                <div class="space-y-6">
+                  <section
+                    class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                  >
+                    <div
+                      v-if="!lockProjectContext"
+                      class="mb-5 inline-flex rounded-lg border border-(--border-color) bg-(--bg-primary)/80 p-1"
                     >
-                      Project Name <span class="text-red-500">*</span>
-                    </label>
-                    <input
-                      v-model="config.parameters.design"
-                      type="text"
-                      placeholder="e.g. ysyx_00000000_soc"
-                      :class="[
-                        'w-full rounded-xl border bg-(--bg-secondary)/40 px-4 py-3.5 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80 focus:outline-none',
-                        designNameError
-                          ? 'border-red-500 focus:border-red-500'
-                          : 'border-(--border-color) focus:border-(--accent-color)',
-                      ]"
-                    />
-                    <p
-                      v-if="designNameError"
-                      class="mt-2 flex items-center gap-1 text-xs text-red-500"
-                    >
-                      <i class="ri-error-warning-fill"></i> {{ designNameError }}
-                    </p>
-                    <p
-                      v-else
-                      class="mt-2 flex items-center gap-1 text-xs text-(--text-secondary)"
-                    >
-                      <i class="ri-error-warning-line"></i> Only letters, numbers, and
-                      underscores are allowed.
-                    </p>
-                  </div>
-
-                  <div class="group">
-                    <label
-                      class="mb-2 block text-sm font-semibold text-(--text-primary) transition-colors group-focus-within:text-(--accent-color)"
-                    >
-                      Project Description
-                    </label>
-                    <textarea
-                      v-model="config.parameters.description"
-                      rows="3"
-                      placeholder="Briefly describe this frontend flow..."
-                      class="w-full resize-none rounded-xl border border-(--border-color) bg-(--bg-secondary)/40 px-4 py-3.5 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:border-(--accent-color) focus:bg-(--bg-primary)/80 focus:outline-none"
-                    ></textarea>
-                  </div>
-
-                  <div class="group">
-                    <label
-                      class="mb-2 block text-sm font-semibold text-(--text-primary) transition-colors group-focus-within:text-(--accent-color)"
-                    >
-                      Save Location <span class="text-red-500">*</span>
-                    </label>
-                    <div class="flex gap-3">
-                      <div class="relative flex-1">
-                        <div
-                          class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4"
-                        >
-                          <i class="ri-folder-line text-(--text-secondary)"></i>
-                        </div>
-                        <input
-                          v-model="config.directory"
-                          type="text"
-                          readonly
-                          placeholder="Choose a folder..."
-                          :class="[
-                            'w-full cursor-pointer truncate rounded-xl border bg-(--bg-secondary)/40 py-3.5 pr-4 pl-10 text-(--text-primary) shadow-sm transition-colors placeholder:text-(--text-secondary)/50 focus:bg-(--bg-primary)/80',
-                            directoryError
-                              ? 'border-red-500 focus:border-red-500'
-                              : 'border-(--border-color) focus:border-(--accent-color)',
-                          ]"
-                          @click="selectLocation"
-                        />
-                      </div>
                       <button
-                        class="flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-(--border-color) bg-(--bg-primary)/50 px-6 py-3.5 font-medium text-(--text-primary) shadow-sm transition-colors hover:border-(--text-secondary) hover:bg-(--bg-secondary)"
-                        @click="selectLocation"
+                        type="button"
+                        class="rounded-md px-4 py-2 text-sm font-semibold transition-colors"
+                        :class="
+                          projectContext.mode === 'select'
+                            ? 'bg-(--accent-color) text-white'
+                            : 'text-(--text-secondary) hover:text-(--text-primary)'
+                        "
+                        @click="setProjectMode('select')"
                       >
-                        Browse
+                        Select Project
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-md px-4 py-2 text-sm font-semibold transition-colors"
+                        :class="
+                          projectContext.mode === 'create'
+                            ? 'bg-(--accent-color) text-white'
+                            : 'text-(--text-secondary) hover:text-(--text-primary)'
+                        "
+                        @click="setProjectMode('create')"
+                      >
+                        Create Project
                       </button>
                     </div>
-                    <p
-                      v-if="directoryError"
-                      class="mt-2 flex items-center gap-1 text-xs text-red-500"
+
+                    <div
+                      v-if="projectManifestError"
+                      class="mb-5 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
                     >
-                      <i class="ri-error-warning-fill"></i> {{ directoryError }}
-                    </p>
-                  </div>
+                      {{ projectManifestError }}
+                    </div>
+
+                    <div v-if="projectContext.mode === 'select'" class="space-y-5">
+                      <div>
+                        <label
+                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                          >Project Root <span class="text-red-500">*</span></label
+                        >
+                        <div class="flex gap-3">
+                          <input
+                            :value="projectContext.project_root"
+                            readonly
+                            type="text"
+                            placeholder="Choose an existing frontend project..."
+                            :class="[
+                              'min-w-0 flex-1 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none',
+                              lockProjectContext
+                                ? 'cursor-default opacity-75'
+                                : 'cursor-pointer',
+                            ]"
+                            @click="selectProjectRoot"
+                          />
+                          <button
+                            v-if="!lockProjectContext"
+                            type="button"
+                            class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-4 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors hover:bg-(--bg-secondary)"
+                            @click="selectProjectRoot"
+                          >
+                            <i class="ri-folder-open-line"></i>
+                            Browse
+                          </button>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="!lockProjectContext && projectHistory.length"
+                        class="space-y-2"
+                      >
+                        <div class="flex items-center justify-between">
+                          <span
+                            class="text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                            >Recent Frontend Projects</span
+                          >
+                          <span class="text-[11px] text-(--text-secondary)"
+                            >{{ projectHistory.length }} projects</span
+                          >
+                        </div>
+                        <div
+                          class="custom-scrollbar max-h-36 space-y-2 overflow-y-auto pr-1"
+                        >
+                          <button
+                            v-for="project in projectHistory"
+                            :key="project.path"
+                            type="button"
+                            class="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors"
+                            :class="
+                              normalizePath(projectContext.project_root) ===
+                              normalizePath(project.path)
+                                ? 'border-(--accent-color) bg-(--accent-color)/10'
+                                : 'border-(--border-color) bg-(--bg-secondary)/35 hover:border-(--accent-color)/45'
+                            "
+                            @click="selectProjectFromHistory(project)"
+                          >
+                            <span class="min-w-0">
+                              <span
+                                class="block truncate text-sm font-semibold text-(--text-primary)"
+                                >{{ project.name }}</span
+                              >
+                              <span
+                                class="mt-0.5 block truncate font-mono text-[11px] text-(--text-secondary)"
+                                :title="project.path"
+                                >{{ project.path }}</span
+                              >
+                            </span>
+                            <i
+                              class="ri-arrow-right-s-line shrink-0 text-(--text-secondary)"
+                            ></i>
+                          </button>
+                        </div>
+                      </div>
+                      <p
+                        v-else-if="!lockProjectContext && isLoadingProjectHistory"
+                        class="text-xs text-(--text-secondary)"
+                      >
+                        Loading recent frontend projects...
+                      </p>
+                      <p
+                        v-else-if="!lockProjectContext && projectHistoryError"
+                        class="text-xs text-(--text-secondary)"
+                      >
+                        {{ projectHistoryError }}
+                      </p>
+                    </div>
+
+                    <div v-else class="space-y-5">
+                      <div>
+                        <label
+                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                          >Project Parent Path <span class="text-red-500">*</span></label
+                        >
+                        <div class="flex gap-3">
+                          <input
+                            :value="projectParentPath"
+                            readonly
+                            type="text"
+                            placeholder="Choose where to create the project..."
+                            class="min-w-0 flex-1 cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none"
+                            @click="selectProjectParentPath"
+                          />
+                          <button
+                            type="button"
+                            class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-4 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors hover:bg-(--bg-secondary)"
+                            @click="selectProjectParentPath"
+                          >
+                            <i class="ri-folder-open-line"></i>
+                            Browse
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="mt-5">
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Project Name <span class="text-red-500">*</span></label
+                      >
+                      <input
+                        v-model.trim="projectContext.project_name"
+                        type="text"
+                        placeholder="e.g. project_fe"
+                        :readonly="lockProjectContext"
+                        :class="[
+                          'w-full rounded-lg border bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)',
+                          projectNameError ? 'border-red-500' : 'border-(--border-color)',
+                          lockProjectContext ? 'cursor-default opacity-75' : '',
+                        ]"
+                        @input="handleProjectNameInput"
+                      />
+                      <p v-if="projectNameError" class="mt-2 text-xs text-red-500">
+                        {{ projectNameError }}
+                      </p>
+                    </div>
+
+                    <div
+                      class="mt-5 grid gap-3 rounded-lg border border-(--border-color) bg-(--bg-primary)/70 p-4 text-sm md:grid-cols-2"
+                    >
+                      <div>
+                        <span
+                          class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                          >Project Path</span
+                        >
+                        <p
+                          class="mt-1 truncate font-mono text-(--text-primary)"
+                          :title="projectContext.project_root"
+                        >
+                          {{ projectContext.project_root || '-' }}
+                        </p>
+                      </div>
+                      <div>
+                        <span
+                          class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                          >Project Metadata</span
+                        >
+                        <p
+                          class="mt-1 truncate font-mono text-(--text-primary)"
+                          :title="projectContext.project_json_path"
+                        >
+                          {{ projectContext.project_json_path || '-' }}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section
+                    class="space-y-5 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                  >
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Workspace Name <span class="text-red-500">*</span></label
+                      >
+                      <input
+                        v-model.trim="workspaceName"
+                        type="text"
+                        placeholder="e.g. ws_0001"
+                        class="w-full rounded-lg border bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
+                        :class="
+                          workspaceNameError
+                            ? 'border-red-500'
+                            : 'border-(--border-color)'
+                        "
+                        @input="workspaceNameTouched = true"
+                      />
+                      <p v-if="workspaceNameError" class="mt-2 text-xs text-red-500">
+                        {{ workspaceNameError }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Design Name <span class="text-red-500">*</span></label
+                      >
+                      <input
+                        v-model.trim="config.parameters.design"
+                        type="text"
+                        placeholder="e.g. ysyx_00000000_soc"
+                        :readonly="
+                          lockProjectContext ||
+                          (projectContext.mode === 'select' &&
+                            Boolean(selectedProjectManifest))
+                        "
+                        :class="[
+                          'w-full rounded-lg border bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)',
+                          designNameError ? 'border-red-500' : 'border-(--border-color)',
+                          lockProjectContext ||
+                          (projectContext.mode === 'select' && selectedProjectManifest)
+                            ? 'cursor-default opacity-75'
+                            : '',
+                        ]"
+                        @input="designNameTouched = true"
+                      />
+                      <p v-if="designNameError" class="mt-2 text-xs text-red-500">
+                        {{ designNameError }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Description</label
+                      >
+                      <textarea
+                        v-model="config.parameters.description"
+                        rows="3"
+                        placeholder="Briefly describe this frontend flow..."
+                        class="w-full resize-none rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
+                      ></textarea>
+                    </div>
+
+                    <div>
+                      <span
+                        class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                        >Workspace Location</span
+                      >
+                      <p
+                        class="mt-1 truncate rounded-lg border border-(--border-color) bg-(--bg-primary)/70 px-3 py-2.5 font-mono text-sm text-(--text-primary)"
+                        :title="config.directory"
+                      >
+                        {{ config.directory || '-' }}
+                      </p>
+                      <p v-if="directoryError" class="mt-2 text-xs text-red-500">
+                        {{ directoryError }}
+                      </p>
+                    </div>
+                  </section>
                 </div>
               </section>
 
@@ -669,10 +884,29 @@
                   >
                     <ReviewItem
                       label="Project Name"
+                      :value="projectContext.project_name || '-'"
+                    />
+                    <ReviewItem
+                      label="Project Mode"
+                      :value="
+                        projectContext.mode === 'create'
+                          ? 'Create Project'
+                          : 'Select Project'
+                      "
+                    />
+                    <ReviewItem
+                      label="Project Root"
+                      :value="projectContext.project_root || '-'"
+                      monospace
+                      wide
+                    />
+                    <ReviewItem label="Workspace Name" :value="workspaceName || '-'" />
+                    <ReviewItem
+                      label="Design Name"
                       :value="config.parameters.design || '-'"
                     />
                     <ReviewItem
-                      label="Save Location"
+                      label="Workspace Location"
                       :value="config.directory || '-'"
                       monospace
                       wide
@@ -847,7 +1081,10 @@ import {
 } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
 import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
-import type { WorkspaceConfig } from '../types'
+import { loadProjectHistory } from '@/utils/projectHistory'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
+import { parseProjectManifest, type ProjectManifest } from '@ecos-studio/shared'
+import type { Project, WorkspaceConfig } from '../types'
 import {
   formatCpuTopModule,
   isVerilogIdentifier,
@@ -859,6 +1096,7 @@ const FINAL_STEP = 3
 const CUSTOM_FILELIST_ID = 'custom-filelist'
 const LEGACY_STANDARD_CPU_FILELIST_ID = 'standard-cpu-filelist'
 type CpuSourceMode = 'filelist' | 'files'
+type ProjectMode = 'select' | 'create'
 const CUSTOM_CPU_TOP_MODULE = 'cpu_top'
 const CUSTOM_CPU_RESET_VECTOR = '0x20000000'
 const CUSTOM_CPU_TOP_PORT_CONTRACT = YSYX_BLACKBOX_CPU_PORT_CONTRACT
@@ -883,6 +1121,14 @@ interface FrontendWorkspaceConfig extends WorkspaceConfig {
   parameters: FrontendParameters
 }
 
+interface ProjectContext {
+  mode: ProjectMode
+  project_name: string
+  project_root: string
+  project_json_path: string
+  project_id?: string
+}
+
 interface Emits {
   (e: 'close'): void
   (e: 'create', config: WorkspaceConfig): void
@@ -890,10 +1136,13 @@ interface Emits {
 
 interface Props {
   creating?: boolean
+  initialConfig?: Partial<WorkspaceConfig>
+  lockProjectContext?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   creating: false,
+  lockProjectContext: false,
 })
 const emit = defineEmits<Emits>()
 
@@ -917,6 +1166,7 @@ function createEmptyCatalog(): FrontendCatalogPayload {
 const currentStep = ref(1)
 const highestStep = ref(1)
 const isCreating = computed(() => props.creating)
+const lockProjectContext = computed(() => props.lockProjectContext)
 const catalogLoading = ref(false)
 const catalogError = ref('')
 const validationBusy = ref(false)
@@ -932,40 +1182,82 @@ const cpuSourceMode = ref<CpuSourceMode>('filelist')
 const selectedCpuRtlFiles = ref<string[]>([])
 const cpuSelectionConfirming = ref(false)
 const cpuSelectionMessage = ref('')
+const projectHistory = ref<Project[]>([])
+const isLoadingProjectHistory = ref(false)
+const projectHistoryError = ref('')
+const projectManifestError = ref('')
+const isLoadingProjectManifest = ref(false)
+const selectedProjectManifest = ref<ProjectManifest | null>(null)
+const initialProjectRoot = normalizePath(
+  props.initialConfig?.project_context?.project_root ||
+    parentPath(props.initialConfig?.directory || ''),
+)
+const projectContext = ref<ProjectContext>({
+  mode: props.lockProjectContext
+    ? 'select'
+    : props.initialConfig?.project_context?.mode || 'select',
+  project_name:
+    props.initialConfig?.project_context?.project_name ||
+    basenamePath(initialProjectRoot),
+  project_root: initialProjectRoot,
+  project_json_path:
+    props.initialConfig?.project_context?.project_json_path ||
+    (initialProjectRoot ? joinPath(initialProjectRoot, 'project.json') : ''),
+  project_id: props.initialConfig?.project_context?.project_id,
+})
+const projectParentPath = ref(parentPath(initialProjectRoot))
+const initialWorkspaceName = basenamePath(props.initialConfig?.directory || '')
+const workspaceName = ref(initialWorkspaceName || 'ws_0001')
+const workspaceNameTouched = ref(Boolean(initialWorkspaceName))
+const designNameTouched = ref(
+  Boolean(String(props.initialConfig?.parameters?.design || '').trim()),
+)
 let validationToken = 0
 let cpuTopContractScrollPending = false
+let projectManifestLoadGeneration = 0
 
 const steps = [
-  { id: 1, title: 'Basic Info' },
+  { id: 1, title: 'Project Setup' },
   { id: 2, title: 'Verification Setup' },
   { id: 3, title: 'Review & Create' },
 ]
 
 const catalog = ref<FrontendCatalogPayload>(createEmptyCatalog())
 
-const config = ref<FrontendWorkspaceConfig>({
-  directory: '',
-  designTool: 'frontend',
-  pdk: '',
-  pdk_root: '',
-  parameters: {
-    design: '',
-    description: '',
-    top_module: 'ecos_sim_top',
-    cpu_top_module: CUSTOM_CPU_TOP_MODULE,
-    clock: 'clk',
-    frequency_max: 100,
-    cpu_filelist: '',
-    soc_variant: '',
-    soc_harness_id: '',
-    frontend_core_id: '',
-    toolchain_id: '',
-    test_suite_id: '',
-  },
-  origin_def: '',
-  origin_verilog: '',
-  rtl_list: [],
-})
+const config = ref<FrontendWorkspaceConfig>(
+  createFrontendWorkspaceConfig(props.initialConfig),
+)
+
+function createFrontendWorkspaceConfig(
+  initialConfig?: Partial<WorkspaceConfig>,
+): FrontendWorkspaceConfig {
+  return {
+    ...initialConfig,
+    directory: initialConfig?.directory ?? '',
+    designTool: 'frontend',
+    pdk: initialConfig?.pdk ?? '',
+    pdk_root: initialConfig?.pdk_root ?? '',
+    parameters: {
+      design: '',
+      description: '',
+      top_module: 'ecos_sim_top',
+      cpu_top_module: CUSTOM_CPU_TOP_MODULE,
+      clock: 'clk',
+      frequency_max: 100,
+      cpu_filelist: '',
+      soc_variant: '',
+      soc_harness_id: '',
+      frontend_core_id: '',
+      toolchain_id: '',
+      test_suite_id: '',
+      ...initialConfig?.parameters,
+    },
+    origin_def: initialConfig?.origin_def ?? '',
+    origin_verilog: initialConfig?.origin_verilog ?? '',
+    rtl_list: [...(initialConfig?.rtl_list ?? [])],
+    project_context: initialConfig?.project_context,
+  }
+}
 
 const selectedCore = computed(() =>
   normalizeCoreEntry(entryById(catalog.value.cores, selectedCoreId.value)),
@@ -1141,12 +1433,18 @@ const validationIcon = computed(() => {
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
 const HAS_SPACE_RE = /\s/
 
+const projectNameError = computed(() =>
+  validateName(projectContext.value.project_name, 'Project name'),
+)
+
+const workspaceNameError = computed(() =>
+  validateName(workspaceName.value, 'Workspace name'),
+)
+
 const designNameError = computed(() => {
   const name = config.value.parameters.design || ''
   if (!name) return ''
-  if (HAS_SPACE_RE.test(name)) return 'Project name cannot contain spaces'
-  if (CHINESE_CHAR_RE.test(name)) return 'Project name cannot contain Chinese characters'
-  return ''
+  return validateName(name, 'Design name')
 })
 
 const directoryError = computed(() => {
@@ -1177,8 +1475,17 @@ const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
       return (
+        projectContext.value.project_root.trim() !== '' &&
+        projectContext.value.project_name.trim() !== '' &&
+        (projectContext.value.mode === 'create' ||
+          Boolean(selectedProjectManifest.value)) &&
+        !projectManifestError.value &&
+        !isLoadingProjectManifest.value &&
+        workspaceName.value.trim() !== '' &&
         config.value.directory.trim() !== '' &&
         config.value.parameters.design.trim() !== '' &&
+        !projectNameError.value &&
+        !workspaceNameError.value &&
         !designNameError.value &&
         !directoryError.value
       )
@@ -1197,7 +1504,24 @@ const canProceed = computed(() => {
   }
 })
 
-onMounted(loadCatalog)
+onMounted(() => {
+  syncProjectTarget()
+  void loadCatalog()
+  if (!lockProjectContext.value) void loadProjectHistoryEntries()
+  if (projectContext.value.mode === 'select' && projectContext.value.project_root) {
+    void applyProjectDefaultsForProject(projectContext.value.project_root)
+  }
+})
+
+watch(
+  [
+    () => projectContext.value.mode,
+    () => projectContext.value.project_name,
+    projectParentPath,
+    workspaceName,
+  ],
+  syncProjectTarget,
+)
 
 watch(
   [
@@ -1465,14 +1789,192 @@ function compatibilityFor(
   )
 }
 
-const selectLocation = async () => {
+async function loadProjectHistoryEntries(): Promise<void> {
+  isLoadingProjectHistory.value = true
+  projectHistoryError.value = ''
+  try {
+    projectHistory.value = (await loadProjectHistory()).filter(
+      (project) => project.projectType === 'frontend',
+    )
+  } catch (error) {
+    console.warn('Failed to load frontend project history.', error)
+    projectHistoryError.value = 'Recent frontend projects are unavailable.'
+  } finally {
+    isLoadingProjectHistory.value = false
+  }
+}
+
+async function applyProjectDefaultsForProject(projectRoot: string): Promise<void> {
+  const generation = ++projectManifestLoadGeneration
+  const root = normalizePath(projectRoot)
+  selectedProjectManifest.value = null
+  projectManifestError.value = ''
+  if (!root) return
+
+  isLoadingProjectManifest.value = true
+  try {
+    const text = await readProjectManagementManifest(root)
+    if (generation !== projectManifestLoadGeneration) return
+    if (!text) {
+      projectManifestError.value =
+        'The selected folder does not contain a project.json manifest.'
+      return
+    }
+
+    const manifest = parseProjectManifest(text)
+    if (manifest.project_type !== 'frontend') {
+      projectManifestError.value =
+        'The selected project is a backend project. Select a frontend project instead.'
+      return
+    }
+
+    selectedProjectManifest.value = manifest
+    projectContext.value.project_id = manifest.project_id
+    projectContext.value.project_name = manifest.name
+    projectContext.value.project_root = root
+    projectContext.value.project_json_path = joinPath(
+      projectContext.value.project_root,
+      'project.json',
+    )
+    config.value.parameters.design = manifest.design_name
+    designNameTouched.value = true
+    if (!workspaceNameTouched.value) {
+      workspaceName.value = nextWorkspaceNameForProject(manifest)
+    }
+    syncProjectTarget()
+  } catch (error) {
+    if (generation !== projectManifestLoadGeneration) return
+    console.warn('Failed to read frontend project manifest.', error)
+    projectManifestError.value = "The selected project's project.json could not be read."
+  } finally {
+    if (generation === projectManifestLoadGeneration) {
+      isLoadingProjectManifest.value = false
+    }
+  }
+}
+
+function setProjectMode(mode: ProjectMode): void {
+  if (lockProjectContext.value) return
+  projectContext.value.mode = mode
+  projectManifestError.value = ''
+  if (mode === 'create') {
+    projectManifestLoadGeneration += 1
+    selectedProjectManifest.value = null
+    isLoadingProjectManifest.value = false
+    delete projectContext.value.project_id
+    if (!projectParentPath.value && projectContext.value.project_root) {
+      projectParentPath.value = parentPath(projectContext.value.project_root)
+    }
+  } else if (projectContext.value.project_root) {
+    void applyProjectDefaultsForProject(projectContext.value.project_root)
+  }
+  syncProjectTarget()
+}
+
+async function selectProjectFromHistory(project: Project): Promise<void> {
+  if (lockProjectContext.value) return
+  projectContext.value.mode = 'select'
+  projectContext.value.project_root = normalizePath(project.path)
+  projectContext.value.project_name = project.name || basenamePath(project.path)
+  projectContext.value.project_json_path = joinPath(project.path, 'project.json')
+  await applyProjectDefaultsForProject(project.path)
+}
+
+async function selectProjectRoot(): Promise<void> {
+  if (lockProjectContext.value) return
   const desktopApi = await waitForDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
-    title: 'Select Project Save Location',
+    title: 'Select Frontend Project Root',
   })
-  if (result) {
-    config.value.directory = result
+  if (!result) return
+
+  const root = normalizePath(result)
+  projectContext.value.mode = 'select'
+  projectContext.value.project_root = root
+  projectContext.value.project_name = basenamePath(root)
+  projectContext.value.project_json_path = joinPath(root, 'project.json')
+  await applyProjectDefaultsForProject(root)
+}
+
+async function selectProjectParentPath(): Promise<void> {
+  if (lockProjectContext.value) return
+  const desktopApi = await waitForDesktopApi()
+  const result = await desktopApi.dialog.pickDirectory({
+    title: 'Select Frontend Project Parent Path',
+  })
+  if (!result) return
+  projectParentPath.value = normalizePath(result)
+  syncProjectTarget()
+}
+
+function handleProjectNameInput(): void {
+  if (projectContext.value.mode === 'create' && !designNameTouched.value) {
+    config.value.parameters.design = projectContext.value.project_name
   }
+  syncProjectTarget()
+}
+
+function syncProjectTarget(): void {
+  if (projectContext.value.mode === 'create') {
+    projectContext.value.project_root = projectParentPath.value
+      ? joinPath(projectParentPath.value, projectContext.value.project_name)
+      : ''
+  }
+  projectContext.value.project_json_path = projectContext.value.project_root
+    ? joinPath(projectContext.value.project_root, 'project.json')
+    : ''
+  config.value.directory = joinPath(
+    projectContext.value.project_root,
+    workspaceName.value,
+  )
+  config.value.project_context = { ...projectContext.value }
+}
+
+function nextWorkspaceNameForProject(manifest: ProjectManifest): string {
+  const numbers = manifest.workspaces
+    .flatMap((workspace) => [
+      workspace.workspace_id,
+      basenamePath(workspace.workspace_path),
+    ])
+    .map((name) => /^ws_(\d+)$/.exec(name)?.[1])
+    .filter((value): value is string => Boolean(value))
+    .map(Number)
+    .filter(Number.isFinite)
+  return `ws_${String(Math.max(0, ...numbers) + 1).padStart(4, '0')}`
+}
+
+function validateName(name: string, label: string): string {
+  if (!name) return ''
+  if (HAS_SPACE_RE.test(name)) return `${label} cannot contain spaces`
+  if (CHINESE_CHAR_RE.test(name)) return `${label} cannot contain Chinese characters`
+  return ''
+}
+
+function normalizePath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.endsWith('/') && normalized.length > 1) return normalized.slice(0, -1)
+  return normalized
+}
+
+function parentPath(path: string): string {
+  const normalized = normalizePath(path)
+  const separator = normalized.lastIndexOf('/')
+  if (separator < 0) return ''
+  if (separator === 0) return '/'
+  return normalized.slice(0, separator)
+}
+
+function basenamePath(path: string): string {
+  return normalizePath(path).split('/').filter(Boolean).pop() || ''
+}
+
+function joinPath(root: string, child: string): string {
+  const normalizedRoot = normalizePath(root)
+  const normalizedChild = normalizePath(child).replace(/^\/+/, '')
+  if (!normalizedRoot) return normalizedChild
+  if (!normalizedChild) return normalizedRoot
+  if (normalizedRoot === '/') return `/${normalizedChild}`
+  return `${normalizedRoot}/${normalizedChild}`
 }
 
 const selectCpuFilelist = async () => {

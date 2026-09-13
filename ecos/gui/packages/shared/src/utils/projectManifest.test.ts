@@ -3,14 +3,39 @@ import {
   archiveWorkspaceInManifest,
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
+  nextProjectManifestStage,
   normalizeProjectManifestFlowStep,
   parseProjectManifest,
   projectManifestFlowSteps,
+  projectManifestProfileFor,
   registerWorkspaceInManifest,
+  setQorBaselineInManifest,
   synchronizeProjectBaseline,
 } from './projectManifest'
 
 describe('project manifest parsing', () => {
+  it('treats manifests without project_type as backend projects', () => {
+    const current = createProjectManifestDraft({
+      rootPath: '/work/gcd',
+      name: 'gcd',
+      designName: 'gcd',
+    })
+    const { project_type: _projectType, ...legacy } = current
+
+    const manifest = parseProjectManifest(JSON.stringify(legacy))
+
+    expect(manifest.project_type).toBe('backend')
+    expect(projectManifestProfileFor(manifest.project_type)).toMatchObject({
+      defaultStartStep: 'Synth',
+      defaultEndStep: 'Harden',
+    })
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({ ...legacy, project_type: 'unsupported-project-type' }),
+      ),
+    ).toThrow('project_type must be backend or frontend')
+  })
+
   it('places LVS after DRC and resolves lvs aliases to that catalog step', () => {
     expect(projectManifestFlowSteps).toEqual([
       'Synth',
@@ -45,6 +70,59 @@ describe('project manifest parsing', () => {
     expect(afterDrc.workspaces[0]?.start_step).toBe('LVS')
   })
 
+  it('uses frontend stages and keeps backend-only QoR state disabled', () => {
+    const draft = createProjectManifestDraft({
+      rootPath: '/work/cpu',
+      name: 'cpu',
+      designName: 'cpu_top',
+      projectType: 'frontend',
+      now: '2026-08-19T00:00:00.000Z',
+    })
+    const first = registerWorkspaceInManifest(draft, {
+      projectRoot: '/work/cpu',
+      workspacePath: '/work/cpu/ws_0001',
+      config: {
+        rtl_list: ['/work/cpu/rtl/cpu_top.sv'],
+        parameters: { top_module: 'cpu_top' },
+      },
+      now: '2026-08-19T00:01:00.000Z',
+    })
+    const branched = registerWorkspaceInManifest(first, {
+      projectRoot: '/work/cpu',
+      workspacePath: '/work/cpu/ws_0002',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'rtl_review',
+      now: '2026-08-19T00:02:00.000Z',
+    })
+
+    expect(draft).toMatchObject({
+      project_type: 'frontend',
+      objectives: { primary: 'verification' },
+      qor_baseline: null,
+    })
+    expect(first.workspaces[0]).toMatchObject({
+      start_step: 'prepare',
+      end_step: 'sim',
+    })
+    expect(branched.workspaces[1]).toMatchObject({
+      branch_from: {
+        source_workspace_id: 'ws_0001',
+        source_step: 'review',
+        source_output_type: 'report',
+      },
+      start_step: 'elab',
+      end_step: 'sim',
+    })
+    expect(nextProjectManifestStage('frontend', 'sim')).toBe('sim')
+    expect(setQorBaselineInManifest(branched, 'ws_0001')).toBe(branched)
+    expect(() =>
+      synchronizeProjectBaseline(branched, {
+        workspaceId: 'ws_0001',
+        baseDesign: { rtl_list: ['/work/cpu/rtl/cpu_top.sv'] },
+      }),
+    ).toThrow('QoR baselines are only available for backend projects')
+  })
+
   it('maps Timing Opt and post-route LEC boundaries to the preceding catalog step', () => {
     expect(normalizeProjectManifestFlowStep('Timing optimization')).toBe('Legal')
     expect(normalizeProjectManifestFlowStep('timing-opt')).toBe('Legal')
@@ -74,6 +152,13 @@ describe('project manifest parsing', () => {
     })
     expect(afterTimingOpt.workspaces[1]?.branch_from?.source_step).toBe('Legal')
     expect(afterTimingOpt.workspaces[1]?.start_step).toBe('Route')
+  })
+
+  it('maps removed Fanout boundaries to Floor without restoring the catalog step', () => {
+    expect(projectManifestFlowSteps).not.toContain('Fanout')
+    expect(normalizeProjectManifestFlowStep('Fanout')).toBe('Floor')
+    expect(normalizeProjectManifestFlowStep('fixFanout')).toBe('Floor')
+    expect(nextProjectManifestStage('backend', 'fixFanout')).toBe('Place')
   })
 
   it('records an optional MPC association with the canonical spec path', () => {

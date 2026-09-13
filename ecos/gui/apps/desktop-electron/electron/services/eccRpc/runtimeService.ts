@@ -60,6 +60,7 @@ export interface EccRpcRuntimeServiceOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
+  forwardLegacyFlowOperationId?: boolean
   snapshotLoader?: (
     directory: string,
   ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
@@ -330,6 +331,10 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).workspaceSnapshot(request)
   }
 
+  replayPendingRecoveryEvents(workspaceHandle: string): void {
+    this.runtimeForHandle(workspaceHandle).replayPendingRecoveryEvents(workspaceHandle)
+  }
+
   private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {
     const key = normalizeWorkspacePath(directory)
     if (!key) {
@@ -341,6 +346,7 @@ export class EccRpcRuntimeService {
         createSidecar: (onEvent, onNotification) =>
           this.options.createSidecar(key, onEvent, onNotification),
         directory: key,
+        forwardLegacyFlowOperationId: this.options.forwardLegacyFlowOperationId,
         lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
         onEvent: (event) => this.emit(event),
         snapshotLoader: this.options.snapshotLoader,
@@ -365,6 +371,7 @@ export class EccRpcRuntimeService {
         createSidecar: (onEvent, onNotification) =>
           this.options.createSidecar(null, onEvent, onNotification),
         directory: null,
+        forwardLegacyFlowOperationId: this.options.forwardLegacyFlowOperationId,
         onEvent: (event) => this.emit(event),
       })
     }

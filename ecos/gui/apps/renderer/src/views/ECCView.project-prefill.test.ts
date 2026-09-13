@@ -83,11 +83,26 @@ describe('ECCView project management handoff', () => {
   it('opens Backend Design new workspace with project-root derived directory mode', () => {
     expect(source).toContain('managedWorkspaceRoot')
     expect(source).toContain('deriveDirectoryFromDesign')
+    expect(source).toContain('lockProjectContext: true')
 
     const openStart = source.indexOf('const openWizard =')
     const openEnd = source.indexOf('const closeWizard =', openStart)
     const openSource = source.slice(openStart, openEnd)
     expect(openSource).toContain('projectManagedWizardInitialConfig')
+  })
+
+  it('locks project identity when project management creates a backend workspace', () => {
+    const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
+    const prefillEnd = source.indexOf(
+      'function projectManagedWizardInitialConfig',
+      prefillStart,
+    )
+    const prefillSource = source.slice(prefillStart, prefillEnd)
+
+    expect(prefillSource).toContain(
+      'managedWorkspaceRoot: projectRoot ? normalizePath(projectRoot) : undefined',
+    )
+    expect(prefillSource).toContain('lockProjectContext: Boolean(projectRoot)')
   })
 
   it('returns to Project Management when cancelling a project-managed new workspace', () => {

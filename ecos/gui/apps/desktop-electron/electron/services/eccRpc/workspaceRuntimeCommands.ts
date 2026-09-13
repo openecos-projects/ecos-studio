@@ -39,7 +39,7 @@ export interface EccWorkspaceSessionResult {
   workspaceId: string
 }
 
-export type RuntimeOperation<T> = () => Promise<T>
+export type RuntimeOperation<T> = (operationId: string) => Promise<T>
 
 export interface RuntimeOperationMetadata {
   executionScope?: 'single_step' | 'full_flow'
@@ -56,6 +56,7 @@ interface WorkspaceRuntimeCommandContext {
     metadata?: RuntimeOperationMetadata,
   ): Promise<T>
   ensureStarted(): Promise<EccRpcRuntimeClient>
+  shouldForwardLegacyFlowOperationId(): boolean
   lazyWorkspaceOpen: boolean
   resolveEccWorkspaceId(workspaceHandle: string): Promise<string>
   sessions: WorkspaceSessionRegistry
@@ -273,7 +274,7 @@ export class WorkspaceRuntimeCommands {
     return this.context.enqueue(
       'flow.run',
       request.workspaceHandle,
-      async () => {
+      async (operationId) => {
         const client = await this.context.ensureStarted()
         if (rerun)
           this.context.sidecar.relocateLogFileFrom?.(this.context.boundDirectory())
@@ -282,7 +283,11 @@ export class WorkspaceRuntimeCommands {
         )
         return await client.call<EccFlowRunResult>(
           'flow.run',
-          { rerun, workspaceId },
+          {
+            rerun,
+            workspaceId,
+            ...(this.context.shouldForwardLegacyFlowOperationId() ? { operationId } : {}),
+          },
           { timeoutMs: 0 },
         )
       },
@@ -295,7 +300,7 @@ export class WorkspaceRuntimeCommands {
     return this.context.enqueue(
       'flow.run_step',
       request.workspaceHandle,
-      async () => {
+      async (operationId) => {
         const client = await this.context.ensureStarted()
         if (rerun)
           this.context.sidecar.relocateLogFileFrom?.(this.context.boundDirectory())
@@ -304,7 +309,12 @@ export class WorkspaceRuntimeCommands {
         )
         return await client.call<EccFlowRunStepResult>(
           'flow.run_step',
-          { rerun, step: request.step, workspaceId },
+          {
+            rerun,
+            step: request.step,
+            workspaceId,
+            ...(this.context.shouldForwardLegacyFlowOperationId() ? { operationId } : {}),
+          },
           { timeoutMs: 0 },
         )
       },

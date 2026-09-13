@@ -1,8 +1,8 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { parseProjectManifest } from '@ecos-studio/shared'
 import {
   buildProjectQorTrendForManifest,
-  parseProjectManifest,
   resolveProjectQorBaselineWorkspace,
   type ProjectQorBaselineSource,
 } from '@/utils/projectManagement'

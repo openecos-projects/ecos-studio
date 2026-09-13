@@ -179,6 +179,31 @@ describe('prepareWorkspaceRerun', () => {
     ])
   })
 
+  it('drops legacy fixFanout entries while preparing a rerun', async () => {
+    const { artifact, source } = await writeSourceWorkspace()
+    const legacyFlow = JSON.stringify({
+      steps: [
+        { name: 'Floorplan', state: 'Success', tool: 'ecc' },
+        { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+        { name: 'place', state: 'Success', tool: 'dreamplace' },
+        { name: 'CTS', state: 'Success', tool: 'ecc' },
+      ],
+    })
+    await writeFile(join(source, 'home', 'flow.json'), legacyFlow)
+    const contract = contractFor(source, legacyFlow, artifact)
+
+    await prepareWorkspaceRerun(contract)
+
+    const targetFlow = JSON.parse(
+      await readFile(join(contract.target_workspace, 'home', 'flow.json'), 'utf8'),
+    ) as { steps: Array<{ name: string }> }
+    expect(targetFlow.steps.map((step) => step.name)).toEqual([
+      'Floorplan',
+      'place',
+      'CTS',
+    ])
+  })
+
   it('accepts the LEC result JSON as stage evidence and wipes the LEC stage', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-lec-'))
     temporaryRoots.push(root)

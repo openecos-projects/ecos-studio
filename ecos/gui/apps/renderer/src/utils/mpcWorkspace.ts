@@ -1,4 +1,4 @@
-import type { ProjectManifestMpc } from './projectManagement'
+import type { ProjectManifestMpc } from '@ecos-studio/shared'
 
 export type MpcDieAreaMode = 'width_height' | 'utilitization_margin'
 

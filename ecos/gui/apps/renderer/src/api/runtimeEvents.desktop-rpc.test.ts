@@ -22,18 +22,20 @@ function restoreWindow() {
 function installRuntimeEventBridge() {
   let listener: ((event: DesignRuntimeEvent) => void) | undefined
   const unsubscribe = vi.fn()
+  const replay = vi.fn().mockResolvedValue(undefined)
   const onEvent = vi.fn((next: (event: DesignRuntimeEvent) => void) => {
     listener = next
     return unsubscribe
   })
   setWindow({
     ecosDesktop: {
-      runtime: { events: { onEvent } },
+      runtime: { events: { onEvent, replay } },
     },
   })
   return {
     emit: (event: DesignRuntimeEvent) => listener?.(event),
     onEvent,
+    replay,
     unsubscribe,
   }
 }
@@ -141,6 +143,10 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
         }),
       }),
     )
+    expect(bridge.replay).toHaveBeenCalledWith({
+      designTool: 'frontend',
+      workspaceHandle: 'frontend-handle',
+    })
   })
 
   it('accepts a frontend event with a stale handle when its directory matches', async () => {

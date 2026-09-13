@@ -81,6 +81,10 @@ export class FrontendRpcRuntimeService {
     return this.runtime.closeWorkspace({ workspaceHandle })
   }
 
+  replayPendingRecoveryEvents(workspaceHandle: string): void {
+    this.runtime.replayPendingRecoveryEvents(workspaceHandle)
+  }
+
   workspaceHome(workspaceHandle: string): Promise<EccWorkspaceHomeResult> {
     return this.runtime.workspaceHome({ workspaceHandle })
   }

@@ -320,6 +320,7 @@ export interface DesktopBridgeServices {
     ): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
     openWorkspace(directory: string): Promise<unknown>
+    replayPendingRecoveryEvents(workspaceHandle: string): void
     refreshConfig(workspaceHandle: string): Promise<unknown>
     resetFlow(workspaceHandle: string): Promise<unknown>
     rpcHello(): Promise<unknown>
@@ -355,6 +356,7 @@ export interface DesktopBridgeServices {
       request: EccWorkspaceOpenRequest,
     ): Promise<{ directory: string; workspaceHandle: string }>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
+    replayPendingRecoveryEvents(workspaceHandle: string): void
     resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
     rpcHello(): Promise<unknown>
     rpcPing(): Promise<unknown>
@@ -2033,6 +2035,27 @@ export function registerIpc(
         trackWorkspaceHandle(event.sender, workspaceHandle, directory, designTool)
     }
     return result
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeEventsReplay, (event, request) => {
+    const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+    const subscription = workspaceHandleSubscriptions.get(runtimeRequest.workspaceHandle)
+    if (!subscription || subscription.sender !== event.sender) {
+      throw new Error('Unknown workspace runtime subscription for this window.')
+    }
+    const designTool = requireDesignTool(runtimeRequest.designTool)
+    if (subscription.designTool !== designTool) {
+      throw new Error('Workspace runtime subscription uses a different design tool.')
+    }
+    if (designTool === 'frontend') {
+      services.frontendRpcRuntimeService.replayPendingRecoveryEvents(
+        runtimeRequest.workspaceHandle,
+      )
+    } else {
+      services.eccRuntimeService.replayPendingRecoveryEvents(
+        runtimeRequest.workspaceHandle,
+      )
+    }
   })
 
   handle(desktopApiIpcChannels.designRuntimeWorkspaceClose, async (_event, request) => {

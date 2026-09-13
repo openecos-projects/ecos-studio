@@ -214,6 +214,15 @@
               <strong>{{ passedCases }}/{{ totalCases }}</strong>
             </div>
             <button
+              type="button"
+              class="step-meta-action"
+              :class="`qor-${currentStepQor.status}`"
+              @click="activeTab = 'qor'"
+            >
+              <i :class="frontendQorStatusIcon(currentStepQor.status)"></i>
+              QoR · {{ frontendQorStatusLabel(currentStepQor.status) }}
+            </button>
+            <button
               v-if="hasStepLogs"
               type="button"
               class="step-meta-action"
@@ -924,6 +933,12 @@
                 </section>
               </template>
             </section>
+
+            <FrontendWorkspaceQorPanel
+              v-else-if="activeTab === 'qor'"
+              :qor="currentStepQor"
+              :step-label="humanStepTitle"
+            />
 
             <section v-else-if="activeTab === 'review'" class="review-panel">
               <div v-if="!reviewReport" class="empty-panel">
@@ -1919,6 +1934,13 @@ import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import {
+  frontendQorForStepState,
+  frontendQorStatusIcon,
+  frontendQorStatusLabel,
+  parseFrontendStepQorArtifacts,
+  type FrontendStepQorArtifacts,
+} from '@/utils/frontendQor'
+import {
   SIM_SUITE_IDS,
   simContextsEqual,
   type SimRunContext,
@@ -1929,6 +1951,7 @@ import FrontendDisassemblyViewer from '@/components/frontend/FrontendDisassembly
 import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
+import FrontendWorkspaceQorPanel from '@/components/frontend/FrontendWorkspaceQorPanel.vue'
 import MonacoLogViewer from '@/components/MonacoLogViewer.vue'
 import FlowStatusStrip from '@/components/workbench/FlowStatusStrip.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
@@ -2038,6 +2061,7 @@ interface FrontendStepDetail {
   runtime: string
   peak_memory_mb?: number
   summary: Record<string, unknown>
+  qor?: FrontendStepQorArtifacts
   prepare?: PrepareReport
   cases?: SimCase[]
   sim?: SimReport
@@ -2121,7 +2145,7 @@ interface PrepareReport {
   reports?: Record<string, unknown>
 }
 
-type TabId = 'summary' | 'review' | 'elab' | 'lint' | 'cases' | 'src'
+type TabId = 'summary' | 'review' | 'elab' | 'lint' | 'cases' | 'qor' | 'src'
 type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
 type ReviewMode = 'source' | 'yosys' | 'modules'
@@ -2948,6 +2972,24 @@ const shouldShowStepConsole = computed(
   () => consoleProblemCount.value > 0 || (!consoleCollapsed.value && hasStepLogs.value),
 )
 const humanStepTitle = computed(() => labelForStep(currentStepName.value || 'Step'))
+const currentStepQorRunning = computed(() => {
+  if (!runBusy.value) return false
+  if (runPhase.value === 'queued') return true
+  const state = String(currentStep.value?.state || '')
+    .trim()
+    .toLowerCase()
+  return state === 'ongoing' || state === 'pending' || state === 'running'
+})
+const currentStepQor = computed(() =>
+  frontendQorForStepState(
+    parseFrontendStepQorArtifacts(detail.value?.qor),
+    currentStep.value?.state,
+    {
+      running: currentStepQorRunning.value,
+      stale: Boolean(stepStaleReason.value),
+    },
+  ),
+)
 const humanSummaryStateTone = computed(() => {
   const state = currentStepDisplayState.value
   if (state === StateEnum.Success || state === 'Success') return 'ok'
@@ -3741,6 +3783,11 @@ const visibleTabs = computed(() => {
   else if (isSimStep.value)
     tabs.push({ id: 'cases', label: 'Cases', icon: 'ri-list-check-3' })
   else tabs.push({ id: 'summary', label: 'Summary', icon: 'ri-dashboard-3-line' })
+  tabs.push({
+    id: 'qor',
+    label: 'QoR',
+    icon: frontendQorStatusIcon(currentStepQor.value.status),
+  })
   return tabs
 })
 const surferViewerUrl = 'ecos-surfer://viewer/'
@@ -4135,6 +4182,13 @@ function processRuntimeStepEvent(event: unknown): void {
   steps.value[stepIndex] = {
     ...steps.value[stepIndex]!,
     ...override,
+  }
+  if (
+    isCompleted &&
+    !isHomeView.value &&
+    detailRequestStepName.value.trim().toLowerCase() === stepKey
+  ) {
+    void loadDetail()
   }
 }
 
@@ -5921,6 +5975,18 @@ button:disabled {
 .step-meta-action:hover {
   color: var(--accent-color);
   border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.28);
+}
+
+.step-meta-action.qor-pass {
+  color: var(--success-color);
+}
+
+.step-meta-action.qor-blocked {
+  color: var(--danger-color);
+}
+
+.step-meta-action.qor-incomplete {
+  color: var(--warn-color);
 }
 
 .frontend-config-card {

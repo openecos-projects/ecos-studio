@@ -73,7 +73,7 @@ def test_algorithm_chunks_are_english_and_describe_place_stages() -> None:
 
 def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> None:
     gui_metrics = (
-        ECOS_ROOT / "ecos/gui/apps/renderer/src/utils/projectManagement.ts"
+        ECOS_ROOT / "ecos/gui/apps/renderer/src/utils/backendProjectManagement.ts"
     ).read_text(encoding="utf-8")
     place_metrics = re.search(r"Place: \[(?P<metrics>.*?)\],", gui_metrics, re.DOTALL)
 
