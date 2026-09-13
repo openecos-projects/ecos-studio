@@ -661,3 +661,17 @@ def test_memory_contains_no_raw_chat_or_prompt(tmp_path: Path) -> None:
     assert "prompt" not in payload
     assert "message" not in payload
     assert "chat" not in payload
+
+
+def test_synchronize_skips_aborted_episode_without_source_state(tmp_path: Path) -> None:
+    store = OptimizationTaskMemoryStore(
+        tmp_path / "optimization", _scope("episode-current")
+    )
+    aborted = store.root / "episode-aborted"
+    aborted.mkdir()
+    store.ensure_episode_scope(aborted, _scope("episode-aborted"))
+    # The aborted start registered its scope but never wrote its state file.
+
+    replay = store.synchronize()
+
+    assert replay.entries == ()
