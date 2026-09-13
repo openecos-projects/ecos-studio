@@ -10,9 +10,11 @@ import pytest
 
 from ecos_agent.gui.provider import EcosAgentProvider
 from tests.optimization.test_gui_episode_provider import (
+    _BlockingRunner,
     _FakeCodexProvider,
     _FailingRunner,
     _baseline,
+    _make_optimization_workspace,
     _send,
 )
 
@@ -127,5 +129,48 @@ def test_gui_stop_during_noise_calibration_cancels_without_episode(
     assert runner_calls == []
     assert any(
         event["type"] == "message" and "Cancelled" in str(event["text"])
+        for event in events
+    )
+
+
+def test_gui_optimization_turns_stream_progress_to_the_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _make_optimization_workspace(tmp_path)
+    monkeypatch.setattr(
+        "ecos_agent.gui.provider_optimization._TURN_HEARTBEAT_SECONDS", 0.05
+    )
+    events: list[dict[str, object]] = []
+    lifecycle: list[str] = []
+    runner = _BlockingRunner(lifecycle)
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: runner,
+    )
+    session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
+        "sessionId"
+    ]
+
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
+    assert runner.started.wait(timeout=2)
+
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and not any(
+        event["type"] == "tool" and "in progress" in str(event.get("text", ""))
+        for event in events
+    ):
+        time.sleep(0.01)
+    runner.release.set()
+
+    assert any(
+        event["type"] == "tool"
+        and "requesting a proposal (planning)" in str(event.get("text", ""))
+        for event in events
+    )
+    assert any(
+        event["type"] == "tool" and "in progress" in str(event.get("text", ""))
         for event in events
     )
