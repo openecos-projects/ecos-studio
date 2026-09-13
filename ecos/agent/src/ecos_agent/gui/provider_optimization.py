@@ -64,6 +64,7 @@ from ecos_agent.gui.messages import (
     optimization_authorization_prompt,
     optimization_objective_prompt,
     optimization_objective_summary_message,
+    optimization_noise_calibration_message,
     optimization_started_message,
     optimization_workspace_prompt,
     optional_file_choice,
@@ -159,11 +160,13 @@ from ecos_agent.gui.support import (
     _workspace_rerun_execution_contract,
 )
 from ecos_agent.gui.workspace_flow import WorkspaceFlow
+from ecos_agent.optimization.calibrate_workspace import calibrate
 from ecos_agent.optimization.contracts import (
     OptimizationEpisodeState,
     OptimizationObjectiveContract,
 )
 from ecos_agent.optimization.observations import build_terminal_observation
+from ecos_agent.optimization.runtime import epsilon_artifact_path
 from ecos_agent.optimization.rules import geometry_constraint_error
 from ecos_agent.optimization.objective_alignment import (
     build_active_objective,
@@ -426,6 +429,61 @@ class ProviderOptimizationMixin:
         workspace = session.rerun_workspace_path
         if not workspace or session.optimization_episode_id is None:
             raise ValueError("Optimization authorization is incomplete.")
+        workspace_path = Path(workspace)
+        if not epsilon_artifact_path(workspace_path).is_file():
+            self._calibrate_then_start_optimization(session, workspace_path)
+            return
+        self._launch_optimization_episode(session, workspace_path)
+
+    def _calibrate_then_start_optimization(
+        self, session: _Session, workspace_path: Path
+    ) -> None:
+        self._emit(
+            session,
+            "message",
+            optimization_noise_calibration_message(session.language),
+        )
+        session.optimization_phase = "calibrating"
+        session.phase = "optimization_preparing"
+        session.optimization_stop.clear()
+        session.optimization_pause.clear()
+        self._emit_status(session, "calibrating")
+
+        def run() -> None:
+            try:
+                calibrate(
+                    workspace_path,
+                    should_stop=session.optimization_stop.is_set,
+                    progress=lambda text: self._progress(session, text),
+                )
+            except Exception as exc:
+                cancelled = session.optimization_stop.is_set()
+                session.optimization_phase = "idle" if cancelled else "unavailable"
+                session.phase = (
+                    "operation" if session.mode == "workspace" else "home_ready"
+                )
+                if cancelled:
+                    self._emit(session, "message", cancellation_message(session.language))
+                else:
+                    self._emit(
+                        session,
+                        "error",
+                        f"Unable to calibrate noise epsilon: {exc}",
+                    )
+                self._emit_phase_choice(session)
+                return
+            self._launch_optimization_episode(session, str(workspace_path))
+
+        session.optimization_thread = threading.Thread(
+            target=run,
+            name=f"ecos-noise-calibration-{session.session_id}",
+            daemon=True,
+        )
+        session.optimization_thread.start()
+
+    def _launch_optimization_episode(
+        self, session: _Session, workspace: str
+    ) -> None:
         session.optimization_phase = "starting"
         session.phase = "optimization_preparing"
         provider = session.optimization_provider
@@ -669,7 +727,7 @@ class ProviderOptimizationMixin:
         self._emit(
             session,
             "message",
-            "Optimization is running. Use pause, resume, or stop.",
+            "Optimization is active. Use pause, resume, or stop.",
             optimization={
                 "schema_version": "ecos.optimization_status.v1",
                 "state": session.optimization_phase,
@@ -682,5 +740,8 @@ class ProviderOptimizationMixin:
         session.optimization_stop.set()
         if session.optimization_runner is not None:
             session.optimization_runner.request_stop()
-        if session.optimization_provider is not None:
+        if session.optimization_runner is not None and session.optimization_provider is not None:
+            # Interrupt only aborts an in-flight planning turn; with no runner
+            # (e.g. during noise calibration) it would leave the reused
+            # provider marked interrupted for the next episode.
             session.optimization_provider.interrupt()

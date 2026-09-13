@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -62,6 +63,17 @@ def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
             )
             return
     raise AssertionError(f"No pending interaction option matches {message!r}")
+
+
+def _make_optimization_workspace(tmp_path: Path) -> Path:
+    workspace = tmp_path / "workspace"
+    optimization_dir = workspace / ".agent" / "optimization"
+    optimization_dir.mkdir(parents=True)
+    (optimization_dir / "noise-epsilon.v1.json").write_text(
+        '{"schema_version": "ecos.noise_epsilon.v1", "epsilon": {}}',
+        encoding="utf-8",
+    )
+    return workspace
 
 
 class _FakeCodexProvider:
@@ -210,8 +222,7 @@ class _QuarantinedRunner(_BlockingRunner):
 def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
     tmp_path: Path,
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     fake_provider = _FakeCodexProvider()
     factory_calls: list[dict[str, object]] = []
@@ -264,8 +275,7 @@ def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
 
 
 def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     lifecycle: list[str] = []
     runner = _BlockingRunner(lifecycle)
     provider = EcosAgentProvider(
@@ -291,8 +301,7 @@ def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) 
 
 
 def test_gui_pause_and_resume_update_running_session_control_state(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     lifecycle: list[str] = []
     runner = _BlockingRunner(lifecycle)
@@ -331,8 +340,7 @@ def test_gui_pause_and_resume_update_running_session_control_state(tmp_path: Pat
 def test_gui_reports_in_flight_and_waits_for_remaining_candidates(
     tmp_path: Path,
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     runner = _InFlightRunner()
     provider = EcosAgentProvider(
@@ -366,8 +374,7 @@ def test_gui_reports_in_flight_and_waits_for_remaining_candidates(
 
 
 def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     lifecycle: list[str] = []
     runner = _BrokenClosureRunner(lifecycle)
     provider = EcosAgentProvider(
@@ -393,8 +400,7 @@ def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> No
 
 
 def test_gui_stop_preserves_indeterminate_quarantine_phase(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     lifecycle: list[str] = []
     runner = _QuarantinedRunner(lifecycle)
     provider = EcosAgentProvider(
@@ -420,8 +426,7 @@ def test_gui_stop_preserves_indeterminate_quarantine_phase(tmp_path: Path) -> No
 
 
 def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
         emit=events.append,
@@ -442,8 +447,7 @@ def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) ->
 
 
 def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     fake_provider = _FakeCodexProvider()
 
@@ -474,8 +478,7 @@ def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
 
 
 def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
         emit=events.append,
@@ -509,8 +512,7 @@ def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -
 def test_gui_optimization_collects_and_confirms_normalized_objective(
     tmp_path: Path,
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     fake_provider = _FakeCodexProvider()
     runner_contexts: list[dict[str, object]] = []
@@ -591,8 +593,7 @@ def test_gui_drc_and_timing_goal_requires_drc_recovery_confirmation(
     tmp_path: Path,
     preserve_metrics: list[str],
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     goal = "reduce routed wirelength while preserving DRC and timing"
     baseline = _baseline(drc=9)
     assert baseline.metrics["route_dr_total_violation_count"] == 0
@@ -659,8 +660,7 @@ def test_gui_drc_and_timing_goal_requires_drc_recovery_confirmation(
 def test_gui_authorizes_recovery_then_original_objective_with_one_confirmation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     contexts: list[dict[str, object]] = []
     monkeypatch.setattr(
@@ -714,8 +714,7 @@ def test_gui_authorizes_recovery_then_original_objective_with_one_confirmation(
 def test_gui_blocks_authorization_when_baseline_evidence_is_incomplete(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing_evidence: str,
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     monkeypatch.setattr(
         "ecos_agent.gui.provider_optimization.build_terminal_observation",
@@ -750,8 +749,7 @@ def test_gui_blocks_authorization_when_baseline_evidence_is_incomplete(
 
 
 def test_gui_optimization_objective_parse_failure_returns_to_operation(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     fake_provider = _FakeCodexProvider()
 
@@ -774,3 +772,4 @@ def test_gui_optimization_objective_parse_failure_returns_to_operation(tmp_path:
     assert provider.sessions[session_id].phase == "operation"
     assert fake_provider.closed == 1
     assert any(event["type"] == "error" and "Unable to parse optimization objective" in str(event["text"]) for event in events)
+

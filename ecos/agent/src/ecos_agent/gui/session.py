@@ -74,6 +74,7 @@ class OptimizationUiPhase(StrEnum):
     AWAITING_OBJECTIVE = "awaiting_objective"
     AWAITING_CONFIRMATION = "awaiting_confirmation"
     STARTING = "starting"
+    CALIBRATING = "calibrating"
     RUNNING = "running"
     PAUSED = "paused"
     STOPPING = "stopping"

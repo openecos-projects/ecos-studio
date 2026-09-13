@@ -621,13 +621,17 @@ def _optimization_execution_context(
     }
 
 
+def epsilon_artifact_path(workspace: Path) -> Path:
+    return workspace / ".agent" / "optimization" / "noise-epsilon.v1.json"
+
+
 def _load_trend_noise_epsilon(workspace: Path) -> dict[str, float]:
     """Load the workspace-level default-replay calibration, failing closed.
 
     Trend predicates must never silently fall back to a zero tolerance, and a
     corrupt artifact is just as silent as a missing one.
     """
-    path = workspace / ".agent" / "optimization" / "noise-epsilon.v1.json"
+    path = epsilon_artifact_path(workspace)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
