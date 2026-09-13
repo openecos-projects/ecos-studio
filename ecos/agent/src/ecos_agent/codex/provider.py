@@ -481,6 +481,10 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             payload,
             (
                 "Return one JSON object matching flow-agent.source_search_proposal.v1. "
+                "The object must contain exactly these three top-level fields: schema_version, queries, "
+                "rationale. Example shape: {\"schema_version\":\"flow-agent.source_search_proposal.v1\","
+                "\"queries\":[{\"query\":\"<literal text>\",\"root_id\":\"<root_id>\"}],"
+                "\"rationale\":\"<why these queries>\"}. "
                 "Return zero to five literal source-search queries when source evidence could improve the answer. "
                 "Use only root_id values from available_source_roots. Queries are fixed text, not paths, globs, "
                 "regular expressions, shell commands, or tool calls. Do not answer the question or describe execution."
