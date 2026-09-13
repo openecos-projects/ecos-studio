@@ -7,8 +7,14 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
-from ecos_agent.knowledge.contracts import SOURCE_ROOT_IDS, SourceSearchProposal
+from ecos_agent.knowledge.contracts import (
+    SOURCE_ROOT_IDS,
+    _MAX_SOURCE_SEARCH_QUERIES,
+    SourceSearchProposal,
+)
+from ecos_agent.knowledge.retriever import _ACRONYM_PATTERN, _STOP_TOKENS, _TOKEN_PATTERN
 
 
 _SOURCE_SUFFIXES = frozenset(
@@ -155,6 +161,51 @@ class SourceCodeRetriever:
             evidence=tuple(evidence),
             result_limit_reached=result_limit_reached,
         )
+
+
+def deterministic_source_proposal(
+    question: str, root_ids: Iterable[str]
+) -> SourceSearchProposal | None:
+    """Build literal queries from identifier-like tokens in the question.
+
+    Deterministic fast path for source evidence so routine questions skip the
+    LLM query-generation turn; None means the question yields no candidates and
+    the LLM proposal remains necessary.
+    """
+    raw_tokens = [match.group() for match in _TOKEN_PATTERN.finditer(question.casefold())]
+    filtered = [token for token in raw_tokens if token not in _STOP_TOKENS]
+    candidates: list[str] = []
+
+    def add_candidate(value: str) -> None:
+        if 2 <= len(value) <= 128 and value not in candidates:
+            candidates.append(value)
+
+    for token in raw_tokens:
+        if "_" in token or "-" in token:
+            add_candidate(token)
+    for match in _ACRONYM_PATTERN.finditer(question):
+        add_candidate(match.group().casefold())
+    for index in range(len(filtered) - 1):
+        first, second = filtered[index], filtered[index + 1]
+        if len(first) >= 4 and len(second) >= 4 and first.isascii() and second.isascii():
+            add_candidate(f"{first}_{second}")
+    for token in filtered:
+        if len(token) >= 5:
+            add_candidate(token)
+    if not candidates:
+        return None
+    queries = [
+        {"root_id": root_id, "query": candidate}
+        for candidate in candidates
+        for root_id in root_ids
+    ][:_MAX_SOURCE_SEARCH_QUERIES]
+    return SourceSearchProposal.model_validate(
+        {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": queries,
+            "rationale": "deterministic identifier extraction from the question",
+        }
+    )
 
 
 def _discover_repository_root() -> Path | None:

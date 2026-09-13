@@ -123,6 +123,7 @@ def write_trace(
     ledger = OptimizationLedger(episode_root)
     ledger.append_start(
         OptimizationInterventionStart(
+            record_type="intervention_started",
             intervention_id="intervention-1",
             parent_checkpoint_id=scope.checkpoint_id,
             candidate_checkpoint_id="candidate-1",
@@ -142,6 +143,7 @@ def write_trace(
     )
     ledger.append_terminal(
         OptimizationTerminalOutcome(
+            record_type="terminal_outcome",
             intervention_id="intervention-1",
             outcome=OptimizationOutcomeKind.IMPROVED,
             candidate_manifest_sha256=file_sha256(paths["manifest"]),

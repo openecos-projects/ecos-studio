@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping
 
+from pydantic import BaseModel
+
 from ecos_agent.codex.provider_helpers import (
     _model_reasoning_efforts,
     _read_only_thread_config,
@@ -19,6 +21,15 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import PlanningProviderEnvelope
 
 
+_REPAIR_INSTRUCTION = (
+    "The previous reply was rejected: it must be exactly one JSON object matching the "
+    "output schema, with no extra fields and no markdown. Respect the schema string "
+    "length limits: rationale and summary text is capped at 512 characters. Return the "
+    "corrected JSON object only."
+)
+_REPAIR_EXCERPT_LIMIT = 1200
+
+
 class CodexThreadManagementMixin:
     def _request_json(
         self,
@@ -27,6 +38,8 @@ class CodexThreadManagementMixin:
         user: dict[str, Any],
         output_schema: dict[str, Any],
         tool_policy: ToolPolicy = "none",
+        effort: str | None = None,
+        model: type[BaseModel] | None = None,
     ) -> dict[str, Any]:
         with self._state_lock:
             if self._interrupted:
@@ -34,31 +47,51 @@ class CodexThreadManagementMixin:
         thread_id = self._ensure_thread(self._ensure_client())
         status = self._status_snapshots.build(user, thread_id)
         status["runtime"] = self._runtime_status.snapshot(thread_id)
-        prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
-        with self._state_lock:
-            if self._planning_envelope is not None:
-                envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
-                envelope["prompt"] = prompt
-                self._planning_envelope = PlanningProviderEnvelope(
-                    **envelope, envelope_sha256=canonical_sha256(envelope)
+        failure: CodexProviderError | None = None
+        reason = ""
+        for attempt in range(2):
+            if attempt == 0:
+                prompt = _build_prompt(system, user, tool_policy=tool_policy, agent_status=status)
+            else:
+                prompt = _build_prompt(
+                    f"{system}\n{_REPAIR_INSTRUCTION}",
+                    {
+                        **user,
+                        "schema_violation": reason,
+                        "previous_rejected_output": _response_excerpt(text)[:_REPAIR_EXCERPT_LIMIT],
+                    },
+                    tool_policy=tool_policy,
+                    agent_status=status,
                 )
-        text = self._run_turn(prompt, output_schema, tool_policy=tool_policy)
-        self._last_response_text = text
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError as exc:
-            self._runtime_status.validation(False)
-            self._parse_failure_excerpt = _response_excerpt(text)
-            raise CodexProviderError(
-                "Codex assistant content is not valid JSON", failure_class="parse_error"
-            ) from exc
-        if not isinstance(payload, dict):
-            self._runtime_status.validation(False)
-            self._parse_failure_excerpt = _response_excerpt(text)
-            raise CodexProviderError(
-                "Codex assistant JSON must be an object", failure_class="parse_error"
-            )
-        return payload
+            with self._state_lock:
+                if self._planning_envelope is not None:
+                    envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
+                    envelope["prompt"] = prompt
+                    self._planning_envelope = PlanningProviderEnvelope(
+                        **envelope, envelope_sha256=canonical_sha256(envelope)
+                    )
+            text = self._run_turn(prompt, output_schema, tool_policy=tool_policy, effort=effort)
+            self._last_response_text = text
+            try:
+                payload = json.loads(text)
+                if not isinstance(payload, dict):
+                    raise ValueError("assistant JSON must be an object")
+                if model is not None:
+                    model.model_validate(payload)
+            except (json.JSONDecodeError, ValueError) as exc:
+                self._runtime_status.validation(False)
+                self._parse_failure_excerpt = _response_excerpt(text)
+                reason = " ".join(str(exc).split())[:400]
+                failure = CodexProviderError(
+                    "Codex proposal output rejected: "
+                    f"{reason}; rejected output excerpt: {_response_excerpt(text)[:400]}",
+                    failure_class="parse_error",
+                )
+                continue
+            self._runtime_status.validation(True)
+            return payload
+        assert failure is not None
+        raise failure
 
     def _start_and_wait(
         self, client: _JsonLineRpcProcessClient, thread_id: str,
@@ -173,13 +206,23 @@ class CodexThreadManagementMixin:
 
     def get_model_settings(self) -> dict[str, Any]:
         models = self.list_models()
+        preferred = "glm-5.3-flash" if any(item.get("model") == "glm-5.3-flash" for item in models) else "gpt-5.6-terra"
         current = next(
             (item for item in models if self._model in {item.get("id"), item.get("model")}),
-            next((item for item in models if item.get("isDefault") is True), models[0]),
+            next((item for item in models if item.get("model") == preferred),
+                 next((item for item in models if item.get("isDefault") is True), models[0])),
         )
         efforts = _model_reasoning_efforts(current)
         default = current.get("defaultReasoningEffort")
         effort = self._reasoning_effort or (default if default in efforts else efforts[0])
+        if self._model is None:
+            self._model = current["model"]
+            configured = str(self.env.get("ECOS_AGENT_DEFAULT_REASONING_EFFORT", "")).strip()
+            if configured in efforts:
+                self._reasoning_effort = configured
+            else:
+                self._reasoning_effort = "high" if "high" in efforts else efforts[0]
+            effort = self._reasoning_effort
         return {
             "model": current["model"],
             "displayName": current.get("displayName") or current["model"],

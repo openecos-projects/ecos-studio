@@ -479,11 +479,15 @@ class OptimizationPlanningAuditEntry(_LedgerModel):
             raise ValueError("planning history count does not match history references")
         if self.task_memory_refs and self.task_memory_snapshot_sha256 is None:
             raise ValueError("planning task memory references require a snapshot")
+        # exclude_unset keeps records written by older revisions verifiable
+        # when optional fields are added later (their absence must not change
+        # the recomputed hash); present fields still re-enter the hash.
         expected = _planning_audit_entry_sha256(
             self.sequence,
             self.previous_entry_sha256,
             self.model_dump(
                 mode="json",
+                exclude_unset=True,
                 exclude={"entry_sha256", "sequence", "previous_entry_sha256"},
             ),
         )
@@ -562,7 +566,12 @@ class OptimizationPlanningAudit:
                 ),
             )
             with self.audit_path.open("ab") as stream:
-                stream.write(_canonical_json(entry.model_dump(mode="json")) + b"\n")
+                stream.write(
+                    _canonical_json(
+                        entry.model_dump(mode="json", exclude_unset=True)
+                    )
+                    + b"\n"
+                )
                 stream.flush()
                 os.fsync(stream.fileno())
             _fsync_directory(self.audit_path.parent)
@@ -686,7 +695,9 @@ class OptimizationLedger:
         payload: OptimizationLedgerPayload,
     ) -> OptimizationLedgerEntry:
         entry = _new_entry(len(replay.entries) + 1, replay.chain_head_sha256, payload)
-        encoded = _canonical_json(entry.model_dump(mode="json")) + b"\n"
+        encoded = (
+            _canonical_json(entry.model_dump(mode="json", exclude_unset=True)) + b"\n"
+        )
         with self.ledger_path.open("ab") as stream:
             stream.write(encoded)
             stream.flush()

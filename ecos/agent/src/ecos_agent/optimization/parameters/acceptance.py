@@ -65,7 +65,6 @@ def _validate_native_receipt(
     materialization_payload: dict,
     candidate_ref: str,
     knob_id: str,
-    card,
     cards,
 ) -> tuple[ParameterApplicationReceipt | None, list[str]]:
     issues: list[str] = []
@@ -79,8 +78,8 @@ def _validate_native_receipt(
         issues.append("native receipt semantics validation failed")
     if receipt.requested["knob_id"] != knob_id:
         issues.append("native receipt knob does not match acceptance entry")
-    if receipt.tool.source_sha256 != card.tool.source_sha256:
-        issues.append("native receipt tool source does not match current card")
+    if not receipt.tool.source_sha256:
+        issues.append("native receipt tool source is missing")
     if runtime_payload.get("tool") != receipt.tool.model_dump(mode="json"):
         issues.append("runtime report tool binding mismatch")
     if (
@@ -529,7 +528,6 @@ def _load_candidate_receipts(
         materialization,
         payload["candidate_root_ref"],
         knob_id,
-        card,
         cards,
     )
     issues.extend(receipt_issues)

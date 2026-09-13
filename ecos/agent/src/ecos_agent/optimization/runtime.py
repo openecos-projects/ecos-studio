@@ -149,6 +149,16 @@ def create_optimization_runner(
             "legacy objective has no parameter policy; confirm a new optimization objective"
         )
     workspace = _workspace(runtime.workspace)
+    if (
+        runtime.trend_noise_epsilon is None
+        and runtime.agent_mode is OptimizationAgentMode.FULL_AGENT
+    ):
+        # The manifest scope gate rejects scoped full-agent episodes without a
+        # calibrated epsilon; the GUI never passes one explicitly, so load the
+        # workspace-level default-replay calibration.
+        runtime = runtime.model_copy(
+            update={"trend_noise_epsilon": _load_trend_noise_epsilon(workspace)}
+        )
     episode_id = runtime.episode_id
     objective = runtime.objective
     checkpoint_id = "place"
@@ -609,6 +619,46 @@ def _optimization_execution_context(
         "site_width_dbu": site_width_dbu,
         "seed": read_workspace_dreamplace_seed(workspace),
     }
+
+
+def _load_trend_noise_epsilon(workspace: Path) -> dict[str, float]:
+    """Load the workspace-level default-replay calibration, failing closed.
+
+    Trend predicates must never silently fall back to a zero tolerance, and a
+    corrupt artifact is just as silent as a missing one.
+    """
+    path = workspace / ".agent" / "optimization" / "noise-epsilon.v1.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise OptimizationRuntimeError(
+            "full-agent optimization needs the calibrated trend noise epsilon "
+            "(.agent/optimization/noise-epsilon.v1.json); run: "
+            "python -m ecos_agent.optimization.calibrate_workspace "
+            f"--workspace {workspace}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise OptimizationRuntimeError(f"noise epsilon artifact is invalid: {path}") from exc
+    epsilon_payload = payload.get("epsilon") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != "ecos.noise_epsilon.v1"
+        or not isinstance(epsilon_payload, dict)
+    ):
+        raise OptimizationRuntimeError(f"noise epsilon artifact is invalid: {path}")
+    epsilon: dict[str, float] = {}
+    for key, value in epsilon_payload.items():
+        if (
+            not isinstance(key, str)
+            or not key
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise OptimizationRuntimeError(f"noise epsilon artifact is invalid: {path}")
+        epsilon[key] = float(value)
+    return epsilon
 
 
 def _workspace(value: object) -> Path:

@@ -25,13 +25,13 @@ from ecos_agent.gui.contracts import (
     GuiClarificationProposal,
     GuiChatResponseProposal,
 )
-from ecos_agent.knowledge.contracts import SourceSearchProposal, StageRoutingProposal
+from ecos_agent.knowledge.contracts import StageRoutingProposal
 from ecos_agent.workspace.contracts import (
     GuiWorkspaceSetupProposal,
 )
 from ecos_agent.knowledge.bundle import KnowledgeAnswer
 from ecos_agent.knowledge.retriever import GlobalKnowledgeRetriever, load_production_retrieval_config
-from ecos_agent.knowledge.source import SourceCodeRetriever, SourceSearchResult
+from ecos_agent.knowledge.source import SourceSearchResult
 from ecos_agent.knowledge.step import (
     StepKnowledge,
     load_default_general_knowledge_bundles,
@@ -347,17 +347,19 @@ class ProviderChatMixin(ProviderQuickStartMixin):
         stages: tuple[str, ...] = ()
         routing: dict[str, object] = {
             "status": "not_requested",
-            "reason": "deterministic_stage_scope",
+            "reason": (
+                "deterministic_stage_scope"
+                if deterministic_scope.candidate_stages
+                else "provider_not_started"
+            ),
             "scope": "in_scope",
         }
-        if self._started or not self._uses_default_stage_routing:
+        # Deterministic identifier matches already settle the scope for known
+        # ECOS terms; only pay a routing turn when they find nothing.
+        if self.stage_routing_parser is not _propose_stage_routing or (
+            self._started and not deterministic_scope.candidate_stages
+        ):
             stages, routing = self._propose_knowledge_stages(session, message)
-        elif not deterministic_scope.candidate_stages:
-            routing = {
-                "status": "not_requested",
-                "reason": "provider_not_started",
-                "scope": "in_scope",
-            }
         candidate_stages = list(
             dict.fromkeys((*deterministic_scope.candidate_stages, *stages))
         )
@@ -367,6 +369,11 @@ class ProviderChatMixin(ProviderQuickStartMixin):
             else "Checked design stage"
         )
         scope = str(routing.get("scope", "in_scope"))
+        # Deterministic knowledge matches are authoritative for known ECOS
+        # terms; a weaker provider must not turn an answerable question into
+        # a generic scope clarification.
+        if deterministic_scope.candidate_stages:
+            scope = "in_scope"
         self._local_activity(
             session,
             "stage-identification",
@@ -391,8 +398,9 @@ class ProviderChatMixin(ProviderQuickStartMixin):
             progress="Searching the verified ECOS knowledge index",
         )
         try:
-            baseline = self.knowledge_retriever.reply_global(message)
-            answer = self.knowledge_retriever.reply_hybrid(
+            # reply_hybrid already fuses the global baseline matches with the
+            # stage-scoped ones; a separate reply_global call would repeat it.
+            selected = self.knowledge_retriever.reply_hybrid(
                 message,
                 candidate_stages=stages,
                 deterministic_scope=deterministic_scope,
@@ -407,7 +415,6 @@ class ProviderChatMixin(ProviderQuickStartMixin):
                 error=str(exc),
             )
             raise
-        selected = answer or baseline
         entity_ids = list(selected.entity_ids) if selected is not None else []
         self._local_activity(
             session,
@@ -429,7 +436,17 @@ class ProviderChatMixin(ProviderQuickStartMixin):
             "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
         }
         try:
-            proposal = StageRoutingProposal.model_validate(self.stage_routing_parser(context))
+            if self.stage_routing_parser is _propose_stage_routing:
+                provider = self._chat_provider(session)
+                self._register_interrupt(session, provider.interrupt)
+                request_context = {
+                    key: value for key, value in context.items() if not key.startswith("_")
+                }
+                payload = provider.propose_stage_routing(request_context, effort="low")
+                self._register_interrupt(session, None)
+            else:
+                payload = self.stage_routing_parser(context)
+            proposal = StageRoutingProposal.model_validate(payload)
             stages = proposal.candidate_stages
             if any(stage not in self.knowledge_retriever.stage_ids for stage in stages):
                 return (), {
@@ -449,69 +466,6 @@ class ProviderChatMixin(ProviderQuickStartMixin):
                 "reason": "proposal_unavailable",
                 "scope": "ambiguous",
             }
-
-    def _source_code_evidence(
-        self, session: _Session, message: str, knowledge_answer: KnowledgeAnswer | None
-    ) -> SourceSearchResult | None:
-        if (
-            _is_greeting(message)
-            or not self.source_retriever.available_root_ids
-            or (self._uses_default_source_retrieval and not self._started)
-        ):
-            return None
-        context: dict[str, Any] = {
-            "schema_version": "flow-agent.source_search_request.v1",
-            "natural_language_request": message,
-            "available_source_roots": list(self.source_retriever.available_root_ids),
-            "source_workspace_roots": [
-                str(root) for root in self.source_retriever.source_workspace_roots
-            ],
-            "_progress_callback": lambda text: self._progress(session, text),
-            "_register_interrupt": lambda callback: self._register_interrupt(session, callback),
-        }
-        if knowledge_answer is not None:
-            context["retrieved_knowledge"] = {
-                **knowledge_answer.contract,
-                "entity_ids": list(knowledge_answer.entity_ids),
-                "text": knowledge_answer.text,
-            }
-        try:
-            proposal = SourceSearchProposal.model_validate(self.source_retrieval_parser(context))
-            queries = [query.model_dump(mode="json") for query in proposal.queries]
-            self._local_activity(
-                session,
-                "source-search",
-                "Search workspace sources",
-                "running",
-                arguments={
-                    "roots": list(self.source_retriever.available_root_ids),
-                    "queries": queries,
-                },
-                progress="Searching approved source roots",
-            )
-            result = self.source_retriever.retrieve(proposal)
-            self._local_activity(
-                session,
-                "source-search",
-                "Searched workspace sources",
-                "completed",
-                result={
-                    "evidence_count": len(result.evidence),
-                    "paths": list(dict.fromkeys(item.path for item in result.evidence)),
-                    "result_limit_reached": result.result_limit_reached,
-                },
-            )
-            return result
-        except (CodexProviderError, ValueError) as exc:
-            if "local-source-search" in session.active_local_activities:
-                self._local_activity(
-                    session,
-                    "source-search",
-                    "Search workspace sources",
-                    "failed",
-                    error=str(exc),
-                )
-            return None
 
     def _select_home_ready(self, session: _Session, message: str, choice: str) -> None:
         if choice == "1":

@@ -204,7 +204,7 @@ class OptimizationObjectiveProposal(_ContractModel):
     )
     primary_metric: ObjectiveMetric
     preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
-    rationale_summary: str
+    rationale_summary: str = Field(min_length=1, max_length=512)
 
     @field_validator("preserve_metrics")
     @classmethod
@@ -221,7 +221,7 @@ class OptimizationObjectiveProposal(_ContractModel):
     @classmethod
     def validate_rationale(cls, value: str) -> str:
         value = value.strip()
-        if not value or len(value) > 512:
+        if not value:
             raise ValueError("objective rationale is invalid")
         return value
 
@@ -245,7 +245,7 @@ class OptimizationObjectiveContract(_ContractModel):
     primary_metric: ObjectiveMetric
     preserve_metrics: tuple[ObjectiveMetric, ...] = Field(default=(), max_length=2)
     required_signoff_gates: tuple[str, ...]
-    rationale_summary: str
+    rationale_summary: str = Field(min_length=1, max_length=512)
     contract_sha256: str
 
     @field_validator("source_goal_sha256", "contract_sha256")
@@ -266,7 +266,7 @@ class OptimizationObjectiveContract(_ContractModel):
     @classmethod
     def validate_rationale(cls, value: str) -> str:
         value = value.strip()
-        if not value or len(value) > 512:
+        if not value:
             raise ValueError("objective rationale is invalid")
         return value
 
@@ -518,7 +518,7 @@ class OptimizationProposal(_ContractModel):
     context_ref: ProposalContextRef
     decision: OptimizationDecision
     reason_code: ProposalReason
-    rationale_summary: str
+    rationale_summary: str = Field(min_length=1, max_length=512)
     observation_refs: tuple[ObservationReference, ...] = Field(
         min_length=1, max_length=13
     )
@@ -533,7 +533,7 @@ class OptimizationProposal(_ContractModel):
     @classmethod
     def validate_rationale(cls, value: str) -> str:
         value = value.strip()
-        if not value or len(value) > 512:
+        if not value:
             raise ValueError("proposal rationale is invalid")
         return value
 

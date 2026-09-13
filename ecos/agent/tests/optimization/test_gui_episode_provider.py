@@ -69,12 +69,16 @@ class _FakeCodexProvider:
         self.interrupted = 0
         self.closed = 0
         self.objective_requests: list[str] = []
+        self.inherited_from: object = None
 
     def interrupt(self) -> None:
         self.interrupted += 1
 
     def close(self) -> None:
         self.closed += 1
+
+    def inherit_model_settings(self, source: object) -> None:
+        self.inherited_from = source
 
     def propose_optimization_objective(self, goal: str) -> dict[str, object]:
         self.objective_requests.append(goal)
@@ -84,6 +88,14 @@ class _FakeCodexProvider:
             "preserve_metrics": ["route_dr_total_violation_count"],
             "rationale_summary": "Reduce routed wirelength while preserving DRC.",
         }
+
+
+class _FakeChatProvider:
+    _model = "glm-5.3-flash"
+    _reasoning_effort = "low"
+
+    def clear_interrupted(self) -> None:
+        pass
 
 
 class _FailingRunner(OptimizationEpisodeRunner):
@@ -195,7 +207,7 @@ class _QuarantinedRunner(_BlockingRunner):
         return turn
 
 
-def test_gui_optimization_authorization_holds_and_closes_codex_provider(
+def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -233,17 +245,20 @@ def test_gui_optimization_authorization_holds_and_closes_codex_provider(
 
     session = provider.sessions[session_id]
     assert session.optimization_phase == "error"
-    assert fake_provider.closed == 2
+    # One provider is created at objective parse and reused for the episode;
+    # it is closed once, when the episode thread finishes.
+    assert fake_provider.closed == 1
+    assert len(factory_calls) == 2
     assert factory_calls[0]["cwd"] == workspace
-    assert factory_calls[1]["diagnostics_path"] == (
+    assert factory_calls[0]["diagnostics_path"] == (
         workspace
         / ".agent"
         / "optimization"
         / session.optimization_episode_id
         / "codex-rpc-diagnostics.v1.jsonl"
     )
-    assert factory_calls[2]["context"]["episode_id"] == session.optimization_episode_id
-    assert factory_calls[2]["context"]["objective"]["primary_metric"] == "route_wirelength"
+    assert factory_calls[1]["context"]["episode_id"] == session.optimization_episode_id
+    assert factory_calls[1]["context"]["objective"]["primary_metric"] == "route_wirelength"
     assert any(event["type"] == "optimization" for event in events) is False
     assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)
 
@@ -451,7 +466,7 @@ def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
     session = provider.sessions[session_id]
     assert session.phase == "operation"
     assert session.optimization_phase == "unavailable"
-    assert fake_provider.closed == 2
+    assert fake_provider.closed == 1
     assert any(
         event["type"] == "error" and "runner startup failed" in str(event["text"])
         for event in events
@@ -523,6 +538,8 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
     session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
         "sessionId"
     ]
+    chat = _FakeChatProvider()
+    provider.sessions[session_id].codex_provider = chat
 
     _send(provider, session_id, "3")
     assert provider.sessions[session_id].phase == "optimization_objective"
@@ -542,13 +559,17 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
         and "drc_clean" in str(event["text"])
         for event in events
     )
-    assert fake_provider.closed == 1
+    # The objective provider is held for the episode, not closed after parse.
+    assert fake_provider.closed == 0
+    # The GUI-selected chat model/effort must reach optimization turns.
+    assert fake_provider.inherited_from is chat
 
     _send(provider, session_id, "1")
     deadline = time.monotonic() + 2
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
         time.sleep(0.01)
 
+    assert fake_provider.closed == 1
     assert runner_contexts[0]["objective"] == session.optimization_objective
     assert runner_contexts[0]["objective_alignment"] == (
         session.optimization_objective_alignment

@@ -73,6 +73,7 @@ def _episode(
     ledger = OptimizationLedger(root)
     ledger.append_start(
         OptimizationInterventionStart(
+            record_type="intervention_started",
             intervention_id="intervention-1",
             parent_checkpoint_id="checkpoint-parent",
             candidate_checkpoint_id="checkpoint-candidate",
@@ -86,6 +87,7 @@ def _episode(
     )
     ledger.append_terminal(
         OptimizationTerminalOutcome(
+            record_type="terminal_outcome",
             intervention_id="intervention-1",
             outcome=OptimizationOutcomeKind.TIMED_OUT_CANCELLED,
             candidate_manifest_sha256=HASH,

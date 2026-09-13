@@ -204,6 +204,7 @@ from ecos_agent.gui.provider_chat import ProviderChatMixin
 from ecos_agent.gui.provider_emission import ProviderEmissionMixin
 from ecos_agent.gui.provider_lifecycle import ProviderLifecycleMixin
 from ecos_agent.gui.provider_optimization import ProviderOptimizationMixin
+from ecos_agent.gui.provider_source_evidence import ProviderSourceEvidenceMixin
 from ecos_agent.gui.provider_workspace_lifecycle import ProviderWorkspaceLifecycleMixin
 from ecos_agent.gui.provider_workspace_rerun import ProviderWorkspaceRerunMixin
 from ecos_agent.gui.provider_workspace_setup import ProviderWorkspaceSetupMixin
@@ -212,6 +213,7 @@ from ecos_agent.gui.provider_workspace_setup import ProviderWorkspaceSetupMixin
 class EcosAgentProvider(
     ProviderLifecycleMixin,
     ProviderChatMixin,
+    ProviderSourceEvidenceMixin,
     ProviderOptimizationMixin,
     ProviderWorkspaceLifecycleMixin,
     ProviderWorkspaceSetupMixin,
@@ -250,9 +252,7 @@ class EcosAgentProvider(
             bundles, config=load_production_retrieval_config()
         )
         self.chat_response_parser = chat_response_parser or _propose_gui_chat_response
-        self._uses_default_stage_routing = stage_routing_parser is None
         self.stage_routing_parser = stage_routing_parser or _propose_stage_routing
-        self._uses_default_source_retrieval = source_retrieval_parser is None
         self.source_retrieval_parser = source_retrieval_parser or _propose_source_retrieval
         self.source_retriever = source_retriever or SourceCodeRetriever()
         self.chat_provider_factory = create_required_codex_provider

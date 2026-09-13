@@ -65,8 +65,13 @@ class OptimizationDecisionAuditEntry(BaseModel):
 
     @model_validator(mode="after")
     def validate_entry(self) -> "OptimizationDecisionAuditEntry":
+        # exclude_unset keeps records written by older revisions verifiable
+        # when optional fields are added later; present fields still re-enter
+        # the hash.
         payload = self.model_dump(
-            mode="json", exclude={"entry_sha256", "sequence", "previous_entry_sha256"}
+            mode="json",
+            exclude_unset=True,
+            exclude={"entry_sha256", "sequence", "previous_entry_sha256"},
         )
         expected = canonical_sha256(
             {
@@ -139,7 +144,13 @@ class OptimizationDecisionAudit:
                 entry_sha256=canonical_sha256(hash_payload),
             )
             with self.audit_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(entry.model_dump(mode="json"), sort_keys=True) + "\n")
+                stream.write(
+                    json.dumps(
+                        entry.model_dump(mode="json", exclude_unset=True),
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
                 stream.flush()
                 os.fsync(stream.fileno())
             return entry

@@ -41,6 +41,7 @@ HASH = "sha256:" + "a" * 64
 
 def _start(intervention_id: str = "intervention-1") -> OptimizationInterventionStart:
     return OptimizationInterventionStart(
+        record_type="intervention_started",
         intervention_id=intervention_id,
         parent_checkpoint_id="checkpoint-parent",
         candidate_checkpoint_id="checkpoint-candidate",
@@ -58,6 +59,7 @@ def _terminal(
     outcome: OptimizationOutcomeKind = OptimizationOutcomeKind.DEGRADED,
 ) -> OptimizationTerminalOutcome:
     return OptimizationTerminalOutcome(
+        record_type="terminal_outcome",
         intervention_id=intervention_id,
         outcome=outcome,
         candidate_manifest_sha256=HASH,

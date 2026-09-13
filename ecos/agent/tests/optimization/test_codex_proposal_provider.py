@@ -356,7 +356,7 @@ def test_planner_keeps_response_excerpt_on_invalid_json(
         provider, "_ensure_thread", lambda _client: f"thread-{tmp_path.name}"
     )
 
-    with pytest.raises(CodexProviderError, match="not valid JSON"):
+    with pytest.raises(CodexProviderError, match="output rejected"):
         provider.propose_v2(_context(), _domain())
 
     evidence = provider.consume_planning_evidence()
@@ -398,7 +398,7 @@ def test_response_excerpt_is_bounded(
         provider, "_ensure_thread", lambda _client: f"thread-{tmp_path.name}"
     )
 
-    with pytest.raises(CodexProviderError, match="not valid JSON"):
+    with pytest.raises(CodexProviderError, match="output rejected"):
         provider.propose_v2(_context(), _domain())
 
     evidence = provider.consume_planning_evidence()
@@ -613,6 +613,9 @@ def test_optimization_objective_parser_sends_only_bounded_request(
         "preserve_metrics",
         "rationale_summary",
     ]
+    rationale_schema = captured["output_schema"]["properties"]["rationale_summary"]
+    assert rationale_schema["minLength"] == 1
+    assert rationale_schema["maxLength"] == 512
     objective_metrics = captured["output_schema"]["$defs"]["ObjectiveMetric"][
         "enum"
     ]
@@ -638,6 +641,18 @@ def test_optimization_objective_parser_rejects_empty_goal(tmp_path: Path) -> Non
 
     with pytest.raises(CodexProviderError, match="empty"):
         provider.propose_optimization_objective("  ")
+
+
+def test_provider_inherits_chat_model_settings(tmp_path: Path) -> None:
+    chat = _provider(tmp_path)
+    chat._model = "glm-5.3-flash"
+    chat._reasoning_effort = "low"
+    provider = _provider(tmp_path)
+
+    provider.inherit_model_settings(chat)
+
+    assert provider.model == "glm-5.3-flash"
+    assert provider._reasoning_effort == "low"
 
 
 @pytest.mark.parametrize("policy", [None, {}])

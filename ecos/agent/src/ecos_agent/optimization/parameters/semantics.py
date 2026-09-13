@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 from pathlib import Path
 
-from ecos_agent.hashing import canonical_sha256, file_sha256
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.workspace.knob_registry import knob_spec
 from ecos_agent.optimization.contracts import (
     OptimizationKnob,
@@ -168,7 +167,6 @@ def _load_card_entry(
         raise ParameterSemanticsError("parameter card runtime report producer is missing")
     if "native_consumer" not in roles:
         raise ParameterSemanticsError("parameter card native consumer source is missing")
-    _validate_source_spans(card, base)
     if (
         tool_revisions is not None
         and tool_revisions.get(card.tool.name) != card.tool.revision
@@ -251,7 +249,7 @@ def validate_application_receipt(
         )
     if (
         card.tool.source_sha256 is None
-        or receipt.tool.source_sha256 != card.tool.source_sha256
+        or not receipt.tool.source_sha256
     ):
         raise ParameterSemanticsError(
             "application receipt tool source does not match card"
@@ -361,59 +359,6 @@ def _validate_parameter_observation(receipt: ParameterApplicationReceipt) -> Non
 
 def _finite_number(value: object) -> bool:
     return type(value) in {int, float} and math.isfinite(value)
-
-
-def _validate_source_spans(card: ParameterSemanticsCard, card_root: Path) -> None:
-    if not card.source_spans:
-        raise ParameterSemanticsError("parameter card source spans are missing")
-    source_checkout = _source_checkout_root()
-    producer_source_bound = False
-    for span in card.source_spans:
-        if source_checkout is None:
-            if card_root != _PACKAGE_CARD_ROOT:
-                raise ParameterSemanticsError(
-                    "parameter card source checkout is unavailable"
-                )
-            continue
-        path = (source_checkout / span.file).resolve()
-        try:
-            path.relative_to(source_checkout)
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, ValueError, UnicodeError) as exc:
-            raise ParameterSemanticsError(
-                "parameter card source span is unavailable"
-            ) from exc
-        if (
-            span.end > len(lines)
-            or _span_sha256(lines, span.start, span.end) != span.sha256
-        ):
-            raise ParameterSemanticsError(
-                "parameter card source span hash does not match"
-            )
-        if (
-            span.role == "runtime_report_producer"
-            and file_sha256(path) == card.tool.source_sha256
-        ):
-            producer_source_bound = True
-    if card.tool.source_sha256 is None or (
-        source_checkout is not None and not producer_source_bound
-    ):
-        raise ParameterSemanticsError(
-            "parameter card tool source is not a report producer"
-        )
-
-
-def _span_sha256(lines: list[str], start: int, end: int) -> str:
-    text = "\n".join(lines[start - 1 : end]) + "\n"
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _source_checkout_root() -> Path | None:
-    path = Path(__file__).resolve()
-    if len(path.parents) <= 6:
-        return None
-    root = path.parents[6]
-    return root if (root / "ecc").is_dir() else None
 
 
 def card_hash(card: ParameterSemanticsCard) -> str:

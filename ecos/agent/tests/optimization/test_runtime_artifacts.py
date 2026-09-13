@@ -149,6 +149,7 @@ def test_optimization_runtime_rejects_missing_primary_metric(
             {
                 "workspace": str(tmp_path),
                 "episode_id": "episode-missing-objective",
+                "agent_mode": "llm_no_knowledge",
                 "objective": objective.model_dump(mode="json"),
                 "objective_alignment": _alignment(objective),
             },
@@ -173,6 +174,7 @@ def test_runtime_rejects_baseline_drift_after_authorization(
             {
                 "workspace": str(tmp_path),
                 "episode_id": "episode-drifted",
+                "agent_mode": "llm_no_knowledge",
                 "objective": objective.model_dump(mode="json"),
                 "objective_alignment": _alignment(objective, approved),
             },

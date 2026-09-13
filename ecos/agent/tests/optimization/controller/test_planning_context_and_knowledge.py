@@ -595,6 +595,7 @@ def test_recovery_rejects_empirical_case_audit_added_after_snapshot(
     controller = _controller(tmp_path, _FakeCodex(_proposal), _FakeEcc())
     EmpiricalCaseAuditStore(tmp_path / "episode").append_diagnostic(
         EmpiricalCaseDiagnostic(
+            schema_version="ecos.knowledge_case_diagnostic.v1",
             intervention_id="intervention-1",
             reason_code="unexpected_external_event",
         )
@@ -617,6 +618,7 @@ def test_recovery_rejects_changed_external_case_pool_head(tmp_path: Path) -> Non
     pool = EmpiricalCaseAuditStore(pool_root)
     pool.append_diagnostic(
         EmpiricalCaseDiagnostic(
+            schema_version="ecos.knowledge_case_diagnostic.v1",
             intervention_id="pool-event-1",
             reason_code="initial_pool_head",
         )
@@ -629,6 +631,7 @@ def test_recovery_rejects_changed_external_case_pool_head(tmp_path: Path) -> Non
     )
     pool.append_diagnostic(
         EmpiricalCaseDiagnostic(
+            schema_version="ecos.knowledge_case_diagnostic.v1",
             intervention_id="pool-event-2",
             reason_code="changed_pool_head",
         )
@@ -652,6 +655,7 @@ def test_external_case_pool_requires_explicit_training_split(tmp_path: Path) -> 
     pool_root = tmp_path / "external-pool"
     EmpiricalCaseAuditStore(pool_root).append_case(
         TerminalEmpiricalCase(
+            schema_version="ecos.terminal_empirical_case.v3",
             case_id="case.unlabeled",
             context_fingerprint=HASH,
             claim_id="claim.one",
@@ -690,6 +694,7 @@ def test_planning_rejects_external_case_pool_change_during_episode(
     pool = EmpiricalCaseAuditStore(pool_root)
     pool.append_diagnostic(
         EmpiricalCaseDiagnostic(
+            schema_version="ecos.knowledge_case_diagnostic.v1",
             intervention_id="pool-event-1",
             reason_code="initial_pool_head",
         )
@@ -703,6 +708,7 @@ def test_planning_rejects_external_case_pool_change_during_episode(
     )
     pool.append_diagnostic(
         EmpiricalCaseDiagnostic(
+            schema_version="ecos.knowledge_case_diagnostic.v1",
             intervention_id="pool-event-2",
             reason_code="changed_pool_head",
         )

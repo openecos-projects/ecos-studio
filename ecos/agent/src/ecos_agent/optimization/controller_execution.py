@@ -508,6 +508,7 @@ class ControllerExecutionMixin:
             }
         )
         return OptimizationInterventionStart(
+            record_type="intervention_started",
             intervention_id=request.intervention_id,
             parent_checkpoint_id=self.checkpoint_id,
             candidate_checkpoint_id=f"candidate-{request.intervention_id}",
@@ -670,6 +671,7 @@ class ControllerExecutionMixin:
                 mode="json"
             )
         terminal_outcome = OptimizationTerminalOutcome(
+            record_type="terminal_outcome",
             intervention_id=record.intervention_id,
             outcome=outcome,
             candidate_manifest_sha256=(

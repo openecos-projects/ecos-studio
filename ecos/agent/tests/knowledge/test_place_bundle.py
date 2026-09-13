@@ -174,7 +174,11 @@ def test_regression_questions_render_only_published_markdown_chunks() -> None:
         assert answer is not None, case["id"]
         assert case["entity_id"] in answer.entity_ids
         assert case["required_text"] in answer.text
-        assert answer.text in "\n\n".join(knowledge.chunk_text(entity_id) for entity_id in answer.entity_ids)
+        published = "\n\n".join(
+            knowledge.chunk_text(entity_id) for entity_id in answer.entity_ids
+        )
+        # Rendering strips internal anchors and record-id headings but invents nothing.
+        assert all(line in published for line in answer.text.splitlines() if line.strip())
         assert answer.contract["schema_version"] == "ecos-knowledge-answer.v2"
         assert answer.contract["read_only"] is True
 

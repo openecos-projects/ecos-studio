@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.knowledge.contracts import SourceSearchProposal
-from ecos_agent.knowledge.source import SourceCodeRetriever
+from ecos_agent.knowledge.source import SourceCodeRetriever, deterministic_source_proposal
 
 
 def _proposal(*queries: dict[str, str]) -> SourceSearchProposal:
@@ -133,3 +133,30 @@ def test_source_search_proposal_rejects_duplicate_queries() -> None:
 def test_source_search_proposal_rejects_more_than_five_queries() -> None:
     with pytest.raises(ValueError, match="too many"):
         _proposal(*({"root_id": "ecc", "query": f"needle-{index}"} for index in range(6)))
+
+
+def test_deterministic_source_proposal_extracts_identifier_queries() -> None:
+    proposal = deterministic_source_proposal("what is the target density", ("ecc", "ecos"))
+    queries = [(query.root_id, query.query) for query in proposal.queries]
+
+    assert len(queries) <= 5
+    assert queries[0] == ("ecc", "target_density")
+    assert ("ecos", "target_density") in queries
+
+
+def test_deterministic_source_proposal_prefers_acronyms_over_joined_pairs() -> None:
+    proposal = deterministic_source_proposal(
+        "How does CTS insertion delay affect hold slack?", ("ecos",)
+    )
+
+    assert proposal.queries[0].query == "cts"
+
+
+def test_deterministic_source_proposal_returns_none_without_candidates() -> None:
+    assert deterministic_source_proposal("hi?", ("ecc",)) is None
+
+
+def test_deterministic_source_proposal_skips_cjk_pair_joins() -> None:
+    proposal = deterministic_source_proposal("使用 target_overflow 参数调优", ("ecc",))
+
+    assert [query.query for query in proposal.queries] == ["target_overflow"]

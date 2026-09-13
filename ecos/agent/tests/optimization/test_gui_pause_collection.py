@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,14 +34,14 @@ class _PauseCollectRunner(_CompletedRunner):
         super().__init__()
         self.turns = 0
         self.paused_flags: list[bool] = []
+        self.turn1_ready = threading.Event()
+        self.release_turn1 = threading.Event()
 
     def run_turn(self, *, paused: bool = False):
         self.paused_flags.append(paused)
         self.turns += 1
         if self.turns == 1:
-            self._controller.state = OptimizationEpisodeState.EXECUTING
-            self._controller.pending_execution_ids = ("execution-1",)
-            return SimpleNamespace(
+            turn = SimpleNamespace(
                 planning=SimpleNamespace(
                     state=OptimizationEpisodeState.EXECUTING,
                     proposal=None,
@@ -50,6 +51,13 @@ class _PauseCollectRunner(_CompletedRunner):
                 execution=SimpleNamespace(state=OptimizationEpisodeState.EXECUTING),
                 incumbent_comparison=None,
             )
+            # Hold turn 1 until the test has paused, so turn 2 is dispatched
+            # with paused=True instead of racing the episode to completion.
+            self.turn1_ready.set()
+            assert self.release_turn1.wait(timeout=2)
+            self._controller.state = OptimizationEpisodeState.EXECUTING
+            self._controller.pending_execution_ids = ("execution-1",)
+            return turn
         if paused:
             self._controller.pending_execution_ids = ()
             self._controller.state = OptimizationEpisodeState.PLANNING
@@ -82,11 +90,12 @@ def test_gui_pause_still_collects_in_flight_terminals(tmp_path: Path) -> None:
     _send(provider, session_id, "3")
     _send(provider, session_id, "reduce wirelength")
     _send(provider, session_id, "1")
-    deadline = time.monotonic() + 2
-    while runner.turns < 1 and time.monotonic() < deadline:
-        time.sleep(0.01)
+    # Turn 1 holds until the pause command has been accepted, so turn 2 is
+    # dispatched under pause and can never race the episode finishing.
+    assert runner.turn1_ready.wait(timeout=2)
 
     provider.send_message({"sessionId": session_id, "message": "pause"})
+    runner.release_turn1.set()
     deadline = time.monotonic() + 2
     while runner.turns < 2 and time.monotonic() < deadline:
         time.sleep(0.01)

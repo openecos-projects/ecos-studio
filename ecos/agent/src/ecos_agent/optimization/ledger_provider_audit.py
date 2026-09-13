@@ -43,11 +43,16 @@ class OptimizationPlanningProviderEvidenceEntry(_LedgerModel):
 
     @model_validator(mode="after")
     def validate_evidence_entry(self) -> "OptimizationPlanningProviderEvidenceEntry":
+        # Stored records written by older revisions lack newer optional fields;
+        # excluding unset fields keeps their entry hash verifiable across
+        # schema additions. Fields present in the record always re-enter the
+        # hash, so tampering is still detected.
         expected = _planning_provider_audit_entry_sha256(
             self.sequence,
             self.previous_entry_sha256,
             self.model_dump(
                 mode="json",
+                exclude_unset=True,
                 exclude={"entry_sha256", "sequence", "previous_entry_sha256"},
             ),
         )
@@ -95,7 +100,12 @@ class OptimizationPlanningProviderEvidenceAudit:
                 ),
             )
             with self.audit_path.open("ab") as stream:
-                stream.write(_canonical_json(entry.model_dump(mode="json")) + b"\n")
+                stream.write(
+                    _canonical_json(
+                        entry.model_dump(mode="json", exclude_unset=True)
+                    )
+                    + b"\n"
+                )
                 stream.flush()
                 os.fsync(stream.fileno())
             _fsync_directory(self.audit_path.parent)
