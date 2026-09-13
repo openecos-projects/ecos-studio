@@ -152,6 +152,14 @@ def optimization_started_message(language: str) -> str:
     )
 
 
+def optimization_noise_calibration_message(language: str) -> str:
+    return _prompt(
+        language,
+        "工作区尚未校准趋势噪声 epsilon；开始优化前先自动校准：以默认参数重放流程 3 次并冻结噪声剖面，完成后自动启动优化。校准期间可随时发送 stop 取消。",
+        "This workspace has no calibrated trend noise epsilon yet; calibrating first: the default-parameter flow is replayed 3 times to freeze the noise profile, then optimization starts automatically. Send stop at any time to cancel.",
+    )
+
+
 def project_mode_choice(language: str, prompt_id: str) -> dict[str, Any]:
     choice = _choice(
         prompt_id,

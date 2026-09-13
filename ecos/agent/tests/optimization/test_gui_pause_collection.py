@@ -15,6 +15,7 @@ from tests.optimization.test_gui_episode_provider import (
     _CompletedRunner,
     _FakeCodexProvider,
     _baseline,
+    _make_optimization_workspace,
     _send,
 )
 
@@ -75,8 +76,7 @@ class _PauseCollectRunner(_CompletedRunner):
 
 
 def test_gui_pause_still_collects_in_flight_terminals(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = _make_optimization_workspace(tmp_path)
     events: list[dict[str, object]] = []
     runner = _PauseCollectRunner()
     provider = EcosAgentProvider(

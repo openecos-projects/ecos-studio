@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
@@ -105,7 +106,12 @@ def _run_replay(
 
 
 def calibrate(
-    workspace: Path, replays: int, timeout_seconds: float
+    workspace: Path,
+    replays: int = 3,
+    timeout_seconds: float = 1800.0,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, object]:
     workspace = workspace.resolve()
     if not workspace.is_dir():
@@ -117,14 +123,22 @@ def calibrate(
     optimization_root = workspace / ".agent" / "optimization"
     calibration_dir = optimization_root / "noise-calibration"
     calibration_dir.mkdir(parents=True, exist_ok=True)
-    observations = tuple(
-        _run_replay(
-            workspace, calibration_dir / f"default-replay-{index}", index, timeout_seconds
+    observations = []
+    for index in range(1, replays + 1):
+        if should_stop is not None and should_stop():
+            raise OptimizationRuntimeError("noise calibration cancelled")
+        observations.append(
+            _run_replay(
+                workspace,
+                calibration_dir / f"default-replay-{index}",
+                index,
+                timeout_seconds,
+            )
         )
-        for index in range(1, replays + 1)
-    )
+        if progress is not None:
+            progress(f"noise calibration replay {index}/{replays} finished")
     payload = write_noise_epsilon_artifact(
-        observations, optimization_root / "noise-epsilon.v1.json"
+        tuple(observations), optimization_root / "noise-epsilon.v1.json"
     )
     return {
         "artifact": str(optimization_root / "noise-epsilon.v1.json"),
