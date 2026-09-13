@@ -269,6 +269,8 @@ def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
         / "codex-rpc-diagnostics.v1.jsonl"
     )
     assert factory_calls[1]["context"]["episode_id"] == session.optimization_episode_id
+    assert factory_calls[1]["context"]["workspace"] == str(workspace)
+    assert isinstance(factory_calls[1]["context"]["workspace"], str)
     assert factory_calls[1]["context"]["objective"]["primary_metric"] == "route_wirelength"
     assert any(event["type"] == "optimization" for event in events) is False
     assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)

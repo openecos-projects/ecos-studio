@@ -482,8 +482,9 @@ class ProviderOptimizationMixin:
         session.optimization_thread.start()
 
     def _launch_optimization_episode(
-        self, session: _Session, workspace: str
+        self, session: _Session, workspace: str | Path
     ) -> None:
+        workspace = str(workspace)
         session.optimization_phase = "starting"
         session.phase = "optimization_preparing"
         provider = session.optimization_provider
