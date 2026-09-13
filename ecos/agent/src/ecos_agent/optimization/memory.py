@@ -357,6 +357,11 @@ class OptimizationTaskMemoryStore:
             candidates = []
             for episode_root in sorted(path for path in self.root.iterdir() if path.is_dir()):
                 if (episode_root / _SCOPE_FILE).is_file():
+                    if not (episode_root / _STATE_FILE).is_file():
+                        # An episode that registered its scope but never wrote
+                        # source state (an aborted start) has no evidence to
+                        # derive; it must not poison later episodes.
+                        continue
                     candidates.extend(_derive_candidates(episode_root))
             derived = {_evidence_key(candidate.evidence) for candidate in candidates}
             if not known.issubset(derived):
