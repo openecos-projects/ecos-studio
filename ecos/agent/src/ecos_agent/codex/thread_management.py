@@ -82,10 +82,12 @@ class CodexThreadManagementMixin:
             except (json.JSONDecodeError, ValueError) as exc:
                 self._runtime_status.validation(False)
                 self._parse_failure_excerpt = _response_excerpt(text)
-                reason = " ".join(str(exc).split())[:400]
+                # Multi-field violations list every missing field; the repair
+                # prompt needs the full list, not a 400-character slice.
+                reason = " ".join(str(exc).split())[:2000]
                 failure = CodexProviderError(
                     "Codex proposal output rejected: "
-                    f"{reason}; rejected output excerpt: {_response_excerpt(text)[:400]}",
+                    f"{reason[:400]}; rejected output excerpt: {_response_excerpt(text)[:400]}",
                     failure_class="parse_error",
                 )
                 continue

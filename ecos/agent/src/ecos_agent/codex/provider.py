@@ -193,6 +193,28 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         else:
             payload["effective_domains"] = [item.model_dump(mode="json") for item in domains]
         system = (
+            "Output exactly one JSON object with exactly these top-level fields: schema_version, "
+            "context_ref, decision, reason_code, rationale_summary, observation_refs, history_refs, "
+            "knowledge_refs, task_memory_refs, action. Wire shape example:\n"
+            "{\n"
+            '  "schema_version": "ecos.optimization_proposal.v3",\n'
+            '  "context_ref": {"episode_id": "<copy supplied>", "checkpoint_id": "<copy supplied>", '
+            '"input_sha256": "<copy supplied>"},\n'
+            '  "decision": "propose",\n'
+            '  "reason_code": "observation",\n'
+            '  "rationale_summary": "<hypothesis, mechanism, probe, expected falsifiable observation>",\n'
+            '  "observation_refs": [{"observation_id": "<copy supplied>", "sha256": "<copy supplied>"}],\n'
+            '  "history_refs": [],\n'
+            '  "knowledge_refs": [],\n'
+            '  "task_memory_refs": [],\n'
+            '  "action": {"knob_id": "<knob_id>", "direction": "<direction>", '
+            '"requested_value": <exact probe value>, '
+            '"effective_domain_sha256": "<copy supplied snapshot_sha256>", '
+            '"expected_effects": [{"metric_id": "<metric_id>", "direction": "decrease"}]}\n'
+            "}\n"
+            "For decision continue, stop, or escalate set action to null. Copy context_ref, "
+            "observation_refs, and effective_domain_sha256 exactly from the supplied context; "
+            "never invent hashes or observation ids. "
             "Select one exact parameter value within the supplied static legal bounds and legal direction. "
             "The task parameter_policy records knob roles, disabled knobs, and the advisory layer priority; "
             "every supplied legal_action is a permitted candidate, and departing from the recommended layer "
