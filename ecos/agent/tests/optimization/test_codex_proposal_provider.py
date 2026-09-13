@@ -307,6 +307,13 @@ def test_planner_exposes_parameter_knowledge_and_unfiltered_trajectories(
     assert "falsifiable" in captured["system"]
     assert "unknown/inactive" in captured["system"]
     assert "Equal actual values do not imply equal QoR" in captured["system"]
+    assert (
+        "exactly these top-level fields: schema_version, context_ref, decision, "
+        "reason_code, rationale_summary, observation_refs, history_refs, "
+        "knowledge_refs, task_memory_refs, action" in captured["system"]
+    )
+    assert '"ecos.optimization_proposal.v3"' in captured["system"]
+    assert '"effective_domain_sha256"' in captured["system"]
     prompt_evidence = json.loads(
         _build_prompt(captured["system"], payload).split(
             "USER AND EVIDENCE CONTEXT JSON\n", maxsplit=1
