@@ -134,6 +134,7 @@ from ecos_agent.gui.support import (
     _gui_workspace_codex_provider,
     _gui_workspace_request_context,
     _workspace_continue_result,
+    _workspace_parameter_update_result,
     _workspace_signoff_inspection_result,
     _workspace_signoff_result,
     _keyword_operation_choice,
@@ -663,12 +664,26 @@ class ProviderWorkspaceLifecycleMixin:
         )
 
     def _handle_workspace_parameter_update_result(self, session: _Session, message: str) -> None:
-        if not message.startswith("workspace_parameter_update_result:"):
+        result = _workspace_parameter_update_result(message)
+        if result is None:
             self._emit(session, "error", "Parameter update result is invalid.")
             return
+        update_id, status, error = result
+        contract = session.workspace_parameter_update
+        if contract is None or contract.get("update_id") != update_id:
+            self._emit(
+                session,
+                "error",
+                "Parameter update result does not match the pending contract.",
+            )
+            return
         self._reset(session)
-        if '"status":"succeeded"' in message or '"status": "succeeded"' in message:
+        if status == "succeeded":
             self._emit(session, "message", "Workspace parameters were saved.")
         else:
-            self._emit(session, "message", "Workspace parameter update failed.")
+            self._emit(
+                session,
+                "message",
+                f"Workspace parameter update failed: {error}",
+            )
         self._emit_phase_choice(session)

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -509,6 +509,7 @@ describe('createEccRuntimeEnv', () => {
     const executable = join(fixture.repoRoot, 'ecc', '.venv', 'bin', 'ecc-agent-rpc')
     mkdirSync(join(fixture.repoRoot, 'ecc', '.venv', 'bin'), { recursive: true })
     writeFileSync(executable, '#!/usr/bin/env bash\n')
+    chmodSync(executable, 0o755)
 
     expect(
       resolveEccAgentExecutable({
@@ -520,6 +521,42 @@ describe('createEccRuntimeEnv', () => {
         userDataPath: fixture.userDataPath,
       }),
     ).toBe(executable)
+  })
+
+  it('resolves the Agent RPC executable from PATH like the Python agent', () => {
+    const pathDir = join(createRepoFixture().userDataPath, 'path-bin')
+    mkdirSync(pathDir, { recursive: true })
+    const executable = join(pathDir, 'ecc-agent-rpc')
+    writeFileSync(executable, '#!/usr/bin/env bash\n')
+    chmodSync(executable, 0o755)
+
+    expect(
+      resolveEccAgentExecutable({
+        appPath: '/nonexistent-app',
+        cwd: '/nonexistent-app',
+        env: { PATH: pathDir },
+        isPackaged: false,
+        platform: 'linux',
+        userDataPath: pathDir,
+      }),
+    ).toBe(executable)
+  })
+
+  it('fails loudly when ECOS_AGENT_ECC_RPC_BIN is set but not executable', () => {
+    const fixture = createRepoFixture()
+    const configured = join(fixture.userDataPath, 'ecc-agent-rpc')
+    writeFileSync(configured, '#!/usr/bin/env bash\n')
+
+    expect(() =>
+      resolveEccAgentExecutable({
+        appPath: fixture.appPath,
+        cwd: fixture.appPath,
+        env: { ECOS_AGENT_ECC_RPC_BIN: configured, PATH: '/usr/bin' },
+        isPackaged: false,
+        platform: 'linux',
+        userDataPath: fixture.userDataPath,
+      }),
+    ).toThrow('ECOS_AGENT_ECC_RPC_BIN is not executable')
   })
 
   it('routes explicit Agent requests to the Agent RPC executable', () => {

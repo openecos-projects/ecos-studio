@@ -83,20 +83,16 @@ class OptimizationRuntimeError(ValueError):
     """The workspace cannot be assembled into a trusted production episode."""
 
 
-_OPTIMIZATION_RERUN_STAGES = (
-    "Floorplan",
-    "place",
-    "CTS",
-    "legalization",
-    "Timing optimization",
-    "route",
-    "drc",
-    "lvs",
-    "filler",
-    "RCX",
-    "sta",
-    CANDIDATE_END_STEP,
+# Candidate budget stages: the ECC catalog minus the synthesis entry stages
+# (candidates always start from an existing synthesized workspace) and
+# postRouteLec (skipped inside isolated candidate reruns).
+_CANDIDATE_SKIPPED_STAGES = frozenset(
+    {ECCStepName.SYNTHESIS, ECCStepName.LEC, ECCStepName.POST_ROUTE_LEC}
 )
+_OPTIMIZATION_RERUN_STAGES = tuple(
+    step.value for step in ECCStepName if step not in _CANDIDATE_SKIPPED_STAGES
+)
+assert _OPTIMIZATION_RERUN_STAGES[-1] == CANDIDATE_END_STEP
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
 
@@ -744,6 +740,14 @@ def _ledger(root: Path):
 
 
 def _ecc_executable() -> Path:
+    """Resolve the ECC Agent RPC executable.
+
+    Resolution order is shared with the Electron resolver
+    (`eccRpc/runtimeEnv.ts` resolveEccAgentExecutable): explicit env override
+    (validated, failing loudly), PATH lookup, then repo-relative candidates.
+    The GUI additionally prefers its packaged copy before PATH. The joint
+    contract lives in `ecos/agent/docs/ecc-agent-rpc.md`.
+    """
     candidate = os.environ.get("ECOS_AGENT_ECC_RPC_BIN", "").strip()
     if candidate:
         path = Path(candidate).expanduser()
@@ -756,6 +760,8 @@ def _ecc_executable() -> Path:
     repo_root = Path(__file__).resolve().parents[5]
     for relative in (
         "ecc/.venv/bin/ecc-agent-rpc",
+        # Windows venv layout; mirrors the Electron resolver's candidates.
+        "ecc/.venv/Scripts/ecc-agent-rpc.exe",
         "ecc/dist/ecc/ecc-agent-rpc",
     ):
         path = repo_root / relative

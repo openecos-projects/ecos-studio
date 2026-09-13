@@ -1,5 +1,6 @@
 import type {
   DesktopApi,
+  EccFlowStep,
   EccRuntimeOperation,
   EccRuntimeProtocolEvent,
 } from '@ecos-studio/shared'
@@ -11,7 +12,9 @@ export interface QuickStartFlowResult {
   error?: string
 }
 
-const STAGES: Record<string, [string, string]> = {
+// Keyed by the shared ECC flow catalog so a catalog change fails typecheck
+// here instead of silently losing a step's narration.
+const STAGES: Record<EccFlowStep, [string, string]> = {
   Synthesis: ['逻辑综合', '将 RTL 转换为标准单元网表'],
   lec: ['逻辑等价检查', '检查综合前后逻辑的一致性'],
   Floorplan: ['布局规划', '确定芯片和核心区域，安排引脚及宏单元位置'],
@@ -35,7 +38,7 @@ const STAGES: Record<string, [string, string]> = {
 function stageNarration(event: EccRuntimeProtocolEvent): string | null {
   const step = event.event.payload.step
   if (typeof step !== 'string' || !step) return null
-  const description = STAGES[step]
+  const description = step in STAGES ? STAGES[step as EccFlowStep] : undefined
   const label = description ? `${step}（${description[0]}）` : step
   if (event.event.type === 'step.started') {
     return description ? `正在进行 ${label}：${description[1]}。` : `正在执行 ${label}。`

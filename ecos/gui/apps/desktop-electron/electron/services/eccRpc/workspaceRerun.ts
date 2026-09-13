@@ -14,6 +14,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 
 import {
   assignOwnJsonPathValue,
+  ECC_CATALOG_END_STEP as CATALOG_END_STEP,
+  ECC_DEFAULT_STEP_TOOLS as DEFAULT_STEP_TOOLS,
+  ECC_FLOW_STEPS as FLOW_STEP_SEQUENCE,
+  ECC_FLOW_STEP_SET as FLOW_STEPS,
   hasSafeJsonPath,
   parameterWritesMatchPatch,
   type DesktopAgentWorkspaceParameterWrite,
@@ -51,41 +55,9 @@ interface WorkspaceRerunRuntime {
   }): Promise<{ error: { message: string } | null; state: string }>
 }
 
-const FLOW_STEP_SEQUENCE = [
-  'Synthesis',
-  'Floorplan',
-  'place',
-  'CTS',
-  'legalization',
-  'Timing optimization',
-  'route',
-  'drc',
-  'lvs',
-  'filler',
-  'postRouteLec',
-  'RCX',
-  'sta',
-  'Harden',
-] as const
-const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
-const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
-/** Default tool names when extending a short source flow to the catalog end. */
-const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
-  Synthesis: 'yosys',
-  Floorplan: 'ecc',
-  place: 'dreamplace',
-  CTS: 'ecc',
-  legalization: 'dreamplace',
-  'Timing optimization': 'sizer',
-  route: 'ecc',
-  drc: 'ecc',
-  lvs: 'ecc',
-  filler: 'ecc',
-  postRouteLec: 'yosys_lec',
-  RCX: 'ecc',
-  sta: 'ecc',
-  Harden: 'ecc',
-}
+// FLOW_STEP_SEQUENCE / FLOW_STEPS / CATALOG_END_STEP / DEFAULT_STEP_TOOLS come
+// from the shared ECC flow catalog (@ecos-studio/shared, contracts/eccFlowSteps).
+
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
 
 /** Step slug for rerun target directories and ids; spaces are not path-safe. */

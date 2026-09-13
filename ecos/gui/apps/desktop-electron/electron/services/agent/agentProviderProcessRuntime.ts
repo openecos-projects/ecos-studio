@@ -33,6 +33,7 @@ import type {
 } from '@ecos-studio/shared'
 import {
   desktopAgentParameterWriteFiles,
+  ECC_FLOW_STEPS,
   hasSafeJsonPath,
   parameterWritesMatchPatch,
 } from '@ecos-studio/shared'
@@ -1130,22 +1131,8 @@ function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null 
     : null
 }
 
-const workspaceSetupFlowSteps = [
-  'Synthesis',
-  'Floorplan',
-  'place',
-  'CTS',
-  'legalization',
-  'Timing optimization',
-  'route',
-  'drc',
-  'lvs',
-  'filler',
-  'postRouteLec',
-  'RCX',
-  'sta',
-  'Harden',
-]
+// The shared ECC flow step catalog (@ecos-studio/shared, contracts/eccFlowSteps).
+const workspaceSetupFlowSteps: readonly string[] = ECC_FLOW_STEPS
 
 function readWorkspaceRerunContract(
   value: unknown,

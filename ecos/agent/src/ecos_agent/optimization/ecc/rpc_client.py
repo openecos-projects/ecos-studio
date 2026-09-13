@@ -34,10 +34,15 @@ _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 
 
 class EccContentLengthRpcClient:
-    """Launch the ECC Agent RPC executable with a fixed method allowlist."""
+    """Launch the ECC Agent RPC executable with a fixed method allowlist.
+
+    Transport and recovery semantics are shared with the Electron client
+    (`ecos/gui/apps/desktop-electron/electron/services/eccRpc/jsonRpcClient.ts`
+    + `transport.ts`); the joint contract lives in `ecos/agent/docs/ecc-agent-rpc.md`.
+    """
 
     def __init__(
-        self, executable: Path, *, response_timeout_seconds: float = 10.0
+        self, executable: Path, *, response_timeout_seconds: float = 30.0
     ) -> None:
         if not executable.is_absolute():
             raise OptimizationEccAdapterError("ECC Agent RPC executable path must be absolute")
@@ -59,7 +64,7 @@ class EccContentLengthRpcClient:
         self._events: queue.Queue[dict[str, object]] = queue.Queue()
         self._next_id = 1
         self._lock = threading.Lock()
-        self._reader_error: OptimizationEccAdapterError | None = None
+        self._last_protocol_error: str | None = None
         self._acked_step_events: set[tuple[str, str]] = set()
 
     def start(self) -> None:
@@ -171,8 +176,6 @@ class EccContentLengthRpcClient:
     ) -> dict[str, object]:
         self.start()
         with self._lock:
-            if self._reader_error is not None:
-                raise self._reader_error
             request_id = self._next_id
             self._next_id += 1
             response: queue.Queue[dict[str, object]] = queue.Queue(maxsize=1)
@@ -201,18 +204,39 @@ class EccContentLengthRpcClient:
         decoder = _ContentLengthDecoder()
         try:
             while chunk := process.stdout.read(8192):
-                for raw in decoder.feed(chunk):
-                    self._handle_message(raw)
-        except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
-            self._reader_error = OptimizationEccAdapterError(
-                "ECC RPC stream is invalid"
-            )
+                try:
+                    messages = decoder.feed(chunk)
+                except ValueError:
+                    # Tool output can leak onto stdout despite the redirection.
+                    # Resync at the next Content-Length frame and fail only the
+                    # in-flight requests, matching the Electron client's
+                    # recoverStdout() policy: corruption never permanently
+                    # poisons the RPC stream.
+                    self._fail_pending(
+                        OptimizationEccAdapterError("ECC RPC frame is invalid")
+                    )
+                    decoder.resync()
+                    continue
+                for raw in messages:
+                    try:
+                        self._handle_message(raw)
+                    except (
+                        OptimizationEccAdapterError,
+                        UnicodeDecodeError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ):
+                        # A well-framed but malformed message is dropped on its
+                        # own; the stream stays usable.
+                        self._last_protocol_error = "ECC RPC message is invalid"
+        except OSError:
+            pass
         finally:
-            failure = self._reader_error or OptimizationEccAdapterError(
-                "ECC RPC stream closed"
-            )
-            for pending in tuple(self._pending.values()):
-                pending.put({"error": str(failure)})
+            self._fail_pending(OptimizationEccAdapterError("ECC RPC stream closed"))
+
+    def _fail_pending(self, failure: OptimizationEccAdapterError) -> None:
+        for pending in tuple(self._pending.values()):
+            pending.put({"error": str(failure)})
 
     def _handle_message(self, raw: bytes) -> None:
         message = json.loads(raw.decode("utf-8"))
@@ -282,6 +306,22 @@ class _ContentLengthDecoder:
             messages.append(tail[:length])
             self._buffer[:] = tail[length:]
         return messages
+
+    def resync(self) -> None:
+        """Drop a malformed prefix and reposition at the next complete frame.
+
+        Mirrors the Electron client's ContentLengthDecoder.discardMalformedPrefix:
+        leaked tool output on stdout must never permanently poison the stream.
+        """
+        marker = self._buffer.find(b"Content-Length:", 1)
+        if marker > 0:
+            del self._buffer[:marker]
+            return
+        header_end = self._buffer.find(b"\r\n\r\n")
+        if header_end >= 0:
+            del self._buffer[: header_end + len(b"\r\n\r\n")]
+            return
+        del self._buffer[: max(0, len(self._buffer) - (len(b"Content-Length:") - 1))]
 
     @staticmethod
     def _content_length(header: bytes) -> int:

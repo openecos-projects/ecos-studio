@@ -70,7 +70,11 @@ export class EccJsonRpcClient {
   private nextId = 1
 
   constructor(private readonly options: EccJsonRpcClientOptions) {
-    this.defaultTimeoutMs = options.defaultTimeoutMs ?? 120_000
+    // Shared timeout policy with the Python ECC client
+    // (ecos_agent/optimization/ecc/rpc_client.py): 30s default for control-plane
+    // calls; known-slow calls opt out explicitly (timeoutMs: 0 or a longer
+    // budget). See ecos/agent/docs/ecc-agent-rpc.md.
+    this.defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000
   }
 
   call<T>(

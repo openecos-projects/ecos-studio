@@ -1,4 +1,8 @@
-"""Read fixed ECOS workspace artifacts into optimization observations."""
+"""Read fixed ECOS workspace artifacts into optimization observations.
+
+Report-file contract: `ecos/agent/docs/ecc-agent-rpc.md` (renderer readers:
+step-dashboard stepDashboardData.ts, projectQorTrend.ts).
+"""
 
 from __future__ import annotations
 

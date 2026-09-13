@@ -13,6 +13,7 @@ _WORKSPACE_CREATE_RESULT_PREFIX = "workspace_create_result:"
 _WORKSPACE_CONTINUE_RESULT_PREFIX = "workspace_continue_result:"
 _WORKSPACE_SIGNOFF_INSPECTION_PREFIX = "workspace_signoff_inspection:"
 _WORKSPACE_SIGNOFF_RESULT_PREFIX = "workspace_signoff_result:"
+_WORKSPACE_PARAMETER_UPDATE_RESULT_PREFIX = "workspace_parameter_update_result:"
 
 
 def _source_workspace_roots(context: Mapping[str, Any]) -> tuple[Path, ...]:
@@ -138,6 +139,33 @@ def _workspace_signoff_result_payload(
     if status in {"failed", "blocked"} and not normalized_error:
         return None
     return value, status, normalized_error
+
+
+def _workspace_parameter_update_result(message: str) -> tuple[str, str, str] | None:
+    if not message.startswith(_WORKSPACE_PARAMETER_UPDATE_RESULT_PREFIX):
+        return None
+    try:
+        payload = json.loads(message.removeprefix(_WORKSPACE_PARAMETER_UPDATE_RESULT_PREFIX))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or set(payload) != {"update_id", "status", "error"}:
+        return None
+    update_id, status, error = (
+        payload.get("update_id"),
+        payload.get("status"),
+        payload.get("error"),
+    )
+    if (
+        not isinstance(update_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", update_id)
+        or status not in {"succeeded", "failed"}
+        or not isinstance(error, str)
+    ):
+        return None
+    normalized_error = re.sub(r"[\x00-\x1f\x7f]+", " ", error).strip()[:512]
+    if status == "failed" and not normalized_error:
+        return None
+    return update_id, status, normalized_error
 
 
 def _required_message(value: object) -> str:

@@ -817,6 +817,7 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.objectContaining({
         flowConfig,
         pdkJson: '/pdks/ics55/pdk.json',
@@ -840,6 +841,7 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.not.objectContaining({
         flowConfig: expect.anything(),
       }),
@@ -869,6 +871,7 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(client.calls.at(-2)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.objectContaining({
         pdkJson: '/pdks/ics55/pdk.json',
         sdc: '/constraints/top.sdc',
@@ -876,6 +879,7 @@ describe('EccWorkspaceRuntime', () => {
     })
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.not.objectContaining({
         sdc: expect.anything(),
       }),
@@ -914,6 +918,7 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(client.calls.at(-3)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.objectContaining({
         flowConfig,
         sdc: '/constraints/top.sdc',
@@ -921,6 +926,7 @@ describe('EccWorkspaceRuntime', () => {
     })
     expect(client.calls.at(-2)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.not.objectContaining({
         flowConfig: expect.anything(),
       }),
@@ -932,6 +938,7 @@ describe('EccWorkspaceRuntime', () => {
     )
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.not.objectContaining({
         flowConfig: expect.anything(),
         sdc: expect.anything(),
@@ -956,6 +963,7 @@ describe('EccWorkspaceRuntime', () => {
 
     expect(client.calls.at(-2)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.objectContaining({
         pdkJson: '/pdks/ics55/pdk.json',
         sdc: '',
@@ -963,6 +971,7 @@ describe('EccWorkspaceRuntime', () => {
     })
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
+      options: { timeoutMs: 120_000 },
       params: expect.not.objectContaining({
         sdc: expect.anything(),
       }),
