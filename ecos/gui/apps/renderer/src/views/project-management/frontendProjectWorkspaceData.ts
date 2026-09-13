@@ -85,6 +85,7 @@ export async function readFrontendProjectWorkspaceData(
                   result.texts[spec.hotspotsPath] ?? null,
                 ]),
               ),
+              frontendUnavailablePaths: result.unavailablePaths,
               flowText: flowText ?? null,
             },
             flow: flowText ? parseFrontendWorkspaceFlowStateMap(flowText) : {},

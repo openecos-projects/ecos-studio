@@ -61,6 +61,8 @@ export function buildFrontendProjectManagementProject(
         workspaceAnalysisInputs[workspace.id]?.frontendQorSummaryTexts ?? undefined,
       qorHotspotTexts:
         workspaceAnalysisInputs[workspace.id]?.frontendQorHotspotTexts ?? undefined,
+      unavailablePaths:
+        workspaceAnalysisInputs[workspace.id]?.frontendUnavailablePaths ?? undefined,
     })),
   )
   const bestWorkspaceId =

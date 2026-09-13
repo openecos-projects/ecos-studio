@@ -28,12 +28,18 @@
           </div>
           <div>
             <dt>Simulation</dt>
-            <dd :class="analysis.failedCases > 0 ? 'tone-bad' : 'tone-good'">
-              {{ passRateLabel(analysis.passRate) }}
-            </dd>
-            <small
-              >{{ analysis.passedCases }}/{{ analysis.totalCases }} cases passed</small
+            <dd
+              :class="
+                analysis.failedCases === null
+                  ? 'tone-neutral'
+                  : analysis.failedCases > 0
+                    ? 'tone-bad'
+                    : 'tone-good'
+              "
             >
+              {{ passRateLabel(analysis.passRate, analysis.totalCases) }}
+            </dd>
+            <small>{{ casesLabel(analysis.passedCases, analysis.totalCases) }}</small>
           </div>
           <div>
             <dt>Quality of Results</dt>
@@ -102,21 +108,45 @@
                 {{ qorStatusLabel(workspace.qorStatus) }}
               </span>
             </span>
-            <span role="cell" :class="workspace.errors > 0 ? 'tone-bad' : 'tone-good'">
-              {{ workspace.errors }}
+            <span
+              role="cell"
+              :class="
+                workspace.errors === null
+                  ? 'tone-neutral'
+                  : workspace.errors > 0
+                    ? 'tone-bad'
+                    : 'tone-good'
+              "
+            >
+              {{ numberLabel(workspace.errors) }}
             </span>
             <span
               role="cell"
-              :class="workspace.actionableWarnings > 0 ? 'tone-warn' : 'tone-good'"
-              :title="`${workspace.warnings} total warnings`"
+              :class="
+                workspace.actionableWarnings === null
+                  ? 'tone-neutral'
+                  : workspace.actionableWarnings > 0
+                    ? 'tone-warn'
+                    : 'tone-good'
+              "
+              :title="`${numberLabel(workspace.warnings)} total warnings`"
             >
-              {{ workspace.actionableWarnings }} actionable
+              {{ numberLabel(workspace.actionableWarnings) }} actionable
             </span>
-            <span role="cell" :class="workspace.failedCases > 0 ? 'tone-bad' : ''">
-              {{ workspace.passedCases }}/{{ workspace.totalCases }}
+            <span
+              role="cell"
+              :class="
+                workspace.failedCases === null
+                  ? 'tone-neutral'
+                  : workspace.failedCases > 0
+                    ? 'tone-bad'
+                    : ''
+              "
+            >
+              {{ casesLabel(workspace.passedCases, workspace.totalCases, false) }}
             </span>
             <span role="cell">{{ numberLabel(workspace.cycles) }}</span>
-            <span role="cell">{{ workspace.difftestPassed }}</span>
+            <span role="cell">{{ numberLabel(workspace.difftestPassed) }}</span>
           </button>
         </div>
       </section>
@@ -488,12 +518,24 @@ function stepStatusLabel(status: FrontendAnalysisStepStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
 
-function passRateLabel(value: number | null): string {
-  return value === null ? 'N/A' : `${Math.round(value * 100)}%`
+function passRateLabel(value: number | null, totalCases: number | null): string {
+  if (value !== null) return `${Math.round(value * 100)}%`
+  return totalCases === 0 ? 'N/A' : 'Unknown'
 }
 
 function numberLabel(value: number | null): string {
-  return value === null ? 'N/A' : new Intl.NumberFormat('en-US').format(value)
+  return value === null ? 'Unknown' : new Intl.NumberFormat('en-US').format(value)
+}
+
+function casesLabel(
+  passed: number | null,
+  total: number | null,
+  includeDescription = true,
+): string {
+  if (passed === null || total === null)
+    return includeDescription ? 'Unknown cases' : 'Unknown'
+  const value = `${passed}/${total}`
+  return includeDescription ? `${value} cases passed` : value
 }
 </script>
 

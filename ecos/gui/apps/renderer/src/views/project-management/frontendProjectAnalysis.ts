@@ -1,4 +1,7 @@
-import type { ProjectManifestFrontendFlowStep } from '@ecos-studio/shared'
+import {
+  projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  type ProjectManifestFrontendFlowStep,
+} from '@ecos-studio/shared'
 import {
   frontendQorForStepState,
   parseFrontendStepQorTexts,
@@ -51,6 +54,7 @@ export interface FrontendStepAnalysis {
   findings: FrontendAnalysisFinding[]
   qor: FrontendStepQorAnalysis
   available: boolean
+  unavailable: boolean
 }
 
 export interface FrontendWorkspaceAnalysis {
@@ -62,15 +66,15 @@ export interface FrontendWorkspaceAnalysis {
   completedSteps: number
   totalSteps: number
   progressPercent: number
-  errors: number
-  warnings: number
-  actionableWarnings: number
-  totalCases: number
-  passedCases: number
-  failedCases: number
+  errors: number | null
+  warnings: number | null
+  actionableWarnings: number | null
+  totalCases: number | null
+  passedCases: number | null
+  failedCases: number | null
   passRate: number | null
   cycles: number | null
-  difftestPassed: number
+  difftestPassed: number | null
   qorStatus: FrontendQorStatus
   qorPassedSteps: number
   qorAnalyzedSteps: number
@@ -88,9 +92,9 @@ export interface FrontendProjectAnalysis {
   completedSteps: number
   totalSteps: number
   progressPercent: number
-  totalCases: number
-  passedCases: number
-  failedCases: number
+  totalCases: number | null
+  passedCases: number | null
+  failedCases: number | null
   passRate: number | null
   qorPassWorkspaceCount: number
   qorBlockedWorkspaceCount: number
@@ -112,6 +116,7 @@ export interface FrontendWorkspaceAnalysisSource {
   qorMetricTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
   qorSummaryTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
   qorHotspotTexts?: Partial<Record<FrontendAnalysisStage, string | null>>
+  unavailablePaths?: readonly string[]
 }
 
 const FRONTEND_STAGE_LABELS: Record<FrontendAnalysisStage, string> = {
@@ -132,9 +137,9 @@ export function buildFrontendProjectAnalysis(
   const workspaces = sources.map(buildFrontendWorkspaceAnalysis)
   const completedSteps = sum(workspaces.map((workspace) => workspace.completedSteps))
   const totalSteps = sum(workspaces.map((workspace) => workspace.totalSteps))
-  const totalCases = sum(workspaces.map((workspace) => workspace.totalCases))
-  const passedCases = sum(workspaces.map((workspace) => workspace.passedCases))
-  const failedCases = sum(workspaces.map((workspace) => workspace.failedCases))
+  const totalCases = sumKnown(workspaces.map((workspace) => workspace.totalCases))
+  const passedCases = sumKnown(workspaces.map((workspace) => workspace.passedCases))
+  const failedCases = sumKnown(workspaces.map((workspace) => workspace.failedCases))
 
   return {
     workspaces,
@@ -155,7 +160,10 @@ export function buildFrontendProjectAnalysis(
     totalCases,
     passedCases,
     failedCases,
-    passRate: totalCases > 0 ? passedCases / totalCases : null,
+    passRate:
+      totalCases !== null && passedCases !== null && totalCases > 0
+        ? passedCases / totalCases
+        : null,
     qorPassWorkspaceCount: workspaces.filter(
       (workspace) => workspace.qorStatus === 'pass',
     ).length,
@@ -172,6 +180,7 @@ export function buildFrontendProjectAnalysis(
 function buildFrontendWorkspaceAnalysis(
   source: FrontendWorkspaceAnalysisSource,
 ): FrontendWorkspaceAnalysis {
+  const unavailablePaths = new Set(source.unavailablePaths ?? [])
   const steps = source.steps
     .filter(({ stage, status }) =>
       isConfiguredAnalysisStage(stage, status, source.startStage, source.endStage),
@@ -185,6 +194,7 @@ function buildFrontendWorkspaceAnalysis(
         source.qorMetricTexts?.[stage] ?? null,
         source.qorSummaryTexts?.[stage] ?? null,
         source.qorHotspotTexts?.[stage] ?? null,
+        unavailableArtifactsForStage(stage, unavailablePaths),
       ),
     )
   const completedSteps = steps.filter((step) =>
@@ -194,30 +204,120 @@ function buildFrontendWorkspaceAnalysis(
   const elab = parseRecord(source.detailTexts?.elab)
   const lint = parseRecord(source.detailTexts?.lint)
   const sim = parseRecord(source.detailTexts?.sim)
-  const errors =
-    numberAt(review, ['summary', 'rtl_review', 'errors']) +
-    numberAt(elab, ['summary', 'elab', 'errors']) +
-    numberAt(lint, ['summary', 'lint', 'cpu_errors'])
-  const warnings =
-    numberAt(review, ['summary', 'rtl_review', 'warnings']) +
-    numberAt(elab, ['summary', 'elab', 'warnings']) +
-    numberAt(lint, ['summary', 'lint', 'warnings'])
-  const actionableWarnings =
-    numberAt(review, ['summary', 'rtl_review', 'actionable_warnings']) +
-    numberAt(lint, ['summary', 'lint', 'cpu_warnings'])
-  const totalCases = numberAt(sim, ['summary', 'total_cases'])
-  const passedCases = numberAt(sim, ['summary', 'passed_cases'])
-  const failedCases = numberAt(sim, ['summary', 'failed_cases'])
-  const cases = arrayValue(sim?.cases)
+  const configuredStages = new Set(steps.map((step) => step.stage))
+  const stepStatusByStage = new Map(steps.map((step) => [step.stage, step.status]))
+  const errors = sumKnown([
+    aggregateNumber(
+      'review',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('review'),
+      review,
+      ['summary', 'rtl_review', 'errors'],
+    ),
+    aggregateNumber(
+      'elab',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('elab'),
+      elab,
+      ['summary', 'elab', 'errors'],
+    ),
+    aggregateNumber(
+      'lint',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('lint'),
+      lint,
+      ['summary', 'lint', 'cpu_errors'],
+    ),
+  ])
+  const warnings = sumKnown([
+    aggregateNumber(
+      'review',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('review'),
+      review,
+      ['summary', 'rtl_review', 'warnings'],
+    ),
+    aggregateNumber(
+      'elab',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('elab'),
+      elab,
+      ['summary', 'elab', 'warnings'],
+    ),
+    aggregateNumber(
+      'lint',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('lint'),
+      lint,
+      ['summary', 'lint', 'warnings'],
+    ),
+  ])
+  const actionableWarnings = sumKnown([
+    aggregateNumber(
+      'review',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('review'),
+      review,
+      ['summary', 'rtl_review', 'actionable_warnings'],
+    ),
+    aggregateNumber(
+      'lint',
+      configuredStages,
+      unavailablePaths,
+      stepStatusByStage.get('lint'),
+      lint,
+      ['summary', 'lint', 'cpu_warnings'],
+    ),
+  ])
+  const totalCases = aggregateNumber(
+    'sim',
+    configuredStages,
+    unavailablePaths,
+    stepStatusByStage.get('sim'),
+    sim,
+    ['summary', 'total_cases'],
+  )
+  const passedCases = aggregateNumber(
+    'sim',
+    configuredStages,
+    unavailablePaths,
+    stepStatusByStage.get('sim'),
+    sim,
+    ['summary', 'passed_cases'],
+  )
+  const failedCases = aggregateNumber(
+    'sim',
+    configuredStages,
+    unavailablePaths,
+    stepStatusByStage.get('sim'),
+    sim,
+    ['summary', 'failed_cases'],
+  )
+  const cases =
+    configuredStages.has('sim') && !isUnavailable('sim', 'detail', unavailablePaths)
+      ? arrayValue(sim?.cases)
+      : []
   const cycles = nullableSum(
     cases.map((item) => numberValue(recordValue(recordValue(item)?.metrics)?.cycles)),
   )
-  const difftestPassed = cases.filter(
-    (item) =>
-      stringValue(
-        recordValue(recordValue(recordValue(item)?.metrics)?.difftest)?.status,
-      ).toLowerCase() === 'passed',
-  ).length
+  const difftestPassed =
+    configuredStages.has('sim') &&
+    sim !== null &&
+    !isUnavailable('sim', 'detail', unavailablePaths)
+      ? cases.filter(
+          (item) =>
+            stringValue(
+              recordValue(recordValue(recordValue(item)?.metrics)?.difftest)?.status,
+            ).toLowerCase() === 'passed',
+        ).length
+      : null
   const qorPassedSteps = steps.filter((step) => step.qor.status === 'pass').length
   const qorAnalyzedSteps = steps.filter((step) => step.qor.available).length
   const qorObservedSteps = steps.filter(
@@ -254,7 +354,10 @@ function buildFrontendWorkspaceAnalysis(
     totalCases,
     passedCases,
     failedCases,
-    passRate: totalCases > 0 ? passedCases / totalCases : null,
+    passRate:
+      totalCases !== null && passedCases !== null && totalCases > 0
+        ? passedCases / totalCases
+        : null,
     cycles,
     difftestPassed,
     qorStatus,
@@ -273,6 +376,7 @@ function buildFrontendStepAnalysis(
   qorMetricsText: string | null,
   qorSummaryText: string | null,
   qorHotspotsText: string | null,
+  unavailable: FrontendStepArtifactAvailability,
 ): FrontendStepAnalysis {
   const detail = parseRecord(text)
   const runtime =
@@ -291,8 +395,64 @@ function buildFrontendStepAnalysis(
     metrics: stageMetrics(stage, detail),
     findings: stageFindings(workspaceId, stage, detail),
     qor: frontendQorForStepState(parsedQor, status),
-    available: detail !== null,
+    available: detail !== null && !unavailable.detail,
+    unavailable: Object.values(unavailable).some(Boolean),
   }
+}
+
+type FrontendArtifactKind = 'detail' | 'qorMetrics' | 'qorSummary' | 'qorHotspots'
+
+interface FrontendStepArtifactAvailability {
+  detail: boolean
+  qorMetrics: boolean
+  qorSummary: boolean
+  qorHotspots: boolean
+}
+
+function unavailableArtifactsForStage(
+  stage: FrontendAnalysisStage,
+  unavailablePaths: ReadonlySet<string>,
+): FrontendStepArtifactAvailability {
+  const spec = projectManagementFrontendWorkspaceStepAnalysisSpecs.find(
+    (candidate) => candidate.step === stage,
+  )
+  if (!spec) {
+    return { detail: false, qorMetrics: false, qorSummary: false, qorHotspots: false }
+  }
+  return {
+    detail: unavailablePaths.has(spec.detailPath),
+    qorMetrics: unavailablePaths.has(spec.metricsPath),
+    qorSummary: unavailablePaths.has(spec.summaryPath),
+    qorHotspots: unavailablePaths.has(spec.hotspotsPath),
+  }
+}
+
+function isUnavailable(
+  stage: FrontendAnalysisStage,
+  kind: FrontendArtifactKind,
+  unavailablePaths: ReadonlySet<string>,
+): boolean {
+  return unavailableArtifactsForStage(stage, unavailablePaths)[kind]
+}
+
+function aggregateNumber(
+  stage: FrontendAnalysisStage,
+  configuredStages: ReadonlySet<FrontendAnalysisStage>,
+  unavailablePaths: ReadonlySet<string>,
+  stepStatus: FrontendAnalysisStepStatus | undefined,
+  source: JsonRecord | null,
+  path: readonly string[],
+): number | null {
+  if (!configuredStages.has(stage)) return 0
+  if (isUnavailable(stage, 'detail', unavailablePaths)) return null
+  if (source === null) {
+    return stepStatus === 'unstart' ||
+      stepStatus === 'running' ||
+      stepStatus === 'skipped'
+      ? 0
+      : null
+  }
+  return numberAt(source, path)
 }
 
 function stageMetrics(
@@ -304,13 +464,17 @@ function stageMetrics(
       metric(
         'rtl_files',
         'RTL files',
-        numberAt(detail, ['summary', 'inputs', 'total_rtl_files']),
+        metricNumber(detail, ['summary', 'inputs', 'total_rtl_files']),
       ),
-      metric('defines', 'Defines', numberAt(detail, ['summary', 'inputs', 'defines'])),
+      metric(
+        'defines',
+        'Defines',
+        metricNumber(detail, ['summary', 'inputs', 'defines']),
+      ),
       metric(
         'incdirs',
         'Include dirs',
-        numberAt(detail, ['summary', 'inputs', 'incdirs']),
+        metricNumber(detail, ['summary', 'inputs', 'incdirs']),
       ),
     ]
   }
@@ -319,41 +483,46 @@ function stageMetrics(
       metric(
         'errors',
         'Errors',
-        numberAt(detail, ['summary', 'rtl_review', 'errors']),
+        metricNumber(detail, ['summary', 'rtl_review', 'errors']),
         true,
       ),
       metric(
         'warnings',
         'Warnings',
-        numberAt(detail, ['summary', 'rtl_review', 'warnings']),
+        metricNumber(detail, ['summary', 'rtl_review', 'warnings']),
         true,
       ),
       metric(
         'modules',
         'Modules',
-        numberAt(detail, ['summary', 'rtl_review', 'modules']),
+        metricNumber(detail, ['summary', 'rtl_review', 'modules']),
       ),
       metric(
         'source_files',
         'Source files',
-        numberAt(detail, ['summary', 'rtl_review', 'source_files']),
+        metricNumber(detail, ['summary', 'rtl_review', 'source_files']),
       ),
     ]
   }
   if (stage === 'elab') {
     return [
-      metric('errors', 'Errors', numberAt(detail, ['summary', 'elab', 'errors']), true),
+      metric(
+        'errors',
+        'Errors',
+        metricNumber(detail, ['summary', 'elab', 'errors']),
+        true,
+      ),
       metric(
         'warnings',
         'Warnings',
-        numberAt(detail, ['summary', 'elab', 'warnings']),
+        metricNumber(detail, ['summary', 'elab', 'warnings']),
         true,
       ),
-      metric('modules', 'Modules', numberAt(detail, ['summary', 'elab', 'modules'])),
+      metric('modules', 'Modules', metricNumber(detail, ['summary', 'elab', 'modules'])),
       metric(
         'unresolved',
         'Unresolved',
-        numberAt(detail, ['summary', 'elab', 'unresolved_modules']),
+        metricNumber(detail, ['summary', 'elab', 'unresolved_modules']),
         true,
       ),
     ]
@@ -363,26 +532,26 @@ function stageMetrics(
       metric(
         'cpu_errors',
         'CPU errors',
-        numberAt(detail, ['summary', 'lint', 'cpu_errors']),
+        metricNumber(detail, ['summary', 'lint', 'cpu_errors']),
         true,
       ),
       metric(
         'cpu_warnings',
         'CPU warnings',
-        numberAt(detail, ['summary', 'lint', 'cpu_warnings']),
+        metricNumber(detail, ['summary', 'lint', 'cpu_warnings']),
         true,
       ),
       metric(
         'total_warnings',
         'All warnings',
-        numberAt(detail, ['summary', 'lint', 'warnings']),
+        metricNumber(detail, ['summary', 'lint', 'warnings']),
       ),
-      metric('rules', 'Rules', numberAt(detail, ['summary', 'lint', 'rules'])),
+      metric('rules', 'Rules', metricNumber(detail, ['summary', 'lint', 'rules'])),
     ]
   }
-  const totalCases = numberAt(detail, ['summary', 'total_cases'])
-  const passedCases = numberAt(detail, ['summary', 'passed_cases'])
-  const failedCases = numberAt(detail, ['summary', 'failed_cases'])
+  const totalCases = metricNumber(detail, ['summary', 'total_cases'])
+  const passedCases = metricNumber(detail, ['summary', 'passed_cases'])
+  const failedCases = metricNumber(detail, ['summary', 'failed_cases'])
   return [
     metric('passed_cases', 'Passed', passedCases),
     metric('failed_cases', 'Failed', failedCases, true),
@@ -390,9 +559,24 @@ function stageMetrics(
     {
       id: 'pass_rate',
       label: 'Pass rate',
-      display: totalCases > 0 ? `${percentage(passedCases, totalCases)}%` : 'N/A',
-      value: totalCases > 0 ? passedCases / totalCases : null,
-      tone: totalCases === 0 ? 'neutral' : failedCases === 0 ? 'good' : 'bad',
+      display:
+        totalCases === null
+          ? 'Unknown'
+          : totalCases > 0
+            ? `${percentage(passedCases ?? 0, totalCases)}%`
+            : 'N/A',
+      value:
+        totalCases !== null && passedCases !== null && totalCases > 0
+          ? passedCases / totalCases
+          : null,
+      tone:
+        totalCases === null
+          ? 'neutral'
+          : totalCases === 0
+            ? 'neutral'
+            : failedCases === 0
+              ? 'good'
+              : 'bad',
     },
   ]
 }
@@ -517,15 +701,22 @@ function finding(
 function metric(
   id: string,
   label: string,
-  value: number,
+  value: number | null,
   zeroIsGood = false,
 ): FrontendAnalysisMetric {
   return {
     id,
     label,
-    display: String(value),
+    display: value === null ? 'Unknown' : String(value),
     value,
-    tone: zeroIsGood ? (value === 0 ? 'good' : 'warn') : 'neutral',
+    tone:
+      value === null
+        ? 'neutral'
+        : zeroIsGood
+          ? value === 0
+            ? 'good'
+            : 'warn'
+          : 'neutral',
   }
 }
 
@@ -580,6 +771,10 @@ function numberAt(source: JsonRecord | null, path: readonly string[]): number {
   return numberValue(valueAt(source, path)) ?? 0
 }
 
+function metricNumber(source: JsonRecord | null, path: readonly string[]): number | null {
+  return source === null ? null : numberAt(source, path)
+}
+
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -607,6 +802,11 @@ function percentage(value: number, total: number): number {
 
 function sum(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0)
+}
+
+function sumKnown(values: readonly (number | null)[]): number | null {
+  if (values.some((value) => value === null)) return null
+  return sum(values.map((value) => value as number))
 }
 
 function nullableSum(values: readonly (number | null)[]): number | null {

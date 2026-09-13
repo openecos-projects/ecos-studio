@@ -81,6 +81,8 @@ export interface ProjectWorkspaceAnalysisInput {
   frontendQorHotspotTexts?: Partial<
     Record<ProjectManifestFrontendFlowStep, string | null>
   >
+  /** Frontend artifacts that could not be read (missing files are not included). */
+  frontendUnavailablePaths?: readonly string[]
   flowText?: string | null
 }
 

@@ -4,6 +4,113 @@ import { buildFrontendProjectAnalysis } from './frontendProjectAnalysis'
 const inputFingerprint = 'a'.repeat(64)
 
 describe('buildFrontendProjectAnalysis', () => {
+  it('keeps unreadable detail artifacts unknown instead of treating them as zero', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_0001',
+        workspaceName: 'cpu',
+        workspacePath: '/projects/cpu/ws_0001',
+        status: 'success',
+        steps: [
+          { stage: 'prepare', status: 'success' },
+          { stage: 'review', status: 'success' },
+          { stage: 'elab', status: 'success' },
+          { stage: 'lint', status: 'success' },
+          { stage: 'sim', status: 'success' },
+        ],
+        detailTexts: {
+          review: null,
+          elab: JSON.stringify({ summary: { elab: { errors: 0, warnings: 0 } } }),
+          lint: JSON.stringify({ summary: { lint: { cpu_errors: 0, warnings: 0 } } }),
+          sim: JSON.stringify({
+            summary: { total_cases: 1, passed_cases: 1, failed_cases: 0 },
+            cases: [{ ok: true }],
+          }),
+        },
+        unavailablePaths: ['review_fe/report/frontend_detail.json'],
+      },
+    ])
+
+    expect(analysis).toMatchObject({
+      totalCases: 1,
+      passedCases: 1,
+      failedCases: 0,
+      passRate: 1,
+    })
+    expect(analysis.workspaces[0]).toMatchObject({
+      errors: null,
+      warnings: null,
+      actionableWarnings: null,
+    })
+    const review = analysis.workspaces[0]?.steps.find((step) => step.stage === 'review')
+    expect(review).toMatchObject({ available: false, unavailable: true })
+    expect(review?.metrics.find((metric) => metric.id === 'errors')).toMatchObject({
+      display: 'Unknown',
+      value: null,
+    })
+  })
+
+  it('keeps malformed detail aggregates unknown instead of treating them as zero', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_malformed',
+        workspaceName: 'Malformed report',
+        workspacePath: '/projects/cpu/ws_malformed',
+        status: 'success',
+        steps: [
+          { stage: 'review', status: 'success' },
+          { stage: 'sim', status: 'success' },
+        ],
+        detailTexts: {
+          review: '{not-json',
+          sim: '{not-json',
+        },
+      },
+    ])
+
+    expect(analysis.workspaces[0]).toMatchObject({
+      errors: null,
+      warnings: null,
+      actionableWarnings: null,
+      totalCases: null,
+      passedCases: null,
+      failedCases: null,
+      difftestPassed: null,
+    })
+  })
+
+  it('does not let an unstarted simulation workspace erase completed totals', () => {
+    const analysis = buildFrontendProjectAnalysis([
+      {
+        workspaceId: 'ws_complete',
+        workspaceName: 'Complete',
+        workspacePath: '/projects/cpu/ws_complete',
+        status: 'success',
+        steps: [{ stage: 'sim', status: 'success' }],
+        detailTexts: {
+          sim: JSON.stringify({
+            summary: { total_cases: 2, passed_cases: 1, failed_cases: 1 },
+          }),
+        },
+      },
+      {
+        workspaceId: 'ws_pending',
+        workspaceName: 'Pending',
+        workspacePath: '/projects/cpu/ws_pending',
+        status: 'running',
+        steps: [{ stage: 'sim', status: 'running' }],
+        detailTexts: { sim: null },
+      },
+    ])
+
+    expect(analysis).toMatchObject({
+      totalCases: 2,
+      passedCases: 1,
+      failedCases: 1,
+      passRate: 0.5,
+    })
+  })
+
   it('builds frontend health, comparison, and actionable findings from ECC-FE details', () => {
     const analysis = buildFrontendProjectAnalysis([
       {

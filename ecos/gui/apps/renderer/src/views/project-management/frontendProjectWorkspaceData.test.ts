@@ -61,7 +61,7 @@ describe('frontend project workspace data', () => {
         'prepare_fe/analysis/qor_hotspots.json': '{"schema_version":3}',
         'review_fe/report/frontend_detail.json': null,
       },
-      unavailablePaths: [],
+      unavailablePaths: ['review_fe/report/frontend_detail.json'],
     })
     const manifest = registerWorkspaceInManifest(
       createProjectManifestDraft({
@@ -94,6 +94,7 @@ describe('frontend project workspace data', () => {
           frontendQorHotspotTexts: {
             prepare: '{"schema_version":3}',
           },
+          frontendUnavailablePaths: ['review_fe/report/frontend_detail.json'],
         },
       },
       flowStates: {
