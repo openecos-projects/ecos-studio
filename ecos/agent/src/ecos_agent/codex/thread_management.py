@@ -23,7 +23,8 @@ from ecos_agent.optimization.contracts import PlanningProviderEnvelope
 
 _REPAIR_INSTRUCTION = (
     "The previous reply was rejected: it must be exactly one JSON object matching the "
-    "output schema, with no extra fields and no markdown. Respect the schema string "
+    "output schema, with no extra fields, no missing required fields, and no markdown. "
+    "Include every field named in schema_violation. Respect the schema string "
     "length limits: rationale and summary text is capped at 512 characters. Return the "
     "corrected JSON object only."
 )

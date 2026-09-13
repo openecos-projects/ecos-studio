@@ -249,6 +249,8 @@ def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypa
 
     assert response["queries"] == [{"root_id": "ecc", "query": "stop_overflow"}]
     assert "Return zero to five literal source-search queries" in str(captured["prompt"])
+    assert "schema_version, queries, rationale" in str(captured["prompt"])
+    assert '"rationale":"' in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "queries", "rationale"]
     assert captured["schema"]["properties"]["queries"]["maxItems"] == 5
     assert captured["tool_policy"] == "none"
