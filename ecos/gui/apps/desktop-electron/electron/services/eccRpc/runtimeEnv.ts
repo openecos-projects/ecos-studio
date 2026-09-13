@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import type { EccRuntimeTarget } from '@ecos-studio/shared'
 
@@ -157,16 +157,54 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
   return existsSync(candidate) ? candidate : null
 }
 
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function findOnPath(
+  executableName: string,
+  env: NodeJS.ProcessEnv,
+  platform: RuntimePlatform,
+): string | null {
+  const searchPath = env[getPathKey(env)] ?? ''
+  for (const directory of searchPath.split(platform === 'win32' ? ';' : ':')) {
+    if (!directory) continue
+    const candidate = join(directory, executableName)
+    if (isExecutableFile(candidate)) return candidate
+  }
+  return null
+}
+
+/**
+ * Resolution order mirrors the Python agent's `_ecc_executable()`
+ * (ecos_agent/optimization/runtime.py): explicit env override (validated,
+ * failing loudly on a misconfiguration), then GUI-specific packaged binary,
+ * then PATH, then repo-relative candidates. The joint contract lives in
+ * `ecos/agent/docs/ecc-agent-rpc.md`.
+ */
 export function resolveEccAgentExecutable(options: EccRuntimeEnvOptions): string | null {
   const configured = options.env.ECOS_AGENT_ECC_RPC_BIN?.trim()
-  if (configured) return existsSync(configured) ? resolve(configured) : null
+  if (configured) {
+    if (!existsSync(configured) || !isExecutableFile(configured)) {
+      throw new Error(`ECOS_AGENT_ECC_RPC_BIN is not executable: ${configured}`)
+    }
+    return resolve(configured)
+  }
 
   const executableName =
     options.platform === 'win32' ? 'ecc-agent-rpc.exe' : 'ecc-agent-rpc'
   if (options.isPackaged) {
     const candidate = join(resolvePackagedBinariesPath(options), executableName)
-    return existsSync(candidate) ? candidate : null
+    if (existsSync(candidate)) return candidate
   }
+
+  const fromPath = findOnPath(executableName, options.env, options.platform)
+  if (fromPath) return resolve(fromPath)
 
   const repoRoot = findRepoRootFromAppPath(options.appPath)
   if (!repoRoot) return null
@@ -175,7 +213,7 @@ export function resolveEccAgentExecutable(options: EccRuntimeEnvOptions): string
     join(repoRoot, 'ecc', '.venv', venvBin, executableName),
     join(repoRoot, 'ecc', 'dist', 'ecc', executableName),
   ]
-  return candidates.find((candidate) => existsSync(candidate)) ?? null
+  return candidates.find((candidate) => isExecutableFile(candidate)) ?? null
 }
 
 export function resolveEccSidecarLaunch(options: EccSidecarLaunchOptions): {

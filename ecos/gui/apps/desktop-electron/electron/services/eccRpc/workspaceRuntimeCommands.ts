@@ -75,6 +75,8 @@ export class WorkspaceRuntimeCommands {
           response = await client.call<EccWorkspaceSessionResult>(
             'workspace.create',
             workspaceCreatePayload(request, payloadOptions),
+            // PDK/workspace provisioning can exceed the 30s control-plane default.
+            { timeoutMs: 120_000 },
           )
         } catch (error) {
           if (

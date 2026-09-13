@@ -158,9 +158,32 @@ def test_global_parameters_are_tunable_before_any_stage_completes(tmp_path: Path
         WorkspaceFlow(ProviderSession(session_id="test")).tunable_parameters(workspace)
     )
     assert available["design.frequency_max"] == 100
-    assert available["floorplan.utilitization"] == 0.4
-    assert available["floorplan.die_width"] == 100.0
     assert available["place.target_density"] == 0.55
+
+
+def test_floorplan_geometry_is_outside_the_gui_rerun_surface(tmp_path: Path) -> None:
+    """The Electron execution gate rejects floorplan knobs, so the agent never
+    offers them (product decision 2026-09-13, ecos/agent/docs/diff.md #8)."""
+    from ecos_agent.workspace.authorization import authorized_knobs_for_step
+    from ecos_agent.workspace.rerun import GuiWorkspaceRerunResolver
+
+    assert authorized_knobs_for_step(ECCStepName.FLOORPLAN) == frozenset()
+
+    workspace = _workspace_without_completed_stages(tmp_path)
+    available = dict(
+        WorkspaceFlow(ProviderSession(session_id="test")).tunable_parameters(workspace)
+    )
+    assert not any(knob_id.startswith("floorplan.") for knob_id in available)
+
+    with pytest.raises(ValueError, match="not available in this workspace"):
+        WorkspaceFlow(ProviderSession(session_id="test")).validate_parameter_patch(
+            [{"knob_id": "floorplan.die_width", "value": 250.0}], available
+        )
+
+    with pytest.raises(ValueError, match="not authorized"):
+        GuiWorkspaceRerunResolver.validate_patch(
+            "Floorplan", [{"knob_id": "floorplan.die_width", "value": 250.0}]
+        )
 
 
 def test_parameter_update_contract_carries_resolved_writes(tmp_path: Path) -> None:
@@ -170,8 +193,8 @@ def test_parameter_update_contract_carries_resolved_writes(tmp_path: Path) -> No
     def parse_parameter(_context: dict[str, object]) -> dict[str, object]:
         return {
             "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
-            "parameter_patch": [{"knob_id": "floorplan.utilitization", "value": 0.7}],
-            "summary": "Raise core utilization.",
+            "parameter_patch": [{"knob_id": "place.target_density", "value": 0.7}],
+            "summary": "Raise target density.",
         }
 
     provider = EcosAgentProvider(emit=events.append, rerun_parameter_parser=parse_parameter)
@@ -179,7 +202,7 @@ def test_parameter_update_contract_carries_resolved_writes(tmp_path: Path) -> No
         "sessionId"
     ]
     provider._begin_workspace_parameter_update(provider.sessions[session_id])
-    _send(provider, session_id, "raise utilization to 0.7")
+    _send(provider, session_id, "raise target density to 0.7")
 
     session = provider.sessions[session_id]
     assert session.phase == "workspace_parameter_confirmation"
@@ -188,10 +211,10 @@ def test_parameter_update_contract_carries_resolved_writes(tmp_path: Path) -> No
     assert contract["schema_version"] == "flow-agent.workspace_parameter_update_contract.v2"
     assert contract["writes"] == [
         {
-            "knob_id": "floorplan.utilitization",
+            "knob_id": "place.target_density",
             "value": 0.7,
             "surface": "parameters",
             "file": "home/parameters.json",
-            "json_path": ["Core", "Utilitization"],
+            "json_path": ["Target density"],
         }
     ]

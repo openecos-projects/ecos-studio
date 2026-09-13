@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ECC_FLOW_STEPS } from '@ecos-studio/shared'
 import source from './App.vue?raw'
 
 describe('agent workspace creation', () => {
@@ -140,7 +141,24 @@ describe('quick start resources', () => {
     const workspaceEnd = source.indexOf('const createdConfig', workspaceStart)
     const workspaceSource = source.slice(workspaceStart, workspaceEnd)
     expect(workspaceSource).toContain("design: 'gcd'")
-    expect(workspaceSource).toContain("'Timing optimization'")
+    expect(workspaceSource).toContain('steps: [...ECC_FLOW_STEPS],')
+    expect([...ECC_FLOW_STEPS]).toEqual([
+      'Synthesis',
+      'lec',
+      'Floorplan',
+      'place',
+      'CTS',
+      'legalization',
+      'Timing optimization',
+      'route',
+      'drc',
+      'lvs',
+      'filler',
+      'postRouteLec',
+      'RCX',
+      'sta',
+      'Harden',
+    ])
     expect(workspaceSource).toContain("top_module: ''")
     expect(workspaceSource).toContain("clock: ''")
     expect(source).toContain('input.value += character')

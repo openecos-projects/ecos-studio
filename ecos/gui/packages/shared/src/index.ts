@@ -102,6 +102,13 @@ export type {
   EccWorkspaceSyncConfigResult,
   EccWorkspaceRuntimeSnapshot,
 } from './contracts/eccRuntime.ts'
+export {
+  ECC_CATALOG_END_STEP,
+  ECC_DEFAULT_STEP_TOOLS,
+  ECC_FLOW_STEPS,
+  ECC_FLOW_STEP_SET,
+  type EccFlowStep,
+} from './contracts/eccFlowSteps.ts'
 export type {
   ResourceAction,
   ResourceImportLocalRequest,

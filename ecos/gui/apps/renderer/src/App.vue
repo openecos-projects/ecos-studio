@@ -233,6 +233,7 @@ import {
   type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
   type DesktopApi,
+  ECC_FLOW_STEPS,
   type QuickStartBuiltinResources,
   type ResourceInfo,
 } from '@ecos-studio/shared'
@@ -662,21 +663,9 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
           flow_config: {
             start_step: 'Synthesis',
             end_step: 'Harden',
-            steps: [
-              'Synthesis',
-              'Floorplan',
-              'place',
-              'CTS',
-              'legalization',
-              'Timing optimization',
-              'route',
-              'drc',
-              'lvs',
-              'filler',
-              'RCX',
-              'sta',
-              'Harden',
-            ],
+            // Full ECC flow catalog, identical to the agent wizard's default
+            // range (product decision 2026-09-13, see ecos/agent/docs/diff.md #7).
+            steps: [...ECC_FLOW_STEPS],
           },
           mpc: (input.project as { mpc?: WorkspaceConfig['mpc'] }).mpc ?? null,
           project_context: {

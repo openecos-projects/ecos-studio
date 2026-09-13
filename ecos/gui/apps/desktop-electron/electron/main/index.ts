@@ -156,7 +156,14 @@ function getDesktopServices() {
     userDataPath: app.getPath('userData'),
   }
   const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
-  const eccAgentExecutable = resolveEccAgentExecutable(eccRuntimeOptions)
+  let eccAgentExecutable: string | null = null
+  try {
+    eccAgentExecutable = resolveEccAgentExecutable(eccRuntimeOptions)
+  } catch (error) {
+    // A misconfigured ECOS_AGENT_ECC_RPC_BIN disables the agent runtime target
+    // but must not block app startup; the error names the exact cause.
+    electronLogger.error('[runtime] Agent RPC executable resolution failed', error)
+  }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
   if (eccAgentExecutable) runtimeEnv.ECOS_AGENT_ECC_RPC_BIN = eccAgentExecutable
   if (eccExecutable) {

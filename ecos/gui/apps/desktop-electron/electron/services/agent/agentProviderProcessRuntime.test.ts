@@ -888,6 +888,7 @@ describe('AgentProviderProcessRuntime', () => {
               end_step: 'Harden',
               steps: [
                 'Synthesis',
+                'lec',
                 'Floorplan',
                 'place',
                 'CTS',

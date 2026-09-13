@@ -279,7 +279,7 @@ def test_stdio_client_allows_candidate_resume(monkeypatch, tmp_path: Path) -> No
         (
             "candidate.resume",
             {"candidateId": "candidate-1"},
-            10.0,
+            30.0,
         )
     ]
 

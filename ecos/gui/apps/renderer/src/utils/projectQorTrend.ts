@@ -1,8 +1,14 @@
+/**
+ * Project QoR trend parsing. The report-file contract is specified in
+ * `ecos/agent/docs/ecc-agent-rpc.md`; the agent's Python reader for the same files
+ * is `ecos_agent/optimization/observations.py`.
+ */
 import type {
   FlowStep,
   ProjectStepStatus,
   ProjectWorkspaceStatus,
 } from './projectManagement'
+import { projectManifestFlowSteps } from '@ecos-studio/shared'
 
 export type QorDimension =
   | 'timing'
@@ -442,21 +448,8 @@ interface QorMetricDefinition {
   polarity: QorPolarity
 }
 
-const QOR_FLOW_STEPS: FlowStep[] = [
-  'Synth',
-  'Floor',
-  'Place',
-  'CTS',
-  'Legal',
-  'Sizer',
-  'Route',
-  'DRC',
-  'LVS',
-  'Filler',
-  'RCX',
-  'STA',
-  'Harden',
-]
+// Shared 13-step project dashboard catalog (@ecos-studio/shared, projectManifest).
+const QOR_FLOW_STEPS = projectManifestFlowSteps
 
 /** The 0-100 QoR score line that separates the Home pass and fail presentation. */
 export const QOR_SCORE_THRESHOLD = 60

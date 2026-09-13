@@ -1,3 +1,10 @@
+/**
+ * Step-dashboard QoR parsing. The report-file contract (qor_metrics.json /
+ * qor_summary.json / qor_hotspots) is specified in `ecos/agent/docs/ecc-agent-rpc.md`;
+ * the agent's Python reader for the same files is
+ * `ecos_agent/optimization/observations.py` — keep both aligned with the
+ * contract until a structured-QoR RPC replaces file parsing.
+ */
 import type { DashboardPieSlice } from '@/components/home/dashboardData'
 import type { FlowStep } from '@/utils/projectManagement'
 import {

@@ -794,6 +794,7 @@ from ecos_agent.gui.workspace_results import (  # noqa: E402
     _source_workspace_roots,
     _workspace_continue_result,
     _workspace_creation_result,
+    _workspace_parameter_update_result,
     _workspace_signoff_inspection_result,
     _workspace_signoff_result,
     _workspace_signoff_result_payload,

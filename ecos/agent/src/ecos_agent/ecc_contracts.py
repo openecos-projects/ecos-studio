@@ -6,6 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 
 class ECCStepName(StrEnum):
+    """Canonical ECC flow step catalog.
+
+    The Electron counterpart is `ECC_FLOW_STEPS`
+    (ecos/gui/packages/shared/src/contracts/eccFlowSteps.ts) — keep entries and
+    order identical; the joint contract lives in `ecos/agent/docs/ecc-agent-rpc.md`.
+    """
+
     SYNTHESIS = "Synthesis"
     LEC = "lec"
     FLOORPLAN = "Floorplan"

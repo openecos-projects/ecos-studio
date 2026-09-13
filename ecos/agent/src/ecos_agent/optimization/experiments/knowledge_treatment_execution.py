@@ -190,9 +190,7 @@ def _ensure_workspace(
             _verify_workspace_inputs(manifest, design, workspace)
             return _terminal_observation(workspace)
         _verify_workspace_binding(manifest, design, workspace)
-        client = EccContentLengthRpcClient(
-            _ecc_executable(), response_timeout_seconds=30
-        )
+        client = EccContentLengthRpcClient(_ecc_executable())
         try:
             workspace_id = client.open_workspace(workspace)
             _run_canonical_flow(client, workspace_id, design.design_id, timeout)
@@ -202,7 +200,7 @@ def _ensure_workspace(
         return _terminal_observation(workspace)
     if workspace.exists():
         raise ValueError("incomplete Phase 8 workspace already exists")
-    client = EccContentLengthRpcClient(_ecc_executable(), response_timeout_seconds=30)
+    client = EccContentLengthRpcClient(_ecc_executable())
     try:
         request = _workspace_request(manifest, design, workspace)
         created = _setup_request(client, "workspace.create", request, 120.0)
@@ -566,9 +564,7 @@ def _run_default_replay(
     )
     started = time.monotonic()
     if not isinstance(terminal, dict) or terminal.get("state") != "succeeded":
-        client = EccContentLengthRpcClient(
-            _ecc_executable(), response_timeout_seconds=30
-        )
+        client = EccContentLengthRpcClient(_ecc_executable())
         request = {
             "workspaceId": client.open_workspace(replay_workspace),
             "rerun": True,

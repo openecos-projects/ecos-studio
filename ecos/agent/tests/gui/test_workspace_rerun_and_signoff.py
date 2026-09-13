@@ -489,6 +489,85 @@ def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
     assert not any(event["type"] == "contract" for event in events)
 
 
+def _parameter_update_pending_session(
+    provider: EcosAgentProvider, session_id: str, update_id: str = "update-1"
+) -> None:
+    provider.sessions[session_id].workspace_parameter_update = {
+        "schema_version": "flow-agent.workspace_parameter_update_contract.v2",
+        "update_id": update_id,
+        "workspace": "/work/demo",
+        "parameter_patch": [{"knob_id": "place.target_density", "value": 0.4}],
+        "writes": [],
+    }
+    provider.sessions[session_id].phase = "workspace_parameter_pending"
+
+
+def test_workspace_parameter_update_result_requires_strict_receipt() -> None:
+    provider = EcosAgentProvider(emit=lambda *args, **kwargs: None)
+    session_id = provider.start_session({"mode": "workspace"})["sessionId"]
+    _parameter_update_pending_session(provider, session_id, update_id="update-1")
+    session = provider.sessions[session_id]
+
+    malformed = [
+        'workspace_parameter_update_result:{"status": "succeeded"}',
+        "workspace_parameter_update_result:not-json",
+        "workspace_parameter_update_result:"
+        + json.dumps({"update_id": "update-1", "status": "failed", "error": ""}),
+        "workspace_parameter_update_result:"
+        + json.dumps(
+            {"update_id": "update-1", "status": "succeeded", "error": "", "extra": 1}
+        ),
+    ]
+    for message in malformed:
+        provider._handle_workspace_parameter_update_result(session, message)
+        assert session.phase == "workspace_parameter_pending"
+        assert session.workspace_parameter_update is not None
+
+
+def test_workspace_parameter_update_result_matches_pending_contract() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "workspace"})["sessionId"]
+    _parameter_update_pending_session(provider, session_id, update_id="update-1")
+    session = provider.sessions[session_id]
+
+    provider._handle_workspace_parameter_update_result(
+        session,
+        "workspace_parameter_update_result:"
+        + json.dumps({"update_id": "other", "status": "succeeded", "error": ""}),
+    )
+    assert "does not match the pending contract" in str(events[-1]["text"])
+    assert session.workspace_parameter_update is not None
+
+    provider._handle_workspace_parameter_update_result(
+        session,
+        "workspace_parameter_update_result:"
+        + json.dumps({"update_id": "update-1", "status": "failed", "error": "disk full"}),
+    )
+    assert session.workspace_parameter_update is None
+    assert any(
+        event["type"] == "message" and "disk full" in str(event["text"]) for event in events
+    )
+
+
+def test_workspace_parameter_update_result_success_saves_parameters() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+    session_id = provider.start_session({"mode": "workspace"})["sessionId"]
+    _parameter_update_pending_session(provider, session_id, update_id="update-1")
+    session = provider.sessions[session_id]
+
+    provider._handle_workspace_parameter_update_result(
+        session,
+        "workspace_parameter_update_result:"
+        + json.dumps({"update_id": "update-1", "status": "succeeded", "error": ""}),
+    )
+    assert session.workspace_parameter_update is None
+    assert any(
+        event["type"] == "message" and "were saved" in str(event["text"]) for event in events
+    )
+
+
 def test_invalid_choice_and_creation_failed_copy_point_to_cards() -> None:
     from ecos_agent.gui.messages import invalid_choice, workspace_creation_failed
 

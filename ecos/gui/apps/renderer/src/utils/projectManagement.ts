@@ -1,5 +1,6 @@
 import {
   ensureProjectQorBaseline,
+  projectManifestFlowSteps,
   type PdkRequirement,
   type ResourceInfo,
 } from '@ecos-studio/shared'
@@ -16,21 +17,8 @@ import {
   type ProjectAnalysisSnapshot,
 } from './projectAnalysisSnapshot'
 
-export const FLOW_STEPS = [
-  'Synth',
-  'Floor',
-  'Place',
-  'CTS',
-  'Legal',
-  'Sizer',
-  'Route',
-  'DRC',
-  'LVS',
-  'Filler',
-  'RCX',
-  'STA',
-  'Harden',
-] as const
+// Shared 13-step project dashboard catalog (@ecos-studio/shared, projectManifest).
+export const FLOW_STEPS = projectManifestFlowSteps
 
 export type FlowStep = (typeof FLOW_STEPS)[number]
 export type ProjectStepStatus =
