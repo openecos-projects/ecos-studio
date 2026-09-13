@@ -280,6 +280,7 @@ def _append_intervention(
     requested = RequestedKnobValue(knob_id="place.cell_padding_x", value=index % 4)
     ledger.append_start(
         OptimizationInterventionStart(
+            record_type="intervention_started",
             intervention_id=intervention_id,
             parent_checkpoint_id=scope.checkpoint_id,
             candidate_checkpoint_id=f"candidate-{index}",
@@ -302,6 +303,7 @@ def _append_intervention(
                 _parameter_application_receipt(requested.value)
             )
         terminal_outcome = OptimizationTerminalOutcome(
+            record_type="terminal_outcome",
             intervention_id=intervention_id,
             outcome=outcome,
             candidate_manifest_sha256=HASH,
@@ -366,6 +368,7 @@ def test_memory_promotes_only_terminal_closed_evidence_and_sync_is_idempotent(
     native_receipt = _parameter_application_receipt(1)
     ledger.append_terminal(
         OptimizationTerminalOutcome(
+            record_type="terminal_outcome",
             intervention_id="intervention-1",
             outcome=OptimizationOutcomeKind.IMPROVED,
             candidate_manifest_sha256=HASH,

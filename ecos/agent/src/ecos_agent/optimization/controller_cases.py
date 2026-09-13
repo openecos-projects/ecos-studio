@@ -165,6 +165,7 @@ class ControllerCaseRecordingMixin:
     ) -> None:
         self._case_audit.append_diagnostic(
             EmpiricalCaseDiagnostic(
+                schema_version="ecos.knowledge_case_diagnostic.v1",
                 intervention_id=outcome.intervention_id,
                 reason_code=reason_code,
                 proposal_sha256=(

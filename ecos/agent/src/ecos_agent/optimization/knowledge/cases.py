@@ -395,6 +395,7 @@ def build_terminal_empirical_case(
     if terminal_outcome_sha256 not in {None, outcome_hash}:
         raise ValueError("terminal outcome hash does not match content")
     return TerminalEmpiricalCase(
+        schema_version="ecos.terminal_empirical_case.v3",
         case_id=case_id,
         **derived,
         requested_value=requested,
@@ -497,6 +498,7 @@ def build_empirical_case_audit(
         if actual is not None and actual != expected:
             raise ValueError("case audit evidence refs do not match selected cases")
     return EmpiricalCaseAudit(
+        schema_version="ecos.knowledge_case_selection_audit.v1",
         selection=selection,
         selected_case_sha256=tuple(item.case_sha256 for item in cases),
         proposal_refs=derived[0],
@@ -659,6 +661,7 @@ class EmpiricalCaseAuditStore:
     ) -> EmpiricalCaseAuditEntry:
         sequence = replay.event_count + 1
         entry = EmpiricalCaseAuditEntry(
+            schema_version="ecos.knowledge_case_audit_entry.v1",
             sequence=sequence,
             previous_entry_sha256=replay.chain_head_sha256,
             payload=payload,
@@ -666,7 +669,9 @@ class EmpiricalCaseAuditStore:
                 sequence, replay.chain_head_sha256, payload
             ),
         )
-        encoded = _canonical_json(entry.model_dump(mode="json")) + b"\n"
+        encoded = (
+            _canonical_json(entry.model_dump(mode="json", exclude_unset=True)) + b"\n"
+        )
         with self.audit_path.open("ab") as stream:
             stream.write(encoded)
             stream.flush()
@@ -776,11 +781,14 @@ def _entry_sha256(
     previous_entry_sha256: str | None,
     payload: CaseAuditPayload,
 ) -> str:
+    # exclude_unset keeps records written by older revisions verifiable when
+    # optional payload fields are added later; present fields still re-enter
+    # the hash.
     return canonical_sha256(
         {
             "sequence": sequence,
             "previous_entry_sha256": previous_entry_sha256,
-            "payload": payload.model_dump(mode="json"),
+            "payload": payload.model_dump(mode="json", exclude_unset=True),
         }
     )
 

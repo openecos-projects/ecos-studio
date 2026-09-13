@@ -5,7 +5,8 @@ import pytest
 
 import ecos_agent.gui.support as provider_support
 from ecos_agent.codex.provider import CodexAppServerProposalProvider, CodexProviderError
-from ecos_agent.knowledge.contracts import StageRoutingProposal
+from ecos_agent.knowledge.contracts import SourceSearchProposal, StageRoutingProposal
+from ecos_agent.knowledge.source import SourceSearchResult
 from ecos_agent.gui.provider import EcosAgentProvider
 
 from .provider_support import (
@@ -104,7 +105,7 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     captured: dict[str, object] = {}
 
     def capture_turn(
-        prompt: str, schema: dict[str, object], *, tool_policy: str
+        prompt: str, schema: dict[str, object], *, tool_policy: str, effort: str | None = None
     ) -> str:
         captured.update(prompt=prompt, schema=schema, tool_policy=tool_policy)
         return json.dumps(_chat_response(answer="Hello.", evidence_ids=["source-1"]))
@@ -149,6 +150,8 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     assert "Use retrieved_knowledge and retrieved_code only as read-only factual context" in str(captured["prompt"])
     assert "State the conclusion first" in str(captured["prompt"])
     assert "execution, closure, or QoR evidence" in str(captured["prompt"])
+    assert "close by weaving one relevant caveat into the flow" in str(captured["prompt"])
+    assert "label headings such as Meaning, Role, or Caveat" in str(captured["prompt"])
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert "def route(): ..." in str(captured["prompt"])
     assert captured["schema"]["properties"]["evidence_ids"]["maxItems"] == 12
@@ -223,7 +226,7 @@ def test_source_search_prompt_is_bounded_and_structured(tmp_path: Path, monkeypa
     captured: dict[str, object] = {}
 
     def capture_turn(
-        prompt: str, schema: dict[str, object], *, tool_policy: str
+        prompt: str, schema: dict[str, object], *, tool_policy: str, effort: str | None = None
     ) -> str:
         captured.update(prompt=prompt, schema=schema, tool_policy=tool_policy)
         return json.dumps(
@@ -263,7 +266,7 @@ def test_stage_routing_prompt_is_read_only_and_bounded(tmp_path: Path, monkeypat
     captured: dict[str, object] = {}
 
     def capture_turn(
-        prompt: str, schema: dict[str, object], *, tool_policy: str
+        prompt: str, schema: dict[str, object], *, tool_policy: str, effort: str | None = None
     ) -> str:
         captured.update(prompt=prompt, schema=schema, tool_policy=tool_policy)
         return json.dumps(
@@ -366,12 +369,12 @@ def test_out_of_scope_chat_is_refused_before_retrieval_and_preserves_phase(tmp_p
     ]
     original_operations = set(provider.sessions[session_id].pending_interaction["values"].values())
 
-    _send(provider, session_id, "What does CTS stand for in New York transit?")
+    _send(provider, session_id, "What is the capital of France?")
     _send(provider, session_id, "帝国大厦多高？")
 
     message = _last_event(events, "message")
     assert classified_requests == [
-        "What does CTS stand for in New York transit?",
+        "What is the capital of France?",
         "帝国大厦多高？",
     ]
     assert provider.sessions[session_id].phase == "operation"
@@ -527,3 +530,259 @@ def test_started_provider_enables_default_stage_routing(monkeypatch) -> None:
 
     assert stage_contexts[0]["schema_version"] == "flow-agent.stage_routing_request.v1"
     assert stage_contexts[0]["stage_catalog"]
+
+
+def test_known_term_answers_despite_out_of_scope_routing() -> None:
+    events: list[dict[str, object]] = []
+    routed: list[str] = []
+
+    def route_out_of_scope(context: dict[str, object]) -> dict[str, object]:
+        routed.append(str(context["natural_language_request"]))
+        return {
+            "schema_version": "flow-agent.stage_routing_proposal.v1",
+            "scope": "out_of_scope",
+            "candidate_stages": [],
+            "rationale": "Unrelated to IC, EDA, or ECOS Studio.",
+        }
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        stage_routing_parser=route_out_of_scope,
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [],
+            "rationale": "No source lookup is required.",
+        },
+        chat_response_parser=lambda _context: _chat_response(
+            answer="CTS is clock-tree synthesis in ECOS."
+        ),
+    )
+    provider._started = True
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "What does CTS stand for in New York transit?")
+
+    message = _last_event(events, "message")
+    assert routed == ["What does CTS stand for in New York transit?"]
+    assert message["text"] == "CTS is clock-tree synthesis in ECOS."
+    assert message["contract"]["backend"] == "local_codex_cli"
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_deterministic_stage_match_skips_the_routing_turn(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+
+    def answer(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return _chat_response(answer="Target density bounds cell area in placement.")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=answer,
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [],
+            "rationale": "No source lookup is required.",
+        },
+    )
+
+    def unexpected_provider(**_kwargs: object) -> object:
+        raise AssertionError("a deterministic stage match must not spawn Codex for routing")
+
+    provider.chat_provider_factory = unexpected_provider
+    monkeypatch.setattr("ecos_agent.gui.provider.validate_required_codex_cli", lambda: "codex")
+    provider.start()
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "what is the target density")
+
+    fusion = contexts[0]["retrieved_knowledge"]["retrieval"]["fusion"]
+    assert fusion["routing"] == {
+        "status": "not_requested",
+        "reason": "deterministic_stage_scope",
+    }
+    assert fusion["deterministic_stage_scope"]["candidate_stages"] == [
+        "cts",
+        "legalization",
+        "place",
+    ]
+    assert _last_event(events, "message")["text"] == "Target density bounds cell area in placement."
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_default_routing_falls_back_to_the_shared_session_provider(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    routing_calls: list[tuple[str, str | None]] = []
+
+    class SharedProvider:
+        def interrupt(self) -> None:
+            pass
+
+        def clear_interrupted(self) -> None:
+            pass
+
+        def propose_stage_routing(
+            self, context: dict[str, object], *, effort: str | None = None
+        ) -> dict[str, object]:
+            routing_calls.append((str(context["natural_language_request"]), effort))
+            return {
+                "schema_version": "flow-agent.stage_routing_proposal.v1",
+                "scope": "in_scope",
+                "candidate_stages": ["place"],
+                "rationale": "Fallback routing proposal.",
+            }
+
+        def respond_to_gui_chat(self, _context: dict[str, object]) -> dict[str, object]:
+            return _chat_response(answer="Check the ECOS workspace Python environment.")
+
+    provider = EcosAgentProvider(
+        emit=events.append,
+        source_retrieval_parser=lambda _context: {
+            "schema_version": "flow-agent.source_search_proposal.v1",
+            "queries": [],
+            "rationale": "No source lookup is required.",
+        },
+    )
+    monkeypatch.setattr("ecos_agent.gui.provider.validate_required_codex_cli", lambda: "codex")
+    provider.start()
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].codex_provider = SharedProvider()
+
+    _send(provider, session_id, "How should I diagnose this ECOS Studio Python import failure?")
+
+    assert routing_calls == [
+        ("How should I diagnose this ECOS Studio Python import failure?", "low")
+    ]
+    assert _last_event(events, "message")["text"] == "Check the ECOS workspace Python environment."
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_deterministic_source_evidence_skips_the_query_generation_turn(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    contexts: list[dict[str, object]] = []
+
+    def answer(context: dict[str, object]) -> dict[str, object]:
+        contexts.append(context)
+        return _chat_response(answer="Target density is defined in the placement configuration.")
+
+    provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer)
+
+    def unexpected_provider(**_kwargs: object) -> object:
+        raise AssertionError("deterministic source evidence must not spawn Codex")
+
+    provider.chat_provider_factory = unexpected_provider
+    monkeypatch.setattr("ecos_agent.gui.provider.validate_required_codex_cli", lambda: "codex")
+    provider.start()
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+
+    _send(provider, session_id, "what is the target density")
+
+    code = contexts[0]["retrieved_code"]
+    assert any(query["query"] == "target_density" for query in code["queries"])
+    assert code["evidence"]
+    assert _last_event(events, "message")["contract"]["source_evidence_ids"] == []
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_source_query_generation_falls_back_to_the_session_provider(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+    source_calls: list[str | None] = []
+
+    class SharedProvider:
+        def interrupt(self) -> None:
+            pass
+
+        def clear_interrupted(self) -> None:
+            pass
+
+        def propose_stage_routing(
+            self, _context: dict[str, object], *, effort: str | None = None
+        ) -> dict[str, object]:
+            return {
+                "schema_version": "flow-agent.stage_routing_proposal.v1",
+                "scope": "in_scope",
+                "candidate_stages": [],
+                "rationale": "General assistance.",
+            }
+
+        def propose_source_search(
+            self, _context: dict[str, object], *, effort: str | None = None
+        ) -> dict[str, object]:
+            source_calls.append(effort)
+            return {
+                "schema_version": "flow-agent.source_search_proposal.v1",
+                "queries": [],
+                "rationale": "No source lookup improves this answer.",
+            }
+
+        def respond_to_gui_chat(self, _context: dict[str, object]) -> dict[str, object]:
+            return _chat_response(answer="Try reinstalling the ECOS Agent runtime.")
+
+    provider = EcosAgentProvider(emit=events.append)
+
+    class EmptyRetriever:
+        available_root_ids = ("ecos",)
+        source_workspace_roots: tuple[Path, ...] = ()
+
+        def retrieve(self, proposal: SourceSearchProposal) -> SourceSearchResult:
+            return SourceSearchResult(
+                proposal_sha256="sha256:test",
+                queries=tuple(query.model_dump(mode="json") for query in proposal.queries),
+                available_root_ids=("ecos",),
+                unavailable_root_ids=(),
+                evidence=(),
+                result_limit_reached=False,
+            )
+
+    provider.source_retriever = EmptyRetriever()
+    monkeypatch.setattr("ecos_agent.gui.provider.validate_required_codex_cli", lambda: "codex")
+    provider.start()
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    provider.sessions[session_id].codex_provider = SharedProvider()
+
+    _send(provider, session_id, "Could you help with this?")
+
+    assert source_calls == ["low"]
+    assert _last_event(events, "message")["text"] == "Try reinstalling the ECOS Agent runtime."
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_proposal_turns_accept_a_reasoning_effort_override(tmp_path: Path, monkeypatch) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    captured: dict[str, object] = {}
+
+    def capture_turn(
+        prompt: str, schema: dict[str, object], *, tool_policy: str, effort: str | None = None
+    ) -> str:
+        captured["effort"] = effort
+        return json.dumps(
+            {
+                "schema_version": "flow-agent.stage_routing_slots.v1",
+                "scope": "in_scope",
+                "primary_stage": None,
+                "secondary_stage": None,
+                "tertiary_stage": None,
+                "rationale": "No stages needed.",
+            }
+        )
+
+    monkeypatch.setattr(provider, "_run_turn", capture_turn)
+    monkeypatch.setattr(provider, "_ensure_client", lambda: object())
+    monkeypatch.setattr(provider, "_ensure_thread", lambda client: "thread-test")
+
+    provider.propose_stage_routing(
+        {
+            "natural_language_request": "What objective guides cell locations?",
+            "stage_catalog": [
+                {"stage": "place", "summary": "Place movable cells.", "chunk_sha256": "a" * 64}
+            ],
+        },
+        effort="low",
+    )
+
+    assert captured["effort"] == "low"
+

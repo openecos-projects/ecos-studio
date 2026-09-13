@@ -185,6 +185,73 @@ def test_codex_turn_uses_selected_model_and_reasoning_effort(
     assert client.turn["effort"] == "high"
 
 
+def test_codex_turn_effort_override_reaches_thread_start(
+    tmp_path: Path, monkeypatch
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.turn: dict[str, object] | None = None
+
+        def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
+            if method == "turn/start":
+                self.turn = params
+                return {"turn": {"id": "turn-1"}}
+            return {}
+
+    client = FakeClient()
+    provider._client = client
+    provider._thread_id = "thread-1"
+    provider._reasoning_effort = "high"
+    monkeypatch.setattr(provider, "_wait_for_turn", lambda *_args, **_kwargs: "{}")
+
+    provider._run_turn("prompt", {"type": "object"}, effort="low")
+
+    assert client.turn is not None
+    assert client.turn["effort"] == "low"
+
+
+def test_model_settings_default_effort_is_env_configurable(tmp_path: Path) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+
+    class FakeClient:
+        def request(self, method: str, _params: dict[str, object]) -> dict[str, object]:
+            if method == "model/list":
+                return {
+                    "data": [
+                        {
+                            "id": "gpt-test",
+                            "model": "gpt-test",
+                            "defaultReasoningEffort": "medium",
+                            "supportedReasoningEfforts": ["low", "medium", "high"],
+                            "isDefault": True,
+                        }
+                    ]
+                }
+            return {}
+
+    for env, expected in (
+        ({}, "high"),
+        ({"ECOS_AGENT_DEFAULT_REASONING_EFFORT": "low"}, "low"),
+        ({"ECOS_AGENT_DEFAULT_REASONING_EFFORT": "unsupported"}, "high"),
+    ):
+        provider = CodexAppServerProposalProvider(
+            codex_bin=str(codex), cwd=tmp_path, env=env
+        )
+        provider._client = FakeClient()
+
+        settings = provider.get_model_settings()
+
+        assert settings["reasoningEffort"] == expected
+        assert provider._reasoning_effort == expected
+
+
 def test_session_chat_and_slash_commands_share_one_codex_provider(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -365,7 +432,9 @@ def test_timeout_closes_the_app_server_before_the_next_proposal(tmp_path: Path) 
 
         def request(self, method: str, params: dict[str, object]) -> dict[str, object]:
             assert method == "turn/start"
-            assert params["summary"] == "detailed"
+            # Proposal turns consume no summary; requesting one would only
+            # add output tokens to every turn.
+            assert params["summary"] is None
             return {"turn": {"id": "turn-1"}}
 
         def wait_for_turn_details(
@@ -444,7 +513,11 @@ def test_workspace_discovery_uses_read_only_tool_policy(
     captured: dict[str, object] = {}
 
     def capture_turn(
-        _prompt: str, _schema: dict[str, object], *, tool_policy: str
+        _prompt: str,
+        _schema: dict[str, object],
+        *,
+        tool_policy: str,
+        effort: str | None = None,
     ) -> str:
         captured["tool_policy"] = tool_policy
         return json.dumps(_proposal().model_dump(mode="json"))

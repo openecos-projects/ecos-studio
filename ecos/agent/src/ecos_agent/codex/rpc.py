@@ -28,6 +28,7 @@ class _RpcDiagnostics:
         payload = {
             "schema_version": "flow-agent.codex_rpc_diagnostics.v1",
             "event": event,
+            "timestamp": round(time.time(), 3),
             **details,
         }
         with self._lock, self._path.open("a", encoding="utf-8") as stream:
@@ -190,6 +191,11 @@ class _JsonLineRpcProcessClient:
         activity_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[str, dict[str, int] | None]:
         self._record("turn_wait_started")
+        wait_started_at = time.monotonic()
+
+        def elapsed() -> float:
+            return round(time.monotonic() - wait_started_at, 3)
+
         activity_projector = CodexActivityProjector(turn_id, activity_callback)
         telemetry = TurnTelemetry(thread_id, turn_id)
         self.turn_telemetry = telemetry
@@ -206,7 +212,7 @@ class _JsonLineRpcProcessClient:
             except queue.Empty as exc:
                 if time.monotonic() < idle_deadline:
                     continue
-                self._record("turn_wait_timeout")
+                self._record("turn_wait_timeout", duration_seconds=elapsed())
                 telemetry.status = "failed"
                 activity_projector.finish("failed")
                 detail = (
@@ -295,7 +301,13 @@ class _JsonLineRpcProcessClient:
                         "Codex turn completed without assistant text",
                         failure_class="parse_error",
                     )
+                self._record(
+                    "turn_wait_completed",
+                    duration_seconds=elapsed(),
+                    usage=token_usage,
+                )
                 return text, token_usage
+        self._record("turn_wait_timeout", duration_seconds=elapsed())
         telemetry.status = "failed"
         detail = f"; last provider error: {last_turn_error}" if last_turn_error else ""
         raise CodexProviderError(

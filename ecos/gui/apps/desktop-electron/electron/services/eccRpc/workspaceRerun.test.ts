@@ -753,6 +753,7 @@ describe('prepareWorkspaceRerun', () => {
     ) as { steps: Array<{ name: string; state: string; tool: string }> }
     expect(targetFlow.steps.map((step) => [step.name, step.tool, step.state])).toEqual([
       ['Synthesis', 'yosys', 'Unstart'],
+      ['lec', 'yosys_lec', 'Unstart'],
       ['Floorplan', 'ecc', 'Unstart'],
       ['place', 'dreamplace', 'Unstart'],
       ['CTS', 'ecc', 'Unstart'],

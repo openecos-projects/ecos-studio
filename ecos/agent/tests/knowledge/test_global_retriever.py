@@ -315,3 +315,12 @@ def test_unknown_named_tools_do_not_inject_shared_eda_chunks() -> None:
     bundle = _bundle(("power", (), "The power grid reports routing demand."))
 
     assert GlobalKnowledgeRetriever((bundle,)).reply("Explain OpenSTA power grid wizard.") is None
+
+
+def test_knowledge_answer_text_hides_internal_record_markup() -> None:
+    answer = _retriever().reply_hybrid("what is the target density")
+
+    assert answer is not None
+    assert "<a" not in answer.text
+    assert "\n## " not in answer.text
+    assert answer.text.startswith("**Meaning:**")

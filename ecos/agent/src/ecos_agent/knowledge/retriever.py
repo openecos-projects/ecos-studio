@@ -27,6 +27,8 @@ _FIELD_NAMES = ("stage", "identifier", "reserved", "content")
 _STOP_TOKENS = frozenset({"a", "an", "and", "are", "by", "does", "for", "how", "in", "is", "of", "on", "or", "the", "to", "what", "with", "了", "何", "如", "是", "的", "算", "计", "指", "标", "如何", "计算", "指标"})
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:[_-][a-z0-9]+)*|[\u4e00-\u9fff]+", re.IGNORECASE)
 _ACRONYM_PATTERN = re.compile(r"(?<![A-Z0-9_])[A-Z][A-Z0-9_]{1,}(?![A-Z0-9_])")
+_ANCHOR_TAG_PATTERN = re.compile(r"<a[^>]*>\s*</a>\s*")
+_RECORD_ID_HEADING_PATTERN = re.compile(r"(?m)^##\s+[A-Za-z0-9_.-]+\s*\n?")
 _NAMED_TOKEN_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(?:[A-Z]{2,}[A-Za-z0-9_]*|[A-Za-z]*[a-z][A-Z][A-Za-z0-9_]*)(?![A-Za-z0-9_])"
 )
@@ -379,7 +381,8 @@ def _tokens_for_match(value: str) -> tuple[str, ...]:
 
 
 def _acronym_tokens(text: str) -> frozenset[str]:
-    return frozenset(match.group().casefold() for match in _ACRONYM_PATTERN.finditer(text))
+    tokens = {match.group().casefold() for match in _ACRONYM_PATTERN.finditer(text)}
+    return frozenset(tokens)
 
 
 def _phrase_tokens(text: str) -> tuple[str, ...]:
@@ -496,6 +499,10 @@ def _has_identifier_evidence(
     return (
         _identifier_phrase_covers_query(record.identifier_phrase_tokens, query_terms)
         or bool(record.identifier_tokens.intersection(query_acronyms))
+        or any(
+            len(term) >= 4 and term in record.identifier_tokens
+            for term in query_terms
+        )
     )
 
 
@@ -594,6 +601,11 @@ def _corpus_sha256(records: tuple[_Record, ...]) -> str:
     return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
+def _plain_knowledge_chunk(text: str) -> str:
+    """Chunk text without internal anchors and record-id headings."""
+    return _RECORD_ID_HEADING_PATTERN.sub("", _ANCHOR_TAG_PATTERN.sub("", text)).strip()
+
+
 def _answer(
     question: str,
     matches: tuple[tuple[_Record, float], ...],
@@ -615,8 +627,13 @@ def _answer(
         }
         for rank, (record, raw_bm25) in enumerate(matches, start=1)
     ]
+    chunks: list[str] = []
+    for record, _score in matches:
+        chunk = _plain_knowledge_chunk(record.text)
+        if chunk and chunk not in chunks:
+            chunks.append(chunk)
     return KnowledgeAnswer(
-        text="\n\n".join(record.text for record, _score in matches),
+        text="\n\n".join(chunks),
         entity_ids=entity_ids,
         contract={
             "schema_version": "ecos-knowledge-answer.v2",

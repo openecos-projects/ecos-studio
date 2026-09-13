@@ -151,6 +151,7 @@ def _terminal_outcome(
 ) -> OptimizationTerminalOutcome:
     terminal_hash = canonical_sha256(terminal.model_dump(mode="json"))
     return OptimizationTerminalOutcome(
+        record_type="terminal_outcome",
         intervention_id="intervention-1",
         outcome=OptimizationOutcomeKind.IMPROVED,
         candidate_manifest_sha256=HASH,
@@ -175,6 +176,7 @@ def _case(
     stale: bool = False,
 ) -> TerminalEmpiricalCase:
     return TerminalEmpiricalCase(
+        schema_version="ecos.terminal_empirical_case.v3",
         case_id=case_id,
         context_fingerprint=HASH,
         claim_id="claim.one",
@@ -309,6 +311,7 @@ def test_append_only_case_audit_store_detects_tamper_and_torn_record(
     store.append_case(case)
     store.append_selection(audit)
     diagnostic = EmpiricalCaseDiagnostic(
+        schema_version="ecos.knowledge_case_diagnostic.v1",
         intervention_id="intervention-2",
         reason_code="missing_terminal_receipt",
         proposal_sha256=HASH,
@@ -323,6 +326,7 @@ def test_append_only_case_audit_store_detects_tamper_and_torn_record(
 
     with pytest.raises(ValueError, match="diagnostic hash"):
         EmpiricalCaseDiagnostic(
+            schema_version="ecos.knowledge_case_diagnostic.v1",
             intervention_id="intervention-3",
             reason_code="invalid_proposal",
             proposal_sha256="sha256:invalid",
@@ -354,6 +358,7 @@ def test_read_only_case_pool_never_creates_or_appends_files(tmp_path: Path) -> N
     with pytest.raises(EmpiricalCaseAuditError, match="read-only"):
         store.append_diagnostic(
             EmpiricalCaseDiagnostic(
+                schema_version="ecos.knowledge_case_diagnostic.v1",
                 intervention_id="intervention-1",
                 reason_code="test",
             )

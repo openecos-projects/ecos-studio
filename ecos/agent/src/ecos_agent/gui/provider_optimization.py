@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -232,7 +233,11 @@ class ProviderOptimizationMixin:
             return
         session.phase = "optimization_authorization"
         session.optimization_phase = "awaiting_confirmation"
-        session.optimization_episode_id = f"episode-{uuid.uuid4().hex}"
+        # The episode id and its diagnostics file are created with the
+        # objective provider so the episode reuses that provider.
+        session.optimization_episode_id = (
+            session.optimization_episode_id or f"episode-{uuid.uuid4().hex}"
+        )
         active = session.optimization_active_objective
         alignment = session.optimization_objective_alignment
         if active is None or alignment is None or session.optimization_objective is None:
@@ -290,6 +295,26 @@ class ProviderOptimizationMixin:
         session.rerun_workspace_path = workspace
         self._begin_optimization_objective(session)
 
+    @staticmethod
+    def _inherit_chat_model_settings(session: _Session, provider: Any) -> None:
+        """Copy the GUI-selected model/effort from the chat provider.
+
+        Proposal providers start unconfigured and would otherwise use the
+        app-server default model, ignoring the user's GUI selection.
+        """
+        chat = session.codex_provider
+        inherit = getattr(provider, "inherit_model_settings", None)
+        if chat is not None and inherit is not None:
+            inherit(chat)
+
+    @classmethod
+    def _close_idle_optimization_provider(cls, session: _Session) -> None:
+        """Release a pre-started provider no episode thread is using."""
+        provider = session.optimization_provider
+        if provider is not None and not cls._optimization_thread_active(session):
+            provider.close()
+            session.optimization_provider = None
+
     def _select_optimization_objective(self, session: _Session, message: str) -> None:
         goal = message.strip()
         if not goal:
@@ -298,55 +323,71 @@ class ProviderOptimizationMixin:
         workspace = session.rerun_workspace_path
         if not workspace:
             raise ValueError("Optimization objective requires a workspace.")
+        self._close_idle_optimization_provider(session)
+        session.optimization_episode_id = f"episode-{uuid.uuid4().hex}"
         provider: CodexAppServerProposalProvider | None = None
-        try:
-            provider = self.optimization_provider_factory(
-                cwd=Path(workspace),
-                runtime_workspace_roots=(workspace,),
-                progress_callback=lambda text: self._progress(session, text),
-                diagnostics_path=(
-                    Path(workspace)
-                    / ".agent"
-                    / "optimization"
-                    / "objective-codex-rpc-diagnostics.v1.jsonl"
-                ),
+        # The baseline scan reads only workspace reports and the objective
+        # parse only reads the goal text; run them concurrently.
+        with ThreadPoolExecutor(max_workers=1) as baseline_pool:
+            baseline_future = baseline_pool.submit(
+                build_terminal_observation, Path(workspace)
             )
-            session.active_interrupt = provider.interrupt
-            proposal = provider.propose_optimization_objective(goal)
-            contract = _freeze_optimization_objective(proposal, goal)
-        except Exception as exc:
-            session.phase = "operation" if session.mode == "workspace" else "home_ready"
-            session.optimization_phase = "unavailable"
-            self._emit(session, "error", f"Unable to parse optimization objective: {exc}")
-            self._emit_phase_choice(session)
-            return
-        finally:
-            session.active_interrupt = None
-            if provider is not None:
-                provider.close()
-        session.optimization_objective = contract
-        session.optimization_objective_sha256 = _objective_sha256(contract)
-        session.optimization_primary_metric = _objective_primary_metric(contract)
-        try:
-            objective = OptimizationObjectiveContract.model_validate(contract)
-            baseline = build_terminal_observation(Path(workspace))
-            geometry_error = geometry_constraint_error(objective, baseline.geometry, baseline)
-            if geometry_error is not None:
-                raise ValueError(geometry_error)
-            alignment = build_objective_alignment(objective, baseline)
-            active = build_active_objective(alignment, objective, baseline)
-        except Exception as exc:
-            session.phase = "operation" if session.mode == "workspace" else "home_ready"
-            session.optimization_phase = "unavailable"
-            self._emit(
-                session,
-                "error",
-                f"Unable to align optimization objective with baseline: {exc}",
-            )
-            self._emit_phase_choice(session)
-            return
-        session.optimization_objective_alignment = alignment.model_dump(mode="json")
-        session.optimization_active_objective = active.model_dump(mode="json")
+            try:
+                provider = self.optimization_provider_factory(
+                    cwd=Path(workspace),
+                    runtime_workspace_roots=(workspace,),
+                    progress_callback=lambda text: self._progress(session, text),
+                    diagnostics_path=(
+                        Path(workspace)
+                        / ".agent"
+                        / "optimization"
+                        / session.optimization_episode_id
+                        / "codex-rpc-diagnostics.v1.jsonl"
+                    ),
+                )
+                self._inherit_chat_model_settings(session, provider)
+                session.active_interrupt = provider.interrupt
+                proposal = provider.propose_optimization_objective(goal)
+                contract = _freeze_optimization_objective(proposal, goal)
+            except Exception as exc:
+                if provider is not None:
+                    provider.close()
+                session.phase = "operation" if session.mode == "workspace" else "home_ready"
+                session.optimization_phase = "unavailable"
+                self._emit(session, "error", f"Unable to parse optimization objective: {exc}")
+                self._emit_phase_choice(session)
+                return
+            finally:
+                session.active_interrupt = None
+            # Keep the provider alive: the episode reuses it after
+            # confirmation instead of paying a second app-server start.
+            session.optimization_provider = provider
+            session.optimization_objective = contract
+            session.optimization_objective_sha256 = _objective_sha256(contract)
+            session.optimization_primary_metric = _objective_primary_metric(contract)
+            try:
+                objective = OptimizationObjectiveContract.model_validate(contract)
+                baseline = baseline_future.result()
+                geometry_error = geometry_constraint_error(objective, baseline.geometry, baseline)
+                if geometry_error is not None:
+                    raise ValueError(geometry_error)
+                alignment = build_objective_alignment(objective, baseline)
+                active = build_active_objective(alignment, objective, baseline)
+            except Exception as exc:
+                # A fresh objective parse creates a new provider, so a failed
+                # alignment must not leave this one lingering.
+                self._close_idle_optimization_provider(session)
+                session.phase = "operation" if session.mode == "workspace" else "home_ready"
+                session.optimization_phase = "unavailable"
+                self._emit(
+                    session,
+                    "error",
+                    f"Unable to align optimization objective with baseline: {exc}",
+                )
+                self._emit_phase_choice(session)
+                return
+            session.optimization_objective_alignment = alignment.model_dump(mode="json")
+            session.optimization_active_objective = active.model_dump(mode="json")
         self._emit(
             session,
             "message",
@@ -365,12 +406,14 @@ class ProviderOptimizationMixin:
 
     def _confirm_optimization_start(self, session: _Session, message: str) -> None:
         if message != "1":
+            self._close_idle_optimization_provider(session)
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             session.optimization_phase = "idle"
             self._emit(session, "message", cancellation_message(session.language))
             self._emit_phase_choice(session)
             return
         if self.optimization_runner_factory is None:
+            self._close_idle_optimization_provider(session)
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             session.optimization_phase = "unavailable"
             self._emit(
@@ -385,20 +428,22 @@ class ProviderOptimizationMixin:
             raise ValueError("Optimization authorization is incomplete.")
         session.optimization_phase = "starting"
         session.phase = "optimization_preparing"
-        provider: CodexAppServerProposalProvider | None = None
+        provider = session.optimization_provider
         try:
-            provider = self.optimization_provider_factory(
-                cwd=Path(workspace),
-                runtime_workspace_roots=(workspace,),
-                progress_callback=lambda text: self._progress(session, text),
-                diagnostics_path=(
-                    Path(workspace)
-                    / ".agent"
-                    / "optimization"
-                    / session.optimization_episode_id
-                    / "codex-rpc-diagnostics.v1.jsonl"
-                ),
-            )
+            if provider is None:
+                provider = self.optimization_provider_factory(
+                    cwd=Path(workspace),
+                    runtime_workspace_roots=(workspace,),
+                    progress_callback=lambda text: self._progress(session, text),
+                    diagnostics_path=(
+                        Path(workspace)
+                        / ".agent"
+                        / "optimization"
+                        / session.optimization_episode_id
+                        / "codex-rpc-diagnostics.v1.jsonl"
+                    ),
+                )
+                self._inherit_chat_model_settings(session, provider)
             runner = self.optimization_runner_factory(
                 {
                     "session_id": session.session_id,
@@ -414,6 +459,7 @@ class ProviderOptimizationMixin:
         except Exception as exc:
             if provider is not None:
                 provider.close()
+            session.optimization_provider = None
             session.optimization_phase = "unavailable"
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             self._emit(session, "error", f"Unable to start optimization: {exc}")

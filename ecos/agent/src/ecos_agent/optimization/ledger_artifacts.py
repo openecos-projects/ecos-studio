@@ -166,6 +166,7 @@ def _new_entry(
     payload: OptimizationLedgerPayload,
 ) -> OptimizationLedgerEntry:
     return OptimizationLedgerEntry(
+        schema_version="ecos.optimization_ledger_entry.v2",
         sequence=sequence,
         previous_entry_sha256=previous_entry_sha256,
         payload=payload,
@@ -178,12 +179,17 @@ def _entry_sha256(
     previous_entry_sha256: str | None,
     payload: OptimizationLedgerPayload,
 ) -> str:
+    # exclude_unset keeps records written by older revisions verifiable when
+    # optional payload fields are added later; present fields still re-enter
+    # the hash, so tampering is still detected. Writes pair with this: rows
+    # are serialized with exclude_unset so the stored key set is exactly the
+    # hashed key set.
     return canonical_sha256(
         {
             "schema_version": "ecos.optimization_ledger_entry.v2",
             "sequence": sequence,
             "previous_entry_sha256": previous_entry_sha256,
-            "payload": payload.model_dump(mode="json"),
+            "payload": payload.model_dump(mode="json", exclude_unset=True),
         }
     )
 

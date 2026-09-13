@@ -288,18 +288,23 @@ def test_loader_rejects_dreamplace_card_without_runtime_report_producer(
         load_parameter_cards(root)
 
 
-def test_loader_rejects_source_span_hash_when_line_range_changes(tmp_path) -> None:
+def test_loader_accepts_source_span_drift_without_live_source(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)
     card_path = root / "place.target_density.json"
     card = json.loads(card_path.read_text(encoding="utf-8"))
-    card["source_spans"][1]["start"] = 1
-    card["source_spans"][1]["end"] = 1
+    for span in card["source_spans"]:
+        span["start"] = 1
+        span["end"] = 1
+        span["sha256"] = "sha256:" + "0" * 64
     card_path.write_text(json.dumps(card, separators=(",", ":")), encoding="utf-8")
     _refresh_card_manifest(root)
 
-    with pytest.raises(ParameterSemanticsError, match="source span hash"):
-        load_parameter_cards(root)
+    loaded = load_parameter_cards(root)
+
+    assert loaded[OptimizationKnob.TARGET_DENSITY].knob_id is (
+        OptimizationKnob.TARGET_DENSITY
+    )
 
 
 def _refresh_card_manifest(root) -> None:
