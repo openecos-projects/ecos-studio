@@ -87,6 +87,9 @@ describe('Home QoR comparison data', () => {
   it('maps dashboard step labels to project QoR steps', () => {
     expect(homeQorFlowStepForLabel('Synthesis')).toBe('Synth')
     expect(homeQorFlowStepForLabel('Floorplan')).toBe('Floor')
+    expect(homeQorFlowStepForLabel('Pre Floorplan')).toBe('Floor')
+    expect(homeQorFlowStepForLabel('Macro Placement')).toBe('Floor')
+    expect(homeQorFlowStepForLabel('Post Floorplan')).toBe('Floor')
     expect(homeQorFlowStepForLabel('LVS')).toBe('LVS')
     expect(homeQorFlowStepForLabel('lvs')).toBe('LVS')
     expect(homeQorFlowStepForLabel('unknown')).toBeNull()

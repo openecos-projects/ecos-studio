@@ -161,4 +161,37 @@ describe('useBackendFlowStages runtime projection', () => {
       flow.dynamicFlowStages.value.filter((step) => step.state === 'Ongoing'),
     ).toEqual([expect.objectContaining({ label: 'Place', tool: 'openroad' })])
   })
+
+  it('keeps the three ECC Floorplan stages as separate sidebar entries', () => {
+    state.session.projection.data.flow.data.steps = [
+      {
+        name: 'preFloorplan',
+        order: 2,
+        state: 'not-started',
+        stepId: 'preFloorplan',
+      },
+      {
+        name: 'macroPlacement',
+        order: 3,
+        state: 'not-started',
+        stepId: 'macroPlacement',
+      },
+      {
+        name: 'postFloorplan',
+        order: 4,
+        state: 'not-started',
+        stepId: 'postFloorplan',
+      },
+    ]
+
+    const flow = useBackendFlowStages()
+
+    expect(
+      flow.dynamicFlowStages.value.map((stage) => [stage.path, stage.label]),
+    ).toEqual([
+      ['preFloorplan', 'Pre Floorplan'],
+      ['macroPlacement', 'Macro Placement'],
+      ['postFloorplan', 'Post Floorplan'],
+    ])
+  })
 })

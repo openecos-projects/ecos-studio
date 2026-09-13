@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { StepEnum, formatStepToolName, getStepMetadata, sameFlowStepName } from './type'
+import {
+  StepEnum,
+  formatStepToolName,
+  getSidebarSteps,
+  getStepMetadata,
+  sameFlowStepName,
+} from './type'
 
 describe('sameFlowStepName', () => {
   it('treats Timing Opt display labels as the Timing optimization flow step', () => {
@@ -25,6 +31,28 @@ describe('sameFlowStepName', () => {
     expect(sameFlowStepName('floorplan', 'Floorplan')).toBe(true)
     expect(sameFlowStepName('all', 'Synthesis')).toBe(false)
     expect(sameFlowStepName('pdk', 'place')).toBe(false)
+  })
+
+  it('keeps the staged Floorplan labels distinct while preserving their canonical paths', () => {
+    expect(getStepMetadata('preFloorplan')).toMatchObject({
+      label: 'Pre Floorplan',
+      path: StepEnum.PRE_FLOORPLAN,
+    })
+    expect(getStepMetadata('macroPlacement')).toMatchObject({
+      label: 'Macro Placement',
+      path: StepEnum.MACRO_PLACEMENT,
+    })
+    expect(getStepMetadata('postFloorplan')).toMatchObject({
+      label: 'Post Floorplan',
+      path: StepEnum.POST_FLOORPLAN,
+    })
+    expect(getSidebarSteps().map((step) => step.path)).toEqual(
+      expect.arrayContaining([
+        StepEnum.PRE_FLOORPLAN,
+        StepEnum.MACRO_PLACEMENT,
+        StepEnum.POST_FLOORPLAN,
+      ]),
+    )
   })
 })
 
