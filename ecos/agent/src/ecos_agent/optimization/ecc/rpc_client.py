@@ -10,7 +10,7 @@ import re
 import subprocess
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from ecos_agent.optimization.ecc.evidence import OptimizationEccAdapterError
@@ -141,7 +141,11 @@ class EccContentLengthRpcClient:
         )
 
     def wait_for_terminal(
-        self, operation_id: str, timeout_seconds: float
+        self,
+        operation_id: str,
+        timeout_seconds: float,
+        *,
+        poll_callback: Callable[[dict[str, object] | None], None] | None = None,
     ) -> dict[str, object] | None:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
@@ -158,6 +162,8 @@ class EccContentLengthRpcClient:
                 if "response timed out" not in str(exc):
                     raise
             else:
+                if poll_callback is not None:
+                    poll_callback(status)
                 if status.get("state") in _TERMINAL_STATES:
                     return status
             try:
