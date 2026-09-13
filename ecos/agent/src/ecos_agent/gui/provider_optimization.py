@@ -211,6 +211,8 @@ from ecos_agent.gui.provider_common import (
     _Session,
 )
 
+_TURN_HEARTBEAT_SECONDS = 30.0
+
 
 class ProviderOptimizationMixin:
     def _begin_optimization_objective(self, session: _Session) -> None:
@@ -543,6 +545,48 @@ class ProviderOptimizationMixin:
         )
         session.optimization_thread.start()
 
+    def _run_turn_with_progress(
+        self, session: _Session, runner: OptimizationEpisodeRunner
+    ):
+        if runner.pending_execution_ids:
+            detail = (
+                f"waiting for {len(runner.pending_execution_ids)} in-flight "
+                "candidate(s) to reach a terminal state"
+            )
+        else:
+            detail = "requesting a proposal (planning)"
+        self._progress(
+            session,
+            f"Optimization turn {session.optimization_turn_count + 1}: {detail}",
+        )
+        heartbeat_stop = threading.Event()
+
+        def beat() -> None:
+            started = time.monotonic()
+            while not heartbeat_stop.wait(_TURN_HEARTBEAT_SECONDS):
+                elapsed = int(time.monotonic() - started)
+                try:
+                    self._progress(
+                        session,
+                        "Optimization turn "
+                        f"{session.optimization_turn_count + 1} in progress, "
+                        f"elapsed {elapsed // 60}m{elapsed % 60:02d}s",
+                    )
+                except Exception:
+                    return
+
+        heartbeat = threading.Thread(
+            target=beat,
+            name=f"ecos-turn-heartbeat-{session.session_id}",
+            daemon=True,
+        )
+        heartbeat.start()
+        try:
+            return runner.run_turn(paused=session.optimization_pause.is_set())
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+
     def _run_optimization_episode(self, session: _Session) -> None:
         runner = session.optimization_runner
         provider = session.optimization_provider
@@ -577,7 +621,7 @@ class ProviderOptimizationMixin:
                 if runner.state == OptimizationEpisodeState.QUARANTINED:
                     final_phase = "quarantined"
                     break
-                turn = runner.run_turn(paused=session.optimization_pause.is_set())
+                turn = self._run_turn_with_progress(session, runner)
                 session.optimization_turn_count += 1
                 active_before = getattr(turn, "active_objective_before", None)
                 active_after = getattr(turn, "active_objective_after", None)
