@@ -230,9 +230,33 @@ const emit = defineEmits<{
 const chartViewport = ref<HTMLElement | null>(null)
 const chartViewportSize = ref({ width: 0, height: 0 })
 let chartResizeObserver: ResizeObserver | null = null
+let chartMeasureFrame: number | null = null
+
+function measureChartViewport() {
+  const element = chartViewport.value
+  if (!element) return
+
+  const rect = element.getBoundingClientRect()
+  const width = element.clientWidth || rect.width
+  const height = element.clientHeight || rect.height
+  if (width <= 0 || height <= 0) return
+
+  chartViewportSize.value = { width, height }
+}
 
 onMounted(() => {
-  if (!chartViewport.value || typeof ResizeObserver === 'undefined') return
+  if (!chartViewport.value) return
+
+  // Read the settled layout before the first paint; ResizeObserver can arrive a frame late.
+  measureChartViewport()
+  if (typeof requestAnimationFrame === 'function') {
+    chartMeasureFrame = requestAnimationFrame(() => {
+      chartMeasureFrame = null
+      measureChartViewport()
+    })
+  }
+
+  if (typeof ResizeObserver === 'undefined') return
 
   chartResizeObserver = new ResizeObserver(([entry]) => {
     chartViewportSize.value = {
@@ -245,6 +269,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   chartResizeObserver?.disconnect()
+  if (chartMeasureFrame !== null && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(chartMeasureFrame)
+  }
 })
 
 const highestScore = computed(() =>
@@ -538,6 +565,7 @@ function formatScore(score: number | null): string {
 .qor-chart-viewport {
   min-height: 260px;
   height: 260px;
+  width: 100%;
   flex: 0 0 auto;
   margin: 0 -6px;
   padding: 8px 4px 2px;

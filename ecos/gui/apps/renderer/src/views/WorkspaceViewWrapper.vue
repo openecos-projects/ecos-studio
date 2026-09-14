@@ -1,8 +1,10 @@
 <template>
   <div class="workspace-view">
     <main :key="workspaceViewKey" class="workspace-main">
-      <FrontendLeftSidebar v-if="currentProject?.designTool === 'frontend'" />
-      <LeftSidebar v-else />
+      <FrontendLeftSidebar
+        v-if="showLeftSidebar && currentProject?.designTool === 'frontend'"
+      />
+      <LeftSidebar v-else-if="showLeftSidebar" />
       <div class="workspace-body">
         <div class="workspace-editor">
           <router-view class="editor-view" />
@@ -14,7 +16,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
 import { clearBaselineStepConfigCache } from '../composables/useBaselineStepConfig'
@@ -26,9 +28,11 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 const { currentProject, workspaceSession } = useWorkspace()
+const route = useRoute()
 const agentShell = useAgentShellStore()
 const backendWorkspaceSession = useBackendWorkspaceSession()
 useWorkspaceAgentFlowCapture()
+const showLeftSidebar = computed(() => route.path !== '/workspace/projects')
 const workspaceViewKey = computed(
   () => `${currentProject.value?.path ?? ''}:${workspaceSession.value.sessionId}`,
 )

@@ -13,3 +13,13 @@ describe('WorkspaceViewWrapper Agent capture', () => {
     expect(source).toContain('useWorkspaceAgentFlowCapture()')
   })
 })
+
+describe('WorkspaceViewWrapper project management layout', () => {
+  it('hides the flow left sidebar on the workspace project management route', () => {
+    expect(source).toContain("route.path !== '/workspace/projects'")
+    expect(source).toContain(
+      'v-if="showLeftSidebar && currentProject?.designTool === \'frontend\'"',
+    )
+    expect(source).toContain('v-else-if="showLeftSidebar"')
+  })
+})
