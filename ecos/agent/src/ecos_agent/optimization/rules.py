@@ -635,17 +635,22 @@ def _timing_regression(
 ) -> IncumbentComparison | None:
     """Adjacent timing guardrail on signed worst slack.
 
-    ECC-QoR draft 3 (section 7.1): the guardrail carries the unclamped
-    signed worst slack, so a degradation inside the positive-margin region
-    (+0.5 ns falling to +0.02 ns) is still a detected regression, while the
-    shared protection tolerance absorbs representation noise.  Clamped WNS
-    must never feed this check: it cannot distinguish positive margins.
+    Only an actually failed guardrail is a regression: the candidate's slack
+    is negative, meaningfully below the incumbent's. Positive-margin erosion
+    is not a veto: it let a sub-nanosecond hold-margin change override a real
+    primary-metric improvement (episode-48bc366d #4, drc 233->231 ruled
+    degraded on 0.106->0.093 hold WNS). Cross-round erosion stays bounded by
+    the frozen baseline envelope when the objective carries one, and by the
+    recovery violation counts otherwise. Clamped WNS must never feed this
+    check: it cannot distinguish positive margins.
     """
     for metric_id in TIMING_GUARDRAIL_ORDER:
         incumbent_value = incumbent.timing_guardrail[metric_id]
         candidate_value = candidate.timing_guardrail[metric_id]
-        if candidate_value < incumbent_value and _meaningful_metric_change(
-            incumbent_value, candidate_value
+        if (
+            candidate_value < 0
+            and candidate_value < incumbent_value
+            and _meaningful_metric_change(incumbent_value, candidate_value)
         ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     return None

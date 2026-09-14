@@ -274,7 +274,7 @@ def test_legacy_terminal_observation_rejects_v3_metrics() -> None:
         TerminalObservation.model_validate(payload)
 
 
-def test_comparator_rejects_any_timing_regression() -> None:
+def test_comparator_rejects_failed_timing_guardrail() -> None:
     comparison = compare_incumbent(
         incumbent=_terminal("incumbent", dr=0, overflow=0, wirelength=100),
         candidate=_terminal(
@@ -283,8 +283,8 @@ def test_comparator_rejects_any_timing_regression() -> None:
             overflow=0,
             wirelength=90,
             timing={
-                TimingMetric.STA_SETUP_WNS: 0.7,
-                TimingMetric.STA_SETUP_TNS: 0.0,
+                TimingMetric.STA_SETUP_WNS: -0.1,
+                TimingMetric.STA_SETUP_TNS: -0.1,
                 TimingMetric.STA_HOLD_WNS: 0.5,
                 TimingMetric.STA_HOLD_TNS: 0.0,
             },
@@ -294,6 +294,42 @@ def test_comparator_rejects_any_timing_regression() -> None:
 
     assert comparison.decision == IncumbentDecision.INCUMBENT_RETAINED
     assert comparison.decisive_metric == TimingMetric.STA_SETUP_WNS
+
+
+def test_comparator_lets_positive_margin_erosion_decide_on_the_primary() -> None:
+    # A positive-margin change above the frozen baseline envelope is not a
+    # guardrail failure; it must not veto a real primary-metric improvement
+    # (episode-48bc366d #4).
+    comparison = compare_incumbent(
+        incumbent=_terminal(
+            "incumbent",
+            dr=0,
+            overflow=0,
+            wirelength=100,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 2.0,
+                TimingMetric.STA_SETUP_TNS: 0.0,
+                TimingMetric.STA_HOLD_WNS: 1.0,
+                TimingMetric.STA_HOLD_TNS: 0.0,
+            },
+        ),
+        candidate=_terminal(
+            "candidate",
+            dr=0,
+            overflow=0,
+            wirelength=90,
+            timing={
+                TimingMetric.STA_SETUP_WNS: 1.2,
+                TimingMetric.STA_SETUP_TNS: 0.0,
+                TimingMetric.STA_HOLD_WNS: 0.6,
+                TimingMetric.STA_HOLD_TNS: 0.0,
+            },
+        ),
+        objective=_objective(),
+    )
+
+    assert comparison.decision == IncumbentDecision.CANDIDATE_BETTER
+    assert comparison.decisive_metric == ObjectiveMetric.ROUTE_WIRELENGTH
 
 
 def test_semantic_objective_preserves_guardrails_before_primary_metric() -> None:

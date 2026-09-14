@@ -28,7 +28,6 @@ from ecos_agent.optimization.observations import build_terminal_observation
 from ecos_agent.optimization.planning import projected_terminal_observation
 from ecos_agent.optimization.rules import (
     IncumbentDecision,
-    _meaningful_metric_change,
     _timing_regression,
     compare_incumbent,
     freeze_optimization_objective,
@@ -61,25 +60,28 @@ def _observation(slack: float, metric: TimingMetric = TimingMetric.STA_SETUP_WNS
 
 
 class TestSignedTimingGuardrail:
-    def test_positive_margin_degradation_is_detected(self) -> None:
-        # +0.5 ns falling to +0.02 ns is a real regression even though both
-        # candidates pass timing: only the signed value can see it.
-        regression = _timing_regression(_observation(0.5), _observation(0.02))
+    def test_positive_margin_erosion_is_not_a_veto(self) -> None:
+        # Positive-margin erosion is not a guardrail failure; it must not
+        # veto a primary-metric improvement (episode-48bc366d #4 ruled a
+        # drc improvement degraded on a 0.106 -> 0.093 hold margin).
+        assert _timing_regression(_observation(0.5), _observation(0.02)) is None
+
+    def test_failed_slack_is_a_regression(self) -> None:
+        regression = _timing_regression(_observation(0.5), _observation(-0.02))
         assert regression is not None
         assert regression.decision == IncumbentDecision.INCUMBENT_RETAINED
         assert regression.decisive_metric == TimingMetric.STA_SETUP_WNS
 
-    def test_sub_tolerance_noise_is_absorbed(self) -> None:
-        assert _timing_regression(_observation(0.5), _observation(0.4995)) is None
+    def test_failing_slack_getting_worse_is_a_regression(self) -> None:
+        regression = _timing_regression(_observation(-0.05), _observation(-0.08))
+        assert regression is not None
+        assert regression.decision == IncumbentDecision.INCUMBENT_RETAINED
+
+    def test_failing_slack_improving_is_not_a_regression(self) -> None:
+        assert _timing_regression(_observation(-0.05), _observation(-0.01)) is None
 
     def test_improvement_is_not_a_regression(self) -> None:
         assert _timing_regression(_observation(0.5), _observation(0.8)) is None
-
-    def test_meaningful_change_uses_the_frozen_protection_tolerances(self) -> None:
-        # The guardband-like noise floor comes from the frozen acceptance
-        # tolerances (1% relative, 0.01 absolute), not a clamped WNS.
-        assert not _meaningful_metric_change(0.5, 0.495)
-        assert _meaningful_metric_change(0.5, 0.4)
 
     def test_narrow_positive_margin_still_beats_negative_margin(self) -> None:
         # Utility of a timing primary metric tracks the signed slack, so a
