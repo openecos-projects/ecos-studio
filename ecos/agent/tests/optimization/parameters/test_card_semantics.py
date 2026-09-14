@@ -39,6 +39,25 @@ def test_parameter_cards_are_flat_under_optimization() -> None:
     }
 
 
+def test_state_rule_manifest_scope_is_frozen_experiment_cohort() -> None:
+    from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
+
+    manifest = load_state_rule_manifest()
+
+    assert list(manifest.scope) == [
+        "gcd",
+        "aes",
+        "PPU",
+        "y_huff",
+        "picorv32a",
+        "sha256",
+        "vm80",
+        "mos6502",
+        "dbg_bridge",
+        "s35932",
+    ]
+
+
 def test_loader_accepts_semantically_identical_json_formatting(tmp_path) -> None:
     root = tmp_path / "cards"
     shutil.copytree(CARD_ROOT, root)

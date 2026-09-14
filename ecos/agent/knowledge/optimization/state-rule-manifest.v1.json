@@ -2,15 +2,15 @@
   "schema_version": "ecos.state_rule_manifest.v1",
   "scope": [
     "gcd",
-    "i2c",
-    "cia",
-    "zipdiv",
-    "cordic",
-    "xtea",
-    "ov7670",
-    "gpio",
-    "prince",
-    "asram16_axi4"
+    "aes",
+    "PPU",
+    "y_huff",
+    "picorv32a",
+    "sha256",
+    "vm80",
+    "mos6502",
+    "dbg_bridge",
+    "s35932"
   ],
   "rules": {
     "rules.evidence.present.v1": {
