@@ -377,6 +377,12 @@
   gap: 10px;
 }
 
+/* The QoR trend chart spans the whole grid row so its right edge aligns with
+   the QoR record breakdown panel instead of stopping at the narrow lead column. */
+.dash-lead-grid .qor-score-panel {
+  grid-column: 1 / -1;
+}
+
 /* Flagged by a left edge rule rather than a tinted panel, matching the attention rows. */
 .dash-recommend {
   display: flex;
