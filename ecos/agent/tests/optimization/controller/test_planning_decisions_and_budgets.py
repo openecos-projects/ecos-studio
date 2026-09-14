@@ -649,3 +649,23 @@ def test_empirical_archive_separates_objective_gain_from_hypothesis_support() ->
         incumbent=incumbent,
         expected_effects=expected_effects,
     ) is EmpiricalOutcome.GUARDRAIL_FAILURE
+
+
+def test_controller_records_schema_violation_detail_for_feedback(
+    tmp_path: Path,
+) -> None:
+    violation = ValueError("action.expected_effects: Field required")
+    planner = _FakeCodex(violation, violation)
+    controller = _controller(tmp_path, planner, _FakeEcc())
+
+    result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.rejection_reason == "proposal_repair_failed"
+    decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
+    assert decisions[0].rejection_reason == (
+        "proposal_schema: action.expected_effects: Field required"
+    )
+    assert planner.contexts[1].planning_feedback == (
+        "proposal_schema: action.expected_effects: Field required",
+    )
