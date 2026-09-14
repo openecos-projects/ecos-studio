@@ -682,7 +682,7 @@ function engineeringFacts(
     ...result.sections.qor.data,
     ...(flow.status === 'ready' ? { flow: flow.data } : {}),
     ...(signoff.status === 'ready' ? { signoffAssessment: signoff.data } : {}),
-    ...(qorSnapshotExtension.status === 'ready'
+    ...(!result.snapshot.stalePredecessor && qorSnapshotExtension.status === 'ready'
       ? { qorSnapshotExtension: qorSnapshotExtension.data }
       : {}),
   }
