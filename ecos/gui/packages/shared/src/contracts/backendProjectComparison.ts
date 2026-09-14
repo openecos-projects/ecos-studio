@@ -4,6 +4,7 @@ import type {
 } from '../utils/projectManifest.ts'
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
 import type { ReadIssue, ReadSection } from './backendWorkspace.ts'
+import type { EccQorSnapshotExtension } from './eccRuntime.ts'
 
 export type ProjectStepStatus =
   | 'success'
@@ -46,6 +47,7 @@ export interface ProjectQorWorkspaceInput {
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
   staTimingIssuesText?: string | null
   stepStatuses: Record<string, ProjectStepStatus>
+  qorSnapshotExtension?: EccQorSnapshotExtension | null
 }
 
 export interface QorStepMetricInput {
@@ -223,6 +225,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   dataQuality: ProjectQorDataQuality
   missingAnalysisSteps: FlowStep[]
   missingMetrics: string[]
+  qorSnapshotExtension?: EccQorSnapshotExtension
 }
 
 export interface ProjectQorTrendSummary {

@@ -3,6 +3,7 @@ import {
   projectManagementWorkspaceStepAnalysisSpecs,
   parseProjectManifestFlowStep,
   type EccEngineeringSnapshot,
+  type EccQorSnapshotExtension,
   type MetricComparison,
   type MetricValue,
   type ProjectManifest,
@@ -55,11 +56,12 @@ interface WorkspaceQorInput extends ProjectQorWorkspaceInput {
 interface SnapshotQorProjection {
   assessment: ProjectQorWorkspaceInput['authoritativeAssessment']
   qor: WorkspaceQorSummary | null
+  qorSnapshotExtension: EccQorSnapshotExtension | null
 }
 
 export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
-  'analysis' | 'metrics' | 'qorAssessment'
+  'analysis' | 'metrics' | 'qorAssessment' | 'qorSnapshotExtension'
 > &
   Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment'>>
 
@@ -116,8 +118,13 @@ function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
 function snapshotQorProjection(
   snapshot: WorkspaceEngineeringFacts | null | undefined,
 ): SnapshotQorProjection {
-  const empty: SnapshotQorProjection = { assessment: null, qor: null }
+  const empty: SnapshotQorProjection = {
+    assessment: null,
+    qor: null,
+    qorSnapshotExtension: snapshot?.qorSnapshotExtension ?? null,
+  }
   if (!snapshot) return empty
+  const extension = snapshot.qorSnapshotExtension ?? null
   const qor = record(snapshot.qorAssessment)
   const score = record(qor?.score)
   const gate = score?.gate
@@ -156,7 +163,7 @@ function snapshotQorProjection(
     : null
   const rawMetrics = Array.isArray(qor?.metrics) ? qor.metrics : snapshot.metrics
   if (!Array.isArray(rawMetrics) || !Array.isArray(qor?.steps)) {
-    return { assessment, qor: null }
+    return { assessment, qor: null, qorSnapshotExtension: extension }
   }
 
   const metrics: MetricValue[] = []
@@ -179,15 +186,17 @@ function snapshotQorProjection(
       (order as number) < 0 ||
       !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(status))
     ) {
-      return { assessment, qor: null }
+      return { assessment, qor: null, qorSnapshotExtension: extension }
     }
     const nextOffset = offset + (count as number)
-    if (nextOffset > rawMetrics.length) return { assessment, qor: null }
+    if (nextOffset > rawMetrics.length) {
+      return { assessment, qor: null, qorSnapshotExtension: extension }
+    }
     const stepMetrics = rawMetrics
       .slice(offset, nextOffset)
       .map((metric) => snapshotMetric(metric, stepId))
     if (stepMetrics.some((metric) => metric === null)) {
-      return { assessment, qor: null }
+      return { assessment, qor: null, qorSnapshotExtension: extension }
     }
     seenSteps.add(stepId)
     metrics.push(...(stepMetrics as MetricValue[]))
@@ -201,9 +210,12 @@ function snapshotQorProjection(
     })
     offset = nextOffset
   }
-  if (offset !== rawMetrics.length) return { assessment, qor: null }
+  if (offset !== rawMetrics.length) {
+    return { assessment, qor: null, qorSnapshotExtension: extension }
+  }
   return {
     assessment,
+    qorSnapshotExtension: extension,
     qor: {
       score: {
         value: value as number | null,
@@ -212,6 +224,7 @@ function snapshotQorProjection(
       },
       metrics,
       steps,
+      ...(extension ? { qorSnapshotExtension: extension } : {}),
     },
   }
 }
@@ -327,6 +340,7 @@ export function projectQorInputForWorkspace(
     authoritativeAssessment: snapshot.assessment,
     normalizedMetrics: snapshotComparisonMetrics(engineeringSnapshot, workspaceId),
     snapshotQor: snapshot.qor,
+    qorSnapshotExtension: snapshot.qorSnapshotExtension,
     stepHotspotTexts: Object.fromEntries(
       projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
         spec.step,

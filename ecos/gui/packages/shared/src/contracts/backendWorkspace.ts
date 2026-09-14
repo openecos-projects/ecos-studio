@@ -1,5 +1,9 @@
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
-import type { EccEngineeringMetric, EccEngineeringSubflowSummary } from './eccRuntime.ts'
+import type {
+  EccEngineeringMetric,
+  EccEngineeringSubflowSummary,
+  EccQorSnapshotExtension,
+} from './eccRuntime.ts'
 
 export interface ReadIssue {
   code: string
@@ -352,6 +356,7 @@ export interface WorkspaceQorSummary {
   score: QorScore
   metrics: MetricValue[]
   steps: QorStepSummary[]
+  qorSnapshotExtension?: EccQorSnapshotExtension
 }
 
 export interface MetricComparison {

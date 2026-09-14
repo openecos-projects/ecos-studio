@@ -366,7 +366,7 @@ describe('ProjectAnalysisPanel needs attention', () => {
 
   it('summarizes the finding counts in the section header', () => {
     const wrapper = mountPanel()
-    const header = wrapper.findAll('.dash-section-head small')[1]
+    const header = wrapper.get('.dash-attention .dash-section-head small')
 
     // Three findings, but only two carry a severity the artifacts reported.
     expect(header.text()).toContain('3 project-wide')

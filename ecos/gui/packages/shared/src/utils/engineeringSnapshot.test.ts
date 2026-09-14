@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { EccQorSnapshotExtension } from '../contracts/eccRuntime.ts'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   parseEngineeringSnapshotJson,
@@ -29,6 +30,75 @@ const metric = {
   confidence: 'high',
   source: { kind: 'feature', path: 'feature/STA.step.json', selector: '/wns' },
   extension_field: 'preserved',
+}
+
+function qorSnapshotExtension(): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score: 84,
+    scalarStatus: 'GREEN',
+    profile: 'balanced',
+    qphys: {
+      timing: { value: 84, state: 'PASS', featureIds: ['timing.setup'] },
+    },
+    feasibility: {
+      status: 'PASS',
+      gates: [
+        {
+          id: 'sta',
+          stage: 'STA',
+          state: 'passed',
+          blocksTapeout: true,
+          metrics: ['sta_setup_wns'],
+          availability: null,
+        },
+      ],
+    },
+    evidence: {
+      index: 80,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 0.9,
+      consistency: 1,
+    },
+    diagnoses: [
+      {
+        diagnosisId: 'timing-watch',
+        state: 'WATCH',
+        severity: 0.4,
+        confidence: 'HIGH',
+        triggerFeatures: ['timing.setup'],
+        affectedDimensions: ['timing'],
+        interventions: [
+          {
+            hypothesis: 'Review clock uncertainty',
+            tier: 'TIER_1_FEASIBILITY',
+            confidence: 'HIGH',
+            parameterKnob: 'timing.uncertainty',
+            validationProcedure: 'rerun STA',
+          },
+        ],
+        interventionConfidence: 'HIGH',
+        validationRequired: null,
+      },
+    ],
+    inflation: {
+      iPlace: 1.1,
+      iRoute: 1.2,
+      iTotal: 1.32,
+      congestionSeverity: 0.1,
+      compatibilityStatus: 'EXACT_COMPATIBLE',
+    },
+    power: {
+      totalUw: 10,
+      budgetUw: 20,
+      sourceKind: 'signoff',
+      corner: 'tt',
+    },
+    artifactIds: ['artifact-metrics'],
+  }
 }
 
 function snapshot() {
@@ -65,6 +135,7 @@ function snapshot() {
         },
       ],
     },
+    qorSnapshotExtension: undefined as EccQorSnapshotExtension | undefined,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     analysis: {
       steps: [
@@ -137,6 +208,46 @@ function snapshot() {
 }
 
 describe('Engineering Snapshot validation', () => {
+  it('exposes a valid QoR Snapshot extension independently from legacy QoR facts', () => {
+    const current = snapshot()
+    current.schemaVersion = 3
+    current.qorSnapshotExtension = qorSnapshotExtension()
+
+    const valid = validateEngineeringSnapshot(current)
+
+    expect(valid.ok).toBe(true)
+    if (!valid.ok) return
+    expect(valid.sections.qorSnapshotExtension).toMatchObject({
+      status: 'ready',
+      data: { scoringEngine: 'qor-v3', qphys: { timing: { value: 84 } } },
+    })
+
+    const invalid = snapshot()
+    invalid.schemaVersion = 3
+    invalid.qorSnapshotExtension = {
+      ...qorSnapshotExtension(),
+      qphys: [] as never,
+    }
+    const partial = validateEngineeringSnapshot(invalid)
+    expect(partial.ok && partial.sections.qorSnapshotExtension).toEqual({
+      status: 'unavailable',
+      issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
+    })
+  })
+
+  it('accepts the extension on the v2 production Snapshot during rollout', () => {
+    const current = snapshot()
+    current.schemaVersion = 2
+    current.qorSnapshotExtension = qorSnapshotExtension()
+
+    const valid = validateEngineeringSnapshot(current)
+
+    expect(valid.ok && valid.sections.qorSnapshotExtension).toMatchObject({
+      status: 'ready',
+      data: { scoringEngine: 'qor-v3' },
+    })
+  })
+
   it('preserves complete metric metadata and validates sections independently', () => {
     const valid = validateEngineeringSnapshot(snapshot())
     expect(valid.ok).toBe(true)

@@ -2,6 +2,7 @@ import { buildStepIssues, countStepIssues } from '@/components/projectStepAnalys
 import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
 import { projectResultStatusLabel } from '@/utils/projectResultPresentation'
 import type {
+  EccQorSnapshotExtension,
   ProjectQorTrendSummary,
   QorGateStatus,
   QorStatus,
@@ -112,6 +113,38 @@ export interface DashboardAttentionItem {
   detail: string | null
   /** The step-local metric key used to select the matching evidence. */
   metric: string | null
+}
+
+export interface DashboardQorDimension {
+  key: string
+  label: string
+  value: number | null
+  display: string
+  state: string
+  tone: DashboardTone
+  percent: number | null
+}
+
+export interface DashboardQorDiagnosis {
+  id: string
+  state: string
+  tone: DashboardTone
+  severity: number | null
+  interventions: string[]
+}
+
+export interface DashboardQorInsights {
+  status: 'available' | 'unavailable'
+  dimensions: DashboardQorDimension[]
+  diagnoses: DashboardQorDiagnosis[]
+}
+
+const QOR_DIMENSION_LABELS: Record<string, string> = {
+  timing: 'Timing',
+  interconnect: 'Interconnect',
+  area: 'Area',
+  power: 'Power',
+  robustness: 'Robustness',
 }
 
 const RUN_STATE_LABELS: Record<ProjectRunStateSlice['state'], string> = {
@@ -259,6 +292,56 @@ export function buildDashboardRecommendation(
     signoff,
     reason: bestReason.includes(score) ? null : bestReason,
   }
+}
+
+export function buildDashboardQorInsights(
+  qorTrendSummary: ProjectQorTrendSummary,
+  workspaceId: string,
+): DashboardQorInsights {
+  const extension = qorTrendSummary.workspaces.find(
+    (workspace) => workspace.workspaceId === workspaceId,
+  )?.qorSnapshotExtension
+  if (!extension || extension.status !== 'available') {
+    return { status: 'unavailable', dimensions: [], diagnoses: [] }
+  }
+
+  return {
+    status: 'available',
+    dimensions: Object.entries(extension.qphys).map(([key, dimension]) => ({
+      key,
+      label: QOR_DIMENSION_LABELS[key] ?? key,
+      value: dimension.value,
+      display: dimension.value === null ? 'NR' : dimension.value.toFixed(1),
+      state: dimension.state,
+      tone: qorStateTone(dimension.state),
+      percent: dimension.value,
+    })),
+    diagnoses: extension.diagnoses.map((diagnosis) => ({
+      id: diagnosis.diagnosisId,
+      state: diagnosis.state,
+      tone: diagnosisTone(diagnosis.state),
+      severity: diagnosis.severity,
+      interventions: diagnosis.interventions
+        .map((intervention) => intervention.hypothesis)
+        .filter(Boolean),
+    })),
+  }
+}
+
+function qorStateTone(
+  state: EccQorSnapshotExtension['qphys'][string]['state'],
+): DashboardTone {
+  if (state === 'PASS' || state === 'OPPORTUNITY') return 'good'
+  if (state === 'WATCH' || state === 'OVER_PROVISIONED') return 'warn'
+  if (state === 'FAIL') return 'bad'
+  return 'neutral'
+}
+
+function diagnosisTone(state: string): DashboardTone {
+  if (state === 'FAIL' || state === 'BLOCKED') return 'bad'
+  if (state === 'WATCH' || state === 'AT_RISK') return 'warn'
+  if (state === 'PASS' || state === 'CLEAR') return 'good'
+  return 'neutral'
 }
 
 function buildScoreNote(

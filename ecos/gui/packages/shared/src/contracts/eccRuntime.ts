@@ -495,6 +495,91 @@ export interface EccEngineeringAnalysis {
   steps: EccEngineeringAnalysisStep[]
 }
 
+export type EccQorSnapshotDimensionState =
+  | 'PASS'
+  | 'FAIL'
+  | 'WATCH'
+  | 'OVER_PROVISIONED'
+  | 'OPPORTUNITY'
+  | 'UNKNOWN'
+
+export interface EccQorSnapshotDimension {
+  value: number | null
+  state: EccQorSnapshotDimensionState
+  featureIds: string[]
+}
+
+export interface EccQorSnapshotFeasibilityGate {
+  id: string
+  stage: string
+  state: 'passed' | 'failed' | 'unavailable'
+  blocksTapeout: boolean
+  metrics: string[]
+  availability: string | null
+}
+
+export interface EccQorSnapshotDiagnosisIntervention {
+  hypothesis: string
+  tier: string
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  parameterKnob: string | null
+  validationProcedure: string | null
+}
+
+export interface EccQorSnapshotDiagnosis {
+  diagnosisId: string
+  state: string
+  severity: number | null
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  triggerFeatures: string[]
+  affectedDimensions: string[]
+  interventions: EccQorSnapshotDiagnosisIntervention[]
+  interventionConfidence: 'HIGH' | 'MEDIUM' | 'LOW'
+  validationRequired: string | null
+}
+
+export interface EccQorSnapshotExtension {
+  schemaVersion: 1
+  scoringEngine: 'qor-v3'
+  status: 'available' | 'unavailable'
+  reason?: string
+  score: number | null
+  scalarStatus: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
+  profile: string
+  qphys: Record<string, EccQorSnapshotDimension>
+  feasibility: {
+    status: 'PASS' | 'PHYSICAL_FAIL' | 'NOT_VERIFIED' | 'UNKNOWN'
+    gates: EccQorSnapshotFeasibilityGate[]
+  }
+  evidence: {
+    index: number | null
+    state: 'HIGH' | 'MODERATE' | 'LIMITED' | 'INSUFFICIENT' | 'NOT_VERIFIED'
+    integrity: number | null
+    coverage: number | null
+    consistency: number | null
+  }
+  diagnoses: EccQorSnapshotDiagnosis[]
+  inflation: {
+    iPlace: number | null
+    iRoute: number | null
+    iTotal: number | null
+    congestionSeverity: number | null
+    compatibilityStatus:
+      | 'EXACT_COMPATIBLE'
+      | 'MAPPED_COMPATIBLE'
+      | 'INCOMPATIBLE'
+      | 'UNAVAILABLE'
+      | ''
+  }
+  power: {
+    totalUw: number | null
+    budgetUw: number | null
+    sourceKind: 'signoff' | 'synthesis' | null
+    corner: string | null
+  }
+  artifactIds: string[]
+}
+
 export interface EccEngineeringSnapshot {
   analysis: EccEngineeringAnalysis
   artifacts: EccArtifactRef[]
@@ -503,7 +588,8 @@ export interface EccEngineeringSnapshot {
   metrics: EccEngineeringMetric[]
   parameters: Record<string, unknown>
   qorAssessment: Record<string, unknown>
-  schemaVersion: 1 | 2
+  qorSnapshotExtension?: EccQorSnapshotExtension
+  schemaVersion: 1 | 2 | 3
   signoffAssessment: EccWorkspaceInspectSignoffResult
   workspaceId: string
   workspaceRevision: number

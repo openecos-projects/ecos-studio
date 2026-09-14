@@ -1,4 +1,5 @@
 import type {
+  EccQorSnapshotExtension,
   ProjectManifestFlowStep as FlowStep,
   ProjectManifestWorkspaceStatus as ProjectWorkspaceStatus,
   ProjectStepStatus,
@@ -46,6 +47,7 @@ export interface ProjectQorWorkspaceInput {
     dimensionScores: Partial<Record<QorDimension, number>>
     signoffStatus: 'ready' | 'attention' | 'blocked'
   } | null
+  qorSnapshotExtension?: EccQorSnapshotExtension | null
 }
 
 export interface QorStepMetricInput {
@@ -226,6 +228,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   dataQuality: ProjectQorDataQuality
   missingAnalysisSteps: FlowStep[]
   missingMetrics: string[]
+  qorSnapshotExtension?: EccQorSnapshotExtension
 }
 
 export interface ProjectQorTrendSummary {
@@ -690,6 +693,9 @@ function buildWorkspaceSummary(
     dataQuality,
     missingAnalysisSteps,
     missingMetrics,
+    ...(workspace.qorSnapshotExtension
+      ? { qorSnapshotExtension: workspace.qorSnapshotExtension }
+      : {}),
   }
 }
 

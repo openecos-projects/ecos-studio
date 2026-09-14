@@ -4,6 +4,7 @@ import type {
   EccEngineeringAnalysisFile,
   EccEngineeringMetric,
   EccEngineeringSnapshot,
+  EccQorSnapshotExtension,
   EccWorkspaceInspectSignoffResult,
 } from '../contracts/eccRuntime.ts'
 import type { ReadIssue, ReadSection } from '../contracts/backendWorkspace.ts'
@@ -18,7 +19,13 @@ export interface EngineeringSnapshotIssue extends ReadIssue {
 export interface EngineeringSnapshotSections {
   artifacts: ReadSection<EccEngineeringAnalysisArtifactRef[]>
   flow: ReadSection<EccEngineeringSnapshot['flow']>
-  qor: ReadSection<Pick<EccEngineeringSnapshot, 'analysis' | 'metrics' | 'qorAssessment'>>
+  qor: ReadSection<
+    Pick<
+      EccEngineeringSnapshot,
+      'analysis' | 'metrics' | 'qorAssessment' | 'qorSnapshotExtension'
+    >
+  >
+  qorSnapshotExtension: ReadSection<EccQorSnapshotExtension>
   signoff: ReadSection<EccEngineeringSnapshot['signoffAssessment']>
 }
 
@@ -76,7 +83,11 @@ export function validateEngineeringSnapshot(
   if (!record(value)) {
     return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
+  if (
+    value.schemaVersion !== 1 &&
+    value.schemaVersion !== 2 &&
+    value.schemaVersion !== 3
+  ) {
     return {
       ok: false,
       issue: {
@@ -133,8 +144,17 @@ export function validateEngineeringSnapshot(
             analysis: value.analysis,
             metrics: value.metrics,
             qorAssessment: value.qorAssessment,
+            ...(validQorSnapshotExtension(value.qorSnapshotExtension)
+              ? { qorSnapshotExtension: value.qorSnapshotExtension }
+              : {}),
           })
         : unavailable('ENGINEERING_QOR_INVALID'),
+      qorSnapshotExtension:
+        value.qorSnapshotExtension === undefined
+          ? { status: 'unavailable', issues: [] }
+          : validQorSnapshotExtension(value.qorSnapshotExtension)
+            ? ready(value.qorSnapshotExtension)
+            : unavailable('ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID'),
       signoff: validSignoff(value.signoffAssessment)
         ? ready(value.signoffAssessment)
         : unavailable('ENGINEERING_SIGNOFF_INVALID'),
@@ -192,6 +212,153 @@ function validQor(
         ['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(step.status)),
     )
   )
+}
+
+function validQorSnapshotExtension(value: unknown): value is EccQorSnapshotExtension {
+  if (!record(value)) return false
+  if (
+    value.schemaVersion !== 1 ||
+    value.scoringEngine !== 'qor-v3' ||
+    !['available', 'unavailable'].includes(String(value.status)) ||
+    !finiteOrNull(value.score) ||
+    !['GREEN', 'YELLOW', 'ORANGE', 'RED', 'FAIL', 'NOT_RATED'].includes(
+      String(value.scalarStatus),
+    ) ||
+    !nonEmptyString(value.profile) ||
+    !validQorDimensions(value.qphys) ||
+    !validQorFeasibility(value.feasibility) ||
+    !validQorEvidence(value.evidence) ||
+    !Array.isArray(value.diagnoses) ||
+    !value.diagnoses.every(validQorDiagnosis) ||
+    !validQorInflation(value.inflation) ||
+    !validQorPower(value.power) ||
+    !Array.isArray(value.artifactIds) ||
+    value.artifactIds.length > 512 ||
+    !value.artifactIds.every(nonEmptyString)
+  ) {
+    return false
+  }
+  return value.reason === undefined || typeof value.reason === 'string'
+}
+
+function validQorDimensions(value: unknown): boolean {
+  if (!record(value)) return false
+  return Object.values(value).every((dimension) => {
+    if (!record(dimension)) return false
+    return (
+      finiteOrNull(dimension.value) &&
+      ['PASS', 'FAIL', 'WATCH', 'OVER_PROVISIONED', 'OPPORTUNITY', 'UNKNOWN'].includes(
+        String(dimension.state),
+      ) &&
+      Array.isArray(dimension.featureIds) &&
+      dimension.featureIds.length <= 32 &&
+      dimension.featureIds.every(nonEmptyString)
+    )
+  })
+}
+
+function validQorFeasibility(value: unknown): boolean {
+  if (
+    !record(value) ||
+    !['PASS', 'PHYSICAL_FAIL', 'NOT_VERIFIED', 'UNKNOWN'].includes(String(value.status))
+  ) {
+    return false
+  }
+  return (
+    Array.isArray(value.gates) &&
+    value.gates.length <= 32 &&
+    value.gates.every((gate) => {
+      if (!record(gate)) return false
+      return (
+        nonEmptyString(gate.id) &&
+        typeof gate.stage === 'string' &&
+        ['passed', 'failed', 'unavailable'].includes(String(gate.state)) &&
+        typeof gate.blocksTapeout === 'boolean' &&
+        Array.isArray(gate.metrics) &&
+        gate.metrics.length <= 32 &&
+        gate.metrics.every(nonEmptyString) &&
+        (gate.availability === null || typeof gate.availability === 'string')
+      )
+    })
+  )
+}
+
+function validQorEvidence(value: unknown): boolean {
+  if (
+    !record(value) ||
+    !['HIGH', 'MODERATE', 'LIMITED', 'INSUFFICIENT', 'NOT_VERIFIED'].includes(
+      String(value.state),
+    )
+  ) {
+    return false
+  }
+  return (
+    finiteOrNull(value.index) &&
+    finiteOrNull(value.integrity) &&
+    finiteOrNull(value.coverage) &&
+    finiteOrNull(value.consistency)
+  )
+}
+
+function validQorDiagnosis(value: unknown): boolean {
+  if (!record(value)) return false
+  return (
+    nonEmptyString(value.diagnosisId) &&
+    typeof value.state === 'string' &&
+    finiteOrNull(value.severity) &&
+    ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.confidence)) &&
+    Array.isArray(value.triggerFeatures) &&
+    value.triggerFeatures.length <= 32 &&
+    value.triggerFeatures.every(nonEmptyString) &&
+    Array.isArray(value.affectedDimensions) &&
+    value.affectedDimensions.length <= 16 &&
+    value.affectedDimensions.every(nonEmptyString) &&
+    Array.isArray(value.interventions) &&
+    value.interventions.length <= 4 &&
+    value.interventions.every(validQorIntervention) &&
+    ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.interventionConfidence)) &&
+    (value.validationRequired === null || typeof value.validationRequired === 'string')
+  )
+}
+
+function validQorIntervention(value: unknown): boolean {
+  if (!record(value)) return false
+  return (
+    typeof value.hypothesis === 'string' &&
+    typeof value.tier === 'string' &&
+    ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.confidence)) &&
+    (value.parameterKnob === null || typeof value.parameterKnob === 'string') &&
+    (value.validationProcedure === null || typeof value.validationProcedure === 'string')
+  )
+}
+
+function validQorInflation(value: unknown): boolean {
+  if (!record(value)) return false
+  return (
+    finiteOrNull(value.iPlace) &&
+    finiteOrNull(value.iRoute) &&
+    finiteOrNull(value.iTotal) &&
+    finiteOrNull(value.congestionSeverity) &&
+    ['', 'EXACT_COMPATIBLE', 'MAPPED_COMPATIBLE', 'INCOMPATIBLE', 'UNAVAILABLE'].includes(
+      String(value.compatibilityStatus),
+    )
+  )
+}
+
+function validQorPower(value: unknown): boolean {
+  if (!record(value)) return false
+  return (
+    finiteOrNull(value.totalUw) &&
+    finiteOrNull(value.budgetUw) &&
+    (value.sourceKind === null ||
+      value.sourceKind === 'signoff' ||
+      value.sourceKind === 'synthesis') &&
+    (value.corner === null || typeof value.corner === 'string')
+  )
+}
+
+function finiteOrNull(value: unknown): value is number | null {
+  return value === null || finiteNumber(value)
 }
 
 function validMetric(value: unknown): value is EccEngineeringMetric {

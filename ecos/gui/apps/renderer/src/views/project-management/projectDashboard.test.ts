@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { EccQorSnapshotExtension } from '@ecos-studio/shared'
 import {
   dashboardSummaryFixture,
   metricPointFixture,
@@ -14,6 +15,7 @@ import {
 import {
   buildDashboardAttention,
   buildDashboardHealth,
+  buildDashboardQorInsights,
   buildDashboardRecommendation,
   buildDashboardWorkspaceRows,
   countAttentionBySeverity,
@@ -21,6 +23,59 @@ import {
   formatScore,
   sortDashboardWorkspaceRows,
 } from './projectDashboard'
+
+function qorSnapshotExtension(): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score: 74.2,
+    scalarStatus: 'GREEN',
+    profile: 'balanced',
+    qphys: {
+      timing: { value: 74.2, state: 'PASS', featureIds: ['timing.setup'] },
+      area: { value: null, state: 'UNKNOWN', featureIds: [] },
+    },
+    feasibility: { status: 'PASS', gates: [] },
+    evidence: {
+      index: 90,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    diagnoses: [
+      {
+        diagnosisId: 'timing-watch',
+        state: 'WATCH',
+        severity: 0.4,
+        confidence: 'HIGH',
+        triggerFeatures: ['timing.setup'],
+        affectedDimensions: ['timing'],
+        interventions: [
+          {
+            hypothesis: 'Review clock uncertainty',
+            tier: 'TIER_1_FEASIBILITY',
+            confidence: 'HIGH',
+            parameterKnob: null,
+            validationProcedure: null,
+          },
+        ],
+        interventionConfidence: 'HIGH',
+        validationRequired: null,
+      },
+    ],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
+}
 
 describe('buildDashboardHealth', () => {
   it('summarizes flow progress, run states, and readiness coverage', () => {
@@ -174,6 +229,54 @@ describe('buildDashboardRecommendation', () => {
     expect(
       buildDashboardRecommendation(trendSummaryWithScoresFixture(), 'ws_missing', ''),
     ).toBeNull()
+  })
+})
+
+describe('buildDashboardQorInsights', () => {
+  it('maps committed Qphys and diagnosis facts without recalculating them', () => {
+    const summary = trendSummaryWithScoresFixture()
+    summary.workspaces[1]!.qorSnapshotExtension = qorSnapshotExtension()
+
+    expect(buildDashboardQorInsights(summary, 'ws_b')).toEqual({
+      status: 'available',
+      dimensions: [
+        {
+          key: 'timing',
+          label: 'Timing',
+          value: 74.2,
+          display: '74.2',
+          state: 'PASS',
+          tone: 'good',
+          percent: 74.2,
+        },
+        {
+          key: 'area',
+          label: 'Area',
+          value: null,
+          display: 'NR',
+          state: 'UNKNOWN',
+          tone: 'neutral',
+          percent: null,
+        },
+      ],
+      diagnoses: [
+        {
+          id: 'timing-watch',
+          state: 'WATCH',
+          tone: 'warn',
+          severity: 0.4,
+          interventions: ['Review clock uncertainty'],
+        },
+      ],
+    })
+  })
+
+  it('returns unavailable when the selected workspace has no committed extension', () => {
+    expect(buildDashboardQorInsights(trendSummaryWithScoresFixture(), 'ws_b')).toEqual({
+      status: 'unavailable',
+      dimensions: [],
+      diagnoses: [],
+    })
   })
 })
 

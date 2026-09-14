@@ -410,7 +410,7 @@ describe('ProjectManagementReadService', () => {
     const { projectRoot, workspaceRoot } = await createProject()
     await writeFile(
       join(workspaceRoot, 'home', 'engineering-snapshot.json'),
-      JSON.stringify({ ...engineeringSnapshot(), schemaVersion: 3 }),
+      JSON.stringify({ ...engineeringSnapshot(), schemaVersion: 99 }),
     )
 
     await expect(

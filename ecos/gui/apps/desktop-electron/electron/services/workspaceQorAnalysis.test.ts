@@ -1,4 +1,8 @@
-import type { EccEngineeringSnapshot, ProjectManifest } from '@ecos-studio/shared'
+import type {
+  EccEngineeringSnapshot,
+  EccQorSnapshotExtension,
+  ProjectManifest,
+} from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import { buildProjectQorTrendSummary } from './qorAnalysis'
 import { analyzeWorkspaceQor, projectQorInputForWorkspace } from './workspaceQorAnalysis'
@@ -37,6 +41,38 @@ function metricText(value: number): string {
     schema_version: 3,
     step: 'Route',
   })
+}
+
+function qorSnapshotExtension(): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score: 73.5,
+    scalarStatus: 'GREEN',
+    profile: 'balanced',
+    qphys: {
+      timing: { value: 73.5, state: 'PASS', featureIds: ['timing.setup'] },
+    },
+    feasibility: { status: 'PASS', gates: [] },
+    evidence: {
+      index: 90,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    diagnoses: [],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
 }
 
 function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
@@ -161,6 +197,25 @@ describe('analyzeWorkspaceQor', () => {
       overallScore: result.qor.status === 'ready' ? result.qor.data.score.value : null,
       scoreThreshold: 60,
     })
+  })
+
+  it('passes committed QoR Snapshot facts through the Backend projection', () => {
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [workspace('current', 'Current')],
+      qor_baseline: null,
+    } as ProjectManifest
+    const snapshot = engineeringSnapshot(5000)
+    const extension = qorSnapshotExtension()
+    snapshot.qorSnapshotExtension = extension
+
+    const input = projectQorInputForWorkspace(manifest, 'current', {}, snapshot)
+    const summary = buildProjectQorTrendSummary([input!]).workspaces[0]
+
+    expect(input?.qorSnapshotExtension).toBe(extension)
+    expect(summary?.qorSnapshotExtension).toBe(extension)
   })
 
   it('restores step metrics directly from an authoritative snapshot', () => {
