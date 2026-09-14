@@ -23,7 +23,13 @@ class EpisodeBudget(_BudgetContractModel):
     candidate_execution_limit: Literal[20] = CANDIDATE_EXECUTION_LIMIT
     planning_call_limit: Literal[60] = 60
     minimum_candidate_executions: Literal[20] = CANDIDATE_EXECUTION_LIMIT
-    max_planning_only_turns: Literal[2] = 2
+    # Bound on consecutive non-productive planning turns before escalation.
+    # A turn is productive when it dispatches a candidate, waits on in-flight
+    # evidence, or continues under a declared strategy with a viable step, so
+    # "continue while a reasonable hypothesis exists" no longer escalates by
+    # a fixed two-turn count.  Widened from the frozen Literal[2]; stored
+    # value 2 from older episodes still validates.
+    max_planning_only_turns: int = Field(default=4, ge=2, le=10)
     reference_place_to_harden_seconds: float
     wall_time_limit_seconds: float
 

@@ -28,6 +28,8 @@ from .support import (
 from ecos_agent.codex.rpc import CodexProviderError
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.optimization.contracts import (
+    BudgetSnapshot,
+    EpisodeBudget,
     ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
@@ -99,7 +101,14 @@ def test_controller_defers_early_stop_then_escalates_without_selecting_value(tmp
         proposal.pop("action")
         return proposal
 
-    controller = _controller(tmp_path, _FakeCodex(stop, stop), _FakeEcc(_started()))
+    pinned = BudgetSnapshot(
+        budget=EpisodeBudget.from_reference_rerun(11.0).model_copy(
+            update={"max_planning_only_turns": 2}
+        )
+    )
+    controller = _controller(
+        tmp_path, _FakeCodex(stop, stop), _FakeEcc(_started()), budget=pinned
+    )
 
     first = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
@@ -109,6 +118,37 @@ def test_controller_defers_early_stop_then_escalates_without_selecting_value(tmp
     assert second.state == OptimizationEpisodeState.ESCALATED
     assert second.requested is None
     assert second.rejection_reason == "minimum_candidates_not_met"
+
+
+def test_bare_continue_still_escalates_at_the_default_stall_limit(
+    tmp_path: Path,
+) -> None:
+    def continue_turn(context: object) -> dict[str, object]:
+        proposal = _proposal(context)
+        proposal.update(
+            decision=OptimizationDecision.CONTINUE,
+            reason_code=ProposalReason.INSUFFICIENT_EVIDENCE,
+            rationale_summary="Waiting for more evidence.",
+        )
+        proposal.pop("action")
+        return proposal
+
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(*[continue_turn] * 4),
+        _FakeEcc(_started()),
+    )
+
+    results = [
+        controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+        for _ in range(4)
+    ]
+
+    assert controller.budget.budget.max_planning_only_turns == 4
+    assert [result.state for result in results[:3]] == [
+        OptimizationEpisodeState.PLANNING
+    ] * 3
+    assert results[3].state == OptimizationEpisodeState.ESCALATED
 
 
 def test_controller_escalates_after_codex_parse_and_repair_errors(tmp_path: Path) -> None:
@@ -408,9 +448,14 @@ def test_controller_repairs_one_invalid_v2_response_before_accepting_exact_value
     assert len(decisions) == 2
     assert decisions[0].validation_result == "rejected"
     assert decisions[0].rejection_reason == "proposal value is outside the legal bounds or type"
-    assert planner.v2_calls[1][0].planning_feedback == (
-        "proposal value is outside the legal bounds or type",
+    feedback = planner.v2_calls[1][0].planning_feedback
+    assert len(feedback) == 1
+    assert feedback[0].source.value == "rejection"
+    assert feedback[0].reason_code == "parameter_domain"
+    assert feedback[0].summary == (
+        "proposal value is outside the legal bounds or type"
     )
+    assert feedback[0].recovery_hints
     assert decisions[0].planning_entry_sha256 == planning[0].entry_sha256
     assert decisions[-1].planner_source == "repair"
     assert decisions[-1].planning_entry_sha256 == planning[-1].entry_sha256
@@ -666,6 +711,13 @@ def test_controller_records_schema_violation_detail_for_feedback(
     assert decisions[0].rejection_reason == (
         "proposal_schema: action.expected_effects: Field required"
     )
-    assert planner.contexts[1].planning_feedback == (
-        "proposal_schema: action.expected_effects: Field required",
+    assert decisions[0].attribution is not None
+    assert decisions[0].attribution.source.value == "rejection"
+    assert decisions[0].attribution.reason_code == "proposal_schema"
+    feedback = planner.contexts[1].planning_feedback
+    assert len(feedback) == 1
+    assert feedback[0].reason_code == "proposal_schema"
+    assert feedback[0].summary == (
+        "proposal_schema: action.expected_effects: Field required"
     )
+    assert feedback[0].recovery_hints

@@ -195,7 +195,7 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
         system = (
             "Output exactly one JSON object with exactly these top-level fields: schema_version, "
             "context_ref, decision, reason_code, rationale_summary, observation_refs, history_refs, "
-            "knowledge_refs, task_memory_refs, action. Wire shape example:\n"
+            "knowledge_refs, task_memory_refs, action, strategy. Wire shape example:\n"
             "{\n"
             '  "schema_version": "ecos.optimization_proposal.v3",\n'
             '  "context_ref": {"episode_id": "<copy supplied>", "checkpoint_id": "<copy supplied>", '
@@ -210,9 +210,24 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             '  "action": {"knob_id": "<knob_id>", "direction": "<direction>", '
             '"requested_value": <exact probe value>, '
             '"effective_domain_sha256": "<copy supplied snapshot_sha256>", '
-            '"expected_effects": [{"metric_id": "<metric_id>", "direction": "decrease"}]}\n'
+            '"expected_effects": [{"metric_id": "<metric_id>", "direction": "decrease"}]},\n'
+            '  "strategy": null\n'
             "}\n"
-            "For decision continue, stop, or escalate set action to null. Copy context_ref, "
+            "For decision continue, stop, or escalate set action to null. strategy is optional on every "
+            "decision: null when the supplied active_strategy still holds, a fresh strategy object when you "
+            "form or revise a multi-step plan (goal plus up to six steps; each step names a legal knob, a "
+            "direction, an optional suggested value, an intent probe/confirm/exploit, an optional condition "
+            "on one objective metric expects improved/degraded/unchanged, and depends_on step ids forming a "
+            "DAG). Strategy steps are declarative sequencing for later turns: only the action dispatches "
+            "this turn, and each step still passes full validation when it becomes the action. When "
+            "replacing a supplied active_strategy set supersede_of to its strategy_sha256; use its step "
+            "annotations (status attempted, legal, condition state, values_stale) to pick or revise the "
+            "next step, and re-declare when values_stale after a promotion changed the parent configuration. "
+            "planning_feedback entries are typed reflections, not penalties: a rejection entry carries "
+            "reason_code and recovery_hints describing exactly what to correct; an outcome_attribution "
+            "entry joins your last predicted expected_effects with the recorded terminal outcome (per "
+            "metric confirmed, refuted, or unknown), so adjust the hypothesis before the next probe. "
+            "Copy context_ref, "
             "observation_refs, and effective_domain_sha256 exactly from the supplied context; "
             "never invent hashes or observation ids. "
             "Select one exact parameter value within the supplied static legal bounds and legal direction. "

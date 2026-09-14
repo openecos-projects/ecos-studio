@@ -209,6 +209,96 @@ def test_decision_audit_verifies_record_missing_optional_keys(tmp_path: Path) ->
         assert len(audit.verify().entries) == 1
 
 
+def test_decision_audit_verifies_attribution_across_generations(
+    tmp_path: Path,
+) -> None:
+    from ecos_agent.optimization.contracts import OptimizationEpisodeState
+    from ecos_agent.optimization.reflection import PlanningFeedbackEntry
+
+    audit = OptimizationDecisionAudit(tmp_path / "episode")
+    attribution = PlanningFeedbackEntry(
+        source="rejection",
+        reason_code="proposal_action",
+        summary="proposal action was not legal",
+        recovery_hints=("choose from the supplied legal_actions",),
+    )
+    audit.append(
+        planning_entry_sha256=HASH,
+        proposal=None,
+        validation_result="rejected",
+        rejection_reason="proposal_action",
+        attribution=attribution,
+        requested=None,
+        state=OptimizationEpisodeState.PLANNING,
+    )
+    assert audit.verify().entries[0].attribution == attribution
+
+    # Gen-older: a revision before attribution existed stored no such key.
+    record = json.loads(audit.audit_path.read_bytes().splitlines()[0])
+    legacy = {
+        k: v
+        for k, v in record.items()
+        if k not in {"attribution", "entry_sha256"}
+    }
+    legacy_line = _canonical_line(dict(legacy), legacy)
+    audit.audit_path.write_bytes(legacy_line + b"\n")
+
+    entry = audit.verify().entries[0]
+    assert entry.attribution is None
+    assert entry.rejection_reason == "proposal_action"
+
+
+def test_episode_state_verifies_strategy_fields_across_generations(
+    tmp_path: Path,
+) -> None:
+    from tests.optimization.controller.support import (
+        CURRENT_VALUES,
+        _Clock,
+        _FakeCodex,
+        _FakeEcc,
+        _controller,
+        _observation,
+        _proposal,
+        _retrieval,
+    )
+
+    strategy = {
+        "schema_version": "ecos.optimization_strategy.v1",
+        "goal": "Probe padding, then confirm.",
+        "steps": [
+            {
+                "step_id": "step-1",
+                "knob_id": "place.cell_padding_x",
+                "direction": "increase",
+                "requested_value": 4,
+            }
+        ],
+    }
+    controller = _controller(
+        tmp_path,
+        _FakeCodex(lambda context: {**_proposal(context), "strategy": strategy}),
+        _FakeEcc(),
+    )
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    # Gen-older: states persisted before the strategy fields existed carry
+    # neither key; their hash must still verify after the keys are dropped.
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    assert "active_strategy" in state
+    legacy = {
+        k: v
+        for k, v in state.items()
+        if k
+        not in {"active_strategy", "strategy_parent_config_sha256", "state_sha256"}
+    }
+    legacy["state_sha256"] = canonical_sha256(legacy)
+    from ecos_agent.optimization.controller_models import _PersistedEpisodeState
+
+    snapshot = _PersistedEpisodeState.model_validate(legacy)
+    assert snapshot.active_strategy is None
+    assert snapshot.strategy_parent_config_sha256 is None
+
+
 def test_ledger_chains_still_append_and_replay(tmp_path: Path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(_start("intervention-1"))

@@ -120,6 +120,7 @@ from ecos_agent.optimization.rules import (
 )
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
+    OptimizationStrategyV4,
     ParameterApplicationReceipt,
 )
 from ecos_agent.optimization.parameters.semantics import (
@@ -259,6 +260,12 @@ class _PersistedEpisodeState(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     planning_only_turns: int = Field(default=0, ge=0)
+    active_strategy: OptimizationStrategyV4 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    strategy_parent_config_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     incumbent_candidate_root_ref: str | None = None
     incumbent_candidate_manifest_ref: str | None = None
     incumbent_candidate_manifest_sha256: str | None = None
@@ -295,6 +302,10 @@ class _PersistedEpisodeState(BaseModel):
             self.task_memory_scope_sha256
         ):
             raise ValueError("task memory scope hash is invalid")
+        if self.strategy_parent_config_sha256 is not None and not _SHA256.fullmatch(
+            self.strategy_parent_config_sha256
+        ):
+            raise ValueError("strategy parent config hash is invalid")
         if not _SHA256.fullmatch(self.execution_context_sha256):
             raise ValueError("execution context hash is invalid")
         if self.objective_alignment is not None:

@@ -526,6 +526,123 @@ class ExpectedEffectV2(_Model):
     direction: Literal["increase", "decrease", "unchanged", "unknown"]
 
 
+class StrategyStepCondition(_Model):
+    """One objective-metric gate a prior step's outcome must satisfy."""
+
+    metric_id: ObjectiveMetric
+    expects: Literal["improved", "degraded", "unchanged"]
+
+
+class StrategyStepV4(_Model):
+    """One declared future probe; never execution authority on its own."""
+
+    step_id: str
+    knob_id: OptimizationKnob
+    direction: StrategyDirection
+    requested_value: Scalar | None = None
+    intent: Literal["probe", "confirm", "exploit"] = "probe"
+    condition: StrategyStepCondition | None = None
+    depends_on: tuple[str, ...] = Field(default=(), max_length=5)
+    rationale: str | None = Field(default=None, max_length=280)
+
+    @field_validator("step_id")
+    @classmethod
+    def step_identifier(cls, value: str) -> str:
+        if not _ID.fullmatch(value):
+            raise ValueError("strategy step id is invalid")
+        return value
+
+    @field_validator("rationale")
+    @classmethod
+    def step_rationale(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def direction_matches_knob(self) -> "StrategyStepV4":
+        if self.knob_id == OptimizationKnob.ROUTABILITY_OPT:
+            if self.direction not in {
+                StrategyDirection.ENABLE,
+                StrategyDirection.DISABLE,
+            }:
+                raise ValueError("boolean knob requires enable or disable")
+            if self.requested_value is not None and type(self.requested_value) is not bool:
+                raise ValueError("boolean knob requires a boolean value")
+        else:
+            if self.direction not in {
+                StrategyDirection.INCREASE,
+                StrategyDirection.DECREASE,
+            }:
+                raise ValueError("numeric knob requires increase or decrease")
+            if self.requested_value is not None and (
+                isinstance(self.requested_value, bool)
+                or not isinstance(self.requested_value, (int, float))
+            ):
+                raise ValueError("numeric knob requires a numeric value")
+        return self
+
+
+class OptimizationStrategyV4(_Model):
+    """The planner's declared multi-step strategy for later turns.
+
+    Declarative guidance only: each step still passes the full per-turn
+    validation when it becomes the dispatched action, and only the single
+    ``action`` field ever dispatches in one turn.
+    """
+
+    schema_version: Literal["ecos.optimization_strategy.v1"] = (
+        "ecos.optimization_strategy.v1"
+    )
+    goal: str = Field(min_length=1, max_length=280)
+    steps: tuple[StrategyStepV4, ...] = Field(min_length=1, max_length=6)
+    supersede_of: str | None = None
+
+    @field_validator("goal")
+    @classmethod
+    def validate_goal(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("strategy goal is invalid")
+        return value
+
+    @field_validator("supersede_of")
+    @classmethod
+    def validate_supersede(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA256.fullmatch(value):
+            raise ValueError("strategy supersede hash is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def validate_step_graph(self) -> "OptimizationStrategyV4":
+        ids = [step.step_id for step in self.steps]
+        if len(set(ids)) != len(ids):
+            raise ValueError("strategy step ids must be unique")
+        known = set(ids)
+        for step in self.steps:
+            if step.step_id in step.depends_on:
+                raise ValueError("strategy step cannot depend on itself")
+            unknown = set(step.depends_on) - known
+            if unknown:
+                raise ValueError("strategy step depends on an unknown step")
+        # Steps form a DAG: a cycle would make the declared order meaningless.
+        pending = {step.step_id: set(step.depends_on) for step in self.steps}
+        resolved: set[str] = set()
+        while pending:
+            ready = [
+                step_id
+                for step_id, deps in pending.items()
+                if deps <= resolved
+            ]
+            if not ready:
+                raise ValueError("strategy steps must form a dependency DAG")
+            for step_id in ready:
+                del pending[step_id]
+                resolved.add(step_id)
+        return self
+
+
 class NumericProposalActionV2(_Model):
     claim_id: str | None = None
     claim_sha256: str | None = None
@@ -596,6 +713,9 @@ class OptimizationProposalV2(_Model):
     knowledge_refs: tuple[KnowledgeReference, ...] = ()
     task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = ()
     action: NumericProposalActionV2 | None = None
+    strategy: OptimizationStrategyV4 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def action_consistency(self) -> "OptimizationProposalV2":

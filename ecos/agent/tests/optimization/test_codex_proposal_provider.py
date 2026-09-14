@@ -461,6 +461,20 @@ def test_planner_binds_domain_and_consumable_evidence(
     assert provider.consume_planning_evidence() is None
 
 
+def test_planner_schema_keeps_strategy_optional() -> None:
+    domain = _domain()
+    schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))
+
+    assert "strategy" in schema["properties"]
+    assert "strategy" not in schema["required"]
+    step = schema["$defs"]["StrategyStepV4"]
+    assert set(step["required"]) == {"step_id", "knob_id", "direction"}
+    strategy = schema["$defs"]["OptimizationStrategyV4"]
+    assert set(strategy["required"]) == {"goal", "steps"}
+    condition = schema["$defs"]["StrategyStepCondition"]
+    assert set(condition["required"]) == {"metric_id", "expects"}
+
+
 def test_planner_schema_is_closed_and_allows_unsampled_values() -> None:
     domain = _domain()
     schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))

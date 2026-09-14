@@ -31,6 +31,11 @@ from ecos_agent.optimization.planning import (
     validate_planner_proposal,
     validate_v2_proposal,
 )
+from ecos_agent.optimization.reflection import (
+    PlanningFeedbackEntry,
+    rejection_feedback_entry,
+)
+from ecos_agent.optimization.strategy import viable_strategy_step_count
 from ecos_agent.optimization.knowledge.retrieval import (
     OptimizationRetrievalResult,
 )
@@ -118,6 +123,13 @@ class ControllerPlanningMixin:
                 and exc.failure_class != "parse_error"
             ):
                 raise
+            rejection = (
+                str(exc)
+                if isinstance(exc, (EffectiveDomainError, ProposalProviderError))
+                # planning_feedback forwards this text to the next turn: a
+                # bare code gives the model nothing to correct.
+                else f"proposal_schema: {str(exc)[:300]}"
+            )
             self._record_planning_provider_evidence(
                 planning_entry,
                 expected_payload_sha256=provider_payload_sha256,
@@ -126,12 +138,9 @@ class ControllerPlanningMixin:
                 planning_entry_sha256=planning_entry.entry_sha256,
                 proposal=None,
                 validation_result="rejected",
-                rejection_reason=(
-                    str(exc)
-                    if isinstance(exc, (EffectiveDomainError, ProposalProviderError))
-                    # planning_feedback forwards this text to the next turn: a
-                    # bare code gives the model nothing to correct.
-                    else f"proposal_schema: {str(exc)[:300]}"
+                rejection_reason=rejection,
+                attribution=rejection_feedback_entry(
+                    rejection, legal_actions=context.legal_actions
                 ),
                 requested=None,
                 state=self._state,
@@ -215,6 +224,10 @@ class ControllerPlanningMixin:
                 reason=rejection_reason,
                 planner_source=planner_source,
             )
+        # A well-formed turn may refresh the declared multi-step strategy on
+        # any decision; the strategy is planning guidance and every step still
+        # passes full validation when it becomes the dispatched action.
+        self._maybe_adopt_strategy(planner_turn.proposal_v2, context)
         if proposal.decision != OptimizationDecision.PROPOSE:
             if proposal.decision == OptimizationDecision.ESCALATE:
                 self._state = OptimizationEpisodeState.ESCALATED
@@ -306,6 +319,7 @@ class ControllerPlanningMixin:
                 v2_to_v1(parsed),
                 None,
                 v2_provider_payload_sha256(context),
+                parsed,
             )
         proposal = validate_v2_proposal(
             parsed,
@@ -326,6 +340,44 @@ class ControllerPlanningMixin:
             proposal,
         )
 
+    def _maybe_adopt_strategy(
+        self,
+        proposal_v2: OptimizationProposalV2 | None,
+        context: OptimizationPlanningContext,
+    ) -> None:
+        strategy = proposal_v2.strategy if proposal_v2 is not None else None
+        if strategy is None:
+            return
+        self._active_strategy = strategy
+        self._strategy_parent_config_sha256 = context.parent_config_sha256
+
+    def _viable_strategy_steps(
+        self, context: OptimizationPlanningContext
+    ) -> int:
+        return viable_strategy_step_count(
+            self._active_strategy,
+            incumbent=context.incumbent,
+            history=context.history,
+            legal_actions=context.legal_actions,
+            attempted=self._attempted_requests(context.parent_config_sha256),
+        )
+
+    def _non_dispatch_is_productive(
+        self, context: OptimizationPlanningContext, reason: str
+    ) -> bool:
+        """A continue is productive while a reasonable hypothesis exists.
+
+        Waiting for dispatched in-flight evidence and continuing under a
+        declared strategy with a legal, unattempted, unblocked step are both
+        forward progress; they must not burn the escalation budget.  A bare
+        continue with nothing declared still counts toward the stall limit.
+        """
+        if reason != "planner_continue":
+            return False
+        if self._pending_executions:
+            return True
+        return self._viable_strategy_steps(context) > 0
+
     def _defer_or_escalate(
         self,
         planning_entry: OptimizationPlanningAuditEntry,
@@ -336,7 +388,6 @@ class ControllerPlanningMixin:
         planner_source: Literal["llm", "repair"] = "llm",
         immediate_escalation: bool = False,
     ) -> OptimizationControlResult:
-        self._planning_only_turns += 1
         self._proposal = None
         self._pending_v2_proposal = None
         self._requested = None
@@ -345,7 +396,17 @@ class ControllerPlanningMixin:
             return self._finish_planning(
                 planning_entry, proposal, "rejected", "no_legal_candidate",
                 planner_source=planner_source,
+                attribution=rejection_feedback_entry(
+                    "no_legal_candidate", legal_actions=context.legal_actions
+                ),
             )
+        attribution = rejection_feedback_entry(
+            reason, legal_actions=context.legal_actions
+        )
+        if self._non_dispatch_is_productive(context, reason):
+            self._planning_only_turns = 0
+        else:
+            self._planning_only_turns += 1
         if (
             not immediate_escalation
             and self._planning_only_turns < self._budget.budget.max_planning_only_turns
@@ -363,6 +424,7 @@ class ControllerPlanningMixin:
                 "rejected",
                 reason,
                 planner_source=planner_source,
+                attribution=attribution,
             )
 
         self._state = OptimizationEpisodeState.ESCALATED
@@ -372,6 +434,7 @@ class ControllerPlanningMixin:
             "rejected",
             reason,
             planner_source=planner_source,
+            attribution=attribution,
         )
 
     def _finish_planning(
@@ -382,12 +445,14 @@ class ControllerPlanningMixin:
         rejection_reason: str | None,
         *,
         planner_source: Literal["llm", "repair"] = "llm",
+        attribution: PlanningFeedbackEntry | None = None,
     ) -> OptimizationControlResult:
         self._decision_audit.append(
             planning_entry_sha256=planning_entry.entry_sha256,
             proposal=proposal,
             validation_result=validation_result,
             rejection_reason=rejection_reason,
+            attribution=attribution,
             requested=self._requested,
             state=self._state,
             objective_contract_sha256=(
