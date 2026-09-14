@@ -118,6 +118,76 @@ def test_stdio_client_queues_only_terminal_events_and_keeps_step_ack(
     assert client._events.empty()
 
 
+def test_stdio_client_forwards_step_events_to_callback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    seen: list[dict[str, object]] = []
+    client.event_callback = seen.append
+    monkeypatch.setattr(client, "_send", lambda payload: None)
+
+    client._handle_message(
+        json.dumps(
+            {
+                "method": "runtime.event",
+                "params": {
+                    "type": "step.started",
+                    "operationId": "operation-1",
+                    "payload": {"step": "place", "tool": "dreamplace"},
+                },
+            }
+        ).encode()
+    )
+    client._handle_message(
+        json.dumps(
+            {
+                "method": "runtime.event",
+                "params": {
+                    "type": "step.log",
+                    "operationId": "operation-1",
+                    "payload": {"lines": ["noise"]},
+                },
+            }
+        ).encode()
+    )
+
+    assert len(seen) == 1
+    assert seen[0]["type"] == "step.started"
+
+
+def test_stdio_client_survives_callback_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+
+    def broken(event: dict[str, object]) -> None:
+        raise RuntimeError("callback exploded")
+
+    client.event_callback = broken
+    monkeypatch.setattr(client, "_send", lambda payload: None)
+
+    client._handle_message(
+        json.dumps(
+            {
+                "method": "runtime.event",
+                "params": {
+                    "type": "step.started",
+                    "operationId": "operation-1",
+                    "payload": {"step": "place"},
+                },
+            }
+        ).encode()
+    )
+
+    assert client._last_protocol_error is None
+
+
 def test_stdio_client_deduplicates_step_ack_per_operation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -376,3 +446,26 @@ sys.stdout.buffer.flush()
         client.call("operation.status", {"operationId": "operation-1"})
 
     client.close()
+
+
+def test_adapter_set_event_callback_forwards_to_transport() -> None:
+    from types import SimpleNamespace
+
+    from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
+
+    rpc = SimpleNamespace(event_callback=None, close=lambda: None)
+    adapter = EccCandidateRerunAdapter(
+        rpc, workspace_id="workspace-1", site_width_dbu=200
+    )
+    received = []
+    seen: list[object] = []
+
+    def callback(event: dict[str, object]) -> None:
+        received.append(event)
+        seen.append(callback)
+
+    adapter.set_event_callback(callback)
+    assert rpc.event_callback is callback
+
+    adapter.set_event_callback(None)
+    assert rpc.event_callback is None

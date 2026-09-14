@@ -10,7 +10,7 @@ import re
 import subprocess
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -92,6 +92,14 @@ class EccCandidateRerunAdapter:
         close = getattr(self._rpc, "close", None)
         if callable(close):
             close()
+
+    def set_event_callback(
+        self, callback: Callable[[Mapping[str, object]], None] | None
+    ) -> None:
+        """Forward step-level runtime events from the underlying transport."""
+        if not hasattr(self._rpc, "event_callback"):
+            return
+        self._rpc.event_callback = callback
 
     def start(self, request: CandidateExecutionRequest) -> CandidateExecutionReceipt:
         self._validate_request(request)
