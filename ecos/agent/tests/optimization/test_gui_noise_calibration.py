@@ -210,6 +210,16 @@ def test_gui_optimization_streams_turn_events_to_the_chat(
             "rejection_reason": None,
         },
     )
+    runner.event_listener(
+        "ecc_step",
+        {
+            "operation_id": "intervention-1",
+            "event_type": "step.started",
+            "step": "place",
+            "tool": "dreamplace",
+            "step_state": "Ongoing",
+        },
+    )
     runner.release.set()
     deadline = time.monotonic() + 2
     while provider.sessions[session_id].optimization_thread is not None and (
@@ -234,4 +244,12 @@ def test_gui_optimization_streams_turn_events_to_the_chat(
         event["optimization"].get("schema_version") == "ecos.optimization_progress.v2"
         for event in events
         if event["type"] == "optimization"
+    )
+    assert any(
+        event["type"] == "activity"
+        and isinstance(event.get("activity"), dict)
+        and event["activity"].get("kind") == "tool_call"
+        and event["activity"].get("tool") == "candidate-rerun"
+        and event["activity"].get("progress") == "place · dreamplace"
+        for event in events
     )

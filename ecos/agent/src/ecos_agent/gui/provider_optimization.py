@@ -609,9 +609,45 @@ class ProviderOptimizationMixin:
                 f"Candidate finished: {detail.get('outcome')} "
                 f"({detail.get('incumbent_decision') or 'no comparison'})"
             )
+        elif kind == "ecc_step":
+            self._emit_ecc_step_activity(session, detail)
+            return
         else:
             text = f"Optimization event: {kind}"
         self._emit(session, "optimization", text, optimization=payload)
+
+    def _emit_ecc_step_activity(
+        self, session: _Session, detail: Mapping[str, Any]
+    ) -> None:
+        operation_id = str(detail.get("operation_id") or "unknown")
+        step = str(detail.get("step") or "")
+        tool = str(detail.get("tool") or "")
+        event_type = str(detail.get("event_type") or "")
+        if event_type == "operation.rerun_prepared":
+            self._local_activity(
+                session,
+                f"ecc-{operation_id}-prepared",
+                "candidate-rerun",
+                "running",
+                progress="Preparing candidate rerun workspace",
+            )
+            return
+        label = " · ".join(part for part in (step, tool) if part) or event_type
+        if event_type == "step.completed":
+            status = (
+                "completed"
+                if str(detail.get("step_state") or "") == "Success"
+                else "failed"
+            )
+        else:
+            status = "running"
+        self._local_activity(
+            session,
+            f"ecc-{operation_id}-{step or event_type}",
+            "candidate-rerun",
+            status,
+            progress=label,
+        )
 
     def _run_turn_with_progress(
         self, session: _Session, runner: OptimizationEpisodeRunner

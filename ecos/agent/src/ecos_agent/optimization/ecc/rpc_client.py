@@ -31,6 +31,9 @@ _ALLOWED_METHODS = frozenset(
     }
 )
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+_FORWARDED_STEP_EVENTS = frozenset(
+    {"step.started", "step.completed", "operation.rerun_prepared"}
+)
 
 
 class EccContentLengthRpcClient:
@@ -66,6 +69,9 @@ class EccContentLengthRpcClient:
         self._lock = threading.Lock()
         self._last_protocol_error: str | None = None
         self._acked_step_events: set[tuple[str, str]] = set()
+        # Optional progress hook for step-level runtime events; set any time
+        # before events arrive (the reader thread reads it per message).
+        self.event_callback: Callable[[dict[str, object]], None] | None = None
 
     def start(self) -> None:
         if self._process is not None:
@@ -278,6 +284,12 @@ class EccContentLengthRpcClient:
             "operation.cancelled",
         }:
             self._events.put(event)
+        if event.get("type") in _FORWARDED_STEP_EVENTS and self.event_callback:
+            try:
+                self.event_callback(event)
+            except Exception:
+                # Progress display must never kill the reader thread.
+                pass
 
     def _send(self, payload: dict[str, object]) -> None:
         process = self._process

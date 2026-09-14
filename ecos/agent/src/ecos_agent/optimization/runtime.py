@@ -535,6 +535,9 @@ def _assemble_runner(
         current_values_supplier=current_values_supplier,
         stage_observation_supplier=stage_observation_supplier,
     )
+    register_step_events = getattr(executor, "set_event_callback", None)
+    if callable(register_step_events):
+        register_step_events(runner.emit_step_event)
 
     return runner
 

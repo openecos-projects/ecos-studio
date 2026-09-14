@@ -120,6 +120,20 @@ class OptimizationEpisodeRunner:
             # Progress display must never take down the episode.
             pass
 
+    def emit_step_event(self, event: Mapping[str, object]) -> None:
+        """Forward a step-level ECC runtime event to the progress listener."""
+        payload = event.get("payload")
+        detail: dict[str, object] = {
+            "operation_id": event.get("operationId"),
+            "event_type": event.get("type"),
+            "step": payload.get("step") if isinstance(payload, Mapping) else None,
+            "tool": payload.get("tool") if isinstance(payload, Mapping) else None,
+            "step_state": (
+                payload.get("state") if isinstance(payload, Mapping) else None
+            ),
+        }
+        self._emit_event("ecc_step", detail)
+
     @property
     def current_values(self) -> Mapping[str, bool | int | float]:
         return dict(self._current_values)
