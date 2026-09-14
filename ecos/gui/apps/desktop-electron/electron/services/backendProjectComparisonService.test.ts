@@ -353,6 +353,10 @@ describe('BackendProjectComparisonService', () => {
       { id: 'ws_0001', score: 72, status: 'Green', metrics: 168, signoff: 'pass' },
       { id: 'ws_0002', score: 84, status: 'Green', metrics: 168, signoff: 'pass' },
     ])
+    expect(first.data.trend.data.workspaces[1]?.qorSnapshotExtension).toMatchObject({
+      scoringEngine: 'qor-v3',
+      score: 84,
+    })
     expect(first.ok && first.data.recommendation).toMatchObject({
       status: 'ready',
       data: { workspaceId: 'ws_0002', score: 84 },

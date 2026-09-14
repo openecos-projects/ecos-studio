@@ -506,6 +506,9 @@ export class BackendProjectComparisonService {
               analysis: qor.analysis,
               metrics: qor.metrics,
               qorAssessment: qor.qorAssessment,
+              ...(qor.qorSnapshotExtension
+                ? { qorSnapshotExtension: qor.qorSnapshotExtension }
+                : {}),
               ...(flow ? { flow } : {}),
               ...(snapshotResult.sections.signoff.status === 'ready'
                 ? { signoffAssessment: snapshotResult.sections.signoff.data }
