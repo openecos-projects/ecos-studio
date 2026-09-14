@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from .support import (
     CURRENT_VALUES,
+    HASH,
     _Clock,
     _FakeCodex,
     _FakeEcc,
@@ -20,15 +25,19 @@ from .support import (
 )
 
 from ecos_agent.optimization.contracts import (
+    ObservationReference,
     OptimizationDecision,
     OptimizationEpisodeState,
+    ProposalContextRef,
     ProposalReason,
 )
 from ecos_agent.optimization.controller import (
     CandidateExecutionReceipt,
     OptimizationEpisodeController,
 )
+from ecos_agent.optimization.knowledge.compiler import KnowledgeApplicability
 from ecos_agent.optimization.ledger import OptimizationOutcomeKind
+from ecos_agent.optimization.planning import OptimizationPlanningContext
 
 _STRATEGY = {
     "schema_version": "ecos.optimization_strategy.v1",
@@ -216,3 +225,59 @@ def test_outcome_attribution_reaches_the_next_planning_turn(
     assert attribution[0].intervention_id is not None
     assert attribution[0].outcome == "improved"
     assert attribution[0].expected_effect_verdicts
+
+
+def _bare_context(**overrides: object) -> OptimizationPlanningContext:
+    context = OptimizationPlanningContext(
+        ProposalContextRef(
+            episode_id="episode-1",
+            checkpoint_id="checkpoint-1",
+            input_sha256=HASH,
+        ),
+        ObservationReference(observation_id="observation-place", sha256=HASH),
+        None,
+        (),
+        (),
+        (),
+    )
+    return replace(context, **overrides)
+
+
+@pytest.mark.parametrize(
+    "applicability",
+    [
+        KnowledgeApplicability.BLOCKED,
+        KnowledgeApplicability.UNKNOWN,
+    ],
+)
+def test_continue_justified_by_inactionable_knowledge_is_productive(
+    tmp_path: Path, applicability: KnowledgeApplicability
+) -> None:
+    controller = _controller(
+        tmp_path, _FakeCodex(_proposal), _FakeEcc(_started())
+    )
+    view = SimpleNamespace(
+        matches=[SimpleNamespace(applicability=applicability)]
+    )
+    context = _bare_context(supported_action_view=view)
+
+    assert controller._non_dispatch_is_productive(context, "planner_continue")
+
+
+def test_bare_continue_without_knowledge_abstention_stays_non_productive(
+    tmp_path: Path,
+) -> None:
+    controller = _controller(
+        tmp_path, _FakeCodex(_proposal), _FakeEcc(_started())
+    )
+    actionable_view = SimpleNamespace(
+        matches=[SimpleNamespace(applicability=KnowledgeApplicability.PASS)]
+    )
+
+    assert not controller._non_dispatch_is_productive(
+        _bare_context(supported_action_view=actionable_view),
+        "planner_continue",
+    )
+    assert not controller._non_dispatch_is_productive(
+        _bare_context(), "planner_continue"
+    )

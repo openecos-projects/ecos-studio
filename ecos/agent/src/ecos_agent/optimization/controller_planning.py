@@ -36,6 +36,7 @@ from ecos_agent.optimization.reflection import (
     rejection_feedback_entry,
 )
 from ecos_agent.optimization.strategy import viable_strategy_step_count
+from ecos_agent.optimization.knowledge.compiler import KnowledgeApplicability
 from ecos_agent.optimization.knowledge.retrieval import (
     OptimizationRetrievalResult,
 )
@@ -367,16 +368,27 @@ class ControllerPlanningMixin:
     ) -> bool:
         """A continue is productive while a reasonable hypothesis exists.
 
-        Waiting for dispatched in-flight evidence and continuing under a
-        declared strategy with a legal, unattempted, unblocked step are both
-        forward progress; they must not burn the escalation budget.  A bare
-        continue with nothing declared still counts toward the stall limit.
+        Waiting for dispatched in-flight evidence, continuing under a
+        declared strategy with a legal, unattempted, unblocked step, and
+        abstaining because the state compiler evaluated the supplied
+        knowledge claims as blocked or unknown are all forward progress;
+        they must not burn the escalation budget.  A bare continue with
+        nothing declared still counts toward the stall limit.
         """
         if reason != "planner_continue":
             return False
         if self._pending_executions:
             return True
-        return self._viable_strategy_steps(context) > 0
+        if self._viable_strategy_steps(context) > 0:
+            return True
+        view = context.supported_action_view
+        return view is not None and any(
+            match.applicability in {
+                KnowledgeApplicability.BLOCKED,
+                KnowledgeApplicability.UNKNOWN,
+            }
+            for match in view.matches
+        )
 
     def _defer_or_escalate(
         self,
