@@ -2,6 +2,7 @@ import type {
   DesignTool,
   DesktopAgentActivity,
   DesktopAgentInteractionRequest,
+  DesktopAgentOptimizationPayload,
   PdkReadiness,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
@@ -46,7 +47,15 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'info' | 'map' | 'interaction' | 'tool' | 'activity'
+  type?:
+    | 'text'
+    | 'image'
+    | 'info'
+    | 'map'
+    | 'interaction'
+    | 'tool'
+    | 'activity'
+    | 'optimization'
   /** Ephemeral report/layout content rendered by the workspace GUI. */
   isGuiArtifact?: boolean
   status?: 'loading' | 'done' | 'error'
@@ -70,6 +79,10 @@ export interface Message {
     startedAt: number
     turnId: string
   }
+  /** Latest optimization event payload for the episode card. */
+  optimization?: DesktopAgentOptimizationPayload
+  /** Chronological optimization payloads accumulated for one episode. */
+  optimizationTimeline?: DesktopAgentOptimizationPayload[]
 }
 
 export interface Thumbnail {

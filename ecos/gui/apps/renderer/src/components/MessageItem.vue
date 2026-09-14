@@ -5,6 +5,11 @@
       :activity="message.activity"
       :status="message.status"
     />
+    <AgentOptimizationCard
+      v-else-if="message.type === 'optimization' && message.optimization"
+      :optimization="message.optimization"
+      :timeline="message.optimizationTimeline ?? [message.optimization]"
+    />
     <AgentToolCard
       v-else-if="message.type === 'tool'"
       :content="message.content"
@@ -455,6 +460,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import type { Message } from '../types'
 import AgentActivityStream from './AgentActivityStream.vue'
+import AgentOptimizationCard from './AgentOptimizationCard.vue'
 import AgentToolCard from './AgentToolCard.vue'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
