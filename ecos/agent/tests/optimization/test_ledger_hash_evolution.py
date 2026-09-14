@@ -299,6 +299,46 @@ def test_episode_state_verifies_strategy_fields_across_generations(
     assert snapshot.strategy_parent_config_sha256 is None
 
 
+def test_episode_state_replays_the_legacy_two_turn_stall_budget(
+    tmp_path: Path,
+) -> None:
+    from ecos_agent.optimization.controller import OptimizationEpisodeController
+    from tests.optimization.controller.support import (
+        CURRENT_VALUES,
+        _Clock,
+        _FakeCodex,
+        _FakeEcc,
+        _controller,
+        _execution_context,
+        _observation,
+        _proposal,
+        _retrieval,
+        _started,
+    )
+
+    controller = _controller(
+        tmp_path, _FakeCodex(_proposal), _FakeEcc(_started())
+    )
+    controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
+
+    # Gen-older: episodes persisted under the frozen Literal[2] stall budget
+    # store 2; the widened int field must keep replaying them unchanged.
+    state = json.loads(controller.state_path.read_text(encoding="utf-8"))
+    state["budget"]["budget"]["max_planning_only_turns"] = 2
+    value = {k: v for k, v in state.items() if k != "state_sha256"}
+    state["state_sha256"] = canonical_sha256(value)
+    controller.state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    recovered = OptimizationEpisodeController.recover(
+        planner=_FakeCodex(_proposal),
+        executor=_FakeEcc(),
+        ledger=controller.ledger,
+        clock=_Clock(),
+        execution_context=_execution_context(),
+    )
+    assert recovered.budget.budget.max_planning_only_turns == 2
+
+
 def test_ledger_chains_still_append_and_replay(tmp_path: Path) -> None:
     ledger = OptimizationLedger(tmp_path / "episode")
     ledger.append_start(_start("intervention-1"))
