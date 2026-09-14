@@ -443,13 +443,16 @@ export interface DesktopAgentOptimizationPayload {
   in_flight?: number
   incumbent_candidate_root_ref?: string | null
   incumbent_decision?: string | null
+  kind?: string
   objective_sha256?: string
   original_objective?: Record<string, unknown>
   original_primary_metric?: string
+  outcome?: string | null
   planning_state?: string | null
   primary_metric?: string
   proposal_decision?: string | null
   proposal_reason?: string | null
+  rationale_summary?: string
   rejection_reason?: string | null
   requested?: { knob_id: string; value: boolean | number } | null
   recovery_incomplete?: boolean

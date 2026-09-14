@@ -214,6 +214,24 @@ from ecos_agent.gui.provider_common import (
 _TURN_HEARTBEAT_SECONDS = 30.0
 
 
+def _optimization_turn_event_payload(
+    session: _Session,
+    runner: OptimizationEpisodeRunner,
+    kind: str,
+    detail: Mapping[str, Any],
+) -> dict[str, Any]:
+    active = session.optimization_active_objective or {}
+    return {
+        "schema_version": "ecos.optimization_turn_event.v1",
+        "episode_id": runner.episode_id,
+        "objective_sha256": session.optimization_objective_sha256,
+        "active_primary_metric": active.get("active_primary_metric"),
+        "recovery_stage": active.get("recovery_stage"),
+        "kind": kind,
+        **detail,
+    }
+
+
 class ProviderOptimizationMixin:
     def _begin_optimization_objective(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
@@ -450,6 +468,9 @@ class ProviderOptimizationMixin:
         session.optimization_stop.clear()
         session.optimization_pause.clear()
         self._emit_status(session, "calibrating")
+        session.active_tool_message_id = (
+            f"optimization-progress-{session.session_id}"
+        )
 
         def run() -> None:
             try:
@@ -464,6 +485,7 @@ class ProviderOptimizationMixin:
                 session.phase = (
                     "operation" if session.mode == "workspace" else "home_ready"
                 )
+                session.active_tool_message_id = None
                 if cancelled:
                     self._emit(session, "message", cancellation_message(session.language))
                 else:
@@ -537,6 +559,10 @@ class ProviderOptimizationMixin:
         session.active_interrupt = provider.interrupt
         self._emit(session, "message", optimization_started_message(session.language))
         self._emit_status(session, "running")
+        # Collapse turn-start lines and heartbeats into one tool message.
+        session.active_tool_message_id = (
+            f"optimization-progress-{session.session_id}"
+        )
         session.optimization_thread = threading.Thread(
             target=self._run_optimization_episode,
             args=(session,),
@@ -544,6 +570,48 @@ class ProviderOptimizationMixin:
             daemon=True,
         )
         session.optimization_thread.start()
+
+    def _emit_optimization_turn_event(
+        self,
+        session: _Session,
+        runner: OptimizationEpisodeRunner,
+        kind: str,
+        detail: Mapping[str, Any],
+    ) -> None:
+        payload = _optimization_turn_event_payload(session, runner, kind, detail)
+        if kind == "proposal":
+            action = detail.get("action") or {}
+            requested = detail.get("requested") or {}
+            rationale = str(detail.get("rationale_summary") or "")
+            if action:
+                text = (
+                    f"Turn {session.optimization_turn_count + 1} proposal: "
+                    f"{action.get('direction')} {action.get('knob_id')}"
+                )
+                if requested:
+                    text += f" to {requested.get('value')}"
+                if rationale:
+                    text += f" — {rationale}"
+            else:
+                text = (
+                    f"Turn {session.optimization_turn_count + 1} proposal: "
+                    f"{detail.get('proposal_decision')} "
+                    f"({detail.get('proposal_reason')})"
+                )
+        elif kind == "dispatched":
+            requested = detail.get("requested") or {}
+            text = (
+                f"Candidate dispatched: {requested.get('knob_id', 'unknown knob')}; "
+                f"{detail.get('in_flight', 0)} in flight"
+            )
+        elif kind == "terminal":
+            text = (
+                f"Candidate finished: {detail.get('outcome')} "
+                f"({detail.get('incumbent_decision') or 'no comparison'})"
+            )
+        else:
+            text = f"Optimization event: {kind}"
+        self._emit(session, "optimization", text, optimization=payload)
 
     def _run_turn_with_progress(
         self, session: _Session, runner: OptimizationEpisodeRunner
@@ -566,10 +634,20 @@ class ProviderOptimizationMixin:
             while not heartbeat_stop.wait(_TURN_HEARTBEAT_SECONDS):
                 elapsed = int(time.monotonic() - started)
                 try:
+                    in_flight = len(runner.pending_execution_ids)
+                    phase = (
+                        "waiting for candidate execution"
+                        if in_flight
+                        else "planning next proposal"
+                    )
+                    budget = runner.budget
                     self._progress(
                         session,
                         "Optimization turn "
-                        f"{session.optimization_turn_count + 1} in progress, "
+                        f"{session.optimization_turn_count + 1} in progress — "
+                        f"{phase}, {in_flight} candidate(s) in flight, "
+                        f"planning calls left {budget.remaining_planning_calls}, "
+                        f"wall time left {int(budget.remaining_wall_time_seconds)}s, "
                         f"elapsed {elapsed // 60}m{elapsed % 60:02d}s",
                     )
                 except Exception:
@@ -592,6 +670,11 @@ class ProviderOptimizationMixin:
         provider = session.optimization_provider
         if runner is None:
             return
+        runner.event_listener = (
+            lambda kind, detail, _session=session, _runner=runner: (
+                self._emit_optimization_turn_event(_session, _runner, kind, detail)
+            )
+        )
         final_phase = "completed"
         try:
             while True:
@@ -734,6 +817,7 @@ class ProviderOptimizationMixin:
             if provider is not None:
                 provider.close()
             session.active_interrupt = None
+            session.active_tool_message_id = None
             session.optimization_provider = None
             session.optimization_runner = None
             session.optimization_thread = None

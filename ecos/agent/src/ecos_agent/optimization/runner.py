@@ -107,6 +107,18 @@ class OptimizationEpisodeRunner:
         self._terminal_waiter_any = terminal_waiter_any
         self._current_values_supplier = current_values_supplier
         self._stage_observation_supplier = stage_observation_supplier
+        # Optional GUI progress hook; set after construction so factory
+        # call sites and test fakes keep their two-argument signature.
+        self.event_listener: Callable[[str, Mapping[str, object]], None] | None = None
+
+    def _emit_event(self, kind: str, payload: Mapping[str, object]) -> None:
+        if self.event_listener is None:
+            return
+        try:
+            self.event_listener(kind, dict(payload))
+        except Exception:
+            # Progress display must never take down the episode.
+            pass
 
     @property
     def current_values(self) -> Mapping[str, bool | int | float]:
@@ -194,12 +206,46 @@ class OptimizationEpisodeRunner:
                 self._current_values,
                 stage_observations=self._stage_observations(observation),
             )
+            proposal = planning.proposal
+            if proposal is not None:
+                self._emit_event(
+                    "proposal",
+                    {
+                        "proposal_decision": proposal.decision.value,
+                        "proposal_reason": proposal.reason_code.value,
+                        "rationale_summary": proposal.rationale_summary,
+                        "action": (
+                            proposal.action.model_dump(mode="json")
+                            if proposal.action
+                            else None
+                        ),
+                        "requested": (
+                            planning.requested.model_dump(mode="json")
+                            if planning.requested
+                            else None
+                        ),
+                        "rejection_reason": planning.rejection_reason,
+                    },
+                )
             if planning.state != OptimizationEpisodeState.AWAITING_EXECUTION:
                 break
             if self._stop_event.is_set():
                 execution = self._controller.stop_before_execution()
                 break
             execution = self._controller.execute()
+            self._emit_event(
+                "dispatched",
+                {
+                    "execution_state": execution.state.value,
+                    "in_flight": len(self._controller.pending_execution_ids),
+                    "requested": (
+                        planning.requested.model_dump(mode="json")
+                        if planning.requested
+                        else None
+                    ),
+                    "rejection_reason": execution.rejection_reason,
+                },
+            )
             if (
                 execution.state == OptimizationEpisodeState.EXECUTING
                 and self._controller.free_candidate_slots > 0
@@ -318,6 +364,21 @@ class OptimizationEpisodeRunner:
             incumbent_decision=comparison.decision.value if comparison else None,
             decisive_metric=comparison.decisive_metric if comparison else None,
         )
+        self._emit_event(
+            "terminal",
+            {
+                "outcome": classification.outcome.value,
+                "incumbent_decision": (
+                    comparison.decision.value if comparison else None
+                ),
+                "decisive_metric": (
+                    comparison.decisive_metric.value
+                    if comparison and comparison.decisive_metric
+                    else None
+                ),
+                "promoted": classification.promote,
+            },
+        )
         self._absorb_promotion(record, classification.promote)
         return (
             terminal_observation,
@@ -359,6 +420,15 @@ class OptimizationEpisodeRunner:
             outcome=OptimizationOutcomeKind.EVIDENCE_INVALID,
             incumbent_decision=IncumbentDecision.EVIDENCE_LIMITED.value,
         )
+        self._emit_event(
+            "terminal",
+            {
+                "outcome": OptimizationOutcomeKind.EVIDENCE_INVALID.value,
+                "incumbent_decision": IncumbentDecision.EVIDENCE_LIMITED.value,
+                "decisive_metric": None,
+                "promoted": False,
+            },
+        )
         return (
             None,
             IncumbentComparison(IncumbentDecision.EVIDENCE_LIMITED, None),
@@ -384,6 +454,15 @@ class OptimizationEpisodeRunner:
             outcome=OptimizationOutcomeKind.INDETERMINATE,
         )
         completed = self._controller.complete_terminal(receipt)
+        self._emit_event(
+            "terminal",
+            {
+                "outcome": OptimizationOutcomeKind.INDETERMINATE.value,
+                "incumbent_decision": None,
+                "decisive_metric": None,
+                "promoted": False,
+            },
+        )
         return (
             None,
             None,
