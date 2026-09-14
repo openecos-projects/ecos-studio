@@ -349,7 +349,7 @@ function validQorDiagnosis(value: unknown): boolean {
     ]) &&
     boundedText(value.diagnosisId) &&
     boundedText(value.state) &&
-    boundedNumber(value.severity, 0, 1, true) &&
+    boundedNumber(value.severity, 0, 1, false) &&
     ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.confidence)) &&
     Array.isArray(value.triggerFeatures) &&
     value.triggerFeatures.length <= 32 &&

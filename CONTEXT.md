@@ -39,3 +39,45 @@ _Avoid_: data age, cache status
 **Canonical Rerun Entry**:
 The existing green play control in the right-side Flow Status bar is the sole UI entry for rerunning the full flow from Dashboard or the selected step from StepDashboard. Stale-result notices explain which evidence is shown and direct users to this control; they do not add a second rerun button.
 _Avoid_: stale-banner rerun button, duplicate execution action
+
+## Engineering Facts
+
+**Engineering Snapshot**:
+The atomic, revision-bound record of committed engineering facts for a Workspace, including the facts used by normal Backend rendering.
+_Avoid_: snapshot ID, cache
+
+**Committed Engineering Facts**:
+Verified Flow, QoR, Signoff, analysis, and Artifact metadata belonging to one Workspace Revision and eligible for normal Backend decisions and presentation.
+_Avoid_: latest result, raw report
+
+**QoR Report**:
+An ECC-produced report artifact for inspection or export; it is not a second source for normal Backend QoR queries.
+_Avoid_: Renderer QoR source, score cache
+
+**QoR Scoring Authority**:
+The ECC Engine is the sole producer of QoR score, gate, polarity, Qphys, and feasibility conclusions persisted for a Workspace Revision.
+_Avoid_: GUI scoring, Renderer score
+
+**QoR Comparison Projection**:
+An Electron Backend projection that consumes committed QoR conclusions to produce baseline deltas, recommendations, risks, and timing triage.
+_Avoid_: second score, Renderer domain calculation
+
+**QoR Snapshot Extension**:
+A bounded set of ECC-produced QoR v3 fields persisted with the Engineering Snapshot for normal Backend rendering, including physical dimensions, diagnoses, and evidence.
+_Avoid_: report fallback, raw QoR payload
+
+**ECC Engine**:
+The headless engineering authority for Workspace lifecycle, execution, Engineering Snapshot publication, QoR scoring, Signoff, Artifacts, and stable domain errors.
+_Avoid_: Studio engine, Adapter engine
+
+**Electron Backend Projection**:
+A product read model assembled from validated ECC committed facts for Workspace and Project queries; it does not publish or recompute engineering truth.
+_Avoid_: Renderer domain model, second authority
+
+**Snapshot Schema Migration**:
+An explicit-write-only, revision-preserving conversion of a supported Engineering Snapshot shape to a newer contract; read-only queries never migrate, and unsupported shapes remain unavailable.
+_Avoid_: silent upgrade, dual Snapshot model
+
+**Snapshot Contract Rollout**:
+ECC may prepare a newer Snapshot contract ahead of Studio, but production writes remain on the currently supported version until ECC and Studio switch atomically.
+_Avoid_: one-sided schema rollout, incompatible intermediate release

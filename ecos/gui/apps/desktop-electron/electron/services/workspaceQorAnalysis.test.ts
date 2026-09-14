@@ -1,7 +1,8 @@
-import type {
-  EccEngineeringSnapshot,
-  EccQorSnapshotExtension,
-  ProjectManifest,
+import {
+  validateEngineeringSnapshot,
+  type EccEngineeringSnapshot,
+  type EccQorSnapshotExtension,
+  type ProjectManifest,
 } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import { buildProjectQorTrendSummary } from './qorAnalysis'
@@ -216,6 +217,35 @@ describe('analyzeWorkspaceQor', () => {
 
     expect(input?.qorSnapshotExtension).toBe(extension)
     expect(summary?.qorSnapshotExtension).toBe(extension)
+  })
+
+  it('validates and projects a schema v3 Snapshot produced by ECC', () => {
+    const snapshot = engineeringSnapshot(5000)
+    snapshot.schemaVersion = 3
+    snapshot.qorSnapshotExtension = qorSnapshotExtension()
+
+    const validated = validateEngineeringSnapshot(snapshot)
+
+    expect(validated.ok).toBe(true)
+    expect(validated.ok && validated.sections.qorSnapshotExtension).toMatchObject({
+      status: 'ready',
+      data: {
+        schemaVersion: 1,
+        scoringEngine: 'qor-v3',
+        score: 73.5,
+      },
+    })
+    const manifest = {
+      project_id: 'project-1',
+      name: 'demo',
+      design_name: 'gcd',
+      workspaces: [workspace('current', 'Current')],
+      qor_baseline: null,
+    } as ProjectManifest
+    expect(
+      projectQorInputForWorkspace(manifest, 'current', {}, snapshot)
+        ?.qorSnapshotExtension,
+    ).toEqual(snapshot.qorSnapshotExtension)
   })
 
   it('restores step metrics directly from an authoritative snapshot', () => {

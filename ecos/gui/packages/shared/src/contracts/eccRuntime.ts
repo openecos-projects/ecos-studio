@@ -520,7 +520,7 @@ export interface EccQorSnapshotFeasibilityGate {
 
 export interface EccQorSnapshotDiagnosisIntervention {
   hypothesis: string
-  tier: string
+  tier: 'TIER_1_FEASIBILITY' | 'TIER_2_BOTTLENECK' | 'TIER_3_OPPORTUNITY'
   confidence: 'HIGH' | 'MEDIUM' | 'LOW'
   parameterKnob: string | null
   validationProcedure: string | null
@@ -529,7 +529,7 @@ export interface EccQorSnapshotDiagnosisIntervention {
 export interface EccQorSnapshotDiagnosis {
   diagnosisId: string
   state: string
-  severity: number | null
+  severity: number
   confidence: 'HIGH' | 'MEDIUM' | 'LOW'
   triggerFeatures: string[]
   affectedDimensions: string[]
@@ -545,7 +545,7 @@ export interface EccQorSnapshotExtension {
   reason?: string
   score: number | null
   scalarStatus: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
-  profile: string
+  profile: 'balanced' | 'timing_critical' | 'low_power' | 'area_optimized'
   qphys: Record<string, EccQorSnapshotDimension>
   feasibility: {
     status: 'PASS' | 'PHYSICAL_FAIL' | 'NOT_VERIFIED' | 'UNKNOWN'
@@ -569,7 +569,6 @@ export interface EccQorSnapshotExtension {
       | 'MAPPED_COMPATIBLE'
       | 'INCOMPATIBLE'
       | 'UNAVAILABLE'
-      | ''
   }
   power: {
     totalUw: number | null

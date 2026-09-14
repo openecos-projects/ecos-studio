@@ -129,7 +129,7 @@ export interface DashboardQorDiagnosis {
   id: string
   state: string
   tone: DashboardTone
-  severity: number | null
+  severity: number
   confidence: string
   evidence: string[]
   interventions: string[]

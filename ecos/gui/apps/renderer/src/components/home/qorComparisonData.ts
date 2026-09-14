@@ -212,6 +212,23 @@ export function formatQorScore(score: number | null | undefined): string {
   return Number.isInteger(score) ? String(score) : score.toFixed(1)
 }
 
+export function qorScoreTone(
+  score: number | null | undefined,
+  threshold: number | null | undefined,
+): 'pass' | 'fail' | 'unrated' {
+  if (
+    score === null ||
+    score === undefined ||
+    threshold === null ||
+    threshold === undefined ||
+    !Number.isFinite(score) ||
+    !Number.isFinite(threshold)
+  ) {
+    return 'unrated'
+  }
+  return score >= threshold ? 'pass' : 'fail'
+}
+
 export function qorDeltaLabel(delta: {
   absoluteDelta: number | null
   relativeDeltaPct: number | null

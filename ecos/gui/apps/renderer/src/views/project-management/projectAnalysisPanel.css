@@ -378,6 +378,17 @@
   align-items: stretch;
   grid-template-columns: minmax(250px, 0.82fr) minmax(0, 1.18fr);
   gap: 10px;
+  width: 100%;
+}
+
+/* The chart is the comparison surface for both lead cards, so it owns the full row. */
+.dash-lead-grid > .dash-qor-chart {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.dash-lead-grid .dash-eyebrow {
+  font-size: 11px;
 }
 
 /* Flagged by a left edge rule rather than a tinted panel, matching the attention rows. */
@@ -1130,6 +1141,10 @@
 
   .dash-lead-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dash-lead-grid > .dash-qor-chart {
+    grid-column: auto;
   }
 }
 

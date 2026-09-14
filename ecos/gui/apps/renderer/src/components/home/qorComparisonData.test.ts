@@ -5,6 +5,7 @@ import {
   formatQorValue,
   homeQorFlowStepForLabel,
   qorMetricComparisonLabel,
+  qorScoreTone,
   qorScoreComparisonLabel,
   summarizeHomeQorComparison,
 } from './qorComparisonData'
@@ -225,5 +226,11 @@ describe('Home QoR comparison data', () => {
         baselinePolarity: 'trend_only',
       }),
     ).toBe('No directional QoR rule')
+  })
+
+  it('uses the authoritative score threshold for the score tone', () => {
+    expect(qorScoreTone(62.1, 60)).toBe('pass')
+    expect(qorScoreTone(59.9, 60)).toBe('fail')
+    expect(qorScoreTone(null, 60)).toBe('unrated')
   })
 })

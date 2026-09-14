@@ -487,6 +487,7 @@ import {
   buildHomeQorDetailModel,
   formatQorScore,
   homeQorFlowStepForLabel,
+  qorScoreTone as getQorScoreTone,
   summarizeHomeQorComparison,
 } from '@/components/home/qorComparisonData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
@@ -691,16 +692,12 @@ const qorBaselineScoreValue = computed(() =>
   formatQorScore(qorComparisonState.value.comparison?.baselineScore),
 )
 const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const gate = qorComparisonState.value.comparison?.scoreGate
-  if (gate === 'pass') return 'pass'
-  if (gate === 'blocked') return 'fail'
-  return 'unrated'
+  const comparison = qorComparisonState.value.comparison
+  return getQorScoreTone(comparison?.score, comparison?.scoreThreshold)
 })
 const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const gate = qorComparisonState.value.comparison?.baselineScoreGate
-  if (gate === 'pass') return 'pass'
-  if (gate === 'blocked') return 'fail'
-  return 'unrated'
+  const comparison = qorComparisonState.value.comparison
+  return getQorScoreTone(comparison?.baselineScore, comparison?.scoreThreshold)
 })
 const qorScoreStatusLabel = computed(() => {
   if (qorScoreTone.value === 'unrated') return 'Not rated'

@@ -207,6 +207,21 @@ function snapshot() {
   }
 }
 
+function snapshotWithInvalidExtension(
+  mutate: (extension: EccQorSnapshotExtension) => void,
+) {
+  const current = snapshot()
+  current.schemaVersion = 3
+  const extension = qorSnapshotExtension()
+  mutate(extension)
+  current.qorSnapshotExtension = extension
+  return current
+}
+
+function invalidQorExtensionResult(current: ReturnType<typeof snapshot>) {
+  return validateEngineeringSnapshot(current)
+}
+
 describe('Engineering Snapshot validation', () => {
   it('exposes a valid QoR Snapshot extension independently from legacy QoR facts', () => {
     const current = snapshot()
@@ -282,6 +297,143 @@ describe('Engineering Snapshot validation', () => {
         },
       },
     })
+  })
+
+  it.each([
+    [
+      'missing top-level field',
+      (extension: EccQorSnapshotExtension) => {
+        delete (extension as unknown as Record<string, unknown>).score
+      },
+    ],
+    [
+      'extra top-level field',
+      (extension: EccQorSnapshotExtension) => {
+        ;(extension as unknown as Record<string, unknown>).unexpected = true
+      },
+    ],
+    [
+      'invalid profile',
+      (extension: EccQorSnapshotExtension) => {
+        extension.profile = 'legacy' as never
+      },
+    ],
+    [
+      'invalid scalar status',
+      (extension: EccQorSnapshotExtension) => {
+        extension.scalarStatus = 'UNKNOWN' as never
+      },
+    ],
+    [
+      'invalid extension status',
+      (extension: EccQorSnapshotExtension) => {
+        extension.status = 'partial' as never
+      },
+    ],
+    [
+      'invalid intervention tier',
+      (extension: EccQorSnapshotExtension) => {
+        extension.diagnoses[0]!.interventions[0]!.tier = 'TIER_UNKNOWN' as never
+      },
+    ],
+    [
+      'null diagnosis severity',
+      (extension: EccQorSnapshotExtension) => {
+        extension.diagnoses[0]!.severity = null as never
+      },
+    ],
+    [
+      'out-of-range diagnosis severity',
+      (extension: EccQorSnapshotExtension) => {
+        extension.diagnoses[0]!.severity = 1.1
+      },
+    ],
+    [
+      'out-of-range score',
+      (extension: EccQorSnapshotExtension) => {
+        extension.score = 101
+      },
+    ],
+    [
+      'out-of-range evidence',
+      (extension: EccQorSnapshotExtension) => {
+        extension.evidence.index = 101
+      },
+    ],
+    [
+      'negative power',
+      (extension: EccQorSnapshotExtension) => {
+        extension.power.totalUw = -1
+      },
+    ],
+    [
+      'unknown qphys dimension',
+      (extension: EccQorSnapshotExtension) => {
+        ;(extension.qphys as Record<string, unknown>).unknown = {
+          value: 1,
+          state: 'PASS',
+          featureIds: [],
+        }
+      },
+    ],
+    [
+      'empty text',
+      (extension: EccQorSnapshotExtension) => {
+        extension.diagnoses[0]!.diagnosisId = ''
+      },
+    ],
+    [
+      'overlong text',
+      (extension: EccQorSnapshotExtension) => {
+        extension.diagnoses[0]!.diagnosisId = 'x'.repeat(513)
+      },
+    ],
+    [
+      'overlong array',
+      (extension: EccQorSnapshotExtension) => {
+        extension.artifactIds = Array.from(
+          { length: 513 },
+          (_, index) => `artifact-${index}`,
+        )
+      },
+    ],
+    [
+      'unavailable without reason',
+      (extension: EccQorSnapshotExtension) => {
+        extension.status = 'unavailable'
+      },
+    ],
+    [
+      'unavailable with empty reason',
+      (extension: EccQorSnapshotExtension) => {
+        extension.status = 'unavailable'
+        extension.reason = ''
+      },
+    ],
+    [
+      'available with reason',
+      (extension: EccQorSnapshotExtension) => {
+        extension.reason = 'not allowed while available'
+      },
+    ],
+    [
+      'invalid compatibility status',
+      (extension: EccQorSnapshotExtension) => {
+        extension.inflation.compatibilityStatus = '' as never
+      },
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(invalidQorExtensionResult(snapshotWithInvalidExtension(mutate))).toMatchObject(
+      {
+        ok: true,
+        sections: {
+          qorSnapshotExtension: {
+            status: 'unavailable',
+            issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
+          },
+        },
+      },
+    )
   })
 
   it('preserves complete metric metadata and validates sections independently', () => {

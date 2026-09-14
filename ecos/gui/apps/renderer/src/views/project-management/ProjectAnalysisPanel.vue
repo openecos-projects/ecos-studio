@@ -179,6 +179,7 @@
         />
 
         <ProjectQorScoreChart
+          class="dash-qor-chart"
           :trend-points="project.qorTrendSummary.trendPoints"
           :baseline-workspace-id="project.qorTrendSummary.baselineWorkspaceId"
           :baseline-label="baselineDisplayLabel"
