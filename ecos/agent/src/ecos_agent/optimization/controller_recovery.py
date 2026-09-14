@@ -226,6 +226,10 @@ class ControllerRecoveryMixin:
         }
         controller._execution_bindings = snapshot.execution_bindings
         controller._planning_only_turns = snapshot.planning_only_turns
+        controller._active_strategy = snapshot.active_strategy
+        controller._strategy_parent_config_sha256 = (
+            snapshot.strategy_parent_config_sha256
+        )
         controller._incumbent_candidate_root_ref = snapshot.incumbent_candidate_root_ref
         controller._incumbent_candidate_manifest_ref = (
             snapshot.incumbent_candidate_manifest_ref

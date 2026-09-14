@@ -104,6 +104,7 @@ from ecos_agent.optimization.planning import (
     validate_planner_proposal,
     validate_v2_proposal,
 )
+from ecos_agent.optimization.reflection import build_reflection_inputs
 from ecos_agent.optimization.knowledge.retrieval import (
     KnowledgeChannel,
     OptimizationRetrievalResult,
@@ -165,11 +166,6 @@ class ControllerContextMixin:
             if self.mode != OptimizationAgentMode.LLM_NO_KNOWLEDGE else ()
         )
         prior_decisions = self._decision_audit.replay().entries
-        planning_feedback = (
-            (prior_decisions[-1].rejection_reason,)
-            if prior_decisions and prior_decisions[-1].validation_result == "rejected"
-            and prior_decisions[-1].rejection_reason else ()
-        )
         effective_domains = self._parameter_domains(observation, active_values)
         search_layer, selected_actions = self._select_parameter_actions(
             effective_domains, observation
@@ -182,6 +178,16 @@ class ControllerContextMixin:
         available_actions = tuple(
             action for action in selected_actions
             if candidate_target_step(action.knob_id) in stage_evidence
+        )
+        planning_feedback, active_strategy_payload = build_reflection_inputs(
+            prior_decisions=prior_decisions,
+            history=history,
+            legal_actions=available_actions,
+            incumbent=self._incumbent,
+            strategy=self._active_strategy,
+            strategy_parent_config_sha256=self._strategy_parent_config_sha256,
+            current_parent_config_sha256=parent_config_sha256,
+            attempted=self._attempted_requests(parent_config_sha256),
         )
         parameter_policy = policy_payload(
             self._objective, search_layer,
@@ -402,7 +408,11 @@ class ControllerContextMixin:
                         )
                         for item in trajectories
                     ],
-                    "planning_feedback": planning_feedback,
+                    "planning_feedback": [
+                        entry.model_dump(mode="json")
+                        for entry in planning_feedback
+                    ],
+                    "active_strategy": active_strategy_payload,
                     "in_flight": [in_flight_payload(item) for item in in_flight],
                     "stage_evidence": stage_evidence_payload(
                         observation.stage.value, observation_ref,
@@ -442,6 +452,7 @@ class ControllerContextMixin:
             parameter_knowledge,
             trajectories,
             planning_feedback,
+            active_strategy_payload,
             parameter_policy,
             in_flight,
             dict(stage_observations or {}),
@@ -520,27 +531,6 @@ class ControllerContextMixin:
         value = self._execution_context.get("design_id")
         return value if isinstance(value, str) and _ID.fullmatch(value) else None
 
-    def _sync_case_pool(self) -> None:
-        pool = self._case_pool.verify()
-        if self._external_case_pool and (
-            pool.event_count != self._case_pool_event_count
-            or pool.chain_head_sha256 != self._case_pool_chain_head_sha256
-        ):
-            raise OptimizationEpisodeControllerError(
-                "frozen knowledge case pool changed during the episode"
-            )
-        local = {item.case_id: item for item in self._case_audit.verify().cases}
-        for case in pool.cases:
-            existing = local.get(case.case_id)
-            if existing is not None:
-                if existing != case:
-                    raise OptimizationEpisodeControllerError(
-                        "empirical case pool conflicts with episode audit"
-                    )
-                continue
-            self._case_audit.append_case(case)
-            local[case.case_id] = case
-
     def _effective_domain_context(
         self,
         observation: StageObservation,
@@ -592,9 +582,6 @@ class ControllerContextMixin:
             context["parameter_policy_sha256"] = canonical_sha256(
                 self._objective.parameter_policy.model_dump(mode="json")
             )
-        context["tool_revision"] = tool_revision
-        context["parameter_card_sha256"] = parameter_card_sha256
-        context["unit"] = unit
         return context
 
     def _execution_seed(self) -> int:

@@ -29,6 +29,7 @@ from ecos_agent.optimization.contracts import (
     StageObservation,
     TerminalObservation,
 )
+from ecos_agent.optimization.reflection import PlanningFeedbackEntry
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
     ParameterApplicationReceipt,
@@ -174,7 +175,10 @@ def freeze_planning_context(context: OptimizationPlanningContext) -> dict[str, o
         "parameter_trajectories": [
             _freeze_history(item) for item in context.parameter_trajectories
         ],
-        "planning_feedback": list(context.planning_feedback),
+        "planning_feedback": [
+            entry.model_dump(mode="json") for entry in context.planning_feedback
+        ],
+        "active_strategy": context.active_strategy,
         "stage_observations": {
             stage: observation.model_dump(mode="json")
             for stage, observation in sorted(
@@ -238,7 +242,11 @@ def rebuild_planning_context(data: Mapping[str, object]) -> OptimizationPlanning
             for item in data.get("parameter_knowledge", ())
         ),
         parameter_trajectories=trajectories,
-        planning_feedback=tuple(data.get("planning_feedback", ())),
+        planning_feedback=tuple(
+            PlanningFeedbackEntry.model_validate(item)
+            for item in data.get("planning_feedback", ())
+        ),
+        active_strategy=data.get("active_strategy"),
         stage_observations=stage_observations or None,
         parent_config_sha256=data.get("parent_config_sha256"),
         parameter_policy=data.get("parameter_policy"),

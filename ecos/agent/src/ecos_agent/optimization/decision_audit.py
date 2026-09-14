@@ -19,6 +19,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationProposal,
     RequestedKnobValue,
 )
+from ecos_agent.optimization.reflection import PlanningFeedbackEntry
 
 DecisionValidationResult = Literal["accepted", "rejected"]
 PlannerSource = Literal["llm", "repair"]
@@ -44,6 +45,9 @@ class OptimizationDecisionAuditEntry(BaseModel):
     proposal: OptimizationProposal | None = None
     validation_result: DecisionValidationResult
     rejection_reason: str | None = None
+    attribution: PlanningFeedbackEntry | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     requested: RequestedKnobValue | None = None
     state: OptimizationEpisodeState
     planner_source: PlannerSource = Field(
@@ -114,6 +118,7 @@ class OptimizationDecisionAudit:
         state: OptimizationEpisodeState,
         objective_contract_sha256: str | None = None,
         planner_source: PlannerSource = "llm",
+        attribution: PlanningFeedbackEntry | None = None,
     ) -> OptimizationDecisionAuditEntry:
         with self._exclusive_lock():
             replay = self._verify_locked()
@@ -126,6 +131,8 @@ class OptimizationDecisionAudit:
                 "requested": requested.model_dump(mode="json") if requested else None,
                 "state": state.value,
             }
+            if attribution is not None:
+                payload["attribution"] = attribution.model_dump(mode="json")
             if objective_contract_sha256 is not None:
                 payload["objective_contract_sha256"] = objective_contract_sha256
             if planner_source != "llm":

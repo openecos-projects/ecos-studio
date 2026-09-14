@@ -29,6 +29,7 @@ from ecos_agent.optimization.contracts import (
     StageObservation,
     TerminalObservation,
 )
+from ecos_agent.optimization.reflection import PlanningFeedbackEntry
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAudit,
     TerminalEmpiricalCase,
@@ -131,7 +132,8 @@ class OptimizationPlanningContext:
     active_objective: ActiveOptimizationObjective | None = None
     parameter_knowledge: tuple[ParameterSemanticsCard, ...] = ()
     parameter_trajectories: tuple["OptimizationHistory", ...] = ()
-    planning_feedback: tuple[str, ...] = ()
+    planning_feedback: tuple[PlanningFeedbackEntry, ...] = ()
+    active_strategy: Mapping[str, object] | None = None
     parameter_policy: Mapping[str, object] | None = None
     in_flight: tuple[InFlightExperiment, ...] = ()
     stage_observations: Mapping[str, StageObservation] | None = None
@@ -482,7 +484,11 @@ def planning_context_payload(context: OptimizationPlanningContext) -> dict[str, 
         optimization_history_payload(item, incumbent=context.incumbent)
         for item in context.parameter_trajectories
     ]
-    payload["planning_feedback"] = list(context.planning_feedback)
+    payload["planning_feedback"] = [
+        entry.model_dump(mode="json") for entry in context.planning_feedback
+    ]
+    if context.active_strategy is not None:
+        payload["active_strategy"] = dict(context.active_strategy)
     if context.in_flight:
         payload["in_flight"] = [in_flight_payload(item) for item in context.in_flight]
     if context.stage_observations is not None and context.observation is not None:
@@ -649,6 +655,9 @@ def v2_to_v1(proposal: OptimizationProposalV2) -> OptimizationProposal:
     """Project the validated probe into the execution ledger's action summary."""
     payload = proposal.model_dump(mode="json")
     payload["schema_version"] = "ecos.optimization_proposal.v1"
+    # The declared strategy is planning guidance; the execution-ledger summary
+    # never carried it and the v1 contract forbids extra keys.
+    payload.pop("strategy", None)
     try:
         payload["reason_code"] = ProposalReason(proposal.reason_code).value
     except ValueError as exc:

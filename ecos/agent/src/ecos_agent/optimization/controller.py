@@ -125,6 +125,7 @@ from ecos_agent.optimization.rules import (
 )
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
+    OptimizationStrategyV4,
     ParameterApplicationReceipt,
 )
 from ecos_agent.optimization.parameters.semantics import (
@@ -296,6 +297,8 @@ class OptimizationEpisodeController(
         self._pending_executions: dict[str, PendingExecutionRecord] = {}
         self._execution_bindings: tuple[ExecutionBinding, ...] = ()
         self._planning_only_turns = 0
+        self._active_strategy: OptimizationStrategyV4 | None = None
+        self._strategy_parent_config_sha256: str | None = None
         self._persist()
 
     @property
@@ -471,6 +474,10 @@ class OptimizationEpisodeController(
     @property
     def task_memory_scope_sha256(self) -> str | None:
         return self._task_memory_scope_sha256
+
+    @property
+    def active_strategy(self) -> OptimizationStrategyV4 | None:
+        return self._active_strategy
 
     @property
     def state_path(self) -> Path:
@@ -659,6 +666,12 @@ class OptimizationEpisodeController(
             )
         if self._task_memory_scope_sha256 is not None:
             value["task_memory_scope_sha256"] = self._task_memory_scope_sha256
+        if self._active_strategy is not None:
+            value["active_strategy"] = self._active_strategy.model_dump(mode="json")
+        if self._strategy_parent_config_sha256 is not None:
+            value["strategy_parent_config_sha256"] = (
+                self._strategy_parent_config_sha256
+            )
         value["state_sha256"] = canonical_sha256(value)
         _PersistedEpisodeState.model_validate(value)
         _write_json_atomic(self.state_path, value)

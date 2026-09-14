@@ -7,7 +7,10 @@ from ecos_agent.optimization.contracts import (
     OptimizationOutcomeKind,
     TerminalObservation,
 )
-from ecos_agent.optimization.controller_models import PendingExecutionRecord
+from ecos_agent.optimization.controller_models import (
+    OptimizationEpisodeControllerError,
+    PendingExecutionRecord,
+)
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseDiagnostic,
     EmpiricalOutcome,
@@ -22,6 +25,27 @@ from ecos_agent.optimization.rules import native_receipt_is_effective
 
 
 class ControllerCaseRecordingMixin:
+    def _sync_case_pool(self) -> None:
+        pool = self._case_pool.verify()
+        if self._external_case_pool and (
+            pool.event_count != self._case_pool_event_count
+            or pool.chain_head_sha256 != self._case_pool_chain_head_sha256
+        ):
+            raise OptimizationEpisodeControllerError(
+                "frozen knowledge case pool changed during the episode"
+            )
+        local = {item.case_id: item for item in self._case_audit.verify().cases}
+        for case in pool.cases:
+            existing = local.get(case.case_id)
+            if existing is not None:
+                if existing != case:
+                    raise OptimizationEpisodeControllerError(
+                        "empirical case pool conflicts with episode audit"
+                    )
+                continue
+            self._case_audit.append_case(case)
+            local[case.case_id] = case
+
     def _record_empirical_case(
         self,
         outcome: OptimizationTerminalOutcome,
