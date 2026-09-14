@@ -7,6 +7,7 @@ import {
   type BackendWorkspaceArtifactResult,
   type BackendWorkspaceStepDetailRequest,
   type BackendWorkspaceStepDetailResult,
+  type EngineeringSnapshotValidationResult,
   type ProjectManifest,
   type ReadIssue,
   type ReadSection,
@@ -92,9 +93,64 @@ export interface BackendWorkspaceInvalidation {
 }
 
 const NOT_MIGRATED_ISSUE: ReadIssue = { code: 'BACKEND_SECTION_NOT_MIGRATED' }
+const SNAPSHOT_SECTIONS = ['artifacts', 'flow', 'qor', 'signoff'] as const
+type ValidEngineeringSnapshot = Extract<EngineeringSnapshotValidationResult, { ok: true }>
 
 function unavailable<T>(): ReadSection<T> {
   return { status: 'unavailable', issues: [NOT_MIGRATED_ISSUE] }
+}
+
+function snapshotSectionItemCount(
+  snapshot: ValidEngineeringSnapshot,
+  section: (typeof SNAPSHOT_SECTIONS)[number],
+): number {
+  if (section === 'flow') {
+    const value = snapshot.sections.flow
+    if (value.status !== 'ready' && value.status !== 'partial') return 0
+    const steps = value.data.steps
+    return Array.isArray(steps) ? steps.length : 0
+  }
+  if (section === 'qor') {
+    const value = snapshot.sections.qor
+    return value.status === 'ready' || value.status === 'partial'
+      ? value.data.metrics.length
+      : 0
+  }
+  if (section === 'artifacts') {
+    const value = snapshot.sections.artifacts
+    return value.status === 'ready' || value.status === 'partial' ? value.data.length : 0
+  }
+  const value = snapshot.sections.signoff
+  return value.status === 'ready' || value.status === 'partial'
+    ? value.data.groups.length + value.data.risks.length
+    : 0
+}
+
+function snapshotSectionRegressed(
+  previous: ValidEngineeringSnapshot,
+  current: ValidEngineeringSnapshot & {
+    staleSnapshot?: ValidEngineeringSnapshot
+  },
+): boolean {
+  return SNAPSHOT_SECTIONS.some((section) => {
+    const previousStatus = previous.sections[section].status
+    const currentStatus = current.sections[section].status
+    const previousAvailable = previousStatus === 'ready' || previousStatus === 'partial'
+    const currentAvailable =
+      currentStatus === 'ready' ||
+      currentStatus === 'partial' ||
+      current.staleSnapshot?.sections[section].status === 'ready' ||
+      current.staleSnapshot?.sections[section].status === 'partial'
+    const currentHasData = snapshotSectionItemCount(current, section) > 0
+    const previousHasData = snapshotSectionItemCount(previous, section) > 0
+    const staleHasData = current.staleSnapshot
+      ? snapshotSectionItemCount(current.staleSnapshot, section) > 0
+      : false
+    return (
+      previousAvailable &&
+      (!currentAvailable || (previousHasData && !currentHasData && !staleHasData))
+    )
+  })
 }
 
 export class BackendWorkspaceService {
@@ -363,6 +419,9 @@ export class BackendWorkspaceService {
         snapshot.snapshot.workspaceRevision < previousSnapshot.snapshot.workspaceRevision
       ) {
         throw new Error('ENGINEERING_SNAPSHOT_REVISION_REGRESSION')
+      }
+      if (snapshotSectionRegressed(previousSnapshot, snapshot)) {
+        throw new Error('ENGINEERING_SNAPSHOT_SECTION_INVALID')
       }
     }
     const resultProjection = snapshot?.ok ? projectWorkspaceResults(snapshot) : null

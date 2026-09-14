@@ -628,6 +628,42 @@ describe('BackendWorkspaceService', () => {
     expect(refreshed.overview.qor).toMatchObject({ data: { score: { value: 80 } } })
   })
 
+  it('does not publish a transiently incomplete snapshot over committed facts', async () => {
+    const first = engineeringSnapshot()
+    first.flow = {
+      steps: [{ name: 'Synthesis', state: 'Success', tool: 'yosys' }],
+    }
+    const transient = structuredClone(first)
+    transient.workspaceRevision = 2
+    transient.flow = { steps: [] }
+    const readEngineeringSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(persistedSnapshotResult(first))
+      .mockResolvedValueOnce(persistedSnapshotResult(transient))
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        readEngineeringSnapshot,
+        readManifest: vi.fn().mockResolvedValue(manifestForWorkspace()),
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+
+    const initial = await runWithWindowScope(49, () => service.getOverview())
+    await expect(runWithWindowScope(49, () => service.refreshOverview())).rejects.toThrow(
+      'ENGINEERING_SNAPSHOT_SECTION_INVALID',
+    )
+    const detail = await runWithWindowScope(49, () =>
+      service.getStepDetail({
+        stepId: 'missing',
+        workspaceContextId: initial.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+
+    expect(initial.overview.flow.status).toBe('ready')
+    expect(detail.workspaceRevision).toBe(1)
+  })
+
   it('loads current and selected baseline facts through the persisted reader only', async () => {
     const index = resourceIndex()
     const current = engineeringSnapshot(index)
