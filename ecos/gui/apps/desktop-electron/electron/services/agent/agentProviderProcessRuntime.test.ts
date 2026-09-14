@@ -474,6 +474,58 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  it('forwards optimization turn events with proposal rationale', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          optimization: {
+            active_primary_metric: 'drc_count',
+            episode_id: 'episode-1',
+            kind: 'proposal',
+            proposal_decision: 'propose',
+            proposal_reason: 'observation',
+            rationale_summary: 'Increase padding to absorb DRC hotspots.',
+            action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+            requested: { knob_id: 'place.cell_padding_x', value: 3 },
+            recovery_stage: 'drc',
+            schema_version: 'ecos.optimization_turn_event.v1',
+          },
+          type: 'optimization',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optimization: expect.objectContaining({
+          kind: 'proposal',
+          proposal_decision: 'propose',
+          proposal_reason: 'observation',
+          rationale_summary: 'Increase padding to absorb DRC hotspots.',
+          action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+          requested: { knob_id: 'place.cell_padding_x', value: 3 },
+        }),
+      }),
+    )
+  })
+
   it('forwards structured interactions, status, and streaming fields', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

@@ -174,3 +174,64 @@ def test_gui_optimization_turns_stream_progress_to_the_chat(
         event["type"] == "tool" and "in progress" in str(event.get("text", ""))
         for event in events
     )
+
+
+def test_gui_optimization_streams_turn_events_to_the_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _make_optimization_workspace(tmp_path)
+    events: list[dict[str, object]] = []
+    lifecycle: list[str] = []
+    runner = _BlockingRunner(lifecycle)
+    provider = EcosAgentProvider(
+        emit=events.append,
+        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
+        optimization_runner_factory=lambda _context, _planner: runner,
+    )
+    session_id = provider.start_session({"directory": str(workspace), "mode": "workspace"})[
+        "sessionId"
+    ]
+
+    _send(provider, session_id, "3")
+    _send(provider, session_id, "reduce wirelength")
+    _send(provider, session_id, "1")
+    assert runner.started.wait(timeout=2)
+    # The fake run_turn bypasses real emission points; simulate one proposal
+    # event through the listener the GUI provider installed.
+    assert runner.event_listener is not None
+    runner.event_listener(
+        "proposal",
+        {
+            "proposal_decision": "propose",
+            "proposal_reason": "observation",
+            "rationale_summary": "Increase padding to reduce DRC.",
+            "action": {"knob_id": "place.cell_padding_x", "direction": "increase"},
+            "requested": {"knob_id": "place.cell_padding_x", "value": 3},
+            "rejection_reason": None,
+        },
+    )
+    runner.release.set()
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and (
+        time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+
+    turn_events = [
+        event
+        for event in events
+        if event["type"] == "optimization"
+        and isinstance(event.get("optimization"), dict)
+        and event["optimization"].get("schema_version")
+        == "ecos.optimization_turn_event.v1"
+    ]
+    assert turn_events, "expected streamed turn events"
+    proposal_payload = turn_events[0]["optimization"]
+    assert proposal_payload["kind"] == "proposal"
+    assert proposal_payload["episode_id"]
+    assert "proposal" in str(turn_events[0]["text"]).casefold()
+    assert any(
+        event["optimization"].get("schema_version") == "ecos.optimization_progress.v2"
+        for event in events
+        if event["type"] == "optimization"
+    )

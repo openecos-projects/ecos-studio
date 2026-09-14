@@ -895,6 +895,13 @@ function readOptimizationPayload(
             | null,
         }
       : {}),
+    ...(typeof record.kind === 'string' ? { kind: record.kind } : {}),
+    ...(typeof record.rationale_summary === 'string'
+      ? { rationale_summary: record.rationale_summary }
+      : {}),
+    ...(typeof record.outcome === 'string' || record.outcome === null
+      ? { outcome: record.outcome as string | null }
+      : {}),
   }
 }
 

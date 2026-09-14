@@ -112,10 +112,18 @@ class _FakeChatProvider:
 
 class _FailingRunner(OptimizationEpisodeRunner):
     def __init__(self) -> None:
+        self.event_listener = None
         self._controller = SimpleNamespace(
             state=OptimizationEpisodeState.PLANNING,
             episode_id="episode-test",
             pending_execution_ids=(),
+        )
+
+    @property
+    def budget(self):
+        return SimpleNamespace(
+            remaining_planning_calls=7,
+            remaining_wall_time_seconds=600.0,
         )
 
     def run_turn(self, *, paused: bool = False):
@@ -131,6 +139,7 @@ class _CompletedRunner(_FailingRunner):
                 proposal=SimpleNamespace(
                     decision=SimpleNamespace(value="stop"),
                     reason_code=SimpleNamespace(value="observation"),
+                    rationale_summary="Budget exhausted; stop cleanly.",
                     action=None,
                 ),
                 requested=None,

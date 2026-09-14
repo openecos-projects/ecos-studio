@@ -76,6 +76,13 @@
           {{ entry.incumbentDecision }}
         </span>
         <span
+          v-if="entry.outcome"
+          class="optimization-card__badge"
+          :class="outcomeBadgeClass(entry.outcome)"
+        >
+          {{ entry.outcome }}
+        </span>
+        <span
           v-if="entry.recoveryTransition"
           class="optimization-card__badge optimization-card__badge--recovery"
         >
@@ -85,6 +92,9 @@
           DRC {{ entry.counts.drc_count }} · setup
           {{ entry.counts.sta_setup_violation_count }} · hold
           {{ entry.counts.sta_hold_violation_count }}
+        </span>
+        <span v-if="entry.rationale" class="optimization-card__rationale">
+          {{ entry.rationale }}
         </span>
       </div>
     </div>
@@ -129,6 +139,9 @@ const latestCounts = computed(() => {
 
 interface OptimizationRow {
   label: string
+  kind?: string | null
+  rationale?: string | null
+  outcome?: string | null
   action?: { knob_id: string } | null
   direction?: string | null
   requested?: { knob_id: string; value: boolean | number } | null
@@ -140,16 +153,27 @@ interface OptimizationRow {
   counts?: DesktopAgentOptimizationPayload['violation_counts']
 }
 
+const KIND_LABELS: Record<string, string> = {
+  proposal: 'Plan',
+  dispatched: 'Dispatch',
+  terminal: 'Result',
+}
+
 const rows = computed<OptimizationRow[]>(() =>
   props.timeline.map((entry) => {
     const isAuthorization = entry.schema_version === 'ecos.optimization_authorization.v2'
     const incumbentDecision = entry.incumbent_decision ?? null
     return {
-      label: isAuthorization
-        ? 'Authorized'
-        : typeof entry.turn === 'number'
-          ? `Turn ${entry.turn}`
-          : 'Episode',
+      label: entry.kind
+        ? (KIND_LABELS[entry.kind] ?? entry.kind)
+        : isAuthorization
+          ? 'Authorized'
+          : typeof entry.turn === 'number'
+            ? `Turn ${entry.turn}`
+            : 'Episode',
+      kind: entry.kind ?? null,
+      rationale: entry.rationale_summary ?? null,
+      outcome: entry.outcome ?? null,
       action: entry.action ?? null,
       direction: entry.action?.direction ?? null,
       requested: entry.requested ?? null,
@@ -162,6 +186,25 @@ const rows = computed<OptimizationRow[]>(() =>
     }
   }),
 )
+
+const BAD_OUTCOMES = new Set([
+  'degraded',
+  'infeasible',
+  'execution_failed',
+  'evidence_invalid',
+  'timed_out_cancelled',
+  'indeterminate',
+])
+
+function outcomeBadgeClass(outcome: string | null | undefined): string {
+  if (!outcome) return 'optimization-card__badge--muted'
+  if (outcome === 'improved' || outcome === 'tradeoff') {
+    return 'optimization-card__badge--good'
+  }
+  return BAD_OUTCOMES.has(outcome)
+    ? 'optimization-card__badge--recovery'
+    : 'optimization-card__badge--muted'
+}
 
 function directionIcon(direction: string | null | undefined): string {
   switch (direction) {
@@ -309,5 +352,13 @@ function directionIcon(direction: string | null | undefined): string {
   margin-left: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: nowrap;
+}
+
+.optimization-card__rationale {
+  flex-basis: 100%;
+  padding-left: 5.9rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 </style>
