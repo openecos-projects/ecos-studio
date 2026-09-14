@@ -264,7 +264,7 @@ def test_congestion_questions_retrieve_step_scoped_strategy_cards() -> None:
         (
             "narrow channels between macros cause routing overflow",
             "strategy.congestion.macro_or_narrow_channel.v1",
-            "macro_or_narrow_channel",
+            "macro or narrow channel",
         ),
     )
     for question, entity_id, required in distinctive:
