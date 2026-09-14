@@ -239,7 +239,7 @@ def validate_optimization_proposal_v2(
     try:
         proposal = OptimizationProposalV2.model_validate(payload)
     except (TypeError, ValueError) as exc:
-        raise EffectiveDomainError("optimization proposal v3 is invalid") from exc
+        raise EffectiveDomainError(f"optimization proposal v3 is invalid: {exc}") from exc
     if proposal.context_ref.model_dump(mode="json") != dict(context_ref):
         raise EffectiveDomainError("proposal context does not match planning turn")
     validate_numeric_proposal(proposal, domain, attempted=attempted)
@@ -272,6 +272,8 @@ def _validate_supported_action(
             supported_action.get("requested_value_bounds")
         )
     except ValueError as exc:
-        raise EffectiveDomainError("proposal does not match compiled knowledge support") from exc
+        raise EffectiveDomainError(
+            f"proposal does not match compiled knowledge support: {exc}"
+        ) from exc
     if not bounds.contains(action.requested_value):
         raise EffectiveDomainError("proposal value is not supported by knowledge action")

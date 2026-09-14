@@ -129,7 +129,9 @@ class ControllerPlanningMixin:
                 rejection_reason=(
                     str(exc)
                     if isinstance(exc, (EffectiveDomainError, ProposalProviderError))
-                    else "proposal_schema"
+                    # planning_feedback forwards this text to the next turn: a
+                    # bare code gives the model nothing to correct.
+                    else f"proposal_schema: {str(exc)[:300]}"
                 ),
                 requested=None,
                 state=self._state,
@@ -296,7 +298,9 @@ class ControllerPlanningMixin:
         try:
             parsed = OptimizationProposalV2.model_validate(raw)
         except (TypeError, ValueError) as exc:
-            raise EffectiveDomainError("optimization proposal v3 is invalid") from exc
+            raise EffectiveDomainError(
+                f"optimization proposal v3 is invalid: {exc}"
+            ) from exc
         if parsed.action is None:
             return OptimizationPlannerTurn(
                 v2_to_v1(parsed),
