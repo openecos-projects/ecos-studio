@@ -106,12 +106,39 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
+<a id="parameter.floorplan.io_placer_file_path"></a>
+## parameter.floorplan.io_placer_file_path
+
+**Meaning:** The `io_placer.file_path` configuration field for Floorplan.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
+
 <a id="parameter.floorplan.io_placer_io_layer_list"></a>
 ## parameter.floorplan.io_placer_io_layer_list
 
 **Meaning:** The routing layers eligible for IO-pin placement.
 
 **Role:** It constrains where the floorplan can place IO pins.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
+
+<a id="parameter.floorplan.io_placer_mode"></a>
+## parameter.floorplan.io_placer_mode
+
+**Meaning:** The `io_placer.mode` configuration field for Floorplan.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
+
+<a id="parameter.floorplan.macro_placer_file_path"></a>
+## parameter.floorplan.macro_placer_file_path
+
+**Meaning:** The `macro_placer.file_path` configuration field for Floorplan.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
@@ -130,6 +157,15 @@
 **Meaning:** The routing halo reserved around macros.
 
 **Role:** It reserves routing clearance around macro boundaries.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
+
+<a id="parameter.floorplan.macro_placer_mode"></a>
+## parameter.floorplan.macro_placer_mode
+
+**Meaning:** The `macro_placer.mode` configuration field for Floorplan.
+
+**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 

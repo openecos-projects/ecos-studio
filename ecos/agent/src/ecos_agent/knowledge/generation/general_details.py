@@ -308,7 +308,7 @@ CONGESTION_REGRESSION_CASES = (
     {
         "id": "strategy-narrow-channel",
         "entity_id": "strategy.congestion.macro_or_narrow_channel.v1",
-        "required_text": "macro_or_narrow_channel",
+        "required_text": "macro or narrow channel",
     },
     {
         "id": "strategy-unbound-timing",
