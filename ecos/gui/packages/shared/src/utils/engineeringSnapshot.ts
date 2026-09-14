@@ -19,12 +19,7 @@ export interface EngineeringSnapshotIssue extends ReadIssue {
 export interface EngineeringSnapshotSections {
   artifacts: ReadSection<EccEngineeringAnalysisArtifactRef[]>
   flow: ReadSection<EccEngineeringSnapshot['flow']>
-  qor: ReadSection<
-    Pick<
-      EccEngineeringSnapshot,
-      'analysis' | 'metrics' | 'qorAssessment' | 'qorSnapshotExtension'
-    >
-  >
+  qor: ReadSection<Pick<EccEngineeringSnapshot, 'analysis' | 'metrics' | 'qorAssessment'>>
   qorSnapshotExtension: ReadSection<EccQorSnapshotExtension>
   signoff: ReadSection<EccEngineeringSnapshot['signoffAssessment']>
 }
@@ -144,9 +139,6 @@ export function validateEngineeringSnapshot(
             analysis: value.analysis,
             metrics: value.metrics,
             qorAssessment: value.qorAssessment,
-            ...(validQorSnapshotExtension(value.qorSnapshotExtension)
-              ? { qorSnapshotExtension: value.qorSnapshotExtension }
-              : {}),
           })
         : unavailable('ENGINEERING_QOR_INVALID'),
       qorSnapshotExtension:

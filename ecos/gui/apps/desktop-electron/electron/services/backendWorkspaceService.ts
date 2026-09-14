@@ -677,10 +677,14 @@ function engineeringFacts(
   if (!result?.ok || result.sections.qor.status !== 'ready') return null
   const flow = result.sections.flow
   const signoff = result.sections.signoff
+  const qorSnapshotExtension = result.sections.qorSnapshotExtension
   return {
     ...result.sections.qor.data,
     ...(flow.status === 'ready' ? { flow: flow.data } : {}),
     ...(signoff.status === 'ready' ? { signoffAssessment: signoff.data } : {}),
+    ...(qorSnapshotExtension.status === 'ready'
+      ? { qorSnapshotExtension: qorSnapshotExtension.data }
+      : {}),
   }
 }
 

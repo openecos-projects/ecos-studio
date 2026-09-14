@@ -173,57 +173,10 @@
           <p class="dash-recommend-reason">No workspace has an eligible QoR score yet.</p>
         </section>
 
-        <section v-if="recommendation" class="dash-qphys" aria-label="QoR v3 Snapshot">
-          <header class="dash-section-head">
-            <span>QoR record breakdown</span>
-            <small>ECC committed facts</small>
-          </header>
-          <div
-            v-if="recommendedQorInsights.dimensions.length > 0"
-            class="dash-qphys-list"
-          >
-            <div
-              v-for="dimension in recommendedQorInsights.dimensions"
-              :key="dimension.key"
-              class="dash-qphys-row"
-            >
-              <span class="dash-qphys-label">{{ dimension.label }}</span>
-              <span
-                class="dash-qphys-bar"
-                role="img"
-                :aria-label="dimension.label + ' ' + dimension.display + ' of 100'"
-              >
-                <i
-                  :class="dashboardToneClass(dimension.tone)"
-                  :style="{ width: (dimension.percent ?? 0) + '%' }"
-                ></i>
-              </span>
-              <strong class="dash-qphys-value">{{ dimension.display }}</strong>
-              <small class="dash-qphys-state">{{ dimension.state }}</small>
-            </div>
-          </div>
-          <p v-else class="dash-qphys-empty">QoR v3 Snapshot unavailable</p>
-          <div v-if="recommendedQorInsights.diagnoses.length > 0" class="dash-diagnoses">
-            <details
-              v-for="diagnosis in recommendedQorInsights.diagnoses"
-              :key="diagnosis.id"
-            >
-              <summary :class="dashboardToneClass(diagnosis.tone)">
-                {{ diagnosis.state }} · {{ diagnosis.id }}
-              </summary>
-              <p v-if="diagnosis.severity !== null">
-                Severity {{ diagnosis.severity.toFixed(2) }}
-              </p>
-              <p
-                v-for="intervention in diagnosis.interventions"
-                :key="intervention"
-                class="dash-diagnosis-hypothesis"
-              >
-                {{ intervention }}
-              </p>
-            </details>
-          </div>
-        </section>
+        <ProjectQorSnapshotPanel
+          v-if="recommendation"
+          :insights="recommendedQorInsights"
+        />
 
         <ProjectQorScoreChart
           :trend-points="project.qorTrendSummary.trendPoints"
@@ -545,6 +498,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import type { ProjectStepFindingsProjectionState } from '@/stores/backendProjectComparisonSession'
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
+import ProjectQorSnapshotPanel from './ProjectQorSnapshotPanel.vue'
 import {
   type ProjectManagementProject,
   type ProjectMetricPoint,

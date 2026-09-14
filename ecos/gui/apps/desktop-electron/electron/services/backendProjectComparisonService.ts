@@ -498,6 +498,10 @@ export class BackendProjectComparisonService {
             }
             if (snapshotResult.sections.qor.status !== 'ready') return entry
             const qor = snapshotResult.sections.qor.data
+            const qorSnapshotExtension =
+              snapshotResult.sections.qorSnapshotExtension.status === 'ready'
+                ? snapshotResult.sections.qorSnapshotExtension.data
+                : undefined
             const artifacts =
               snapshotResult.sections.artifacts.status === 'ready'
                 ? snapshotResult.sections.artifacts.data
@@ -506,9 +510,7 @@ export class BackendProjectComparisonService {
               analysis: qor.analysis,
               metrics: qor.metrics,
               qorAssessment: qor.qorAssessment,
-              ...(qor.qorSnapshotExtension
-                ? { qorSnapshotExtension: qor.qorSnapshotExtension }
-                : {}),
+              ...(qorSnapshotExtension ? { qorSnapshotExtension } : {}),
               ...(flow ? { flow } : {}),
               ...(snapshotResult.sections.signoff.status === 'ready'
                 ? { signoffAssessment: snapshotResult.sections.signoff.data }
