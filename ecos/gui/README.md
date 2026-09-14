@@ -56,6 +56,25 @@ ECOS_FE_DEV_ROOT=/absolute/path/to/ecc-fe pnpm run dev
 Without this variable, a nearby `ecc-fe` checkout never overrides the installed
 runtime.
 
+### External ECC runtime
+
+Packaged builds do not embed ECC; the CLI installer acquires the pinned bundle
+from the registry on first run. To use an ECC you installed yourself instead
+(for example with `ecc-installer.sh`), point `ECOS_ECC_BIN_DIR` at the
+directory containing the `ecc` executable:
+
+```bash
+ECOS_ECC_BIN_DIR=$HOME/.local/share/ecc/v0.1.0-alpha.12 ecos-studio
+```
+
+The path must be absolute and contain an executable `ecc`; invalid values are
+ignored with a log warning. An external runtime is used **read-only**: ECOS
+Studio never writes into it, startup drift repair is skipped, and uninstalling
+from the CLI tools card only removes the generated `ecos-ecc` shim. When the
+external runtime's version differs from the pinned bundle version the card
+shows a non-blocking warning. Unsetting the variable falls back to the managed
+bundle (or first-run download).
+
 ```bash
 # Linux VM / sandbox-restricted environment
 pnpm run dev:vm

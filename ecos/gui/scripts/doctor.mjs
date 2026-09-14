@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 const execFilePromise = promisify(execFileCallback)
 const guiRoot = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
-const REQUIRED_NATIVE_RESOURCES = ['ecc', 'chip-viewer-native']
+// ECC is deliberately not packaged (slim build): it is acquired from the
+// registry on first run, so only the staged native payloads are required.
+const REQUIRED_NATIVE_RESOURCES = ['chip-viewer-native']
 
 function createCheck(name, status, message, detail) {
   return {

@@ -41,8 +41,10 @@ the repository-root `AGENTS.md`.
 
 ## Packaging
 
-- `.github/scripts/build-binaries.sh` builds and stages ECC, Chip Viewer, and the
-  packaged Agent before Electron packaging.
+- `.github/scripts/build-binaries.sh` builds and stages Chip Viewer and the
+  packaged Agent before Electron packaging. ECC is deliberately not staged:
+  packages stay slim and acquire the pinned ECC bundle from the registry on
+  first run through the CLI installer.
 - Do not edit `gui/apps/desktop-electron/resources/`, `release/`, `dist/`,
   `build/`, or `target/` outputs by hand.
 - For changes to integration scripts, packaged binaries, manifests, or Electron

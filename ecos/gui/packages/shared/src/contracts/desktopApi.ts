@@ -64,6 +64,7 @@ import type {
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
 } from './desktopCodex.ts'
+import type { CliInstallState, CliInstallerProgressEvent } from './cliInstaller.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -402,6 +403,14 @@ export interface DesktopApi {
         listener: (event: DesktopCodexInstallProgressEvent) => void,
       ): DesktopEventUnsubscribe
     }
+  }
+  cliInstaller: {
+    getStatus(): Promise<CliInstallState>
+    install(): Promise<CliInstallState>
+    uninstall(): Promise<CliInstallState>
+    onProgress(
+      listener: (event: CliInstallerProgressEvent) => void,
+    ): DesktopEventUnsubscribe
   }
   shell: {
     createSession(options: DesktopShellSessionOptions): Promise<DesktopShellSession>

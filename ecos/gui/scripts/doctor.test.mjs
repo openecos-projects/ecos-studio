@@ -36,7 +36,6 @@ describe('runGuiDoctor', () => {
       cwd,
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [
@@ -95,7 +94,6 @@ describe('runGuiDoctor', () => {
       cwd,
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [['pnpm --version', { stdout: '11.0.9\n' }]],
@@ -139,7 +137,8 @@ describe('runGuiDoctor', () => {
         expect.objectContaining({
           name: 'native resources',
           status: 'error',
-          message: 'Missing native resources: ecc, chip-viewer-native',
+          // ECC is acquired on first run (slim build) and not required here.
+          message: 'Missing native resources: chip-viewer-native',
         }),
       ]),
     )

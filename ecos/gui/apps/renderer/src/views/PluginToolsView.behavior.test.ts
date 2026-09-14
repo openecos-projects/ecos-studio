@@ -36,6 +36,12 @@ vi.mock('@/composables/usePdkManager', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: viewMocks.getDesktopApi,
 }))
+vi.mock('@/api/cliInstaller', () => ({
+  fetchCliInstallerStatus: vi.fn(async () => null),
+  installEccCli: vi.fn(),
+  uninstallEccCli: vi.fn(),
+  subscribeCliInstallerProgress: () => () => undefined,
+}))
 
 function pdkResource(overrides: Partial<ResourceItem>): ResourceItem {
   return {
