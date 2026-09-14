@@ -59,6 +59,7 @@ describe('ProjectQorSnapshotPanel', () => {
     )
     expect(wrapper.get('.dash-diagnosis-validation').text()).toContain('Run STA')
     expect(wrapper.get('.dash-qor-facts').text()).toContain('12.5 uW')
+    expect(wrapper.get('.dash-qor-facts').text()).toContain('Coverage 100%')
   })
 
   it('renders an explicit unavailable state when the extension has no dimensions', () => {

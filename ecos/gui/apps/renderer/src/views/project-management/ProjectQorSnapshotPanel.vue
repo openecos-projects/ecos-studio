@@ -34,6 +34,11 @@
         <dt>Evidence</dt>
         <dd>
           {{ insights.evidence.state }} · {{ formatIndex(insights.evidence.index) }}
+          <small>
+            Integrity {{ formatRatio(insights.evidence.integrity) }} · Coverage
+            {{ formatRatio(insights.evidence.coverage) }} · Consistency
+            {{ formatRatio(insights.evidence.consistency) }}
+          </small>
         </dd>
       </div>
       <div v-if="insights.feasibility">
@@ -54,7 +59,7 @@
     <div v-if="insights.diagnoses.length > 0" class="dash-diagnoses">
       <details v-for="diagnosis in insights.diagnoses" :key="diagnosis.id">
         <summary :class="dashboardToneClass(diagnosis.tone)">
-          {{ diagnosis.state }} · {{ diagnosis.id }}
+          {{ diagnosis.state }} · {{ diagnosis.id }} · {{ diagnosis.confidence }}
         </summary>
         <p v-if="diagnosis.severity !== null">
           Severity {{ diagnosis.severity.toFixed(2) }}
@@ -87,6 +92,10 @@ defineProps<{
 
 function formatIndex(value: number | null): string {
   return value === null ? 'NR' : value.toFixed(1) + '/100'
+}
+
+function formatRatio(value: number | null): string {
+  return value === null ? 'NR' : Math.round(value * 100) + '%'
 }
 
 function formatPower(totalUw: number | null, budgetUw: number | null): string {
@@ -224,6 +233,18 @@ function formatPower(totalUw: number | null, budgetUw: number | null): string {
   margin-top: 4px;
   color: var(--text-primary);
   font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.dash-qor-facts dd small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.dash-qor-gates span {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
