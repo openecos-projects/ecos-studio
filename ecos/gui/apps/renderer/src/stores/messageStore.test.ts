@@ -355,4 +355,61 @@ describe('messageStore', () => {
       { activity: { turnId: 'turn-b' }, type: 'activity' },
     ])
   })
+
+  it('aggregates optimization events into one per-episode card message', () => {
+    const store = useMessageStore()
+    const basePayload = {
+      schema_version: 'ecos.optimization_progress.v2' as const,
+      episode_id: 'episode-1',
+      active_primary_metric: 'drc_count',
+      original_primary_metric: 'drc_count',
+      recovery_stage: 'drc',
+      violation_counts: {
+        drc_count: 12,
+        sta_setup_violation_count: 3,
+        sta_hold_violation_count: 0,
+      },
+    }
+    const turnOne = {
+      ...basePayload,
+      turn: 1,
+      state: 'executing',
+      action: { knob_id: 'place_density', direction: 'increase' },
+      requested: { knob_id: 'place_density', value: 0.75 },
+      proposal_decision: 'propose',
+      incumbent_decision: 'candidate_better',
+      decisive_metric: 'drc_count',
+    }
+    const turnTwo = {
+      ...basePayload,
+      turn: 2,
+      state: 'awaiting_execution',
+      violation_counts: {
+        drc_count: 9,
+        sta_setup_violation_count: 3,
+        sta_hold_violation_count: 0,
+      },
+    }
+
+    store.setActiveSessionId('session-test')
+    store.upsertAgentEvent({
+      optimization: turnOne,
+      sessionId: 'session-test',
+      type: 'optimization',
+    })
+    store.upsertAgentEvent({
+      optimization: turnTwo,
+      sessionId: 'session-test',
+      type: 'optimization',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      id: 'optimization-episode-1',
+      optimization: turnTwo,
+      optimizationTimeline: [turnOne, turnTwo],
+      status: 'done',
+      type: 'optimization',
+    })
+  })
 })

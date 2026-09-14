@@ -339,6 +339,28 @@ export const useMessageStore = defineStore('messages', () => {
       }
       return message.id
     }
+    if (event.type === 'optimization' && event.optimization) {
+      const id = `optimization-${event.optimization.episode_id}`
+      const existingOptimization = bucket.find((message) => message.id === id)
+      if (existingOptimization) {
+        existingOptimization.optimization = event.optimization
+        existingOptimization.optimizationTimeline = [
+          ...(existingOptimization.optimizationTimeline ?? []),
+          event.optimization,
+        ]
+      } else {
+        bucket.push({
+          id,
+          role: 'assistant',
+          content: '',
+          type: 'optimization',
+          status: 'done',
+          optimization: event.optimization,
+          optimizationTimeline: [event.optimization],
+        })
+      }
+      return id
+    }
     const id = event.messageId ?? generateId()
     const existing = bucket.find((message) => message.id === id)
     if (existing) {
