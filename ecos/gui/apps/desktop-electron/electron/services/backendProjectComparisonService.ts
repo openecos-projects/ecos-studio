@@ -499,6 +499,7 @@ export class BackendProjectComparisonService {
             if (snapshotResult.sections.qor.status !== 'ready') return entry
             const qor = snapshotResult.sections.qor.data
             const qorSnapshotExtension =
+              !snapshotResult.snapshot.stalePredecessor &&
               snapshotResult.sections.qorSnapshotExtension.status === 'ready'
                 ? snapshotResult.sections.qorSnapshotExtension.data
                 : undefined

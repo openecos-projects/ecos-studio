@@ -174,7 +174,7 @@
         </section>
 
         <ProjectQorSnapshotPanel
-          v-if="recommendation"
+          v-if="hasProjectData"
           :insights="recommendedQorInsights"
         />
 
@@ -630,7 +630,7 @@ const recommendedPpaMetrics = computed(() =>
 const recommendedQorInsights = computed(() =>
   buildDashboardQorInsights(
     props.project.qorTrendSummary,
-    recommendation.value?.workspaceId ?? '',
+    recommendation.value?.workspaceId || props.selectedWorkspaceId,
   ),
 )
 const workspaceRows = computed(() =>

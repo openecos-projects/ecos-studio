@@ -577,6 +577,38 @@ describe('BackendProjectComparisonService', () => {
     })
   })
 
+  it('does not project QoR v3 facts from a snapshot with stale predecessors', async () => {
+    const fixture = representativeProjectComparisonFixture()
+    fixture.engineeringSnapshots.ws_0002!.stalePredecessor = {
+      workspaceRevision: 13,
+      invalidatedStepIds: ['Route'],
+    }
+    const watchers = watcherHarness()
+    const service = new BackendProjectComparisonService(
+      {
+        readManifest: vi.fn().mockResolvedValue(fixture.manifest),
+        readEngineeringSnapshot: vi.fn().mockImplementation(async ({ workspacePath }) => {
+          const workspaceId = workspacePath.split('/').at(-1)!
+          return snapshotResult(fixture.engineeringSnapshots[workspaceId]!)
+        }),
+        resolveProjectRoot: async (path) => path,
+      },
+      watchers.create,
+    )
+    const selected = await service.selectProject(11, {
+      projectRootLocator: '/projects/gcd',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const result = await service.getComparison(11, selected.projectComparisonContextId)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok || result.data.trend.status !== 'ready') return
+    expect(result.data.trend.data.workspaces[1]).not.toHaveProperty(
+      'qorSnapshotExtension',
+    )
+  })
+
   it('captures the no-HMR initial-load failure when a lifecycle event invalidates the query', async () => {
     const { service } = serviceFixture()
     const selected = await service.selectProject(11, {

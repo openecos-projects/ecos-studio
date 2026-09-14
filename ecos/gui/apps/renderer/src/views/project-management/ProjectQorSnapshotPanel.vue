@@ -26,6 +26,31 @@
       </div>
     </div>
     <p v-else class="dash-qphys-empty">QoR v3 Snapshot unavailable</p>
+    <dl
+      v-if="insights.evidence || insights.feasibility || insights.power"
+      class="dash-qor-facts"
+    >
+      <div v-if="insights.evidence">
+        <dt>Evidence</dt>
+        <dd>
+          {{ insights.evidence.state }} · {{ formatIndex(insights.evidence.index) }}
+        </dd>
+      </div>
+      <div v-if="insights.feasibility">
+        <dt>Feasibility</dt>
+        <dd>{{ insights.feasibility.status }}</dd>
+        <ul v-if="insights.feasibility.gates.length" class="dash-qor-gates">
+          <li v-for="gate in insights.feasibility.gates" :key="gate.id">
+            <span>{{ gate.id }}</span>
+            <small>{{ gate.state }}</small>
+          </li>
+        </ul>
+      </div>
+      <div v-if="insights.power">
+        <dt>Power</dt>
+        <dd>{{ formatPower(insights.power.totalUw, insights.power.budgetUw) }}</dd>
+      </div>
+    </dl>
     <div v-if="insights.diagnoses.length > 0" class="dash-diagnoses">
       <details v-for="diagnosis in insights.diagnoses" :key="diagnosis.id">
         <summary :class="dashboardToneClass(diagnosis.tone)">
@@ -34,12 +59,18 @@
         <p v-if="diagnosis.severity !== null">
           Severity {{ diagnosis.severity.toFixed(2) }}
         </p>
+        <p v-if="diagnosis.evidence.length" class="dash-diagnosis-evidence">
+          Evidence: {{ diagnosis.evidence.join(', ') }}
+        </p>
         <p
           v-for="intervention in diagnosis.interventions"
           :key="intervention"
           class="dash-diagnosis-hypothesis"
         >
           {{ intervention }}
+        </p>
+        <p v-if="diagnosis.validationRequired" class="dash-diagnosis-validation">
+          Validate: {{ diagnosis.validationRequired }}
         </p>
       </details>
     </div>
@@ -53,6 +84,16 @@ import { dashboardToneClass } from './projectDashboard'
 defineProps<{
   insights: DashboardQorInsights
 }>()
+
+function formatIndex(value: number | null): string {
+  return value === null ? 'NR' : value.toFixed(1) + '/100'
+}
+
+function formatPower(totalUw: number | null, budgetUw: number | null): string {
+  const total = totalUw === null ? 'NR' : totalUw.toFixed(1) + ' uW'
+  const budget = budgetUw === null ? 'NR' : budgetUw.toFixed(1) + ' uW budget'
+  return total + ' · ' + budget
+}
 </script>
 
 <style scoped>
@@ -138,6 +179,54 @@ defineProps<{
   font-size: 12px;
 }
 
+.dash-qor-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+}
+
+.dash-qor-facts div {
+  min-width: 0;
+}
+
+.dash-qor-facts dt,
+.dash-qor-facts dd {
+  margin: 0;
+}
+
+.dash-qor-gates {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.dash-qor-gates li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.dash-qor-facts dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.dash-qor-facts dd {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .dash-diagnoses {
   display: grid;
   gap: 6px;
@@ -166,6 +255,10 @@ defineProps<{
 }
 
 @media (max-width: 700px) {
+  .dash-qor-facts {
+    grid-template-columns: 1fr;
+  }
+
   .dash-qphys-row {
     grid-template-columns: minmax(76px, 0.8fr) minmax(70px, 1.2fr) 38px;
   }

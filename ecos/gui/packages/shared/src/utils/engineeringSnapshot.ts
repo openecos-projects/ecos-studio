@@ -208,43 +208,74 @@ function validQor(
 
 function validQorSnapshotExtension(value: unknown): value is EccQorSnapshotExtension {
   if (!record(value)) return false
+  const status = value.status
+  const baseKeys = [
+    'schemaVersion',
+    'scoringEngine',
+    'status',
+    'score',
+    'scalarStatus',
+    'profile',
+    'qphys',
+    'feasibility',
+    'evidence',
+    'diagnoses',
+    'inflation',
+    'power',
+    'artifactIds',
+  ]
   if (
+    !exactKeys(value, status === 'unavailable' ? [...baseKeys, 'reason'] : baseKeys) ||
     value.schemaVersion !== 1 ||
     value.scoringEngine !== 'qor-v3' ||
-    !['available', 'unavailable'].includes(String(value.status)) ||
-    !finiteOrNull(value.score) ||
+    !['available', 'unavailable'].includes(String(status)) ||
+    !boundedNumber(value.score, 0, 100, true) ||
     !['GREEN', 'YELLOW', 'ORANGE', 'RED', 'FAIL', 'NOT_RATED'].includes(
       String(value.scalarStatus),
     ) ||
-    !nonEmptyString(value.profile) ||
+    !boundedText(value.profile, [
+      'balanced',
+      'timing_critical',
+      'low_power',
+      'area_optimized',
+    ]) ||
     !validQorDimensions(value.qphys) ||
     !validQorFeasibility(value.feasibility) ||
     !validQorEvidence(value.evidence) ||
     !Array.isArray(value.diagnoses) ||
+    value.diagnoses.length > 64 ||
     !value.diagnoses.every(validQorDiagnosis) ||
     !validQorInflation(value.inflation) ||
     !validQorPower(value.power) ||
     !Array.isArray(value.artifactIds) ||
     value.artifactIds.length > 512 ||
-    !value.artifactIds.every(nonEmptyString)
+    !value.artifactIds.every((id) => boundedText(id))
   ) {
     return false
   }
-  return value.reason === undefined || typeof value.reason === 'string'
+  return status !== 'unavailable' || boundedText(value.reason)
 }
 
 function validQorDimensions(value: unknown): boolean {
   if (!record(value)) return false
+  const keys = ['timing', 'interconnect', 'area', 'power', 'robustness']
+  if (
+    Object.keys(value).length > keys.length ||
+    !Object.keys(value).every((key) => keys.includes(key))
+  ) {
+    return false
+  }
   return Object.values(value).every((dimension) => {
     if (!record(dimension)) return false
     return (
-      finiteOrNull(dimension.value) &&
+      exactKeys(dimension, ['value', 'state', 'featureIds']) &&
+      boundedNumber(dimension.value, 0, 100, true) &&
       ['PASS', 'FAIL', 'WATCH', 'OVER_PROVISIONED', 'OPPORTUNITY', 'UNKNOWN'].includes(
         String(dimension.state),
       ) &&
       Array.isArray(dimension.featureIds) &&
       dimension.featureIds.length <= 32 &&
-      dimension.featureIds.every(nonEmptyString)
+      dimension.featureIds.every((id) => boundedText(id))
     )
   })
 }
@@ -252,6 +283,7 @@ function validQorDimensions(value: unknown): boolean {
 function validQorFeasibility(value: unknown): boolean {
   if (
     !record(value) ||
+    !exactKeys(value, ['status', 'gates']) ||
     !['PASS', 'PHYSICAL_FAIL', 'NOT_VERIFIED', 'UNKNOWN'].includes(String(value.status))
   ) {
     return false
@@ -262,14 +294,22 @@ function validQorFeasibility(value: unknown): boolean {
     value.gates.every((gate) => {
       if (!record(gate)) return false
       return (
-        nonEmptyString(gate.id) &&
-        typeof gate.stage === 'string' &&
+        exactKeys(gate, [
+          'id',
+          'stage',
+          'state',
+          'blocksTapeout',
+          'metrics',
+          'availability',
+        ]) &&
+        boundedText(gate.id) &&
+        boundedText(gate.stage) &&
         ['passed', 'failed', 'unavailable'].includes(String(gate.state)) &&
         typeof gate.blocksTapeout === 'boolean' &&
         Array.isArray(gate.metrics) &&
         gate.metrics.length <= 32 &&
-        gate.metrics.every(nonEmptyString) &&
-        (gate.availability === null || typeof gate.availability === 'string')
+        gate.metrics.every((metric) => boundedText(metric)) &&
+        (gate.availability === null || boundedText(gate.availability))
       )
     })
   )
@@ -278,6 +318,7 @@ function validQorFeasibility(value: unknown): boolean {
 function validQorEvidence(value: unknown): boolean {
   if (
     !record(value) ||
+    !exactKeys(value, ['index', 'state', 'integrity', 'coverage', 'consistency']) ||
     !['HIGH', 'MODERATE', 'LIMITED', 'INSUFFICIENT', 'NOT_VERIFIED'].includes(
       String(value.state),
     )
@@ -285,53 +326,80 @@ function validQorEvidence(value: unknown): boolean {
     return false
   }
   return (
-    finiteOrNull(value.index) &&
-    finiteOrNull(value.integrity) &&
-    finiteOrNull(value.coverage) &&
-    finiteOrNull(value.consistency)
+    boundedNumber(value.index, 0, 100, true) &&
+    boundedNumber(value.integrity, 0, 1, true) &&
+    boundedNumber(value.coverage, 0, 1, true) &&
+    boundedNumber(value.consistency, 0, 1, true)
   )
 }
 
 function validQorDiagnosis(value: unknown): boolean {
   if (!record(value)) return false
   return (
-    nonEmptyString(value.diagnosisId) &&
-    typeof value.state === 'string' &&
-    finiteOrNull(value.severity) &&
+    exactKeys(value, [
+      'diagnosisId',
+      'state',
+      'severity',
+      'confidence',
+      'triggerFeatures',
+      'affectedDimensions',
+      'interventions',
+      'interventionConfidence',
+      'validationRequired',
+    ]) &&
+    boundedText(value.diagnosisId) &&
+    boundedText(value.state) &&
+    boundedNumber(value.severity, 0, 1, true) &&
     ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.confidence)) &&
     Array.isArray(value.triggerFeatures) &&
     value.triggerFeatures.length <= 32 &&
-    value.triggerFeatures.every(nonEmptyString) &&
+    value.triggerFeatures.every((item) => boundedText(item)) &&
     Array.isArray(value.affectedDimensions) &&
     value.affectedDimensions.length <= 16 &&
-    value.affectedDimensions.every(nonEmptyString) &&
+    value.affectedDimensions.every((item) => boundedText(item)) &&
     Array.isArray(value.interventions) &&
     value.interventions.length <= 4 &&
     value.interventions.every(validQorIntervention) &&
     ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.interventionConfidence)) &&
-    (value.validationRequired === null || typeof value.validationRequired === 'string')
+    (value.validationRequired === null || boundedText(value.validationRequired))
   )
 }
 
 function validQorIntervention(value: unknown): boolean {
   if (!record(value)) return false
   return (
-    typeof value.hypothesis === 'string' &&
-    typeof value.tier === 'string' &&
+    exactKeys(value, [
+      'hypothesis',
+      'tier',
+      'confidence',
+      'parameterKnob',
+      'validationProcedure',
+    ]) &&
+    boundedText(value.hypothesis) &&
+    ['TIER_1_FEASIBILITY', 'TIER_2_BOTTLENECK', 'TIER_3_OPPORTUNITY'].includes(
+      String(value.tier),
+    ) &&
     ['HIGH', 'MEDIUM', 'LOW'].includes(String(value.confidence)) &&
-    (value.parameterKnob === null || typeof value.parameterKnob === 'string') &&
-    (value.validationProcedure === null || typeof value.validationProcedure === 'string')
+    (value.parameterKnob === null || boundedText(value.parameterKnob)) &&
+    (value.validationProcedure === null || boundedText(value.validationProcedure))
   )
 }
 
 function validQorInflation(value: unknown): boolean {
   if (!record(value)) return false
   return (
-    finiteOrNull(value.iPlace) &&
-    finiteOrNull(value.iRoute) &&
-    finiteOrNull(value.iTotal) &&
-    finiteOrNull(value.congestionSeverity) &&
-    ['', 'EXACT_COMPATIBLE', 'MAPPED_COMPATIBLE', 'INCOMPATIBLE', 'UNAVAILABLE'].includes(
+    exactKeys(value, [
+      'iPlace',
+      'iRoute',
+      'iTotal',
+      'congestionSeverity',
+      'compatibilityStatus',
+    ]) &&
+    boundedNumber(value.iPlace, 0, null, true) &&
+    boundedNumber(value.iRoute, 0, null, true) &&
+    boundedNumber(value.iTotal, 0, null, true) &&
+    boundedNumber(value.congestionSeverity, 0, null, true) &&
+    ['EXACT_COMPATIBLE', 'MAPPED_COMPATIBLE', 'INCOMPATIBLE', 'UNAVAILABLE'].includes(
       String(value.compatibilityStatus),
     )
   )
@@ -340,17 +408,42 @@ function validQorInflation(value: unknown): boolean {
 function validQorPower(value: unknown): boolean {
   if (!record(value)) return false
   return (
-    finiteOrNull(value.totalUw) &&
-    finiteOrNull(value.budgetUw) &&
+    exactKeys(value, ['totalUw', 'budgetUw', 'sourceKind', 'corner']) &&
+    boundedNumber(value.totalUw, 0, null, true) &&
+    boundedNumber(value.budgetUw, 0, null, true) &&
     (value.sourceKind === null ||
       value.sourceKind === 'signoff' ||
       value.sourceKind === 'synthesis') &&
-    (value.corner === null || typeof value.corner === 'string')
+    (value.corner === null || boundedText(value.corner))
   )
 }
 
-function finiteOrNull(value: unknown): value is number | null {
-  return value === null || finiteNumber(value)
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value)
+  return actual.length === keys.length && keys.every((key) => actual.includes(key))
+}
+
+function boundedText(value: unknown, values?: readonly string[]): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    (values === undefined || values.includes(value))
+  )
+}
+
+function boundedNumber(
+  value: unknown,
+  low: number | null,
+  high: number | null,
+  nullable: boolean,
+): value is number | null {
+  if (value === null) return nullable
+  return (
+    finiteNumber(value) &&
+    (low === null || value >= low) &&
+    (high === null || value <= high)
+  )
 }
 
 function validMetric(value: unknown): value is EccEngineeringMetric {

@@ -265,9 +265,21 @@ describe('buildDashboardQorInsights', () => {
           state: 'WATCH',
           tone: 'warn',
           severity: 0.4,
+          confidence: 'HIGH',
+          evidence: ['timing.setup'],
           interventions: ['Review clock uncertainty'],
+          validationRequired: null,
         },
       ],
+      evidence: {
+        index: 90,
+        state: 'HIGH',
+        integrity: 1,
+        coverage: 1,
+        consistency: 1,
+      },
+      feasibility: { status: 'PASS', gates: [] },
+      power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
     })
   })
 
@@ -276,6 +288,9 @@ describe('buildDashboardQorInsights', () => {
       status: 'unavailable',
       dimensions: [],
       diagnoses: [],
+      evidence: null,
+      feasibility: null,
+      power: null,
     })
   })
 })

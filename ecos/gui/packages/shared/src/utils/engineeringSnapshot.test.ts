@@ -248,6 +248,42 @@ describe('Engineering Snapshot validation', () => {
     })
   })
 
+  it('rejects out-of-range and extra QoR extension fields', () => {
+    const outOfRange = snapshot()
+    outOfRange.schemaVersion = 3
+    outOfRange.qorSnapshotExtension = {
+      ...qorSnapshotExtension(),
+      qphys: {
+        timing: { value: 101, state: 'PASS', featureIds: [] },
+      },
+    }
+    expect(validateEngineeringSnapshot(outOfRange)).toMatchObject({
+      ok: true,
+      sections: {
+        qorSnapshotExtension: {
+          status: 'unavailable',
+          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
+        },
+      },
+    })
+
+    const extraField = snapshot()
+    extraField.schemaVersion = 3
+    extraField.qorSnapshotExtension = {
+      ...qorSnapshotExtension(),
+      evidence: { ...qorSnapshotExtension().evidence, extra: true } as never,
+    }
+    expect(validateEngineeringSnapshot(extraField)).toMatchObject({
+      ok: true,
+      sections: {
+        qorSnapshotExtension: {
+          status: 'unavailable',
+          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
+        },
+      },
+    })
+  })
+
   it('preserves complete metric metadata and validates sections independently', () => {
     const valid = validateEngineeringSnapshot(snapshot())
     expect(valid.ok).toBe(true)

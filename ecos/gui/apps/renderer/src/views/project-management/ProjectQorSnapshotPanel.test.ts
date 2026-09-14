@@ -24,9 +24,21 @@ function insights(overrides: Partial<DashboardQorInsights> = {}): DashboardQorIn
         state: 'WATCH',
         tone: 'warn',
         severity: 0.4,
+        confidence: 'HIGH',
+        evidence: ['timing.setup'],
         interventions: ['Review clock uncertainty'],
+        validationRequired: 'Run STA',
       },
     ],
+    evidence: {
+      index: 90,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    feasibility: { status: 'PASS', gates: [] },
+    power: { totalUw: 12.5, budgetUw: 20, sourceKind: 'signoff', corner: 'tt' },
     ...overrides,
   }
 }
@@ -41,15 +53,25 @@ describe('ProjectQorSnapshotPanel', () => {
     expect(wrapper.get('.dash-qphys-state').text()).toBe('PASS')
     expect(wrapper.get('.dash-qphys-bar i').attributes('style')).toContain('74.2%')
     expect(wrapper.get('summary').text()).toContain('timing-watch')
+    expect(wrapper.get('.dash-diagnosis-evidence').text()).toContain('timing.setup')
     expect(wrapper.get('.dash-diagnosis-hypothesis').text()).toBe(
       'Review clock uncertainty',
     )
+    expect(wrapper.get('.dash-diagnosis-validation').text()).toContain('Run STA')
+    expect(wrapper.get('.dash-qor-facts').text()).toContain('12.5 uW')
   })
 
   it('renders an explicit unavailable state when the extension has no dimensions', () => {
     const wrapper = mount(ProjectQorSnapshotPanel, {
       props: {
-        insights: insights({ status: 'unavailable', dimensions: [], diagnoses: [] }),
+        insights: insights({
+          status: 'unavailable',
+          dimensions: [],
+          diagnoses: [],
+          evidence: null,
+          feasibility: null,
+          power: null,
+        }),
       },
     })
 

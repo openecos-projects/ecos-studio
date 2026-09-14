@@ -38,6 +38,13 @@ function readyData<T>(section: { status: string; data?: T }): T | null {
     : null
 }
 
+function staleQorSnapshotExtension(): ValidSnapshot['sections']['qorSnapshotExtension'] {
+  return {
+    status: 'unavailable',
+    issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_STALE' }],
+  }
+}
+
 function assessmentSteps(assessment: Record<string, unknown>): AssessmentStep[] | null {
   const steps = assessment.steps
   const metrics = assessment.metrics
@@ -224,6 +231,7 @@ export function projectWorkspaceResults(
         ...current.sections,
         artifacts: artifacts.section,
         qor: mergeQor(current, stale, staleSteps),
+        qorSnapshotExtension: staleQorSnapshotExtension(),
       },
     },
     staleArtifactIds: artifacts.staleArtifactIds,

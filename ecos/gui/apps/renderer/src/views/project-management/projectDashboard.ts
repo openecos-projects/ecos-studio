@@ -130,13 +130,19 @@ export interface DashboardQorDiagnosis {
   state: string
   tone: DashboardTone
   severity: number | null
+  confidence: string
+  evidence: string[]
   interventions: string[]
+  validationRequired: string | null
 }
 
 export interface DashboardQorInsights {
   status: 'available' | 'unavailable'
   dimensions: DashboardQorDimension[]
   diagnoses: DashboardQorDiagnosis[]
+  evidence: EccQorSnapshotExtension['evidence'] | null
+  feasibility: EccQorSnapshotExtension['feasibility'] | null
+  power: EccQorSnapshotExtension['power'] | null
 }
 
 const QOR_DIMENSION_LABELS: Record<string, string> = {
@@ -302,7 +308,14 @@ export function buildDashboardQorInsights(
     (workspace) => workspace.workspaceId === workspaceId,
   )?.qorSnapshotExtension
   if (!extension || extension.status !== 'available') {
-    return { status: 'unavailable', dimensions: [], diagnoses: [] }
+    return {
+      status: 'unavailable',
+      dimensions: [],
+      diagnoses: [],
+      evidence: null,
+      feasibility: null,
+      power: null,
+    }
   }
 
   return {
@@ -321,10 +334,16 @@ export function buildDashboardQorInsights(
       state: diagnosis.state,
       tone: diagnosisTone(diagnosis.state),
       severity: diagnosis.severity,
+      confidence: diagnosis.confidence,
+      evidence: diagnosis.triggerFeatures,
       interventions: diagnosis.interventions
         .map((intervention) => intervention.hypothesis)
         .filter(Boolean),
+      validationRequired: diagnosis.validationRequired,
     })),
+    evidence: extension.evidence,
+    feasibility: extension.feasibility,
+    power: extension.power,
   }
 }
 
