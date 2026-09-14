@@ -12,7 +12,14 @@ vi.mock('@/composables/useBackendFlowStages', () => ({
   useBackendFlowStages: () => ({
     dynamicFlowStages: ref([
       { label: 'Synthesis', path: 'Synthesis', icon: 'synth', tool: 'yosys' },
-      { label: 'Floorplan', path: 'Floorplan', icon: 'floorplan', tool: 'ecc' },
+      { label: 'Pre Floorplan', path: 'preFloorplan', icon: 'floorplan', tool: 'ecc' },
+      {
+        label: 'Macro Placement',
+        path: 'macroPlacement',
+        icon: 'macro',
+        tool: 'dreamplace',
+      },
+      { label: 'Post Floorplan', path: 'postFloorplan', icon: 'floorplan', tool: 'ecc' },
       { label: 'Place', path: 'place', icon: 'place', tool: 'dreamplace' },
       { label: 'CTS', path: 'CTS', icon: 'cts', tool: 'ecc' },
       { label: 'Route', path: 'route', icon: 'route', tool: 'ecc' },
@@ -65,12 +72,14 @@ describe('WorkspaceStepConfigDialog', () => {
       wrapper.findAll('.workspace-step-config-list button').map((item) => item.text()),
     ).toEqual([
       'SynthesisYosys · 2 params',
-      'FloorplanECC · 2 params',
+      'Pre FloorplanECC · 2 params',
       'PlaceDreamPlace · 1 param',
       'CTSECC · 1 param',
       'RouteECC · 1 param',
     ])
     expect(wrapper.text()).not.toContain('DRC')
     expect(wrapper.text()).not.toContain('Legalization')
+    expect(wrapper.text()).not.toContain('Macro Placement')
+    expect(wrapper.text()).not.toContain('Post Floorplan')
   })
 })

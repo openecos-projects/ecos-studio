@@ -304,6 +304,20 @@ export function sameFlowStepName(left: string, right: string): boolean {
   return sameProjectManifestFlowStep(a, b)
 }
 
+/**
+ * True when an ECC catalog `appliesTo` name belongs to a persisted flow step.
+ *
+ * Catalog entries still say `floorplan`, but rtl2gds persists that shared
+ * config on `preFloorplan` rather than a `Floorplan` step.
+ */
+export function catalogAppliesToFlowStep(appliesTo: string, stepPath: string): boolean {
+  if (sameFlowStepName(appliesTo, stepPath)) return true
+  return (
+    sameFlowStepName(appliesTo, StepEnum.FLOORPLAN) &&
+    sameFlowStepName(stepPath, StepEnum.PRE_FLOORPLAN)
+  )
+}
+
 const STEP_TOOL_LABELS: Record<string, string> = {
   ecc: 'ECC',
   dreamplace: 'DreamPlace',

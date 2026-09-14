@@ -52,7 +52,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { formatStepToolName, sameFlowStepName, StepEnum } from '@/api/type'
+import { catalogAppliesToFlowStep, formatStepToolName, StepEnum } from '@/api/type'
 import StepConfigPanel from '@/components/StepConfigPanel.vue'
 import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { getDesktopApi } from '@/platform/desktop'
@@ -80,7 +80,7 @@ const configurableSteps = computed(() => {
     )
     const applies = catalogApplies.value ?? []
     const parameterCount = applies.filter((target) =>
-      target === 'all' ? index === 0 : sameFlowStepName(target, stage.path),
+      target === 'all' ? index === 0 : catalogAppliesToFlowStep(target, stage.path),
     ).length
     if (!step || seen.has(step) || parameterCount === 0) return []
     seen.add(step)

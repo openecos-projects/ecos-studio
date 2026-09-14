@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   StepEnum,
+  catalogAppliesToFlowStep,
   formatStepToolName,
   getSidebarSteps,
   getStepMetadata,
@@ -29,8 +30,18 @@ describe('sameFlowStepName', () => {
     expect(sameFlowStepName('routing', 'route')).toBe(true)
     expect(sameFlowStepName('synthesis', 'Synthesis')).toBe(true)
     expect(sameFlowStepName('floorplan', 'Floorplan')).toBe(true)
+    expect(sameFlowStepName('floorplan', 'preFloorplan')).toBe(false)
     expect(sameFlowStepName('all', 'Synthesis')).toBe(false)
     expect(sameFlowStepName('pdk', 'place')).toBe(false)
+  })
+
+  it('maps the shared floorplan catalog onto the persisted preFloorplan step', () => {
+    expect(catalogAppliesToFlowStep('floorplan', StepEnum.PRE_FLOORPLAN)).toBe(true)
+    expect(catalogAppliesToFlowStep('floorplan', StepEnum.FLOORPLAN)).toBe(true)
+    expect(catalogAppliesToFlowStep('floorplan', StepEnum.MACRO_PLACEMENT)).toBe(false)
+    expect(catalogAppliesToFlowStep('floorplan', StepEnum.POST_FLOORPLAN)).toBe(false)
+    expect(catalogAppliesToFlowStep('placement', StepEnum.PLACEMENT)).toBe(true)
+    expect(catalogAppliesToFlowStep('all', StepEnum.SYNTHESIS)).toBe(false)
   })
 
   it('keeps the staged Floorplan labels distinct while preserving their canonical paths', () => {
