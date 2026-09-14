@@ -5,6 +5,7 @@ import { useAgentShellStore } from './agentShellStore'
 
 describe('agentShellStore', () => {
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia())
   })
 
@@ -75,5 +76,24 @@ describe('agentShellStore', () => {
     store.setPanelWidthPx(560)
     expect(store.panelWidthPx).toBe(560)
     expect(localStorage.getItem('ecos.agent.panelWidthPx')).toBe('560')
+  })
+
+  it('persists workspace Agent collapse state and tracks Codex status', () => {
+    const store = useAgentShellStore()
+    expect(store.workspaceAgentCollapsed).toBe(false)
+    store.setWorkspaceAgentCollapsed(true)
+    expect(store.workspaceAgentCollapsed).toBe(true)
+    expect(localStorage.getItem('ecos.agent.workspaceCollapsed')).toBe('true')
+
+    const status = {
+      authState: 'authenticated' as const,
+      binPath: '/tmp/codex',
+      message: 'Codex CLI 已就绪。',
+      platformSupportsInstall: true,
+      state: 'ready' as const,
+      version: 'codex-cli 1.0.0',
+    }
+    store.setCodexStatus(status)
+    expect(store.codexStatus).toEqual(status)
   })
 })

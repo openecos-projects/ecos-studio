@@ -760,22 +760,28 @@ async function ensureCodexReady(): Promise<boolean> {
 async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
   const codex = getDesktopApi().agent?.codex
   if (!codex) {
-    codexSetupStatus.value = null
+    setCodexSetupStatus(null)
     return null
   }
   try {
     const status = await codex.getStatus()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     return status
   } catch (error) {
-    codexSetupStatus.value = {
+    const status: DesktopCodexDependencyStatus = {
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: false,
       state: 'error',
     }
-    return codexSetupStatus.value
+    setCodexSetupStatus(status)
+    return status
   }
+}
+
+function setCodexSetupStatus(status: DesktopCodexDependencyStatus | null): void {
+  codexSetupStatus.value = status?.state === 'ready' ? null : status
+  agentShell.setCodexStatus(status)
 }
 
 function bindCodexProgress(): void {
@@ -786,18 +792,18 @@ function bindCodexProgress(): void {
   unsubscribeCodexProgress = codex.onProgress(
     (event: DesktopCodexInstallProgressEvent) => {
       if (!codexSetupStatus.value) {
-        codexSetupStatus.value = {
+        setCodexSetupStatus({
           authState: 'unknown',
           platformSupportsInstall: true,
           state: 'installing',
-        }
+        })
       }
-      codexSetupStatus.value = {
+      setCodexSetupStatus({
         ...codexSetupStatus.value,
         progressMessage: event.message,
         progressRatio: event.progress,
         state: event.phase === 'error' ? 'error' : 'installing',
-      }
+      } as DesktopCodexDependencyStatus)
     },
   )
 }
@@ -809,18 +815,18 @@ async function installCodexCli(): Promise<void> {
   bindCodexProgress()
   try {
     const status = await codex.install()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     if (status.state === 'ready') {
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: true,
       state: 'error',
-    }
+    })
   } finally {
     codexSetupBusy.value = false
   }
@@ -832,9 +838,9 @@ async function loginCodexCli(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.login()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       ...(codexSetupStatus.value ?? {
         authState: 'unknown',
         platformSupportsInstall: false,
@@ -842,7 +848,7 @@ async function loginCodexCli(): Promise<void> {
       }),
       message: agentErrorMessage(error),
       state: 'error',
-    }
+    } as DesktopCodexDependencyStatus)
   } finally {
     codexSetupBusy.value = false
   }
@@ -854,18 +860,18 @@ async function recheckCodexCli(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.recheck()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     if (status.state === 'ready') {
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
-    }
+    })
   } finally {
     codexSetupBusy.value = false
   }
@@ -883,19 +889,19 @@ async function pickCodexBin(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.setBinPath({ path: selected })
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     if (status.state === 'ready') {
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       authState: 'unknown',
       binPath: selected,
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
-    }
+    })
   } finally {
     codexSetupBusy.value = false
   }
