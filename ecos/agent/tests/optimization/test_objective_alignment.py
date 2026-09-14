@@ -641,7 +641,14 @@ def test_recovery_progress_still_requires_initial_geometry(counts, geometry_chan
 
 
 @pytest.mark.parametrize("metric", tuple(TimingMetric))
-@pytest.mark.parametrize("drop, accepted", [(0.005, True), (0.1, False)])
+@pytest.mark.parametrize(
+    "drop, accepted",
+    [
+        (0.005, True),  # sub-tolerance noise
+        (0.1, True),  # positive-margin erosion; primary recovery wins
+        (1.1, False),  # slack actually fails (1.0 -> -0.1): vetoed
+    ],
+)
 def test_recovery_keeps_timing_within_existing_tolerance(
     metric: TimingMetric, drop: float, accepted: bool,
 ) -> None:
