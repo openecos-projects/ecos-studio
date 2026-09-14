@@ -40,6 +40,22 @@
     </button>
 
     <div v-show="expanded" class="optimization-card__body">
+      <div v-if="summary" class="optimization-card__row optimization-card__summary">
+        <i class="ri-line-chart-line" aria-hidden="true"></i>
+        <span>{{ summary.turns }} turns</span>
+        <span
+          v-for="(delta, index) in summary.deltas"
+          :key="index"
+          class="optimization-card__delta"
+          :class="{
+            'optimization-card__delta--better': delta.change < 0,
+            'optimization-card__delta--worse': delta.change > 0,
+          }"
+        >
+          {{ delta.label }} {{ delta.from }} → {{ delta.to }}
+        </span>
+        <span v-if="summary.promotions">{{ summary.promotions }} promoted</span>
+      </div>
       <div v-for="(entry, index) in rows" :key="index" class="optimization-card__row">
         <span class="optimization-card__turn">{{ entry.label }}</span>
         <span
@@ -135,6 +151,33 @@ const latestCounts = computed(() => {
     { label: 'Setup', value: counts.sta_setup_violation_count },
     { label: 'Hold', value: counts.sta_hold_violation_count },
   ]
+})
+
+/** Episode-level trend across per-turn entries (first finished vs latest). */
+const summary = computed(() => {
+  const turns = props.timeline.filter((entry) => typeof entry.turn === 'number')
+  if (turns.length === 0) return null
+  const first = turns[0].violation_counts
+  const latest = turns[turns.length - 1].violation_counts
+  if (!first || !latest) return null
+  const deltas = (
+    [
+      ['DRC', 'drc_count'],
+      ['Setup', 'sta_setup_violation_count'],
+      ['Hold', 'sta_hold_violation_count'],
+    ] as const
+  ).map(([label, key]) => ({
+    label,
+    from: first[key],
+    to: latest[key],
+    change: latest[key] - first[key],
+  }))
+  const promotions = turns.filter(
+    (entry) =>
+      entry.incumbent_decision != null &&
+      PROMOTING_DECISIONS.has(entry.incumbent_decision),
+  ).length
+  return { turns: turns.length, deltas, promotions }
 })
 
 interface OptimizationRow {
@@ -352,6 +395,25 @@ function directionIcon(direction: string | null | undefined): string {
   margin-left: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: nowrap;
+}
+
+.optimization-card__summary {
+  padding: 0.2rem 0 0.35rem;
+  border-bottom: 1px dashed color-mix(in srgb, var(--border-color) 45%, transparent);
+  color: var(--text-primary);
+  font-size: 0.6875rem;
+}
+
+.optimization-card__delta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.optimization-card__delta--better {
+  color: var(--accent-color);
+}
+
+.optimization-card__delta--worse {
+  color: #e6a23c;
 }
 
 .optimization-card__rationale {
