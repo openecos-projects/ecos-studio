@@ -499,10 +499,9 @@ def _has_identifier_evidence(
     return (
         _identifier_phrase_covers_query(record.identifier_phrase_tokens, query_terms)
         or bool(record.identifier_tokens.intersection(query_acronyms))
-        or any(
-            len(term) >= 4 and term in record.identifier_tokens
-            for term in query_terms
-        )
+        # A lone query word shared with an identifier ("report", "ratio") is not
+        # discriminative; exact-token evidence only when it is the whole query.
+        or len(query_terms) == 1 and bool(record.identifier_tokens.intersection(query_terms))
     )
 
 
