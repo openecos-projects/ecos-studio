@@ -19,6 +19,7 @@ const props = withDefaults(
     accent?: 'indigo' | 'violet' | 'emerald' | 'amber' | 'cyan'
     readonly?: boolean
     parameterDescriptions?: Record<string, string>
+    parameterTypes?: Record<string, string>
     /** Baseline-comparison leaf path ('' at the root; keys append '.k', array items '[i]'). */
     path?: string
   }>(),
@@ -50,6 +51,29 @@ function changedUnder(prefix: string): number {
 function descriptionFor(path: string): string | undefined {
   const description = props.parameterDescriptions?.[path]?.trim()
   return description || undefined
+}
+
+function numberType(path: string): string | undefined {
+  const type = props.parameterTypes?.[path]
+  if (type) return type
+  const parameterPath = path.replace(/\[\d+\].*$/, '')
+  const listType = props.parameterTypes?.[parameterPath]
+  return listType?.match(/^list\[(.+)\]$/)?.[1]
+}
+
+function numberFractionDigits(path: string, value: number): number {
+  const type = numberType(path)
+  if (type === 'int' || (type !== 'float' && Number.isInteger(value))) return 0
+
+  const text = String(value).toLowerCase()
+  const [coefficient, exponentText] = text.split('e')
+  const decimalPlaces = coefficient.split('.')[1]?.length ?? 0
+  const exponent = exponentText ? Number(exponentText) : 0
+  return Math.max(2, decimalPlaces - exponent)
+}
+
+function numberStep(path: string, value: number): number {
+  return 10 ** -numberFractionDigits(path, value)
 }
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -171,7 +195,9 @@ function setPrim(i: number, v: unknown): void {
         size="small"
         fluid
         class="w-full min-w-0"
+        :max-fraction-digits="numberFractionDigits(path, model as number)"
         :use-grouping="false"
+        :step="numberStep(path, model as number)"
         @update:model-value="setScalar($event ?? 0)"
       />
       <div v-else-if="typeof model === 'boolean'" class="flex items-center gap-2">
@@ -233,6 +259,7 @@ function setPrim(i: number, v: unknown): void {
                 :accent="accent"
                 :readonly="readonly"
                 :parameter-descriptions="parameterDescriptions"
+                :parameter-types="parameterTypes"
                 :path="cellPath(ri, k)"
                 @update:model-value="setCell(ri, k, $event)"
               />
@@ -250,7 +277,11 @@ function setPrim(i: number, v: unknown): void {
                 size="small"
                 fluid
                 class="w-full min-w-0"
+                :max-fraction-digits="
+                  numberFractionDigits(cellPath(ri, k), row[k] as number)
+                "
                 :use-grouping="false"
+                :step="numberStep(cellPath(ri, k), row[k] as number)"
                 @update:model-value="setCell(ri, k, $event ?? 0)"
               />
               <Checkbox
@@ -314,7 +345,9 @@ function setPrim(i: number, v: unknown): void {
           size="small"
           fluid
           class="min-w-0 flex-1"
+          :max-fraction-digits="numberFractionDigits(itemPath(i), (model as number[])[i])"
           :use-grouping="false"
+          :step="numberStep(itemPath(i), (model as number[])[i])"
           @update:model-value="setPrim(i, $event ?? 0)"
         />
         <div
@@ -330,6 +363,7 @@ function setPrim(i: number, v: unknown): void {
             :accent="accent"
             :readonly="readonly"
             :parameter-descriptions="parameterDescriptions"
+            :parameter-types="parameterTypes"
             :path="itemPath(i)"
             @update:model-value="setPrim(i, $event)"
           />
@@ -385,6 +419,7 @@ function setPrim(i: number, v: unknown): void {
           :accent="accent"
           :readonly="readonly"
           :parameter-descriptions="parameterDescriptions"
+          :parameter-types="parameterTypes"
           :path="childPath(k)"
           @update:model-value="setKey(k, $event)"
         />

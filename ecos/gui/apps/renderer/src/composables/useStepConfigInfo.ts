@@ -79,6 +79,21 @@ function parameterDescriptions(records: unknown[]): Record<string, string> {
   )
 }
 
+function parameterTypes(records: unknown[]): Record<string, string> {
+  return Object.fromEntries(
+    records.flatMap((record) => {
+      if (
+        !isRecord(record) ||
+        typeof record.param !== 'string' ||
+        typeof record.type !== 'string'
+      ) {
+        return []
+      }
+      return [[record.param, record.type]]
+    }),
+  )
+}
+
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
   const { currentProject, showToast, workspaceSession } = useWorkspace()
@@ -97,6 +112,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   const stepConfigRaw = ref<string | null>(null)
   const stepConfigReadError = ref<string | null>(null)
   const stepConfigParameterDescriptions = ref<Record<string, string>>({})
+  const stepConfigParameterTypes = ref<Record<string, string>>({})
 
   /** Editable draft (matches disk when JSON is valid; baseline updates after save). */
   const stepConfigDraft = ref<unknown | null>(null)
@@ -224,6 +240,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
           return
         }
         stepConfigParameterDescriptions.value = parameterDescriptions(response.parameters)
+        stepConfigParameterTypes.value = parameterTypes(response.parameters)
         const payload = {
           parameters,
           stepId: response.stepId ?? response.step,
@@ -277,6 +294,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigRaw.value = null
     stepConfigReadError.value = null
     stepConfigParameterDescriptions.value = {}
+    stepConfigParameterTypes.value = {}
     stepConfigDraft.value = null
     stepConfigBaselineSig.value = ''
     stepConfigTextDraft.value = ''
@@ -562,6 +580,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     stepConfigJsonInvalid,
     stepConfigParameterCount,
     stepConfigParameterDescriptions,
+    stepConfigParameterTypes,
     stepConfigDraft,
     stepConfigTextDraft,
     hasStepConfigChanges,

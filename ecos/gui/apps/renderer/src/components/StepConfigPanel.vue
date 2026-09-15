@@ -299,6 +299,7 @@
                       v-model="stepConfigDraft"
                       :step="currentStep"
                       :parameter-descriptions="stepConfigParameterDescriptions"
+                      :parameter-types="stepConfigParameterTypes"
                       @initialized="markStepConfigEditorInitialized"
                     />
                   </template>
@@ -348,6 +349,7 @@ const {
   stepConfigJsonInvalid,
   stepConfigParameterCount,
   stepConfigParameterDescriptions,
+  stepConfigParameterTypes,
   stepConfigParsed,
   stepConfigDraft,
   stepConfigTextDraft,

@@ -7,6 +7,7 @@ withDefaults(
   defineProps<{
     readonly?: boolean
     parameterDescriptions?: Record<string, string>
+    parameterTypes?: Record<string, string>
   }>(),
   { readonly: false },
 )
@@ -26,6 +27,7 @@ withDefaults(
       accent="indigo"
       :readonly="readonly"
       :parameter-descriptions="parameterDescriptions"
+      :parameter-types="parameterTypes"
     />
   </div>
 </template>

@@ -35,14 +35,18 @@ import {
 } from './useFlowRunner'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
-function available(values: Record<string, unknown>, step = 'Floorplan') {
+function available(
+  values: Record<string, unknown>,
+  step = 'Floorplan',
+  types: Record<string, string> = {},
+) {
   return {
     parameters: Object.entries(values).map(([param, value]) => ({
       applies: step,
       default: value,
       description: param,
       param,
-      type: typeof value,
+      type: types[param] ?? typeof value,
       value,
     })),
     status: 'available',
@@ -102,6 +106,26 @@ describe('useStepConfigInfo', () => {
     })
     expect(result.stepConfigParameterDescriptions.value).toEqual({
       'floorplan.ifp.thread_number': 'floorplan.ifp.thread_number',
+    })
+    expect(result.stepConfigParameterTypes.value).toEqual({
+      'floorplan.ifp.thread_number': 'number',
+    })
+  })
+
+  it('keeps parameter types for numeric editor steps', async () => {
+    testState.readWorkspaceStepConfigurationApi.mockResolvedValue(
+      available({ 'floorplan.core_util': 1 }, 'Floorplan', {
+        'floorplan.core_util': 'float',
+      }),
+    )
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() =>
+      expect(result.stepConfigDraft.value).toEqual({ 'floorplan.core_util': 1 }),
+    )
+    expect(result.stepConfigParameterTypes.value).toEqual({
+      'floorplan.core_util': 'float',
     })
   })
 

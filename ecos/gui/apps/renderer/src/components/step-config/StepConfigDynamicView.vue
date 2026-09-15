@@ -9,6 +9,7 @@ defineProps<{
   step: StepEnum
   readonly?: boolean
   parameterDescriptions?: Record<string, string>
+  parameterTypes?: Record<string, string>
 }>()
 const emit = defineEmits<{ initialized: [] }>()
 let initialized = false
@@ -30,6 +31,7 @@ onMounted(() => {
     v-model="draft"
     :readonly="readonly"
     :parameter-descriptions="parameterDescriptions"
+    :parameter-types="parameterTypes"
     @initialized="emitInitialized"
   />
 </template>
