@@ -13,12 +13,12 @@ export const ECC_FLOW_STEPS = [
   'legalization',
   'Timing optimization',
   'route',
-  'drc',
-  'lvs',
   'filler',
-  'postRouteLec',
   'RCX',
   'sta',
+  'lvs',
+  'postRouteLec',
+  'drc',
   'Harden',
 ] as const
 
