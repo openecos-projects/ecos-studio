@@ -144,6 +144,8 @@ export type {
   DesktopRtlSourceDialogOptions,
   PickedRtlSources,
   DesktopProjectDirectoryEntry,
+  DesktopProjectManagementWorkspaceImportFailureCode,
+  DesktopProjectManagementWorkspaceImportResult,
   DesktopProjectManagementWorkspaceStepConfigurationRequest,
   DesktopProjectManagementWorkspaceStepConfigurationResult,
   DesktopProjectTextFileChunk,

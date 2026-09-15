@@ -91,6 +91,9 @@ async function loadDesktopBridge() {
     menu: {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
+    projectManagement: {
+      importWorkspace(projectRoot: string): Promise<unknown>
+    }
     workspace: {
       openWaveformExternal(path: string): Promise<void>
       readProjectTextFile(path: string): Promise<unknown>
@@ -338,6 +341,19 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       desktopApiEventChannels.backendWorkspaceInvalidated,
       eventListener,
+    )
+  })
+
+  it('routes project workspace imports through the narrow main-owned picker channel', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce({ status: 'cancelled' })
+
+    await expect(bridge.projectManagement.importWorkspace('/work/gcd')).resolves.toEqual({
+      status: 'cancelled',
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.projectManagementImportWorkspace,
+      '/work/gcd',
     )
   })
 

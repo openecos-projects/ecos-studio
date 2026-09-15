@@ -39,6 +39,32 @@ vi.mock('@/utils/projectHistory', () => ({
   removeProjectHistoryEntry: vi.fn(),
 }))
 vi.mock('@/utils/projectManagementRead', () => ({
+  importProjectManagementWorkspace: vi.fn(async (projectRoot: string) => ({
+    status: 'imported',
+    manifest: {
+      schema_version: 1,
+      project_id: `project-${projectRoot}`,
+      name: projectRoot.split('/').pop() ?? 'demo',
+      design_name: 'gcd',
+      description: '',
+      root_path: projectRoot,
+      created_at: '2026-09-04T00:00:00.000Z',
+      updated_at: '2026-09-04T00:00:00.000Z',
+      base_design: { parameters: {}, rtl_list: [] },
+      objectives: { primary: 'timing', directions: {} },
+      workspaces: [
+        {
+          workspace_id: 'ws_0001',
+          name: 'ws_0001',
+          workspace_path: `${projectRoot}/ws_0001`,
+          status: 'active',
+        },
+      ],
+      best_workspace: null,
+    },
+    workspaceId: 'ws_0001',
+    workspacePath: `${projectRoot}/ws_0001`,
+  })),
   listProjectManagementEntries: vi.fn(async () => []),
   readProjectManagementManifest: vi.fn(async (projectRoot: string) => ({
     schema_version: 1,
@@ -84,7 +110,8 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
-import { loadProjectHistory } from '@/utils/projectHistory'
+import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
+import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
 
 function historyProject(index: number) {
   return {
@@ -106,6 +133,27 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.showToast.mockReset()
     vi.mocked(loadProjectHistory).mockReset()
     vi.mocked(loadProjectHistory).mockResolvedValue([testState.project])
+    vi.mocked(rememberProjectHistoryEntry).mockReset()
+    vi.mocked(rememberProjectHistoryEntry).mockResolvedValue([testState.project])
+    vi.mocked(importProjectManagementWorkspace).mockClear()
+  })
+
+  it('imports a workspace through the main-owned import API', async () => {
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="More actions for demo"]').trigger('click')
+    const importAction = wrapper
+      .findAll('.row-action-menu-item')
+      .find((item) => item.text().includes('Import workspace'))
+    expect(importAction).toBeDefined()
+    await importAction!.trigger('click')
+    await flushPromises()
+
+    expect(importProjectManagementWorkspace).toHaveBeenCalledWith('/projects/demo')
+    expect(testState.showToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'Workspace not imported' }),
+    )
   })
 
   it('keeps opening after the Project Management route is normalized', async () => {

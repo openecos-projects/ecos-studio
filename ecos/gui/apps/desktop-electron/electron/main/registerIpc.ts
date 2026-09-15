@@ -121,6 +121,7 @@ import {
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
 import { registerBackgroundLifecycleIpc } from './registerBackgroundLifecycleIpc'
+import { projectWorkspaceImportFailure } from '../services/projectWorkspaceImportService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -281,6 +282,14 @@ export interface DesktopBridgeServices {
         event: import('@ecos-studio/shared').BackendProjectExecutionInvalidatedEvent,
       ) => void,
     ): () => void
+  }
+  projectWorkspaceImportService?: {
+    importWorkspace(
+      projectRoot: string,
+      workspacePath: string,
+    ): Promise<
+      import('@ecos-studio/shared').DesktopProjectManagementWorkspaceImportResult
+    >
   }
   workspaceService: {
     approvePendingExternalReadRoots?(
@@ -1709,6 +1718,40 @@ export function registerIpc(
       return await services.projectManagementReadService.readWorkspaceStepConfiguration(
         request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest,
       )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementImportWorkspace,
+    async (event, projectRoot) => {
+      if (!services.projectWorkspaceImportService) {
+        return {
+          status: 'failed',
+          code: 'project_invalid',
+          message: 'Project workspace import is unavailable.',
+        }
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        return {
+          status: 'failed',
+          code: 'project_invalid',
+          message: 'Project workspace import requires a project root.',
+        }
+      }
+      requireBackendMutationAllowed(event)
+      const workspacePath = await pickDirectory({ title: 'Select Workspace Folder' })
+      if (!workspacePath) return { status: 'cancelled' }
+      try {
+        const result = await services.projectWorkspaceImportService.importWorkspace(
+          projectRoot,
+          workspacePath,
+        )
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateProject(projectRoot)
+        return result
+      } catch (error) {
+        return projectWorkspaceImportFailure(error)
+      }
     },
   )
 

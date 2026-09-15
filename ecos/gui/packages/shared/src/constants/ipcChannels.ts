@@ -27,6 +27,7 @@ export const desktopApiIpcChannels = {
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceStepConfiguration:
     'project-management:read-workspace-step-configuration',
+  projectManagementImportWorkspace: 'project-management:import-workspace',
   backendWorkspaceGetOverview: 'backend-workspace:get-overview',
   backendWorkspaceGetArtifact: 'backend-workspace:get-artifact',
   backendWorkspaceGetStepDetail: 'backend-workspace:get-step-detail',

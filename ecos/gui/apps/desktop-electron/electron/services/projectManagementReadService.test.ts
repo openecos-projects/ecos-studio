@@ -128,6 +128,101 @@ describe('ProjectManagementReadService', () => {
     ])
   })
 
+  it('reads step configuration from an exactly declared external workspace', async () => {
+    const container = await mkdtemp(join(tmpdir(), 'ecos-project-external-read-'))
+    temporaryDirectories.push(container)
+    const projectRoot = join(container, 'project')
+    const workspaceRoot = join(container, 'external', 'recovered')
+    await mkdir(join(projectRoot), { recursive: true })
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    const now = '2026-08-09T00:00:00.000Z'
+    const manifest = {
+      schema_version: 1,
+      project_id: 'proj_gcd',
+      name: 'gcd',
+      design_name: 'gcd',
+      root_path: projectRoot,
+      created_at: now,
+      updated_at: now,
+      objectives: {},
+      workspaces: [
+        {
+          workspace_id: 'recovered',
+          name: 'recovered',
+          workspace_path: workspaceRoot,
+          source_workspace_id: null,
+          lifecycle: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ],
+      mpc: null,
+      best_workspace: null,
+      qor_baseline: null,
+    }
+    await writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest))
+    await writeFile(join(workspaceRoot, 'home', 'flow.json'), '{"steps":[]}')
+    const readStepConfiguration = vi.fn().mockResolvedValue({
+      options: {},
+      step: 'CTS',
+      stepId: 'CTS',
+      status: 'available',
+      workspaceId: 'recovered',
+      workspaceRevision: 1,
+    })
+    const service = createReadService(readStepConfiguration)
+
+    await expect(service.readManifest(projectRoot)).resolves.toMatchObject({
+      workspaces: [{ workspace_id: 'recovered' }],
+    })
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        projectRoot,
+        step: 'CTS',
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toMatchObject({ step: 'CTS' })
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        projectRoot,
+        step: 'CTS',
+        workspacePath: join(container, 'external'),
+      }),
+    ).rejects.toThrow('not declared')
+  })
+
+  it('keeps declared workspaces readable when another external workspace is missing', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const content = JSON.parse(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    ) as { workspaces: Array<Record<string, unknown>> }
+    content.workspaces.push({
+      workspace_id: 'missing',
+      workspace_path: join(projectRoot, '..', 'missing-external'),
+    })
+    await writeFile(join(projectRoot, 'project.json'), JSON.stringify(content))
+    const readStepConfiguration = vi.fn().mockResolvedValue({
+      options: {},
+      step: 'CTS',
+      stepId: 'CTS',
+      status: 'available',
+      workspaceId: 'ws_0001',
+      workspaceRevision: 1,
+    })
+    const service = createReadService(readStepConfiguration)
+
+    await expect(service.readManifest(projectRoot)).resolves.toMatchObject({
+      workspaces: [{ workspace_id: 'ws_0001' }, { workspace_id: 'missing' }],
+    })
+    await expect(
+      service.readWorkspaceStepConfiguration({
+        projectRoot,
+        step: 'CTS',
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toMatchObject({ step: 'CTS' })
+  })
+
   it('derives the project root from the selected manifest directory', async () => {
     const { projectRoot } = await createProject()
     const manifest = JSON.parse(
