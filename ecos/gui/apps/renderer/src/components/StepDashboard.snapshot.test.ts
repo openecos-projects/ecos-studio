@@ -145,4 +145,13 @@ describe('StepDashboard committed Snapshot rendering', () => {
   it('keeps scrollable data highlights aligned to the top', () => {
     expect(dashboardSource).toMatch(/\.data-highlights\s*{[^}]*align-content: start/s)
   })
+
+  it('keeps STA report rows from overlapping long names and paths', () => {
+    expect(dashboardSource).toMatch(
+      /\.reports-card\.is-sta-report-card \.report-copy strong\s*{[^}]*-webkit-line-clamp:\s*2/s,
+    )
+    expect(dashboardSource).toMatch(
+      /\.reports-card\.is-sta-report-card \.report-copy small\s*{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    )
+  })
 })

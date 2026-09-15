@@ -2760,15 +2760,20 @@ function fileName(path: string): string {
   padding-top: 3px;
 }
 .reports-card.is-sta-report-card .report-copy strong {
+  display: -webkit-box;
   line-height: 1.35;
-  overflow: visible;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
 }
 .reports-card.is-sta-report-card .report-copy small {
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .step-config-dialog {
