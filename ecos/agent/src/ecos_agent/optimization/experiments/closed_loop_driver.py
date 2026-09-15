@@ -21,6 +21,7 @@ from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     OptimizationEpisodeState,
+    OptimizationObjectiveProposal,
     ROUTABILITY_OBJECTIVE_ORDER,
     TerminalObservation,
     TIMING_GUARDRAIL_ORDER,
@@ -42,7 +43,6 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     _ensure_workspace,
     _filelist_refs,
 )
-from ecos_agent.optimization.experiments.knowledge_treatment_runner import _objective
 from ecos_agent.optimization.experiments.knowledge_mediation import (
     EPISODE_AUDIT_SCHEMA_VERSION,
     audit_episode_mediation,
@@ -58,7 +58,9 @@ from ecos_agent.optimization.ledger import (
 )
 from ecos_agent.optimization.metrics.contracts import TELEMETRY_METRIC_IDS
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
+from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
 from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
+from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import create_optimization_runner
 
 # 频率取各设计 SDC 的原始约束 100 MHz：ECC cf5db256 起 refresh_generated_sdc 会把
@@ -76,6 +78,32 @@ BASELINE: dict[str, object] = {
     # ECC workspace.create 的实际默认（dreamplace_ecc.json 实测）；不是参数卡参考值。
     "density_weight": 0.00085,
 }
+
+# 与 knowledge_treatment_runner._objective 的硬编码目标逐字一致；默认调用
+# （不带 --goal-text/--geometry-mode）冻结出完全相同的 objective contract。
+_DEFAULT_GOAL_TEXT = (
+    "Minimize routed wirelength while preserving DRC and global-routing overflow."
+)
+
+
+def _episode_objective(goal_text: str, geometry_mode: str):
+    return freeze_optimization_objective(
+        goal_text,
+        OptimizationObjectiveProposal(
+            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+            preserve_metrics=(
+                ObjectiveMetric.DRC_COUNT,
+                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+            ),
+            parameter_policy=OptimizationParameterPolicy(
+                geometry_mode=geometry_mode
+            ),
+            rationale_summary=(
+                "Minimize wirelength while preserving final DRC and "
+                "global-routing overflow."
+            ),
+        ),
+    )
 
 # 顶层模块名与设计 id 不同的设计（对照 rtl/ 源码与 defined-not-instantiated 分析核实），
 # 其余默认 design_id。stage_d_* 系列取编号同名模块；24090015 的 RTL 无单一顶层，
@@ -357,6 +385,19 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     parser.add_argument(
         "--reasoning-effort", default=None, choices=("low", "medium", "high")
     )
+    parser.add_argument(
+        "--goal-text",
+        default=_DEFAULT_GOAL_TEXT,
+        help="natural-language goal frozen into the objective contract "
+        "(hashed as source_goal_sha256)",
+    )
+    parser.add_argument(
+        "--geometry-mode",
+        choices=("fixed", "variable"),
+        default="fixed",
+        help="floorplan knob domain; variable matches goals that explicitly "
+        "allow adjusting floorplan knobs",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--agent-mode", default="full_agent")
     parser.add_argument(
@@ -486,7 +527,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             )
         else:
             provider.select_model(model)
-        objective = _objective()
+        objective = _episode_objective(args.goal_text, args.geometry_mode)
         # alignment 必须锚定 workspace 本体（canonical）观测：runner 启动时用
         # build_terminal_observation(workspace) 重建 alignment 并做整对象比较，而
         # terminal observation 含 flow_tool_runtime/flow_peak_memory 等易变遥测，

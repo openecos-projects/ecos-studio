@@ -3,16 +3,40 @@ from pathlib import Path
 
 import pytest
 
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import ObjectiveMetric
 from ecos_agent.optimization.experiments.closed_loop_driver import (
+    _DEFAULT_GOAL_TEXT,
+    _episode_objective,
     build_metric_comparison,
     write_noise_epsilon,
 )
 from ecos_agent.optimization.experiments.equal_budget import CandidateTrace
+from ecos_agent.optimization.experiments.knowledge_treatment_runner import _objective
 from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from tests.optimization.experiments.equal_budget_support import (
     _terminal_observation,
 )
+
+
+def test_default_episode_objective_matches_treatment_freeze() -> None:
+    assert _episode_objective(_DEFAULT_GOAL_TEXT, "fixed") == _objective()
+
+
+def test_variable_geometry_goal_opens_floorplan_domain_only() -> None:
+    goal = "reduce routed wirelength and you can adjust floorplan knobs"
+    contract = _episode_objective(goal, "variable")
+    assert contract.source_goal_sha256 == canonical_sha256(goal)
+    assert contract.primary_metric == ObjectiveMetric.ROUTE_WIRELENGTH
+    assert contract.preserve_metrics == (
+        ObjectiveMetric.DRC_COUNT,
+        ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+    )
+    assert contract.parameter_policy is not None
+    assert contract.parameter_policy.geometry_mode == "variable"
+    baseline = _episode_objective(_DEFAULT_GOAL_TEXT, "fixed")
+    assert baseline.parameter_policy is not None
+    assert baseline.parameter_policy.geometry_mode == "fixed"
 
 
 def _write_replay(calibration_dir: Path, index: int, peak_memory_mb: float) -> None:
