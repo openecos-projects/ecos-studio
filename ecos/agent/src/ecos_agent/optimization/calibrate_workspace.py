@@ -7,34 +7,53 @@ two or more times in isolated copies of the workspace, then freezes the
 cross-replay noise profile into ``<workspace>/.agent/optimization/
 noise-epsilon.v1.json`` where the episode runtime loads it.
 
-Replays inherit the workspace's current parameters; recalibrate whenever the
-toolchain, PDK, or workspace inputs change.
+Replays inherit the workspace's current parameters. Each replay caches its ECC
+flow artifacts behind a fingerprint manifest (ECC revision, PDK, workspace
+inputs, observation-code hash): cached replays are reused unchanged while the
+inputs match, re-parsed in place when only the observation code changed, and
+calibration refuses to run when the toolchain or workspace inputs drifted.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
 from ecos_agent.optimization.observation_contracts import (
     TerminalObservation,
     deterministic_noise_profile,
 )
 from ecos_agent.optimization.observations import build_terminal_observation
-from ecos_agent.optimization.runtime import OptimizationRuntimeError, _ecc_executable
+from ecos_agent.optimization.runtime import (
+    OptimizationRuntimeError,
+    WorkspaceParametersError,
+    _ecc_executable,
+    _runtime_parameters,
+)
+from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
+    _workspace_flow_succeeded,
+)
 
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 _MIN_REPLAYS = 2
 _PROGRESS_INTERVAL_SECONDS = 30.0
+_CACHE_MANIFEST_SCHEMA = "ecos.replay_cache_manifest.v1"
+#: Fingerprint keys that gate the expensive ECC flow rerun and must fail
+#: closed on drift. ``parser_sha256`` only gates cheap re-parsing.
+_REPLAY_INPUT_KEYS = ("ecc_revision", "origin_sha256", "parameters_sha256", "pdk_sha256")
 
 
 def write_noise_epsilon_artifact(
-    observations: tuple[TerminalObservation, ...], artifact_path: Path
+    observations: tuple[TerminalObservation, ...],
+    artifact_path: Path,
+    metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     profile = deterministic_noise_profile(observations)
     payload = {
@@ -44,6 +63,8 @@ def write_noise_epsilon_artifact(
         "reference": profile["reference"],
         "epsilon": dict(profile["epsilon"]),
     }
+    if metadata:
+        payload.update(metadata)
     artifact_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -85,17 +106,139 @@ def _heartbeat_emitter(
     return heartbeat
 
 
+def _parser_sha256() -> str:
+    # Lazy module lookup: importing these eagerly would reorder the package's
+    # circular-prone initialization (contracts <-> observation_contracts).
+    module_files = (
+        Path(importlib.import_module("ecos_agent.optimization.observation_contracts").__file__),
+        Path(importlib.import_module("ecos_agent.optimization.observations").__file__),
+    )
+    return canonical_sha256({"files": [file_sha256(path) for path in module_files]})
+
+
+def _tree_sha256(root: Path) -> str:
+    return canonical_sha256(
+        {
+            str(path.relative_to(root)): file_sha256(path)
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        }
+    )
+
+
+def _environment_fingerprint(workspace: Path) -> dict[str, str]:
+    """Identify every input that decides cached-replay reusability.
+
+    The ECC handshake is cheap (one ``rpc.hello``) and runs even on the
+    full-cache path so that a drifted toolchain is never silently accepted.
+    """
+    client = EccContentLengthRpcClient(_ecc_executable())
+    try:
+        ecc_revision = client.ecc_revision()
+    finally:
+        client.close()
+    try:
+        parameters_ref, parameters = _runtime_parameters(workspace)
+        pdk_root = Path(parameters["pdk_root"])
+        pdk_sha256 = file_sha256(pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef")
+    except (KeyError, OSError, TypeError, ValueError, WorkspaceParametersError) as exc:
+        raise OptimizationRuntimeError(
+            "workspace parameters or PDK evidence are unavailable for replay cache validation"
+        ) from exc
+    return {
+        "ecc_revision": ecc_revision,
+        "origin_sha256": _tree_sha256(workspace / "origin"),
+        "parameters_sha256": file_sha256(workspace / parameters_ref),
+        "pdk_sha256": pdk_sha256,
+        "parser_sha256": _parser_sha256(),
+    }
+
+
+def _load_replay_manifest(replay_root: Path) -> dict[str, object] | None:
+    try:
+        payload = json.loads(
+            (replay_root / "replay-cache-manifest.v1.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != _CACHE_MANIFEST_SCHEMA
+        or not isinstance(payload.get("components"), dict)
+    ):
+        return None
+    return payload
+
+
+def _store_replay_cache(
+    replay_root: Path,
+    observation: TerminalObservation,
+    fingerprint: dict[str, str],
+    provenance: str,
+) -> None:
+    (replay_root / "terminal-observation.v1.json").write_text(
+        observation.model_dump_json(), encoding="utf-8"
+    )
+    (replay_root / "replay-cache-manifest.v1.json").write_text(
+        json.dumps(
+            {
+                "schema_version": _CACHE_MANIFEST_SCHEMA,
+                "provenance": provenance,
+                "components": dict(fingerprint),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _require_same_inputs(
+    manifest: dict[str, object], fingerprint: dict[str, str], index: int
+) -> None:
+    components = manifest["components"]
+    drifted = [
+        key for key in _REPLAY_INPUT_KEYS if components.get(key) != fingerprint[key]
+    ]
+    if drifted:
+        raise OptimizationRuntimeError(
+            f"default replay {index} was produced by different inputs "
+            f"({', '.join(drifted)}); re-run the flow screen for this workspace "
+            "and calibrate again"
+        )
+
+
 def _run_replay(
     workspace: Path,
     replay_root: Path,
     index: int,
     timeout_seconds: float,
+    fingerprint: dict[str, str],
     progress: Callable[[str], None] | None = None,
 ) -> TerminalObservation:
     observation_path = replay_root / "terminal-observation.v1.json"
-    if observation_path.is_file():
-        return TerminalObservation.model_validate_json(observation_path.read_bytes())
+    manifest = _load_replay_manifest(replay_root)
     replay_workspace = replay_root / "workspace"
+    if observation_path.is_file() and manifest is not None:
+        _require_same_inputs(manifest, fingerprint, index)
+        if manifest["components"].get("parser_sha256") == fingerprint["parser_sha256"]:
+            return TerminalObservation.model_validate_json(observation_path.read_bytes())
+        # Only the observation code moved: the cached ECC artifacts stay
+        # authoritative, so re-parse them instead of paying for a flow rerun.
+        observation = _terminal_observation(replay_workspace)
+        _store_replay_cache(replay_root, observation, fingerprint, "reparsed")
+        if progress is not None:
+            progress("observation code changed; re-parsed the cached flow artifacts")
+        return observation
+    if replay_workspace.is_dir() and _workspace_flow_succeeded(replay_workspace):
+        # Pre-manifest cache from an earlier calibration: adopt the finished
+        # flow artifacts, recording that their toolchain provenance is unverified.
+        observation = _terminal_observation(replay_workspace)
+        _store_replay_cache(replay_root, observation, fingerprint, "adopted")
+        if progress is not None:
+            progress("re-parsed the finished flow artifacts and adopted the replay cache")
+        return observation
     if not replay_workspace.exists():
         shutil.copytree(
             workspace, replay_workspace, ignore=shutil.ignore_patterns(".agent")
@@ -136,9 +279,7 @@ def _run_replay(
     finally:
         client.close()
     observation = _terminal_observation(replay_workspace)
-    observation_path.write_text(
-        observation.model_dump_json(), encoding="utf-8"
-    )
+    _store_replay_cache(replay_root, observation, fingerprint, "produced")
     return observation
 
 
@@ -160,7 +301,9 @@ def calibrate(
     optimization_root = workspace / ".agent" / "optimization"
     calibration_dir = optimization_root / "noise-calibration"
     calibration_dir.mkdir(parents=True, exist_ok=True)
-    observations = []
+    fingerprint = _environment_fingerprint(workspace)
+    observations: list[TerminalObservation] = []
+    provenances: dict[str, str] = {}
     for index in range(1, replays + 1):
         if should_stop is not None and should_stop():
             raise OptimizationRuntimeError("noise calibration cancelled")
@@ -180,13 +323,23 @@ def calibrate(
                 calibration_dir / f"default-replay-{index}",
                 index,
                 timeout_seconds,
+                fingerprint,
                 progress=scoped,
             )
+        )
+        manifest = _load_replay_manifest(calibration_dir / f"default-replay-{index}")
+        provenances[str(index)] = (
+            str(manifest["provenance"]) if manifest is not None else "unknown"
         )
         if progress is not None:
             progress(f"replay {index}/{replays} finished")
     payload = write_noise_epsilon_artifact(
-        tuple(observations), optimization_root / "noise-epsilon.v1.json"
+        tuple(observations),
+        optimization_root / "noise-epsilon.v1.json",
+        metadata={
+            "calibration_fingerprint": dict(fingerprint),
+            "replay_provenance": provenances,
+        },
     )
     return {
         "artifact": str(optimization_root / "noise-epsilon.v1.json"),
