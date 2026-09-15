@@ -245,11 +245,13 @@ def test_gui_optimization_streams_turn_events_to_the_chat(
         for event in events
         if event["type"] == "optimization"
     )
-    assert any(
+    # Candidate-rerun steps run outside a planner turn, so their local
+    # activities carry no turnId and would be rejected by the GUI activity
+    # contract; the provider must suppress them instead of streaming notice
+    # bait. The run spinner covers this phase.
+    assert not any(
         event["type"] == "activity"
         and isinstance(event.get("activity"), dict)
-        and event["activity"].get("kind") == "tool_call"
         and event["activity"].get("tool") == "candidate-rerun"
-        and event["activity"].get("progress") == "place · dreamplace"
         for event in events
     )
