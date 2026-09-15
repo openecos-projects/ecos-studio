@@ -80,7 +80,31 @@ gui_default_nix = parse_regex(
 )
 versions.append(("ecos/gui/default.nix", gui_default_nix))
 
+# The ECC bundle constant must track the ecc package version it is published
+# from; a drifted constant makes the app download a mismatched runtime.
+expected_ecc_bundle = parse_regex(
+    "ecos/gui/packages/shared/src/constants/eccBundle.ts",
+    r"EXPECTED_ECC_BUNDLE_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
+    label="EXPECTED_ECC_BUNDLE_VERSION",
+)
+ecc_package = parse_regex(
+    "ecc/pyproject.toml",
+    r'(?m)^version\s*=\s*"([^"]+)"\s*$',
+    label="ecc/pyproject.toml version",
+)
+if expected_ecc_bundle != ecc_package:
+    print("")
+    print(
+        "ERROR: ECC bundle version mismatch. "
+        f"EXPECTED_ECC_BUNDLE_VERSION ({expected_ecc_bundle}) must match "
+        f"ecc/pyproject.toml ({ecc_package}).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print("Detected versions:")
+print(f"  EXPECTED_ECC_BUNDLE_VERSION: {expected_ecc_bundle}")
+print(f"  ecc/pyproject.toml: {ecc_package}")
 for name, value in versions:
     print(f"  {name}: {value}")
 

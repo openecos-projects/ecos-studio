@@ -17,6 +17,7 @@ use chipgeom_format::{
     OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
 };
 use eframe::egui;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
@@ -1312,18 +1313,45 @@ impl SearchMode {
         }
     }
 
-    fn query_shape_ids(self, db: &ChipViewDb, name: &str) -> Vec<ShapeId> {
+    fn query_shape_ids(self, db: &ChipViewDb, pattern: &Regex) -> Vec<ShapeId> {
         match self {
-            SearchMode::All => db.query_owner_name(name),
+            SearchMode::All => db.query_owner_name_pattern(pattern),
             SearchMode::Net | SearchMode::Instance => self
                 .owner_types()
-                .map(|owner_types| db.query_owner_name_for_owner_types(name, owner_types))
+                .map(|owner_types| {
+                    db.query_owner_name_for_owner_types_pattern(pattern, owner_types)
+                })
                 .unwrap_or_default(),
-            SearchMode::Pin => db.query_pin_name(name),
-            SearchMode::Bus => db.query_bus_name(name),
-            SearchMode::Group => db.query_group_name(name),
+            SearchMode::Pin => db
+                .connectivity_metadata()
+                .iter()
+                .filter(|endpoint| pattern.is_match(&endpoint.pin_name))
+                .flat_map(|endpoint| db.query_pin_name(&endpoint.pin_name))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            SearchMode::Bus => db
+                .bus_metadata()
+                .iter()
+                .filter(|bus| pattern.is_match(&bus.name))
+                .flat_map(|bus| db.query_bus_name(&bus.name))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            SearchMode::Group => db
+                .group_metadata()
+                .iter()
+                .filter(|group| pattern.is_match(&group.name))
+                .flat_map(|group| db.query_group_name(&group.name))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
         }
     }
+}
+
+fn search_pattern(query: &str) -> Result<Regex, regex::Error> {
+    Regex::new(query)
 }
 
 impl SidebarInfoPanel {
@@ -3110,22 +3138,49 @@ impl LoadedViewer {
     }
 
     fn query_input_ui(&mut self, ui: &mut egui::Ui, height: f32) {
+        const QUERY_FRAME_VERTICAL_MARGIN: f32 = 24.0;
+        let content_height = (height - QUERY_FRAME_VERTICAL_MARGIN).max(88.0);
         egui::Frame::NONE
             .fill(ecos_canvas())
             .stroke(egui::Stroke::new(1.0_f32, ecos_border()))
             .corner_radius(14)
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
-                ui.set_min_height(height);
-                ui.set_max_height(height);
+                ui.set_min_height(content_height);
+                ui.set_max_height(content_height);
                 ui.vertical(|ui| {
-                    let input_height = (height - 46.0).max(42.0);
+                    let input_height = (content_height - 46.0).max(42.0);
                     match self.query_input_mode {
                         QueryInputMode::Search => self.search_input_ui(ui, input_height),
                         QueryInputMode::ShapeId => self.shape_id_input_ui(ui, input_height),
                     }
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                         ui.horizontal(|ui| {
+                            if self.query_input_mode == QueryInputMode::Search {
+                                if let Some(status) = &self.last_query_status {
+                                    ui.label(
+                                        egui::RichText::new(status).small().color(ecos_warning()),
+                                    );
+                                } else if !self.search_text.trim().is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} matches",
+                                            self.highlighted.len()
+                                        ))
+                                        .small()
+                                        .color(ecos_text_secondary()),
+                                    );
+                                    if ui.small_button("Locate").clicked() {
+                                        self.focus_highlighted_shapes();
+                                    }
+                                    if ui.small_button("Clear").clicked() {
+                                        clear_search_state(
+                                            &mut self.search_text,
+                                            &mut self.highlighted,
+                                        );
+                                    }
+                                }
+                            }
                             self.query_mode_picker(ui);
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -3144,7 +3199,7 @@ impl LoadedViewer {
     fn query_mode_picker(&mut self, ui: &mut egui::Ui) {
         egui::ComboBox::from_id_salt("chip_viewer_query_input_mode")
             .selected_text(match self.query_input_mode {
-                QueryInputMode::Search => format!("⌕ {}", self.search_mode.label()),
+                QueryInputMode::Search => format!("Search: {}", self.search_mode.label()),
                 QueryInputMode::ShapeId => "# Shape ID".to_string(),
             })
             .width(98.0)
@@ -3183,18 +3238,15 @@ impl LoadedViewer {
     }
 
     fn query_send_button(&self, ui: &mut egui::Ui) -> egui::Response {
-        let icon = match self.query_input_mode {
-            QueryInputMode::Search => "⌕",
-            QueryInputMode::ShapeId => "➤",
+        let label = match self.query_input_mode {
+            QueryInputMode::Search => "Search",
+            QueryInputMode::ShapeId => "Select",
         };
-        ui.add_sized(
-            egui::vec2(34.0, 34.0),
-            egui::Button::new(egui::RichText::new(icon).size(19.0).strong()),
-        )
-        .on_hover_text(match self.query_input_mode {
-            QueryInputMode::Search => "Search and locate",
-            QueryInputMode::ShapeId => "Select shape id",
-        })
+        ui.add(egui::Button::new(egui::RichText::new(label).strong()))
+            .on_hover_text(match self.query_input_mode {
+                QueryInputMode::Search => "Search and locate",
+                QueryInputMode::ShapeId => "Select shape id",
+            })
     }
 
     fn submit_query(&mut self) {
@@ -3211,7 +3263,7 @@ impl LoadedViewer {
         let response = ui.add_sized(
             egui::vec2(ui.available_width(), input_height),
             egui::TextEdit::multiline(&mut self.search_text)
-                .hint_text("Search name, net, instance, pin, bus, group")
+                .hint_text("Regex: name, net, instance, pin, bus, group")
                 .desired_rows(2)
                 .frame(false),
         );
@@ -3222,21 +3274,6 @@ impl LoadedViewer {
         let submit = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         if submit {
             self.submit_query();
-        }
-        if !self.search_text.trim().is_empty() {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("{} matches", self.highlighted.len()))
-                        .small()
-                        .color(ecos_text_secondary()),
-                );
-                if ui.small_button("Locate").clicked() {
-                    self.focus_highlighted_shapes();
-                }
-                if ui.small_button("Clear").clicked() {
-                    clear_search_state(&mut self.search_text, &mut self.highlighted);
-                }
-            });
         }
     }
 
@@ -4144,10 +4181,10 @@ impl LoadedViewer {
             if !is_renderable_shape(shape) {
                 continue;
             }
-            if !self.shape_is_visible(shape) {
+            if !self.highlighted.contains(shape_id) && !self.shape_is_visible(shape) {
                 continue;
             }
-            if !self.shape_is_drawn_at_current_zoom(shape) {
+            if !self.highlighted.contains(shape_id) && !self.shape_is_drawn_at_current_zoom(shape) {
                 continue;
             }
             let geometry = self.db.shape_geometry(shape);
@@ -6636,19 +6673,22 @@ impl LoadedViewer {
     }
 
     fn refresh_highlight(&mut self) {
-        let name = self.search_text.trim();
-        self.highlighted = if name.is_empty() {
+        let query = self.search_text.trim();
+        self.last_query_status = None;
+        self.highlighted = if query.is_empty() {
             BTreeSet::new()
         } else {
-            self.search_mode
-                .query_shape_ids(&self.db, name)
-                .into_iter()
-                .filter(|shape_id| {
-                    self.db
-                        .find_shape(*shape_id)
-                        .is_some_and(|shape| self.shape_is_visible(shape))
-                })
-                .collect()
+            match search_pattern(query) {
+                Ok(pattern) => self
+                    .search_mode
+                    .query_shape_ids(&self.db, &pattern)
+                    .into_iter()
+                    .collect(),
+                Err(error) => {
+                    self.last_query_status = Some(format!("Invalid search pattern: {error}"));
+                    BTreeSet::new()
+                }
+            }
         };
     }
 
@@ -6657,10 +6697,7 @@ impl LoadedViewer {
             return;
         }
         self.pending_focus = focus_target_for_shape_ids(&self.highlighted, |shape_id| {
-            self.db
-                .find_shape(shape_id)
-                .filter(|shape| self.shape_is_visible(shape))
-                .map(|shape| shape.bbox)
+            self.db.find_shape(shape_id).map(|shape| shape.bbox)
         });
     }
 
@@ -12608,6 +12645,22 @@ mod tests {
         assert_eq!(SearchMode::Pin.label(), "Pin");
         assert_eq!(SearchMode::Bus.label(), "Bus");
         assert_eq!(SearchMode::Group.label(), "Group");
+    }
+
+    #[test]
+    fn search_pattern_uses_standard_regex_syntax() {
+        let pattern = search_pattern("Tile_X[01]_Y0_.*").unwrap();
+        assert!(pattern.is_match("Tile_X0_Y0_ALU_out"));
+        assert!(pattern.is_match("Tile_X1_Y0_ALU_out"));
+        assert!(!pattern.is_match("Tile_X2_Y0_ALU_out"));
+        assert!(!search_pattern("^Tile_X[01]_Y0_*$")
+            .unwrap()
+            .is_match("Tile_X0_Y0_ALU_out"));
+    }
+
+    #[test]
+    fn search_pattern_reports_invalid_regex() {
+        assert!(search_pattern("[").is_err());
     }
 
     #[test]

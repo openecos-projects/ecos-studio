@@ -151,12 +151,12 @@ describe('quick start resources', () => {
       'legalization',
       'Timing optimization',
       'route',
-      'drc',
-      'lvs',
       'filler',
-      'postRouteLec',
       'RCX',
       'sta',
+      'lvs',
+      'postRouteLec',
+      'drc',
       'Harden',
     ])
     expect(workspaceSource).toContain("top_module: ''")

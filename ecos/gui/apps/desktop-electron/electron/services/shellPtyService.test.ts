@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { electronLogger } from './logger'
 import { ShellPtyService } from './shellPtyService'
@@ -196,6 +198,7 @@ describe('ShellPtyService', () => {
       envProvider,
       platform: 'linux',
       ptyBackend,
+      userBinDir: null,
     })
 
     const firstSession = await service.createSession({ cols: 80, rows: 24 }, vi.fn())
@@ -251,6 +254,7 @@ describe('ShellPtyService', () => {
       }),
       platform: 'linux',
       ptyBackend,
+      userBinDir: null,
     })
 
     const session = await service.createSession({ cols: 80, rows: 24 }, vi.fn())
@@ -295,5 +299,180 @@ describe('ShellPtyService', () => {
     )
     expect(() => service.resize('missing', 100, 28)).toThrow('Unknown shell session')
     expect(() => service.kill('missing')).toThrow('Unknown shell session')
+  })
+
+  it('prepends the user bin dir to PATH so the shim resolves by name', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/usr/bin:/bin',
+        SHELL: '/bin/bash',
+      },
+      platform: 'linux',
+      ptyBackend,
+      userBinDir: '/home/ecos/.local/bin',
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/home/ecos/.local/bin:/usr/bin:/bin',
+        }),
+      }),
+    )
+  })
+
+  it('moves the user bin dir to the front when PATH already contains it later', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/usr/local/bin:/home/ecos/.local/bin:/usr/bin',
+        SHELL: '/bin/bash',
+      },
+      platform: 'linux',
+      ptyBackend,
+      userBinDir: '/home/ecos/.local/bin',
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/home/ecos/.local/bin:/usr/local/bin:/usr/bin',
+        }),
+      }),
+    )
+  })
+
+  it('handles an empty PATH without leaving a trailing separator', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        SHELL: '/bin/bash',
+      },
+      platform: 'linux',
+      ptyBackend,
+      userBinDir: '/home/ecos/.local/bin',
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/home/ecos/.local/bin',
+        }),
+      }),
+    )
+  })
+
+  it('prepends the user bin dir to envProvider results', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        SHELL: '/bin/bash',
+      },
+      envProvider: vi.fn(async () => ({
+        HOME: '/home/ecos',
+        PATH: '/managed/tools:/bundle/bin',
+        SHELL: '/bin/bash',
+      })),
+      platform: 'linux',
+      ptyBackend,
+      userBinDir: '/home/ecos/.local/bin',
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/home/ecos/.local/bin:/managed/tools:/bundle/bin',
+        }),
+      }),
+    )
+  })
+
+  it('defaults the user bin dir to ~/.local/bin on linux', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/usr/bin',
+        SHELL: '/bin/bash',
+      },
+      platform: 'linux',
+      ptyBackend,
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: `${join(homedir(), '.local', 'bin')}:/usr/bin`,
+        }),
+      }),
+    )
+  })
+
+  it('leaves PATH untouched on non-linux platforms by default', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        PATH: '/usr/bin',
+        SHELL: '/bin/zsh',
+      },
+      platform: 'darwin',
+      ptyBackend,
+    })
+
+    await service.createSession({ cols: 80, rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/zsh',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PATH: '/usr/bin',
+        }),
+      }),
+    )
   })
 })

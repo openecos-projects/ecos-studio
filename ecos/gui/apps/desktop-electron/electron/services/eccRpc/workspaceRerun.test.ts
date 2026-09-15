@@ -673,12 +673,12 @@ describe('prepareWorkspaceRerun', () => {
       'legalization',
       'Timing optimization',
       'route',
-      'drc',
-      'lvs',
       'filler',
-      'postRouteLec',
       'RCX',
       'sta',
+      'lvs',
+      'postRouteLec',
+      'drc',
       'Harden',
     ])
     expect(targetFlow.steps.find((step) => step.name === 'Floorplan')?.state).toBe(
@@ -760,12 +760,12 @@ describe('prepareWorkspaceRerun', () => {
       ['legalization', 'dreamplace', 'Unstart'],
       ['Timing optimization', 'sizer', 'Unstart'],
       ['route', 'ecc', 'Unstart'],
-      ['drc', 'ecc', 'Unstart'],
-      ['lvs', 'ecc', 'Unstart'],
       ['filler', 'ecc', 'Unstart'],
-      ['postRouteLec', 'yosys_lec', 'Unstart'],
       ['RCX', 'ecc', 'Unstart'],
       ['sta', 'ecc', 'Unstart'],
+      ['lvs', 'ecc', 'Unstart'],
+      ['postRouteLec', 'yosys_lec', 'Unstart'],
+      ['drc', 'ecc', 'Unstart'],
       ['Harden', 'ecc', 'Unstart'],
     ])
   })

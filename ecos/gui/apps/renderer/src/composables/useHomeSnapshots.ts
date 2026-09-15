@@ -54,8 +54,15 @@ interface HomeSnapshotData {
   signature: string
 }
 
+/** Steps that open the floorplan→harden thumbnail range: the legacy
+ *  single-step flow and the pre/post floorplan split introduced on main. */
+const floorplanRangeStartKeys = new Set(['floorplan', 'prefloorplan', 'postfloorplan'])
+
 const physicalSnapshotSteps = new Set([
   'floorplan',
+  'prefloorplan',
+  'macroplacement',
+  'postfloorplan',
   'place',
   'cts',
   'legalization',
@@ -104,7 +111,9 @@ function homeSnapshotSignature(index: WorkspaceResourceIndex): string {
 }
 
 function floorplanToHardenSteps(steps: WorkspaceStepResource[]): WorkspaceStepResource[] {
-  const floorplanIndex = steps.findIndex((step) => snapshotStepKey(step) === 'floorplan')
+  const floorplanIndex = steps.findIndex((step) =>
+    floorplanRangeStartKeys.has(snapshotStepKey(step)),
+  )
   if (floorplanIndex < 0) return []
   const hardenIndex = steps.findIndex((step) => snapshotStepKey(step) === 'harden')
   return steps.slice(

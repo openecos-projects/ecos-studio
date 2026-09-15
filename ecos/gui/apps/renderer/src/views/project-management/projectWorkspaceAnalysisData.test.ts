@@ -29,6 +29,7 @@ describe('readProjectManagementWorkspaceData', () => {
     testState.readProjectManagementWorkspaceTexts.mockResolvedValue({
       texts: {
         'home/flow.json': '{"steps":[]}',
+        'home/qor_report.json': '{"schema_version":3,"scoring_engine":"qor-v3"}',
         'Synthesis_yosys/analysis/qor_metrics.json': '{"area":42}',
         'Synthesis_yosys/analysis/qor_summary.json': null,
       },
@@ -42,6 +43,7 @@ describe('readProjectManagementWorkspaceData', () => {
       '/projects/gcd/ws_0001',
       expect.arrayContaining([
         'home/flow.json',
+        'home/qor_report.json',
         'Synthesis_yosys/analysis/qor_metrics.json',
         'Synthesis_yosys/analysis/qor_summary.json',
       ]),
@@ -49,5 +51,8 @@ describe('readProjectManagementWorkspaceData', () => {
     expect(result.flowStates).toEqual({ ws_0001: {} })
     expect(result.analysisInputs.ws_0001?.stepMetricTexts?.Synth).toBe('{"area":42}')
     expect(result.analysisInputs.ws_0001?.stepSummaryTexts?.Synth).toBeNull()
+    expect(result.analysisInputs.ws_0001?.qorReportText).toBe(
+      '{"schema_version":3,"scoring_engine":"qor-v3"}',
+    )
   })
 })

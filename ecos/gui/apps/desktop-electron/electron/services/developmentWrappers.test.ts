@@ -40,7 +40,7 @@ describe('development wrappers', () => {
     const runtimeBin = join(userDataPath, 'runtime-bin')
     const eccShimPath = join(runtimeBin, 'ecc')
     expect(env.PATH).toBe(`${runtimeBin}:/usr/bin`)
-    expect(readFileSync(eccShimPath, 'utf8')).toContain(`exec "${eccWrapperPath}" "$@"`)
+    expect(readFileSync(eccShimPath, 'utf8')).toContain(`exec '${eccWrapperPath}' "$@"`)
 
     const chipExecFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
     const chipViewerChild = new EventEmitter() as EventEmitter & {

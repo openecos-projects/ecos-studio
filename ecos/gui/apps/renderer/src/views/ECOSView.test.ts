@@ -343,6 +343,15 @@ function loadECOSViewComponent(vue: VueRuntime) {
         }),
       }
     }
+    if (id === '@/components/CliInstallerCard.vue') {
+      // The CLI tools card is irrelevant to the home layout assertions. The
+      // transpiled import applies CJS interop itself, so return the
+      // component (not a nested default export).
+      return {
+        name: 'CliInstallerCard',
+        render: () => null,
+      }
+    }
     if (id === '../composables/useWorkspace') {
       return {
         useWorkspace: () => ({

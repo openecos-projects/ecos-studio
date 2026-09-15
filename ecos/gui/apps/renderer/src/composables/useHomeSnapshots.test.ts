@@ -194,6 +194,48 @@ describe('useHomeSnapshots', () => {
     scope.stop()
   })
 
+  it('shows split floorplan steps as layout thumbnails', async () => {
+    testState.getWorkspaceResourceIndexApi.mockResolvedValueOnce({
+      root: '/workspace/demo',
+      flow: {
+        steps: [
+          step('Synthesis', 'Success', '/workspace/demo/Synthesis_yosys'),
+          step('preFloorplan', 'Success', '/workspace/demo/preFloorplan_ecc', {
+            image: '/workspace/demo/preFloorplan_ecc/output/preFloorplan.png',
+          }),
+          step('macroPlacement', 'Success', '/workspace/demo/macroPlacement_dreamplace', {
+            image: '/workspace/demo/macroPlacement_dreamplace/output/macroPlacement.png',
+          }),
+          step('postFloorplan', 'Success', '/workspace/demo/postFloorplan_ecc', {
+            db: '/workspace/demo/postFloorplan_ecc/feature/postFloorplan.db.json',
+            geometry:
+              '/workspace/demo/postFloorplan_ecc/output/geometry/geometry.manifest',
+            image: '/workspace/demo/postFloorplan_ecc/output/postFloorplan.png',
+          }),
+          step('Harden', 'Success', '/workspace/demo/Harden_ecc', {
+            image: '/workspace/demo/Harden_ecc/output/harden.png',
+          }),
+        ],
+      },
+    })
+    const scope = effectScope()
+    const snapshots = scope.run(() => useHomeSnapshots())!
+
+    await vi.waitFor(() => {
+      expect(snapshots.layoutThumbnails.value.map((item) => item.step)).toEqual([
+        'preFloorplan',
+        'macroPlacement',
+        'postFloorplan',
+        'Harden',
+      ])
+    })
+    expect(snapshots.insightSnapshots.value.map((item) => item.label)).toContain(
+      'postFloorplan Instance Distribution',
+    )
+
+    scope.stop()
+  })
+
   it('reuses cached Blob URLs when a resource refresh has no new artifacts', async () => {
     const scope = effectScope()
     const snapshots = scope.run(() => useHomeSnapshots())!

@@ -110,6 +110,24 @@ export {
   type EccFlowStep,
 } from './contracts/eccFlowSteps.ts'
 export type {
+  QorReportDimension,
+  QorReportDimensionKey,
+  QorReportDimensionState,
+  QorReportDiagnosis,
+  QorReportEvidence,
+  QorReportFeature,
+  QorReportFeasibility,
+  QorReportFeasibilityGate,
+  QorReportInflation,
+  QorReportIntervention,
+  QorReportPowerObservation,
+  QorReportScalarSummary,
+  QorReportSupportingMetric,
+  QorReportTimingSlack,
+  QorReportV3,
+} from './contracts/qorReport.ts'
+export { parseQorReport } from './contracts/qorReport.ts'
+export type {
   ResourceAction,
   ResourceImportLocalRequest,
   ResourceImportPdkRequest,
@@ -146,6 +164,18 @@ export {
   DESKTOP_GLM_API_KEY_SETTING_KEY,
   DESKTOP_OPENAI_API_KEY_SETTING_KEY,
 } from './contracts/desktopCodex.ts'
+export type {
+  CliInstallSelfCheck,
+  CliInstallSource,
+  CliInstallState,
+  CliInstallStatus,
+  CliInstallerProgressEvent,
+  CliManagedInstallSource,
+} from './contracts/cliInstaller.ts'
+export {
+  ECC_BUNDLE_RESOURCE_ID,
+  EXPECTED_ECC_BUNDLE_VERSION,
+} from './constants/eccBundle.ts'
 export type {
   DesktopAgentActivity,
   DesktopAgentActivityNotice,
@@ -292,6 +322,7 @@ export {
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
+  projectManagementQorReportPath,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,
