@@ -11,6 +11,7 @@ from ecos_agent.optimization.experiments.equal_budget import (
 from ecos_agent.optimization.experiments.knowledge_metrics import (
     abstention_rate,
     expected_effect_realization,
+    summarize_offline_rows,
     truncation_loss,
 )
 
@@ -160,3 +161,43 @@ def test_abstention_and_truncation_rates() -> None:
     assert truncation["truncated_claim_ref_count"] == 1
     assert truncation["truncation_row_ratio"] == 0.5
     assert truncation_loss([])["truncation_row_ratio"] is None
+
+
+def test_offline_summary_splits_claim_bound_and_unbound() -> None:
+    rows = [
+        {
+            "treatment": "t",
+            "decision": "propose",
+            "context_fingerprint": "c1",
+            "claim_bound": True,
+            "knob": "k",
+            "direction": "down",
+            "requested_value": 0.5,
+        },
+        {
+            "treatment": "t",
+            "decision": "propose",
+            "context_fingerprint": "c1",
+            "claim_bound": True,
+            "knob": "k",
+            "direction": "down",
+            "requested_value": 0.6,
+        },
+        {
+            "treatment": "t",
+            "decision": "propose",
+            "context_fingerprint": "c1",
+            "claim_bound": False,
+            "knob": "k",
+            "direction": "down",
+            "requested_value": 0.5,
+        },
+        {"treatment": "t", "decision": "abstain", "context_fingerprint": "c1"},
+    ]
+    treatment = summarize_offline_rows(rows)["treatments"]["t"]
+    assert treatment["claim_bound_proposals"] == 2
+    assert treatment["claim_bound_ratio"] == pytest.approx(2 / 3)
+    assert treatment["claim_bound_exact_action_divergence"]["unique_actions"] == 2
+    assert treatment["claim_bound_within_treatment_disagreement"] == 1
+    assert treatment["unbound_exact_action_divergence"]["unique_actions"] == 1
+    assert treatment["unbound_within_treatment_disagreement"] == 0
