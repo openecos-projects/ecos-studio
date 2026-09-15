@@ -35,6 +35,10 @@ from ecos_agent.workspace.parameters import (
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SETUP_METHODS = frozenset({"workspace.create", "operation.start_flow"})
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
+# ECC drops catalog steps it currently disables from the written flow ledger
+# (upstream 67cc0951 disabled synthesis LEC); both ledgers are canonical for
+# the requested catalog, so accept either shape when validating a workspace.
+_ECC_DISABLED_FLOW_STEPS = frozenset({"lec"})
 # Adaptive replay protocol: two replays establish epsilon when bitwise
 # identical; the third only runs when drift appears and needs bounding.
 _DEFAULT_REPLAYS = 3
@@ -219,7 +223,14 @@ def _workspace_flow_succeeded(workspace: Path) -> bool:
     steps = flow.get("steps")
     if not isinstance(steps, list) or [
         item.get("name") for item in steps if isinstance(item, dict)
-    ] != list(GUI_WORKSPACE_FLOW_STEPS):
+    ] not in (
+        list(GUI_WORKSPACE_FLOW_STEPS),
+        [
+            name
+            for name in GUI_WORKSPACE_FLOW_STEPS
+            if name not in _ECC_DISABLED_FLOW_STEPS
+        ],
+    ):
         raise ValueError("Phase 8 workspace flow is invalid")
     return all(item.get("state") == "Success" for item in steps)
 
