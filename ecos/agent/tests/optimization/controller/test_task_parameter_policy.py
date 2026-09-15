@@ -115,6 +115,7 @@ def _recovery_terminal(*, drc=6, wirelength=100.0, overflow=0):
         ),
         "metrics": {
             **terminal.metrics,
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: float(drc),
             ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: overflow,
         },

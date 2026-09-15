@@ -672,19 +672,14 @@ def test_empirical_archive_separates_objective_gain_from_hypothesis_support() ->
         incumbent=incumbent,
         expected_effects=expected_effects,
     ) is EmpiricalOutcome.SUPPORTED
-    # An unsigned candidate (final DRC still open) never becomes a supported
+    # An unsigned candidate (routed DRC still open) never becomes a supported
     # case, even when the declared effect was observed.
     unsigned = realized.model_copy(
         update={
-            "evaluation_metrics": tuple(
-                item.model_copy(update={"value": 1})
-                if item.metric_id == "drc_count"
-                else item
-                for item in realized.evaluation_metrics
-            ),
-            "signoff_gates": realized.signoff_gates.model_copy(
-                update={"drc_clean": GateResult.FAIL}
-            ),
+            "metrics": {
+                **realized.metrics,
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 1.0,
+            },
         }
     )
     assert ControllerCaseRecordingMixin._empirical_outcome(

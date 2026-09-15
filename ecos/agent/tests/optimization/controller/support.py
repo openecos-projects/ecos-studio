@@ -461,7 +461,6 @@ def _eligible_terminal(
                 source_refs=("analysis/terminal.json",),
             )
             for metric_id in (
-                "drc_count",
                 "lvs_count",
                 "rcx_expected_corner_count",
                 "rcx_spef_file_count",

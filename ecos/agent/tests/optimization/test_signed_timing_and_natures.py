@@ -155,26 +155,24 @@ class TestPlannerProjectionDiscipline:
         self, frozen_workspace: Path
     ) -> None:
         observation = build_terminal_observation(frozen_workspace)
-        degraded = observation.model_copy(
-            update={
-                "evaluation_metrics": tuple(
-                    item.model_copy(
-                        update={"value": 9.0 if item.metric_id == "drc_count" else item.value}
-                    )
-                    for item in observation.evaluation_metrics
-                ),
-                "signoff_gates": observation.signoff_gates.model_copy(
-                    update={"drc_clean": GateResult.FAIL}
-                ),
-            }
+        # Degraded DRC is modeled on the routed violation count, the DRC
+        # decision metric (the signoff iDRC count is an artifact).
+        route_path = frozen_workspace / "route_ecc/analysis/qor_metrics.json"
+        route_payload = json.loads(route_path.read_text(encoding="utf-8"))
+        for item in route_payload["metrics"]:
+            if item["id"] == "route_dr_total_violation_count":
+                item["value"] = 9.0
+        route_path.write_text(
+            json.dumps(route_payload, sort_keys=True), encoding="utf-8"
         )
+        degraded = build_terminal_observation(frozen_workspace)
         projection = projected_terminal_observation(degraded)
         states = projection["engineering_states"]
         # Fixture STA corner rows derive Tclk = 1000/313 + 6.8 ~= 9.995 ns,
         # so setup ws 0.2 ns sits below the 0.05*Tclk guardband: WATCH.
         assert states["timing_setup"]["state"] == "WATCH"
         priorities = projection["recovery_priorities"]
-        assert priorities[0]["metric_id"] == "drc_count"
+        assert priorities[0]["metric_id"] == "route_dr_total_violation_count"
         assert priorities[0]["severity"] == pytest.approx(0.80 + 0.20 * 0.09)
         assert priorities[0]["tier"] == "tier_1_feasibility"
         assert "consistency_violations" not in projection

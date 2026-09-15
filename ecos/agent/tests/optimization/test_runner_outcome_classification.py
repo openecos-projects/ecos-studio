@@ -101,6 +101,7 @@ def _recovery_terminal(
             ),
             "metrics": {
                 **terminal.metrics,
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: float(drc),
                 ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
             },
         }
