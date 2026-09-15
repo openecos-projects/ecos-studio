@@ -109,3 +109,7 @@ def main() -> int:
     passed = sum(1 for row in results if row["result"] == "pass")
     print(f"[screen] {passed}/{len(results)} passed; results -> {out}", flush=True)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
