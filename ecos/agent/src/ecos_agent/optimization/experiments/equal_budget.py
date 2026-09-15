@@ -180,15 +180,7 @@ def build_candidate_trace(
         dynamic_power=_evaluation_value(evaluation, "sta_typical_dynamic_power"),
         leakage_power=_evaluation_value(evaluation, "sta_typical_leakage_power"),
         frequency=_evaluation_value(evaluation, "sta_frequency"),
-        drc=(
-            float(
-                terminal_observation.metrics[
-                    ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
-                ]
-            )
-            if terminal_observation is not None
-            else None
-        ),
+        drc=_evaluation_value(evaluation, "drc_count"),
         timing=(
             float(terminal_observation.timing_guardrail[TimingMetric.STA_SETUP_WNS])
             if terminal_observation is not None

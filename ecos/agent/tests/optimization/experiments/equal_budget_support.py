@@ -41,6 +41,7 @@ def _load_experiment_execution():
 
 def _terminal_observation() -> TerminalObservation:
     eligibility_ids = (
+        "drc_count",
         "lvs_count",
         "rcx_expected_corner_count",
         "rcx_spef_file_count",

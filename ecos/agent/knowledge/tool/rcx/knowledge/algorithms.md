@@ -1,7 +1,7 @@
 <a id="algorithm.rcx.execution"></a>
 ## algorithm.rcx.execution
 
-**Execution path:** The ECC runner loads the design, initializes RCX with the workspace PDK, runs and destroys RCX, copies generated SPEF files to the declared output paths, saves the design, persists bounded SPEF feature facts, and runs analysis and checklist generation. Native RCX return values are not used as wrapper gates; save-data and parsed SPEF facts are checked explicitly.
+**Execution path:** The ECC runner loads the design, removes stale SPEF artifacts left in the step directory by an earlier run, initializes RCX with the workspace PDK, runs RCX, and destroys it in a `finally` block. Init or run failures mark `run rcx` incomplete and return false. On success, generated SPEF files are copied to the declared output paths, and shared persistence plus parsed SPEF feature facts are checked explicitly before analysis and checklist generation.
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 

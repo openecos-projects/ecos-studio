@@ -55,6 +55,24 @@ METRIC_DETAILS: dict[str, MetricDetail] = {
         "It describes the saved core rectangle, not the free placement area after macro halos, blockages, or routing reservations.",
         ("ecc.metrics", "ecc.feature.summary"),
     ),
+    "die_width": (
+        "The current die width in micrometres.",
+        "The feature parser writes `Design Layout.die_bounding_width`, and the metric builder publishes its finite numeric value as a trend-only dimension.",
+        "It is a database geometry fact of the saved step state, not evidence of site-aligned core construction or IO-pin legality.",
+        ("ecc.metrics", "ecc.feature.summary"),
+    ),
+    "die_height": (
+        "The current die height in micrometres.",
+        "The feature parser writes `Design Layout.die_bounding_height`, and the metric builder publishes its finite numeric value as a trend-only dimension.",
+        "It is a database geometry fact of the saved step state, not evidence of site-aligned core construction or IO-pin legality.",
+        ("ecc.metrics", "ecc.feature.summary"),
+    ),
+    "die_utilization": (
+        "The feature database's current die-level usage ratio.",
+        "The parser publishes `Design Layout.die_usage`, and the metric builder normalizes its finite numeric value for target-range evaluation.",
+        "It is the tool's summary ratio over the full die including margins and IO regions, distinct from core utilization and not a proof of legal placement or density closure.",
+        ("ecc.metrics", "ecc.feature.summary"),
+    ),
     "core_utilization": (
         "The feature database's current core-usage ratio.",
         "The parser publishes `Design Layout.core_usage`, and the metric builder normalizes its finite numeric value before publication.",

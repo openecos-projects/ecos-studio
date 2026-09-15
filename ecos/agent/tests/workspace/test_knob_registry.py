@@ -167,7 +167,7 @@ def test_floorplan_geometry_is_outside_the_gui_rerun_surface(tmp_path: Path) -> 
     from ecos_agent.workspace.authorization import authorized_knobs_for_step
     from ecos_agent.workspace.rerun import GuiWorkspaceRerunResolver
 
-    assert authorized_knobs_for_step(ECCStepName.FLOORPLAN) == frozenset()
+    assert authorized_knobs_for_step(ECCStepName.POST_FLOORPLAN) == frozenset()
 
     workspace = _workspace_without_completed_stages(tmp_path)
     available = dict(
@@ -182,7 +182,7 @@ def test_floorplan_geometry_is_outside_the_gui_rerun_surface(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="not authorized"):
         GuiWorkspaceRerunResolver.validate_patch(
-            "Floorplan", [{"knob_id": "floorplan.die_width", "value": 250.0}]
+            "postFloorplan", [{"knob_id": "floorplan.die_width", "value": 250.0}]
         )
 
 

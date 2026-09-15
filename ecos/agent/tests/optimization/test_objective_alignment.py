@@ -69,6 +69,7 @@ def _terminal(
     drc_gate: GateResult | None = None,
 ) -> TerminalObservation:
     values = {
+        "drc_count": drc,
         "lvs_count": lvs,
         "rcx_expected_corner_count": 1,
         "rcx_spef_file_count": 1,
@@ -156,24 +157,20 @@ def test_alignment_rejects_nonrecoverable_or_contradictory_baseline() -> None:
         build_objective_alignment(_objective(), _terminal(lvs=1))
     with pytest.raises(ObjectiveAlignmentError, match="contradicts"):
         build_objective_alignment(
-            _objective(), _terminal(setup=2).model_copy(
-                update={
-                    "signoff_gates": _terminal(setup=2).signoff_gates.model_copy(
-                        update={"sta_setup_closed": GateResult.PASS}
-                    )
-                }
-            )
+            _objective(), _terminal(drc=2, drc_gate=GateResult.PASS)
         )
     terminal = _terminal()
     fractional = terminal.model_copy(
         update={
-            "metrics": dict(
-                terminal.metrics,
-                **{ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 1.5},
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 1.5})
+                if item.metric_id == "drc_count"
+                else item
+                for item in terminal.evaluation_metrics
             )
         }
     )
-    with pytest.raises(ObjectiveAlignmentError, match="route DRC count is invalid"):
+    with pytest.raises(ObjectiveAlignmentError, match="count is invalid"):
         build_objective_alignment(_objective(), fractional)
     with pytest.raises(ObjectiveAlignmentError, match="incomplete"):
         build_objective_alignment(
@@ -673,11 +670,7 @@ def test_recovery_keeps_timing_within_existing_tolerance(
     assert comparison.decisive_metric == (ObjectiveMetric.DRC_COUNT if accepted else metric)
 
 
-def test_signoff_drc_artifact_does_not_trigger_recovery() -> None:
-    """The fse-baseline-1 shape: signoff iDRC flags obs-vs-rail pseudo shorts
-    (drc_count evaluation noise) while the routed violation count is zero.
-    The artifact must not flip the episode into DRC recovery, and the routed
-    count stays the binding DRC preserve constraint."""
+def test_final_drc_recovery_returns_to_requested_wirelength() -> None:
     objective = freeze_optimization_objective(
         "reduce routed wirelength while preserving DRC and timing",
         OptimizationObjectiveProposal(
@@ -686,26 +679,14 @@ def test_signoff_drc_artifact_does_not_trigger_recovery() -> None:
             rationale_summary="Reduce wirelength with DRC and timing protection.",
         ),
     )
-    baseline = _terminal(drc=0)
+    baseline = _terminal(drc=9)
     baseline.metrics[ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT] = 0
-    # The signoff iDRC artifact count is present as non-eligibility evidence.
-    artifact = TerminalEvaluationMetric(
-        metric_id="drc_count",
-        value=9310,
-        unit="count",
-        category=EvaluationMetricCategory.ROUTING_DIAGNOSTIC,
-        role=EvaluationMetricRole.REPORT,
-        direction=EvaluationMetricDirection.EXACT,
-        source_refs=("drc_ecc/analysis/qor_metrics.json",),
-    )
-    baseline = baseline.model_copy(
-        update={"evaluation_metrics": (*baseline.evaluation_metrics, artifact)}
-    )
     alignment = build_objective_alignment(objective, baseline)
-    active = build_active_objective(alignment, objective, baseline)
-    assert active.active_primary_metric == ObjectiveMetric.ROUTE_WIRELENGTH
-    assert active.recovery_stage == "original"
-    assert active.active_preserve_metrics == (ObjectiveMetric.DRC_COUNT,)
+    assert build_active_objective(alignment, objective, baseline).active_primary_metric == ObjectiveMetric.DRC_COUNT
+    recovered = build_active_objective(alignment, objective, _terminal())
+    assert recovered.recovery_stage == "original"
+    assert recovered.active_primary_metric == ObjectiveMetric.ROUTE_WIRELENGTH
+    assert recovered.active_preserve_metrics == (ObjectiveMetric.DRC_COUNT,)
     for drc, expected in (
         (0, IncumbentDecision.CANDIDATE_BETTER),
         (1, IncumbentDecision.CANDIDATE_INELIGIBLE),

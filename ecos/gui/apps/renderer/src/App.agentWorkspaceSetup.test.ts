@@ -145,7 +145,9 @@ describe('quick start resources', () => {
     expect([...ECC_FLOW_STEPS]).toEqual([
       'Synthesis',
       'lec',
-      'Floorplan',
+      'preFloorplan',
+      'macroPlacement',
+      'postFloorplan',
       'place',
       'CTS',
       'legalization',

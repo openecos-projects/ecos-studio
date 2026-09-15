@@ -103,7 +103,7 @@ def test_p2_cross_stage_actions_need_their_own_stage_evidence(tmp_path):
     """P2: floorplan actions dispatch only with floorplan-stage evidence."""
     floorplan_observation = _observation().model_copy(
         update={
-            "stage": ECCStepName.FLOORPLAN,
+            "stage": ECCStepName.POST_FLOORPLAN,
             "observation_id": "observation-floorplan",
         }
     )

@@ -941,7 +941,9 @@ describe('AgentProviderProcessRuntime', () => {
               steps: [
                 'Synthesis',
                 'lec',
-                'Floorplan',
+                'preFloorplan',
+                'macroPlacement',
+                'postFloorplan',
                 'place',
                 'CTS',
                 'legalization',

@@ -253,7 +253,7 @@ def _build_mediation_audit(
 _COMPARISON_KEYS = (
     ("route_wirelength", "wirelength"),
     ("route_la_total_overflow", "congestion"),
-    ("route_dr_total_violation_count", "drc"),
+    ("drc_count", "drc"),
     ("die_area", "die_area"),
     ("sta_standard_cell_area", "area"),
     ("sta_typical_dynamic_power", "dynamic_power"),

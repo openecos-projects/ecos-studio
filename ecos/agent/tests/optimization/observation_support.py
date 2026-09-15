@@ -75,7 +75,9 @@ def frozen_workspace(tmp_path: Path) -> Path:
         {
             "steps": [
                 {"name": "Synthesis", "state": "Success"},
-                {"name": "Floorplan", "state": "Success"},
+                {"name": "preFloorplan", "state": "Success"},
+                {"name": "macroPlacement", "state": "Success"},
+                {"name": "postFloorplan", "state": "Success"},
                 {"name": "place", "state": "Success"},
                 {"name": "CTS", "state": "Success"},
                 {"name": "legalization", "state": "Success"},
@@ -108,7 +110,7 @@ def frozen_workspace(tmp_path: Path) -> Path:
         ),
     )
     _write_json(
-        root / "Floorplan_ecc/analysis/qor_metrics.json",
+        root / "postFloorplan_ecc/analysis/qor_metrics.json",
         _metrics(
             ("die_area", 3000.0),
             ("core_area", 2500.0),

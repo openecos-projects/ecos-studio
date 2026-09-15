@@ -56,10 +56,10 @@ class OptimizationRetrievalRequest(BaseModel):
     )
     task_id: str
     current_stage: ECCStepName
-    action_stages: tuple[ECCStepName, ...] = (
-        ECCStepName.FLOORPLAN,
-        ECCStepName.PLACEMENT,
-    )
+    # Knowledge-phase vocabulary (bundle stage_ids), not ECC step names: the
+    # floorplan phase bundle covers the preFloorplan/macroPlacement/postFloorplan
+    # sub-steps even though the cards bind to the sub-steps.
+    action_stages: tuple[str, ...] = ("floorplan", "place")
     observed_metric_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
     observation_status: Literal["success"] = "success"
     previous_intervention_outcome: OptimizationOutcomeKind | None = None
@@ -85,10 +85,7 @@ class OptimizationRetrievalRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_knobs(self) -> "OptimizationRetrievalRequest":
-        if self.action_stages != (
-            ECCStepName.FLOORPLAN,
-            ECCStepName.PLACEMENT,
-        ):
+        if self.action_stages != ("floorplan", "place"):
             raise ValueError("retrieval action stages are not frozen")
         if self.allowed_knobs != tuple(OptimizationKnob):
             raise ValueError("retrieval allowed knobs are not frozen")
@@ -211,7 +208,7 @@ class OptimizationKnowledgeRetriever:
                 )
                 continue
             query = _fixed_query(request, channel)
-            stages = tuple(stage.value.casefold() for stage in request.action_stages)
+            stages = tuple(stage.casefold() for stage in request.action_stages)
             answer = retriever.reply_for_stages(query, stages)
             channel_results.append(_channel_result(channel, query, answer, seen_entity_ids))
         references = tuple(ref for item in channel_results for ref in item.knowledge_refs)
@@ -262,7 +259,7 @@ def _fixed_query(request: OptimizationRetrievalRequest, channel: KnowledgeChanne
         else "primary metric default preserve metrics none"
     )
     knobs = " ".join(knob.value for knob in request.allowed_knobs)
-    stages = " ".join(stage.value for stage in request.action_stages)
+    stages = " ".join(request.action_stages)
     prefix = "ECC physical design" if channel == KnowledgeChannel.TOOL else "congestion strategy"
     return (
         f"{prefix} current stage {request.current_stage.value} action stages {stages} "

@@ -292,6 +292,13 @@
 
 **Role:** It enables macro preprocessing and macro-legalization paths.
 
+<a id="parameter.dreamplace.macro_only"></a>
+## parameter.dreamplace.macro_only
+
+**Meaning:** The macro-only placement switch.
+
+**Role:** The macro-placement runner forces it to `1` so DreamPlace places only hard macros between the two floorplan phases; the serialized `0` default applies to normal placement runs.
+
 <a id="parameter.dreamplace.use_bb"></a>
 ## parameter.dreamplace.use_bb
 

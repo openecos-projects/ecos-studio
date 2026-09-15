@@ -109,9 +109,9 @@
 <a id="parameter.floorplan.io_placer_file_path"></a>
 ## parameter.floorplan.io_placer_file_path
 
-**Meaning:** The `io_placer.file_path` configuration field for Floorplan.
+**Meaning:** The IO-pin location file consumed in `file` mode.
 
-**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+**Role:** When the mode is `file`, IOPlacer reads pin locations from this file instead of running automatic edge placement; the configured layer list still resolves the pin shapes.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
@@ -120,25 +120,25 @@
 
 **Meaning:** The routing layers eligible for IO-pin placement.
 
-**Role:** It constrains where the floorplan can place IO pins.
+**Role:** It constrains where the floorplan can place IO pins and is required in both automatic and file-driven IO placement.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.io_placer_mode"></a>
 ## parameter.floorplan.io_placer_mode
 
-**Meaning:** The `io_placer.mode` configuration field for Floorplan.
+**Meaning:** The IO-pin placement mode (`auto` or `file`).
 
-**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+**Role:** `run_simple_fp` always auto-places on the configured layers; the full `run_fp` path reads `io_placer.file_path` in `file` mode and otherwise auto-places.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
 <a id="parameter.floorplan.macro_placer_file_path"></a>
 ## parameter.floorplan.macro_placer_file_path
 
-**Meaning:** The `macro_placer.file_path` configuration field for Floorplan.
+**Meaning:** The macro-placement location file consumed in `file` mode.
 
-**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+**Role:** `postFloorplan` points it at the workspace macro-location Tcl written by the macro-placement step; `init_fp` applies its placement commands while wrapping the database.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 
@@ -163,9 +163,9 @@
 <a id="parameter.floorplan.macro_placer_mode"></a>
 ## parameter.floorplan.macro_placer_mode
 
-**Meaning:** The `macro_placer.mode` configuration field for Floorplan.
+**Meaning:** The macro-placement input mode (`auto` or `file`).
 
-**Role:** It is parsed by the underlying stage tool and has effect only when that tool consumes the field.
+**Role:** The pre-floorplan runner forces `auto` with an empty file path; the post-floorplan runner forces `file` with the workspace macro-location Tcl, making the macro-placement step's result the fixed macro input.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.floorplan**
 

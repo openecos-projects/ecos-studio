@@ -1,7 +1,7 @@
 <a id="algorithm.route.execution"></a>
 ## algorithm.route.execution
 
-**Execution path:** The ECC runner loads the design, initializes STA first only when routing timing is enabled by the route configuration, invokes the iRT pipeline, saves the resulting design and geometry snapshot, then runs analysis and checklist generation. The wrapper marks the routing subflow successful without inspecting the native routing return value.
+**Execution path:** The ECC runner loads the design and invokes the iRT pipeline through `run_routing`; timing-driven routing is self-contained in iRT, which builds its own timing engine from the shared database configuration, so the runner performs no Python-side STA initialization around routing. It saves the resulting design and geometry snapshot, then runs analysis and checklist generation. The wrapper marks the routing subflow successful without inspecting the native routing return value.
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 

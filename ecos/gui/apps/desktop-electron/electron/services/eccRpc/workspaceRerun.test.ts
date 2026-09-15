@@ -41,7 +41,9 @@ async function writeSourceWorkspace(): Promise<{
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
     steps: [
-      { name: 'Floorplan', state: 'Success', tool: 'ecc' },
+      { name: 'preFloorplan', state: 'Success', tool: 'ecc' },
+      { name: 'macroPlacement', state: 'Success', tool: 'dreamplace' },
+      { name: 'postFloorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
       { name: 'legalization', state: 'Success', tool: 'dreamplace' },
@@ -51,7 +53,9 @@ async function writeSourceWorkspace(): Promise<{
   const artifact = Buffer.from('place-def')
   await mkdir(join(source, 'home'), { recursive: true })
   await mkdir(join(source, 'config'), { recursive: true })
-  await mkdir(join(source, 'Floorplan_ecc', 'output'), { recursive: true })
+  await mkdir(join(source, 'preFloorplan_ecc', 'output'), { recursive: true })
+  await mkdir(join(source, 'macroPlacement_dreamplace', 'output'), { recursive: true })
+  await mkdir(join(source, 'postFloorplan_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
@@ -63,7 +67,7 @@ async function writeSourceWorkspace(): Promise<{
     '{"density_weight":0.01}\n',
   )
   await writeFile(
-    join(source, 'Floorplan_ecc', 'output', 'gcd_Floorplan.def.gz'),
+    join(source, 'postFloorplan_ecc', 'output', 'gcd_postFloorplan.def.gz'),
     'checkpoint',
   )
   await writeFile(
@@ -188,7 +192,7 @@ describe('prepareWorkspaceRerun', () => {
 
     await expect(
       readFile(
-        `${contract.target_workspace}/Floorplan_ecc/output/gcd_Floorplan.def.gz`,
+        `${contract.target_workspace}/postFloorplan_ecc/output/gcd_postFloorplan.def.gz`,
         'utf8',
       ),
     ).resolves.toBe('checkpoint')
@@ -207,7 +211,9 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
     expect(targetFlow.steps).toEqual([
-      { name: 'Floorplan', state: 'Success', tool: 'ecc' },
+      { name: 'preFloorplan', state: 'Success', tool: 'ecc' },
+      { name: 'macroPlacement', state: 'Success', tool: 'dreamplace' },
+      { name: 'postFloorplan', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
       { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
       { name: 'legalization', state: 'Unstart', tool: 'dreamplace', runtime: '' },
@@ -398,12 +404,12 @@ describe('prepareWorkspaceRerun', () => {
           checklist: `${source}/home/checklist.json`,
           metrics: {
             'drc dist.': `${source}/drc_ecc/analysis/drc.png`,
-            'floor dist.': `${source}/Floorplan_ecc/output/floor.png`,
+            'floor dist.': `${source}/postFloorplan_ecc/output/floor.png`,
             'sizer timing': `${source}/timing_optimization_sizer/analysis/qor_metrics.json`,
           },
           monitor: {
             step: [
-              'Floorplan - analysis',
+              'preFloorplan - analysis',
               'place - analysis',
               'CTS - analysis',
               'legalization - analysis',
@@ -429,7 +435,7 @@ describe('prepareWorkspaceRerun', () => {
           checklist: [
             {
               id: 'artifact.floorplan',
-              step: 'Floorplan',
+              step: 'postFloorplan',
               state: 'pass',
               blocked: false,
             },
@@ -470,9 +476,9 @@ describe('prepareWorkspaceRerun', () => {
     expect(home.checklist).toBe(`${contract.target_workspace}/home/checklist.json`)
     expect(home.layout).toBe('')
     expect(home.metrics).toEqual({
-      'floor dist.': `${contract.target_workspace}/Floorplan_ecc/output/floor.png`,
+      'floor dist.': `${contract.target_workspace}/postFloorplan_ecc/output/floor.png`,
     })
-    expect(home.monitor.step).toEqual(['Floorplan - analysis'])
+    expect(home.monitor.step).toEqual(['preFloorplan - analysis'])
     expect(home.monitor.memory).toEqual(['1'])
 
     const checklist = JSON.parse(
@@ -482,7 +488,7 @@ describe('prepareWorkspaceRerun', () => {
       summary: { passed: number; blocked: number }
       checklist: Array<{ step: string }>
     }
-    expect(checklist.checklist.map((item) => item.step)).toEqual(['Floorplan'])
+    expect(checklist.checklist.map((item) => item.step)).toEqual(['postFloorplan'])
     expect(checklist.summary).toEqual({
       passed: 1,
       blocked: 0,
@@ -667,7 +673,9 @@ describe('prepareWorkspaceRerun', () => {
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
     ) as { steps: Array<{ name: string; state: string }> }
     expect(targetFlow.steps.map((step) => step.name)).toEqual([
-      'Floorplan',
+      'preFloorplan',
+      'macroPlacement',
+      'postFloorplan',
       'place',
       'CTS',
       'legalization',
@@ -681,7 +689,7 @@ describe('prepareWorkspaceRerun', () => {
       'drc',
       'Harden',
     ])
-    expect(targetFlow.steps.find((step) => step.name === 'Floorplan')?.state).toBe(
+    expect(targetFlow.steps.find((step) => step.name === 'postFloorplan')?.state).toBe(
       'Success',
     )
     expect(targetFlow.steps.find((step) => step.name === 'place')?.state).toBe('Unstart')
@@ -692,10 +700,10 @@ describe('prepareWorkspaceRerun', () => {
     const root = await mkdtemp(join(tmpdir(), 'ecos-workspace-rerun-legacy-'))
     temporaryRoots.push(root)
     const source = join(root, 'gcd')
-    // A flow completed before Timing Opt and postRouteLec existed.
+    // A flow completed before the floorplan sub-steps, Timing Opt, and
+    // postRouteLec existed.
     const legacyNames = [
       'Synthesis',
-      'Floorplan',
       'place',
       'CTS',
       'legalization',
@@ -754,7 +762,9 @@ describe('prepareWorkspaceRerun', () => {
     expect(targetFlow.steps.map((step) => [step.name, step.tool, step.state])).toEqual([
       ['Synthesis', 'yosys', 'Unstart'],
       ['lec', 'yosys_lec', 'Unstart'],
-      ['Floorplan', 'ecc', 'Unstart'],
+      ['preFloorplan', 'ecc', 'Unstart'],
+      ['macroPlacement', 'dreamplace', 'Unstart'],
+      ['postFloorplan', 'ecc', 'Unstart'],
       ['place', 'dreamplace', 'Unstart'],
       ['CTS', 'ecc', 'Unstart'],
       ['legalization', 'dreamplace', 'Unstart'],

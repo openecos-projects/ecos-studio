@@ -85,7 +85,7 @@ def test_unavailable_gate_is_evidence_limited_not_ineligible(
     candidate = _v3_candidate().model_copy(
         update={
             "signoff_gates": _v3_candidate().signoff_gates.model_copy(
-                update={"lvs_clean": GateResult.UNAVAILABLE}
+                update={"drc_clean": GateResult.UNAVAILABLE}
             )
         }
     )
@@ -99,7 +99,7 @@ def test_failed_gate_stays_a_physical_ineligibility(tmp_path: Path) -> None:
     candidate = _v3_candidate().model_copy(
         update={
             "signoff_gates": _v3_candidate().signoff_gates.model_copy(
-                update={"lvs_clean": GateResult.FAIL}
+                update={"drc_clean": GateResult.FAIL}
             )
         }
     )

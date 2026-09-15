@@ -376,6 +376,15 @@
 
 **Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
 
+<a id="parameter.legalization.macro_only"></a>
+## parameter.legalization.macro_only
+
+**Meaning:** The macro-only placement switch.
+
+**Role:** The macro-placement runner forces it to `1` so DreamPlace places only hard macros between the two floorplan phases; the serialized `0` default applies to normal placement runs.
+
+**Source evidence:** **dreamplace.runner**, **dreamplace.module**, **ecc.runner**, **ecc.module**, **config.legalization**
+
 <a id="parameter.legalization.macro_overlap_flag"></a>
 ## parameter.legalization.macro_overlap_flag
 

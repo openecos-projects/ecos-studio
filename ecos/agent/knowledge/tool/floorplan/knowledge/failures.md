@@ -1,14 +1,14 @@
 <a id="failure.floorplan.preconditions"></a>
 ## failure.floorplan.preconditions
 
-**Failure mode:** The step cannot proceed without an ECC database instance. iFP can log configuration, layer/capacity, macro-placement, or geometry errors while the wrapper still records subflow progress; inspect native logs, saved artifacts, and analysis records before claiming a successful floorplan.
+**Failure mode:** The phase cannot proceed without an ECC database instance. A missing, malformed, or unknown-macro macro-location file, iFP configuration, layer/capacity, macro-placement, or geometry errors can be logged while the wrapper still records subflow progress; only `postFloorplan` runs analysis, so inspect native logs, saved artifacts, and analysis records before claiming a successful floorplan.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
 
 <a id="failure.floorplan.engine"></a>
 ## failure.floorplan.engine
 
-**Failure mode:** If `get_eda_instance` returns no ECC module, the floorplan runner does not enter `init_fp` or `run_fp` and returns false.
+**Failure mode:** If `get_eda_instance` returns no ECC module, neither floorplan runner enters `init_fp` or the native run call and returns false.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
 
@@ -33,6 +33,20 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
 
+<a id="failure.floorplan.macro_step"></a>
+## failure.floorplan.macro_step
+
+**Failure mode:** In the `macroPlacement` step, a failed DreamPlace macro-only run or a failed `tcl_save` marks the `macro placement` subflow incomplete and returns false before persistence. Manual `macro.placements` bypass DreamPlace entirely, and a design with no unplaced hard macros is skipped as success.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
+
+<a id="failure.floorplan.macro_file"></a>
+## failure.floorplan.macro_file
+
+**Failure mode:** In `file` mode, an empty path, an unreadable macro-location Tcl, malformed lines, non-finite coordinates, `placed` status before its `placeInstance`, unknown or non-block instance names, or an invalid micron DBU are logged as native errors during `init_fp` database wrapping; affected macros stay unplaced and later MacroPlacer checks surface them.
+
+**Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
+
 <a id="failure.floorplan.macro_placement"></a>
 ## failure.floorplan.macro_placement
 
@@ -50,14 +64,14 @@
 <a id="failure.floorplan.native_progress"></a>
 ## failure.floorplan.native_progress
 
-**Failure mode:** `run_floorplan` marks init, tracks, IO pins, taps, PDN, and clock-net subflow entries successful without inspecting iFP native returns. Native logs and output artifacts are required to determine the actual result.
+**Failure mode:** The floorplan runners mark their subflow entries (`init floorplan`, `create tracks`, `place io pins`, `tap cell`, `PDN`, `set clock net`, `save data`) successful without inspecting iFP native returns. Native logs and output artifacts are required to determine the actual result.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
 
 <a id="failure.floorplan.geometry"></a>
 ## failure.floorplan.geometry
 
-**Failure mode:** For floorplan, shared persistence requires `geometry_snapshot_save` and an existing geometry manifest. Either failure causes `save_data` to return false.
+**Failure mode:** For every floorplan-phase step, shared persistence requires `geometry_snapshot_save` and an existing geometry manifest. Either failure causes `save_data` to return false.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ecc.workspace**, **ifp.interface**, **ifp.io_placer**, **ifp.macro_placer**
 

@@ -105,7 +105,9 @@ def _validate_manifest(
         raise KnowledgeBundleError("knowledge bundle manifest has no file hashes")
     for relative_path, expected_hash in expected.items():
         path = root / str(relative_path)
-        if not path.is_file() or _sha256(path.read_bytes()) != expected_hash:
+        if not path.is_file() or _sha256(path.read_bytes()) != str(expected_hash).removeprefix(
+            "sha256:"
+        ):
             raise KnowledgeBundleError(f"knowledge bundle hash mismatch: {relative_path}")
     if not isinstance(sources.get("sources"), list):
         raise KnowledgeBundleError("knowledge bundle has invalid source inventory")

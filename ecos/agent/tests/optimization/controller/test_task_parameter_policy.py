@@ -57,8 +57,10 @@ def test_fixed_task_exposes_every_permitted_layer_with_advisory_priority(tmp_pat
 def test_area_task_recommends_floorplan_and_keeps_increase_only_policy(tmp_path):
     instance = controller(tmp_path, goal=objective("降低面积", ObjectiveMetric.DIE_AREA),
                           planner=_FakeCodex(lambda ctx: _proposal(ctx, knob_id="floorplan.core_util", requested_value=0.7)))
-    assert instance.planning_stage(_observation(), CURRENT_VALUES) == "Floorplan"
-    observation = _observation().model_copy(update={"stage": ECCStepName.FLOORPLAN})
+    # planning_stage returns an observable flow step; the RPC-level "Floorplan"
+    # target maps to the postFloorplan sub-step holding the floorplan evidence.
+    assert instance.planning_stage(_observation(), CURRENT_VALUES) == "postFloorplan"
+    observation = _observation().model_copy(update={"stage": ECCStepName.POST_FLOORPLAN})
     result = instance.plan(observation, _retrieval(), CURRENT_VALUES)
     assert result.requested.knob_id == "floorplan.core_util"
     legal = instance.planner.contexts[0].legal_actions
@@ -115,7 +117,6 @@ def _recovery_terminal(*, drc=6, wirelength=100.0, overflow=0):
         ),
         "metrics": {
             **terminal.metrics,
-            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: float(drc),
             ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: overflow,
         },

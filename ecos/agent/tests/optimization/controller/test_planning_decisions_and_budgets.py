@@ -394,7 +394,7 @@ def test_controller_accepts_llm_selected_non_first_knob(
     observation = _observation().model_copy(
         update={
             "observation_id": "observation-floorplan",
-            "stage": ECCStepName.FLOORPLAN,
+            "stage": ECCStepName.POST_FLOORPLAN,
             "metrics": {"core_area": 2500.0, "die_area": 3000.0},
         }
     )
@@ -403,7 +403,7 @@ def test_controller_accepts_llm_selected_non_first_knob(
         retrieval,
         request=retrieval.request.model_copy(
             update={
-                "current_stage": ECCStepName.FLOORPLAN,
+                "current_stage": ECCStepName.POST_FLOORPLAN,
                 "observed_metric_ids": ("core_area", "die_area"),
             }
         ),
@@ -411,7 +411,7 @@ def test_controller_accepts_llm_selected_non_first_knob(
             update={
                 "claims": (
                     retrieval.support_catalog.claims[0].model_copy(
-                        update={"stages": ("Floorplan",), "state_predicates": ()}
+                        update={"stages": ("postFloorplan",), "state_predicates": ()}
                     ),
                 )
             }
@@ -672,14 +672,19 @@ def test_empirical_archive_separates_objective_gain_from_hypothesis_support() ->
         incumbent=incumbent,
         expected_effects=expected_effects,
     ) is EmpiricalOutcome.SUPPORTED
-    # An unsigned candidate (routed DRC still open) never becomes a supported
+    # An unsigned candidate (final DRC still open) never becomes a supported
     # case, even when the declared effect was observed.
     unsigned = realized.model_copy(
         update={
-            "metrics": {
-                **realized.metrics,
-                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 1.0,
-            },
+            "evaluation_metrics": tuple(
+                item.model_copy(update={"value": 1})
+                if item.metric_id == "drc_count"
+                else item
+                for item in realized.evaluation_metrics
+            ),
+            "signoff_gates": realized.signoff_gates.model_copy(
+                update={"drc_clean": GateResult.FAIL}
+            ),
         }
     )
     assert ControllerCaseRecordingMixin._empirical_outcome(

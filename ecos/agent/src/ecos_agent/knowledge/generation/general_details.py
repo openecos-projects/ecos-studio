@@ -37,6 +37,12 @@ GENERAL_SOURCE_PATHS = {
 }
 GENERAL_KNOWLEDGE_METRICS = tuple(GENERAL_SOURCE_PATHS)
 _ALLOWED_STAGES = {stage.slug for stage in STAGES}
+# ECC sub-step name (casefolded) -> knowledge phase slug covering it.
+_KNOWLEDGE_PHASE = {
+    "prefloorplan": "floorplan",
+    "macroplacement": "floorplan",
+    "postfloorplan": "floorplan",
+}
 _CONTRACT_DIRECTION = {
     "increase": "increase",
     "decrease": "decrease",
@@ -119,7 +125,13 @@ def _strategy_entries(metric: str) -> tuple[
             raise ValueError(f"invalid metric: {statement['id']}")
         binding = bindings.get(intent)
         actions = _binding_actions(binding, cards) if binding else []
-        if any(cards[action["knob_id"]].stage.casefold() not in stages for action in actions):
+        # Floorplan geometry knobs bind to the postFloorplan sub-step but their
+        # knowledge lives in the shared floorplan phase bundle.
+        if any(
+            _KNOWLEDGE_PHASE.get(cards[action["knob_id"]].stage.casefold(), cards[action["knob_id"]].stage.casefold())
+            not in stages
+            for action in actions
+        ):
             raise ValueError(f"binding stage is outside claim scope: {statement['id']}")
         if actions and not any(
             predicate.get("op") != "present"

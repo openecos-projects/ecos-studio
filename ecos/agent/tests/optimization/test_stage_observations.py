@@ -179,7 +179,7 @@ def test_floorplan_mode_is_configuration_evidence_not_parameter_effectiveness(
 ) -> None:
     relative = "config/floorplan_ecc.json"
     _write_json(frozen_workspace / relative, {"die_builder": {"mode": mode}})
-    observation = build_stage_observation(frozen_workspace, "Floorplan", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "postFloorplan", budget=_budget())
     feature = next(item for item in observation.state_evidence if item.feature_id == "floorplan_die_util_mode")
     assert feature.value is expected
     assert feature.evidence_ref == relative
@@ -187,7 +187,7 @@ def test_floorplan_mode_is_configuration_evidence_not_parameter_effectiveness(
 
 
 def test_absent_floorplan_mode_remains_unknown(frozen_workspace: Path) -> None:
-    observation = build_stage_observation(frozen_workspace, "Floorplan", budget=_budget())
+    observation = build_stage_observation(frozen_workspace, "postFloorplan", budget=_budget())
     assert not any(item.feature_id == "floorplan_die_util_mode" for item in observation.state_evidence)
 
 
@@ -202,7 +202,7 @@ def test_convergence_evidence_is_hash_bound_and_stage_independent(frozen_workspa
     })
     expected = type(final) in (int, float) and 0 <= final < float("inf")
     evidence = []
-    for stage in ("place", "Floorplan"):
+    for stage in ("place", "postFloorplan"):
         observation = build_stage_observation(frozen_workspace, stage, budget=_budget())
         features = [item for item in observation.state_evidence
                     if item.feature_id == "place_final_density_overflow"]
