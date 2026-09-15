@@ -164,3 +164,12 @@ def test_convergence_knob_enabled_without_runtime_evidence():
                   if item["knob_id"] == "place.target_overflow")
     assert target["enabled"] is True
     assert target["disabled_reason"] is None
+
+
+def test_policy_payload_exposes_die_util_candidate_mode_only_for_variable_geometry():
+    from ecos_agent.optimization.knob_policy import policy_payload
+    variable = policy_payload(objective(geometry="variable"), "floorplan_shape")
+    fixed = policy_payload(objective(), "physical")
+    assert variable["floorplan_candidate_mode"] == "die_util"
+    assert fixed["floorplan_candidate_mode"] is None
+    assert policy_payload(None, "unrestricted_experiment")["floorplan_candidate_mode"] is None
