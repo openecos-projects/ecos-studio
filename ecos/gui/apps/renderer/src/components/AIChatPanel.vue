@@ -15,6 +15,7 @@
       ref="scrollContainerRef"
       class="custom-scrollbar agent-chat__scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3"
       @scroll.passive="onScrollContainerScroll"
+      @click="onScrollContainerClick"
     >
       <div
         v-if="codexSetupStatus && codexSetupStatus.state !== 'ready'"
@@ -79,16 +80,23 @@
               @continue-select="handleWorkspaceContinueChoice"
               @parameter-select="handleWorkspaceParameterChoice"
             />
-            <MessageItem
-              v-for="msg in turn.responses"
-              :key="msg.id"
-              :message="msg"
-              :choice-interactive="msg.choice?.promptId === activeChoicePromptId"
-              :choice-disabled="isRunning"
-              @img-load="onImageLoad"
-              @choice="handleMessageChoice"
-              class="message-item w-full max-w-full min-w-0"
-            />
+            <template v-for="item in turn.responses" :key="item.id">
+              <ChatStepArtifactGroup
+                v-if="isChatStepArtifactGroup(item)"
+                :step="item.step"
+                :messages="item.messages"
+                @img-load="onImageLoad"
+              />
+              <MessageItem
+                v-else
+                :message="item"
+                :choice-interactive="item.choice?.promptId === activeChoicePromptId"
+                :choice-disabled="isRunning"
+                @img-load="onImageLoad"
+                @choice="handleMessageChoice"
+                class="message-item w-full max-w-full min-w-0"
+              />
+            </template>
             <div
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
@@ -188,15 +196,15 @@ import {
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import {
-  type DesktopAgentChoice,
-  type DesktopAgentChoiceOption,
-  type DesktopAgentEvent,
-  type DesktopAgentWorkspaceParameterWrite,
-  type DesktopCodexDependencyStatus,
-  type DesktopCodexInstallProgressEvent,
+import type {
+  DesktopAgentChoice,
+  DesktopAgentChoiceOption,
+  DesktopAgentEvent,
+  DesktopCodexDependencyStatus,
+  DesktopCodexInstallProgressEvent,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import ChatStepArtifactGroup from './ChatStepArtifactGroup.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
 import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
@@ -210,11 +218,15 @@ import {
 } from './agentSessionUi'
 import { choiceSelectionText } from './agentChoiceDisplay'
 import { displayAgentContractTitle } from './agentContractDisplay'
-import { groupMessagesIntoTurns } from './chatTurns'
+import { groupMessagesIntoTurns, isChatStepArtifactGroup } from './chatTurns'
+import {
+  confirmedExecutionToken,
+  executeConfirmedWorkspaceParameterUpdate,
+} from './workspaceParameterUpdateExecution'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
-import { resolveAgentTabContext } from '@/stores/agentTabContext'
-import { getOptionalDesktopApi } from '@/platform/desktop'
+import { existingTabIdForMode, resolveAgentTabContext } from '@/stores/agentTabContext'
+import { getDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
@@ -224,8 +236,7 @@ import {
 } from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
-import { refreshConfigApi, syncConfigApi } from '@/api/flow'
-import { CMDEnum, ResponseEnum } from '@/api/type'
+import { updateWorkspaceConfigurationApi } from '@/api/workspace'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
   registerProjectManagedWorkspace,
@@ -255,12 +266,12 @@ const {
   openProject,
   invalidateWorkspaceResources,
   currentProject,
-  runtimeEvents,
+  backendRuntimeEvents,
   waitForRuntimeOperation,
 } = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
 const { runAllFlow } = useFlowRunner()
-const agentFlowProgress = useAgentFlowProgress(
+const liveAgentFlowProgress = useAgentFlowProgress(
   (message) => {
     const sessionId = agentSessionId.value
     if (message.startsWith('Live flow progress is unavailable')) {
@@ -270,11 +281,17 @@ const agentFlowProgress = useAgentFlowProgress(
     messageStore.appendToolProgress(message, sessionId ?? undefined)
   },
   () => {
-    // ECC terminal events are the only source of runtime-driven refreshes.
     invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
   },
-  runtimeEvents,
+  backendRuntimeEvents,
 )
+const agentFlowProgress =
+  props.shell === 'home'
+    ? liveAgentFlowProgress
+    : {
+        start: async () => undefined,
+        stop: () => undefined,
+      }
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const agentSessionId = computed({
@@ -594,14 +611,21 @@ watch(
 )
 
 function currentTabContext() {
-  const workspacePath = currentProject.value?.path
+  const isHome = props.shell === 'home'
+  const workspacePath = isHome ? undefined : currentProject.value?.path
   return resolveAgentTabContext({
-    shell: props.shell === 'home' ? 'home' : 'workspace',
+    shell: isHome ? 'home' : 'workspace',
     currentWorkspacePath: workspacePath,
-    currentWorkspaceName: currentProject.value?.name ?? baseName(workspacePath),
+    currentWorkspaceName: isHome
+      ? undefined
+      : (currentProject.value?.name ?? baseName(workspacePath)),
     currentProjectRoot: queryString(route.query.projectRoot) || undefined,
     routeProjectRoot: queryString(route.query.projectRoot) || undefined,
-    step: typeof route.params.step === 'string' ? route.params.step : undefined,
+    step: isHome
+      ? undefined
+      : typeof route.params.step === 'string'
+        ? route.params.step
+        : undefined,
   })
 }
 
@@ -613,23 +637,29 @@ function baseName(path: string | undefined): string | undefined {
 }
 
 async function connectAgent(): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
+  const desktopApi = getDesktopApi()
+  const agent = desktopApi.agent
   if (!agent) return
 
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
   agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
+  await ensureShellTab()
+}
 
-  if (agentShell.tabs.length === 0) {
+async function ensureShellTab(): Promise<void> {
+  const mode = props.shell === 'home' ? 'home' : 'workspace'
+  const tabId = existingTabIdForMode(agentShell.tabs, mode, agentShell.activeTabId)
+  if (!tabId) {
     await createChatTab()
     return
   }
-
-  const active = agentShell.activeTab
-  if (active && !active.started) {
-    await startProviderSession(active.id)
+  if (agentShell.activeTabId !== tabId) {
+    agentShell.activateTab(tabId)
+    messageStore.setActiveSessionId(tabId)
   }
+  const tab = agentShell.tabs.find((candidate) => candidate.id === tabId)
+  if (tab && !tab.started) await startProviderSession(tab.id)
 }
 
 async function createChatTab(): Promise<void> {
@@ -645,7 +675,7 @@ function selectChatTab(id: string): void {
 }
 
 async function closeChatTab(id: string): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (agent) {
     try {
       await agent.interrupt({ providerId: AGENT_PROVIDER_ID, sessionId: id })
@@ -669,8 +699,8 @@ async function closeChatTab(id: string): Promise<void> {
 }
 
 async function startProviderSession(sessionId: string): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
+  const desktopApi = getDesktopApi()
+  const agent = desktopApi.agent
   const tab = agentShell.tabs.find((candidate) => candidate.id === sessionId)
   if (!agent || !tab) return
 
@@ -693,6 +723,12 @@ async function startProviderSession(sessionId: string): Promise<void> {
       mode: tab.mode,
       ...(tab.projectRoot ? { projectRoot: tab.projectRoot } : {}),
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
+      ...(tab.workspacePath &&
+      normalizeWorkspaceRoot(currentProject.value?.path ?? '') ===
+        normalizeWorkspaceRoot(tab.workspacePath) &&
+      workspaceLifecycle.session.value.workspaceId
+        ? { workspaceId: workspaceLifecycle.session.value.workspaceId }
+        : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
     agentShell.markTabStarted(sessionId)
@@ -722,83 +758,89 @@ async function ensureCodexReady(): Promise<boolean> {
 }
 
 async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) {
-    codexSetupStatus.value = null
+    setCodexSetupStatus(null)
     return null
   }
   try {
     const status = await codex.getStatus()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     return status
   } catch (error) {
-    codexSetupStatus.value = {
+    const status: DesktopCodexDependencyStatus = {
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: false,
       state: 'error',
     }
-    return codexSetupStatus.value
+    setCodexSetupStatus(status)
+    return status
   }
+}
+
+function setCodexSetupStatus(status: DesktopCodexDependencyStatus | null): void {
+  codexSetupStatus.value = status?.state === 'ready' ? null : status
+  agentShell.setCodexStatus(status)
 }
 
 function bindCodexProgress(): void {
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex?.onProgress) return
   unsubscribeCodexProgress = codex.onProgress(
     (event: DesktopCodexInstallProgressEvent) => {
       if (!codexSetupStatus.value) {
-        codexSetupStatus.value = {
+        setCodexSetupStatus({
           authState: 'unknown',
           platformSupportsInstall: true,
           state: 'installing',
-        }
+        })
       }
-      codexSetupStatus.value = {
+      setCodexSetupStatus({
         ...codexSetupStatus.value,
         progressMessage: event.message,
         progressRatio: event.progress,
         state: event.phase === 'error' ? 'error' : 'installing',
-      }
+      } as DesktopCodexDependencyStatus)
     },
   )
 }
 
 async function installCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   bindCodexProgress()
   try {
     const status = await codex.install()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     if (status.state === 'ready') {
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: true,
       state: 'error',
-    }
+    })
   } finally {
     codexSetupBusy.value = false
   }
 }
 
 async function loginCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   try {
     const status = await codex.login()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       ...(codexSetupStatus.value ?? {
         authState: 'unknown',
         platformSupportsInstall: false,
@@ -806,39 +848,39 @@ async function loginCodexCli(): Promise<void> {
       }),
       message: agentErrorMessage(error),
       state: 'error',
-    }
+    } as DesktopCodexDependencyStatus)
   } finally {
     codexSetupBusy.value = false
   }
 }
 
 async function recheckCodexCli(): Promise<void> {
-  const codex = getOptionalDesktopApi()?.agent?.codex
+  const codex = getDesktopApi().agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   try {
     const status = await codex.recheck()
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     if (status.state === 'ready') {
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
-    }
+    })
   } finally {
     codexSetupBusy.value = false
   }
 }
 
 async function pickCodexBin(): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const codex = desktopApi?.agent?.codex
-  if (!desktopApi || !codex) return
+  const desktopApi = getDesktopApi()
+  const codex = desktopApi.agent?.codex
+  if (!codex) return
   const files = await desktopApi.dialog.pickFiles({
     title: '选择 Codex CLI 可执行文件',
   })
@@ -847,19 +889,19 @@ async function pickCodexBin(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.setBinPath({ path: selected })
-    codexSetupStatus.value = status.state === 'ready' ? null : status
+    setCodexSetupStatus(status)
     if (status.state === 'ready') {
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    codexSetupStatus.value = {
+    setCodexSetupStatus({
       authState: 'unknown',
       binPath: selected,
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
-    }
+    })
   } finally {
     codexSetupBusy.value = false
   }
@@ -1140,6 +1182,12 @@ function onScrollContainerScroll(): void {
   stickToBottom.value = isNearBottom()
 }
 
+function onScrollContainerClick(event: MouseEvent): void {
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('[aria-expanded]')) return
+  stickToBottom.value = false
+}
+
 /**
  * 直接滚动到底部（使用 scrollTop）
  */
@@ -1238,9 +1286,13 @@ const handleSubmit = async (): Promise<void> => {
   await sendAgentMessage(message)
 }
 
-async function sendAgentMessage(message: string, addToHistory = true): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
+async function sendAgentMessage(
+  message: string,
+  addToHistory = true,
+  confirmationToken?: string,
+): Promise<void> {
+  const desktopApi = getDesktopApi()
+  const agent = desktopApi.agent
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
@@ -1251,6 +1303,7 @@ async function sendAgentMessage(message: string, addToHistory = true): Promise<v
   isAgentRequestPending.value = true
   try {
     await agent.sendMessage({
+      ...(confirmationToken ? { confirmationToken } : {}),
       message,
       providerId: AGENT_PROVIDER_ID,
       sessionId,
@@ -1329,7 +1382,14 @@ async function submitChoice(
     if (contractSurface === 'parameter')
       activeUi.value.workspaceParameterAnchorTurnId = turnId
   }
-  await sendAgentMessage(option.value, false)
+  const executionContract =
+    contractSurface === 'rerun'
+      ? activeUi.value.workspaceRerunContract
+      : contractSurface === 'parameter'
+        ? activeUi.value.workspaceParameterContract
+        : undefined
+  const confirmationToken = confirmedExecutionToken(option.value, executionContract)
+  await sendAgentMessage(option.value, false, confirmationToken)
 }
 
 function sendSuggestion(suggestion: { label: string; value: string }): void {
@@ -1349,7 +1409,7 @@ async function flushQueuedMessage(): Promise<void> {
 }
 
 async function interruptAgent(): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isInterruptPending.value) return
   isInterruptPending.value = true
@@ -1427,7 +1487,7 @@ async function reportWorkspaceCreationResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
@@ -1443,10 +1503,10 @@ async function executeWorkspaceRerun(
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const ui = sessionUi(ownerSessionId)
-  const desktopApi = getOptionalDesktopApi()
-  const prepareRerun = desktopApi?.workspace.prepareFlowAgentRerun
-  const executeRerun = desktopApi?.workspace.executeFlowAgentRerun
-  if (!desktopApi || !prepareRerun || !executeRerun) {
+  const desktopApi = getDesktopApi()
+  const prepareRerun = desktopApi.workspace.prepareFlowAgentRerun
+  const executeRerun = desktopApi.workspace.executeFlowAgentRerun
+  if (!prepareRerun || !executeRerun) {
     messageStore.addAssistantMessage(
       'Rerun is unavailable in this desktop session.',
       'error',
@@ -1615,7 +1675,7 @@ async function reportWorkspaceRerunResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
@@ -1680,7 +1740,7 @@ async function reportWorkspaceContinueResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_continue_result:${JSON.stringify({ continue_id: continueId, status, error })}`,
@@ -1703,36 +1763,32 @@ async function executeWorkspaceParameterUpdate(
   ui.isWorkspaceParameterPending = true
   messageStore.setActiveSessionId(ownerSessionId)
   try {
-    const workspaceRoot = normalizeWorkspaceRoot(contract.workspace)
-    if (normalizeWorkspaceRoot(currentProject.value?.path ?? '') !== workspaceRoot) {
-      throw new Error('The parameter update targets a workspace that is not open.')
-    }
-    await applyWorkspaceParameterWrites(workspaceRoot, contract.writes)
-    await syncWorkspaceParameterWrites(workspaceRoot, contract.writes)
-    invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])
-    await reportWorkspaceParameterUpdateResult(
-      contract.update_id,
-      'succeeded',
-      '',
-      ownerSessionId,
-    )
-  } catch (error) {
-    const reason = agentErrorMessage(error)
-    messageStore.addAssistantMessage(
-      `Parameter update failed: ${reason}`,
-      'error',
-      ownerSessionId,
-    )
-    try {
-      await reportWorkspaceParameterUpdateResult(
-        contract.update_id,
-        'failed',
-        reason,
-        ownerSessionId,
-      )
-    } catch {
-      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
-    }
+    await executeConfirmedWorkspaceParameterUpdate(contract, {
+      commandId: () => crypto.randomUUID(),
+      currentWorkspace: currentProject.value?.path ?? '',
+      errorMessage: agentErrorMessage,
+      initialRevision: contract.workspace_revision,
+      invalidate: () =>
+        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow']),
+      onFailure: (reason) =>
+        messageStore.addAssistantMessage(
+          `Parameter update failed: ${reason}`,
+          'error',
+          ownerSessionId,
+        ),
+      onReportFailure: (reason) =>
+        messageStore.addAssistantMessage(reason, 'error', ownerSessionId),
+      report: (status, error) =>
+        reportWorkspaceParameterUpdateResult(
+          contract.update_id,
+          status,
+          error,
+          ownerSessionId,
+        ),
+      updateConfiguration: updateWorkspaceConfigurationApi,
+      updateRevision: (revision) => workspaceLifecycle.updateWorkspaceRevision(revision),
+      workspaceHandle: workspaceLifecycle.session.value.workspaceId,
+    })
   } finally {
     ui.isWorkspaceParameterPending = false
     ui.pendingParameterUpdate = undefined
@@ -1745,7 +1801,7 @@ async function reportWorkspaceParameterUpdateResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getOptionalDesktopApi()?.agent
+  const agent = getDesktopApi().agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_parameter_update_result:${JSON.stringify({ update_id: updateId, status, error })}`,
@@ -1757,61 +1813,6 @@ async function reportWorkspaceParameterUpdateResult(
 
 function normalizeWorkspaceRoot(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '')
-}
-
-/**
- * Applies the Agent's resolved write instructions. The knob-to-location mapping
- * lives in the Agent registry, so an unsupported knob fails loudly here instead
- * of being dropped by a second, out-of-date table. The main process commits
- * every file through the serialized atomic parameter queue and rolls back
- * only the revision this operation produced.
- */
-async function applyWorkspaceParameterWrites(
-  workspaceRoot: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  if (!desktopApi) throw new Error('Desktop API is unavailable.')
-  await desktopApi.workspace.applyWorkspaceParameterWrites(workspaceRoot, writes)
-}
-
-/**
- * Pushes the edited files back through ECC. Without this the two parameter
- * surfaces drift apart and the change never reaches the next run: a step-config
- * edit must be synced into `parameters.json` before that file is re-expanded.
- */
-async function syncWorkspaceParameterWrites(
-  workspaceRoot: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const workspaceHandle = workspaceLifecycle.session.value.workspaceId
-  const stepConfigFiles = [
-    ...new Set(
-      writes
-        .filter((write) => write.surface === 'step_config')
-        .map((write) => write.file),
-    ),
-  ]
-  for (const configPath of stepConfigFiles) {
-    assertEccSuccess(
-      await syncConfigApi({
-        cmd: CMDEnum.sync_config,
-        data: { config_path: configPath, directory: workspaceRoot, workspaceHandle },
-      }),
-      `Failed to sync ${configPath}`,
-    )
-  }
-  assertEccSuccess(
-    await refreshConfigApi({
-      cmd: CMDEnum.refresh_config,
-      data: { directory: workspaceRoot, workspaceHandle },
-    }),
-    'Failed to refresh the workspace configuration',
-  )
-}
-
-function assertEccSuccess(result: { response?: string } | null, message: string): void {
-  if (result?.response !== ResponseEnum.success) throw new Error(`${message}.`)
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {

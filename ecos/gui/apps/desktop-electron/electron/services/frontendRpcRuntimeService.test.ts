@@ -19,8 +19,7 @@ function createRuntime() {
       directory: '/work/frontend',
       workspaceHandle: 'handle-1',
     }),
-    rpcPing: vi.fn().mockResolvedValue({ ok: true }),
-    rpcShutdown: vi.fn().mockResolvedValue({ ok: true }),
+    shutdown: vi.fn().mockResolvedValue({ ok: true }),
     runFlow: vi.fn().mockResolvedValue({ rerun: false }),
     runStepPayload: vi.fn().mockResolvedValue({ state: 'Success', step: 'sim' }),
     workspaceHome: vi.fn().mockResolvedValue({ path: '/work/frontend/home/home.json' }),
@@ -53,6 +52,21 @@ describe('FrontendRpcRuntimeService', () => {
     })
     expect(service.activeWorkspaceDirectory).toBe('/work/frontend')
     expect(service.isWorkspaceRuntimeActive('/work/frontend')).toBe(true)
+  })
+
+  it('preserves frontend management calls', async () => {
+    const runtime = createRuntime()
+    const service = new FrontendRpcRuntimeService({
+      runtime: runtime as unknown as EccRpcRuntimeService,
+    })
+
+    await service.rpcHello()
+    await service.rpcPing()
+    await service.rpcShutdown()
+
+    expect(runtime.callRuntime).toHaveBeenNthCalledWith(1, 'rpc.hello', { version: 1 })
+    expect(runtime.callRuntime).toHaveBeenNthCalledWith(2, 'rpc.ping')
+    expect(runtime.shutdown).toHaveBeenCalledOnce()
   })
 
   it('normalizes frontend progress before exposing the runtime event stream', () => {

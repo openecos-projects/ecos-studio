@@ -428,6 +428,28 @@ describe('createEccRuntimeEnv', () => {
     expect(executable).toBe(packagedEcc)
   })
 
+  it('does not create or resolve a development ECC executable on Windows', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
+    mkdirSync(join(fixture.repoRoot, 'ecos', 'scripts'), { recursive: true })
+    writeFileSync(
+      join(fixture.repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh'),
+      '#!/usr/bin/env bash\n',
+    )
+
+    expect(
+      resolveEccExecutable({
+        appPath: fixture.appPath,
+        cwd: fixture.appPath,
+        env: { PATH: 'C:\\Windows\\System32' },
+        isPackaged: false,
+        platform: 'win32',
+        userDataPath: fixture.userDataPath,
+      }),
+    ).toBeNull()
+    expect(existsSync(join(fixture.userDataPath, 'runtime-bin', 'ecc.cmd'))).toBe(false)
+  })
+
   it('resolves the development ECC shim by absolute path', () => {
     const fixture = createRepoFixture()
     writeFileSync(

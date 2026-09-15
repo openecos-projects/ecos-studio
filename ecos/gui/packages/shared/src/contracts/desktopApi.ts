@@ -1,4 +1,8 @@
 import type { DesignRuntimeApi } from './designRuntime.ts'
+import type { ProductCommandApi } from './productCommands.ts'
+import type { WorkspaceCreationModelApi } from './workspaceCreationModel.ts'
+import type { BackendWorkspaceApi } from './backendWorkspace.ts'
+import type { BackendProjectComparisonApi } from './backendProjectComparison.ts'
 import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
@@ -19,7 +23,11 @@ import type {
   ResourceOperationResult,
   ResourceUpdateCheckResult,
 } from './resources.ts'
-import type { EccRuntimeApi } from './eccRuntime.ts'
+import type {
+  EccRuntimeApi,
+  EccWorkspaceStepConfigurationReadResult,
+} from './eccRuntime.ts'
+import type { DesktopShutdownApi } from './shutdown.ts'
 import type {
   PdkBinding,
   PdkImportRequest,
@@ -28,15 +36,11 @@ import type {
   PdkResolveBindingRequest,
 } from './pdkInventory.ts'
 import type {
+  ProjectManifest,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
 } from '../utils/projectManifest.ts'
-import type {
-  DesktopEventUnsubscribe,
-  DesktopMenuEventId,
-  DesktopProjectFileChangedEvent,
-  DesktopProjectLogTailEvent,
-} from './desktopEvents.ts'
+import type { DesktopEventUnsubscribe, DesktopMenuEventId } from './desktopEvents.ts'
 import type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -46,7 +50,6 @@ import type {
 import type {
   DesktopAgentEvent,
   DesktopAgentInterruptRequest,
-  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunExecuteRequest,
   DesktopAgentWorkspaceRerunPrepareRequest,
   DesktopAgentWorkspaceRerunPrepareResult,
@@ -125,6 +128,28 @@ export interface ScannedRtlDirectory {
   files: string[]
 }
 
+export type HdlModuleDiscoveryStatus =
+  | 'complete'
+  | 'partial_read_failure'
+  | 'total_read_failure'
+  | 'incomplete'
+
+export interface HdlModuleDiscoveryRequest {
+  designName?: string
+  filelistPath?: string
+  manifestTopModule?: string
+  originVerilogPath?: string
+  rtlPaths?: string[]
+  sourceTopModule?: string
+}
+
+export interface HdlModuleDiscoveryResult {
+  candidates: string[]
+  reason?: string
+  status: HdlModuleDiscoveryStatus
+  suggested: string
+}
+
 export interface VersionInfo {
   gui: string
   runtime: string
@@ -139,15 +164,6 @@ export interface DesktopProjectTextFileTail {
   sizeBytes: number
 }
 
-export interface DesktopProjectTextFileUpdate {
-  content: string
-  fromOffsetBytes: number
-  nextOffsetBytes: number
-  sizeBytes: number
-  reset: boolean
-  truncated: boolean
-}
-
 /** A bounded sequential chunk from a project-scoped UTF-8 text file. */
 export interface DesktopProjectTextFileChunk {
   content: string
@@ -156,28 +172,20 @@ export interface DesktopProjectTextFileChunk {
   sizeBytes: number
 }
 
-export interface DesktopProjectLogTailSubscriptionOptions {
-  maxInitialChars?: number
-  maxChunkChars?: number
-  pollIntervalMs?: number
-}
-
 export interface DesktopProjectDirectoryEntry {
   name: string
   path: string
   type: 'file' | 'directory'
 }
 
-export interface DesktopProjectManagementWorkspaceTextsRequest {
+export interface DesktopProjectManagementWorkspaceStepConfigurationRequest {
   projectRoot: string
+  step: string
   workspacePath: string
-  paths: string[]
 }
 
-export interface DesktopProjectManagementWorkspaceTextsResult {
-  texts: Record<string, string | null>
-  unavailablePaths: string[]
-}
+export type DesktopProjectManagementWorkspaceStepConfigurationResult =
+  EccWorkspaceStepConfigurationReadResult
 
 export interface ChipViewerOpenRequest {
   projectPath: string
@@ -217,16 +225,16 @@ export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
   }
+  productCommands: ProductCommandApi
+  workspaceCreationModel: WorkspaceCreationModelApi
   window: {
     minimize(): Promise<void>
     toggleMaximize(): Promise<void>
     close(): Promise<void>
-    confirmClose(): Promise<void>
     setTitle(title: string): Promise<void>
     isMaximized(): Promise<boolean>
     setZoomFactor(factor: number): Promise<void>
     create(options?: { initialRoute?: string }): Promise<void>
-    onCloseRequested(listener: () => void): DesktopEventUnsubscribe
     onResized(listener: () => void): DesktopEventUnsubscribe
     onMaximizedChanged(listener: (isMaximized: boolean) => void): DesktopEventUnsubscribe
   }
@@ -249,12 +257,15 @@ export interface DesktopApi {
       request: ProjectManifestMutationRequest,
     ): Promise<ProjectManifestMutationResult>
   }
+  backendWorkspace: BackendWorkspaceApi
+  backendProjectComparison: BackendProjectComparisonApi
   projectManagement?: {
-    readManifest(projectRoot: string): Promise<string | null>
+    discoverProject(directory: string): Promise<ProjectManifest | null>
+    readManifest(projectRoot: string): Promise<ProjectManifest | null>
     listProjectEntries(projectRoot: string): Promise<string[]>
-    readWorkspaceTexts(
-      request: DesktopProjectManagementWorkspaceTextsRequest,
-    ): Promise<DesktopProjectManagementWorkspaceTextsResult>
+    readWorkspaceStepConfiguration(
+      request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
+    ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
@@ -284,38 +295,16 @@ export interface DesktopApi {
     openWaveformExternal(path: string): Promise<void>
     readProjectTextFile(path: string): Promise<string>
     readOptionalProjectTextFile(path: string): Promise<string | null>
-    readWorkspaceParameters(
-      workspacePath: string,
-    ): Promise<Record<string, unknown> | null>
-    hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean>
-    editWorkspaceParameters(
-      workspacePath: string,
-      edits: { json_path: (string | number)[]; value: unknown }[],
-    ): Promise<{ format: 'toml' | 'json'; path: string }>
-    applyWorkspaceParameterWrites(
-      workspacePath: string,
-      writes: DesktopAgentWorkspaceParameterWrite[],
-    ): Promise<void>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>
     readOptionalProjectTextFileTail?(
       path: string,
       maxChars: number,
     ): Promise<DesktopProjectTextFileTail | null>
-    readOptionalProjectTextFileUpdate?(
-      path: string,
-      fromOffsetBytes: number,
-      maxChars: number,
-    ): Promise<DesktopProjectTextFileUpdate | null>
     readOptionalProjectTextFileChunk?(
       path: string,
       fromOffsetBytes: number,
       maxBytes: number,
     ): Promise<DesktopProjectTextFileChunk | null>
-    subscribeProjectLogTail?(
-      path: string,
-      options: DesktopProjectLogTailSubscriptionOptions,
-      listener: (event: DesktopProjectLogTailEvent) => void,
-    ): Promise<DesktopEventUnsubscribe>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
@@ -329,13 +318,12 @@ export interface DesktopApi {
     retainProjectDirectoryReplacement(replacementId: string): Promise<void>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
     scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    discoverHdlModules(
+      request: HdlModuleDiscoveryRequest,
+    ): Promise<HdlModuleDiscoveryResult>
     listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>
     addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult>
     removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null>
-    watchProjectFile(
-      path: string,
-      listener: (event: DesktopProjectFileChangedEvent) => void,
-    ): Promise<DesktopEventUnsubscribe>
   }
   chipViewer: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
@@ -346,13 +334,6 @@ export interface DesktopApi {
     readHome(): Promise<Record<string, unknown> | null>
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
-    writeParameters(request: {
-      parameters: Record<string, unknown>
-      /** The workspace the renderer captured at dispatch time. Required so a
-       * save queued behind another writer cannot land after the window has
-       * switched to a different workspace. */
-      workspace: string
-    }): Promise<{ format: 'toml' | 'json'; path: string }>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
   }
   resources: {
@@ -385,6 +366,7 @@ export interface DesktopApi {
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi
+  shutdown?: DesktopShutdownApi
   agent?: {
     interrupt(request: DesktopAgentInterruptRequest): Promise<void>
     start(request: DesktopAgentStartRequest): Promise<void>

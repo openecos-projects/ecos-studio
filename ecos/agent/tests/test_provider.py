@@ -2,12 +2,19 @@ import json
 import threading
 from pathlib import Path
 
-from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
+from ecos_agent.codex_provider import (
+    CodexAppServerProposalProvider,
+    CodexProviderError,
+    _resolve_codex_bin,
+)
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.messages import EMPTY_CHOICE_VALUE
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
+from ecos_agent.workspace_rerun import (
+    GuiWorkspaceRerunResolver,
+    GuiWorkspaceRerunSource,
+)
 from ecos_agent.workspace_setup import (
     display_path,
     recommended_workspace_name,
@@ -123,7 +130,10 @@ def test_codex_rerun_parameter_prompt_requires_boolean_and_multi_knob_interpreta
     prompts: list[str] = []
 
     def capture_proposal(
-        _context: dict[str, object], system: str, _schema: dict[str, object], _model: object
+        _context: dict[str, object],
+        system: str,
+        _schema: dict[str, object],
+        _model: object,
     ) -> dict[str, object]:
         prompts.append(system)
         return {
@@ -182,16 +192,21 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
         "",
         "",
         "",
-        "",
         "target overflow is 0.1",
     ):
         _send(provider, session_id, message)
 
-    setup = next(event["workspaceSetup"] for event in events if event["type"] == "workspace_setup")
+    setup = next(
+        event["workspaceSetup"]
+        for event in events
+        if event["type"] == "workspace_setup"
+    )
     assert PROVIDER_ID == "ecos_agent"
     assert "execute" not in provider.__dict__
     assert setup["schema_version"] == "flow-agent.workspace_setup_contract.v2"
     assert setup["directory"] == str(project_root / "ws_0001")
+    assert setup["filelist"] == str(filelist)
+    assert setup["rtl_list"] == []
     assert setup["parameters"]["design"] == "gcd"
     assert setup["project_context"]["project_root"] == str(project_root)
     assert setup["parameters"]["target_overflow"] == 0.1
@@ -211,13 +226,17 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
     assert workspace_create["providerId"] == "ecos_agent"
 
 
-def test_numeric_semantic_fallback_fails_closed_when_codex_times_out(tmp_path: Path) -> None:
+def test_numeric_semantic_fallback_fails_closed_when_codex_times_out(
+    tmp_path: Path,
+) -> None:
     events: list[dict[str, object]] = []
 
     def mock_codex_timeout(_context: dict[str, object]) -> None:
         raise CodexProviderError("mock timeout", failure_class="timeout")
 
-    provider = EcosAgentProvider(emit=events.append, workspace_setup_parser=mock_codex_timeout)
+    provider = EcosAgentProvider(
+        emit=events.append, workspace_setup_parser=mock_codex_timeout
+    )
     session_id = provider.start_session({})["sessionId"]
     session = provider.sessions[session_id]
     session.phase = "workspace_overflow"
@@ -233,7 +252,9 @@ def test_numeric_semantic_fallback_fails_closed_when_codex_times_out(tmp_path: P
     assert not any(event["type"] == "workspace_setup" for event in events)
 
 
-def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path) -> None:
+def test_rerun_uses_the_open_gui_workspace_as_the_default_source(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "source-workspace"
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
@@ -248,7 +269,14 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
     provider = EcosAgentProvider(emit=events.append)
 
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {
+                "place.routability_opt": False,
+                "place.target_overflow": 0.1,
+            },
+        }
     )["sessionId"]
     _send(provider, session_id, "2")
 
@@ -262,7 +290,8 @@ def test_rerun_uses_the_open_gui_workspace_as_the_default_source(tmp_path: Path)
         (option["label"], option["value"]) for option in source_choice["options"]
     ] == [(str(workspace), "1")]
     assert any(
-        event["type"] == "tool" and "Preparing stage rerun" in str(event.get("text", ""))
+        event["type"] == "tool"
+        and "Preparing stage rerun" in str(event.get("text", ""))
         for event in events
     )
 
@@ -280,7 +309,9 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
         emit=events.append,
-        chat_response_parser=lambda _context: _chat_response(answer="Please describe your ECOS question."),
+        chat_response_parser=lambda _context: _chat_response(
+            answer="Please describe your ECOS question."
+        ),
     )
     session_id = provider.start_session({"mode": "home"})["sessionId"]
 
@@ -298,7 +329,9 @@ def test_home_mode_starts_with_primary_cta_not_operation_list() -> None:
     choice_count = len([event for event in events if event["type"] == "choice"])
     _send(provider, session_id, "2")
     assert provider.sessions[session_id].phase == "home_ready"
-    assert _last_event(events, "message")["text"] == "Please describe your ECOS question."
+    assert (
+        _last_event(events, "message")["text"] == "Please describe your ECOS question."
+    )
     assert len([event for event in events if event["type"] == "choice"]) == choice_count
 
 
@@ -316,13 +349,21 @@ def test_home_greeting_uses_codex_chat_fallback_without_advancing() -> None:
     _send(provider, session_id, "你好")
 
     assert provider.sessions[session_id].phase == "home_ready"
-    assert _last_event(events, "message")["text"] == "你好，我可以回答 ECOS 物理设计流程相关问题。"
-    assert _last_event(events, "message")["contract"]["schema_version"] == "flow-agent.gui_chat_response.v1"
+    assert (
+        _last_event(events, "message")["text"]
+        == "你好，我可以回答 ECOS 物理设计流程相关问题。"
+    )
+    assert (
+        _last_event(events, "message")["contract"]["schema_version"]
+        == "flow-agent.gui_chat_response.v1"
+    )
     assert len([event for event in events if event["type"] == "choice"]) == choice_count
     assert not any(event["type"] == "error" for event in events)
 
 
-def test_wizard_greeting_answers_without_losing_the_pending_input(tmp_path: Path) -> None:
+def test_wizard_greeting_answers_without_losing_the_pending_input(
+    tmp_path: Path,
+) -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
         emit=events.append,
@@ -339,7 +380,10 @@ def test_wizard_greeting_answers_without_losing_the_pending_input(tmp_path: Path
     _send(provider, session_id, "hello")
 
     assert session.phase == "workspace_design"
-    assert _last_event(events, "message")["text"] == "I can help while waiting for workspace_design."
+    assert (
+        _last_event(events, "message")["text"]
+        == "I can help while waiting for workspace_design."
+    )
     assert len([event for event in events if event["type"] == "choice"]) == choice_count
 
     _send(provider, session_id, "gcd")
@@ -347,7 +391,9 @@ def test_wizard_greeting_answers_without_losing_the_pending_input(tmp_path: Path
     assert session.phase == "workspace_flow_end"
 
 
-def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, monkeypatch) -> None:
+def test_gui_chat_response_prompt_is_read_only_and_structured(
+    tmp_path: Path, monkeypatch
+) -> None:
     codex = tmp_path / "codex"
     codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     codex.chmod(0o755)
@@ -373,7 +419,9 @@ def test_gui_chat_response_prompt_is_read_only_and_structured(tmp_path: Path, mo
     )
 
     assert response["answer"] == "Hello."
-    assert "Use retrieved_knowledge only as read-only factual context" in str(captured["prompt"])
+    assert "Use retrieved_knowledge only as read-only factual context" in str(
+        captured["prompt"]
+    )
     assert "Audited target-overflow knowledge." in str(captured["prompt"])
     assert captured["schema"]["required"] == ["schema_version", "operation", "answer"]
 
@@ -426,7 +474,11 @@ def test_workspace_mode_rerun_uses_bound_directory_without_design_prompt(
     provider = EcosAgentProvider(emit=events.append)
 
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {"place.target_density": 0.55},
+        }
     )["sessionId"]
     _send(provider, session_id, "2")
     _send(provider, session_id, "1")
@@ -472,7 +524,14 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     )
 
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {
+                "place.routability_opt": False,
+                "place.target_overflow": 0.1,
+            },
+        }
     )["sessionId"]
     for message in (
         "2",
@@ -485,7 +544,8 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     parameter_message = next(
         event
         for event in reversed(events)
-        if event["type"] == "message" and "Parameters available for this stage" in str(event["text"])
+        if event["type"] == "message"
+        and "Parameters available for this stage" in str(event["text"])
     )
     assert "| place.routability_opt | false |" in str(parameter_message["text"])
     assert "| place.target_overflow | 0.1 |" in str(parameter_message["text"])
@@ -520,27 +580,16 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
         {"knob_id": "place.routability_opt", "value": False},
         {"knob_id": "place.target_overflow", "value": 0.1},
     ]
-    assert rerun["writes"] == [
-        {
-            "file": "home/parameters.json",
-            "json_path": ["Routability opt flag"],
-            "knob_id": "place.routability_opt",
-            "surface": "parameters",
-            "value": 0,
-        },
-        {
-            "file": "home/parameters.json",
-            "json_path": ["Target overflow"],
-            "knob_id": "place.target_overflow",
-            "surface": "parameters",
-            "value": 0.1,
-        },
-    ]
+    assert "workspace_parameters" not in rerun
+    assert "step_configurations" not in rerun
 
     _send(
         provider,
         session_id,
-        "workspace_rerun_result:" + json.dumps({"rerun_id": "gcd_rerun_place", "status": "succeeded", "error": ""}),
+        "workspace_rerun_result:"
+        + json.dumps(
+            {"rerun_id": "gcd_rerun_place", "status": "succeeded", "error": ""}
+        ),
     )
 
     assert provider.sessions[session_id].phase == "operation"
@@ -549,13 +598,19 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     assert _last_event(events, "status")["status"] == "awaiting_choice"
 
 
-def test_rerun_workspace_invalid_path_reemits_current_workspace_choice(tmp_path: Path) -> None:
+def test_rerun_workspace_invalid_path_reemits_current_workspace_choice(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "source-workspace"
     workspace.mkdir()
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {"place.target_density": 0.55},
+        }
     )["sessionId"]
     session = provider.sessions[session_id]
     session.phase = "rerun_workspace"
@@ -579,7 +634,9 @@ def test_rerun_workspace_invalid_path_reemits_current_workspace_choice(tmp_path:
     )
 
 
-def test_workspace_contract_validation_failure_reemits_top_choice(tmp_path: Path) -> None:
+def test_workspace_contract_skips_top_module_chat_prompt(
+    tmp_path: Path,
+) -> None:
     rtl, _filelist, _sdc, pdk = _write_workspace_inputs(tmp_path)
     rtl.write_text("module other(input clk); endmodule\n", encoding="utf-8")
     events: list[dict[str, object]] = []
@@ -593,7 +650,7 @@ def test_workspace_contract_validation_failure_reemits_top_choice(tmp_path: Path
     session.workspace_setup = _proposal(
         workspace_name="ws_0001",
         design_name="gcd",
-        top_module="gcd",
+        top_module=None,
         clock_name="clk",
         frequency_mhz=100,
         max_fanout=32,
@@ -608,20 +665,34 @@ def test_workspace_contract_validation_failure_reemits_top_choice(tmp_path: Path
 
     _send(provider, session_id, "0.1")
 
-    assert session.phase == "workspace_top"
-    choice = _last_event(events, "choice")["choice"]
-    assert choice["title"] == "Top Module Name"
-    assert [option["value"] for option in choice["options"]] == ["gcd"]
-    assert _last_event(events, "status")["status"] == "awaiting_choice"
+    assert session.phase == "workspace_confirmation"
+    setup = next(
+        event["workspaceSetup"]
+        for event in events
+        if event["type"] == "workspace_setup"
+    )
+    assert setup["schema_version"] == "flow-agent.workspace_setup_contract.v2"
+    assert setup["parameters"]["top_module"] == ""
+    assert not any(
+        event.get("type") == "choice"
+        and str(event.get("choice", {}).get("title", "")) == "Top Module Name"
+        for event in events
+    )
 
 
-def test_workspace_parameter_request_uses_describe_change_prompt(tmp_path: Path) -> None:
+def test_workspace_parameter_request_uses_describe_change_prompt(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "gcd"
     workspace.mkdir()
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {"place.target_density": 0.55},
+        }
     )["sessionId"]
 
     _send(provider, session_id, "1")
@@ -629,7 +700,8 @@ def test_workspace_parameter_request_uses_describe_change_prompt(tmp_path: Path)
     assert provider.sessions[session_id].phase == "workspace_parameter_request"
     assert any(
         event["type"] == "message"
-        and "Describe the parameter change to save in the current workspace" in str(event["text"])
+        and "Describe the parameter change to save in the current workspace"
+        in str(event["text"])
         for event in events
     )
     assert not any(
@@ -658,7 +730,9 @@ def test_workspace_continue_uses_compact_confirm_without_command_table(
     assert contract["contract"]["fields"] == []
     assert "runAllFlow" not in str(contract["text"])
     assert str(workspace) in str(contract["text"])
-    assert "Continue the unfinished flow in the current workspace" in str(contract["text"])
+    assert "Continue the unfinished flow in the current workspace" in str(
+        contract["text"]
+    )
 
 
 def _workspace_with_place(tmp_path: Path) -> Path:
@@ -693,7 +767,8 @@ def _workspace_with_place(tmp_path: Path) -> Path:
 
 
 def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -> None:
-    workspace = _workspace_with_place(tmp_path)
+    workspace = tmp_path / "empty-workspace"
+    workspace.mkdir()
     events: list[dict[str, object]] = []
     parser_contexts: list[dict[str, object]] = []
 
@@ -710,7 +785,12 @@ def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -
         rerun_parameter_parser=parse_parameter,
     )
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceDesignId": "gcd",
+            "workspaceParameterValues": {"place.target_density": 0.55},
+        }
     )["sessionId"]
     _send(provider, session_id, "1")
     _send(provider, session_id, "lower target density")
@@ -741,14 +821,19 @@ def test_workspace_parameter_update_rejects_empty_patch(tmp_path: Path) -> None:
         rerun_parameter_parser=empty_patch,
     )
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {"place.target_density": 0.55},
+        }
     )["sessionId"]
     _send(provider, session_id, "1")
     _send(provider, session_id, "lower target density")
 
     assert provider.sessions[session_id].phase == "workspace_parameter_request"
     assert any(
-        event["type"] == "error" and "no parameter changes were proposed" in str(event["text"])
+        event["type"] == "error"
+        and "no parameter changes were proposed" in str(event["text"])
         for event in events
     )
     assert not any(event["type"] == "contract" for event in events)
@@ -762,7 +847,9 @@ def test_invalid_choice_and_creation_failed_copy_point_to_cards() -> None:
     assert "confirm again" in workspace_creation_failed("en", "disk full").lower()
 
 
-def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Path) -> None:
+def test_rerun_allocates_a_numbered_target_when_the_default_exists(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "gcd"
     workspace.mkdir()
     (tmp_path / "gcd_rerun_place").mkdir()
@@ -776,7 +863,9 @@ def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Pat
         stage_artifact_sha256={"place": "1" * 64},
     )
 
-    contract = GuiWorkspaceRerunResolver(tmp_path).freeze(source, "place", [], "single_step")
+    contract = GuiWorkspaceRerunResolver(tmp_path).freeze(
+        source, "place", [], "single_step"
+    )
 
     assert contract.target_workspace == str(tmp_path / "gcd_rerun_place_0001")
     assert contract.rerun_id == "gcd_rerun_place_0001"
@@ -850,7 +939,9 @@ def test_rerun_discovers_timing_opt_stage_with_sanitized_target(tmp_path: Path) 
         "timing_optimization_sizer/output/gcd_timing_optimization.def.gz"
     )
 
-    contract = resolver.freeze(discovery.source, "Timing optimization", [], "single_step")
+    contract = resolver.freeze(
+        discovery.source, "Timing optimization", [], "single_step"
+    )
     assert contract.rerun_id == "gcd_rerun_timing_optimization"
     assert contract.target_workspace == str(tmp_path / "gcd_rerun_timing_optimization")
 
@@ -868,7 +959,9 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     (output / "gcd_place.def.gz").write_bytes(b"def")
     config = workspace / "config"
     config.mkdir()
-    (config / "dreamplace_ecc.json").write_text('{"target_density": 0.2}', encoding="utf-8")
+    (config / "dreamplace_ecc.json").write_text(
+        '{"target_density": 0.2}', encoding="utf-8"
+    )
     events: list[dict[str, object]] = []
 
     def mock_codex_timeout(_context: dict[str, object]) -> None:
@@ -879,7 +972,11 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
         rerun_parameter_parser=mock_codex_timeout,
     )
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {"place.target_density": 0.2},
+        }
     )["sessionId"]
     for message in ("2", "1", "1", "reduce density"):
         _send(provider, session_id, message)
@@ -889,7 +986,9 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
     assert not any(event["type"] in {"contract", "workspace_rerun"} for event in events)
 
 
-def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path) -> None:
+def test_optional_path_steps_emit_skip_and_recommendation_choices(
+    tmp_path: Path,
+) -> None:
     project_root = tmp_path / "projects"
     project_root.mkdir()
     rtl, filelist, sdc, pdk = _write_workspace_inputs(project_root)
@@ -930,14 +1029,20 @@ def test_optional_path_steps_emit_skip_and_recommendation_choices(tmp_path: Path
     _send(provider, session_id, str(sdc))
     assert session.phase == "workspace_pdk"
     pdk_choice = _last_event(events, "choice")["choice"]
-    assert [option["label"] for option in pdk_choice["options"]] == ["Use recommended path"]
+    assert [option["label"] for option in pdk_choice["options"]] == [
+        "Use recommended path"
+    ]
     assert pdk_choice["options"][0]["value"] == display_path(str(pdk))
 
     _send(provider, session_id, pdk_choice["options"][0]["value"])
-    assert session.phase == "workspace_top"
-    top_choice = _last_event(events, "choice")["choice"]
-    assert top_choice["options"][0]["label"].startswith("Use default:")
-    assert top_choice["allowFreeText"] is True
+    assert session.phase == "workspace_clock"
+    clock_choice = _last_event(events, "choice")["choice"]
+    assert clock_choice["title"] == "Clock Signal Name"
+    assert not any(
+        event.get("type") == "choice"
+        and str(event.get("choice", {}).get("title", "")) == "Top Module Name"
+        for event in events
+    )
 
 
 def test_workspace_confirmation_accepts_deterministic_frequency_and_workspace_name(
@@ -986,7 +1091,9 @@ def test_workspace_confirmation_accepts_deterministic_frequency_and_workspace_na
     assert not any(event["type"] == "error" for event in events)
 
 
-def test_workspace_confirmation_accepts_explicit_external_pdk_path(tmp_path: Path) -> None:
+def test_workspace_confirmation_accepts_explicit_external_pdk_path(
+    tmp_path: Path,
+) -> None:
     project_root = tmp_path / "gcd"
     project_root.mkdir()
     rtl, _filelist, _sdc, old_pdk = _write_workspace_inputs(project_root)
@@ -1033,11 +1140,15 @@ def test_workspace_confirmation_accepts_explicit_external_pdk_path(tmp_path: Pat
     assert session.phase == "workspace_confirmation"
     assert session.workspace_inputs.pdk_root == str(external_pdk.resolve())
     assert not any(event["type"] == "error" for event in events)
-    assert any(
-        event["type"] == "workspace_setup"
-        and event.get("workspaceSetup", {}).get("pdk_root") == str(external_pdk.resolve())
-        for event in events
-    ) or session.workspace_contract is not None
+    assert (
+        any(
+            event["type"] == "workspace_setup"
+            and event.get("workspaceSetup", {}).get("pdk_root")
+            == str(external_pdk.resolve())
+            for event in events
+        )
+        or session.workspace_contract is not None
+    )
 
 
 def test_operation_and_cancellation_choices_preserve_the_controlled_paths() -> None:
@@ -1084,7 +1195,9 @@ def test_running_turn_can_be_interrupted_and_the_session_accepts_another_message
         assert release.wait(timeout=2)
         return _proposal(target_overflow=0.1)
 
-    provider = EcosAgentProvider(emit=events.append, workspace_setup_parser=blocking_parser)
+    provider = EcosAgentProvider(
+        emit=events.append, workspace_setup_parser=blocking_parser
+    )
     session_id = provider.start_session({})["sessionId"]
     session = provider.sessions[session_id]
     session.phase = "workspace_overflow"
@@ -1111,10 +1224,13 @@ def test_running_turn_can_be_interrupted_and_the_session_accepts_another_message
 
     _send(provider, session_id, "0.1")
 
-    assert sum(
-        event["type"] == "status" and event.get("status") == "running"
-        for event in events
-    ) == 2
+    assert (
+        sum(
+            event["type"] == "status" and event.get("status") == "running"
+            for event in events
+        )
+        == 2
+    )
 
 
 def test_start_session_binds_project_root_and_welcome_shows_both_contexts(
@@ -1230,7 +1346,9 @@ def test_rtl_recommendation_emits_a_path_choice_without_embedding_the_path(
     rtl_choice = _last_event(events, "choice")["choice"]
     assert rtl_choice["title"] == "RTL path"
     assert rtl_choice["allowFreeText"] is True
-    assert [option["label"] for option in rtl_choice["options"]] == ["Use recommended path"]
+    assert [option["label"] for option in rtl_choice["options"]] == [
+        "Use recommended path"
+    ]
     assert rtl_choice["options"][0]["value"] == display_path(str(rtl))
     rtl_prompt_text = next(
         event["text"]
@@ -1322,7 +1440,9 @@ def test_workspace_mode_option_four_prefills_project_root(tmp_path: Path) -> Non
     assert session.workspace_inputs.project_root == str(project)
 
 
-def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(tmp_path: Path) -> None:
+def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(
+    tmp_path: Path,
+) -> None:
     events: list[dict[str, object]] = []
 
     def streaming_parser(context: dict[str, object]) -> GuiWorkspaceSetupProposal:
@@ -1332,7 +1452,9 @@ def test_tool_streaming_reuses_one_message_id_for_all_turn_deltas(tmp_path: Path
         progress("Validating the structured proposal.")
         return _proposal(target_overflow=0.1)
 
-    provider = EcosAgentProvider(emit=events.append, workspace_setup_parser=streaming_parser)
+    provider = EcosAgentProvider(
+        emit=events.append, workspace_setup_parser=streaming_parser
+    )
     session_id = provider.start_session({})["sessionId"]
     session = provider.sessions[session_id]
     session.phase = "workspace_overflow"
@@ -1372,7 +1494,11 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
         chat_response_parser=parse_operation,
     )
     session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
+        {
+            "directory": str(workspace),
+            "mode": "workspace",
+            "workspaceParameterValues": {"place.target_density": 0.55},
+        }
     )["sessionId"]
     _send(provider, session_id, "lower target density")
 
@@ -1384,7 +1510,9 @@ def test_operation_keyword_routes_parameter_nl_without_codex(tmp_path: Path) -> 
     )
 
 
-def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_path: Path) -> None:
+def test_operation_question_uses_place_knowledge_without_parameter_update(
+    tmp_path: Path,
+) -> None:
     workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
     chat_contexts: list[dict[str, object]] = []
@@ -1392,9 +1520,13 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
     def unexpected_parameter_update(_context: dict[str, object]) -> dict[str, object]:
         raise AssertionError("a question must not enter the parameter-update parser")
 
-    def answer_with_retrieved_knowledge(context: dict[str, object]) -> dict[str, object]:
+    def answer_with_retrieved_knowledge(
+        context: dict[str, object],
+    ) -> dict[str, object]:
         chat_contexts.append(context)
-        return _chat_response(answer="The stop-overflow threshold ends global placement.")
+        return _chat_response(
+            answer="The stop-overflow threshold ends global placement."
+        )
 
     provider = EcosAgentProvider(
         emit=events.append,
@@ -1416,14 +1548,18 @@ def test_operation_question_uses_place_knowledge_without_parameter_update(tmp_pa
     assert answer["contract"]["knowledge"]["entity_ids"] == retrieved["entity_ids"]
 
 
-def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(tmp_path: Path) -> None:
+def test_operation_question_falls_back_to_audited_knowledge_when_codex_fails(
+    tmp_path: Path,
+) -> None:
     workspace = _workspace_with_place(tmp_path)
     events: list[dict[str, object]] = []
 
     def unavailable_codex(_context: dict[str, object]) -> dict[str, object]:
         raise CodexProviderError("Codex timed out", failure_class="timeout")
 
-    provider = EcosAgentProvider(emit=events.append, chat_response_parser=unavailable_codex)
+    provider = EcosAgentProvider(
+        emit=events.append, chat_response_parser=unavailable_codex
+    )
     session_id = provider.start_session(
         {"directory": str(workspace), "mode": "workspace"}
     )["sessionId"]
@@ -1444,7 +1580,9 @@ def test_operation_question_codex_fallback_disallows_operations(tmp_path: Path) 
 
     def answer_chat(context: dict[str, object]) -> dict[str, object]:
         contexts.append(context)
-        return _chat_response(answer="This workspace has no published answer for that question.")
+        return _chat_response(
+            answer="This workspace has no published answer for that question."
+        )
 
     provider = EcosAgentProvider(emit=events.append, chat_response_parser=answer_chat)
     session_id = provider.start_session(
@@ -1515,19 +1653,24 @@ def test_operation_codex_fallback_fails_closed(tmp_path: Path) -> None:
 
     assert provider.sessions[session_id].phase == "operation"
     assert any(
-        event["type"] == "error" and "Unable to answer the request" in str(event["text"])
+        event["type"] == "error"
+        and "Unable to answer the request" in str(event["text"])
         for event in events
     )
     assert len([event for event in events if event["type"] == "choice"]) == 1
 
 
-def test_operation_codex_fallback_answers_unmatched_nl_without_error(tmp_path: Path) -> None:
+def test_operation_codex_fallback_answers_unmatched_nl_without_error(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
     events: list[dict[str, object]] = []
 
     def parse_operation(_context: dict[str, object]) -> dict[str, object]:
-        return _chat_response(answer="Hello. What would you like to know about this workspace?")
+        return _chat_response(
+            answer="Hello. What would you like to know about this workspace?"
+        )
 
     provider = EcosAgentProvider(
         emit=events.append,
@@ -1540,7 +1683,8 @@ def test_operation_codex_fallback_answers_unmatched_nl_without_error(tmp_path: P
 
     assert provider.sessions[session_id].phase == "operation"
     assert any(
-        event["type"] == "message" and "What would you like to know" in str(event["text"])
+        event["type"] == "message"
+        and "What would you like to know" in str(event["text"])
         for event in events
     )
     assert not any(event["type"] == "error" for event in events)

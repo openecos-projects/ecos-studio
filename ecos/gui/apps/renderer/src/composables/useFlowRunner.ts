@@ -1,6 +1,5 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
 import {
@@ -11,7 +10,10 @@ import {
   type RunStepResponse,
 } from '@/api/flow'
 import type { DesignTool } from '@ecos-studio/shared'
-import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
+import {
+  WORKSPACE_RESULT_INVALIDATION_SCOPES,
+  type WorkspaceInvalidationScope,
+} from './useWorkspaceLifecycle'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
   markHomeRunArtifactResetAwaitingBackendStart,
@@ -69,7 +71,6 @@ function clearTransientInteractionLocks() {
  * 同一套 renderer runtime protocol，状态更新由事件消费者直接完成。
  */
 export function useFlowRunner() {
-  const { ensureDesktopRuntime } = useDesktopRuntime()
   const {
     currentProject,
     ensureApiReady,
@@ -89,6 +90,14 @@ export function useFlowRunner() {
   const error = ref<string | null>(null)
   const lastRunResult = ref<RunStepResponse | null>(null)
 
+  function currentWorkspaceRevision(): number {
+    const revision = workspaceSession.value.workspaceRevision
+    if (!Number.isInteger(revision)) {
+      throw new Error('The current Workspace revision is unavailable.')
+    }
+    return revision!
+  }
+
   /**
    * 获取当前步骤（从动态路由参数获取）
    */
@@ -98,15 +107,6 @@ export function useFlowRunner() {
     if (stepParam) {
       return stepParam
     }
-  }
-
-  function showDesktopRequiredToast() {
-    showToast({
-      severity: 'warn',
-      summary: 'Desktop App Required',
-      detail: 'Flow execution is only available in the desktop app.',
-      life: 5000,
-    })
   }
 
   function getCurrentWorkspacePath(): string | null {
@@ -151,13 +151,19 @@ export function useFlowRunner() {
     return { directory, workspaceHandle }
   }
 
-  function observeRuntimeOperation(operationId: string, directory: string): void {
-    void waitForRuntimeOperation(operationId)
+  function observeRuntimeOperation(
+    operationId: string,
+    directory: string,
+    workspaceHandle: string,
+  ): void {
+    void waitForRuntimeOperation(operationId, { workspaceHandle })
       .then(() => {
         // The main-process operation tracker is authoritative when renderer IPC
         // delivery was delayed or replayed. Reconcile resource-backed panels
         // before releasing the shared run lock.
-        invalidateWorkspaceResources('all')
+        if (getCurrentWorkspacePath() === directory) {
+          invalidateWorkspaceResources(WORKSPACE_RESULT_INVALIDATION_SCOPES)
+        }
       })
       .catch((reason: unknown) => {
         error.value = reason instanceof Error ? reason.message : String(reason)
@@ -180,15 +186,6 @@ export function useFlowRunner() {
     if (!step) {
       console.warn('Unable to get current step')
       return null
-    }
-
-    // 检查是否在 desktop runtime 环境中
-    if (!ensureDesktopRuntime()) {
-      console.warn(
-        'Not running in desktop runtime environment, cannot execute ECC RPC flow command',
-      )
-      showDesktopRequiredToast()
-      return { step: step as StepEnum, state: StateEnum.Invalid }
     }
 
     if (!(await ensureApiReady())) {
@@ -256,13 +253,18 @@ export function useFlowRunner() {
       }
 
       const operation = await startStepOperationApi({
+        expectedWorkspaceRevision: currentWorkspaceRevision(),
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         resetDependents: Boolean(options.resetDependents),
         step,
         workspaceHandle: requestScope.workspaceHandle,
       })
-      observeRuntimeOperation(operation.operationId, directory)
+      observeRuntimeOperation(
+        operation.operationId,
+        directory,
+        requestScope.workspaceHandle,
+      )
       lastRunResult.value = { step: step as StepEnum, state: StateEnum.Ongoing }
       showToast({
         severity: 'info',
@@ -299,15 +301,6 @@ export function useFlowRunner() {
    * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
    */
   async function runAllFlow(options: FlowRunOptions = {}): Promise<any | null> {
-    // 检查是否在 desktop runtime 环境中
-    if (!ensureDesktopRuntime()) {
-      console.warn(
-        'Not running in desktop runtime environment, cannot execute ECC RPC flow command',
-      )
-      showDesktopRequiredToast()
-      return null
-    }
-
     if (!(await ensureApiReady())) {
       return null
     }
@@ -379,13 +372,18 @@ export function useFlowRunner() {
       }
 
       const operation = await startFlowOperationApi({
+        expectedWorkspaceRevision: currentWorkspaceRevision(),
         idempotencyKey: crypto.randomUUID(),
         rerun: Boolean(options.rerun),
         workspaceHandle: requestScope.workspaceHandle,
       })
       // Keep the rerun marker until the backend emits its authoritative
       // rerun-prepared protocol event. A failed start must clear it below.
-      observeRuntimeOperation(operation.operationId, directory)
+      observeRuntimeOperation(
+        operation.operationId,
+        directory,
+        requestScope.workspaceHandle,
+      )
       showToast({
         severity: 'info',
         summary: 'RTL2GDS Started',

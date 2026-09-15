@@ -164,6 +164,22 @@
                   >
                     Workspace not recognized
                   </span>
+                  <span
+                    v-if="project.committedRevision !== undefined"
+                    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    :class="
+                      project.committedFreshness === 'stale'
+                        ? 'bg-amber-500/10 text-amber-500'
+                        : 'bg-(--accent-color)/10 text-(--accent-color)'
+                    "
+                    :title="project.committedVerifiedAt"
+                  >
+                    {{
+                      project.committedFreshness === 'stale'
+                        ? 'Stale · last verified'
+                        : 'Last verified'
+                    }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -209,19 +225,7 @@ import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
 import { requestOpenStepConfigAfterCreate } from '@/composables/openStepConfigAfterCreate'
-import { waitForDesktopApi } from '@/platform/desktop'
-import {
-  hasCanonicalDieDimensions,
-  losslessNumberList,
-  losslessOptionalNumber,
-  losslessOptionalString,
-  losslessOptionalRecord,
-  scalarMarginFromCore,
-} from '@/utils/numbers'
-import {
-  readOptionalProjectTextFile,
-  readWorkspaceParametersFile,
-} from '@/utils/projectFiles'
+import { getDesktopApi } from '@/platform/desktop'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
@@ -335,53 +339,36 @@ const prefillWorkspaceDirectory = async () => {
   const startStep = queryString(route.query.startStep)
   const endStep = queryString(route.query.endStep)
   const workspaceName = workspacePath.split('/').filter(Boolean).pop() || 'workspace'
-  let sourceWorkspaceConfig: ProjectWorkspaceInitialConfig | undefined
-
   await registerProjectRootForProjectManagement(projectRoot)
-  // Guard and parse failures (an unrepresentable value, a malformed config)
-  // must abort the prefill instead of silently becoming wizard defaults;
-  // genuinely missing files already read as null and are tolerated above.
-  sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
-
-  initialWizardConfig.value = mergeBranchInitialConfig(
-    {
-      directory: workspacePath,
-      origin_def: originDef,
-      origin_verilog: originVerilog,
-      pdk: sourceWorkspaceConfig?.pdk,
-      pdk_root: sourceWorkspaceConfig?.pdk_root,
-      sdc: sourceSdc || sourceWorkspaceConfig?.sdc,
-      pdk_config_mode: sourceWorkspaceConfig?.pdk_config_mode,
-      pdk_config: sourceWorkspaceConfig?.pdk_config,
-      pdk_json: sourceWorkspaceConfig?.pdk_json,
-      source_config: sourceWorkspaceConfig,
-      source_context: {
-        projectName,
-        projectRoot,
-        workspaceId: sourceWorkspace,
-        workspaceName: sourceWorkspace,
-        workspacePath: sourceWorkspacePath,
-        step: sourceStep,
-        outputPath: sourceOutputPath,
-        outputType: sourceOutputType,
-        startStep,
-      },
-      parameters: {
-        ...sourceWorkspaceConfig?.parameters,
-        design:
-          designName || (projectName ? `${projectName}_${workspaceName}` : workspaceName),
-        description:
-          sourceWorkspace && sourceStep
-            ? `Created from ${sourceWorkspace} ${sourceStep} output`
-            : 'Created from Project Management',
-        source_output_path: sourceOutputPath,
-        source_output_type: sourceOutputType,
-        start_step: startStep,
-        end_step: endStep,
-      },
+  initialWizardConfig.value = {
+    directory: workspacePath,
+    origin_def: originDef,
+    origin_verilog: originVerilog,
+    sdc: sourceSdc,
+    source_context: {
+      projectName,
+      projectRoot,
+      workspaceId: sourceWorkspace,
+      workspaceName: sourceWorkspace,
+      workspacePath: sourceWorkspacePath,
+      step: sourceStep,
+      outputPath: sourceOutputPath,
+      outputType: sourceOutputType,
+      startStep,
     },
-    sourceWorkspaceConfig,
-  )
+    parameters: {
+      design:
+        designName || (projectName ? `${projectName}_${workspaceName}` : workspaceName),
+      description:
+        sourceWorkspace && sourceStep
+          ? `Created from ${sourceWorkspace} ${sourceStep} output`
+          : 'Created from Project Management',
+      source_output_path: sourceOutputPath,
+      source_output_type: sourceOutputType,
+      start_step: startStep,
+      end_step: endStep,
+    },
+  }
   showWizard.value = true
 }
 
@@ -391,194 +378,11 @@ async function registerProjectRootForProjectManagement(
   if (!projectRoot) return
 
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     await desktopApi.workspace.registerProjectRoot(projectRoot)
   } catch (error) {
     console.warn('Failed to register project root for workspace defaults.', error)
   }
-}
-
-async function loadSourceWorkspaceInitialConfig(
-  sourceWorkspacePath: string,
-): Promise<ProjectWorkspaceInitialConfig | undefined> {
-  if (!sourceWorkspacePath) return undefined
-
-  const [parametersJson, pdkText, dbConfigText] = await Promise.all([
-    readWorkspaceParametersFile(sourceWorkspacePath),
-    readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
-    readOptionalProjectTextFile('config/db_ecc.json', {
-      projectPath: sourceWorkspacePath,
-    }),
-  ])
-
-  const pdkJson = parseOptionalJson(pdkText)
-  const dbConfigJson = parseOptionalJson(dbConfigText)
-  const dbInput = optionalRecord(dbConfigJson?.INPUT)
-  const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
-
-  return {
-    pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
-    pdk_root:
-      optionalString(parametersJson?.['PDK Root']) ||
-      optionalString(parametersJson?.pdk_root),
-    sdc:
-      sourceWorkspaceSdcPath(sourceWorkspacePath, parametersJson) ||
-      optionalString(pdkJson?.sdc) ||
-      optionalString(dbInput?.sdc_path),
-    pdk_config_mode: pdkConfig.mode,
-    pdk_config: pdkConfig,
-    pdk_json: pdkText ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json` : '',
-    parameters: normalizeSourceParameters(parametersJson),
-  }
-}
-
-function mergeBranchInitialConfig(
-  branchConfig: ProjectWorkspaceInitialConfig,
-  sourceWorkspaceConfig?: ProjectWorkspaceInitialConfig,
-): ProjectWorkspaceInitialConfig {
-  if (!sourceWorkspaceConfig) return branchConfig
-
-  return {
-    ...sourceWorkspaceConfig,
-    ...branchConfig,
-    origin_def: branchConfig.origin_def || '',
-    origin_verilog: branchConfig.origin_verilog || '',
-    parameters: {
-      ...sourceWorkspaceConfig.parameters,
-      ...branchConfig.parameters,
-    },
-  }
-}
-
-function sourceWorkspaceSdcPath(
-  sourceWorkspacePath: string,
-  parametersJson: Record<string, unknown> | null,
-): string {
-  const designName =
-    optionalString(parametersJson?.Design) || optionalString(parametersJson?.design)
-  if (!designName) return ''
-  return `${normalizePath(sourceWorkspacePath)}/origin/${designName}.sdc`
-}
-
-function parseOptionalJson(content: string | null): Record<string, unknown> | null {
-  if (!content) return null
-  try {
-    return JSON.parse(content) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-function normalizeSourceParameters(
-  parametersJson: Record<string, unknown> | null,
-): Record<string, unknown> {
-  if (!parametersJson) return {}
-  const dieAreaRecord =
-    optionalRecord(parametersJson['Die Area']) ??
-    optionalRecord(parametersJson.die_area) ??
-    {}
-  const die =
-    optionalRecord(parametersJson.Die) ?? optionalRecord(parametersJson.die) ?? {}
-  const core =
-    optionalRecord(parametersJson.Core) ?? optionalRecord(parametersJson.core) ?? {}
-  const dieSize = numberList(die.Size ?? die.size)
-  const coreMargin = numberList(core.Margin ?? core.margin)
-  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieAreaRecord)
-
-  return {
-    design:
-      optionalString(parametersJson.Design) || optionalString(parametersJson.design),
-    top_module:
-      optionalString(parametersJson['Top module']) ||
-      optionalString(parametersJson.top_module),
-    clock: optionalString(parametersJson.Clock) || optionalString(parametersJson.clock),
-    frequency_max: optionalNumber(
-      parametersJson['Frequency max [MHz]'] ?? parametersJson.frequency_max,
-      50,
-    ),
-    max_fanout: optionalNumber(
-      parametersJson['Max fanout'] ?? parametersJson.max_fanout,
-      32,
-    ),
-    die_area_mode:
-      optionalString(dieAreaRecord.mode) ||
-      optionalString(parametersJson.die_area_mode) ||
-      (hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height' : ''),
-    die_width: optionalNumber(
-      dieAreaRecord.width ?? dieSize[0] ?? parametersJson.die_width,
-      100,
-    ),
-    die_height: optionalNumber(
-      dieAreaRecord.height ?? dieSize[1] ?? parametersJson.die_height,
-      100,
-    ),
-    utilitization: optionalNumber(
-      dieAreaRecord.utilitization ??
-        core.Utilitization ??
-        core.utilitization ??
-        parametersJson.utilitization,
-      0.6,
-    ),
-    margin: optionalNumber(
-      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
-        dieAreaRecord.margin ??
-        parametersJson.margin,
-      0,
-    ),
-  }
-}
-
-function normalizeSourcePdkConfig(
-  pdkJson: Record<string, unknown> | null,
-  dbConfigJson: Record<string, unknown> | null,
-) {
-  const dbInput = optionalRecord(dbConfigJson?.INPUT)
-  const techLef = stringList(
-    pdkJson?.tech_lef ??
-      pdkJson?.tech ??
-      pdkJson?.selected_tech_lef ??
-      dbInput?.tech_lef_path,
-  )
-  const cellLef = stringList(
-    pdkJson?.cell_lef ?? pdkJson?.lefs ?? pdkJson?.cell_lef_list ?? dbInput?.lef_paths,
-  )
-  const liberty = stringList(
-    pdkJson?.liberty ?? pdkJson?.libs ?? pdkJson?.liberty_list ?? dbInput?.lib_path,
-  )
-  const hasManualResources =
-    techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
-
-  return {
-    mode: hasManualResources ? ('manual' as const) : ('default' as const),
-    tech_lef: techLef,
-    cell_lef: cellLef,
-    liberty,
-  }
-}
-
-function optionalRecord(value: unknown): Record<string, unknown> | null {
-  return losslessOptionalRecord(value, 'workspace parameter')
-}
-
-function stringList(value: unknown): string[] {
-  if (Array.isArray(value))
-    return value.filter(
-      (item): item is string => typeof item === 'string' && item.trim() !== '',
-    )
-  if (typeof value === 'string' && value.trim()) return [value.trim()]
-  return []
-}
-
-function optionalString(value: unknown): string {
-  return losslessOptionalString(value, 'workspace parameter')
-}
-
-function optionalNumber(value: unknown, fallback: number): number {
-  return losslessOptionalNumber(value, fallback, 'workspace parameter')
-}
-
-function numberList(value: unknown): number[] {
-  return losslessNumberList(value, 'workspace parameter')
 }
 
 function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | undefined {
@@ -680,6 +484,7 @@ const formatDate = (date: Date) => {
 function statusBadgeClass(status: ProjectStatus): string {
   const map: Record<ProjectStatus, string> = {
     success: 'bg-emerald-500/15 text-emerald-400',
+    warning: 'bg-amber-500/15 text-amber-400',
     failed: 'bg-red-500/15 text-red-400',
     running: 'bg-blue-500/15 text-blue-400',
     in_progress: 'bg-amber-500/15 text-amber-400',
@@ -691,6 +496,7 @@ function statusBadgeClass(status: ProjectStatus): string {
 function statusLabel(status: ProjectStatus): string {
   const map: Record<ProjectStatus, string> = {
     success: 'Success',
+    warning: 'Completed with warnings',
     failed: 'Failed',
     running: 'Running',
     in_progress: 'In Progress',

@@ -229,10 +229,10 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
     return bundleHomeBin ? join(bundleHomeBin, executableName) : null
   }
 
+  const repoRoot = findRepoRootFromAppPath(options.appPath)
+  if (!repoRoot) return null
   const developmentBinDir = resolveDevelopmentEccBinDir(options)
-  if (!developmentBinDir) {
-    return null
-  }
+  if (!developmentBinDir) return null
 
   const candidate = join(developmentBinDir, executableName)
   return existsSync(candidate) ? candidate : null

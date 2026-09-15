@@ -1,5 +1,11 @@
 import { watch, type Ref } from 'vue'
-import type { RuntimeEventResponse } from '@/api/runtimeEvents'
+import type { DesignRuntimeEvent } from '@ecos-studio/shared'
+import {
+  backendRuntimeEventKind,
+  backendRuntimeEventMessage,
+  backendRuntimeEventState,
+  backendRuntimeEventStep,
+} from '@/api/backendRuntimeEvents'
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined
@@ -9,8 +15,8 @@ function normalizedPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
-function sameWorkspace(event: RuntimeEventResponse, workspacePath: string): boolean {
-  const directory = stringValue(event.data?.directory)
+function sameWorkspace(event: DesignRuntimeEvent, workspacePath: string): boolean {
+  const directory = stringValue(event.workspaceDirectory)
   return !directory || normalizedPath(directory) === normalizedPath(workspacePath)
 }
 
@@ -22,7 +28,7 @@ function sameWorkspace(event: RuntimeEventResponse, workspacePath: string): bool
 export function useAgentFlowProgress(
   report: (message: string) => void,
   onFlowChanged: () => void = () => undefined,
-  runtimeEvents: Readonly<Ref<RuntimeEventResponse[]>>,
+  runtimeEvents: Readonly<Ref<DesignRuntimeEvent[]>>,
 ) {
   let activeWorkspacePath = ''
   let active = false
@@ -46,13 +52,13 @@ export function useAgentFlowProgress(
     (event) => {
       if (!active || !event || !sameWorkspace(event, activeWorkspacePath)) return
 
-      const data = event.data
-      const eventId = stringValue(data.runtimeEventId)
+      const protocol = event.type === 'runtime.protocol' ? event.event : null
+      const eventId = protocol?.eventId
       const eventKey = eventId
         ? [
-            stringValue(data.workspaceId),
-            stringValue(data.runtimeInstanceId),
-            stringValue(data.jobId),
+            protocol?.workspaceId,
+            protocol?.runtimeInstanceId,
+            protocol?.operationId,
             eventId,
           ].join('\u001f')
         : ''
@@ -64,20 +70,22 @@ export function useAgentFlowProgress(
         }
       }
 
-      const step = stringValue(data.step)
-      switch (data.runtimeProtocolType) {
+      const step = backendRuntimeEventStep(event)
+      switch (backendRuntimeEventKind(event)) {
         case 'step.started':
           if (step) report(`Running ${step}.`)
           break
         case 'step.completed': {
           if (!step) break
-          const state = stringValue(data.state)?.toLowerCase()
+          const state = backendRuntimeEventState(event)?.toLowerCase()
           report(state === 'success' ? `Completed ${step}.` : `Failed ${step}.`)
           onFlowChanged()
           break
         }
         case 'operation.failed':
-          if (event.message[0]) report(`Flow failed: ${event.message[0]}`)
+          if (backendRuntimeEventMessage(event)) {
+            report(`Flow failed: ${backendRuntimeEventMessage(event)}`)
+          }
           break
         case 'operation.cancelled':
           report('Flow cancelled.')

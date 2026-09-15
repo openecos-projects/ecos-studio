@@ -1,18 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  appendFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { DesktopProjectFileChangedEvent } from '@ecos-studio/shared'
 import { WorkspaceService } from './workspaceService'
 
 const tempDirectories: string[] = []
@@ -67,24 +56,6 @@ function createWorkspaceService(
   }
 }
 
-async function waitForProjectFileEvent(
-  listener: ReturnType<typeof vi.fn>,
-  event: Partial<DesktopProjectFileChangedEvent>,
-): Promise<void> {
-  await vi.waitFor(
-    () => {
-      expect(listener).toHaveBeenCalledWith(expect.objectContaining(event))
-    },
-    { timeout: 3000 },
-  )
-}
-
-async function delay(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, ms)
-  })
-}
-
 describe('WorkspaceService', () => {
   afterEach(async () => {
     await Promise.all(
@@ -129,23 +100,23 @@ describe('WorkspaceService', () => {
 
   it('reads UTF-8 project text in bounded sequential chunks', async () => {
     const directory = await createTempDir('ecos-workspace-service-chunk-')
-    const filePath = join(directory, 'place_dreamplace', 'log', 'place.log')
-    await mkdir(join(directory, 'place_dreamplace', 'log'), { recursive: true })
+    const filePath = join(directory, 'fixFanout_ecc', 'log', 'fixFanout.log')
+    await mkdir(join(directory, 'fixFanout_ecc', 'log'), { recursive: true })
     await writeFile(filePath, 'ab中cd', 'utf8')
 
     const { service } = createWorkspaceService(directory, filePath)
     const first = await service.readOptionalProjectTextFileChunk(
-      '/workspace/place_dreamplace/log/place.log',
+      '/workspace/fixFanout_ecc/log/fixFanout.log',
       0,
       4,
     )
     const second = await service.readOptionalProjectTextFileChunk(
-      '/workspace/place_dreamplace/log/place.log',
+      '/workspace/fixFanout_ecc/log/fixFanout.log',
       first?.nextOffsetBytes ?? 0,
       4,
     )
     const third = await service.readOptionalProjectTextFileChunk(
-      '/workspace/place_dreamplace/log/place.log',
+      '/workspace/fixFanout_ecc/log/fixFanout.log',
       second?.nextOffsetBytes ?? 0,
       4,
     )
@@ -224,53 +195,6 @@ describe('WorkspaceService', () => {
       content: 'third line',
       truncated: true,
       sizeBytes: Buffer.byteLength('first line\nsecond line\nthird line'),
-    })
-  })
-
-  it('reads appended text updates from a byte offset', async () => {
-    const directory = await createTempDir('ecos-workspace-service-update-')
-    const filePath = join(directory, 'Route_openroad', 'log', 'Route.log')
-    await mkdir(join(directory, 'Route_openroad', 'log'), { recursive: true })
-    await writeFile(filePath, 'alpha\nbeta', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const offset = Buffer.byteLength('alpha')
-
-    await expect(
-      service.readOptionalProjectTextFileUpdate(
-        '/workspace/Route_openroad/log/Route.log',
-        offset,
-        32,
-      ),
-    ).resolves.toMatchObject({
-      content: '\nbeta',
-      fromOffsetBytes: offset,
-      nextOffsetBytes: Buffer.byteLength('alpha\nbeta'),
-      sizeBytes: Buffer.byteLength('alpha\nbeta'),
-      reset: false,
-      truncated: false,
-    })
-  })
-
-  it('resets text updates when the unread range exceeds the bounded tail window', async () => {
-    const directory = await createTempDir('ecos-workspace-service-update-reset-')
-    const filePath = join(directory, 'Route_openroad', 'log', 'Route.log')
-    await mkdir(join(directory, 'Route_openroad', 'log'), { recursive: true })
-    await writeFile(filePath, '0123456789abcdefghijklmnopqrstuvwxyz', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-
-    await expect(
-      service.readOptionalProjectTextFileUpdate(
-        '/workspace/Route_openroad/log/Route.log',
-        0,
-        10,
-      ),
-    ).resolves.toMatchObject({
-      content: 'qrstuvwxyz',
-      nextOffsetBytes: Buffer.byteLength('0123456789abcdefghijklmnopqrstuvwxyz'),
-      reset: true,
-      truncated: true,
     })
   })
 
@@ -749,464 +673,21 @@ describe('WorkspaceService', () => {
     expect(runtimeMutationGuard.isWorkspaceRuntimeActive).toHaveBeenCalledWith(directory)
   })
 
-  it('watches a project-scoped file through the validated canonical path', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-')
-    const filePath = join(directory, 'flow.json')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
-
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    expect(subscriptionId).toMatch(/^project-file-watch-/)
-    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-      '/workspace/home/flow.json',
-    )
-
-    await service.unwatchProjectFile(subscriptionId)
-  })
-
-  it('emits change events for an existing watched file', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-change-')
-    const filePath = join(directory, 'flow.json')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    try {
-      await writeFile(join(directory, 'unrelated.log'), 'noise', 'utf8')
-      await delay(100)
-      expect(listener).not.toHaveBeenCalled()
-
-      await writeFile(filePath, '{"steps":[{"state":"ongoing"}]}', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-
-      listener.mockClear()
-      await appendFile(filePath, '\nmore log-like content', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
+  it('blocks direct configuration writes for an idle descriptor Workspace', async () => {
+    const directory = await createTempDir('ecos-workspace-service-domain-write-')
+    await mkdir(join(directory, 'home'), { recursive: true })
+    await writeFile(join(directory, 'home', 'workspace.toml'), 'format = 1\n')
+    const filePath = join(directory, 'home', 'parameters.json')
+    const runtimeMutationGuard = {
+      isWorkspaceRuntimeActive: vi.fn().mockReturnValue(false),
     }
-  })
-
-  it('emits when a missing watched file is created later', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-missing-')
-    const filePath = join(directory, 'CTS_ecc', 'log', 'CTS.log')
-    await mkdir(join(directory, 'CTS_ecc', 'log'), { recursive: true })
-
-    const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
-
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/CTS_ecc/log/CTS.log',
-      listener,
-    )
-
-    try {
-      expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-        '/workspace/CTS_ecc/log/CTS.log',
-      )
-
-      await writeFile(filePath, 'created after watch', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('falls back to the project root when parent directories do not exist yet', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-root-fallback-')
-    const filePath = join(directory, 'legalization_dreamplace', 'log', 'legalization.log')
-    const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
-
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/legalization_dreamplace/log/legalization.log',
-      listener,
-    )
-
-    try {
-      expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-        '/workspace/legalization_dreamplace/log/legalization.log',
-      )
-      expect(projectScopeProvider.getProjectRoot).toHaveBeenCalledTimes(1)
-
-      await mkdir(join(directory, 'legalization_dreamplace', 'log'), { recursive: true })
-      await writeFile(filePath, 'created under missing parents', 'utf8')
-      await waitForProjectFileEvent(listener, {
-        subscriptionId,
-        path: filePath,
-        eventType: 'change',
-      })
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('emits when the watched file is replaced by rename', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-replace-')
-    const filePath = join(directory, 'flow.json')
-    const replacementPath = join(directory, 'flow.json.tmp')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    try {
-      await writeFile(replacementPath, '{"steps":[{"state":"complete"}]}', 'utf8')
-      await rename(replacementPath, filePath)
-
-      await vi.waitFor(
-        () => {
-          expect(listener).toHaveBeenCalledWith(
-            expect.objectContaining({
-              subscriptionId,
-              path: filePath,
-            }),
-          )
-          const events = listener.mock.calls.map(([event]) => event.eventType)
-          expect(
-            events.some((eventType) => eventType === 'change' || eventType === 'rename'),
-          ).toBe(true)
-        },
-        { timeout: 3000 },
-      )
-    } finally {
-      await service.unwatchProjectFile(subscriptionId)
-    }
-  })
-
-  it('does not emit after unwatching a project file', async () => {
-    const directory = await createTempDir('ecos-workspace-service-watch-unwatch-')
-    const filePath = join(directory, 'flow.json')
-    await writeFile(filePath, '{"steps":[]}', 'utf8')
-
-    const { service } = createWorkspaceService(directory, filePath)
-    const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile(
-      '/workspace/home/flow.json',
-      listener,
-    )
-
-    await service.unwatchProjectFile(subscriptionId)
-    await writeFile(filePath, '{"steps":[{"state":"ongoing"}]}', 'utf8')
-    await delay(150)
-
-    expect(listener).not.toHaveBeenCalled()
-  })
-})
-
-describe('editWorkspaceParameters', () => {
-  it('refuses to edit parameters through a symlinked config file', async () => {
-    const directory = await createTempDir('ecos-workspace-service-')
-    const homeDir = join(directory, 'home')
-    await mkdir(homeDir, { recursive: true })
-    const externalPath = join(directory, 'external.toml')
-    await writeFile(externalPath, '[params]\ndesign = "gcd"\n', 'utf8')
-    await symlink(externalPath, join(homeDir, 'params.toml'))
-
-    const { service } = createWorkspaceService(directory, externalPath)
+    const { service } = createWorkspaceService(directory, filePath, {
+      runtimeMutationGuard,
+    })
 
     await expect(
-      service.editWorkspaceParameters(directory, [{ json_path: ['design'], value: 'x' }]),
-    ).rejects.toThrow(/symlink/i)
-    await expect(readFile(externalPath, 'utf8')).resolves.toBe(
-      '[params]\ndesign = "gcd"\n',
-    )
-  })
-
-  it('refuses to edit parameters in a nested workspace under the active root', async () => {
-    const directory = await createTempDir('ecos-workspace-service-')
-    const nested = join(directory, 'archive', 'other')
-    await mkdir(join(nested, 'home'), { recursive: true })
-    const tomlPath = join(nested, 'home', 'params.toml')
-    await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
-
-    const { service } = createWorkspaceService(directory, tomlPath)
-    await expect(
-      service.editWorkspaceParameters(nested, [{ json_path: ['design'], value: 'x' }]),
-    ).rejects.toThrow(/not the active workspace/)
-    await expect(readFile(tomlPath, 'utf8')).resolves.toBe('[params]\ndesign = "gcd"\n')
-  })
-
-  it('edits parameters in a real params.toml file', async () => {
-    const directory = await createTempDir('ecos-workspace-service-')
-    const homeDir = join(directory, 'home')
-    await mkdir(homeDir, { recursive: true })
-    const tomlPath = join(homeDir, 'params.toml')
-    await writeFile(tomlPath, '[params]\ndesign = "gcd"\n', 'utf8')
-
-    const { service } = createWorkspaceService(directory, tomlPath)
-    const result = await service.editWorkspaceParameters(directory, [
-      { json_path: ['design'], value: 'updated' },
-    ])
-
-    expect(result.format).toBe('toml')
-    await expect(readFile(tomlPath, 'utf8')).resolves.toContain('design = "updated"')
-  })
-})
-
-describe('applyWorkspaceParameterWrites', () => {
-  function createApplyService(rootPath: string): WorkspaceService {
-    const projectScopeProvider = createProjectScopeProvider(rootPath, rootPath)
-    projectScopeProvider.requestWritableProjectPathAccess = vi.fn(
-      async (path: string) => path,
-    )
-    return new WorkspaceService({
-      projectScopeProvider,
-      replacementJournalDirectory: join(rootPath, '.workspace-replacement-journals'),
-    })
-  }
-
-  it('rolls back the parameter file when a later step-config write fails', async () => {
-    const directory = await createTempDir('ecos-workspace-service-apply-rollback-')
-    await mkdir(join(directory, 'home'), { recursive: true })
-    await mkdir(join(directory, 'config'), { recursive: true })
-    const tomlPath = join(directory, 'home', 'params.toml')
-    const original = '[params]\ndesign = "gcd"\nmax_fanout = 20\n'
-    await writeFile(tomlPath, original, 'utf8')
-    await writeFile(
-      join(directory, 'config', 'dreamplace_ecc.json'),
-      '{\n    "other_key": 1\n}\n',
-      'utf8',
-    )
-
-    const service = createApplyService(directory)
-    await expect(
-      service.applyWorkspaceParameterWrites(directory, [
-        {
-          file: 'home/params.toml',
-          json_path: ['max_fanout'],
-          knob_id: 'cts.max_fanout',
-          surface: 'parameters',
-          value: 64,
-        },
-        {
-          file: 'config/dreamplace_ecc.json',
-          json_path: ['density_weight'],
-          knob_id: 'place.density_weight',
-          surface: 'step_config',
-          value: 0.1,
-        },
-      ]),
-    ).rejects.toThrow(/does not exist/)
-
-    await expect(readFile(tomlPath, 'utf8')).resolves.toBe(original)
-  })
-
-  it('applies parameter and step-config writes together', async () => {
-    const directory = await createTempDir('ecos-workspace-service-apply-ok-')
-    await mkdir(join(directory, 'home'), { recursive: true })
-    await mkdir(join(directory, 'config'), { recursive: true })
-    const tomlPath = join(directory, 'home', 'params.toml')
-    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
-    await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
-    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
-
-    const service = createApplyService(directory)
-    await service.applyWorkspaceParameterWrites(directory, [
-      {
-        file: 'home/params.toml',
-        json_path: ['max_fanout'],
-        knob_id: 'cts.max_fanout',
-        surface: 'parameters',
-        value: 64,
-      },
-      {
-        file: 'config/dreamplace_ecc.json',
-        json_path: ['density_weight'],
-        knob_id: 'place.density_weight',
-        surface: 'step_config',
-        value: 0.1,
-      },
-    ])
-
-    await expect(readFile(tomlPath, 'utf8')).resolves.toContain('max_fanout = 64')
-    await expect(readFile(stepPath, 'utf8')).resolves.toContain('"density_weight": 0.1')
-  })
-
-  it('serializes step-config editor saves behind the parameter write queue', async () => {
-    const directory = await createTempDir('ecos-workspace-service-step-config-queue-')
-    await mkdir(join(directory, 'home'), { recursive: true })
-    await mkdir(join(directory, 'config'), { recursive: true })
-    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
-    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
-
-    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
-      await import('./workspaceParametersFile')
-    const queueKey = await workspaceParameterWriteQueueKey(directory)
-    let release!: () => void
-    const gate = new Promise<void>((resolveGate) => {
-      release = resolveGate
-    })
-    const hold = enqueueParameterWrite(queueKey, async () => {
-      await gate
-    })
-
-    const service = createApplyService(directory)
-    const editorContent = '{\n    "density_weight": 0.8,\n    "extra": true\n}\n'
-    const editor = service.writeProjectTextFile(stepPath, editorContent)
-
-    let editorDone = false
-    void editor.then(() => {
-      editorDone = true
-    })
-    await delay(50)
-    expect(editorDone).toBe(false)
-    await expect(readFile(stepPath, 'utf8')).resolves.toBe(
-      '{\n    "density_weight": 0.2\n}\n',
-    )
-
-    release()
-    await hold
-    await editor
-    await expect(readFile(stepPath, 'utf8')).resolves.toBe(editorContent)
-  })
-
-  it('lets a later agent step-config RMW observe a queued editor save', async () => {
-    const directory = await createTempDir('ecos-workspace-service-step-config-overlap-')
-    await mkdir(join(directory, 'home'), { recursive: true })
-    await mkdir(join(directory, 'config'), { recursive: true })
-    const tomlPath = join(directory, 'home', 'params.toml')
-    const stepPath = join(directory, 'config', 'dreamplace_ecc.json')
-    await writeFile(tomlPath, '[params]\ndesign = "gcd"\nmax_fanout = 20\n', 'utf8')
-    await writeFile(stepPath, '{\n    "density_weight": 0.2\n}\n', 'utf8')
-
-    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
-      await import('./workspaceParametersFile')
-    const queueKey = await workspaceParameterWriteQueueKey(directory)
-    let release!: () => void
-    const gate = new Promise<void>((resolveGate) => {
-      release = resolveGate
-    })
-    const hold = enqueueParameterWrite(queueKey, async () => {
-      await gate
-    })
-
-    const service = createApplyService(directory)
-    const editorContent = '{\n    "density_weight": 0.8,\n    "extra": true\n}\n'
-    const editor = service.writeProjectTextFile(stepPath, editorContent)
-    await delay(20)
-    const agent = service.applyWorkspaceParameterWrites(directory, [
-      {
-        file: 'config/dreamplace_ecc.json',
-        json_path: ['density_weight'],
-        knob_id: 'place.density_weight',
-        surface: 'step_config',
-        value: 0.1,
-      },
-    ])
-
-    release()
-    await hold
-    await Promise.all([agent, editor])
-
-    const finalDocument = JSON.parse(await readFile(stepPath, 'utf8')) as {
-      density_weight: number
-      extra?: boolean
-    }
-    // Without the shared queue the agent can read 0.2, the editor can land
-    // `extra`, and the agent rename then drops it. Serialized, the agent
-    // RMW sees the editor document and keeps unknown leaves.
-    expect(finalDocument.extra).toBe(true)
-    expect(finalDocument.density_weight).toBe(0.1)
-  })
-
-  it('refuses a queued config-editor save after the active workspace changes', async () => {
-    const workspaceA = await createTempDir('ecos-workspace-service-editor-root-a-')
-    const workspaceB = await createTempDir('ecos-workspace-service-editor-root-b-')
-    await mkdir(join(workspaceA, 'home'), { recursive: true })
-    await mkdir(join(workspaceA, 'config'), { recursive: true })
-    const stepPath = join(workspaceA, 'config', 'dreamplace_ecc.json')
-    const original = '{\n    "density_weight": 0.2\n}\n'
-    await writeFile(stepPath, original, 'utf8')
-
-    const projectScopeProvider = createProjectScopeProvider(workspaceA, workspaceA)
-    projectScopeProvider.requestWritableProjectPathAccess = vi.fn(
-      async (path: string) => path,
-    )
-    let activeRoot = workspaceA
-    projectScopeProvider.getProjectRoot = vi.fn(async () => activeRoot)
-    const service = new WorkspaceService({
-      projectScopeProvider,
-      replacementJournalDirectory: join(workspaceA, '.workspace-replacement-journals'),
-    })
-
-    const { enqueueParameterWrite, workspaceParameterWriteQueueKey } =
-      await import('./workspaceParametersFile')
-    const queueKey = await workspaceParameterWriteQueueKey(workspaceA)
-    let release!: () => void
-    const gate = new Promise<void>((resolveGate) => {
-      release = resolveGate
-    })
-    const hold = enqueueParameterWrite(queueKey, async () => {
-      await gate
-    })
-
-    const editor = service.writeProjectTextFile(
-      stepPath,
-      '{\n    "density_weight": 0.8\n}\n',
-    )
-    await delay(20)
-    activeRoot = workspaceB
-    release()
-    await hold
-    await expect(editor).rejects.toThrow(/active workspace/)
-    await expect(readFile(stepPath, 'utf8')).resolves.toBe(original)
-  })
-})
-
-describe('hasWorkspaceConfigShadow', () => {
-  it('refuses to probe paths outside the project scope', async () => {
-    const directory = await createTempDir('ecos-workspace-service-')
-    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
-    projectScopeProvider.requestProjectPathAccess = vi
-      .fn()
-      .mockRejectedValue(
-        new Error('Refusing to grant access outside current project root'),
-      )
-
-    await expect(service.hasWorkspaceConfigShadow('/etc')).rejects.toThrow(
-      /outside current project root/,
-    )
-  })
-
-  it('probes the shadow pair for in-scope workspaces', async () => {
-    const directory = await createTempDir('ecos-workspace-service-')
-    const workspace = join(directory, 'ws')
-    await mkdir(join(workspace, 'home'), { recursive: true })
-    await writeFile(join(workspace, 'home', 'params.toml'), '[params]\n', 'utf8')
-    await writeFile(join(workspace, 'home', 'parameters.json'), '{}', 'utf8')
-    const { projectScopeProvider, service } = createWorkspaceService(directory, directory)
-
-    await expect(service.hasWorkspaceConfigShadow(workspace)).resolves.toBe(true)
-    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-      join(workspace, 'home', 'params.toml'),
-    )
+      service.writeProjectTextFile('/workspace/home/parameters.json', '{}'),
+    ).rejects.toThrow('must be changed through an ECC configuration command')
+    expect(runtimeMutationGuard.isWorkspaceRuntimeActive).not.toHaveBeenCalled()
   })
 })

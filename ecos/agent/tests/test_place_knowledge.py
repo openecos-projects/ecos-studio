@@ -73,12 +73,11 @@ def test_algorithm_chunks_are_english_and_describe_place_stages() -> None:
 
 def test_metrics_cover_gui_place_values_and_maps_with_english_calculations() -> None:
     gui_metrics = (
-        ECOS_ROOT / "ecos/gui/apps/renderer/src/utils/projectManagement.ts"
+        ECOS_ROOT / "ecos/gui/apps/desktop-electron/electron/services/qorAnalysis.ts"
     ).read_text(encoding="utf-8")
-    place_metrics = re.search(r"Place: \[(?P<metrics>.*?)\],", gui_metrics, re.DOTALL)
-
-    assert place_metrics is not None
-    visible_numeric_metrics = set(re.findall(r"'(place_[^']+)'", place_metrics.group("metrics")))
+    visible_numeric_metrics = set(
+        re.findall(r"metricName: '(place_[^']+)'", gui_metrics)
+    )
     expected_map_entities = {
         "metric.place.map.cell_density",
         "metric.place.map.macro_density",

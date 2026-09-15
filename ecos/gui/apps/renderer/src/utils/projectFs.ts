@@ -15,7 +15,3 @@ export async function resolveProjectPathAccess(path: string): Promise<string | n
     return null
   }
 }
-
-export async function requestProjectPathAccess(path: string): Promise<boolean> {
-  return (await resolveProjectPathAccess(path)) !== null
-}

@@ -149,6 +149,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => children.shift()!)
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
       envProvider: async () => runtimeEnv,
       spawn,
     })
@@ -223,6 +224,7 @@ describe('EccRpcSidecarProcess', () => {
     const spawn = vi.fn(() => child)
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
       envProvider: async () => runtimeEnv,
       shutdownTimeoutMs: 25,
       spawn,
@@ -254,6 +256,7 @@ describe('EccRpcSidecarProcess', () => {
     const child = new FakeChild()
     let runtimeEnv: NodeJS.ProcessEnv = { PATH: '/tools/v1/bin' }
     const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
       envProvider: async () => runtimeEnv,
       shutdownTimeoutMs: 25,
       spawn: () => child,
@@ -316,7 +319,10 @@ describe('EccRpcSidecarProcess', () => {
 
   it('does not signal a sidecar when ECC defers shutdown for an active operation', async () => {
     const child = new FakeChild()
-    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
+      spawn: () => child,
+    })
     await sidecar.start()
 
     const shutdown = sidecar.shutdown()
@@ -335,7 +341,10 @@ describe('EccRpcSidecarProcess', () => {
 
   it('waits for the sidecar process to exit after rpc.shutdown is acknowledged', async () => {
     const child = new FakeChild()
-    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
+      spawn: () => child,
+    })
     await sidecar.start()
 
     let settled = false
@@ -352,6 +361,21 @@ describe('EccRpcSidecarProcess', () => {
 
     expect(settled).toBe(false)
     child.emit('close', 0, null)
+    await expect(shutdown).resolves.toBeUndefined()
+  })
+
+  it('terminates the backend runtime without a management RPC', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    const shutdown = sidecar.shutdown()
+    await vi.waitFor(() => {
+      expect(child.signals).toEqual(['SIGTERM'])
+    })
+    expect(child.stdin.chunks).toEqual([])
+    child.emit('close', 0, null)
+
     await expect(shutdown).resolves.toBeUndefined()
   })
 
@@ -503,6 +527,7 @@ describe('EccRpcSidecarProcess', () => {
     vi.useFakeTimers()
     const child = new FakeChild()
     const sidecar = new EccRpcSidecarProcess({
+      managementRpc: true,
       shutdownTimeoutMs: 25,
       spawn: () => child,
     })
@@ -519,5 +544,15 @@ describe('EccRpcSidecarProcess', () => {
     await expect(shutdown).resolves.toMatchObject({
       message: 'ECC RPC sidecar did not exit after SIGKILL.',
     })
+  })
+
+  it('force terminates the running sidecar with SIGKILL', async () => {
+    const child = new FakeChild()
+    const sidecar = new EccRpcSidecarProcess({ spawn: () => child })
+    await sidecar.start()
+
+    await sidecar.forceShutdown()
+
+    expect(child.signals).toEqual(['SIGKILL'])
   })
 })

@@ -334,12 +334,59 @@ export class CodexDependencyService {
     const managedValidated = await this.validateExecutable(managed)
     if (managedValidated) return managedValidated
 
+    const wellKnown = await this.findCodexInDirectories(await this.wellKnownCodexDirs())
+    if (wellKnown) return wellKnown
+
     return await this.whichCodex()
+  }
+
+  private async wellKnownCodexDirs(): Promise<string[]> {
+    const home = this.resolveHomedir()
+    const directories = [
+      join(home, '.npm-global', 'bin'),
+      join(home, '.volta', 'bin'),
+      join(home, '.bun', 'bin'),
+      join(home, '.local', 'share', 'pnpm'),
+      join(home, '.local', 'bin'),
+    ]
+
+    if (this.platform !== 'win32') {
+      directories.push('/usr/local/bin', '/opt/homebrew/bin')
+    }
+
+    const nvmRoot = join(home, '.nvm', 'versions', 'node')
+    try {
+      const entries = await readdir(nvmRoot, { withFileTypes: true })
+      directories.splice(
+        1,
+        0,
+        ...entries
+          .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+          .sort((left, right) =>
+            right.name.localeCompare(left.name, undefined, { numeric: true }),
+          )
+          .map((entry) => join(nvmRoot, entry.name, 'bin')),
+      )
+    } catch {
+      // NVM is optional and its directory may not exist.
+    }
+
+    return directories
+  }
+
+  private async findCodexInDirectories(
+    directories: readonly string[],
+  ): Promise<string | null> {
+    for (const directory of directories) {
+      const validated = await this.validateExecutable(join(directory, 'codex'))
+      if (validated) return validated
+    }
+    return null
   }
 
   private async whichCodex(): Promise<string | null> {
     const pathValue = this.env.PATH ?? ''
-    for (const entry of pathValue.split(':')) {
+    for (const entry of pathValue.split(delimiter)) {
       if (!entry) continue
       const candidate = join(entry, 'codex')
       const validated = await this.validateExecutable(candidate)

@@ -250,6 +250,15 @@ function selectNode(id: string): void {
   color: var(--accent-color);
 }
 
+.is-warning {
+  color: var(--warn-color);
+}
+
+.flow-status-node.is-warning .flow-status-node-mark {
+  border-color: var(--warn-color);
+  color: var(--warn-color);
+}
+
 .is-failed {
   color: var(--danger-color);
 }

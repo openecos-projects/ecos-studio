@@ -4,25 +4,22 @@ import type { ProjectManifestMutation } from '@ecos-studio/shared'
 const mutate = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi: vi.fn(async () => ({
+  getDesktopApi: vi.fn(() => ({
     projectManifest: {
       mutate,
     },
   })),
 }))
 
-vi.mock('@/utils/projectManagement', () => ({
-  parseProjectManifest: vi.fn((content: string) => JSON.parse(content)),
-}))
-
 describe('mutateProjectManifest', () => {
   beforeEach(() => {
     mutate.mockReset()
     mutate.mockResolvedValue({
-      content: JSON.stringify({
+      manifest: {
         schema_version: 1,
         project_id: 'proj_demo',
         name: 'demo',
+        design_name: 'demo',
         root_path: '/projects/demo',
         created_at: '2026-07-17T00:00:00.000Z',
         updated_at: '2026-07-17T00:00:00.000Z',
@@ -30,7 +27,7 @@ describe('mutateProjectManifest', () => {
         objectives: { primary: 'timing', directions: {} },
         workspaces: [],
         best_workspace: null,
-      }),
+      },
     })
   })
 

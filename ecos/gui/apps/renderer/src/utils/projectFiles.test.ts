@@ -4,11 +4,9 @@ import {
   getMimeTypeFromPath,
   readOptionalProjectTextFileChunk,
   readOptionalProjectTextFileTail,
-  readOptionalProjectTextFileUpdate,
   readProjectTextFileTail,
   readProjectBlobUrl,
   readProjectTextFile,
-  readWorkspaceParametersFile,
   resolveProjectFilePath,
   writeProjectTextFile,
 } from './projectFiles'
@@ -61,14 +59,6 @@ describe('projectFiles', () => {
       truncated: true,
       sizeBytes: 4096,
     })
-    const readOptionalProjectTextUpdate = vi.fn().mockResolvedValue({
-      content: 'next',
-      fromOffsetBytes: 10,
-      nextOffsetBytes: 14,
-      sizeBytes: 14,
-      reset: false,
-      truncated: false,
-    })
     const readOptionalProjectTextChunk = vi.fn().mockResolvedValue({
       content: 'complete log',
       eof: true,
@@ -86,7 +76,6 @@ describe('projectFiles', () => {
           readProjectTextFile: readProjectText,
           readProjectTextFileTail: readProjectTextTail,
           readOptionalProjectTextFileTail: readOptionalProjectTextTail,
-          readOptionalProjectTextFileUpdate: readOptionalProjectTextUpdate,
           readOptionalProjectTextFileChunk: readOptionalProjectTextChunk,
           readProjectBinaryFile: readProjectBinary,
           writeProjectTextFile: writeProjectText,
@@ -113,14 +102,6 @@ describe('projectFiles', () => {
       sizeBytes: 4096,
     })
     await expect(
-      readOptionalProjectTextFileUpdate('logs/run.log', 10, 64, {
-        projectPath: '/workspace/demo',
-      }),
-    ).resolves.toMatchObject({
-      content: 'next',
-      nextOffsetBytes: 14,
-    })
-    await expect(
       readOptionalProjectTextFileChunk('logs/run.log', 0, 262144, {
         projectPath: '/workspace/demo',
       }),
@@ -140,11 +121,6 @@ describe('projectFiles', () => {
       '/workspace/demo/logs/run.log',
       64,
     )
-    expect(readOptionalProjectTextUpdate).toHaveBeenCalledWith(
-      '/workspace/demo/logs/run.log',
-      10,
-      64,
-    )
     expect(readOptionalProjectTextChunk).toHaveBeenCalledWith(
       '/workspace/demo/logs/run.log',
       0,
@@ -156,23 +132,6 @@ describe('projectFiles', () => {
       '{"PDK":"ics55"}',
     )
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the parameters read successful when the shadow probe fails', async () => {
-    const readWorkspaceParameters = vi.fn().mockResolvedValue({ design: 'gcd' })
-    const hasWorkspaceConfigShadow = vi.fn().mockRejectedValue(new Error('EACCES'))
-    setWindow({
-      ecosDesktop: {
-        workspace: { readWorkspaceParameters, hasWorkspaceConfigShadow },
-      },
-    })
-
-    await expect(
-      readWorkspaceParametersFile('/workspace/shadow-probe-failure'),
-    ).resolves.toEqual({ design: 'gcd' })
-    expect(hasWorkspaceConfigShadow).toHaveBeenCalledWith(
-      '/workspace/shadow-probe-failure',
-    )
   })
 
   it('infers MIME types from common file extensions', () => {

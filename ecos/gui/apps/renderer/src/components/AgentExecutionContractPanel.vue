@@ -107,6 +107,7 @@
       >
         {{ confirmationText }}
       </p>
+      <slot name="before-choice" />
       <AgentChoiceCard
         v-if="choice"
         class="mt-4"

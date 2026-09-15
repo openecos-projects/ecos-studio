@@ -1,62 +1,153 @@
-import { describe, expect, it } from 'vitest'
-import source from './AgentWorkspaceSetupPanel.vue?raw'
+// @vitest-environment happy-dom
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
+import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
+import type { DesktopAgentWorkspaceSetupContract } from '@ecos-studio/shared'
 
-describe('AgentWorkspaceSetupPanel', () => {
-  it('creates from the frozen contract without reopening NewProjectWizard', () => {
-    expect(source).toContain("emit('createWorkspace'")
-    expect(source).toContain('() => props.createSetupId')
-    expect(source).toContain('workspaceConfig(contract)')
-    expect(source).not.toContain('NewProjectWizard')
+const discoverHdlModules = vi.fn(async () => ({
+  candidates: ['gcd_top', 'child'],
+  status: 'complete',
+  suggested: 'gcd_top',
+}))
+
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => ({
+    workspace: { discoverHdlModules },
+  }),
+}))
+
+const primevueStubs = {
+  Select: {
+    props: ['modelValue', 'placeholder', 'ariaLabel'],
+    inheritAttrs: false,
+    template: `<div role="combobox" :aria-label="ariaLabel || $attrs['aria-label']">{{
+      modelValue || placeholder || ''
+    }}</div>`,
+  },
+}
+
+function contract(
+  overrides: Partial<DesktopAgentWorkspaceSetupContract> = {},
+): DesktopAgentWorkspaceSetupContract {
+  return {
+    design_input_mode: 'rtl',
+    directory: '/projects/gcd/ws_0001',
+    flow_config: {
+      end_step: 'Harden',
+      start_step: 'Synthesis',
+      steps: ['Synthesis', 'Harden'],
+    },
+    parameters: {
+      clock: 'clk',
+      design: 'gcd',
+      description: '',
+      die_area_mode: 'utilitization_margin',
+      frequency_max: 50,
+      margin: 2,
+      max_fanout: 32,
+      target_density: 0.2,
+      target_overflow: 0.1,
+      top_module: '',
+      utilitization: 0.3,
+    },
+    pdk: 'ics55',
+    pdk_config: { cell_lef: [], liberty: [], mode: 'default', tech_lef: [] },
+    pdk_config_mode: 'default',
+    pdk_root: '/pdk',
+    project_context: {
+      mode: 'create',
+      project_json_path: '/projects/gcd/project.json',
+      project_name: 'gcd',
+      project_root: '/projects/gcd',
+    },
+    requires_gui_review: true,
+    rtl_list: ['/rtl/gcd.v'],
+    schema_version: 'flow-agent.workspace_setup_contract.v2',
+    setup_id: 'setup-1',
+    title: 'Workspace run plan',
+    ...overrides,
+  }
+}
+
+describe('AgentWorkspaceSetupPanel top module confirmation', () => {
+  it('disables confirm until a discovered Top Module is selected', async () => {
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: {
+        contract: contract(),
+        choice: {
+          allowFreeText: false,
+          options: [
+            { id: '1', label: 'Confirm', value: '1' },
+            { id: '2', label: 'Cancel', value: '2' },
+          ],
+          promptId: 'confirm-1',
+          title: 'Confirm workspace',
+          variant: 'buttons',
+        },
+      },
+      global: {
+        stubs: { AgentChoiceCard: true, ...primevueStubs },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('input[placeholder="top"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="Top Module Name"]').text()).toContain('gcd_top')
+    expect(
+      wrapper
+        .findComponent({ name: 'AgentExecutionContractPanel' })
+        .props('choiceDisabled'),
+    ).toBe(false)
+    wrapper.unmount()
   })
 
-  it('renders the complete resolved specification in a two-column table', () => {
-    expect(source).toContain('AgentExecutionContractPanel')
-    expect(source).toContain(':rows="specRows"')
-    for (const field of [
-      'Workspace',
-      'Flow',
-      'RTL',
-      'Filelist',
-      'SDC',
-      'PDK Root',
-      'Top Module',
-    ])
-      expect(source).toContain(`['${field}'`)
-    expect(source).not.toContain('<dl')
+  it('does not create until the confirmed Top Module is present', async () => {
+    discoverHdlModules.mockResolvedValueOnce({
+      candidates: [],
+      status: 'complete',
+      suggested: '',
+    })
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: {
+        contract: contract(),
+        createSetupId: 'setup-1',
+      },
+      global: {
+        stubs: { AgentChoiceCard: true, ...primevueStubs },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.emitted('createWorkspace')).toBeUndefined()
+    wrapper.unmount()
   })
 
-  it('shows Workspace Name from the directory leaf and Design Name separately', () => {
-    expect(source).toContain("['Workspace Name', workspaceName]")
-    expect(source).toContain("['Design Name', parameters.design]")
-    expect(source).toContain("['Project Root', contract.project_context.project_root]")
-  })
-
-  it('keeps the specification selectable and permits retrying a failed setup id', () => {
-    expect(source).toContain('AgentExecutionContractPanel')
-    expect(source).toContain('if (!setupId) {')
-    expect(source).toContain("submittedSetupId.value = ''")
-  })
-
-  it('renders the confirmation after the resolved specification', () => {
-    expect(source).toContain('confirmationText?: string')
-    expect(source).toContain(':confirmation-text="confirmationText"')
-    expect(source).toContain(':choice="choice"')
-    expect(source).toContain(':choice-disabled="choiceDisabled"')
-  })
-
-  it('collapses committed setups into a short summary with progressive status', () => {
-    expect(source).toContain(':summary="committedSummary"')
-    expect(source).toContain(
-      "return [workspaceName, design, flow].filter(Boolean).join(' · ')",
-    )
-    expect(source).toContain("return 'Running'")
-    expect(source).toContain("return 'Review'")
-    expect(source).toContain("return 'Cancelled'")
-    expect(source).toContain("return 'Confirmed'")
-  })
-
-  it('shows a user-facing run-plan title instead of frozen-contract jargon', () => {
-    expect(source).toContain('displayAgentContractTitle')
-    expect(source).toContain(':title="displayTitle"')
+  it('emits filelist-only workspace config when both RTL and filelist are present', async () => {
+    const wrapper = mount(AgentWorkspaceSetupPanel, {
+      props: {
+        contract: contract({
+          filelist: '/design/gcd.f',
+          rtl_list: ['/rtl/gcd.v'],
+        }),
+        createSetupId: 'setup-1',
+        choice: {
+          allowFreeText: false,
+          options: [
+            { id: '1', label: 'Confirm', value: '1' },
+            { id: '2', label: 'Cancel', value: '2' },
+          ],
+          promptId: 'confirm-1',
+          title: 'Confirm workspace',
+          variant: 'buttons',
+        },
+      },
+      global: {
+        stubs: { AgentChoiceCard: true, ...primevueStubs },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.emitted('createWorkspace')?.[0]?.[0]).toMatchObject({
+      filelist: '/design/gcd.f',
+      rtl_list: [],
+    })
+    wrapper.unmount()
   })
 })

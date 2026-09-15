@@ -1,5 +1,9 @@
 <template>
-  <section class="step-analysis" aria-label="Step analysis">
+  <section
+    class="step-analysis"
+    :class="{ 'has-findings-status': findingsReadStatus }"
+    aria-label="Step analysis"
+  >
     <nav class="step-rail" aria-label="Flow steps">
       <button
         v-for="tab in stepTabs"
@@ -173,6 +177,16 @@
       <small class="mode-hint">{{ modeHint }}</small>
     </div>
 
+    <div
+      v-if="findingsReadStatus"
+      class="findings-read-status"
+      :class="findingsReadStatus.tone"
+      role="status"
+    >
+      <i :class="findingsReadStatus.icon" aria-hidden="true"></i>
+      <span>{{ findingsReadStatus.label }}</span>
+    </div>
+
     <div v-if="mode === 'findings'" class="step-body">
       <section class="issue-pane" aria-label="Issues">
         <header class="pane-header">
@@ -284,7 +298,10 @@
             </div>
           </div>
           <p v-else class="pane-empty">
-            No V3 metrics were reported for {{ selectedStep }} in this workspace.
+            {{
+              evidenceEmptyState ??
+              `No V3 metrics were reported for ${selectedStep} in this workspace.`
+            }}
           </p>
         </section>
 
@@ -565,7 +582,6 @@ import {
   buildStepIssues,
   buildStepMetricGroups,
   buildStepTabs,
-  buildStepVerdict,
   buildStepWorkspaceChips,
   COMPARE_BAR_FULL_SCALE_PERCENT,
   countStepIssues,
@@ -587,13 +603,15 @@ import {
   type StepCompareSort,
 } from './projectStepComparisonScope'
 import type {
-  FlowStep,
   ProjectStepCompareSummary,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
+import type { ProjectStepFindingsProjectionState } from '@/stores/backendProjectComparisonSession'
+import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
+import { useProjectStepEvidence } from '@/composables/useProjectStepEvidence'
 
 const props = defineProps<{
+  findings?: ProjectStepFindingsProjectionState
   steps: ProjectStepCompareSummary[]
   workspaceSummaries: ProjectWorkspaceSummary[]
   qorTrendSummary: ProjectQorTrendSummary
@@ -601,13 +619,13 @@ const props = defineProps<{
   projectObjective: string
   bestWorkspaceId: string
   bestWorkspaceReason?: string
-  selectedStep: FlowStep
+  selectedStep: string
   selectedWorkspaceId: string
   selectedIssueMetric?: string | null
 }>()
 
 const emit = defineEmits<{
-  'select-step': [step: FlowStep]
+  'select-step': [step: string]
   'select-workspace': [workspaceId: string]
 }>()
 
@@ -626,14 +644,13 @@ const compareSort = ref<StepCompareSort | null>(null)
 const barFullScalePercent = COMPARE_BAR_FULL_SCALE_PERCENT
 const WORKSPACE_PICKER_PREVIEW_COUNT = 16
 
-const activeWorkspace = computed(
-  () =>
-    props.workspaceSummaries.find(
-      (summary) => summary.workspaceId === props.selectedWorkspaceId,
-    ) ??
-    props.workspaceSummaries[0] ??
-    null,
-)
+const {
+  activeWorkspace,
+  emptyMessage: evidenceEmptyState,
+  notice: findingsReadStatus,
+  readOnly: evidenceReadOnly,
+  verdict,
+} = useProjectStepEvidence(props, mode)
 const activeWorkspaceId = computed(() => activeWorkspace.value?.workspaceId ?? '')
 const baselineWorkspace = computed(
   () =>
@@ -663,15 +680,19 @@ const evidenceIssue = computed(() =>
     ? selectedIssue.value
     : null,
 )
-const issueEmptyMessage = computed(() =>
-  issueCounts.value.total === 0
-    ? `No findings reported for ${props.selectedStep} in this workspace.`
-    : 'No findings match this filter.',
+const issueEmptyMessage = computed(
+  () =>
+    evidenceEmptyState.value ??
+    (issueCounts.value.total === 0
+      ? `No findings reported for ${props.selectedStep} in this workspace.`
+      : 'No findings match this filter.'),
 )
-const evidenceEmptyMessage = computed(() =>
-  issueCounts.value.total === 0
-    ? `No findings reported for ${props.selectedStep} in this workspace.`
-    : 'No findings match this filter.',
+const evidenceEmptyMessage = computed(
+  () =>
+    evidenceEmptyState.value ??
+    (issueCounts.value.total === 0
+      ? `No findings reported for ${props.selectedStep} in this workspace.`
+      : 'No findings match this filter.'),
 )
 
 // Context changes start from the complete queue. A metric supplied by Dashboard then
@@ -688,9 +709,6 @@ watch(
   { immediate: true },
 )
 
-const verdict = computed(() =>
-  buildStepVerdict(activeWorkspace.value, props.selectedStep, issues.value),
-)
 const stepTabs = computed(() => buildStepTabs(props.steps, activeWorkspace.value))
 const workspaceChips = computed(() =>
   buildStepWorkspaceChips(
@@ -787,7 +805,7 @@ const comparisonWorkspaceSummaries = computed(() => {
 const metricGroups = computed(() =>
   buildStepMetricGroups(
     activeWorkspace.value,
-    baselineWorkspace.value,
+    evidenceReadOnly.value ? null : baselineWorkspace.value,
     props.selectedStep,
   ),
 )

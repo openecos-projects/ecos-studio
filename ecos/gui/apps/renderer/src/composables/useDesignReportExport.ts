@@ -6,15 +6,18 @@ import {
   joinLocalPath,
   parsePowerRpt,
   parseQorSummaryRpt,
+  parseProjectManifestFlowStep,
   projectManagementWorkspaceStepAnalysisSpecs,
   type DesignReportData,
   type DesignReportExportOptions,
   type DesignReportFormat,
+  type EccEngineeringAnalysis,
   type WorkspaceResourceIndex,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import {
   getWorkspaceResourceIndexApi,
+  getWorkspaceRuntimeSnapshotApi,
   readWorkspaceFlowResourceApi,
   readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
@@ -46,10 +49,51 @@ interface ToastOptions {
 interface UseDesignReportExportDependencies {
   currentProject: Readonly<Ref<WorkspaceProject | null | undefined>>
   showToast(options: ToastOptions): void
+  workspaceSession?: Readonly<Ref<{ state: string; workspaceId: string }>>
 }
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function analysisFileData(
+  file: { status: string; data: Record<string, unknown> | null } | null | undefined,
+): Record<string, unknown> | null {
+  return file?.status === 'available' && file.data ? file.data : null
+}
+
+function reportDataFromEngineeringAnalysis(analysis: EccEngineeringAnalysis): {
+  stepMetrics: Record<string, unknown>
+  stepSummaries: Record<string, unknown>
+  stepHotspots: Record<string, unknown>
+  staTimingIssues: Record<string, unknown> | null
+} {
+  const stepMetrics: Record<string, unknown> = {}
+  const stepSummaries: Record<string, unknown> = {}
+  const stepHotspots: Record<string, unknown> = {}
+  let staTimingIssues: Record<string, unknown> | null = null
+  for (const step of analysis.steps) {
+    const canonical =
+      parseProjectManifestFlowStep(step.stepId) ?? canonicalizeStageName(step.stepId)
+    const metrics = analysisFileData(step.metrics)
+    const summary = analysisFileData(step.summary)
+    const hotspots = analysisFileData(step.hotspots)
+    if (metrics) {
+      stepMetrics[step.stepId] = metrics
+      stepMetrics[canonical] = metrics
+    }
+    if (summary) {
+      stepSummaries[step.stepId] = summary
+      stepSummaries[canonical] = summary
+    }
+    if (hotspots) {
+      stepHotspots[step.stepId] = hotspots
+      stepHotspots[canonical] = hotspots
+    }
+    const timingIssues = analysisFileData(step.timingIssues)
+    if (timingIssues) staTimingIssues = timingIssues
+  }
+  return { stepMetrics, stepSummaries, stepHotspots, staTimingIssues }
 }
 
 function formatFileExtension(format: DesignReportFormat): string {
@@ -125,6 +169,7 @@ const COMMON_CORNER_CANDIDATES = [
 export function useDesignReportExport({
   currentProject,
   showToast,
+  workspaceSession,
 }: UseDesignReportExportDependencies) {
   const dialogVisible = ref(false)
   const loading = ref(false)
@@ -191,6 +236,7 @@ export function useDesignReportExport({
 
     try {
       const api = getDesktopApi()
+      const isBackend = (currentProject.value?.designTool ?? 'backend') === 'backend'
 
       // 1. Get version info from desktop app
       let versionInfo = null
@@ -202,74 +248,102 @@ export function useDesignReportExport({
 
       // 2. Query workspace resource index
       let resourceIndex: WorkspaceResourceIndex | null = null
-      try {
-        resourceIndex = await getWorkspaceResourceIndexApi()
-      } catch {
-        /* ignore if index API fails */
+      if (!isBackend) {
+        try {
+          resourceIndex = await getWorkspaceResourceIndexApi()
+        } catch {
+          /* ignore if index API fails */
+        }
       }
 
-      // 3. Read flow.json and parameters.json and home.json
+      // 3. Backend configuration comes from ECC; frontend keeps its file resources.
       let flow: Record<string, unknown> | null = null
       let parameters: Record<string, unknown> | null = null
       let homeData: Record<string, unknown> | null = null
 
-      try {
-        flow = await readWorkspaceFlowResourceApi()
-      } catch {
-        /* ignore */
-      }
-      if (!flow && resourceIndex?.home.flowJson?.exists) {
-        flow = await readWorkspaceJson(resourceIndex.home.flowJson.path)
-      }
-      if (!flow) {
-        flow = await readWorkspaceJson('home/flow.json')
+      const runtimeSnapshot =
+        isBackend &&
+        workspaceSession?.value.state === 'active' &&
+        workspaceSession.value.workspaceId
+          ? await getWorkspaceRuntimeSnapshotApi(workspaceSession.value.workspaceId)
+          : null
+
+      if (isBackend && !runtimeSnapshot) {
+        throw new Error('ECC Workspace Runtime Snapshot is unavailable.')
       }
 
-      try {
-        parameters = await readWorkspaceParametersResourceApi()
-      } catch {
-        /* ignore */
-      }
-      if (!parameters && resourceIndex?.parameters) {
-        parameters = resourceIndex.parameters
-      }
-      if (!parameters && resourceIndex?.home.parametersJson?.exists) {
-        parameters = await readWorkspaceJson(resourceIndex.home.parametersJson.path)
-      }
-      if (!parameters) {
-        parameters = await readWorkspaceJson('home/parameters.json')
+      if (runtimeSnapshot) {
+        flow = runtimeSnapshot.flow
+        parameters = runtimeSnapshot.parameters
+        homeData = runtimeSnapshot.home
       }
 
-      try {
-        homeData = await readWorkspaceHomeResourceApi()
-      } catch {
-        /* ignore */
-      }
-      if (!homeData && resourceIndex?.homeData) {
-        homeData = resourceIndex.homeData
-      }
+      if (!runtimeSnapshot && !isBackend) {
+        try {
+          flow = await readWorkspaceFlowResourceApi()
+        } catch {
+          /* ignore */
+        }
+        if (!flow && resourceIndex?.home.flowJson?.exists) {
+          flow = await readWorkspaceJson(resourceIndex.home.flowJson.path)
+        }
+        if (!flow) flow = await readWorkspaceJson('home/flow.json')
 
-      let pdkJson: Record<string, unknown> | null = null
-      try {
-        pdkJson =
+        try {
+          parameters = await readWorkspaceParametersResourceApi()
+        } catch {
+          /* ignore */
+        }
+        if (!parameters && resourceIndex?.parameters)
+          parameters = resourceIndex.parameters
+        if (!parameters && resourceIndex?.home.parametersJson?.exists) {
+          parameters = await readWorkspaceJson(resourceIndex.home.parametersJson.path)
+        }
+        if (!parameters) parameters = await readWorkspaceJson('home/parameters.json')
+
+        try {
+          homeData = await readWorkspaceHomeResourceApi()
+        } catch {
+          /* ignore */
+        }
+        if (!homeData && resourceIndex?.homeData) homeData = resourceIndex.homeData
+
+        const pdkJson =
           (await readWorkspaceJson('home/pdk.json')) ||
           (await readWorkspaceJson('config/pdk.json')) ||
           (await readWorkspaceJson('pdk.json'))
-      } catch {
-        /* ignore */
-      }
-      if (pdkJson) {
-        homeData = { ...homeData, ...pdkJson }
+        if (pdkJson) homeData = { ...homeData, ...pdkJson }
       }
 
       const topModule =
-        resourceIndex?.topModule ||
-        resourceIndex?.design ||
+        (!isBackend && (resourceIndex?.topModule || resourceIndex?.design)) ||
         currentProject.value?.topModule ||
         currentProject.value?.name ||
         'gcd'
 
-      // 4. Collect step metrics from workspace resource index & raw step directories
+      if (runtimeSnapshot?.engineeringSnapshot) {
+        const analysis = reportDataFromEngineeringAnalysis(
+          runtimeSnapshot.engineeringSnapshot.analysis,
+        )
+        if (unmounted || generation !== loadGeneration) return
+        reportData.value = extractDesignReportData({
+          workspacePath,
+          workspaceName: currentProject.value?.name,
+          designName: currentProject.value?.topModule,
+          topModule,
+          pdk: currentProject.value?.pdk,
+          frequencyTarget: currentProject.value?.frequencyTarget,
+          parameters,
+          flow,
+          homeData,
+          ...analysis,
+          versionInfo,
+        })
+        loading.value = false
+        return
+      }
+
+      // Frontend still collects step metrics from the resource index and step directories.
       const stepMetrics: Record<string, unknown> = {}
       const stepSummaries: Record<string, unknown> = {}
       const stepHotspots: Record<string, unknown> = {}

@@ -152,6 +152,56 @@ describe('createElectronLogger', () => {
     )
   })
 
+  it('keeps file logging when the terminal write fails with EIO or EPIPE', () => {
+    const fileSink = vi.fn()
+    const broken = Object.assign(new Error('write EIO'), { code: 'EIO' })
+    const consoleSink = {
+      debug: vi.fn(),
+      error: vi.fn(() => {
+        throw broken
+      }),
+      info: vi.fn(),
+      warn: vi.fn(),
+    }
+    const logger = createElectronLogger({
+      consoleSink,
+      env: { ECOS_ELECTRON_LOG_LEVEL: 'error' },
+      fileSink,
+      isTty: true,
+      now: () => new Date('2026-05-12T08:36:17.209Z'),
+    })
+
+    expect(() => logger.error('[desktop] Failed to launch main window')).not.toThrow()
+    expect(fileSink).toHaveBeenCalledWith(
+      '2026-05-12T08:36:17.209Z ERROR [desktop] Failed to launch main window',
+    )
+
+    const pipe = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })
+    consoleSink.error.mockImplementation(() => {
+      throw pipe
+    })
+    expect(() => logger.error('[desktop] status after hangup')).not.toThrow()
+  })
+
+  it('still throws unexpected console write failures', () => {
+    const consoleSink = {
+      debug: vi.fn(),
+      error: vi.fn(() => {
+        throw new Error('disk full')
+      }),
+      info: vi.fn(),
+      warn: vi.fn(),
+    }
+    const logger = createElectronLogger({
+      consoleSink,
+      env: { ECOS_ELECTRON_LOG_LEVEL: 'error' },
+      isTty: false,
+      now: localTestDate,
+    })
+
+    expect(() => logger.error('[desktop] unexpected sink failure')).toThrow('disk full')
+  })
+
   it('writes configured file logs to one launch session file', async () => {
     const directory = await createTempDirectory('ecos-logger-session-')
     tempDirectories.push(directory)

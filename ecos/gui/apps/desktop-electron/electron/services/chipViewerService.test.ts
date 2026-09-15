@@ -210,6 +210,7 @@ function createService(options: {
     openWorkspace: vi.fn(async () => ({
       directory: PROJECT_ROOT,
       workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 1,
     })),
   }
   const service = new ChipViewerService({
@@ -342,6 +343,7 @@ describe('ChipViewerService', () => {
         openWorkspace: vi.fn(async () => ({
           directory: PROJECT_ROOT,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         })),
       },
     })
@@ -395,6 +397,7 @@ describe('ChipViewerService', () => {
         openWorkspace: vi.fn(async () => ({
           directory: PROJECT_ROOT,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         })),
       },
     })
@@ -942,6 +945,7 @@ describe('ChipViewerService', () => {
       expect(layoutEditRuntime.layoutEditSave).toHaveBeenCalledWith({
         editSessionId: 'layout-edit-1',
         expectedRevision: 0,
+        expectedWorkspaceRevision: 1,
         workspaceHandle: 'workspace-handle-1',
       })
       expect(ensureDirectory).toHaveBeenCalledWith(join(STEP_DIRECTORY, 'output'))
@@ -1055,6 +1059,7 @@ describe('ChipViewerService', () => {
           openWorkspace: vi.fn(async () => ({
             directory: PROJECT_ROOT,
             workspaceHandle: 'workspace-handle-1',
+            workspaceRevision: 1,
           })),
         },
       })
@@ -1120,6 +1125,7 @@ describe('ChipViewerService', () => {
         openWorkspace: vi.fn(async () => ({
           directory: PROJECT_ROOT,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         })),
       },
     })
