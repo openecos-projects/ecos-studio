@@ -290,9 +290,7 @@ codex app-server -c mcp_servers={} -c tools.web_search=<true|false>
 
 `codex_rpc.py` 的 `_readonly_activity` 仅匹配 `commandexecution` 类型的 item，web search 相关事件将完全静默，用户会看到 Agent 无响应而不知其在执行什么。
 
-需增加 `webSearch` 分支，在 Tool 卡中展示查询内容与访问域名。
-
-依据：`PRODUCT.md` —— Make the current state and next valid action immediately visible。
+需增加 `webSearch` 分支，在 Tool 卡中展示查询内容与访问域名，让当前状态和下一步有效操作立刻可见。
 
 ### 8.2 审计
 
