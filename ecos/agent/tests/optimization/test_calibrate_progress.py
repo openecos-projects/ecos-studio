@@ -13,10 +13,16 @@ def test_calibrate_emits_per_replay_progress(tmp_path, monkeypatch) -> None:
     observation = _terminal_observation()
     messages: list[str] = []
 
+    monkeypatch.setattr(
+        "ecos_agent.optimization.calibrate_workspace._environment_fingerprint",
+        lambda workspace: {"parser_sha256": "p1"},
+    )
+
     def fake_run_replay(
-        workspace, replay_root, index, timeout_seconds, progress=None
+        workspace, replay_root, index, timeout_seconds, fingerprint, progress=None
     ):
         assert progress is not None
+        assert fingerprint == {"parser_sha256": "p1"}
         progress("flow rerun started")
         return observation
 
