@@ -230,8 +230,26 @@ def action_divergence(rows: Iterable[Mapping[str, object]]) -> dict[str, object]
 SUPPORT_COVERED_STATUSES = frozenset({"pass", "weak"})
 
 
+def _within_context_disagreement(proposed: Sequence[Mapping[str, object]]) -> int:
+    repeats: dict[str, set[object]] = {}
+    for row in proposed:
+        repeats.setdefault(str(row.get("context_fingerprint")), set()).add(
+            exact_action(row)
+        )
+    return sum(
+        len({action for action in actions if action is not None}) > 1
+        for actions in repeats.values()
+    )
+
+
 def summarize_offline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
-    """Per-treatment offline behavior metrics; failures stay in the denominator."""
+    """Per-treatment offline behavior metrics; failures stay in the denominator.
+
+    Divergence and disagreement are additionally split into claim-bound and
+    unbound subsets: unbound probes are legal-domain exploration unrelated to
+    knowledge, so knowledge-effect interpretation reads the claim-bound split
+    (unbound stays reported as background, never deleted from the denominator).
+    """
     by_treatment: dict[str, list[Mapping[str, object]]] = {}
     for row in rows:
         by_treatment.setdefault(str(row.get("treatment")), []).append(row)
@@ -239,7 +257,9 @@ def summarize_offline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, ob
     for treatment, values in sorted(by_treatment.items()):
         decisions = Counter(str(row.get("decision")) for row in values)
         proposed = [row for row in values if row.get("decision") == "propose"]
-        claim_bound = sum(bool(row.get("claim_bound")) for row in proposed)
+        bound = [row for row in proposed if row.get("claim_bound")]
+        unbound = [row for row in proposed if not row.get("claim_bound")]
+        claim_bound = len(bound)
         covered = sum(
             str(row.get("support_status")) in SUPPORT_COVERED_STATUSES
             for row in proposed
@@ -248,15 +268,6 @@ def summarize_offline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, ob
             str(row.get("support_status")) == "blocked" for row in proposed
         )
         scored = [row for row in values if isinstance(row.get("correct"), bool)]
-        repeats: dict[str, set[object]] = {}
-        for row in proposed:
-            repeats.setdefault(str(row.get("context_fingerprint")), set()).add(
-                exact_action(row)
-            )
-        disagreement = sum(
-            len({action for action in actions if action is not None}) > 1
-            for actions in repeats.values()
-        )
         treatments[treatment] = {
             "rows": len(values),
             "decision_counts": dict(sorted(decisions.items())),
@@ -266,12 +277,20 @@ def summarize_offline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, ob
             "support_coverage_ratio": covered / len(proposed) if proposed else 0.0,
             "unsupported_rate": unsupported / len(proposed) if proposed else 0.0,
             "exact_action_divergence": action_divergence(proposed),
-            "within_treatment_disagreement": disagreement,
+            "within_treatment_disagreement": _within_context_disagreement(proposed),
+            "claim_bound_exact_action_divergence": action_divergence(bound),
+            "unbound_exact_action_divergence": action_divergence(unbound),
+            "claim_bound_within_treatment_disagreement": _within_context_disagreement(
+                bound
+            ),
+            "unbound_within_treatment_disagreement": _within_context_disagreement(
+                unbound
+            ),
             "label_correct_rows": sum(bool(row.get("correct")) for row in scored),
             "label_scored_rows": len(scored),
         }
     return {
-        "schema_version": "ecos.knowledge_offline_summary.v1",
+        "schema_version": "ecos.knowledge_offline_summary.v2",
         "rows": len(rows),
         "treatments": treatments,
     }
