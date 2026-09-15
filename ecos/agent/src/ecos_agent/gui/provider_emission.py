@@ -665,6 +665,13 @@ class ProviderEmissionMixin:
         key = _activity_identifier(f"local-{item_id}")
         with session.state_lock:
             session.local_telemetry.observe(session.active_turn_id, key, status)
+        if not session.active_turn_id:
+            # Outside a planner turn there is no turnId to attach, and the GUI
+            # contract requires one: emitting would only produce an
+            # "unavailable details" notice row per event. The run spinner
+            # already covers this phase; optimization progress keeps flowing
+            # through the optimization event channel.
+            return
         now = round(time.time() * 1000)
         activity = session.active_local_activities.setdefault(
             key,
