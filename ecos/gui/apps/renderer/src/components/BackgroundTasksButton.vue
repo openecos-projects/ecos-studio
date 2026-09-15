@@ -39,14 +39,14 @@
             <button
               type="button"
               class="background-task-main"
-              :title="operation.workspaceDirectory"
+              :title="taskTitle(operation.workspaceDirectory)"
               @click="inspect(operation)"
             >
               <span class="background-task-icon" aria-hidden="true">
                 <i class="ri-play-circle-line"></i>
               </span>
               <span class="background-task-copy">
-                <strong>{{ workspaceLabel(operation.workspaceDirectory) }}</strong>
+                <strong>{{ taskLabel(operation.workspaceDirectory) }}</strong>
                 <span>{{
                   operation.currentStep || operation.step || 'Preparing Flow'
                 }}</span>
@@ -78,7 +78,7 @@
           >
             <div
               class="background-task-main background-task-static"
-              :title="creation.targetDirectory"
+              :title="taskTitle(creation.targetDirectory, creation.projectRoot)"
             >
               <span class="background-task-icon" aria-hidden="true">
                 <i
@@ -90,7 +90,9 @@
                 ></i>
               </span>
               <span class="background-task-copy">
-                <strong>{{ workspaceLabel(creation.targetDirectory) }}</strong>
+                <strong>{{
+                  taskLabel(creation.targetDirectory, creation.projectRoot)
+                }}</strong>
                 <span>{{
                   creation.issue ||
                   (creation.status === 'active'
@@ -114,7 +116,7 @@
           >
             <div
               class="background-task-main background-task-static"
-              :title="finalization.workspaceDirectory"
+              :title="taskTitle(finalization.workspaceDirectory)"
             >
               <span class="background-task-icon" aria-hidden="true">
                 <i
@@ -126,7 +128,7 @@
                 ></i>
               </span>
               <span class="background-task-copy">
-                <strong>{{ workspaceLabel(finalization.workspaceDirectory) }}</strong>
+                <strong>{{ taskLabel(finalization.workspaceDirectory) }}</strong>
                 <span>{{ finalization.issue || 'Saving final Workspace snapshot' }}</span>
               </span>
               <span class="background-task-meta">
@@ -165,9 +167,11 @@ import type {
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { backgroundTaskIdentityLabel } from '@/components/backgroundTaskIdentity'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { useNotificationStore } from '@/stores/notificationStore'
+import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
 import {
   resolveProjectRouteContextForWorkspace,
   workspaceRouteQueryFromProjectContext,
@@ -187,6 +191,7 @@ const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | null = null
 const retryingHandle = ref('')
 const topbarOverlayEvent = 'ecos-topbar-overlay-open'
+const designOwners = ref<Record<string, string>>({})
 
 type PresentedCreation = EccBackgroundWorkspaceCreation & {
   local?: boolean
@@ -234,10 +239,28 @@ const taskButtonLabel = computed(() => {
   const attention = attentionCount.value ? `, ${attentionCount.value} need attention` : ''
   return `Background tasks, ${taskCount.value} active${attention}`
 })
+const identityDirectories = computed(() => [
+  ...new Set(
+    [
+      ...operations.value.map((operation) => operation.workspaceDirectory),
+      ...creationTasks.value.map((creation) => creation.targetDirectory),
+      ...finalizations.value.map((finalization) => finalization.workspaceDirectory),
+    ]
+      .map(normalizePath)
+      .filter(Boolean),
+  ),
+])
 watch(open, (isOpen) => {
   if (clock) clearInterval(clock)
   clock = isOpen ? setInterval(() => (now.value = Date.now()), 1000) : null
 })
+watch(
+  identityDirectories,
+  (directories) => {
+    void resolveDesignOwners(directories)
+  },
+  { immediate: true },
+)
 
 function toggle(): void {
   if (open.value) {
@@ -270,7 +293,7 @@ async function openWorkspace(workspacePath: string): Promise<void> {
     await navigateToWorkspace(normalizedPath)
     return
   }
-  const workspaceName = workspaceLabel(normalizedPath)
+  const workspaceName = taskLabel(normalizedPath)
   const success = await openProject(
     {
       id: normalizedPath,
@@ -312,7 +335,7 @@ async function cancel(operation: EccBackgroundOperation): Promise<void> {
     operation.cancelRequested ||
     operation.interruptibility === 'forbidden' ||
     !confirm(
-      `Cancel the Flow running in ${workspaceLabel(operation.workspaceDirectory)}?\n\nThe Runtime will stop at the next supported cancellation boundary.`,
+      `Cancel the Flow running in ${taskLabel(operation.workspaceDirectory)}?\n\nThe Runtime will stop at the next supported cancellation boundary.`,
     )
   ) {
     return
@@ -346,17 +369,49 @@ async function retrySnapshot(workspaceHandle: string): Promise<void> {
   }
 }
 
-function workspaceLabel(path: string): string {
-  return (
-    path
-      .replace(/[\\/]+$/g, '')
-      .split(/[\\/]/)
-      .pop() || path
+function taskLabel(path: string, projectRoot?: string): string {
+  const workspacePath = normalizePath(path)
+  return backgroundTaskIdentityLabel({
+    owner: designOwners.value[workspacePath],
+    projectRoot,
+    workspacePath,
+  })
+}
+
+function taskTitle(path: string, projectRoot?: string): string {
+  const workspacePath = normalizePath(path)
+  const label = taskLabel(workspacePath, projectRoot)
+  return label === workspacePath ? workspacePath : `${label}\n${workspacePath}`
+}
+
+async function resolveDesignOwners(directories: string[]): Promise<void> {
+  const pending = directories.filter((directory) => !(directory in designOwners.value))
+  if (pending.length === 0) return
+  const resolved = await Promise.all(
+    pending.map(async (directory) => {
+      try {
+        const manifest = await discoverProjectForWorkspace(directory)
+        const listed = manifest?.workspaces.some(
+          (workspace) => normalizePath(workspace.workspace_path) === directory,
+        )
+        const owner = listed
+          ? (manifest?.design_name || manifest?.name || '').trim()
+          : ''
+        return [directory, owner] as const
+      } catch {
+        return [directory, ''] as const
+      }
+    }),
   )
+  const next = { ...designOwners.value }
+  for (const [directory, owner] of resolved) next[directory] = owner
+  designOwners.value = next
 }
 
 function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.endsWith('/') && normalized.length > 1) return normalized.slice(0, -1)
+  return normalized
 }
 
 function stateLabel(state: EccRuntimeOperationState): string {

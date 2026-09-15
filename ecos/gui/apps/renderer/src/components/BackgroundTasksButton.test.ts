@@ -83,10 +83,15 @@ describe('BackgroundTasksButton', () => {
       testState.currentProject = { path: project.path }
       return true
     })
-    discoverProjectForWorkspace.mockResolvedValue({
-      name: 'demo',
-      root_path: '/projects/demo',
-      workspaces: [{ workspace_path: '/projects/demo/ws_1' }],
+    discoverProjectForWorkspace.mockImplementation(async (directory: string) => {
+      const parts = directory.split('/').filter(Boolean)
+      const owner = parts[parts.length - 2] ?? 'demo'
+      return {
+        design_name: owner,
+        name: owner,
+        root_path: directory.replace(/\/[^/]+\/?$/, ''),
+        workspaces: [{ workspace_path: directory }],
+      }
     })
     vi.stubGlobal(
       'confirm',
@@ -102,12 +107,41 @@ describe('BackgroundTasksButton', () => {
 
     expect(wrapper.get('.background-tasks-trigger').text()).toContain('2')
     await wrapper.get('.background-tasks-trigger').trigger('click')
-    expect(wrapper.text()).toContain('ws_1')
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('demo / ws_1')
+    })
     expect(wrapper.text()).toContain('Route')
-    expect(wrapper.text()).toContain('ws_2')
+    expect(wrapper.text()).toContain('demo / ws_2')
     expect(wrapper.text()).toContain('Creating Workspace')
 
     finishWorkspaceCreation(creationToken)
+    wrapper.unmount()
+  })
+
+  it('shows the owning design next to a default workspace name', async () => {
+    const store = useBackgroundOperationStore()
+    store.operations = [
+      operation({
+        workspaceDirectory: '/home/ekko/Desktop/ECOS/templates/minirv/ws_0001',
+      }),
+      operation({
+        operationId: 'operation-2',
+        workspaceDirectory: '/home/ekko/Desktop/ECOS/templates/picorv32/ws_0001',
+        workspaceHandle: 'handle-2',
+        workspaceId: 'engineering-2',
+      }),
+    ]
+    const wrapper = mount(BackgroundTasksButton)
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('minirv / ws_0001')
+      expect(wrapper.text()).toContain('picorv32 / ws_0001')
+    })
+    const titles = wrapper
+      .findAll('.background-task-main')
+      .map((row) => row.attributes('title') ?? '')
+    expect(titles[0]).toContain('minirv / ws_0001')
+    expect(titles[0]).toContain('/templates/minirv/ws_0001')
     wrapper.unmount()
   })
 
