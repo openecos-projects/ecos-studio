@@ -26,10 +26,9 @@
           :selected-node="selectedLogNode"
           :selected-node-pinned="logSelectionPinned"
         />
-        <ChatInspectorPanel
-          v-show="!workspaceAgentCollapsed"
-          class="workspace-workbench-inspector"
-        />
+        <div v-show="!workspaceAgentCollapsed" class="workspace-workbench-inspector">
+          <ChatInspectorPanel />
+        </div>
         <div v-if="workspaceAgentCollapsed" class="workspace-workbench-agent-collapsed">
           <button
             type="button"
@@ -340,8 +339,11 @@ defineSlots<{
 }
 
 .workspace-workbench-right > .workspace-workbench-inspector {
+  display: flex;
   flex: 1 1 auto;
   height: auto !important;
   min-height: clamp(184px, 30vh, 280px);
+  min-width: 0;
+  overflow: hidden;
 }
 </style>

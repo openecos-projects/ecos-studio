@@ -34,12 +34,16 @@ describe('WorkspaceWorkbench Agent panel', () => {
     await nextTick()
 
     expect(wrapper.find('.workspace-agent').exists()).toBe(true)
-    expect(wrapper.find('.workspace-agent').attributes('style')).toContain(
+    expect(wrapper.get('.workspace-workbench-inspector').attributes('style')).toContain(
       'display: none',
     )
     const toggle = wrapper.get('button.workspace-workbench-agent-toggle')
     expect(toggle.attributes('aria-label')).toBe('Expand Agent panel')
     await toggle.trigger('click')
+    await nextTick()
     expect(store.workspaceAgentCollapsed).toBe(false)
+    expect(wrapper.get('.workspace-workbench-inspector').attributes('style')).not.toContain(
+      'display: none',
+    )
   })
 })
