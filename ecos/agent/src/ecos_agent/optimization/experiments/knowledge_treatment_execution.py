@@ -322,13 +322,20 @@ def _verify_workspace_parameters(
         "density_weight": baseline["density_weight"],
     }
     die_util = floorplan.get("die_builder", {}).get("die_util", {})
+    # The floorplan stage writes back the site-quantized aspect ratio it
+    # achieved (~0.3% off the request), so bind on the requested utilization
+    # exactly but allow the resolved aspect ratio a small relative tolerance.
+    aspect = die_util.get("aspect_ratio")
+    aspect_matched = isinstance(aspect, (int, float)) and math.isclose(
+        aspect, baseline["core_aspect_ratio"], rel_tol=0.02
+    )
     if (
         any(parameters.get(key) != value for key, value in expected_parameters.items())
         or Path(str(parameters.get("pdk_root"))).resolve() != manifest.pdk_root
         or any(dreamplace.get(key) != value for key, value in expected_dreamplace.items())
         or cts.get("max_fanout") != baseline["max_fanout"]
         or die_util.get("utilization") != baseline["core_utilization"]
-        or die_util.get("aspect_ratio") != baseline["core_aspect_ratio"]
+        or not aspect_matched
     ):
         raise ValueError("Phase 8 workspace parameters do not match")
 
