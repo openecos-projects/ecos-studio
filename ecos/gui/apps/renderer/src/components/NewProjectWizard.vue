@@ -3268,6 +3268,12 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
             name: 'Filelist',
             extensions: ['f', 'fl', 'flist', 'filelist', 'lst', 'txt', 'gz'],
           },
+          {
+            // ECC writes the workspace filelist without an extension
+            // (origin/filelist); keep it selectable in the dialog.
+            name: 'All Files',
+            extensions: ['*'],
+          },
         ],
       }
     case 'sdc':
@@ -3301,7 +3307,14 @@ function isAllowedDesignInputPath(type: DesignInputKey, path: string) {
         lowerPath.endsWith(`.${extension}`) || lowerPath.endsWith(`.${extension}.gz`),
     )
 
-  if (type === 'filelist') return matches(['f', 'fl', 'flist', 'filelist', 'lst', 'txt'])
+  if (type === 'filelist') {
+    // Extension filters cannot match the extensionless ECC convention
+    // (origin/filelist), so accept it by basename as well.
+    return (
+      matches(['f', 'fl', 'flist', 'filelist', 'lst', 'txt']) ||
+      lowerPath.endsWith('/filelist')
+    )
+  }
   if (type === 'sdc') return matches(['sdc'])
   if (type === 'def') return matches(['def'])
   if (type === 'verilog') return matches(['v', 'sv', 'vg'])

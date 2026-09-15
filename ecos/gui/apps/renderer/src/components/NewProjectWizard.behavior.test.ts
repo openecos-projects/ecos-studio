@@ -18,6 +18,7 @@ const wizardMocks = vi.hoisted(() => ({
   ),
   resolveBinding: vi.fn(),
   scanPdkDirectory: vi.fn(),
+  pickFiles: vi.fn(),
   discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
     if (request.rtlPaths?.includes('/rtl/empty.v')) {
       return { candidates: [], status: 'complete', suggested: '' }
@@ -52,6 +53,7 @@ vi.mock('../composables/useWorkspace', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     pdkInventory: { resolveBinding: wizardMocks.resolveBinding },
+    dialog: { pickFiles: wizardMocks.pickFiles },
     workspaceCreationModel: { get: wizardMocks.getWorkspaceCreationModel },
     workspace: {
       scanPdkDirectory: wizardMocks.scanPdkDirectory,
@@ -489,6 +491,38 @@ describe('NewProjectWizard behavior', () => {
     wizard.filelistPath = '/rtl/sources.f'
     await flushPromises()
     expect(wizard.canProceed).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('accepts an extensionless filelist picked from the dialog', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      designFileError: string
+      filelistPath: string
+      importDesignInput: (type: string) => Promise<void>
+    }
+
+    wizardMocks.pickFiles.mockResolvedValueOnce(['/projects/gcd/ws_0001/origin/filelist'])
+    await wizard.importDesignInput('filelist')
+    await flushPromises()
+    expect(wizard.filelistPath).toBe('/projects/gcd/ws_0001/origin/filelist')
+    expect(wizard.designFileError).toBe('')
+
+    wizardMocks.pickFiles.mockResolvedValueOnce(['/projects/gcd/design.exe'])
+    await wizard.importDesignInput('filelist')
+    await flushPromises()
+    expect(wizard.filelistPath).toBe('/projects/gcd/ws_0001/origin/filelist')
+    expect(wizard.designFileError).toContain('FILELIST')
     wrapper.unmount()
   })
 
