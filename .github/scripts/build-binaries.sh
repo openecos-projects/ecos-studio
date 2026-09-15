@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
-export MAKEFLAGS="${MAKEFLAGS:--j2}"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
-export npm_config_jobs="${npm_config_jobs:-2}"
-
 SCRIPT_FILE="$(dirname "${BASH_SOURCE[0]}")"
 REPO_ROOT="$(cd "$SCRIPT_FILE/../.." && pwd)"
-export REPO_ROOT
 
 build_chip_viewer() {
   cd "$REPO_ROOT/ecos/chip-viewer"
