@@ -7,6 +7,7 @@ import {
   parseProjectManifest,
   projectManifestFlowSteps,
   registerWorkspaceInManifest,
+  serializeProjectManifest,
   synchronizeProjectBaseline,
 } from './projectManifest'
 
@@ -293,6 +294,117 @@ describe('project manifest parsing', () => {
       (updated.workspaces[0] as unknown as Record<string, unknown> | undefined)
         ?.custom_workspace_setting,
     ).toEqual({ keep: true })
+  })
+
+  it('round-trips external paths and resolves legacy relative paths inside the project', () => {
+    const manifest = parseProjectManifest(
+      JSON.stringify({
+        schema_version: 1,
+        name: 'gcd',
+        design_name: 'gcd',
+        root_path: '/work/gcd',
+        workspaces: [
+          { workspace_id: 'internal', workspace_path: 'internal' },
+          { workspace_id: 'external', workspace_path: '/archive/gcd/external' },
+        ],
+      }),
+    )
+
+    expect(manifest.workspaces.map((workspace) => workspace.workspace_path)).toEqual([
+      '/work/gcd/internal',
+      '/archive/gcd/external',
+    ])
+    expect(parseProjectManifest(serializeProjectManifest(manifest)).workspaces).toEqual(
+      manifest.workspaces,
+    )
+  })
+
+  it('rejects relative path escapes and duplicate active workspace identities', () => {
+    const base = {
+      schema_version: 1,
+      name: 'gcd',
+      design_name: 'gcd',
+      root_path: '/work/gcd',
+    }
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({
+          ...base,
+          workspaces: [{ workspace_id: 'escape', workspace_path: '../escape' }],
+        }),
+      ),
+    ).toThrow('escapes root_path')
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({
+          ...base,
+          workspaces: [
+            { workspace_id: 'same', workspace_path: 'one' },
+            { workspace_id: 'same', workspace_path: 'two' },
+          ],
+        }),
+      ),
+    ).toThrow('duplicate active workspace_id')
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({
+          ...base,
+          workspaces: [
+            { workspace_id: 'one', workspace_path: 'same' },
+            { workspace_id: 'two', workspace_path: '/work/gcd/same' },
+          ],
+        }),
+      ),
+    ).toThrow('duplicate active workspace_path')
+  })
+
+  it('rejects crossed registration conflicts and accepts imported metadata', () => {
+    const first = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
+      { projectRoot: '/work/gcd', workspacePath: '/external/recovered' },
+    )
+
+    expect(() =>
+      registerWorkspaceInManifest(first, {
+        projectRoot: '/work/gcd',
+        workspacePath: '/other/recovered',
+      }),
+    ).toThrow('workspace_id_conflict')
+    const pathOwnedByAnotherId = {
+      ...first,
+      workspaces: first.workspaces.map((workspace) => ({
+        ...workspace,
+        workspace_id: 'first',
+      })),
+    }
+    expect(() =>
+      registerWorkspaceInManifest(pathOwnedByAnotherId, {
+        projectRoot: '/work/gcd',
+        workspacePath: '/external/recovered',
+      }),
+    ).toThrow('workspace_path_conflict')
+
+    const imported = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/work/gcd',
+        name: 'gcd',
+        designName: 'gcd',
+      }),
+      {
+        projectRoot: '/work/gcd',
+        workspacePath: '/external/failed',
+        status: 'failed',
+        parameterPatch: { frequency_max: { from: 100, to: 125 } },
+      },
+    )
+    expect(imported.workspaces[0]).toMatchObject({
+      status: 'failed',
+      parameter_patch: { frequency_max: { from: 100, to: 125 } },
+    })
   })
 
   it('persists the first available workspace as the default QoR baseline', () => {

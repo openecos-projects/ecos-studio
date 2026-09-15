@@ -539,6 +539,32 @@ describe('useWorkspace openProject', () => {
     expect(desktopApi.workspace.registerProjectReadRoot).toHaveBeenCalledWith('/work')
   })
 
+  it('uses an explicit project context when opening an external workspace', async () => {
+    const workspace = useWorkspace()
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/external/recovered',
+        workspace_handle: 'workspace-recovered',
+      },
+    })
+
+    await expect(
+      workspace.openProject(
+        {
+          id: '/external/recovered',
+          name: 'gcd/recovered',
+          path: '/external/recovered',
+          lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        { projectContext: { projectRoot: '/work/gcd', projectName: 'gcd' } },
+      ),
+    ).resolves.toBe(true)
+
+    expect(resolveProjectRouteContextForWorkspaceMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.registerProjectReadRoot).toHaveBeenCalledWith('/work/gcd')
+  })
+
   it('stops before loading when the selected directory is not an ECOS workspace', async () => {
     const workspace = useWorkspace()
 

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   applyProjectManifestMutation,
   parseProjectManifest,
@@ -60,6 +61,28 @@ export class ProjectManifestService {
   async mutate(
     request: ProjectManifestMutationRequest,
   ): Promise<ProjectManifestMutationResult> {
+    return await this.mutateWithLock(request)
+  }
+
+  async mutateWithWorkspaceLock(
+    request: ProjectManifestMutationRequest,
+    workspacePath: string,
+    revalidate: () => Promise<void>,
+  ): Promise<ProjectManifestMutationResult> {
+    return await this.mutateWithLock(request, async (operation) =>
+      withWorkspaceFileLock(workspacePath, async () => {
+        await revalidate()
+        return await operation()
+      }),
+    )
+  }
+
+  private async mutateWithLock(
+    request: ProjectManifestMutationRequest,
+    withinManifestLock: (
+      operation: () => Promise<ProjectManifestMutationResult>,
+    ) => Promise<ProjectManifestMutationResult> = (operation) => operation(),
+  ): Promise<ProjectManifestMutationResult> {
     if (
       !request ||
       typeof request.projectRoot !== 'string' ||
@@ -72,89 +95,98 @@ export class ProjectManifestService {
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
       request.projectRoot,
     )
-    return await this.enqueue(projectRoot, async () => {
-      const manifestPath = join(projectRoot, 'project.json')
-      const currentContent = await readOptionalTextFile(manifestPath)
-      const currentManifest =
-        currentContent === null ? null : parseProjectManifest(currentContent)
-      if (currentManifest) {
-        const manifestRoot = await this.projectScopeProvider.resolveProjectRoot(
-          currentManifest.root_path,
-        )
-        if (manifestRoot !== projectRoot) {
-          throw new Error(
-            'Project manifest root_path does not match its containing directory.',
-          )
-        }
-      }
-      if (request.mutation.type === 'create' && currentManifest) {
-        throw new Error('Project manifest already exists.')
-      }
-      const manifest =
-        request.mutation.type === 'record-replacement-backup'
-          ? this.applyReplacementBackupMutation(
-              currentManifest,
-              projectRoot,
-              request.mutation,
+    return await this.enqueue(projectRoot, async () =>
+      withManifestFileLock(projectRoot, () =>
+        withinManifestLock(async () => {
+          const manifestPath = join(projectRoot, 'project.json')
+          const currentContent = await readOptionalTextFile(manifestPath)
+          const currentManifest =
+            currentContent === null ? null : parseProjectManifest(currentContent)
+          if (currentManifest) {
+            const manifestRoot = await this.projectScopeProvider.resolveProjectRoot(
+              currentManifest.root_path,
             )
-          : request.mutation.type === 'select-qor-baseline'
-            ? await this.applyQorBaselineMutation(currentManifest, request.mutation)
-            : applyProjectManifestMutation(currentManifest, projectRoot, request.mutation)
-      const directoryReplacement =
-        request.mutation.type === 'delete-workspace' && request.mutation.deleteDirectory
-          ? await this.prepareManagedWorkspaceDeletion(
-              currentManifest,
-              projectRoot,
-              request.mutation.workspaceId,
-            )
-          : null
-      const content = serializeProjectManifest(manifest)
-      try {
-        if (request.mutation.type === 'record-replacement-backup') {
-          await this.setReplacementRecoveryMode(
-            request.mutation.input.replacementId,
-            projectRoot,
-            'retain',
-          )
-        }
-        if (directoryReplacement) {
-          await this.setReplacementRecoveryMode(
-            directoryReplacement.id,
-            projectRoot,
-            'delete',
-          )
-        }
-        await writeTextFileAtomically(manifestPath, content)
-      } catch (error) {
-        if (directoryReplacement) {
-          await this.replacementProvider!.restoreProjectDirectoryReplacement(
-            directoryReplacement.id,
-          ).catch(() => undefined)
-        }
-        throw error
-      }
-      let cleanupPending = false
-      if (request.mutation.type === 'record-replacement-backup') {
-        try {
-          await this.replacementProvider!.retainProjectDirectoryReplacement(
-            request.mutation.input.replacementId,
-          )
-        } catch {
-          // The manifest now references the backup and recovery mode is retain.
-          cleanupPending = true
-        }
-      }
-      if (directoryReplacement) {
-        try {
-          await this.replacementProvider!.finalizeProjectDirectoryReplacement(
-            directoryReplacement.id,
-          )
-        } catch {
-          cleanupPending = true
-        }
-      }
-      return { content, ...(cleanupPending ? { cleanupPending } : {}) }
-    })
+            if (manifestRoot !== projectRoot) {
+              throw new Error(
+                'Project manifest root_path does not match its containing directory.',
+              )
+            }
+          }
+          if (request.mutation.type === 'create' && currentManifest) {
+            throw new Error('Project manifest already exists.')
+          }
+          const manifest =
+            request.mutation.type === 'record-replacement-backup'
+              ? this.applyReplacementBackupMutation(
+                  currentManifest,
+                  projectRoot,
+                  request.mutation,
+                )
+              : request.mutation.type === 'select-qor-baseline'
+                ? await this.applyQorBaselineMutation(currentManifest, request.mutation)
+                : applyProjectManifestMutation(
+                    currentManifest,
+                    projectRoot,
+                    request.mutation,
+                  )
+          const directoryReplacement =
+            request.mutation.type === 'delete-workspace' &&
+            request.mutation.deleteDirectory
+              ? await this.prepareManagedWorkspaceDeletion(
+                  currentManifest,
+                  projectRoot,
+                  request.mutation.workspaceId,
+                )
+              : null
+          const content = serializeProjectManifest(manifest)
+          try {
+            if (request.mutation.type === 'record-replacement-backup') {
+              await this.setReplacementRecoveryMode(
+                request.mutation.input.replacementId,
+                projectRoot,
+                'retain',
+              )
+            }
+            if (directoryReplacement) {
+              await this.setReplacementRecoveryMode(
+                directoryReplacement.id,
+                projectRoot,
+                'delete',
+              )
+            }
+            await writeTextFileAtomically(manifestPath, content)
+          } catch (error) {
+            if (directoryReplacement) {
+              await this.replacementProvider!.restoreProjectDirectoryReplacement(
+                directoryReplacement.id,
+              ).catch(() => undefined)
+            }
+            throw error
+          }
+          let cleanupPending = false
+          if (request.mutation.type === 'record-replacement-backup') {
+            try {
+              await this.replacementProvider!.retainProjectDirectoryReplacement(
+                request.mutation.input.replacementId,
+              )
+            } catch {
+              // The manifest now references the backup and recovery mode is retain.
+              cleanupPending = true
+            }
+          }
+          if (directoryReplacement) {
+            try {
+              await this.replacementProvider!.finalizeProjectDirectoryReplacement(
+                directoryReplacement.id,
+              )
+            } catch {
+              cleanupPending = true
+            }
+          }
+          return { content, ...(cleanupPending ? { cleanupPending } : {}) }
+        }),
+      ),
+    )
   }
 
   private applyReplacementBackupMutation(
@@ -235,6 +267,11 @@ export class ProjectManifestService {
       (candidate) => candidate.workspace_id === workspaceId,
     )
     if (!workspace) return null
+    if (!isPathWithinRoot(workspace.workspace_path, projectRoot)) {
+      throw new Error(
+        'External workspace data cannot be deleted from Project Management.',
+      )
+    }
     if (!this.replacementProvider) {
       throw new Error('Workspace replacement support is unavailable.')
     }
@@ -310,6 +347,23 @@ function validateProjectManifestMutation(
       requireOptionalString(input.sourceOutputType, 'Project manifest source output type')
       requireOptionalString(input.startStep, 'Project manifest start step')
       requireOptionalString(input.endStep, 'Project manifest end step')
+      requireOptionalString(input.status, 'Project manifest workspace status')
+      if (
+        input.status !== undefined &&
+        ![
+          'success',
+          'failed',
+          'running',
+          'in_progress',
+          'not_started',
+          'archived',
+        ].includes(input.status as string)
+      ) {
+        throw new Error('Project manifest workspace status is invalid')
+      }
+      if (input.parameterPatch !== undefined && !isRecord(input.parameterPatch)) {
+        throw new Error('Project manifest workspace parameterPatch must be an object')
+      }
       if (input.config !== undefined) validateWorkspaceConfig(input.config)
       return
     }
@@ -656,6 +710,82 @@ async function readOptionalTextFile(path: string): Promise<string | null> {
     if (isNodeErrorWithCode(error, 'ENOENT')) return null
     throw error
   }
+}
+
+async function withManifestFileLock<T>(
+  projectRoot: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return await withFlockFile(
+    join(projectRoot, '.manifest.lock'),
+    'project manifest',
+    operation,
+  )
+}
+
+async function withWorkspaceFileLock<T>(
+  workspacePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return await withFlockFile(
+    join(dirname(workspacePath), `${basename(workspacePath)}.lock`),
+    'workspace',
+    operation,
+  )
+}
+
+async function withFlockFile<T>(
+  lockPath: string,
+  label: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const marker = `ecos-studio-${label.replaceAll(' ', '-')}-lock:${randomUUID()}\n`
+  const child = spawn('flock', ['--exclusive', lockPath, 'cat'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk
+  })
+  const closed = new Promise<number | null>((resolve) => {
+    child.once('close', (code) => resolve(code))
+  })
+  await new Promise<void>((resolveLock, rejectLock) => {
+    let stdout = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+      if (stdout.includes(marker)) resolveLock()
+    })
+    child.once('error', rejectLock)
+    child.once('close', (code) => {
+      rejectLock(
+        new Error(
+          `Failed to acquire ${label} lock (exit ${String(code)}): ${stderr.trim()}`,
+        ),
+      )
+    })
+    child.stdin.write(marker)
+  })
+
+  let result: T | undefined
+  let operationError: unknown
+  try {
+    result = await operation()
+  } catch (error) {
+    operationError = error
+  }
+
+  child.stdin.end()
+  const exitCode = await closed
+  if (operationError !== undefined) throw operationError
+  if (exitCode !== 0) {
+    throw new Error(
+      `${label} lock exited unexpectedly (${String(exitCode)}): ${stderr.trim()}`,
+    )
+  }
+  return result as T
 }
 
 async function writeTextFileAtomically(path: string, content: string): Promise<void> {

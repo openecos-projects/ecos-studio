@@ -22,6 +22,7 @@ export const desktopApiIpcChannels = {
   projectManagementReadManifest: 'project-management:read-manifest',
   projectManagementListEntries: 'project-management:list-entries',
   projectManagementReadWorkspaceTexts: 'project-management:read-workspace-texts',
+  projectManagementImportWorkspace: 'project-management:import-workspace',
   dialogPickDirectory: 'dialog:pick-directory',
   dialogPickFiles: 'dialog:pick-files',
   dialogPickRtlSources: 'dialog:pick-rtl-sources',

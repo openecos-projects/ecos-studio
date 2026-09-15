@@ -179,6 +179,26 @@ export interface DesktopProjectManagementWorkspaceTextsResult {
   unavailablePaths: string[]
 }
 
+export type DesktopProjectManagementWorkspaceImportFailureCode =
+  | 'project_invalid'
+  | 'workspace_id_conflict'
+  | 'workspace_not_importable'
+  | 'workspace_path_conflict'
+
+export type DesktopProjectManagementWorkspaceImportResult =
+  | { status: 'cancelled' }
+  | {
+      status: 'imported' | 'already_registered'
+      content: string
+      workspaceId: string
+      workspacePath: string
+    }
+  | {
+      status: 'failed'
+      code: DesktopProjectManagementWorkspaceImportFailureCode
+      message: string
+    }
+
 export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
@@ -255,6 +275,9 @@ export interface DesktopApi {
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
+    importWorkspace(
+      projectRoot: string,
+    ): Promise<DesktopProjectManagementWorkspaceImportResult>
   }
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>

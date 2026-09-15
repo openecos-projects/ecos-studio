@@ -1044,9 +1044,29 @@ export function parseProjectManifest(content: string): ProjectManifest {
   ) {
     throw new Error('Invalid project manifest.')
   }
+  const rootPath = normalizePath(parsed.root_path)
+  const workspaces = parsed.workspaces.map((workspace) => ({
+    ...workspace,
+    workspace_path: resolveManifestWorkspacePath(rootPath, workspace.workspace_path),
+  }))
+  const activeIds = new Set<string>()
+  const activePaths = new Set<string>()
+  for (const workspace of workspaces) {
+    if (workspace.status === 'archived') continue
+    if (activeIds.has(workspace.workspace_id)) {
+      throw new Error('Invalid project manifest: duplicate active workspace_id.')
+    }
+    if (activePaths.has(workspace.workspace_path)) {
+      throw new Error('Invalid project manifest: duplicate active workspace_path.')
+    }
+    activeIds.add(workspace.workspace_id)
+    activePaths.add(workspace.workspace_path)
+  }
   return {
     ...parsed,
     design_name: optionalString(parsed.design_name),
+    root_path: rootPath,
+    workspaces,
     base_design: {
       ...parsed.base_design,
       parameters: {
@@ -2268,6 +2288,27 @@ function slugify(value: string): string {
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+function resolveManifestWorkspacePath(rootPath: string, workspacePath: string): string {
+  const normalizedWorkspace = normalizePath(workspacePath)
+  if (normalizedWorkspace.startsWith('/') || /^[A-Za-z]:\//.test(normalizedWorkspace)) {
+    return normalizedWorkspace
+  }
+  const rootParts = normalizePath(rootPath).split('/').filter(Boolean)
+  const parts = [...rootParts]
+  for (const part of normalizedWorkspace.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  const drive = /^[A-Za-z]:/.test(rootPath) ? '' : '/'
+  const resolved = `${drive}${parts.join('/')}`
+  const rootPrefix = `${normalizePath(rootPath)}/`
+  if (resolved !== normalizePath(rootPath) && !resolved.startsWith(rootPrefix)) {
+    throw new Error('Invalid project manifest: relative workspace path escapes root.')
+  }
+  return resolved
 }
 
 function joinPath(...parts: string[]): string {

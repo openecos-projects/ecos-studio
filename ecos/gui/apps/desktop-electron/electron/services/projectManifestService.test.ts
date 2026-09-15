@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -83,6 +84,85 @@ describe('ProjectManifestService', () => {
     expect(manifest.workspaces.map((workspace) => workspace.workspace_id).sort()).toEqual(
       ['ws_0001', 'ws_0002'],
     )
+  })
+
+  it('cooperates with the ECC CLI manifest flock before reading and writing', async () => {
+    const projectRoot = await createTemporaryProject()
+    const lockHolder = spawn(
+      'flock',
+      ['--exclusive', join(projectRoot, '.manifest.lock'), 'cat'],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    )
+    lockHolder.stdout.setEncoding('utf8')
+    const acquired = new Promise<void>((resolve) => {
+      lockHolder.stdout.once('data', () => resolve())
+    })
+    lockHolder.stdin.write('locked\n')
+    await acquired
+
+    let mutationSettled = false
+    const mutation = createService(projectRoot)
+      .mutate({
+        projectRoot,
+        mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+      })
+      .finally(() => {
+        mutationSettled = true
+      })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(mutationSettled).toBe(false)
+
+    lockHolder.stdin.end()
+    await mutation
+    expect(mutationSettled).toBe(true)
+  })
+
+  it('holds the ECC sibling workspace lock while revalidating an import', async () => {
+    const projectRoot = await createTemporaryProject()
+    const workspaceRoot = join(projectRoot, 'external-workspace')
+    const service = createService(projectRoot)
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
+
+    const lockHolder = spawn('flock', ['--exclusive', `${workspaceRoot}.lock`, 'cat'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    lockHolder.stdout.setEncoding('utf8')
+    const acquired = new Promise<void>((resolve) => {
+      lockHolder.stdout.once('data', () => resolve())
+    })
+    lockHolder.stdin.write('locked\n')
+    await acquired
+
+    let revalidated = false
+    let mutationSettled = false
+    const mutation = service
+      .mutateWithWorkspaceLock(
+        {
+          projectRoot,
+          mutation: {
+            type: 'register-workspace',
+            input: { projectRoot, workspacePath: workspaceRoot },
+          },
+        },
+        workspaceRoot,
+        async () => {
+          revalidated = true
+        },
+      )
+      .finally(() => {
+        mutationSettled = true
+      })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(revalidated).toBe(false)
+    expect(mutationSettled).toBe(false)
+
+    lockHolder.stdin.end()
+    await mutation
+    expect(revalidated).toBe(true)
+    expect(mutationSettled).toBe(true)
   })
 
   it('writes project manifests atomically and refuses to overwrite an existing project manifest', async () => {
@@ -751,6 +831,49 @@ describe('ProjectManifestService', () => {
       await readFile(join(projectRoot, 'project.json'), 'utf8'),
     )
     expect(manifest.workspaces).toEqual([])
+  })
+
+  it('rejects directory deletion for an external workspace without changing the manifest', async () => {
+    const projectRoot = await createTemporaryProject()
+    const externalRoot = await createTemporaryProject()
+    const prepare = vi.fn()
+    const service = createService(projectRoot, {
+      finalizeProjectDirectoryReplacement: async () => undefined,
+      getProjectDirectoryReplacement: () => {
+        throw new Error('unexpected replacement')
+      },
+      prepareManagedProjectWorkspaceDirectoryReplacement: prepare,
+      retainProjectDirectoryReplacement: async () => undefined,
+      restoreProjectDirectoryReplacement: async () => undefined,
+      setProjectDirectoryReplacementRecoveryMode: async () => undefined,
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: { type: 'create', name: 'gcd', designName: 'gcd' },
+    })
+    await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'register-workspace',
+        input: { projectRoot, workspacePath: externalRoot },
+      },
+    })
+    const before = await readFile(join(projectRoot, 'project.json'), 'utf8')
+
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: {
+          type: 'delete-workspace',
+          workspaceId: externalRoot.split('/').at(-1)!,
+          deleteDirectory: true,
+        },
+      }),
+    ).rejects.toThrow('External workspace data cannot be deleted')
+    expect(prepare).not.toHaveBeenCalled()
+    await expect(readFile(join(projectRoot, 'project.json'), 'utf8')).resolves.toBe(
+      before,
+    )
   })
 
   it('records a replacement backup from the trusted token and releases it after writing', async () => {

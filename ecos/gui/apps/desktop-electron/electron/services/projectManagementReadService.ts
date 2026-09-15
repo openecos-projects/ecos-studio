@@ -1,5 +1,5 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   parseProjectManifest,
   projectManagementWorkspaceReadablePaths,
@@ -160,10 +160,7 @@ export class ProjectManagementReadService {
       )
     }
     for (const workspace of manifest.workspaces) {
-      const candidate = resolve(workspace.workspace_path)
-      if (!isPathWithinRoot(candidate, root)) {
-        throw new Error('Project manifest contains a workspace outside the project root.')
-      }
+      resolveDeclaredWorkspacePath(root, workspace.workspace_path)
     }
     return { content, manifest, root }
   }
@@ -173,20 +170,20 @@ export class ProjectManagementReadService {
     declaredWorkspacePaths: string[],
     workspacePath: string,
   ): Promise<string> {
-    if (!declaredWorkspacePaths.some((path) => pathsEqual(path, workspacePath))) {
-      throw new Error('Workspace is not declared by the requested project.')
-    }
-
-    const candidatePath = resolve(workspacePath)
-    if (!isPathWithinRoot(candidatePath, projectRoot)) {
-      throw new Error('Workspace is outside the requested project.')
-    }
-
+    const candidatePath = isAbsolute(workspacePath)
+      ? resolve(workspacePath)
+      : resolve(projectRoot, workspacePath)
     const canonicalPath = await canonicalizeExistingDirectory(candidatePath)
-    if (!isPathWithinRoot(canonicalPath, projectRoot)) {
-      throw new Error('Workspace resolves outside the requested project.')
+    for (const declaredPath of declaredWorkspacePaths) {
+      const declaredCandidate = resolveDeclaredWorkspacePath(projectRoot, declaredPath)
+      try {
+        const declaredCanonical = await canonicalizeExistingDirectory(declaredCandidate)
+        if (pathsEqual(declaredCanonical, canonicalPath)) return canonicalPath
+      } catch (error) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+      }
     }
-    return canonicalPath
+    throw new Error('Workspace is not declared by the requested project.')
   }
 
   private async readWorkspaceTextFile(
@@ -209,6 +206,27 @@ export class ProjectManagementReadService {
     }
     return await readOptionalBoundedTextFile(canonicalPath, maxBytes)
   }
+}
+
+function resolveDeclaredWorkspacePath(
+  projectRoot: string,
+  workspacePath: string,
+): string {
+  const absolute = isAbsolute(workspacePath)
+  const candidate = absolute
+    ? resolve(workspacePath)
+    : resolve(projectRoot, workspacePath)
+  if (!absolute && !isPathWithinRoot(candidate, projectRoot)) {
+    throw new Error('Project manifest contains a relative workspace path escape.')
+  }
+  if (
+    pathsEqual(candidate, projectRoot) ||
+    pathsEqual(candidate, join(projectRoot, 'runs')) ||
+    isPathWithinRoot(projectRoot, candidate)
+  ) {
+    throw new Error('Project manifest contains a protected workspace path.')
+  }
+  return candidate
 }
 
 function normalizeRequestedPaths(paths: string[]): string[] {

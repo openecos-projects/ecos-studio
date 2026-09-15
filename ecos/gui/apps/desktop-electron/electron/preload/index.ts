@@ -137,6 +137,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.projectManagementListEntries, projectRoot),
     readWorkspaceTexts: (request) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementReadWorkspaceTexts, request),
+    importWorkspace: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementImportWorkspace, projectRoot),
   },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>

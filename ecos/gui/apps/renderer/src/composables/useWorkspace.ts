@@ -45,7 +45,10 @@ import {
   rewriteWorkspaceConfigPathsForReplacement,
   workspaceParentPath,
 } from './workspaceReplacement'
-import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
+import {
+  resolveProjectRouteContextForWorkspace,
+  type ProjectRouteContext,
+} from '@/utils/projectManifestRegistration'
 
 interface SerializedProject {
   id: string
@@ -433,10 +436,15 @@ export function useWorkspace() {
       }
     })
 
-  const registerProjectManagedReadScope = (workspacePath: string): Promise<void> =>
+  const registerProjectManagedReadScope = (
+    workspacePath: string,
+    explicitProjectContext?: ProjectRouteContext | null,
+  ): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+        const projectContext =
+          explicitProjectContext ??
+          (await resolveProjectRouteContextForWorkspace(workspacePath))
         if (!projectContext) return
 
         const desktopApi = await waitForDesktopApi()
@@ -608,7 +616,11 @@ export function useWorkspace() {
             await router.replace('/')
             return
           }
-          await registerProjectManagedReadScope(canonicalProjectRoot)
+          const routeProjectRoot = asString(router.currentRoute.value.query.projectRoot)
+          await registerProjectManagedReadScope(
+            canonicalProjectRoot,
+            routeProjectRoot ? { projectRoot: routeProjectRoot } : undefined,
+          )
           if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           currentProject.value = {
             ...restored,
@@ -681,7 +693,11 @@ export function useWorkspace() {
   }
   const openProject = async (
     project?: Project,
-    options: { designTool?: DesignTool; quiet?: boolean } = {},
+    options: {
+      designTool?: DesignTool
+      projectContext?: ProjectRouteContext | null
+      quiet?: boolean
+    } = {},
   ) => {
     const quiet = Boolean(options.quiet)
     const openProjectRequestId = ++openProjectRequestSequence
@@ -833,7 +849,10 @@ export function useWorkspace() {
           }
           return false
         }
-        await registerProjectManagedReadScope(canonicalProjectRoot)
+        await registerProjectManagedReadScope(
+          canonicalProjectRoot,
+          options.projectContext,
+        )
         if (!isLatestOpenProjectRequest()) return false
         if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
           return false

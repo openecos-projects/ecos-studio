@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
-import { dirname, join, relative, resolve, win32 } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import {
   parseProjectManifest,
   type PdkDetectedFiles,
@@ -122,13 +122,28 @@ async function manifestWorkspaceRoots(
 
   return await Promise.all(
     manifest.workspaces.map(async (workspace) => {
-      const workspacePath = resolve(workspace.workspace_path)
-      if (!pathsEqual(dirname(workspacePath), projectRoot)) {
+      const absolute = isAbsolute(workspace.workspace_path)
+      const workspacePath = absolute
+        ? resolve(workspace.workspace_path)
+        : resolve(projectRoot, workspace.workspace_path)
+      if (!absolute && !isPathWithinRoot(workspacePath, projectRoot)) {
         throw new Error(
-          'Project read root manifest contains a workspace outside the project',
+          'Project read root manifest contains a relative workspace path escape',
         )
       }
-      return await canonicalizePotentialPathWithinRoot(workspacePath, projectRoot)
+      if (
+        pathsEqual(workspacePath, projectRoot) ||
+        pathsEqual(workspacePath, join(projectRoot, 'runs')) ||
+        isPathWithinRoot(projectRoot, workspacePath)
+      ) {
+        throw new Error('Project read root manifest contains a protected workspace path')
+      }
+      try {
+        return await canonicalizeExistingDirectory(workspacePath)
+      } catch (error) {
+        if (isNodeErrorWithCode(error, 'ENOENT')) return workspacePath
+        throw error
+      }
     }),
   )
 }
@@ -324,12 +339,6 @@ export class ProjectScopeService {
       this.readScopesByWindowId.delete(windowId)
       return canonicalPath
     }
-    if (!pathsEqual(canonicalPath, dirname(activeProjectRoot))) {
-      throw new Error(
-        'Project read root must be the active workspace root or its parent directory',
-      )
-    }
-
     let manifest: ProjectManifest
     try {
       manifest = parseProjectManifest(

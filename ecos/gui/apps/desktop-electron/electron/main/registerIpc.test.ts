@@ -112,6 +112,9 @@ function registerHandlers(
       listProjectEntries: vi.fn(),
       readWorkspaceTexts: vi.fn(),
     },
+    projectWorkspaceImportService: {
+      importWorkspace: vi.fn(),
+    },
     workspaceService: {
       approvePendingExternalReadRoots: vi.fn(),
       clearProjectRoot: vi.fn(),
@@ -317,6 +320,56 @@ describe('registerIpc', () => {
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
     )
+  })
+
+  it('imports only the workspace selected by the main-process directory picker', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: {} }
+    showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/tmp/external-workspace'],
+    })
+    statMock.mockResolvedValueOnce({ isDirectory: () => true, isFile: () => false })
+    services.projectWorkspaceImportService.importWorkspace.mockResolvedValueOnce({
+      status: 'imported',
+      content: '{"workspaces":[]}',
+      workspaceId: 'external-workspace',
+      workspacePath: '/tmp/external-workspace',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementImportWorkspace)?.(
+        event,
+        '/tmp/project',
+        '/tmp/renderer-forged-path',
+      ),
+    ).resolves.toMatchObject({ status: 'imported' })
+    expect(showOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: ['openDirectory'],
+        title: 'Select Workspace Folder',
+      }),
+    )
+    expect(services.projectWorkspaceImportService.importWorkspace).toHaveBeenCalledWith(
+      '/tmp/project',
+      '/tmp/external-workspace',
+    )
+    expect(
+      services.projectWorkspaceImportService.importWorkspace,
+    ).not.toHaveBeenCalledWith('/tmp/project', '/tmp/renderer-forged-path')
+  })
+
+  it('treats a cancelled workspace import picker as a no-op', async () => {
+    const { handlers, services } = registerHandlers()
+    showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementImportWorkspace)?.(
+        { sender: {} },
+        '/tmp/project',
+      ),
+    ).resolves.toEqual({ status: 'cancelled' })
+    expect(services.projectWorkspaceImportService.importWorkspace).not.toHaveBeenCalled()
   })
 
   it('requires native confirmation before approving external frontend roots', async () => {

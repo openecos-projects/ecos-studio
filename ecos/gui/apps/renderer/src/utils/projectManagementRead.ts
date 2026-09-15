@@ -1,5 +1,8 @@
 import { waitForDesktopApi } from '@/platform/desktop'
-import type { DesktopProjectManagementWorkspaceTextsResult } from '@ecos-studio/shared'
+import type {
+  DesktopProjectManagementWorkspaceImportResult,
+  DesktopProjectManagementWorkspaceTextsResult,
+} from '@ecos-studio/shared'
 
 async function projectManagementApi() {
   const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
@@ -19,6 +22,12 @@ export async function listProjectManagementEntries(
   projectRoot: string,
 ): Promise<string[]> {
   return await (await projectManagementApi()).listProjectEntries(projectRoot)
+}
+
+export async function importProjectManagementWorkspace(
+  projectRoot: string,
+): Promise<DesktopProjectManagementWorkspaceImportResult> {
+  return await (await projectManagementApi()).importWorkspace(projectRoot)
 }
 
 export async function readProjectManagementWorkspaceTexts(

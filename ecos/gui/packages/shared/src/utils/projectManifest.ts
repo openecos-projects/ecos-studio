@@ -128,6 +128,8 @@ export interface ProjectManifestWorkspaceRegistrationInput {
   sourceOutputType?: string
   startStep?: ProjectManifestFlowStep | string
   endStep?: ProjectManifestFlowStep | string
+  status?: ProjectManifestWorkspaceStatus
+  parameterPatch?: Record<string, unknown>
   now?: string
   config?: {
     pdk?: string
@@ -306,6 +308,19 @@ export function parseProjectManifest(content: string): ProjectManifest {
   const baseDesign = normalizeBaseDesign(source.base_design)
   const objectives = normalizeObjectives(source.objectives)
 
+  const normalizedRootPath = normalizeProjectManifestPath(rootPath)
+  const workspaces = source.workspaces.map((workspace, index) => {
+    const normalized = normalizeWorkspace(workspace, index, createdAt)
+    return {
+      ...normalized,
+      workspace_path: resolveProjectManifestWorkspacePath(
+        normalizedRootPath,
+        normalized.workspace_path,
+      ),
+    }
+  })
+  validateActiveWorkspaceIdentity(workspaces)
+
   return {
     ...source,
     schema_version: 1,
@@ -313,14 +328,12 @@ export function parseProjectManifest(content: string): ProjectManifest {
     name,
     design_name: designName,
     description: optionalString(source.description),
-    root_path: normalizeProjectManifestPath(rootPath),
+    root_path: normalizedRootPath,
     created_at: createdAt,
     updated_at: updatedAt,
     base_design: withProjectDesignName(baseDesign, designName),
     objectives,
-    workspaces: source.workspaces.map((workspace, index) =>
-      normalizeWorkspace(workspace, index, createdAt),
-    ),
+    workspaces,
     mpc: normalizeProjectManifestMpc(source.mpc),
     best_workspace: normalizeBestWorkspace(source.best_workspace),
     qor_baseline: normalizeQorBaseline(source.qor_baseline),
@@ -373,14 +386,29 @@ export function registerWorkspaceInManifest(
   input: ProjectManifestWorkspaceRegistrationInput,
 ): ProjectManifest {
   const now = input.now ?? new Date().toISOString()
-  const workspacePath = normalizeProjectManifestPath(input.workspacePath)
+  const workspacePath = collapseProjectManifestPath(input.workspacePath)
   const workspaceId =
     basenameProjectManifestPath(workspacePath) || nextManifestWorkspaceId(manifest)
-  const existingWorkspace = manifest.workspaces.find(
+  const workspaceWithId = manifest.workspaces.find(
     (workspace) =>
-      workspace.workspace_id === workspaceId ||
+      workspace.status !== 'archived' && workspace.workspace_id === workspaceId,
+  )
+  const workspaceWithPath = manifest.workspaces.find(
+    (workspace) =>
+      workspace.status !== 'archived' &&
       normalizeProjectManifestPath(workspace.workspace_path) === workspacePath,
   )
+  if (workspaceWithId && workspaceWithId !== workspaceWithPath) {
+    throw new Error(
+      `workspace_id_conflict: ${workspaceId} is already registered at ${workspaceWithId.workspace_path}`,
+    )
+  }
+  if (workspaceWithPath && workspaceWithPath !== workspaceWithId) {
+    throw new Error(
+      `workspace_path_conflict: ${workspacePath} is already registered as ${workspaceWithPath.workspace_id}`,
+    )
+  }
+  const existingWorkspace = workspaceWithId ?? workspaceWithPath
   const sourceStep = input.sourceStep
     ? normalizeProjectManifestFlowStep(input.sourceStep)
     : null
@@ -412,15 +440,17 @@ export function registerWorkspaceInManifest(
     ...input.config?.parameters,
     design: manifest.design_name,
   }
-  const parameterPatch = input.config
-    ? {
-        ...existingWorkspace?.parameter_patch,
-        ...buildParameterPatch(
-          manifest.base_design.parameters ?? {},
-          workspaceParameters,
-        ),
-      }
-    : { ...existingWorkspace?.parameter_patch }
+  const parameterPatch = input.parameterPatch
+    ? { ...input.parameterPatch }
+    : input.config
+      ? {
+          ...existingWorkspace?.parameter_patch,
+          ...buildParameterPatch(
+            manifest.base_design.parameters ?? {},
+            workspaceParameters,
+          ),
+        }
+      : { ...existingWorkspace?.parameter_patch }
   const workspace: ProjectManifestWorkspace = {
     ...existingWorkspace,
     workspace_id: workspaceId,
@@ -430,7 +460,7 @@ export function registerWorkspaceInManifest(
     branch_from: branchFrom,
     start_step: startStep,
     end_step: endStep,
-    status: existingWorkspace?.status ?? 'not_started',
+    status: input.status ?? existingWorkspace?.status ?? 'not_started',
     created_at: existingWorkspace?.created_at ?? now,
     updated_at: now,
     parameter_patch: parameterPatch,
@@ -449,7 +479,7 @@ export function registerWorkspaceInManifest(
   return {
     ...manifest,
     name: input.projectName || manifest.name,
-    root_path: normalizeProjectManifestPath(input.projectRoot || manifest.root_path),
+    root_path: collapseProjectManifestPath(input.projectRoot || manifest.root_path),
     updated_at: now,
     base_design: shouldSyncBaseDesign
       ? withProjectDesignName(
@@ -662,6 +692,28 @@ function normalizeWorkspace(
     parameter_patch: recordValue(source.parameter_patch) ?? {},
     metrics_summary: recordValue(source.metrics_summary) ?? {},
     step_metrics: normalizeStepMetrics(source.step_metrics),
+  }
+}
+
+function validateActiveWorkspaceIdentity(
+  workspaces: readonly ProjectManifestWorkspace[],
+): void {
+  const ids = new Set<string>()
+  const paths = new Set<string>()
+  for (const workspace of workspaces) {
+    if (workspace.status === 'archived') continue
+    if (ids.has(workspace.workspace_id)) {
+      throw new Error(
+        `Invalid project manifest: duplicate active workspace_id ${workspace.workspace_id}.`,
+      )
+    }
+    if (paths.has(workspace.workspace_path)) {
+      throw new Error(
+        `Invalid project manifest: duplicate active workspace_path ${workspace.workspace_path}.`,
+      )
+    }
+    ids.add(workspace.workspace_id)
+    paths.add(workspace.workspace_path)
   }
 }
 
@@ -947,6 +999,48 @@ function normalizeProjectManifestPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   if (normalized.length <= 1) return normalized
   return normalized.replace(/\/+$/g, '')
+}
+
+function resolveProjectManifestWorkspacePath(
+  rootPath: string,
+  workspacePath: string,
+): string {
+  if (isAbsoluteProjectManifestPath(workspacePath)) {
+    return collapseProjectManifestPath(workspacePath)
+  }
+  const normalizedRoot = collapseProjectManifestPath(rootPath)
+  const resolved = collapseProjectManifestPath(`${normalizedRoot}/${workspacePath}`)
+  const rootPrefix = `${normalizedRoot.replace(/\/+$/g, '')}/`
+  if (resolved !== normalizedRoot && !resolved.startsWith(rootPrefix)) {
+    throw new Error(
+      `Invalid project manifest: relative workspace_path escapes root_path: ${workspacePath}.`,
+    )
+  }
+  return resolved
+}
+
+function isAbsoluteProjectManifestPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path)
+}
+
+function collapseProjectManifestPath(path: string): string {
+  const normalized = normalizeProjectManifestPath(path)
+  const drive = normalized.match(/^[A-Za-z]:/)?.[0] ?? ''
+  const absolute = normalized.startsWith('/') || Boolean(drive)
+  const source = drive ? normalized.slice(drive.length) : normalized
+  const parts: string[] = []
+  for (const part of source.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop()
+      else if (!absolute) parts.push(part)
+      continue
+    }
+    parts.push(part)
+  }
+  if (drive) return `${drive}/${parts.join('/')}`.replace(/\/$/, parts.length ? '' : '/')
+  if (normalized.startsWith('/')) return parts.length > 0 ? `/${parts.join('/')}` : '/'
+  return parts.join('/')
 }
 
 function basenameProjectManifestPath(path: string): string {

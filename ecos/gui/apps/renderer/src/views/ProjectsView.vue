@@ -669,10 +669,18 @@
           checked by default.
         </p>
         <label class="workspace-delete-option">
-          <input v-model="keepWorkspaceDataOnDelete" type="checkbox" />
+          <input
+            v-model="keepWorkspaceDataOnDelete"
+            type="checkbox"
+            :disabled="pendingDeleteWorkspaceIsExternal"
+          />
           <span>
             <strong>Keep workspace data</strong>
-            <small v-if="keepWorkspaceDataOnDelete">
+            <small v-if="pendingDeleteWorkspaceIsExternal">
+              External workspace data cannot be deleted from Project Management. The
+              manifest entry only will be removed.
+            </small>
+            <small v-else-if="keepWorkspaceDataOnDelete">
               Workspace folder will remain at
               {{ pendingDeleteWorkspace?.workspacePath || '-' }}.
             </small>
@@ -794,6 +802,7 @@ import {
   type MpcSpecDesign,
 } from '@/utils/mpcSpec'
 import {
+  importProjectManagementWorkspace,
   listProjectManagementEntries,
   readProjectManagementManifest,
 } from '@/utils/projectManagementRead'
@@ -1016,6 +1025,16 @@ const pendingDeleteWorkspace = computed<ProjectWorkspace | null>(() => {
     selectedProject.value.workspaces.find(
       (workspace) => workspace.id === pendingDeleteWorkspaceId.value,
     ) ?? null
+  )
+})
+const pendingDeleteWorkspaceIsExternal = computed(() => {
+  const workspacePath = normalizePath(pendingDeleteWorkspace.value?.workspacePath ?? '')
+  const projectRoot = normalizePath(selectedProject.value.path)
+  return Boolean(
+    workspacePath &&
+    projectRoot &&
+    workspacePath !== projectRoot &&
+    !workspacePath.startsWith(`${projectRoot}/`),
   )
 })
 
@@ -1454,12 +1473,20 @@ async function continueWorkspaceDraft() {
 
 async function openWorkspace(workspace: ProjectWorkspace) {
   closeRowActionMenus()
-  const success = await openProject({
-    id: workspace.workspacePath,
-    name: `${selectedProject.value.name}/${workspace.id}`,
-    path: workspace.workspacePath,
-    lastOpened: new Date(),
-  })
+  const success = await openProject(
+    {
+      id: workspace.workspacePath,
+      name: `${selectedProject.value.name}/${workspace.id}`,
+      path: workspace.workspacePath,
+      lastOpened: new Date(),
+    },
+    {
+      projectContext: {
+        projectRoot: selectedProject.value.path,
+        projectName: selectedProject.value.name,
+      },
+    },
+  )
   if (success) {
     await router.push({
       path: '/workspace/home',
@@ -1591,24 +1618,16 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
   closeRowActionMenus()
   if (!project.path) return
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const directory = await desktopApi.dialog.pickDirectory({
-      title: 'Select Workspace Folder',
-    })
-    if (!directory) return
-
     const projectRoot = project.path
-
-    const updated = await mutateProjectManifest(projectRoot, {
-      type: 'register-workspace',
-      input: {
-        projectRoot,
-        projectName: project.name,
-        workspacePath: directory,
-      },
-    })
+    const result = await importProjectManagementWorkspace(projectRoot)
+    if (result.status === 'cancelled') return
+    if (result.status === 'failed') {
+      throw new Error(`${result.code}: ${result.message}`)
+    }
+    const updated = parseProjectManifest(result.content)
     await applyProjectManifestForProject(updated, projectRoot)
     selectedProjectId.value = project.id
+    selectedWorkspaceId.value = result.workspaceId
   } catch (error) {
     console.warn('Failed to import workspace into project.', error)
     showToast({
@@ -1653,7 +1672,8 @@ async function confirmDeleteWorkspace() {
   const workspaceId = pendingDeleteWorkspaceId.value
   deleteWorkspaceError.value = ''
   const deleted = await deleteWorkspace(workspaceId ?? undefined, {
-    keepWorkspaceData: keepWorkspaceDataOnDelete.value,
+    keepWorkspaceData:
+      pendingDeleteWorkspaceIsExternal.value || keepWorkspaceDataOnDelete.value,
   })
   if (deleted) closeDeleteWorkspaceDialog()
 }

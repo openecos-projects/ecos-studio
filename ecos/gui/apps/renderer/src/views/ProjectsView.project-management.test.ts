@@ -194,6 +194,18 @@ describe('ProjectsView project management surface', () => {
     expect(projectStyles).not.toContain('.project-tree-row:hover .row-action-secondary')
   })
 
+  it('imports workspaces through the main-owned API and protects external data', () => {
+    expect(source).toContain('importProjectManagementWorkspace(projectRoot)')
+    expect(source).toContain("result.status === 'cancelled'")
+    expect(source).toContain("result.status === 'failed'")
+    expect(source).toContain('selectedWorkspaceId.value = result.workspaceId')
+    expect(source).not.toContain("title: 'Select Workspace Folder'")
+    expect(source).toContain('pendingDeleteWorkspaceIsExternal')
+    expect(source).toContain(':disabled="pendingDeleteWorkspaceIsExternal"')
+    expect(source).toContain('External workspace data cannot be deleted')
+    expect(source).toContain('projectContext: {')
+  })
+
   it('lets the selected project collapse its workspace list without hiding its summary', () => {
     expect(source).toContain('class="circle-action project-collapse-toggle"')
     expect(source).toContain('projectWorkspaceListExpanded(project.model.id)')

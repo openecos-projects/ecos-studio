@@ -109,6 +109,7 @@ import {
   executeWorkspaceRerun,
   prepareWorkspaceRerun,
 } from '../services/eccRpc/workspaceRerun'
+import { projectWorkspaceImportFailure } from '../services/projectWorkspaceImportService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -176,6 +177,14 @@ export interface DesktopBridgeServices {
     readWorkspaceTexts(
       request: DesktopProjectManagementWorkspaceTextsRequest,
     ): Promise<DesktopProjectManagementWorkspaceTextsResult>
+  }
+  projectWorkspaceImportService?: {
+    importWorkspace(
+      projectRoot: string,
+      workspacePath: string,
+    ): Promise<
+      import('@ecos-studio/shared').DesktopProjectManagementWorkspaceImportResult
+    >
   }
   workspaceService: {
     approvePendingExternalReadRoots?(
@@ -1380,6 +1389,36 @@ export function registerIpc(
       return await services.projectManagementReadService.readWorkspaceTexts(
         request as unknown as DesktopProjectManagementWorkspaceTextsRequest,
       )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementImportWorkspace,
+    async (_event, projectRoot) => {
+      if (!services.projectWorkspaceImportService) {
+        return {
+          status: 'failed',
+          code: 'project_invalid',
+          message: 'Project workspace import is unavailable.',
+        }
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        return {
+          status: 'failed',
+          code: 'project_invalid',
+          message: 'Project workspace import requires a project root.',
+        }
+      }
+      const workspacePath = await pickDirectory({ title: 'Select Workspace Folder' })
+      if (!workspacePath) return { status: 'cancelled' }
+      try {
+        return await services.projectWorkspaceImportService.importWorkspace(
+          projectRoot,
+          workspacePath,
+        )
+      } catch (error) {
+        return projectWorkspaceImportFailure(error)
+      }
     },
   )
 

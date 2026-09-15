@@ -90,6 +90,64 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
+  it('reads bounded summaries from an exactly declared external workspace', async () => {
+    const container = await mkdtemp(join(tmpdir(), 'ecos-project-external-read-'))
+    temporaryDirectories.push(container)
+    const projectRoot = join(container, 'project')
+    const workspaceRoot = join(container, 'external', 'recovered')
+    await mkdir(join(projectRoot), { recursive: true })
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: projectRoot,
+        name: 'gcd',
+        designName: 'gcd',
+      }),
+      { projectRoot, workspacePath: workspaceRoot },
+    )
+    await writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest))
+    await writeFile(join(workspaceRoot, 'home', 'flow.json'), '{"steps":[]}')
+
+    const service = new ProjectManagementReadService()
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: ['home/flow.json'],
+      }),
+    ).resolves.toEqual({
+      texts: { 'home/flow.json': '{"steps":[]}' },
+      unavailablePaths: [],
+    })
+    await expect(
+      service.readWorkspaceTexts({
+        projectRoot,
+        workspacePath: join(container, 'external'),
+        paths: ['home/flow.json'],
+      }),
+    ).rejects.toThrow('not declared')
+  })
+
+  it('keeps available workspaces readable when another external workspace is missing', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const content = JSON.parse(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    ) as { workspaces: Array<Record<string, unknown>> }
+    content.workspaces.push({
+      workspace_id: 'missing',
+      workspace_path: join(projectRoot, '..', 'missing-external'),
+    })
+    await writeFile(join(projectRoot, 'project.json'), JSON.stringify(content))
+
+    await expect(
+      new ProjectManagementReadService().readWorkspaceTexts({
+        projectRoot,
+        workspacePath: workspaceRoot,
+        paths: ['home/flow.json'],
+      }),
+    ).resolves.toMatchObject({ texts: { 'home/flow.json': '{"steps":[]}' } })
+  })
+
   it('returns project.json text even when root_path does not match the selected directory', async () => {
     const { projectRoot } = await createProject()
     const manifest = JSON.parse(
