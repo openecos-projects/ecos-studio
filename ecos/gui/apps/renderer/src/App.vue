@@ -197,7 +197,7 @@
     <Teleport to="body">
       <Transition name="runtime-backend-overlay">
         <div
-          v-if="runtimeBackendConnecting && !workspaceCreation"
+          v-if="runtimeBackendConnecting"
           class="runtime-backend-overlay"
           role="status"
           aria-busy="true"
@@ -275,7 +275,6 @@ import {
   useWorkspaceWizardRequest,
   type WorkspaceWizardInitialConfig,
   consumeWorkspaceManagementReturnRoute,
-  useWorkspaceCreation,
 } from '@/utils/workspaceNavigation'
 import { workspaceReconfigureInitialConfig } from '@/utils/workspaceReconfigure'
 
@@ -418,7 +417,6 @@ const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefine
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
 const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
-const workspaceCreation = useWorkspaceCreation()
 const backgroundOperations = useBackgroundOperationStore()
 const mutationsDisabled = computed(() =>
   isShutdownInProgress(backgroundOperations.shutdownStatus.state),
