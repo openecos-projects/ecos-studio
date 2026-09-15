@@ -10,20 +10,10 @@ DRY_RUN=false
 
 REQUIRED_ENTRIES=(
   "resources/binaries/chip-viewer-native"
-  "resources/binaries/ecc"
   "resources/binaries/sizer/bin/Sizer"
   "resources/binaries/sizer/libexec/Sizer"
   "resources/binaries/sizer/lib/ld-linux-x86-64.so.2"
   "resources/binaries/sizer/src/sizer_os.tcl"
-  "resources/binaries/_internal/ecc_tools_bin"
-  "resources/binaries/_internal/ecc_tools_bin/lib"
-  "resources/binaries/_internal/ecc_tools_bin/ecc_py.cpython-311-x86_64-linux-gnu.so"
-  "resources/binaries/_internal/ecc_tools_bin/lib/libgeometry_db.so"
-  "resources/binaries/_internal/ecc_tools_bin/lib/libidb.so"
-  "resources/binaries/_internal/dreamplace/Params.py"
-  "resources/binaries/_internal/dreamplace/Placer.py"
-  "resources/binaries/_internal/dreamplace/ops/rc_timing/rc_timing_cpp.cpython-311-x86_64-linux-gnu.so"
-  "resources/binaries/_internal/torch/lib/libtorch.so"
 )
 
 usage() {
@@ -31,9 +21,9 @@ usage() {
 Usage: chip-viewer-appimage-smoke.sh [options]
 
 Inspect the ECOS Studio AppImage and fail if required chip viewer runtime
-payload files are missing.
-Required payload includes chip-viewer-native, ecc, Sizer,
-and the packaged ecc_tools_bin runtime libraries.
+payload files are missing. ECC is deliberately not packaged (slim build):
+it is acquired from the registry on first run. Required payload covers
+chip-viewer-native and the staged Sizer runtime.
 
 Options:
   --appimage <path>   AppImage path. Defaults to the desktop-electron release.

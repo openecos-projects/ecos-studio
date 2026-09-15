@@ -12,6 +12,11 @@ import {
   serializeProjectQorTrendReport,
   type ProjectQorWorkspaceInput,
 } from './projectQorTrend'
+import {
+  buildQorReportText,
+  PASSING_QOR_REPORT_TEXT,
+  passedFeasibilityGates,
+} from './qorReportFixture'
 
 describe('normalizeQorHotspots', () => {
   const source = {
@@ -305,7 +310,7 @@ describe('project QoR trend V3 model', () => {
     ).toEqual([])
   })
 
-  it('requires RCX and STA signoff readiness before exposing a numeric score', () => {
+  it('does not rate a workspace without a current ECC QoR report', () => {
     const input = workspace(
       'ws_0004',
       {
@@ -319,10 +324,10 @@ describe('project QoR trend V3 model', () => {
         ]),
         STA: staMetrics('sha-0004'),
       },
-      {
-        RCX: signoffSummary('RCX', 'incomplete'),
-        STA: signoffSummary('STA', 'pass'),
-      },
+      {},
+      {},
+      null,
+      null,
     )
     const summary = buildProjectQorTrendSummary([input])
 
@@ -331,46 +336,135 @@ describe('project QoR trend V3 model', () => {
     ])
     expect(summary.workspaces[0]).toMatchObject({
       overallScore: null,
-      signoffReadiness: { status: 'incomplete', scoreEligible: false },
+      status: 'Blocked',
+      scoringEngine: null,
+      gateStatus: 'unavailable',
+      signoffReadiness: { status: 'unavailable', scoreEligible: false },
     })
   })
 
-  it('derives score details from V3 records and the last successful area step', () => {
+  it('ignores a stale report whose flow ledger no longer matches', () => {
+    // The report claims DRC succeeded; the ledger says the step failed since.
+    const staleReport = buildQorReportText({
+      flow_steps: {
+        Synthesis: 'Success',
+        Floorplan: 'Success',
+        place: 'Success',
+        CTS: 'Success',
+        legalization: 'Success',
+        route: 'Success',
+        drc: 'Success',
+        lvs: 'Success',
+        RCX: 'Success',
+        sta: 'Success',
+        Harden: 'Success',
+      },
+    })
     const summary = buildProjectQorTrendSummary([
       workspace(
         'ws_0004',
-        {
-          Floor: v3Metrics('Floor', [
-            metric('die_area', 3000, {
-              category: 'area_cost',
-              direction: 'lower_is_better',
-              scope: 'physical',
-              analysisGroup: 'area',
-            }),
-          ]),
-          Route: v3Metrics('Route', [
-            metric('die_area', 2100, {
-              category: 'area_cost',
-              direction: 'lower_is_better',
-              scope: 'physical',
-              analysisGroup: 'area',
-            }),
-          ]),
-          RCX: rcxMetrics(938, rcxDetails(['Cbest_125C', 'Cworst_125C'])),
-          STA: staMetrics('sha-0004'),
-        },
-        undefined,
-        { Floor: 'success', Route: 'success', RCX: 'success', STA: 'success' },
+        {},
+        {},
+        { DRC: 'failed', Route: 'success', RCX: 'success', STA: 'success' },
+        null,
+        staleReport,
       ),
     ])
-    const qorWorkspace = summary.workspaces[0]!
-    const detail = buildProjectQorScoreDetail(qorWorkspace)
 
-    expect(qorWorkspace.overallScore).not.toBeNull()
-    expect(qorWorkspace.areaScoringStep).toBe('Route')
-    expect(
-      detail.dimensions.find((dimension) => dimension.dimension === 'area_cost')?.metrics,
-    ).toEqual([expect.objectContaining({ metricName: 'die_area', value: 2100 })])
+    expect(summary.workspaces[0]).toMatchObject({
+      overallScore: null,
+      status: 'Blocked',
+      scoringEngine: null,
+    })
+  })
+
+  it('maps the ECC scalar status onto the workspace verdict and score', () => {
+    const failReport = buildQorReportText({
+      feasibility: {
+        status: 'PHYSICAL_FAIL',
+        gates: passedFeasibilityGates().map((gate) =>
+          gate.id === 'GATE_DRC' ? { ...gate, state: 'failed' as const } : gate,
+        ),
+      },
+      scalar_summary: {
+        score: 0,
+        status: 'FAIL',
+        profile: 'balanced',
+        weights: {},
+      },
+    })
+    const summary = buildProjectQorTrendSummary([
+      workspace('ws_fail', {}, {}, {}, null, failReport),
+    ])
+
+    expect(summary.workspaces[0]).toMatchObject({
+      overallScore: 0,
+      status: 'Red',
+      gateStatus: 'blocked',
+      scoringEngine: 'qor-v3',
+    })
+    expect(summary.workspaces[0]?.blockingIssues).toEqual([
+      expect.objectContaining({ step: 'DRC', displayName: 'GATE_DRC' }),
+    ])
+  })
+
+  it('exposes the five Qphys coordinates straight from the ECC report', () => {
+    const report = buildQorReportText({
+      qor_record: {
+        timing: {
+          key: 'timing',
+          value: 100,
+          state: 'OPPORTUNITY',
+          features: [
+            {
+              feature_id: 'F_STA_HEADROOM',
+              value: 0.83,
+              unit: 'ratio',
+              formula: 'sta_setup_ws_ns / Tclk',
+              classification: 'DERIVED_ENGINEERING_FEATURE',
+              semantic_class: 'normalized_headroom',
+              state: 'OPPORTUNITY',
+              input_metric_ids: ['sta_setup_wns'],
+              input_source_artifacts: [],
+              interpretation: 'Large positive setup headroom.',
+            },
+          ],
+        },
+        interconnect: {
+          key: 'interconnect',
+          value: 75.4,
+          state: 'PASS',
+          features: [],
+        },
+        area: { key: 'area', value: 92, state: 'PASS', features: [] },
+        power: { key: 'power', value: null, state: 'UNKNOWN', features: [] },
+        robustness: { key: 'robustness', value: 88, state: 'PASS', features: [] },
+      },
+    })
+    const summary = buildProjectQorTrendSummary([
+      workspace('ws_0004', {}, {}, {}, null, report),
+    ])
+    const detail = buildProjectQorScoreDetail(summary.workspaces[0]!)
+
+    expect(summary.workspaces[0]?.dimensionScores).toEqual({
+      timing: 100,
+      interconnect: 75.4,
+      area: 92,
+      robustness: 88,
+    })
+    expect(detail.profile).toBe('balanced')
+    expect(detail.dimensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'timing',
+          label: 'Timing Quality',
+          value: 100,
+          state: 'OPPORTUNITY',
+          features: [expect.objectContaining({ featureId: 'F_STA_HEADROOM' })],
+        }),
+        expect.objectContaining({ key: 'power', value: null, state: 'UNKNOWN' }),
+      ]),
+    )
   })
 
   it('keeps runtime and peak memory as V3 trend-only records outside score dimensions', () => {
@@ -401,7 +495,7 @@ describe('project QoR trend V3 model', () => {
         expect.objectContaining({ metricName: 'peak_memory_mb', value: 640 }),
       ]),
     )
-    expect(summary.workspaces[0]?.dimensionScores.runtime).toBeUndefined()
+    expect(summary.workspaces[0]?.dimensionScores).not.toHaveProperty('runtime')
   })
 
   it('compares RCX envelope only when pass coverage has the same RC-corner set', () => {
@@ -537,7 +631,7 @@ describe('project QoR trend V3 model', () => {
     ).toEqual([])
   })
 
-  it('blocks a workspace whose flow includes a failed LVS gate', () => {
+  it('blocks a workspace whose report reports a failed LVS signoff gate', () => {
     const summary = buildProjectQorTrendSummary([
       workspace(
         'ws_with_lvs',
@@ -559,41 +653,36 @@ describe('project QoR trend V3 model', () => {
             }),
           ]),
         },
-        {
-          DRC: JSON.stringify({
-            schema_version: 4,
-            analysis_status: 'valid',
-            quality_status: 'pass',
-            gates: [],
-          }),
-          LVS: JSON.stringify({
-            schema_version: 4,
-            analysis_status: 'valid',
-            quality_status: 'blocked',
-            gates: [
-              {
-                id: 'qor.lvs.clean',
-                title: 'Final LVS clean',
-                state: 'failed',
-                blocking: true,
-                metrics: [{ id: 'lvs_count', actual: 2, operator: '==', expected: 0 }],
-              },
-            ],
-          }),
-        },
+        {},
         { DRC: 'success', LVS: 'success', RCX: 'success', STA: 'success' },
+        null,
+        buildQorReportText({
+          feasibility: {
+            status: 'PHYSICAL_FAIL',
+            gates: passedFeasibilityGates().map((gate) =>
+              gate.id === 'GATE_LVS' ? { ...gate, state: 'failed' as const } : gate,
+            ),
+          },
+          scalar_summary: {
+            score: 0,
+            status: 'FAIL',
+            profile: 'balanced',
+            weights: {},
+          },
+        }),
       ),
     ])
 
     expect(summary.workspaces[0]).toMatchObject({
       gateStatus: 'blocked',
+      overallScore: 0,
       missingMetrics: expect.not.arrayContaining(['lvs_count']),
     })
     expect(summary.workspaces[0]?.blockingIssues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           step: 'LVS',
-          metric: 'qor.lvs.clean',
+          displayName: 'GATE_LVS',
         }),
       ]),
     )
@@ -675,6 +764,7 @@ function workspace(
   stepSummaryTexts: Partial<Record<string, string | null>> = {},
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
   staTimingIssuesText: string | null = null,
+  qorReportText: string | null = PASSING_QOR_REPORT_TEXT,
 ): ProjectQorWorkspaceInput {
   return {
     workspaceId,
@@ -695,6 +785,7 @@ function workspace(
     stepHotspotTexts: {},
     stepStatuses,
     staTimingIssuesText,
+    qorReportText,
   }
 }
 

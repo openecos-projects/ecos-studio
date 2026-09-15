@@ -20,6 +20,8 @@
         </p>
       </header>
 
+      <CliInstallerCard />
+
       <div class="manager-grid">
         <aside class="manager-sidebar" aria-label="Resource categories">
           <nav class="resource-nav">
@@ -442,6 +444,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import CliInstallerCard from '@/components/CliInstallerCard.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import {

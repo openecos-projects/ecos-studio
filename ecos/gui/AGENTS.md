@@ -32,7 +32,10 @@ pnpm run dev
 Use `pnpm run dev:vm` in sandboxed or VM-like Linux environments. To deliberately
 use an ECC-FE source checkout, start with
 `ECOS_FE_DEV_ROOT=/absolute/path/to/ecc-fe pnpm run dev`; nearby checkouts do not
-override the installed runtime automatically.
+override the installed runtime automatically. To run against a self-installed ECC
+(for example one installed by `ecc-installer.sh`), set
+`ECOS_ECC_BIN_DIR=/absolute/path/with/ecc`; the external runtime is used
+read-only (no drift repair, uninstall only removes the shim).
 
 Use pnpm workspace scripts instead of invoking local binaries directly. Run a
 focused Vitest file while iterating, for example:

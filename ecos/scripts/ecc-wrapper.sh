@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_FILE="$(dirname "${BASH_SOURCE[0]}")"
-cd "$SCRIPT_FILE/../../ecc"
+ECC_PROJECT="$(cd "$SCRIPT_FILE/../../ecc" && pwd)"
 
 # Keep native dependency builds responsive on development machines.  Use the
 # available CPU count, leaving three cores for the desktop and the OS.
@@ -23,7 +23,7 @@ printf '[ecc-wrapper] limiting native builds to %s job(s) (%s online CPU core(s)
   "$build_jobs" "$cpu_count" >&2
 
 if [ "${ECOS_ECC_USE_NIX:-}" = "1" ]; then
-  exec nix develop --command uv run ecc "$@"
+  exec nix develop "$ECC_PROJECT" --command uv run --project "$ECC_PROJECT" ecc "$@"
 fi
 
-exec uv run ecc "$@"
+exec uv run --project "$ECC_PROJECT" ecc "$@"

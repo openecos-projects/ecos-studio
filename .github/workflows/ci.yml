@@ -19,6 +19,7 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     permissions:
       pull-requests: read
     outputs:
@@ -68,6 +69,7 @@ jobs:
   check-version:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     needs: changes
     if: >-
       ${{
@@ -81,6 +83,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The version gate compares EXPECTED_ECC_BUNDLE_VERSION against the
+          # pinned ecc submodule, so its content must be present.
+          submodules: recursive
 
       - name: Check version
         uses: ./.github/actions/check-version
@@ -90,6 +96,7 @@ jobs:
   gui-checks:
     name: GUI Checks
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     needs: changes
     if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
@@ -98,6 +105,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Linux GUI dependencies
+        uses: ./.github/actions/install-gui-linux-deps
+        with:
+          extra-packages: xvfb libasound2
 
       - name: Setup Node.js
         uses: ./.github/actions/setup-node-pnpm
@@ -117,9 +129,19 @@ jobs:
       - name: Run GUI tests
         run: pnpm run test
 
+      - name: Build Electron bundles
+        run: pnpm run desktop:build
+
+      - name: Run Electron smoke
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+          ECOS_ELECTRON_DISABLE_GPU: '1'
+        run: xvfb-run --auto-servernum pnpm run desktop:smoke
+
   chip-viewer-rust:
     name: Chip Viewer Rust Checks
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     needs: changes
     if: ${{ needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
@@ -156,6 +178,7 @@ jobs:
         needs.chip-viewer-rust.result != 'failure'
       }}
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -241,6 +264,7 @@ jobs:
         needs.chip-viewer-rust.result != 'failure'
       }}
     runs-on: macos-14
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -303,6 +327,7 @@ jobs:
         needs.chip-viewer-rust.result != 'failure'
       }}
     runs-on: windows-2022
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4

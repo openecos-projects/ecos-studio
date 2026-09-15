@@ -13,7 +13,9 @@ import {
 } from '@/components/projectStepAnalysis.fixture'
 import {
   buildDashboardAttention,
+  buildDashboardDiagnoses,
   buildDashboardHealth,
+  buildDashboardQphys,
   buildDashboardRecommendation,
   buildDashboardWorkspaceRows,
   countAttentionBySeverity,
@@ -353,5 +355,88 @@ describe('dashboard formatting helpers', () => {
     expect(dashboardGridTemplate([populated, empty])).toBe(
       'minmax(148px, 1.05fr) 92px 62px 76px 84px minmax(96px, 1fr) minmax(82px, 0.8fr) 78px',
     )
+  })
+})
+
+describe('buildDashboardQphys', () => {
+  it('projects the ECC-scored five-coordinate record with tones', () => {
+    const rows = buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_a')
+
+    expect(rows.map((row) => row.key)).toEqual(['timing', 'interconnect', 'area'])
+    expect(rows[0]).toMatchObject({ value: 100, display: '100.0', tone: 'good' })
+    expect(rows[1]).toMatchObject({ value: 52, state: 'WATCH', tone: 'warn' })
+    // Null coordinates read as N/A, never a fabricated zero.
+    expect(rows[2]).toMatchObject({ value: null, display: 'N/A', tone: 'neutral' })
+  })
+
+  it('returns nothing for workspaces without a report', () => {
+    expect(buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_b')).toEqual([])
+    expect(buildDashboardQphys(trendSummaryWithScoresFixture(), null)).toEqual([])
+  })
+
+  it('explains an unrated power coordinate with the observed signoff power', () => {
+    const summary = trendSummaryWithScoresFixture()
+    const workspace = summary.workspaces.find((entry) => entry.workspaceId === 'ws_a')!
+    const rows = buildDashboardQphys(
+      {
+        ...summary,
+        workspaces: [
+          {
+            ...workspace,
+            power: {
+              total_uw: 12400,
+              budget_uw: null,
+              source_path: '/ws/sta_ecc/feature/MAX_125/Cworst/power_summary.json',
+              source_kind: 'signoff',
+              corner: 'MAX_125/Cworst',
+            },
+            qphys: [
+              ...workspace.qphys,
+              {
+                key: 'power',
+                value: null,
+                state: 'UNKNOWN',
+                features: [
+                  {
+                    featureId: 'F_SYN_LEAK_FRAC',
+                    value: null,
+                    state: 'UNKNOWN',
+                    interpretation: 'Synthesis leakage fraction unavailable.',
+                  },
+                ],
+              },
+            ],
+          },
+          ...summary.workspaces.filter((entry) => entry.workspaceId !== 'ws_a'),
+        ],
+      },
+      'ws_a',
+    )
+
+    expect(rows.find((row) => row.key === 'power')).toMatchObject({
+      display: 'N/A',
+      reason: 'Signoff power (MAX_125/Cworst): 12.400 mW; no power budget declared.',
+    })
+  })
+})
+
+describe('buildDashboardDiagnoses', () => {
+  it('surfaces severity-ordered diagnoses with their intervention hypotheses', () => {
+    const diagnoses = buildDashboardDiagnoses(trendSummaryWithScoresFixture(), 'ws_a')
+
+    expect(diagnoses).toHaveLength(1)
+    expect(diagnoses[0]).toMatchObject({
+      id: 'diag.place.congestion',
+      stateLabel: 'Watch',
+      tone: 'warn',
+    })
+    expect(diagnoses[0]?.interventions[0]).toMatchObject({
+      tierLabel: 'Quality limiter',
+      validation: 'Rerun placement and compare.',
+    })
+  })
+
+  it('returns nothing for workspaces without a report', () => {
+    expect(buildDashboardDiagnoses(trendSummaryWithScoresFixture(), 'ws_c')).toEqual([])
   })
 })

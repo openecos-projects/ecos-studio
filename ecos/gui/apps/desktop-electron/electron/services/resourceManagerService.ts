@@ -372,6 +372,22 @@ export interface RuntimeEnvOptions {
   platform: NodeJS.Platform
 }
 
+export interface RegistryAssetDownloadRequest {
+  /** Registry resource id; must be a `tool:` id. */
+  resourceId: string
+  /** Exact registry version to download; there is no latest fallback. */
+  version: string
+  destinationDir: string
+  listener?: (event: ResourceJob) => void
+  signal?: AbortSignal
+}
+
+export interface RegistryAssetDownloadResult {
+  version: string
+  sha256: string
+  size: number | null
+}
+
 export class ResourceManagerService {
   private readonly archiveExtractor: ArchiveExtractor
   private readonly cacheDir: string
@@ -396,6 +412,8 @@ export class ResourceManagerService {
     ResourceOperationResult
   >()
   private manifestOperationPromise: Promise<void> = Promise.resolve()
+  private externalDownloadPromise: Promise<void> = Promise.resolve()
+  private readonly manifestChangeListeners = new Set<() => void | Promise<void>>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
     this.resourcesDir =
@@ -996,6 +1014,251 @@ export class ResourceManagerService {
       status: removedReference ? 'removed' : 'uninstalled',
       resource_id: resourceId,
     }
+  }
+
+  /**
+   * Subscribe to changes of the active-state resource manifest. Fired after
+   * a successful manifest commit (tool installs, updates, uninstalls) — the
+   * mutations that change the shared runtime env (tool PATH entries, OSS CAD
+   * roots, RISCV vars, ...). PDK inventory changes do not affect the runtime
+   * env and do not fire this hook. Returns an unsubscribe function;
+   * Promise-returning listeners have rejections observed (and logged), but
+   * are not awaited by the caller.
+   */
+  onManifestChanged(listener: () => void | Promise<void>): () => void {
+    this.manifestChangeListeners.add(listener)
+    return () => {
+      this.manifestChangeListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Resolve the registry identity (version, sha256, size) for a tool asset
+   * without downloading it. Throws when the tool or requested version is
+   * missing from the registry.
+   */
+  async resolveRegistryToolAsset(
+    resourceId: string,
+    version?: string,
+  ): Promise<RegistryAssetDownloadResult> {
+    const name = resourceNameFromId(resourceId, 'tool')
+    const state = await this.fetchRegistry(false)
+    const tool = state.registry?.tools.find((candidate) => candidate.name === name)
+    if (!tool) throw new Error(`Tool '${name}' not found in registry`)
+    const versionEntry = version
+      ? tool.versions.find((candidate) => candidate.version === version)
+      : tool.versions[0]
+    if (!versionEntry) {
+      throw new Error(
+        version
+          ? `Version ${version} of tool '${name}' not found in registry`
+          : `Tool '${name}' has no published versions`,
+      )
+    }
+    const { asset } = selectPlatformAsset(versionEntry)
+    if (!asset?.sha256) throw new Error(`Missing SHA256 checksum for ${name}`)
+    return {
+      version: versionEntry.version,
+      sha256: asset.sha256,
+      size: asset.size && asset.size > 0 ? asset.size : null,
+    }
+  }
+
+  private notifyManifestChanged(): void {
+    for (const listener of this.manifestChangeListeners) {
+      try {
+        const result = listener()
+        if (result instanceof Promise) {
+          result.catch((error: unknown) => {
+            electronLogger.warn(
+              '[resources] Manifest change listener failed: %s',
+              error instanceof Error ? error.message : String(error),
+            )
+          })
+        }
+      } catch (error) {
+        electronLogger.warn(
+          '[resources] Manifest change listener failed: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    }
+  }
+
+  /** Serialize external archive downloads so concurrent calls never
+   * interleave their staging paths or progress streams. */
+  private async withExternalDownloadLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.externalDownloadPromise
+    let release!: () => void
+    this.externalDownloadPromise = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await previous.catch(() => undefined)
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+
+  /**
+   * Download a registry tool archive and extract its contents into
+   * `destinationDir` without touching the install manifest, tool health
+   * policy, or executable detection. Used by consumers that manage their own
+   * on-disk layout (e.g. the ECC bundle home).
+   *
+   * The archive is staged at a unique per-call path next to the destination,
+   * so downloads never race on the resumable per-resource `.part` files used
+   * by installTool. On failure the destination directory content is
+   * unspecified and the caller is expected to discard it.
+   */
+  async downloadRegistryAssetToDirectory(
+    request: RegistryAssetDownloadRequest,
+  ): Promise<RegistryAssetDownloadResult> {
+    return await this.withExternalDownloadLock(async () => {
+      const resourceId = request.resourceId
+      const name = resourceNameFromId(resourceId, 'tool')
+      const signal = request.signal ?? new AbortController().signal
+      const listener = request.listener
+      const action: ResourceAction = 'install'
+      const archivePath = join(
+        dirname(request.destinationDir),
+        `.${basename(request.destinationDir)}.archive-${randomUUID()}`,
+      )
+
+      try {
+        const state = await this.fetchRegistry(false, signal)
+        const tool = state.registry?.tools.find((candidate) => candidate.name === name)
+        if (!tool) throw new Error(`Tool '${name}' not found in registry`)
+        const versionEntry = tool.versions.find(
+          (candidate) => candidate.version === request.version,
+        )
+        if (!versionEntry) {
+          throw new Error(
+            `Version ${request.version} of tool '${name}' not found in registry`,
+          )
+        }
+        const { platform, asset } = selectPlatformAsset(versionEntry)
+        if (!asset) throw new Error(`No asset for ${name} on ${platform}`)
+        const resolvedAsset = await this.resolvePlatformAsset(asset)
+        if (!resolvedAsset.sha256) {
+          throw new Error(`Missing SHA256 checksum for ${name}`)
+        }
+        const version = versionEntry.version
+
+        electronLogger.info(
+          '[resources] Downloading %s v%s for external install on %s',
+          resourceId,
+          version,
+          platform,
+        )
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'downloading',
+          progress: 0,
+          message: `Downloading ${name} v${version}...`,
+        })
+        await mkdir(dirname(archivePath), { recursive: true })
+        await downloadAsset(
+          resolvedAsset.url,
+          archivePath,
+          this.fetchImpl,
+          resolvedAsset.size,
+          (progress) => {
+            const totalLabel =
+              progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+            this.publish(listener, {
+              resource_id: resourceId,
+              action,
+              phase: 'downloading',
+              progress: progress.progress,
+              message: `Downloading ${name} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
+            })
+          },
+          signal,
+        )
+        throwIfAborted(signal)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'verifying',
+          progress: 0,
+          message: 'Verifying SHA256...',
+        })
+        const verified = await this.sha256Verifier(
+          archivePath,
+          resolvedAsset.sha256,
+          signal,
+        )
+        if (!verified) {
+          throw new Error(`SHA256 verification failed for ${name}`)
+        }
+        throwIfAborted(signal)
+        await mkdir(request.destinationDir, { recursive: true })
+        await this.withExtractProgress(
+          resourceId,
+          action,
+          name,
+          listener,
+          signal,
+          async () => {
+            await this.archiveExtractor(
+              archivePath,
+              request.destinationDir,
+              resolvedAsset.strip_prefix,
+              signal,
+            )
+          },
+        )
+        throwIfAborted(signal)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'done',
+          progress: 1,
+          message: `${name} v${version} downloaded successfully`,
+        })
+        electronLogger.info(
+          '[resources] Downloaded %s v%s into %s',
+          resourceId,
+          version,
+          request.destinationDir,
+        )
+        return {
+          version,
+          sha256: resolvedAsset.sha256,
+          size: resolvedAsset.size && resolvedAsset.size > 0 ? resolvedAsset.size : null,
+        }
+      } catch (error) {
+        if (isAbortError(error) || signal.aborted) {
+          const cancelMessage = `Cancelled download for ${resourceId}`
+          electronLogger.info('[resources] Cancelled %s download', resourceId)
+          this.publish(listener, {
+            resource_id: resourceId,
+            action,
+            phase: 'cancelled',
+            progress: 0,
+            message: cancelMessage,
+            error: cancelMessage,
+          })
+          throw new Error(cancelMessage, { cause: error })
+        }
+        const message = error instanceof Error ? error.message : String(error)
+        electronLogger.error('[resources] Failed to download %s: %s', resourceId, message)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'error',
+          progress: 0,
+          message,
+          error: message,
+        })
+        throw error
+      } finally {
+        await rm(archivePath, { force: true, recursive: true }).catch(() => undefined)
+      }
+    })
   }
 
   async validatePdkRootForWorkspace(pdkRoot: string): Promise<void> {
@@ -2270,7 +2533,10 @@ export class ResourceManagerService {
       await mutator(manifest)
       throwIfAborted(signal)
       await this.writeManifestFile(manifest)
-      if (!signal?.aborted) return
+      if (!signal?.aborted) {
+        this.notifyManifestChanged()
+        return
+      }
 
       const abortError = new DOMException('The operation was aborted.', 'AbortError')
       try {
