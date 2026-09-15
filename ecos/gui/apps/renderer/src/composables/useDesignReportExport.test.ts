@@ -105,6 +105,19 @@ describe('useDesignReportExport', () => {
       CLOCK_PERIOD: 10.0,
     })
     mockRuntimeSnapshot.mockResolvedValue({
+      engineeringSnapshot: {
+        analysis: { steps: [] },
+        artifacts: [],
+        checklist: {},
+        flow: { steps: [] },
+        metrics: [],
+        parameters: {},
+        qorAssessment: {},
+        schemaVersion: 1,
+        signoffAssessment: { groups: [], risks: [], status: 'ready' },
+        workspaceId: 'workspace-1',
+        workspaceRevision: 1,
+      },
       flow: { steps: [] },
       home: {},
       parameters: { Design: 'gcd', PDK: 'ic55' },
@@ -145,9 +158,8 @@ describe('useDesignReportExport', () => {
     expect(mockReadFlow).not.toHaveBeenCalled()
     expect(mockReadParameters).not.toHaveBeenCalled()
     expect(mockReadHome).not.toHaveBeenCalled()
-    expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalledWith(
-      expect.stringMatching(/home\/(flow|parameters|pdk)\.json|config\/pdk\.json/),
-    )
+    expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalled()
+    expect(mockRequestProjectPathAccess).not.toHaveBeenCalled()
   })
 
   it('loads workspace data and generates report content on openDesignReportExport', async () => {

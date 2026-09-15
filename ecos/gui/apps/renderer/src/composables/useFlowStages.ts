@@ -1,9 +1,6 @@
 import { ref, computed, getCurrentInstance, onUnmounted, watch } from 'vue'
 import { useWorkspace } from './useWorkspace'
-import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
-import { readProjectTextFile } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
@@ -118,33 +115,6 @@ function normalizeFlowStageState(value: string | null | undefined): string {
     default:
       return value || 'Unstart'
   }
-}
-
-/**
- * 从工程读取 flow.json，返回全部 run 步骤的 path（用作路由 stepKey）。
- * 读取失败时回退为 STEP_METADATA 中 `group === 'run'` 的全集。
- */
-export async function loadFlowRunStepKeysFromProject(
-  projectPath: string,
-): Promise<string[]> {
-  if (!projectPath) {
-    return fallbackRunStepKeys()
-  }
-  try {
-    const flowData = (await readWorkspaceFlowResourceApi()) as FlowData | null
-    if (!flowData) return fallbackRunStepKeys()
-    const stages = transformFlowData(flowData)
-    return stages.map((s) => s.path)
-  } catch (e) {
-    console.warn('[loadFlowRunStepKeysFromProject]', e)
-    return fallbackRunStepKeys()
-  }
-}
-
-function fallbackRunStepKeys(): string[] {
-  return Object.values(STEP_METADATA)
-    .filter((m) => m.group === 'run')
-    .map((m) => m.path)
 }
 
 function flowDataHasStartedRun(flowData: FlowData): boolean {
@@ -334,63 +304,6 @@ export function useFlowStages() {
       (stage) => stage.state === 'Ongoing' || stage.state === 'running',
     ),
   )
-
-  /**
-   * 将远程路径转换为本地项目路径
-   */
-  function convertToLocalPath(remotePath: string): string {
-    const projectPath = currentProject.value?.path
-    return projectPath ? convertRemoteToLocalPath(remotePath, projectPath) : remotePath
-  }
-
-  /**
-   * 从指定的 flow.json 路径加载流程步骤
-   */
-  async function loadFlowStagesFromPath(flowJsonPath: string): Promise<void> {
-    const loadGeneration = ++flowLoadGeneration
-    if (!flowJsonPath) {
-      console.warn('Cannot load flow.json: path is empty')
-      return
-    }
-
-    const sessionId = workspaceLifecycle.currentSessionId.value
-    const isCurrent = () =>
-      workspaceLifecycle.isCurrentSession(sessionId) &&
-      loadGeneration === flowLoadGeneration
-    isLoading.value = true
-    error.value = null
-
-    try {
-      const localPath = convertToLocalPath(flowJsonPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(localPath),
-      )
-      if (!isCurrent()) return
-      console.log('Loading flow.json from path:', resolvedPath ?? localPath)
-      if (!resolvedPath) return
-
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
-      )
-      if (!isCurrent() || fileContent === undefined) return
-      const flowData: FlowData = JSON.parse(fileContent)
-      if (!shouldApplyFlowData(flowData)) return
-
-      console.log('Loaded flow data from path:', flowData)
-
-      dynamicFlowStages.value = applyRuntimeStepOverrides(transformFlowData(flowData))
-      console.log('Flow stages loaded from path:', dynamicFlowStages.value)
-    } catch (err) {
-      if (!isCurrent()) return
-      console.error('Failed to load flow.json from path:', flowJsonPath, err)
-      error.value = err instanceof Error ? err.message : String(err)
-      dynamicFlowStages.value = []
-    } finally {
-      if (isCurrent()) {
-        isLoading.value = false
-      }
-    }
-  }
 
   /**
    * 从 flow.json 加载流程步骤
@@ -761,7 +674,6 @@ export function useFlowStages() {
 
     // 方法
     loadFlowStages,
-    loadFlowStagesFromPath,
     refreshFlowStages,
     clearFlowStages,
     setFirstRunStepOngoing,

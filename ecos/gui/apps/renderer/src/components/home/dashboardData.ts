@@ -20,18 +20,11 @@ export interface DashboardStatusSummary {
 }
 
 export interface DashboardQorStep {
-  blockedCount: number
   id: string
   label: string
-  metricsPath: string | null
-  missing: string[]
-  passCount: number
-  reportCount: number
-  runtime: string
   /** Number of metrics reported by this step's qor_summary.json. */
   summaryMetricCount: number
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
-  totalCount: number
 }
 
 export interface DashboardMetric {
@@ -72,32 +65,6 @@ export function checklistStatusSummary(
   })
 }
 
-export function qorPieSlices(steps: readonly DashboardQorStep[]): DashboardPieSlice[] {
-  const count = (status: DashboardQorStep['status']) =>
-    steps.filter((step) => step.status === status).length
-  const slices: DashboardPieSlice[] = [
-    { id: 'pass', label: 'Pass', value: count('pass'), tone: 'good' },
-    { id: 'incomplete', label: 'Attention', value: count('incomplete'), tone: 'warn' },
-    { id: 'blocked', label: 'Blocked', value: count('blocked'), tone: 'bad' },
-    {
-      id: 'unavailable',
-      label: 'Unavailable',
-      value: count('unavailable'),
-      tone: 'neutral',
-    },
-  ]
-  return slices.filter((slice) => slice.value > 0)
-}
-
-export function qorStatusSummary(
-  steps: readonly DashboardQorStep[],
-): DashboardStatusSummary {
-  return summaryFromSlices(qorPieSlices(steps), {
-    blocked: 'blocked',
-    warning: 'incomplete',
-  })
-}
-
 function summaryFromSlices(
   slices: readonly DashboardPieSlice[],
   statusIds: { blocked: string; warning: string },
@@ -115,101 +82,6 @@ function summaryFromSlices(
     unavailable: count('unavailable'),
     passingPercent: total > 0 ? Math.round((passed / total) * 100) : null,
   }
-}
-
-export function dashboardMetrics(
-  analysisMetrics: ReadonlyMap<string, number>,
-): DashboardMetric[] {
-  const findMetric = (...ids: string[]): number | null => {
-    for (const id of ids) {
-      const value = analysisMetrics.get(id)
-      if (value !== undefined) return value
-    }
-    return null
-  }
-  return [
-    { id: 'die-area', label: 'Die Area', value: findMetric('die_area'), unit: 'um2' },
-    {
-      id: 'core-utilization',
-      label: 'Core Utility',
-      value: findMetric('core_utilization'),
-      unit: '%',
-    },
-    {
-      id: 'io-pins',
-      label: 'IO Pin',
-      value: findMetric('pin_count', 'io_pin_count', 'total_pins'),
-      unit: '',
-    },
-    {
-      id: 'instances',
-      label: 'Instance Number',
-      value: findMetric('instance_count', 'total_instances'),
-      unit: '',
-    },
-    {
-      id: 'macro-number',
-      label: 'Macro Number',
-      value: findMetric('macro_count'),
-      unit: '',
-    },
-    {
-      id: 'macro-area',
-      label: 'Macro Area',
-      value: findMetric('macro_area'),
-      unit: 'um2',
-    },
-    {
-      id: 'std-cell-number',
-      label: 'Std Cell Number',
-      value: findMetric('std_cell_count'),
-      unit: '',
-    },
-    {
-      id: 'std-cell-area',
-      label: 'Std Cell Area',
-      value: findMetric('std_cell_area'),
-      unit: 'um2',
-    },
-    {
-      id: 'io-pad-number',
-      label: 'IO Pad Number',
-      value: findMetric('io_pad_count'),
-      unit: '',
-    },
-    {
-      id: 'nets',
-      label: 'Net number',
-      value: findMetric('net_count', 'total_nets'),
-      unit: '',
-    },
-    {
-      id: 'frequency',
-      label: 'Frequency',
-      value: findMetric('sta_frequency_mhz', 'frequency_mhz'),
-      unit: 'MHz',
-    },
-    {
-      id: 'setup-wns',
-      label: 'Setup WNS',
-      value: findMetric('sta_setup_wns'),
-      unit: 'ns',
-    },
-    {
-      id: 'setup-tns',
-      label: 'Setup TNS',
-      value: findMetric('sta_setup_tns'),
-      unit: 'ns',
-    },
-    { id: 'hold-wns', label: 'Hold WNS', value: findMetric('sta_hold_wns'), unit: 'ns' },
-    { id: 'hold-tns', label: 'Hold TNS', value: findMetric('sta_hold_tns'), unit: 'ns' },
-    {
-      id: 'drc',
-      label: 'DRC Number',
-      value: findMetric('drc_count', 'drc_num'),
-      unit: '',
-    },
-  ]
 }
 
 export function formatDashboardMetric(metric: DashboardMetric): string {

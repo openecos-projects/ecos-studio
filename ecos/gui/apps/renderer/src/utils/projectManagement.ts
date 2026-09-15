@@ -262,35 +262,6 @@ export interface WorkspaceBranchDraft {
   originSdc?: string
 }
 
-const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  lec: 'LEC',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  prefloorplan: 'Floor',
-  macroplacement: 'Floor',
-  postfloorplan: 'Floor',
-  place: 'Place',
-  placement: 'Place',
-  cts: 'CTS',
-  legalization: 'Legal',
-  legal: 'Legal',
-  'timing optimization': 'Timing Opt',
-  timingoptimization: 'Timing Opt',
-  route: 'Route',
-  routing: 'Route',
-  drc: 'DRC',
-  lvs: 'LVS',
-  filler: 'Filler',
-  postroutelec: 'Post-route LEC',
-  rcx: 'RCX',
-  sta: 'STA',
-  gds: 'Harden',
-  signoff: 'Harden',
-  harden: 'Harden',
-}
-
 const RUNTIME_STEP_ARTIFACTS: Record<
   FlowStep,
   {
@@ -827,25 +798,6 @@ export function projectMpcOptionFromResource(
   }
 }
 
-export function parseWorkspaceFlowStateMap(
-  content: string,
-): ProjectWorkspaceFlowStateMap {
-  const parsed = JSON.parse(content) as {
-    steps?: Array<{ name?: unknown; state?: unknown }>
-  }
-  if (!Array.isArray(parsed.steps)) return {}
-
-  return parsed.steps.reduce<ProjectWorkspaceFlowStateMap>((stateMap, step) => {
-    const name = optionalString(step.name)
-    const status = projectStepStatusFromFlowState(step.state)
-    const flowStep = knownFlowStep(name)
-    if (!flowStep || !status) return stateMap
-
-    stateMap[flowStep] = status
-    return stateMap
-  }, {})
-}
-
 export function nextWorkspaceId(
   project: ProjectManagementProject,
   occupiedWorkspaceIds: string[] = [],
@@ -1111,27 +1063,6 @@ function buildStepCell(
     label: labelForStepStatus(status),
     canCreateWorkspace: isCompletedStepStatus(status),
   }
-}
-
-function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | null {
-  const normalized = optionalString(state).toLowerCase()
-  if (!normalized) return null
-
-  if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized))
-    return 'success'
-  if (normalized === 'warning') return 'warning'
-  if (['reused', 'reuse'].includes(normalized)) return 'reused'
-  if (['skipped', 'skip'].includes(normalized)) return 'skipped'
-  if (['ongoing', 'running', 'run'].includes(normalized)) return 'running'
-  if (['failed', 'failure', 'error', 'invalid', 'incomplete'].includes(normalized))
-    return 'failed'
-  if (
-    ['unstart', 'unstarted', 'not_started', 'not started', 'pending', 'created'].includes(
-      normalized,
-    )
-  )
-    return 'unstart'
-  return null
 }
 
 function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranchLink[] {
@@ -1445,11 +1376,6 @@ function defaultSourceOutputType(step: FlowStep): 'verilog' | 'def' {
   return step === 'Synth' ? 'verilog' : 'def'
 }
 
-function knownFlowStep(step: FlowStep | string): FlowStep | null {
-  if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
-}
-
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {
   return status === 'success' || status === 'warning' || status === 'reused'
 }
@@ -1477,10 +1403,6 @@ function formatMetricValue(
   if (Math.abs(value) >= 100) return String(Number(value.toFixed(1)))
   if (Math.abs(value) >= 10) return String(Number(value.toFixed(2)))
   return String(Number(value.toFixed(3)))
-}
-
-function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
 
 function labelForStepStatus(status: ProjectStepStatus): string {

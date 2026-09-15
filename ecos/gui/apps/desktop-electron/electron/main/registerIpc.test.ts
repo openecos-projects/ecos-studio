@@ -114,7 +114,6 @@ function registerHandlers(
       discoverProject: vi.fn(),
       readManifest: vi.fn(),
       listProjectEntries: vi.fn(),
-      readWorkspaceTexts: vi.fn(),
       readWorkspaceStepConfiguration: vi.fn(),
     },
     backendWorkspaceService: {
@@ -1851,10 +1850,6 @@ describe('registerIpc', () => {
       'project.json',
       'ws_0001',
     ])
-    services.projectManagementReadService.readWorkspaceTexts.mockResolvedValue({
-      texts: { 'home/flow.json': '{"steps":[]}' },
-      unavailablePaths: [],
-    })
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
       '/tmp/project/home.json',
     )
@@ -1945,16 +1940,6 @@ describe('registerIpc', () => {
         '/tmp/project',
       ),
     ).resolves.toEqual(['project.json', 'ws_0001'])
-    await expect(
-      handlers.get(desktopApiIpcChannels.projectManagementReadWorkspaceTexts)?.(event, {
-        projectRoot: '/tmp/project',
-        workspacePath: '/tmp/project/ws_0001',
-        paths: ['home/flow.json'],
-      }),
-    ).resolves.toEqual({
-      texts: { 'home/flow.json': '{"steps":[]}' },
-      unavailablePaths: [],
-    })
     await handlers.get(desktopApiIpcChannels.workspaceClearProjectRoot)?.(event)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceRequestProjectPathAccess)?.(

@@ -10,10 +10,7 @@ import type {
   CommittedFindingsResult,
   CommittedFindingsWorkspace,
 } from './projectStepFindingsService'
-import {
-  analysisTextsFromSnapshot,
-  buildProjectComparisonSnapshots,
-} from './projectComparisonProjection'
+import { buildProjectComparisonSnapshots } from './projectComparisonProjection'
 import { projectQorInputForWorkspace, workspaceFlowStates } from './workspaceQorAnalysis'
 
 type Snapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnapshot']>
@@ -78,20 +75,15 @@ export function projectComparisonEvidence(
     const flow =
       stale.sections.flow.status === 'ready' ? stale.sections.flow.data : undefined
     const qor = stale.sections.qor.data
-    const input = projectQorInputForWorkspace(
-      manifest,
-      workspace.workspace_id,
-      analysisTextsFromSnapshot(qor.analysis, stale.sections.artifacts.data),
-      {
-        analysis: qor.analysis,
-        metrics: qor.metrics,
-        qorAssessment: qor.qorAssessment,
-        ...(flow ? { flow } : {}),
-        ...(stale.sections.signoff.status === 'ready'
-          ? { signoffAssessment: stale.sections.signoff.data }
-          : {}),
-      },
-    )
+    const input = projectQorInputForWorkspace(manifest, workspace.workspace_id, {
+      analysis: qor.analysis,
+      metrics: qor.metrics,
+      qorAssessment: qor.qorAssessment,
+      ...(flow ? { flow } : {}),
+      ...(stale.sections.signoff.status === 'ready'
+        ? { signoffAssessment: stale.sections.signoff.data }
+        : {}),
+    })
     if (input) {
       const oldAnalysis = buildProjectComparisonSnapshots([input])[0]!
       previous = result(stale, oldAnalysis) ?? undefined

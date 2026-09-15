@@ -84,9 +84,3 @@ export const projectManagementWorkspaceSummaryPaths = [
   ]),
   projectManagementStaTimingIssuesPath,
 ]
-
-/** Every workspace-relative path projectManagement.readWorkspaceTexts may serve. */
-export const projectManagementWorkspaceReadablePaths = [
-  'home/flow.json',
-  ...projectManagementWorkspaceSummaryPaths,
-] as const

@@ -8,7 +8,6 @@ import {
 import {
   buildProjectManagementProject,
   createSelectionState,
-  parseWorkspaceFlowStateMap,
   projectMpcOptionFromResource,
   resolveProjectQorBaselineWorkspace,
 } from './projectManagement'
@@ -128,20 +127,6 @@ function comparisonWithUnknownStep(): BackendProjectComparison {
 }
 
 describe('project management V3 model', () => {
-  it('groups ECC physical floorplan steps into the Floor project state', () => {
-    const state = parseWorkspaceFlowStateMap(
-      JSON.stringify({
-        steps: [
-          { name: 'preFloorplan', state: 'Success' },
-          { name: 'macroPlacement', state: 'Ongoing' },
-          { name: 'postFloorplan', state: 'Incomplete' },
-        ],
-      }),
-    )
-
-    expect(state).toEqual({ Floor: 'failed' })
-  })
-
   it('selects only healthy managed MPC resources and derives their spec path', () => {
     expect(projectMpcOptionFromResource(managedMpc())).toEqual({
       resource_id: 'mpc:mpc-frame',

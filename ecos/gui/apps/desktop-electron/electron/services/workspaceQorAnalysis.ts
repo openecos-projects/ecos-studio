@@ -1,5 +1,4 @@
 import {
-  projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   parseProjectManifestFlowStep,
   type EccEngineeringSnapshot,
@@ -18,8 +17,6 @@ import {
   type ProjectQorWorkspaceInput,
   type QorDimension,
 } from './qorAnalysis'
-
-export type WorkspaceAnalysisTexts = Record<string, string | null>
 
 const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
   synthesis: 'Synth',
@@ -323,7 +320,6 @@ function snapshotComparisonMetrics(
 export function projectQorInputForWorkspace(
   manifest: ProjectManifest,
   workspaceId: string,
-  texts: WorkspaceAnalysisTexts,
   engineeringSnapshot?: WorkspaceEngineeringFacts | null,
 ): WorkspaceQorInput | null {
   const workspace = manifest.workspaces.find(
@@ -332,10 +328,23 @@ export function projectQorInputForWorkspace(
   if (!workspace) return null
   const statuses = workspaceFlowStates(engineeringSnapshot?.flow)
   const snapshot = snapshotQorProjection(engineeringSnapshot)
+  const analysisByStep = new Map(
+    (engineeringSnapshot?.analysis.steps ?? []).map((step) => [
+      parseProjectManifestFlowStep(step.stepId) ?? step.stepId,
+      step,
+    ]),
+  )
+  const analysisText = (
+    file: { status: string; data: Record<string, unknown> | null } | null | undefined,
+  ): string | null =>
+    file?.status === 'available' && file.data ? JSON.stringify(file.data) : null
   return {
     branchFrom: workspace.branch_from,
     createdAt: workspace.created_at,
-    staTimingIssuesText: texts[projectManagementStaTimingIssuesPath] ?? null,
+    staTimingIssuesText: analysisText(
+      engineeringSnapshot?.analysis.steps.find((step) => step.timingIssues)
+        ?.timingIssues ?? null,
+    ),
     status: workspaceStatus(workspace.status, statuses),
     authoritativeAssessment: snapshot.assessment,
     normalizedMetrics: snapshotComparisonMetrics(engineeringSnapshot, workspaceId),
@@ -344,20 +353,20 @@ export function projectQorInputForWorkspace(
     stepHotspotTexts: Object.fromEntries(
       projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
         spec.step,
-        texts[spec.hotspotsPath] ?? null,
+        analysisText(analysisByStep.get(spec.step)?.hotspots),
       ]),
     ),
     stepMetricTexts: Object.fromEntries(
       projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
         spec.step,
-        texts[spec.metricsPath] ?? null,
+        analysisText(analysisByStep.get(spec.step)?.metrics),
       ]),
     ),
     stepStatuses: statuses,
     stepSummaryTexts: Object.fromEntries(
       projectManagementWorkspaceStepAnalysisSpecs.map((spec) => [
         spec.step,
-        texts[spec.summaryPath] ?? null,
+        analysisText(analysisByStep.get(spec.step)?.summary),
       ]),
     ),
     workspaceId,

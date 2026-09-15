@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   projectManagementStaTimingIssuesPath,
-  projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceSummaryPaths,
 } from './projectManagementSummary'
@@ -19,6 +18,7 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
       summaryPath: 'lvs_ecc/analysis/qor_summary.json',
     })
     expect(projectManagementWorkspaceSummaryPaths).not.toContain('home/flow.json')
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
     expect(projectManagementWorkspaceSummaryPaths).not.toContain(
       'home/engineering-snapshot.json',
     )
@@ -37,23 +37,5 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
         expect.arrayContaining([spec.metricsPath, spec.summaryPath, spec.hotspotsPath]),
       )
     }
-  })
-})
-
-describe('projectManagementWorkspaceReadablePaths', () => {
-  it('contains only flow and analysis inputs, not Backend configuration files', () => {
-    expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
-    expect(projectManagementWorkspaceReadablePaths).toHaveLength(
-      projectManagementWorkspaceSummaryPaths.length + 1,
-    )
-    expect(projectManagementWorkspaceReadablePaths).toEqual(
-      expect.arrayContaining([
-        'home/flow.json',
-        ...projectManagementWorkspaceSummaryPaths,
-      ]),
-    )
-    expect(new Set(projectManagementWorkspaceReadablePaths).size).toBe(
-      projectManagementWorkspaceReadablePaths.length,
-    )
   })
 })

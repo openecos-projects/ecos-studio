@@ -154,13 +154,6 @@ export async function readOptionalProjectTextFileChunk(
   return await readChunk.call(workspace, resolvedPath, fromOffsetBytes, maxBytes)
 }
 
-export async function readProjectJsonFile<T>(
-  path: string,
-  options: ProjectFilePathOptions = {},
-): Promise<T> {
-  return JSON.parse(await readProjectTextFile(path, options)) as T
-}
-
 export async function readProjectBinaryFile(
   path: string,
   options: ProjectFilePathOptions = {},

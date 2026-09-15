@@ -144,8 +144,6 @@ export type {
   DesktopRtlSourceDialogOptions,
   PickedRtlSources,
   DesktopProjectDirectoryEntry,
-  DesktopProjectManagementWorkspaceTextsRequest,
-  DesktopProjectManagementWorkspaceTextsResult,
   DesktopProjectManagementWorkspaceStepConfigurationRequest,
   DesktopProjectManagementWorkspaceStepConfigurationResult,
   DesktopProjectTextFileChunk,
@@ -394,10 +392,8 @@ export {
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
 export { isVerilogIdentifier } from './utils/verilogIdentifier.ts'
-export { normalizeParameterKey, normalizeParameterKeys } from './utils/parameterKeys.ts'
 export {
   projectManagementStaTimingIssuesPath,
-  projectManagementWorkspaceReadablePaths,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceSummaryPaths,
 } from './utils/projectManagementSummary.ts'

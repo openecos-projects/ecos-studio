@@ -1,9 +1,6 @@
 import {
-  projectManagementWorkspaceSummaryPaths,
   projectManifestFlowSteps,
   parseProjectManifestFlowStep,
-  type EccEngineeringAnalysis,
-  type EccEngineeringAnalysisArtifactRef,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
   type ProjectQorMetricRecord,
@@ -20,7 +17,6 @@ import { buildProjectQorTrendSummary } from './qorAnalysis'
 import { projectQorInputForWorkspace } from './workspaceQorAnalysis'
 
 const FLOW_STEPS = projectManifestFlowSteps
-const ANALYSIS_PATHS = new Set<string>(projectManagementWorkspaceSummaryPaths)
 
 function comparisonStepId(stepId: string): string | null {
   const canonical = parseProjectManifestFlowStep(stepId)
@@ -31,26 +27,6 @@ function comparisonStepId(stepId: string): string | null {
 export type ProjectComparisonInput = NonNullable<
   ReturnType<typeof projectQorInputForWorkspace>
 >
-
-export function analysisTextsFromSnapshot(
-  analysis: EccEngineeringAnalysis,
-  artifacts: EccEngineeringAnalysisArtifactRef[],
-): Record<string, string | null> {
-  const references = new Map(
-    artifacts.map((artifact) => [artifact.artifactId, artifact.reference]),
-  )
-  const texts: Record<string, string | null> = {}
-  for (const step of analysis.steps) {
-    for (const file of [step.metrics, step.summary, step.hotspots, step.timingIssues]) {
-      if (!file || file.status !== 'available' || !file.data) continue
-      const reference = references.get(file.artifactId)
-      if (reference && ANALYSIS_PATHS.has(reference)) {
-        texts[reference] = JSON.stringify(file.data)
-      }
-    }
-  }
-  return texts
-}
 
 export function buildProjectComparisonTrend(
   inputs: ProjectComparisonInput[],

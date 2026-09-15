@@ -4,31 +4,18 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   parseEngineeringSnapshotJson,
-  projectManagementWorkspaceReadablePaths,
 } from '@ecos-studio/shared'
 import type {
-  DesktopProjectManagementWorkspaceTextsRequest,
-  DesktopProjectManagementWorkspaceTextsResult,
   DesktopProjectManagementWorkspaceStepConfigurationRequest,
   DesktopProjectManagementWorkspaceStepConfigurationResult,
   EngineeringSnapshotValidationResult,
   ProjectManifest,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
-import { mapWithConcurrency } from './boundedConcurrency'
 
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
-const PROJECT_WORKSPACE_TEXT_MAX_BYTES = 256 * 1024
-const PROJECT_WORKSPACE_READ_CONCURRENCY = 4
-const PROJECT_WORKSPACE_READ_LIMIT = projectManagementWorkspaceReadablePaths.length
 export const PROJECT_FINDINGS_ARTIFACT_MAX_BYTES = 1024 * 1024
 export const PROJECT_BINARY_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
-
-const PROJECT_MANAGEMENT_WORKSPACE_PATHS = new Set(
-  projectManagementWorkspaceReadablePaths,
-)
-
-class ProjectManagementWorkspacePathError extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -226,47 +213,6 @@ export class ProjectManagementReadService {
       .filter((entry) => entry.isDirectory() || entry.isFile())
       .map((entry) => entry.name)
       .sort((left, right) => left.localeCompare(right))
-  }
-
-  async readWorkspaceTexts(
-    request: DesktopProjectManagementWorkspaceTextsRequest,
-  ): Promise<DesktopProjectManagementWorkspaceTextsResult> {
-    const paths = normalizeRequestedPaths(request.paths)
-    const project = await this.loadProject(request.projectRoot)
-    if (!project.manifest) {
-      throw new Error('Project manifest does not exist.')
-    }
-    const workspacePath = await this.resolveDeclaredWorkspace(
-      project.root,
-      project.manifest.workspaces.map((workspace) => workspace.workspace_path),
-      request.workspacePath,
-    )
-    const entries = await mapWithConcurrency(
-      paths,
-      PROJECT_WORKSPACE_READ_CONCURRENCY,
-      async (path) => {
-        try {
-          return {
-            path,
-            text: await this.readWorkspaceTextFile(
-              workspacePath,
-              path,
-              PROJECT_WORKSPACE_TEXT_MAX_BYTES,
-            ),
-            unavailable: false,
-          }
-        } catch (error) {
-          if (error instanceof ProjectManagementWorkspacePathError) throw error
-          return { path, text: null, unavailable: true }
-        }
-      },
-    )
-    return {
-      texts: Object.fromEntries(entries.map(({ path, text }) => [path, text])),
-      unavailablePaths: entries
-        .filter(({ unavailable }) => unavailable)
-        .map(({ path }) => path),
-    }
   }
 
   async readWorkspaceStepConfiguration(
@@ -490,27 +436,6 @@ export class ProjectManagementReadService {
     }
     return canonicalPath
   }
-
-  private async readWorkspaceTextFile(
-    workspaceRoot: string,
-    relativePath: string,
-    maxBytes: number,
-  ): Promise<string | null> {
-    const requestedPath = join(workspaceRoot, relativePath)
-    let canonicalPath: string
-    try {
-      canonicalPath = await realpath(requestedPath)
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) return null
-      throw error
-    }
-    if (!isPathWithinRoot(canonicalPath, workspaceRoot)) {
-      throw new ProjectManagementWorkspacePathError(
-        'Project management workspace file resolves outside its workspace.',
-      )
-    }
-    return await readOptionalBoundedTextFile(canonicalPath, maxBytes)
-  }
 }
 
 async function readVerifiedArtifactBytes(
@@ -647,17 +572,4 @@ async function readBoundedSnapshot(
   } finally {
     await handle.close()
   }
-}
-
-function normalizeRequestedPaths(paths: string[]): string[] {
-  const uniquePaths = [...new Set(paths)]
-  if (uniquePaths.length === 0 || uniquePaths.length > PROJECT_WORKSPACE_READ_LIMIT) {
-    throw new Error('Project management workspace read has an invalid path count.')
-  }
-  for (const path of uniquePaths) {
-    if (!PROJECT_MANAGEMENT_WORKSPACE_PATHS.has(path)) {
-      throw new Error(`Project management workspace path is not allowed: ${path}`)
-    }
-  }
-  return uniquePaths
 }

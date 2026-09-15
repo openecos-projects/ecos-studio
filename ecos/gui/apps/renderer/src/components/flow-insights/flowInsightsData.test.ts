@@ -24,7 +24,6 @@ import {
   parseFirstStaPathPreview,
   parsePeakMemoryMb,
   parseRuntimeSeconds,
-  parseStaCornerSummaries,
   peakMemoryFromFlowStep,
   selectStaCriticalPaths,
   selectStaPathGroup,
@@ -254,23 +253,6 @@ describe('flow insights data', () => {
   })
 
   it('builds STA corner overview from per-corner summaries and takes min WNS as worst', () => {
-    const refs = parseStaCornerSummaries({
-      sta: {
-        signoff_metrics: {
-          corners: [
-            {
-              sta_corner: 'MAX_125/Cworst',
-              summary_file: 'feature/MAX_125/Cworst/qor_summary.json',
-            },
-            {
-              sta_corner: 'MIN_m40/Cworst',
-              summary_file: 'feature/MIN_m40/Cworst/qor_summary.json',
-            },
-          ],
-        },
-      },
-    })
-    expect(refs).toHaveLength(2)
     const model = buildStaOverviewModel([
       {
         corner: 'MAX_125/Cworst',

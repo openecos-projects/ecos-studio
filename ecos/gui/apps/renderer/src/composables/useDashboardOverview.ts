@@ -25,17 +25,10 @@ export function useDashboardOverview() {
   })
   const qorSteps = computed<DashboardQorStep[]>(() =>
     (qor.value?.steps ?? []).map((step) => ({
-      blockedCount: step.status === 'blocked' ? 1 : 0,
       id: step.stepId,
       label: step.name,
-      metricsPath: null,
-      missing: step.summaryMetricCount > 0 ? [] : ['analysis/qor_metrics.json'],
-      passCount: step.status === 'pass' ? 1 : 0,
-      reportCount: 0,
-      runtime: '',
       status: step.status,
       summaryMetricCount: step.summaryMetricCount,
-      totalCount: step.status === 'unavailable' ? 0 : 1,
     })),
   )
 

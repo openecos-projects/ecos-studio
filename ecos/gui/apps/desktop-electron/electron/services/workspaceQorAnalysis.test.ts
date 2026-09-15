@@ -142,7 +142,7 @@ describe('analyzeWorkspaceQor', () => {
       qor_baseline: null,
     } as ProjectManifest
 
-    expect(projectQorInputForWorkspace(manifest, 'current', {}, snapshot)?.status).toBe(
+    expect(projectQorInputForWorkspace(manifest, 'current', snapshot)?.status).toBe(
       'not_started',
     )
   })
@@ -187,9 +187,6 @@ describe('analyzeWorkspaceQor', () => {
     const projectInput = projectQorInputForWorkspace(
       manifest,
       'current',
-      {
-        'route_ecc/analysis/qor_metrics.json': metricText(5000),
-      },
       engineeringSnapshot(5000),
     )
     expect(buildProjectQorTrendSummary([projectInput!]).workspaces[0]).toMatchObject({
@@ -212,7 +209,7 @@ describe('analyzeWorkspaceQor', () => {
     const extension = qorSnapshotExtension()
     snapshot.qorSnapshotExtension = extension
 
-    const input = projectQorInputForWorkspace(manifest, 'current', {}, snapshot)
+    const input = projectQorInputForWorkspace(manifest, 'current', snapshot)
     const summary = buildProjectQorTrendSummary([input!]).workspaces[0]
 
     expect(input?.qorSnapshotExtension).toBe(extension)
@@ -243,8 +240,7 @@ describe('analyzeWorkspaceQor', () => {
       qor_baseline: null,
     } as ProjectManifest
     expect(
-      projectQorInputForWorkspace(manifest, 'current', {}, snapshot)
-        ?.qorSnapshotExtension,
+      projectQorInputForWorkspace(manifest, 'current', snapshot)?.qorSnapshotExtension,
     ).toEqual(snapshot.qorSnapshotExtension)
   })
 

@@ -17,7 +17,6 @@ import {
   qorSummary,
   rcxInsights,
   runSummary,
-  staCornerSummaryPaths,
   staInsights,
   stepFeatureInsights,
   stepTimingAnalysis,
@@ -884,14 +883,6 @@ describe('step dashboard data', () => {
         },
       },
     }
-    expect(staCornerSummaryPaths(step, '/workspace/sta/')).toEqual([
-      {
-        id: 'MAX_125/Cworst',
-        path: '/workspace/sta/feature/MAX_125/Cworst/qor_summary.json',
-        timingPathsPath: '/workspace/sta/feature/MAX_125/Cworst/timing_paths.json',
-      },
-    ])
-
     const insights = staInsights(step)
     expect(insights?.corners).toEqual([
       expect.objectContaining({

@@ -178,17 +178,6 @@ export interface DesktopProjectDirectoryEntry {
   type: 'file' | 'directory'
 }
 
-export interface DesktopProjectManagementWorkspaceTextsRequest {
-  projectRoot: string
-  workspacePath: string
-  paths: string[]
-}
-
-export interface DesktopProjectManagementWorkspaceTextsResult {
-  texts: Record<string, string | null>
-  unavailablePaths: string[]
-}
-
 export interface DesktopProjectManagementWorkspaceStepConfigurationRequest {
   projectRoot: string
   step: string
@@ -274,9 +263,6 @@ export interface DesktopApi {
     discoverProject(directory: string): Promise<ProjectManifest | null>
     readManifest(projectRoot: string): Promise<ProjectManifest | null>
     listProjectEntries(projectRoot: string): Promise<string[]>
-    readWorkspaceTexts(
-      request: DesktopProjectManagementWorkspaceTextsRequest,
-    ): Promise<DesktopProjectManagementWorkspaceTextsResult>
     readWorkspaceStepConfiguration(
       request: DesktopProjectManagementWorkspaceStepConfigurationRequest,
     ): Promise<DesktopProjectManagementWorkspaceStepConfigurationResult>

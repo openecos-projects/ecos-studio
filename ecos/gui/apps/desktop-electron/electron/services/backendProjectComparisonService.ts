@@ -32,7 +32,6 @@ import {
 import { ProjectStepFindingsService } from './projectStepFindingsService'
 import { projectComparisonEvidence } from './projectComparisonEvidence'
 import {
-  analysisTextsFromSnapshot,
   buildProjectComparisonSnapshots,
   buildProjectComparisonSteps,
   buildProjectComparisonTrend,
@@ -503,10 +502,6 @@ export class BackendProjectComparisonService {
               snapshotResult.sections.qorSnapshotExtension.status === 'ready'
                 ? snapshotResult.sections.qorSnapshotExtension.data
                 : undefined
-            const artifacts =
-              snapshotResult.sections.artifacts.status === 'ready'
-                ? snapshotResult.sections.artifacts.data
-                : []
             const engineeringFacts = {
               analysis: qor.analysis,
               metrics: qor.metrics,
@@ -517,11 +512,9 @@ export class BackendProjectComparisonService {
                 ? { signoffAssessment: snapshotResult.sections.signoff.data }
                 : {}),
             }
-            const texts = analysisTextsFromSnapshot(qor.analysis, artifacts)
             const input = projectQorInputForWorkspace(
               manifest,
               workspace.workspace_id,
-              texts,
               engineeringFacts,
             )
             return input

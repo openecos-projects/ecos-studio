@@ -14,7 +14,6 @@ import { tmpdir } from 'node:os'
 import {
   ENGINEERING_SNAPSHOT_MAX_BYTES,
   projectManifestForPresentation,
-  projectManagementWorkspaceSummaryPaths,
   type EccProjectManifest,
   type EccPersistedEngineeringSnapshot,
 } from '@ecos-studio/shared'
@@ -78,7 +77,6 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
     qor_baseline: null,
   }
   await writeFile(join(projectRoot, 'project.json'), JSON.stringify(manifest))
-  await writeFile(join(workspaceRoot, 'home', 'flow.json'), '{"steps":[]}')
   return { projectRoot, workspaceRoot }
 }
 
@@ -117,7 +115,7 @@ describe('ProjectManagementReadService', () => {
   })
 
   it('reads a historical project and its declared workspace without an active workspace scope', async () => {
-    const { projectRoot, workspaceRoot } = await createProject()
+    const { projectRoot } = await createProject()
     const service = createReadService()
 
     await expect(service.readManifest(projectRoot)).resolves.toMatchObject({
@@ -128,31 +126,6 @@ describe('ProjectManagementReadService', () => {
       'project.json',
       'ws_0001',
     ])
-    await expect(
-      service.readWorkspaceTexts({
-        projectRoot,
-        workspacePath: workspaceRoot,
-        paths: ['home/flow.json', 'sta_ecc/analysis/qor_metrics.json'],
-      }),
-    ).resolves.toEqual({
-      texts: {
-        'home/flow.json': '{"steps":[]}',
-        'sta_ecc/analysis/qor_metrics.json': null,
-      },
-      unavailablePaths: [],
-    })
-    const summaries = await service.readWorkspaceTexts({
-      projectRoot,
-      workspacePath: workspaceRoot,
-      paths: [...projectManagementWorkspaceSummaryPaths],
-    })
-    expect(summaries).toMatchObject({
-      texts: expect.objectContaining({
-        'lvs_ecc/analysis/qor_metrics.json': null,
-      }),
-      unavailablePaths: [],
-    })
-    expect(summaries.texts).not.toHaveProperty('home/flow.json')
   })
 
   it('derives the project root from the selected manifest directory', async () => {
@@ -204,26 +177,19 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
-  it('rejects undeclared workspaces and files outside the summary allowlist', async () => {
+  it('rejects undeclared workspaces for Step Configuration reads', async () => {
     const { projectRoot } = await createProject()
     const undeclaredWorkspace = join(projectRoot, 'ws_0002')
     await mkdir(undeclaredWorkspace)
-    const service = createReadService()
+    const service = createReadService(vi.fn())
 
     await expect(
-      service.readWorkspaceTexts({
+      service.readWorkspaceStepConfiguration({
         projectRoot,
+        step: 'CTS',
         workspacePath: undeclaredWorkspace,
-        paths: ['home/flow.json'],
       }),
     ).rejects.toThrow('not declared')
-    await expect(
-      service.readWorkspaceTexts({
-        projectRoot,
-        workspacePath: join(projectRoot, 'ws_0001'),
-        paths: ['../../settings.json'],
-      }),
-    ).rejects.toThrow('not allowed')
   })
 
   it('throws ENOTDIR when the project root exists but is not a directory', async () => {
@@ -256,45 +222,7 @@ describe('ProjectManagementReadService', () => {
     )
   })
 
-  it('keeps readable workspace summaries when one optional artifact exceeds the limit', async () => {
-    const { projectRoot, workspaceRoot } = await createProject()
-    const metricsPath = join(workspaceRoot, 'sta_ecc', 'analysis', 'qor_metrics.json')
-    await mkdir(join(workspaceRoot, 'sta_ecc', 'analysis'), { recursive: true })
-    await writeFile(metricsPath, 'x'.repeat(256 * 1024 + 1))
-    const service = createReadService()
-
-    await expect(
-      service.readWorkspaceTexts({
-        projectRoot,
-        workspacePath: workspaceRoot,
-        paths: ['home/flow.json', 'sta_ecc/analysis/qor_metrics.json'],
-      }),
-    ).resolves.toEqual({
-      texts: {
-        'home/flow.json': '{"steps":[]}',
-        'sta_ecc/analysis/qor_metrics.json': null,
-      },
-      unavailablePaths: ['sta_ecc/analysis/qor_metrics.json'],
-    })
-  })
-
-  it('rejects an allowed artifact path that resolves outside its workspace', async () => {
-    const { projectRoot, workspaceRoot } = await createProject()
-    const flowPath = join(workspaceRoot, 'home', 'flow.json')
-    await unlink(flowPath)
-    await symlink(join(projectRoot, 'project.json'), flowPath)
-    const service = createReadService()
-
-    await expect(
-      service.readWorkspaceTexts({
-        projectRoot,
-        workspacePath: workspaceRoot,
-        paths: ['home/flow.json'],
-      }),
-    ).rejects.toThrow('outside its workspace')
-  })
-
-  it('reads Step Options through the ECC domain reader and rejects config file paths', async () => {
+  it('reads Step Options through the ECC domain reader', async () => {
     const { projectRoot, workspaceRoot } = await createProject()
     const readStepConfiguration = vi.fn().mockResolvedValue({
       options: { cts_buf_list: 'BUF' },
@@ -321,13 +249,6 @@ describe('ProjectManagementReadService', () => {
       workspaceRevision: 1,
     })
     expect(readStepConfiguration).toHaveBeenCalledWith(workspaceRoot, 'CTS')
-    await expect(
-      service.readWorkspaceTexts({
-        projectRoot,
-        workspacePath: workspaceRoot,
-        paths: ['config/cts_ecc.json'],
-      }),
-    ).rejects.toThrow('not allowed')
   })
 
   it('reads and validates one persisted Engineering Snapshot without a Runtime session', async () => {

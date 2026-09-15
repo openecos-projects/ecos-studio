@@ -174,12 +174,6 @@ export interface StepDashboardStaInsights {
   corners: StepDashboardStaCorner[]
 }
 
-export interface StepDashboardStaSummaryPath {
-  id: string
-  path: string
-  timingPathsPath: string
-}
-
 export interface StepDashboardQor {
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
   metricCount: number
@@ -1120,30 +1114,6 @@ function staCornerRecords(value: unknown): Record<string, unknown>[] {
 
 function staCornerId(corner: Record<string, unknown>, index: number): string {
   return textValue(corner.sta_corner, `Corner ${index + 1}`)
-}
-
-export function staCornerSummaryPaths(
-  value: unknown,
-  stepDirectory: string,
-): StepDashboardStaSummaryPath[] {
-  const baseDirectory = stepDirectory.replace(/\/+$/, '')
-  return staCornerRecords(value).map((corner, index) => {
-    const id = staCornerId(corner, index)
-    const sourcePath = textValue(corner.summary_file, `feature/${id}/qor_summary.json`)
-    const timingPathsFile = textValue(corner.timing_paths_file, '')
-    const timingPathsPath = timingPathsFile
-      ? timingPathsFile
-      : sourcePath.replace(/qor_summary\.json$/i, 'timing_paths.json')
-    return {
-      id,
-      path: resolveStepPath(baseDirectory, sourcePath),
-      timingPathsPath: resolveStepPath(baseDirectory, timingPathsPath),
-    }
-  })
-}
-
-function resolveStepPath(baseDirectory: string, relativePath: string): string {
-  return relativePath.startsWith('/') ? relativePath : `${baseDirectory}/${relativePath}`
 }
 
 function staCornerMetrics(

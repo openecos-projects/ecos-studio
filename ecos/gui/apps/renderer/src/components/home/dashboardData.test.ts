@@ -3,7 +3,6 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
-  qorStatusSummary,
   workspaceResultFreshnessNotice,
 } from './dashboardData'
 
@@ -17,7 +16,7 @@ describe('dashboard data presentation', () => {
     ])
   })
 
-  it('summarizes checklist and Backend QoR step states', () => {
+  it('summarizes checklist states', () => {
     expect(
       checklistStatusSummary([
         { state: 'pass' },
@@ -32,36 +31,6 @@ describe('dashboard data presentation', () => {
       warning: 1,
       passingPercent: 50,
     })
-    expect(
-      qorStatusSummary([
-        {
-          id: 'route',
-          label: 'Route',
-          blockedCount: 0,
-          metricsPath: null,
-          missing: [],
-          passCount: 1,
-          reportCount: 0,
-          runtime: '',
-          summaryMetricCount: 10,
-          status: 'pass',
-          totalCount: 1,
-        },
-        {
-          id: 'rcx',
-          label: 'RCX',
-          blockedCount: 0,
-          metricsPath: null,
-          missing: [],
-          passCount: 0,
-          reportCount: 0,
-          runtime: '',
-          summaryMetricCount: 0,
-          status: 'incomplete',
-          totalCount: 1,
-        },
-      ]),
-    ).toMatchObject({ total: 2, passed: 1, warning: 1, passingPercent: 50 })
   })
 
   it('formats Backend key metrics without engineering interpretation', () => {

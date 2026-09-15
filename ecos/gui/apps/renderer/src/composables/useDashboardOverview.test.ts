@@ -71,7 +71,6 @@ describe('useDashboardOverview', () => {
     expect(overview.qorSteps.value).toEqual([
       expect.objectContaining({
         label: 'Place',
-        passCount: 1,
         status: 'pass',
         summaryMetricCount: 10,
       }),

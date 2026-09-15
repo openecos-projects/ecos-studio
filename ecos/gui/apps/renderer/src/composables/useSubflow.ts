@@ -295,8 +295,6 @@ export function useSubflow() {
       )
       if (!isCurrent() || !response) return
 
-      console.log('workspace subflow response:', response)
-
       if (response.response === 'error') {
         console.warn('workspace subflow resolver failed:', response.message)
         if (subflowSteps.value.length === 0) {
@@ -336,8 +334,6 @@ export function useSubflow() {
       )
       if (!isCurrent() || fileContent === undefined) return
       const subflowData: SubflowData = JSON.parse(fileContent)
-
-      console.log('subflow data:', subflowData)
 
       // 3. 转换数据格式并更新步骤
       if (expectedRuntimeRevision === runtimeUpdateRevision) {
@@ -403,13 +399,11 @@ export function useSubflow() {
     async (newPath) => {
       const pathParts = newPath.split('/')
       const currentPath = pathParts[pathParts.length - 1] || ''
-      console.log('Current path:', currentPath)
 
       // 检查当前路由是否是步骤页面
       const stepEnum = getStepEnumFromPath(currentPath)
       if (stepEnum) {
         updateCurrentStep(stepEnum)
-        console.log('Fetching subflow for:', stepEnum)
         await fetchSubflowInfo(stepEnum)
       } else {
         clearSubflow()

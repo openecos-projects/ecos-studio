@@ -1,5 +1,4 @@
 import { getDesktopApi } from '@/platform/desktop'
-import type { DesktopProjectManagementWorkspaceTextsResult } from '@ecos-studio/shared'
 import type { ProjectManifest } from '@ecos-studio/shared'
 
 function projectManagementApi() {
@@ -26,16 +25,4 @@ export async function listProjectManagementEntries(
   projectRoot: string,
 ): Promise<string[]> {
   return await projectManagementApi().listProjectEntries(projectRoot)
-}
-
-export async function readProjectManagementWorkspaceTexts(
-  projectRoot: string,
-  workspacePath: string,
-  paths: string[],
-): Promise<DesktopProjectManagementWorkspaceTextsResult> {
-  return await projectManagementApi().readWorkspaceTexts({
-    projectRoot,
-    workspacePath,
-    paths,
-  })
 }
