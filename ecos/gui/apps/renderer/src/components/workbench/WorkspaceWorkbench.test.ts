@@ -42,8 +42,6 @@ describe('WorkspaceWorkbench Agent panel', () => {
     await toggle.trigger('click')
     await nextTick()
     expect(store.workspaceAgentCollapsed).toBe(false)
-    expect(wrapper.get('.workspace-workbench-inspector').attributes('style')).not.toContain(
-      'display: none',
-    )
+    expect(wrapper.get('.workspace-workbench-inspector').isVisible()).toBe(true)
   })
 })
