@@ -133,13 +133,10 @@ def test_gui_stop_during_noise_calibration_cancels_without_episode(
     )
 
 
-def test_gui_optimization_turns_stream_progress_to_the_chat(
+def test_gui_optimization_turns_keep_heartbeat_noise_out_of_the_chat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = _make_optimization_workspace(tmp_path)
-    monkeypatch.setattr(
-        "ecos_agent.gui.provider_optimization._TURN_HEARTBEAT_SECONDS", 0.05
-    )
     events: list[dict[str, object]] = []
     lifecycle: list[str] = []
     runner = _BlockingRunner(lifecycle)
@@ -156,22 +153,25 @@ def test_gui_optimization_turns_stream_progress_to_the_chat(
     _send(provider, session_id, "reduce wirelength")
     _send(provider, session_id, "1")
     assert runner.started.wait(timeout=2)
-
-    deadline = time.monotonic() + 1
-    while time.monotonic() < deadline and not any(
-        event["type"] == "tool" and "in progress" in str(event.get("text", ""))
-        for event in events
-    ):
-        time.sleep(0.01)
+    time.sleep(0.2)
     runner.release.set()
 
-    assert any(
-        event["type"] == "tool"
-        and "requesting a proposal (planning)" in str(event.get("text", ""))
-        for event in events
+    deadline = time.monotonic() + 2
+    while provider.sessions[session_id].optimization_thread is not None and (
+        time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+
+    noise_fragments = (
+        "in progress",
+        "in flight",
+        "in-flight",
+        "requesting a proposal (planning)",
+        "wall time left",
     )
-    assert any(
-        event["type"] == "tool" and "in progress" in str(event.get("text", ""))
+    assert all(
+        event["type"] != "tool"
+        or not any(fragment in str(event.get("text", "")) for fragment in noise_fragments)
         for event in events
     )
 
