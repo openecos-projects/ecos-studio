@@ -320,7 +320,10 @@ def build_eligibility_metrics(
     metrics_by_path: dict[str, dict[str, float]],
 ) -> tuple[TerminalEvaluationMetric, ...]:
     specifications = (
-        ("drc_ecc/analysis/qor_metrics.json", "drc_count"),
+        # ``drc_count`` (signoff iDRC) is deliberately absent: it flags
+        # standard-cell ``obs`` shapes against power rails at every cell row,
+        # so it is not actionable DRC evidence. The routed violation count in
+        # the objective-metric trio carries the DRC decision instead.
         ("lvs_ecc/analysis/qor_metrics.json", "lvs_count"),
         ("RCX_ecc/analysis/qor_metrics.json", "rcx_expected_corner_count"),
         ("RCX_ecc/analysis/qor_metrics.json", "rcx_spef_file_count"),

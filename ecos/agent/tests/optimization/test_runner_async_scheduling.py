@@ -122,7 +122,7 @@ def _baseline_incumbent() -> TerminalObservation:
     return support._incumbent()
 
 
-def _better_terminal(execution_id: str, *, dr=2.0, overflow=3.0, wirelength=4.0):
+def _better_terminal(execution_id: str, *, dr=0.0, overflow=3.0, wirelength=4.0):
     return _terminal_observation(
         _observation(_budget()),
         CandidateExecutionReceipt(execution_id=execution_id, started=True),
@@ -291,7 +291,7 @@ def test_a3_promotion_switches_to_the_winners_full_configuration(tmp_path):
     def terminal_for(_observation, receipt):
         if receipt.execution_id == "execution-1":
             return _better_terminal(receipt.execution_id)
-        return _better_terminal(receipt.execution_id, dr=1.0, overflow=2.0, wirelength=3.5)
+        return _better_terminal(receipt.execution_id, dr=0.0, overflow=2.0, wirelength=3.5)
 
     runner = _runner(
         controller, executor,
@@ -381,6 +381,7 @@ def _recovery_terminal(execution_id, *, drc=0, setup=0, hold=0, wirelength=4.0):
             ),
             "metrics": {
                 **terminal.metrics,
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: float(drc),
                 ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
             },
         }

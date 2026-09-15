@@ -8,7 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from ecos_agent.optimization.contracts import GateResult, OptimizationEpisodeState
+from ecos_agent.optimization.contracts import (
+    GateResult,
+    ObjectiveMetric,
+    OptimizationEpisodeState,
+)
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.gui.provider import EcosAgentProvider
 from tests.optimization.controller.support import _eligible_terminal
@@ -33,7 +37,14 @@ def _baseline(*, drc: int = 0, setup: int = 0, hold: int = 0):
         }
     )
     return terminal.model_copy(
-        update={"evaluation_metrics": evaluation, "signoff_gates": gates}
+        update={
+            "evaluation_metrics": evaluation,
+            "signoff_gates": gates,
+            "metrics": {
+                **terminal.metrics,
+                ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: float(drc),
+            },
+        }
     )
 
 
@@ -607,7 +618,7 @@ def test_gui_drc_and_timing_goal_requires_drc_recovery_confirmation(
     workspace = _make_optimization_workspace(tmp_path)
     goal = "reduce routed wirelength while preserving DRC and timing"
     baseline = _baseline(drc=9)
-    assert baseline.metrics["route_dr_total_violation_count"] == 0
+    assert baseline.metrics["route_dr_total_violation_count"] == 9
     monkeypatch.setattr(
         "ecos_agent.gui.provider_optimization.build_terminal_observation",
         lambda _workspace: baseline,

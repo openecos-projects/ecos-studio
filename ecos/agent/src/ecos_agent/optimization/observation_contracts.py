@@ -38,8 +38,11 @@ from ecos_agent.optimization.contracts import (
 )
 
 #: Required signoff gates whose FAIL state is a physical closure failure.
+#: ``drc_clean`` is excluded on purpose: it is derived from the signoff iDRC
+#: count, which flags standard-cell ``obs`` shapes against power rails at
+#: every cell row (a labeling artifact, see fse-baseline-1), so the routed
+#: design-rule violation count in ``metrics`` is the DRC decision evidence.
 _PHYSICAL_GATE_NAMES = (
-    "drc_clean",
     "lvs_clean",
     "rcx_corner_coverage",
     "rcx_spef_parse_health",
@@ -163,9 +166,14 @@ class SignoffGates(_ContractModel):
 
     @property
     def passed(self) -> bool:
+        # ``drc_clean`` is excluded: it tracks the artifact-prone signoff iDRC
+        # count, so it must not veto incumbent eligibility (see
+        # _PHYSICAL_GATE_NAMES). The routed violation count in ``metrics``
+        # carries the DRC decision instead.
         return all(
             value in {GateResult.PASS, GateResult.NOT_APPLICABLE}
-            for value in self.model_dump().values()
+            for name, value in self.model_dump().items()
+            if name != "drc_clean"
         )
 class TerminalObservation(_ContractModel):
     schema_version: Literal[
@@ -354,8 +362,13 @@ class TerminalObservation(_ContractModel):
         )
         if frequency is not None:
             values[ObjectiveMetric.STA_FREQUENCY] = frequency.value
+        # DRC recovery evidence is the routed design-rule violation count from
+        # the objective-metric trio, never the signoff iDRC ``drc_count``
+        # (see _PHYSICAL_GATE_NAMES).
+        values[ObjectiveMetric.DRC_COUNT] = self.metrics[
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT
+        ]
         for metric_id in (
-            ObjectiveMetric.DRC_COUNT,
             ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
             ObjectiveMetric.STA_HOLD_VIOLATION_COUNT,
         ):
@@ -435,7 +448,6 @@ class TerminalObservation(_ContractModel):
             if item.category == EvaluationMetricCategory.ELIGIBILITY
         }
         zero_metrics = (
-            "drc_count",
             "lvs_count",
             "rcx_missing_corner_count",
             "rcx_spef_parse_failure_count",
@@ -445,7 +457,10 @@ class TerminalObservation(_ContractModel):
             "harden_artifact_missing_count",
         )
         return (
-            all(values.get(metric_id) == 0 for metric_id in zero_metrics)
+            # DRC eligibility is the routed violation count (objective trio),
+            # not the signoff iDRC count (see _PHYSICAL_GATE_NAMES).
+            self.metrics[ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT] == 0
+            and all(values.get(metric_id) == 0 for metric_id in zero_metrics)
             and values.get("rcx_expected_corner_count", 0) > 0
             and values.get("rcx_spef_file_count")
             == values.get("rcx_expected_corner_count")

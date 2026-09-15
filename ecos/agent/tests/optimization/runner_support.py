@@ -436,7 +436,6 @@ def _terminal_observation(
             source_refs=("analysis/terminal.json",),
         )
         for metric_id in (
-            "drc_count",
             "lvs_count",
             "rcx_expected_corner_count",
             "rcx_spef_file_count",
@@ -459,7 +458,7 @@ def _terminal_observation(
         harden_artifacts_complete=True,
         signoff_gates=SignoffGates.all(GateResult.PASS),
         metrics={
-            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 2.0,
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 0.0,
             ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 3.0,
             ObjectiveMetric.ROUTE_WIRELENGTH: 4.0,
         },
