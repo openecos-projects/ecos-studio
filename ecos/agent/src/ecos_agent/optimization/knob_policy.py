@@ -167,7 +167,16 @@ def policy_payload(
     priority: tuple[str, ...] = (),
 ) -> dict[str, object]:
     allowed = set(allowed_knobs(objective))
+    geometry_variable = (
+        objective is not None
+        and objective.parameter_policy is not None
+        and objective.parameter_policy.geometry_mode == "variable"
+    )
     payload: dict[str, object] = {
+        # Variable-geometry tasks rerun Floorplan-target candidates in die_util
+        # mode, so the floorplan knobs are effective probes even when the
+        # baseline floorplan stage itself runs in die_size mode.
+        "floorplan_candidate_mode": "die_util" if geometry_variable else None,
         "active_layer": layer,
         "knobs": [
             {
