@@ -1,7 +1,7 @@
 <a id="failure.route.preconditions"></a>
 ## failure.route.preconditions
 
-**Failure mode:** The step cannot execute without an ECC database instance. iRT initialization, pin access, planar/layer/track/detailed routing, or violation reporting can fail while the wrapper still records progress; routing timing initialization is conditional, so timing data must not be assumed from route completion alone.
+**Failure mode:** The step cannot execute without an ECC database instance. iRT initialization, pin access, planar/layer/track/detailed routing, or violation reporting can fail while the wrapper still records progress; timing awareness is decided inside iRT from its own configuration, so timing data must not be assumed from route completion alone.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **irt.interface**, **irt.planar_router**, **irt.layer_assigner**, **irt.track_assigner**, **irt.detailed_router**
 
@@ -29,7 +29,7 @@
 <a id="failure.route.conditional_sta"></a>
 ## failure.route.conditional_sta
 
-**Failure mode:** A completed route does not prove timing-aware routing. Verify that the route configuration enabled timing and that STA initialization/artifacts exist before making that claim.
+**Failure mode:** A completed route does not prove timing-aware routing. Timing-driven routing is self-contained in iRT and builds its own timing engine from its configuration and the shared database state; verify route features and logs before making timing claims.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **irt.interface**, **irt.planar_router**, **irt.layer_assigner**, **irt.track_assigner**, **irt.detailed_router**
 

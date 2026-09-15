@@ -240,7 +240,7 @@ def test_build_candidate_trace_uses_native_receipt_and_terminal_metrics() -> Non
     assert trace.dynamic_power == 2.5
     assert trace.leakage_power == 0.4
     assert trace.frequency == 100.0
-    assert trace.drc == 2.0
+    assert trace.drc == 0.0
     assert trace.timing == 0.0
     assert trace.congestion == 3.0
     assert trace.wirelength == 4.0

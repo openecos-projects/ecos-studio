@@ -112,7 +112,7 @@ _SPECS: tuple[KnobSpec, ...] = (
     # -- Floorplan: die and core geometry ------------------------------------
     KnobSpec(
         "floorplan.utilitization",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "ranged",
         parameters=_parameters("Core", "Utilitization"),
         evidence=_params_toml("core", "utilitization"),
@@ -120,38 +120,38 @@ _SPECS: tuple[KnobSpec, ...] = (
     ),
     KnobSpec(
         "floorplan.aspect_ratio",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "positive_number",
         parameters=_parameters("Core", "Aspect ratio"),
         evidence=_params_toml("core", "aspect_ratio"),
     ),
     KnobSpec(
         "floorplan.margin_x",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "number",
         parameters=_parameters("Core", "Margin", 0),
     ),
     KnobSpec(
         "floorplan.margin_y",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "number",
         parameters=_parameters("Core", "Margin", 1),
     ),
     KnobSpec(
         "floorplan.die_width",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "positive_number",
         parameters=_parameters("Die", "Size", 0),
     ),
     KnobSpec(
         "floorplan.die_height",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "positive_number",
         parameters=_parameters("Die", "Size", 1),
     ),
     KnobSpec(
         "floorplan.global_right_padding",
-        ECCStepName.FLOORPLAN,
+        ECCStepName.POST_FLOORPLAN,
         "zero_based_integer",
         parameters=_parameters("Global right padding"),
     ),

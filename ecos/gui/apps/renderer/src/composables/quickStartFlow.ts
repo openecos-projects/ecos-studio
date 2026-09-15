@@ -17,7 +17,9 @@ export interface QuickStartFlowResult {
 const STAGES: Record<EccFlowStep, [string, string]> = {
   Synthesis: ['逻辑综合', '将 RTL 转换为标准单元网表'],
   lec: ['逻辑等价检查', '检查综合前后逻辑的一致性'],
-  Floorplan: ['布局规划', '确定芯片和核心区域，安排引脚及宏单元位置'],
+  preFloorplan: ['布局规划初始化', '构建初始版图并自动放置输入输出引脚'],
+  macroPlacement: ['宏单元布局', '确定硬宏单元在版图中的位置'],
+  postFloorplan: ['布局规划完成', '应用宏单元位置并生成完整的版图规划'],
   place: ['全局布局', '安排标准单元位置，兼顾线长、密度和拥塞'],
   CTS: ['时钟树综合', '构建时钟分配网络，控制时钟偏斜和延迟'],
   legalization: ['布局合法化', '消除单元重叠，并将单元对齐到合法位置'],

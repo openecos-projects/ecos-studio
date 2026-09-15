@@ -66,7 +66,9 @@ _METRIC_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _STAGE_DIRECTORIES = {
     ECCStepName.SYNTHESIS: "Synthesis_yosys",
-    ECCStepName.FLOORPLAN: "Floorplan_ecc",
+    ECCStepName.PRE_FLOORPLAN: "preFloorplan_ecc",
+    ECCStepName.MACRO_PLACEMENT: "macroPlacement_dreamplace",
+    ECCStepName.POST_FLOORPLAN: "postFloorplan_ecc",
     ECCStepName.PLACEMENT: "place_dreamplace",
     ECCStepName.CTS: "CTS_ecc",
     ECCStepName.LEGALIZATION: "legalization_dreamplace",
@@ -91,7 +93,7 @@ _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
 _CTS_FEATURE_FILE = "CTS_ecc/feature/CTS.step.json"
 _AREA_EVIDENCE_STEPS = (
     ECCStepName.SYNTHESIS,
-    ECCStepName.FLOORPLAN,
+    ECCStepName.POST_FLOORPLAN,
 )
 _TERMINAL_FLOW_STEPS = (
     ECCStepName.PLACEMENT,

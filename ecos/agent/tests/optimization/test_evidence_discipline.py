@@ -189,7 +189,7 @@ class TestRecoverySeverity:
             clock_period_ns=20.0,
         )
         assert [entry["metric_id"] for entry in entries] == [
-            "route_dr_total_violation_count",
+            "drc_count",
             "sta_setup_wns",
             "sta_setup_violation_count",
         ]
@@ -285,8 +285,6 @@ class TestWorkspaceIntegration:
     def test_physical_failures_are_not_misread_as_evidence_gaps(
         self, frozen_workspace: Path
     ) -> None:
-        # The artifact-prone signoff iDRC count and its checklist gate do not
-        # constitute a physical failure on their own (fse-baseline-1).
         drc_path = frozen_workspace / "drc_ecc/analysis/qor_metrics.json"
         payload = json.loads(drc_path.read_text(encoding="utf-8"))
         for item in payload["metrics"]:
@@ -304,18 +302,5 @@ class TestWorkspaceIntegration:
             encoding="utf-8",
         )
         observation = build_terminal_observation(frozen_workspace)
-        assert not observation.physical_signoff_failure
+        assert observation.physical_signoff_failure
         assert not observation.evidence_incomplete
-
-        # A routed design-rule violation is a real physical failure.
-        route_path = frozen_workspace / "route_ecc/analysis/qor_metrics.json"
-        route_payload = json.loads(route_path.read_text(encoding="utf-8"))
-        for item in route_payload["metrics"]:
-            if item["id"] == "route_dr_total_violation_count":
-                item["value"] = 9
-        route_path.write_text(
-            json.dumps(route_payload, sort_keys=True), encoding="utf-8"
-        )
-        routed = build_terminal_observation(frozen_workspace)
-        assert routed.physical_signoff_failure
-        assert not routed.evidence_incomplete

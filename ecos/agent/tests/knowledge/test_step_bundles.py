@@ -124,8 +124,10 @@ def test_generated_floorplan_bundle_covers_current_io_and_macro_boundaries(
     assert "parameter.floorplan.macro_placer_macro_location_path" not in parameter_ids
     assert "macro_location_path" not in parameters
 
-    assert "**Debug-only path:**" in algorithms
-    assert "not a main floorplan input" in algorithms
+    assert "fixed handoff from the macro-placement step" in algorithms
+    assert "`tcl_save` writes the hard-macro placement commands" in algorithms
+    assert "`FPInterface::inputMacroPlacement()` parses `placeInstance`-style lines" in algorithms
+    assert "`run_simple_fp`, which runs iFP `DieBuilder` and auto IO-pin placement" in algorithms
     assert "two-pitch spacing" in algorithms
     assert "one-pitch spacing" in algorithms
     assert "capacity exhaustion emits a native error" in algorithms
@@ -153,8 +155,8 @@ def test_generated_floorplan_bundle_covers_current_io_and_macro_boundaries(
     assert "does not relocate it" in failures
     assert "not a relocation or repair algorithm" in failures
     assert "<a id=\"failure.drc.invalid_shape\"></a>" in drc_failures
-    assert "regular_net_num" in drc_failures
-    assert "negative result-net" not in drc_failures
+    assert "violation_map.json" in drc_failures
+    assert "aborts feature translation rather than being counted as zero violations" in drc_failures
 
 
 def test_build_all_uses_the_same_bundle_builder_for_every_stage(

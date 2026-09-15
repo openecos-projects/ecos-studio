@@ -62,7 +62,7 @@ def test_terminal_observation_uses_fixed_signoff_sources_and_reads_lvs_rcx(
         (item.category.value, item.metric_id, item.corner): item
         for item in observation.evaluation_metrics
     }
-    assert ("eligibility", "drc_count", None) not in by_id
+    assert by_id[("eligibility", "drc_count", None)].value == 0
     assert by_id[("eligibility", "lvs_count", None)].value == 0
     assert by_id[("eligibility", "sta_corner_count", None)].value == 3
     assert by_id[("ppa", "synthesis_cell_area", None)].value == 1200
@@ -172,11 +172,9 @@ def test_terminal_observation_fails_closed_without_numeric_eligibility(
         build_terminal_observation(frozen_workspace)
 
 
-def test_terminal_observation_rejects_nonzero_routed_drc_but_tolerates_signoff_artifact(
+def test_terminal_observation_rejects_nonzero_numeric_eligibility(
     frozen_workspace: Path,
 ) -> None:
-    # The signoff iDRC count (obs-vs-rail labeling artifact) must not gate
-    # incumbent eligibility; the routed violation count is the DRC decision.
     path = frozen_workspace / "drc_ecc/analysis/qor_metrics.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     next(item for item in payload["metrics"] if item["id"] == "drc_count")["value"] = 1
@@ -185,23 +183,7 @@ def test_terminal_observation_rejects_nonzero_routed_drc_but_tolerates_signoff_a
     observation = build_terminal_observation(frozen_workspace)
 
     assert observation.signoff_gates.drc_clean.value == "pass"
-    assert observation.eligible_for_incumbent is True
-
-    route_path = frozen_workspace / "route_ecc/analysis/qor_metrics.json"
-    route_payload = json.loads(route_path.read_text(encoding="utf-8"))
-    next(
-        item
-        for item in route_payload["metrics"]
-        if item["id"] == "route_dr_total_violation_count"
-    )["value"] = 1
-    _write_json(route_path, route_payload)
-
-    routed = build_terminal_observation(frozen_workspace)
-
-    assert (
-        routed.metrics[ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT] == 1.0
-    )
-    assert routed.eligible_for_incumbent is False
+    assert observation.eligible_for_incumbent is False
 
 
 def test_terminal_observation_marks_missing_power_as_ineligible(
@@ -370,12 +352,12 @@ def test_gui_overall_qor_score_can_be_the_primary_objective(
         ),
         (
             ObjectiveMetric.DIE_AREA,
-            "Floorplan_ecc/analysis/qor_metrics.json",
+            "postFloorplan_ecc/analysis/qor_metrics.json",
             "die_area",
         ),
         (
             ObjectiveMetric.CORE_AREA,
-            "Floorplan_ecc/analysis/qor_metrics.json",
+            "postFloorplan_ecc/analysis/qor_metrics.json",
             "core_area",
         ),
     ],
@@ -485,8 +467,8 @@ def test_missing_selected_area_metric_rejects_candidate(
     ("relative_path", "metric_id"),
     [
         ("Synthesis_yosys/analysis/qor_metrics.json", "synthesis_cell_area"),
-        ("Floorplan_ecc/analysis/qor_metrics.json", "die_area"),
-        ("Floorplan_ecc/analysis/qor_metrics.json", "core_area"),
+        ("postFloorplan_ecc/analysis/qor_metrics.json", "die_area"),
+        ("postFloorplan_ecc/analysis/qor_metrics.json", "core_area"),
     ],
 )
 def test_terminal_observation_requires_area_evidence(

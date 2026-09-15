@@ -113,6 +113,7 @@ PLACE_PARAMETER_SEMANTICS = {
     "dump_legalize_solution_flag": ("The legalized-solution dump switch.", "It controls whether the legalizer result is saved."),
     "routability_opt_flag": ("The routability-optimization switch.", "A false request is effective when the algorithm is confirmed disabled. A true request requires an executed routability round to be effective; enabling the flag without executing a round is inactive after placement completes."),
     "macro_place_flag": ("The macro-placement switch.", "It enables macro preprocessing and macro-legalization paths."),
+    "macro_only": ("The macro-only placement switch.", "The macro-placement runner forces it to `1` so DreamPlace places only hard macros between the two floorplan phases; the serialized `0` default applies to normal placement runs."),
     "use_bb": ("The bounding-box approximation switch.", "It affects the bounding-box form used by wirelength or congestion modeling."),
     "route_num_bins_x": ("The routing-evaluation grid count along X.", "It sets the X resolution for routability and congestion estimation."),
     "route_num_bins_y": ("The routing-evaluation grid count along Y.", "It sets the Y resolution for routability and congestion estimation."),

@@ -40,9 +40,35 @@ _CANDIDATE_TARGET_STEPS = {
     OptimizationKnob.DENSITY_WEIGHT: "place",
 }
 
+# RPC candidates target the "Floorplan" step name, but the flow ledger and the
+# stage observations use the sub-step names the floorplan phase runs as.
+_FLOORPLAN_EVIDENCE_STAGES = frozenset({"preFloorplan", "macroPlacement", "postFloorplan"})
+
 
 def candidate_target_step(knob_id: OptimizationKnob) -> str:
     return _CANDIDATE_TARGET_STEPS[knob_id]
+
+
+# "Floorplan" is an RPC-level target only (ECC keeps it as the shared floorplan
+# configuration key, not a flow step). Its observable evidence lives on the
+# postFloorplan sub-step alone: preFloorplan and macroPlacement are zero-length
+# configuration steps whose analysis directories stay empty.
+_CANDIDATE_OBSERVATION_STAGE = {"Floorplan": "postFloorplan"}
+
+
+def candidate_observation_stage(target: str) -> str:
+    """The flow step whose stage observation represents this candidate target."""
+    return _CANDIDATE_OBSERVATION_STAGE.get(target, target)
+
+
+def knob_has_stage_evidence(
+    knob_id: OptimizationKnob, stage_evidence: frozenset[str] | set[str]
+) -> bool:
+    """Whether one of the stage names in ``stage_evidence`` backs this knob."""
+    target = candidate_target_step(knob_id)
+    if target in stage_evidence:
+        return True
+    return target == "Floorplan" and bool(stage_evidence & _FLOORPLAN_EVIDENCE_STAGES)
 
 
 @dataclass(frozen=True)

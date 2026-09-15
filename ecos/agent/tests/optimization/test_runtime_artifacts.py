@@ -44,7 +44,10 @@ from ecos_agent.workspace.parameters import WorkspaceParametersError
 from tests.optimization.controller.support import _eligible_terminal
 
 _STAGES = (
-    "Floorplan",
+    "Synthesis",
+    "preFloorplan",
+    "macroPlacement",
+    "postFloorplan",
     "place",
     "CTS",
     "legalization",
@@ -119,7 +122,7 @@ def _alignment(
 def test_optimization_runtime_uses_the_earliest_rerun_stage(tmp_path: Path) -> None:
     _write_flow(tmp_path)
 
-    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(12))
+    assert _optimization_rerun_runtime_seconds(tmp_path) == sum(range(15))
 
 
 def test_optimization_runtime_fails_closed_on_incomplete_stage(tmp_path: Path) -> None:

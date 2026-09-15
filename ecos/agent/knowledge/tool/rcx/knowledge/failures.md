@@ -1,7 +1,7 @@
 <a id="failure.rcx.preconditions"></a>
 ## failure.rcx.preconditions
 
-**Failure mode:** The step cannot execute without an ECC database instance. Topology/environment construction, process-table extraction, SPEF writing, or output copying can fail before the checked persistence gates; missing SPEF outputs or unparseable corner files must remain visible through RCX feature and signoff metrics rather than being treated as successful extraction.
+**Failure mode:** The step cannot execute without an ECC database instance. Failed RCX initialization or extraction now terminates the step through the checked init/run/copy gates; topology/environment construction, process-table extraction, SPEF writing, or output copying failures must remain visible through RCX feature and signoff metrics rather than being treated as successful extraction.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ircx.topo**, **ircx.env**, **ircx.var_processor**, **ircx.res_extractor**, **ircx.cap_extractor**, **ircx.spef_writer**
 
@@ -36,7 +36,7 @@
 <a id="failure.rcx.native_progress"></a>
 ## failure.rcx.native_progress
 
-**Failure mode:** The wrapper records `run rcx` successful without inspecting init/run/destroy return values; explicit save-data and SPEF-fact gates are the checked boundaries.
+**Failure mode:** Failed RCX initialization or extraction marks `run rcx` incomplete and returns false; the extractor is destroyed in a `finally` block whose release failure is only logged. Explicit save-data, SPEF-copy, and SPEF-fact gates remain the checked boundaries.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **ircx.topo**, **ircx.env**, **ircx.var_processor**, **ircx.res_extractor**, **ircx.cap_extractor**, **ircx.spef_writer**
 

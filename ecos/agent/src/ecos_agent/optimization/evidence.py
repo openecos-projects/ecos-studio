@@ -275,9 +275,7 @@ def recovery_severity_entries(
         TIMING_FAIL_RATIO * clock_period_ns if clock_period_ns is not None else None
     )
     specifications = (
-        # ``drc_count`` here carries the routed design-rule violation count
-        # (the objective-trio DRC member), not the signoff iDRC count.
-        ("route_dr_total_violation_count", drc_count, DRC_SEVERITY_REFERENCE),
+        ("drc_count", drc_count, DRC_SEVERITY_REFERENCE),
         ("sta_setup_violation_count", setup_violation_count, NVP_SEVERITY_REFERENCE),
         ("sta_hold_violation_count", hold_violation_count, NVP_SEVERITY_REFERENCE),
     )

@@ -8,7 +8,7 @@
 <a id="failure.drc.engine"></a>
 ## failure.drc.engine
 
-**Failure mode:** Without an ECC module, DRC initialization and rule checking do not run.
+**Failure mode:** Without an ECC module, the native `init_drc -> run_drc -> destroy_drc` lifecycle and rule checking do not run.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **idrc.interface**, **idrc.validator**, **idrc.metal_short**, **idrc.minimum_width**, **idrc.cut_spacing**
 
@@ -19,24 +19,24 @@
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **idrc.interface**, **idrc.validator**, **idrc.metal_short**, **idrc.minimum_width**, **idrc.cut_spacing**
 
-<a id="failure.drc.invalid_shape"></a>
-## failure.drc.invalid_shape
+<a id="failure.drc.violation_map"></a>
+## failure.drc.violation_map
 
-**Failure mode:** The wrapper converts result shapes and classifies special nets using `regular_net_num` before verification; malformed or missing result-shape mapping must be diagnosed rather than treated as zero violations.
+**Failure mode:** The feature translation requires the native `violation_map.json` in the step data directory; an absent file or a non-list payload makes `save_drc_feature` return false and leaves the DRC count unknown even when the wrapper subflow says success.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **idrc.interface**, **idrc.validator**, **idrc.metal_short**, **idrc.minimum_width**, **idrc.cut_spacing**
 
-<a id="failure.drc.report"></a>
-## failure.drc.report
+<a id="failure.drc.invalid_shape"></a>
+## failure.drc.invalid_shape
 
-**Failure mode:** The configured report path and saved feature file are independent evidence. Missing either leaves the DRC count unknown even when the wrapper subflow says success.
+**Failure mode:** Each violation entry must carry a non-empty string `type` and a list-shaped `shape` with a usable layer name at index 4; any malformed entry aborts feature translation rather than being counted as zero violations.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **idrc.interface**, **idrc.validator**, **idrc.metal_short**, **idrc.minimum_width**, **idrc.cut_spacing**
 
 <a id="failure.drc.feature"></a>
 ## failure.drc.feature
 
-**Failure mode:** The DRC count comes from the saved feature record. If that record is absent or malformed, a missing number must not be reported as zero violations.
+**Failure mode:** The DRC count comes from the translated feature record (`drc.number` plus per-type/layer distribution). If that record is absent or malformed, a missing number must not be reported as zero violations.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **idrc.interface**, **idrc.validator**, **idrc.metal_short**, **idrc.minimum_width**, **idrc.cut_spacing**
 

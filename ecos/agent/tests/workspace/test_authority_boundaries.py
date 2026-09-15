@@ -14,7 +14,9 @@ def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
     assert GUI_WORKSPACE_FLOW_STEPS == (
         "Synthesis",
         "lec",
-        "Floorplan",
+        "preFloorplan",
+        "macroPlacement",
+        "postFloorplan",
         "place",
         "CTS",
         "legalization",
@@ -33,7 +35,7 @@ def test_gui_workspace_flow_steps_are_the_ecc_catalog_in_order() -> None:
 def test_floorplan_alias_does_not_expand_workspace_authority() -> None:
     # Floorplan geometry is excluded from the GUI rerun surface entirely: the
     # Electron execution gate does not authorize floorplan knobs (diff.md #8).
-    authorized = authorized_knobs_for_step(ECCStepName.FLOORPLAN)
+    authorized = authorized_knobs_for_step(ECCStepName.POST_FLOORPLAN)
 
     assert authorized == frozenset()
     assert "floorplan.utilitization" not in authorized
@@ -91,5 +93,5 @@ def test_public_patch_validation_preserves_workspace_rerun_contract(tmp_path: Pa
 def test_core_util_alias_remains_unauthorized_for_workspace_rerun() -> None:
     with pytest.raises(ValueError, match="not authorized"):
         GuiWorkspaceRerunResolver.validate_patch(
-            "Floorplan", [{"knob_id": "floorplan.core_util", "value": 0.7}]
+            "postFloorplan", [{"knob_id": "floorplan.core_util", "value": 0.7}]
         )

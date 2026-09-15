@@ -40,7 +40,7 @@ def floorplan_mode_state_evidence(
 ) -> tuple[StageEvidenceFeature, ...]:
     relative_path = "config/floorplan_ecc.json"
     path = root / relative_path
-    if stage != ECCStepName.FLOORPLAN or not (path.exists() or path.is_symlink()):
+    if stage != ECCStepName.POST_FLOORPLAN or not (path.exists() or path.is_symlink()):
         return ()
     try:
         builder = _read_json(root, relative_path).get("die_builder")

@@ -7,7 +7,9 @@
 export const ECC_FLOW_STEPS = [
   'Synthesis',
   'lec',
-  'Floorplan',
+  'preFloorplan',
+  'macroPlacement',
+  'postFloorplan',
   'place',
   'CTS',
   'legalization',
@@ -32,7 +34,9 @@ export const ECC_CATALOG_END_STEP: EccFlowStep = ECC_FLOW_STEPS[ECC_FLOW_STEPS.l
 export const ECC_DEFAULT_STEP_TOOLS: Record<EccFlowStep, string> = {
   Synthesis: 'yosys',
   lec: 'yosys_lec',
-  Floorplan: 'ecc',
+  preFloorplan: 'ecc',
+  macroPlacement: 'dreamplace',
+  postFloorplan: 'ecc',
   place: 'dreamplace',
   CTS: 'ecc',
   legalization: 'dreamplace',

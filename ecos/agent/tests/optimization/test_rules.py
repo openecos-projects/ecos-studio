@@ -530,7 +530,7 @@ def _tiebreak_terminal(
             source_refs=("analysis/terminal.json",),
         )
 
-    base = _terminal(observation_id, dr=0, overflow=10, wirelength=100)
+    base = _terminal(observation_id, dr=10, overflow=10, wirelength=100)
     return base.model_copy(
         update={
             "schema_version": "ecos.terminal_observation.v3",

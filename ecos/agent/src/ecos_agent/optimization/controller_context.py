@@ -55,7 +55,9 @@ from ecos_agent.optimization.execution import (
     CandidateExecutionReceipt,
     CandidateExecutionRequest,
     OptimizationExecutionAdapter,
+    candidate_observation_stage,
     candidate_target_step,
+    knob_has_stage_evidence,
 )
 from ecos_agent.optimization.knowledge.compiler import (
     build_state_evidence_request,
@@ -177,7 +179,7 @@ class ControllerContextMixin:
             stage_evidence.update(stage_observations)
         available_actions = tuple(
             action for action in selected_actions
-            if candidate_target_step(action.knob_id) in stage_evidence
+            if knob_has_stage_evidence(action.knob_id, stage_evidence)
         )
         planning_feedback, active_strategy_payload = build_reflection_inputs(
             prior_decisions=prior_decisions,
@@ -516,13 +518,18 @@ class ControllerContextMixin:
         layer, actions = self._select_parameter_actions(self._parameter_domains(observation, active_values), observation)
         for action in actions:
             if _KNOB_ROLES.get(action.knob_id) == layer:
-                return candidate_target_step(action.knob_id)
-        return candidate_target_step(actions[0].knob_id) if actions else "place"
+                return candidate_observation_stage(candidate_target_step(action.knob_id))
+        return (
+            candidate_observation_stage(candidate_target_step(actions[0].knob_id))
+            if actions
+            else "place"
+        )
 
     def planning_stages(self, observation, current_values):
         """Extra stages whose evidence cross-stage legal actions need."""
         stages = {
-            candidate_target_step(knob) for knob in allowed_knobs(self._objective)
+            candidate_observation_stage(candidate_target_step(knob))
+            for knob in allowed_knobs(self._objective)
         }
         stages.discard(observation.stage.value)
         return tuple(sorted(stages))

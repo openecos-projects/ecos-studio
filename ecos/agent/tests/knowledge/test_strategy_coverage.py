@@ -1,7 +1,10 @@
 import hashlib
 import json
 
-from ecos_agent.knowledge.generation.general_details import _strategy_entries
+from ecos_agent.knowledge.generation.general_details import (
+    _KNOWLEDGE_PHASE,
+    _strategy_entries,
+)
 from ecos_agent.optimization.contracts import OptimizationKnob
 from ecos_agent.optimization.knowledge.compiler import GeneralDomainClaim, StatePredicate
 from ecos_agent.optimization.knowledge.compiler_runtime import _evaluate
@@ -34,7 +37,10 @@ def test_bindings_cover_exactly_the_seven_controlled_knobs() -> None:
             statement = statements[strategy_id]
             assert statement["action_intent"] == binding["action_intent"]
             for knob in binding["knobs"]:
-                assert knob["step"] in statement["scope"]["stages"]
+                phase = _KNOWLEDGE_PHASE.get(
+                    str(knob["step"]).casefold(), str(knob["step"]).casefold()
+                )
+                assert phase in statement["scope"]["stages"]
     preservation = next(
         binding for binding in bindings
         if binding["action_intent"] == "preserve_padding_through_legalization"

@@ -29,11 +29,6 @@ from ecos_agent.optimization.metrics.contracts import (
 )
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
-# DRC recovery is driven by the routed design-rule violation count
-# (``route_dr_total_violation_count``, the objective-metric trio member), not
-# by the signoff iDRC ``drc_count``: the iDRC run flags standard-cell ``obs``
-# shapes against power rails at every cell row, so its count is a labeling
-# artifact rather than actionable DRC damage (fse-baseline-1 evidence).
 RECOVERY_ORDER = (
     ObjectiveMetric.DRC_COUNT,
     ObjectiveMetric.STA_SETUP_VIOLATION_COUNT,
@@ -46,13 +41,13 @@ INCUMBENT_ACCEPTANCE_RULE = "ecos.incumbent_acceptance.v3"
 PROTECTION_RELATIVE_TOLERANCE = 0.01
 PROTECTION_ABSOLUTE_TOLERANCE = 0.01
 PRIMARY_METRIC_RELATIVE_TOLERANCE = 1e-9
-# DRC has no signoff gate here: the ``drc_clean`` checklist gate is derived
-# from the artifact-prone iDRC count and must not gate recovery.
 _RECOVERY_GATES = {
+    ObjectiveMetric.DRC_COUNT: "drc_clean",
     ObjectiveMetric.STA_SETUP_VIOLATION_COUNT: "sta_setup_closed",
     ObjectiveMetric.STA_HOLD_VIOLATION_COUNT: "sta_hold_closed",
 }
 _ELIGIBILITY_IDS = (
+    "drc_count",
     "lvs_count",
     "rcx_expected_corner_count",
     "rcx_spef_file_count",
@@ -257,14 +252,7 @@ def recovery_violation_counts(
 ) -> dict[ObjectiveMetric, int]:
     values = _validated_eligibility_values(observation)
     _validate_non_recoverable_evidence(observation, values)
-    route_dr = observation.metrics[ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT]
-    if route_dr < 0 or not float(route_dr).is_integer():
-        raise ObjectiveAlignmentError("baseline route DRC count is invalid")
-    counts = {
-        ObjectiveMetric.DRC_COUNT: int(route_dr),
-        ObjectiveMetric.STA_SETUP_VIOLATION_COUNT: values["sta_setup_violation_count"],
-        ObjectiveMetric.STA_HOLD_VIOLATION_COUNT: values["sta_hold_violation_count"],
-    }
+    counts = {metric: values[metric.value] for metric in RECOVERY_ORDER}
     for metric, gate_name in _RECOVERY_GATES.items():
         expected = GateResult.PASS if counts[metric] == 0 else GateResult.FAIL
         if getattr(observation.signoff_gates, gate_name) != expected:

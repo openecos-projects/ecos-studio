@@ -62,10 +62,7 @@ def test_optimization_retrieval_uses_fixed_query_inputs_and_independent_channels
 
     result = retriever.retrieve(request)
 
-    assert tuple(stage.value for stage in request.action_stages) == (
-        "Floorplan",
-        "place",
-    )
+    assert request.action_stages == ("floorplan", "place")
     assert request.allowed_knobs == tuple(OptimizationKnob)
     assert request.observed_metric_ids == tuple(sorted(observation.metrics))
     assert "0.88" not in json.dumps(request.model_dump(mode="json"))

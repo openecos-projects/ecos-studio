@@ -525,7 +525,7 @@ def test_floorplan_observation_exposes_only_floorplan_actions(tmp_path: Path) ->
     observation = _observation().model_copy(
         update={
             "observation_id": "observation-floorplan",
-            "stage": ECCStepName.FLOORPLAN,
+            "stage": ECCStepName.POST_FLOORPLAN,
             "metrics": {"core_area": 2500.0, "die_area": 3000.0},
         }
     )
@@ -534,7 +534,7 @@ def test_floorplan_observation_exposes_only_floorplan_actions(tmp_path: Path) ->
         retrieval,
         request=retrieval.request.model_copy(
             update={
-                "current_stage": ECCStepName.FLOORPLAN,
+                "current_stage": ECCStepName.POST_FLOORPLAN,
                 "observed_metric_ids": ("core_area", "die_area"),
             }
         ),

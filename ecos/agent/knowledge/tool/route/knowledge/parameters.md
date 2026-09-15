@@ -12,7 +12,7 @@
 
 **Meaning:** The routing timing-awareness switch.
 
-**Role:** It controls whether the runner initializes STA before routing.
+**Role:** It configures timing-driven routing inside iRT, which builds its own timing engine from the shared database configuration; the runner performs no separate STA initialization around routing.
 
 **Source evidence:** **ecc.runner**, **ecc.module**, **config.route**
 

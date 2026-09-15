@@ -7,10 +7,12 @@ AlgorithmDetail = tuple[str, tuple[str, ...], str, tuple[str, ...]]
 
 SOURCE_PATHS = {
     "ecc.workspace": "ecc/chipcompiler/data/workspace/__init__.py",
+    "ecc.macro_location": "ecc/chipcompiler/data/workspace/macro_location.py",
     "yosys.builder": "ecc/chipcompiler/tools/yosys/builder.py",
     "yosys.script": "ecc/chipcompiler/tools/yosys/scripts/yosys_synthesis.tcl",
     "yosys.tech": "ecc/chipcompiler/tools/yosys/scripts/init_tech.tcl",
     "ifp.interface": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/interface/FPInterface.cpp",
+    "ifp.binding": "ecc/chipcompiler/thirdparty/ecc-tools/src/interface/python/py_ifp/py_ifp.cpp",
     "ifp.die_builder": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/die_builder/DieBuilder.cpp",
     "ifp.io_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/io_placer/IOPlacer.cpp",
     "ifp.macro_placer": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iFP/source/module/macro_placer/MacroPlacer.cpp",
@@ -84,34 +86,46 @@ ALGORITHM_DETAILS: dict[str, tuple[AlgorithmDetail, ...]] = {
     ),
     "floorplan": (
         (
+            "pre_post_floorplan_split",
+            ("floorplan simple and full phases", "prefloorplan postfloorplan runner split"),
+            "**Execution split:** The floorplan phase is two ECC runner steps around the macro-placement step. `run_pre_floorplan` reads the Floorplan configuration, writes a `<stem>_simple` copy with `macro_placer.mode` forced to `auto` and an empty `file_path`, and executes `init_fp -> run_simple_fp -> destroy_fp`. `run_post_floorplan` rewrites the original configuration to `macro_placer.mode` `file` with the workspace macro-location path and executes `init_fp -> run_fp -> destroy_fp`.\n\n**Native order:** `runSimpleFP()` runs `DieBuilder -> IOPlacer.placeAuto()` and writes the floorplan and IO-pin-list outputs that feed macro placement. `runFP()` runs the full order `DieBuilder -> IOPlacer -> MacroPlacer -> PDNGenerator -> PhyPlacer`.\n\n**Boundary:** Both steps persist with `feature_step=False` and require the geometry snapshot manifest; only `postFloorplan` runs metrics, plot, and checklist analysis. The subflow entries (`init floorplan`, `create tracks`, `place io pins`, `tap cell`, `PDN`, `set clock net`, `save data`) are recorded without inspecting native return values. After each save, the derived die/core size, area, bounding box, and aspect ratio are written back into the workspace parameters.",
+            ("ecc.runner", "ifp.binding", "ecc.module"),
+        ),
+        (
             "database_wrapping",
             ("floorplan database wrapping", "ifp config database"),
-            "**Input and state:** `FPInterface::initFP()` parses the Floorplan JSON and wraps the live iDB design/layout into iFP `Config` and `Database` objects containing site, masters, routing layers, instances, nets, and IO pins.\n\n**Algorithm:** The wrapper performs deterministic container conversion before any geometry is generated, so later iFP modules operate on an internal physical model rather than raw JSON.\n\n**Boundary:** The conversion ends after the finite iDB collections have been scanned; it does not synthesize a new logical netlist.",
+            "**Input and state:** `FPInterface::initFP()` parses the Floorplan JSON and wraps the live iDB design/layout into iFP `Config` and `Database` objects containing site, masters, routing layers, instances, nets, and IO pins.\n\n**Algorithm:** The wrapper performs deterministic container conversion before any geometry is generated, so later iFP modules operate on an internal physical model rather than raw JSON. While wrapping the instance list, `inputMacroPlacement()` applies the configured macro-location file when `macro_placer.mode` is `file`, fixing those macros before net and IO-pin wrapping.\n\n**Boundary:** The conversion ends after the finite iDB collections have been scanned; it does not synthesize a new logical netlist.",
             ("ifp.interface",),
         ),
         (
             "die_core_rows_tracks",
             ("floorplan die core rows tracks", "die builder utilization"),
-            "**Input and state:** `DieBuilder` receives die mode, cell area, aspect ratio/utilization or explicit size, margins, site, and routing-layer pitch/offset.\n\n**Algorithm:** In utilization mode it derives die area and dimensions; otherwise it uses the configured size. It aligns the core to the placement site, enumerates rows at row height, and emits X/Y track grids for routing layers.\n\n**Constraint and stop:** Site alignment and positive track pitch constrain construction. The finite row/layer loops finish with Die, Core, Row, and Track objects stored in the iFP database.",
+            "**Input and state:** `DieBuilder` receives die mode, cell area, aspect ratio/utilization or explicit size, margins, site, and routing-layer pitch/offset.\n\n**Algorithm:** In utilization mode it derives die area and dimensions; in explicit-size mode it first validates finite positive die size and non-negative margins, die size exceeding the margins, site existence with positive dimensions, DBU representability, and at least one site remaining after alignment. It aligns the core to the placement site, enumerates rows at row height, and emits X/Y track grids for routing layers.\n\n**Constraint and stop:** Site alignment, positive track pitch, and the explicit-size validation checks constrain construction; violations are logged as native errors and stop die construction. The finite row/layer loops finish with Die, Core, Row, and Track objects stored in the iFP database.",
             ("ifp.die_builder",),
         ),
         (
             "io_pin_placement",
             ("floorplan io pin placement", "io placer edge distribution"),
-            "**Input and state:** `IOPlacer` consumes the configured layer-name list, each layer's preferred direction, minimum width, preferred track offset/pitch, die/core bounds, and the IO-pin list.\n\n**Algorithm:** It chooses the first valid horizontal and vertical layers, derives pin depths as four times the perpendicular track pitch, and enumerates track-aligned legal slots on all four die edges. Slots are first sampled at two-pitch spacing; if that cannot fit all pins, it retries at one-pitch spacing. It ranks slots by distance from the die center plus a perpendicular-span tie-breaker, keeps the best slots, then restores edge/coordinate order while assigning them to the original IO-pin order.\n\n**Constraint and stop:** Missing usable layers, non-positive width/pitch, an empty pin list, or insufficient minimum-pitch capacity returns without placement; capacity exhaustion emits a native error. Valid assignments create die-edge port rectangles and synchronize IO pin and net-pin coordinates.",
+            "**Input and state:** `IOPlacer` consumes the configured layer-name list, each layer's preferred direction, minimum width, preferred track offset/pitch, die/core bounds, and the IO-pin list. `placeAuto()` (used by `runSimpleFP`) always runs automatic placement on the layer list; `place()` (used by `runFP`) reads `io_placer.file_path` in `file` mode and otherwise falls back to the same automatic path.\n\n**Algorithm:** Automatic placement chooses the first valid horizontal and vertical layers, derives pin depths as four times the perpendicular track pitch, and enumerates track-aligned legal slots on all four die edges. Slots are first sampled at two-pitch spacing; if that cannot fit all pins, it retries at one-pitch spacing. It ranks slots by distance from the die center plus a perpendicular-span tie-breaker, keeps the best slots, then restores edge/coordinate order while assigning them to the original IO-pin order. File mode requires both a usable horizontal and vertical layer before reading locations.\n\n**Constraint and stop:** Missing usable layers, non-positive width/pitch, an empty pin list, or insufficient minimum-pitch capacity returns without placement; capacity exhaustion emits a native error. Valid assignments create die-edge port rectangles and synchronize IO pin and net-pin coordinates.",
             ("ifp.io_placer",),
+        ),
+        (
+            "macro_placement_step",
+            ("dreamplace macro placement step", "macro only placement", "macroPlacement"),
+            "**Input and state:** The `macroPlacement` flow step runs between the two floorplan phases and consumes the pre-floorplan DEF/netlist state.\n\n**Algorithm:** The runner first checks manual `macro.placements` workspace parameters; when present, DreamPlace is skipped entirely and the generated macro-location Tcl is used as-is. Otherwise `DreamplaceModule` forces macro-only parameters (`macro_only=1`, `macro_place_flag=1`, `global_place_flag=1`, `legalize_flag=1`, `two_stage_flag=0`, macro halos of 2000, routability and congestion extras off) and runs the placement engine; on success `tcl_save` writes the hard-macro placement commands to the workspace macro-location Tcl. A run with no unplaced hard macros is treated as a successful skip.\n\n**Boundary:** A failed engine run or a failed Tcl save marks the `macro placement` subflow incomplete and returns false before shared persistence; the step saves with `feature_step=False` and runs no stage analysis.",
+            ("dreamplace.runner", "dreamplace.module", "ecc.macro_location"),
+        ),
+        (
+            "macro_location_boundary",
+            ("floorplan macro location file", "macro location tcl handoff", "macro placement file boundary"),
+            "**Flow handoff:** The workspace `macro_location` Tcl (default `macro_location.tcl`, seeded from a template and refreshed from manual placements when `macro.placements` is set) is the fixed handoff from the macro-placement step into post-floorplan. The macro-placement step writes it from DreamPlace results via `tcl_save`; manual placements render into it directly and leave DreamPlace's own content untouched on refresh.\n\n**Consumption:** `postFloorplan` forces `macro_placer.mode` to `file` with this path, and `FPInterface::inputMacroPlacement()` parses `placeInstance`-style lines during database wrapping, validating micron DBU, file readability, line syntax, known block-macro names, finite coordinates, and `placed` status ordering before fixing each macro's location. Auto mode with an empty path skips loading silently; file mode with an empty path is a native error.\n\n**Boundary:** Unknown or non-block instance names, malformed lines, or failed placements are logged as native errors; an unreadable file leaves macros unplaced, which the later MacroPlacer containment and halo checks then surface.",
+            ("ifp.interface", "ecc.workspace", "ecc.macro_location"),
         ),
         (
             "macro_halo_row_cutting",
             ("floorplan macro halo row cutting", "macro placement blockage rows"),
-            "**Input and state:** Existing placed macro instances, core bounds, placement/routing halo values, rows, and site dimensions form the macro-placement state.\n\n**Algorithm:** Before cutting rows, `MacroPlacer` checks every macro for placement and core containment, expands placement and routing halos around placed macros, and gathers each row's site-aligned halo intersections. Sorted blockage intervals are subtracted from each row and the remaining legal segments replace the original row list.\n\n**Constraint and stop:** iFP does not move or optimize macro locations. Unplaced or out-of-core macros are reported at native error severity, while the GUI checklist may expose the aggregate check as a warning; only placed macros contribute halo blockages.",
+            "**Input and state:** Existing placed macro instances, core bounds, placement/routing halo values, rows, and site dimensions form the macro-placement state. In the split flow, macros are already fixed by the macro-location file applied during database wrapping.\n\n**Algorithm:** Before cutting rows, `MacroPlacer` checks every macro for placement and core containment, expands placement and routing halos around placed macros, and gathers each row's site-aligned halo intersections. Sorted blockage intervals are subtracted from each row and the remaining legal segments replace the original row list.\n\n**Constraint and stop:** iFP does not move or optimize macro locations. Unplaced or out-of-core macros are reported at native error severity, while the GUI checklist may expose the aggregate check as a warning; only placed macros contribute halo blockages.",
             ("ifp.macro_placer",),
-        ),
-        (
-            "macro_location_boundary",
-            ("floorplan macro location path", "debug input macro", "macro placement file boundary"),
-            "**Flow boundary:** The `macro_location_path` key remains in the default workspace JSON for compatibility, but `FPInterface::wrapConfig()` reads only macro halos and `runFP()` never calls `debugInputMacro()`. The workspace helper normalizes the path and creates an empty file when needed; it is not a main floorplan input.\n\n**Debug-only path:** The separate `debug_input_macro` Tcl command passes `-path` to `debugInputMacro()`, which reads `instance x y orient` lines, places fixed block macros, and logs malformed, unknown, non-block, or failed placements as warnings.\n\n**Boundary:** Debug-file placement must complete before the normal iFP macro checks; an empty or unused compatibility file does not place macros.",
-            ("ifp.interface", "ecc.workspace"),
         ),
         (
             "pdn_and_physical_cells",

@@ -10,11 +10,17 @@ from ecos_agent.workspace.knob_registry import authorized_knobs as _registry_aut
 # The Electron rerun execution gate (workspaceRerun.ts AUTHORIZED_KNOBS)
 # authorizes place/CTS/legalization/route knobs only. Offering floorplan
 # geometry here would produce contracts the GUI always rejects, so the GUI
-# rerun surface excludes the Floorplan step entirely; geometry changes belong
+# rerun surface excludes the floorplan steps entirely; geometry changes belong
 # to the workspace spec (creation wizard) or controlled optimization. The
 # underlying KNOB_SPECS entries stay: optimization parameter cards use them
 # (product decision 2026-09-13, ecos/agent/docs/diff.md #8).
-_GUI_RERUN_EXCLUDED_STEPS = frozenset({ECCStepName.FLOORPLAN})
+_GUI_RERUN_EXCLUDED_STEPS = frozenset(
+    {
+        ECCStepName.PRE_FLOORPLAN,
+        ECCStepName.MACRO_PLACEMENT,
+        ECCStepName.POST_FLOORPLAN,
+    }
+)
 
 _AUTHORIZED_KNOBS = {
     step: knobs

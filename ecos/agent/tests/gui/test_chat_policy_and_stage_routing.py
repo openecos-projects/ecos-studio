@@ -605,7 +605,6 @@ def test_deterministic_stage_match_skips_the_routing_turn(monkeypatch) -> None:
         "reason": "deterministic_stage_scope",
     }
     assert fusion["deterministic_stage_scope"]["candidate_stages"] == [
-        "cts",
         "legalization",
         "place",
     ]

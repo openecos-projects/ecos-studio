@@ -406,6 +406,11 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   synth: 'Synth',
   floorplan: 'Floor',
   floor: 'Floor',
+  // The floorplan phase runs as three ECC sub-steps sharing the Floorplan
+  // configuration; report them under the coarse Floor step.
+  prefloorplan: 'Floor',
+  macroplacement: 'Floor',
+  postfloorplan: 'Floor',
   place: 'Place',
   placement: 'Place',
   cts: 'CTS',

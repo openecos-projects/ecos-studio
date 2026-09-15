@@ -1,7 +1,7 @@
 <a id="algorithm.drc.execution"></a>
 ## algorithm.drc.execution
 
-**Execution path:** The ECC runner loads the design, initializes the DRC engine in the step data directory, invokes `run_drc` with the configured report path, saves the design, persists DRC feature data, and then runs analysis and checklist generation. The wrapper does not branch on native DRC initialization or run results, so report and feature artifacts are the observable completion evidence.
+**Execution path:** The ECC runner loads the design, runs the native iDRC lifecycle `init_drc -> run_drc -> destroy_drc` in the step data directory, saves the design, translates the native `violation_map.json` into the DRC feature record, and then runs analysis and checklist generation. The wrapper does not branch on the native DRC lifecycle results, so the feature and report artifacts are the observable completion evidence.
 
 **Source evidence:** **ecc.runner**, **ecc.module**
 
