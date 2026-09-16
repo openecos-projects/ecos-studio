@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Callable, Mapping
@@ -29,6 +30,9 @@ from ecos_agent.optimization.rules import (
     IncumbentDecision,
     classify_terminal_candidate,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class OptimizationEpisodeRunnerError(ValueError):
@@ -363,6 +367,9 @@ class OptimizationEpisodeRunner:
         if not pending_ids:
             return None
         if self._terminal_waiter is None and self._terminal_waiter_any is None:
+            logger.warning(
+                "indeterminate absorb: no terminal waiter is configured"
+            )
             return self._indeterminate_absorb(observation, None, None)
         try:
             receipt = (
@@ -371,12 +378,34 @@ class OptimizationEpisodeRunner:
                 else self._terminal_waiter(pending_ids[0])
             )
         except Exception:
+            logger.exception(
+                "indeterminate absorb: terminal waiter raised for %s",
+                pending_ids,
+            )
             return self._indeterminate_absorb(observation, None, None)
         if not isinstance(receipt, CandidateExecutionReceipt):
+            logger.warning(
+                "indeterminate absorb: waiter returned %r for %s",
+                receipt,
+                pending_ids,
+            )
             return self._indeterminate_absorb(observation, None, None)
         if receipt.execution_id not in pending_ids:
+            logger.warning(
+                "indeterminate absorb: waiter returned unknown execution %s "
+                "for pending %s",
+                receipt.execution_id,
+                pending_ids,
+            )
             return self._indeterminate_absorb(observation, None, None)
         if not receipt.started or receipt.outcome is None:
+            logger.warning(
+                "indeterminate absorb: no terminal for %s within the wait "
+                "budget (started=%s, outcome=%s)",
+                receipt.execution_id,
+                receipt.started,
+                receipt.outcome,
+            )
             return self._indeterminate_absorb(observation, None, None)
         record = self._controller.pending_execution(receipt.execution_id)
         try:

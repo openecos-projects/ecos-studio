@@ -222,6 +222,18 @@ def validate_parameter_cards(
     load_parameter_cards(root, tool_revisions=tool_revisions)
 
 
+def _receipt_stage_matches(receipt_stage: object, card_stage: str) -> bool:
+    """Stage names compare equal modulo the split-floorplan topology.
+
+    The RPC candidate target for the floorplan knobs is "Floorplan", while
+    the flow (and the reviewed cards) name the step that actually runs the
+    floorplan phase "postFloorplan"; the receipt records the RPC-level name.
+    """
+    if receipt_stage == card_stage:
+        return True
+    return {receipt_stage, card_stage} == {"Floorplan", "postFloorplan"}
+
+
 def validate_application_receipt(
     receipt: ParameterApplicationReceipt,
     cards: dict[OptimizationKnob, ParameterSemanticsCard],
@@ -241,7 +253,7 @@ def validate_application_receipt(
         )
     if receipt.requested.get("unit") != card.surface.unit:
         raise ParameterSemanticsError("application receipt unit does not match card")
-    if receipt.context.get("stage") != card.stage:
+    if not _receipt_stage_matches(receipt.context.get("stage"), card.stage):
         raise ParameterSemanticsError("application receipt stage does not match card")
     if receipt.context.get("lattice_version") != LATTICE_VERSION:
         raise ParameterSemanticsError(

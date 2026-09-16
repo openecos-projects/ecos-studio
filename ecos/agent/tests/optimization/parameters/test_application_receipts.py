@@ -272,3 +272,31 @@ def test_fixed_size_floorplan_without_geometry_cannot_confirm_run_completion(sta
         "run_fp_call_count": 1, "geometry_constructed": False,
     }, status=status)
     validate_application_receipt(receipt, load_parameter_cards())
+
+
+def test_floorplan_receipt_accepts_rpc_stage_alias() -> None:
+    """The RPC candidate target "Floorplan" and the card stage "postFloorplan"
+    name the same floorplan phase; the receipt's stage must compare equal
+    modulo that alias, and unrelated stages must still be rejected."""
+    knob = OptimizationKnob.FLOORPLAN_CORE_UTIL
+    observation = {
+        "mode": "die_util",
+        "configured_value": 0.25,
+        "geometry_constructed": True,
+        "init_fp_call_count": 1,
+        "run_fp_call_count": 1,
+    }
+    receipt = _receipt(knob, requested=0.25, actual=0.25, observation=observation)
+    validate_application_receipt(receipt, load_parameter_cards())
+
+    payload = receipt.model_dump(mode="json")
+    aliased = _rehash(
+        {**payload, "context": {**payload["context"], "stage": "Floorplan"}}
+    )
+    validate_application_receipt(aliased, load_parameter_cards())
+
+    wrong = _rehash(
+        {**payload, "context": {**payload["context"], "stage": "preFloorplan"}}
+    )
+    with pytest.raises(ParameterSemanticsError, match="stage"):
+        validate_application_receipt(wrong, load_parameter_cards())
