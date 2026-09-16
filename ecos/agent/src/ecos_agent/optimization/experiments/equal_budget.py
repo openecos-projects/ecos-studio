@@ -17,6 +17,7 @@ from ecos_agent.optimization.contracts import (
     objective_metric_utility,
 )
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
+from ecos_agent.optimization.execution import candidate_observation_stage
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
@@ -413,6 +414,10 @@ def _candidate_resources(
         raise ValueError("candidate resource evidence is unavailable") from exc
     if not isinstance(steps, list) or any(not isinstance(item, dict) for item in steps):
         raise ValueError("candidate resource evidence is invalid")
+    # Floorplan candidates target the RPC-level "Floorplan" name, which never
+    # appears in the flow ledger; their resource evidence lives on the
+    # postFloorplan sub-step (see candidate_observation_stage).
+    target_step = candidate_observation_stage(target_step)
     start = next(
         (index for index, item in enumerate(steps) if item.get("name") == target_step),
         None,
