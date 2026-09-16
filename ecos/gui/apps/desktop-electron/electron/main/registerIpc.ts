@@ -585,6 +585,17 @@ function serializeError(error: unknown): {
 }
 
 function shouldSilenceIpcError(channel: string, error: unknown): boolean {
+  // Force quit deliberately rejects in-flight sidecar operations.
+  if (isNodeErrorWithCode(error, 'ECC_SIDECAR_FORCE_QUIT')) return true
+  // Window teardown can clear the project root while the renderer still has a
+  // refresh in flight.
+  if (
+    (channel === desktopApiIpcChannels.backendWorkspaceGetOverview ||
+      channel === desktopApiIpcChannels.backendWorkspaceRefreshOverview) &&
+    isNodeErrorWithCode(error, 'PROJECT_ROOT_NOT_REGISTERED')
+  ) {
+    return true
+  }
   if (
     channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile &&
     isNodeErrorWithCode(error, 'ENOENT')
@@ -1198,7 +1209,12 @@ export function registerIpc(
     }
 
     const onDestroyed = (): void => {
-      void detachTrackedWorkspaceHandle(workspaceHandle)
+      void detachTrackedWorkspaceHandle(workspaceHandle).catch((error: unknown) => {
+        electronLogger.warn(
+          `[ipc] Failed to release workspace handle during window teardown: ${workspaceHandle}`,
+          error,
+        )
+      })
     }
     const directories = previous?.directories ?? new Set<string>()
     directories.add(normalizedDirectory)
@@ -1629,8 +1645,21 @@ export function registerIpc(
       if (typeof directory !== 'string') {
         throw new Error('Project management directory must be a string.')
       }
-      const authorizedDirectory =
-        await services.workspaceService.requestProjectPathAccess(directory)
+      let authorizedDirectory: string
+      try {
+        authorizedDirectory =
+          await services.workspaceService.requestProjectPathAccess(directory)
+      } catch (error) {
+        // Discovery is a probe: a path outside the granted scope (or one probed
+        // before any project root is registered) simply has no visible project.
+        if (
+          isNodeErrorWithCode(error, 'PROJECT_PATH_ACCESS_DENIED') ||
+          isNodeErrorWithCode(error, 'PROJECT_ROOT_NOT_REGISTERED')
+        ) {
+          return null
+        }
+        throw error
+      }
       return await services.projectManagementReadService.discoverProject(
         authorizedDirectory,
       )

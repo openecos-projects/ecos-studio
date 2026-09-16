@@ -86,6 +86,10 @@ import {
   resetFlowExecutionState,
   useFlowRunner,
 } from './useFlowRunner'
+import {
+  setBackendFlowProjectionReady,
+  setBackendFlowProjectionUnknown,
+} from './flowExecutionState'
 
 describe('useFlowRunner desktop and design-tool routing', () => {
   beforeEach(() => {
@@ -283,5 +287,33 @@ describe('useFlowRunner desktop and design-tool routing', () => {
     expect(flowExecutionActive.value).toBe(true)
     clearFlowExecutionActiveForWorkspace('/work/a')
     expect(flowExecutionActive.value).toBe(false)
+  })
+
+  it('keeps the backend run control non-startable while its projection is unknown', () => {
+    currentProject.value = { designTool: 'backend', path: '/work/demo' }
+    const runner = useFlowRunner()
+    expect(runner.isRunning.value).toBe(false)
+
+    // A pending or failed recovery marks only the recovering Workspace unknown.
+    setBackendFlowProjectionUnknown(['/work/demo'])
+    expect(runner.isRunning.value).toBe(true)
+
+    setBackendFlowProjectionUnknown(['/work/other'])
+    expect(runner.isRunning.value).toBe(false)
+
+    // A failed projection request must not silently fall back to idle.
+    setBackendFlowProjectionUnknown([])
+    setBackendFlowProjectionReady(false)
+    expect(runner.isRunning.value).toBe(true)
+  })
+
+  it('keeps the frontend run control independent of backend projection state', () => {
+    currentProject.value = { designTool: 'frontend', path: '/work/demo' }
+    const runner = useFlowRunner()
+
+    setBackendFlowProjectionUnknown(['/work/demo'])
+    setBackendFlowProjectionReady(false)
+
+    expect(runner.isRunning.value).toBe(false)
   })
 })

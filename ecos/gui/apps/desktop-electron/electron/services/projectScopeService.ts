@@ -25,6 +25,21 @@ interface ProjectReadScope {
   workspaceRoots: string[]
 }
 
+function codedError(message: string, code: string): Error {
+  return Object.assign(new Error(message), { code })
+}
+
+function projectRootNotRegisteredError(): Error {
+  return codedError('Project root is not registered', 'PROJECT_ROOT_NOT_REGISTERED')
+}
+
+function projectPathAccessDeniedError(candidatePath: string, scope: string): Error {
+  return codedError(
+    `Refusing to grant access outside current project ${scope}: ${candidatePath}`,
+    'PROJECT_PATH_ACCESS_DENIED',
+  )
+}
+
 export interface ProjectReadGrantProvider {
   get(projectRoot: string): Promise<string[]>
   set(projectRoot: string, roots: string[]): Promise<void>
@@ -81,9 +96,7 @@ async function canonicalizePotentialPathWithinRoot(
   const candidatePath = resolve(path)
 
   if (!isPathWithinRoot(candidatePath, rootPath)) {
-    throw new Error(
-      `Refusing to grant access outside current project root: ${candidatePath}`,
-    )
+    throw projectPathAccessDeniedError(candidatePath, 'root')
   }
 
   const relativePath = relative(rootPath, candidatePath)
@@ -266,7 +279,7 @@ export class ProjectScopeService {
   async getProjectRoot(): Promise<string> {
     const root = this.rootsByWindowId.get(requireWindowScopeId())
     if (!root) {
-      throw new Error('Project root is not registered')
+      throw projectRootNotRegisteredError()
     }
 
     return root
@@ -308,7 +321,7 @@ export class ProjectScopeService {
     const windowId = requireWindowScopeId()
     const projectRoot = this.rootsByWindowId.get(windowId)
     if (!projectRoot) {
-      throw new Error('Project root is not registered')
+      throw projectRootNotRegisteredError()
     }
     if (!pathsEqual(projectRoot, expectedProjectRoot)) {
       throw new Error('External read approval no longer matches the active project')
@@ -344,7 +357,7 @@ export class ProjectScopeService {
     const windowId = requireWindowScopeId()
     const activeProjectRoot = this.rootsByWindowId.get(windowId)
     if (!activeProjectRoot) {
-      throw new Error('Project root is not registered')
+      throw projectRootNotRegisteredError()
     }
 
     const canonicalPath = await this.resolveProjectRoot(path)
@@ -404,7 +417,7 @@ export class ProjectScopeService {
     const windowId = requireWindowScopeId()
     const activeProjectRoot = this.rootsByWindowId.get(windowId)
     if (!activeProjectRoot) {
-      throw new Error('Project root is not registered')
+      throw projectRootNotRegisteredError()
     }
 
     const candidatePath = resolve(path)
@@ -428,14 +441,10 @@ export class ProjectScopeService {
     }
 
     if (matchedLexicalRoot || extraRoots.length > 0) {
-      throw new Error(
-        `Refusing to grant access outside current project scope: ${candidatePath}`,
-      )
+      throw projectPathAccessDeniedError(candidatePath, 'scope')
     }
 
-    throw new Error(
-      `Refusing to grant access outside current project root: ${candidatePath}`,
-    )
+    throw projectPathAccessDeniedError(candidatePath, 'root')
   }
 
   /**
@@ -446,9 +455,7 @@ export class ProjectScopeService {
     const activeProjectRoot = await this.getProjectRoot()
     const candidatePath = resolve(path)
     if (!isPathWithinRoot(candidatePath, activeProjectRoot)) {
-      throw new Error(
-        `Refusing to grant access outside current project root: ${candidatePath}`,
-      )
+      throw projectPathAccessDeniedError(candidatePath, 'root')
     }
 
     const canonicalPath = await canonicalizePotentialPathWithinRoot(
@@ -456,9 +463,7 @@ export class ProjectScopeService {
       activeProjectRoot,
     )
     if (!isPathWithinRoot(canonicalPath, activeProjectRoot)) {
-      throw new Error(
-        `Refusing to grant access outside current project root: ${candidatePath}`,
-      )
+      throw projectPathAccessDeniedError(candidatePath, 'root')
     }
     return canonicalPath
   }

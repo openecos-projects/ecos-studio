@@ -2529,6 +2529,7 @@ describe('registerIpc', () => {
       generation: 4,
       operations: [{ operationId: 'operation-a', workspaceHandle: 'workspace-handle-a' }],
       outcomes: [],
+      recoveries: [],
     })
     await handlers.get(desktopApiIpcChannels.eccRuntimeOperationProjection)?.({
       sender: otherSender,
@@ -3701,6 +3702,95 @@ describe('registerIpc', () => {
       error: {
         code: 'ENOENT',
         message: `ENOENT: no such file or directory, open '${path}'`,
+        name: 'Error',
+      },
+      ok: false,
+    })
+
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('resolves project discovery outside the granted scope as null without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.workspaceService.requestProjectPathAccess.mockRejectedValue(
+      Object.assign(
+        new Error('Refusing to grant access outside current project root: /tmp/other'),
+        { code: 'PROJECT_PATH_ACCESS_DENIED' },
+      ),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementDiscoverProject)?.(
+        event,
+        '/tmp/other/ws_0001',
+      ),
+    ).resolves.toBeNull()
+
+    expect(services.projectManagementReadService.discoverProject).not.toHaveBeenCalled()
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('resolves project discovery without a registered root as null without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.workspaceService.requestProjectPathAccess.mockRejectedValue(
+      Object.assign(new Error('Project root is not registered'), {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+      }),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementDiscoverProject)?.(
+        event,
+        '/tmp/other/ws_0001',
+      ),
+    ).resolves.toBeNull()
+
+    expect(services.projectManagementReadService.discoverProject).not.toHaveBeenCalled()
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('returns an overview refresh racing root teardown as an IPC error without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.backendWorkspaceService.refreshOverview.mockRejectedValue(
+      Object.assign(new Error('Project root is not registered'), {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+      }),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceRefreshOverview)?.(event),
+    ).resolves.toEqual({
+      error: {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+        message: 'Project root is not registered',
+        name: 'Error',
+      },
+      ok: false,
+    })
+
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('returns a Force quit operation rejection as an IPC error without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.eccRuntimeService.waitForOperation.mockRejectedValue(
+      Object.assign(new Error('ECC sidecar was terminated during Force quit.'), {
+        code: 'ECC_SIDECAR_FORCE_QUIT',
+      }),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeWaitForOperation)?.(event, {
+        operationId: 'operation-1',
+      }),
+    ).resolves.toEqual({
+      error: {
+        code: 'ECC_SIDECAR_FORCE_QUIT',
+        message: 'ECC sidecar was terminated during Force quit.',
         name: 'Error',
       },
       ok: false,

@@ -116,6 +116,7 @@ export class EccWorkspaceRuntime {
   private readonly operationTracker = new RuntimeOperationTracker()
   private readonly crashRecoveryAttempts = new Set<string>()
   private readonly failedCrashRecoveries = new Map<string, CrashRecoveryRequest>()
+  private readonly pendingCrashRecoveries = new Map<string, Promise<void>>()
   private readonly pendingRecoveryEvents: EccRuntimeEvent[] = []
   private readonly sidecarLifecycle: RuntimeSidecarLifecycle
   private cachedSnapshot: Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'> | null =
@@ -201,6 +202,24 @@ export class EccWorkspaceRuntime {
 
   recentOperationOutcomes(): EccRuntimeOperation[] {
     return this.operationTracker.recentOutcomes()
+  }
+
+  recoveryStates(): Array<{
+    operationId?: string
+    state: 'pending' | 'failed'
+    workspaceHandle: string
+  }> {
+    return [
+      ...[...this.pendingCrashRecoveries.keys()].map((workspaceHandle) => ({
+        state: 'pending' as const,
+        workspaceHandle,
+      })),
+      ...[...this.failedCrashRecoveries.values()].map((request) => ({
+        ...(request.operationId ? { operationId: request.operationId } : {}),
+        state: 'failed' as const,
+        workspaceHandle: request.workspaceHandle,
+      })),
+    ]
   }
 
   trackOperationSnapshot(operation: EccRuntimeOperation): void {
@@ -521,6 +540,7 @@ export class EccWorkspaceRuntime {
   async startFlowOperation(
     request: EccRuntimeStartFlowRequest,
   ): Promise<EccRuntimeOperation> {
+    await this.settleCrashRecoveryBeforeStart(request.workspaceHandle)
     this.clearCrashRecoverySuppression(request.workspaceHandle)
     const client = await this.ensureStarted()
     if (request.rerun) {
@@ -539,6 +559,7 @@ export class EccWorkspaceRuntime {
   async startStepOperation(
     request: EccRuntimeStartStepRequest,
   ): Promise<EccRuntimeOperation> {
+    await this.settleCrashRecoveryBeforeStart(request.workspaceHandle)
     this.clearCrashRecoverySuppression(request.workspaceHandle)
     const client = await this.ensureStarted()
     if (request.rerun) {
@@ -590,8 +611,7 @@ export class EccWorkspaceRuntime {
   async workspaceSnapshot(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRuntimeSnapshot> {
-    const retry = this.retryFailedCrashRecovery(request.workspaceHandle)
-    if (retry) await retry
+    await this.settleCrashRecovery(request.workspaceHandle)
     // A route can mount after ECC publishes its terminal event but before the
     // final snapshot has been captured. Do not expose the preceding Ongoing
     // cache entry to that new renderer surface.
@@ -657,17 +677,29 @@ export class EccWorkspaceRuntime {
   async recoverInterrupted(
     workspaceHandle: string,
     operationId = '',
-  ): Promise<RecoveredOperation[]> {
+  ): Promise<{ recovered: RecoveredOperation[]; workspaceRevision?: number }> {
     const client = await this.ensureStarted()
     const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
-    const result = await client.call<{ recovered: RecoveredOperation[] }>(
-      'workspace.recover_interrupted',
-      {
-        workspaceId,
-        ...(operationId ? { operationId } : {}),
-      },
-    )
+    const result = await client.call<{
+      recovered: RecoveredOperation[]
+      workspaceRevision?: number
+    }>('workspace.recover_interrupted', {
+      workspaceId,
+      ...(operationId ? { operationId } : {}),
+    })
     if (result.recovered.length > 0) this.cachedSnapshot = null
+    if (typeof result.workspaceRevision === 'number') {
+      this.sessions.updateRevision(workspaceHandle, result.workspaceRevision)
+      this.stepConfigurationCache.clear()
+      this.emit({
+        data: { workspaceRevision: result.workspaceRevision },
+        method: 'workspace.recover_interrupted',
+        phase: 'recovered',
+        type: 'operation.progress',
+        workspaceDirectory: this.runtimeDirectoryForHandle(workspaceHandle) ?? undefined,
+        workspaceHandle,
+      })
+    }
     for (const recovered of result.recovered) {
       const step = recovered.step || 'Flow step'
       const event: EccRuntimeEvent = {
@@ -691,7 +723,7 @@ export class EccWorkspaceRuntime {
       if (operationId) this.emit(event)
       else this.pendingRecoveryEvents.push(event)
     }
-    return result.recovered
+    return result
   }
 
   async shutdown(): Promise<RuntimeShutdownResult> {
@@ -731,7 +763,9 @@ export class EccWorkspaceRuntime {
     this.sessions.clearEccWorkspaceIds()
     this.stepConfigurationCache.clear()
     this.operationTracker.rejectAll(
-      new Error('ECC sidecar was terminated during Force quit.'),
+      Object.assign(new Error('ECC sidecar was terminated during Force quit.'), {
+        code: 'ECC_SIDECAR_FORCE_QUIT',
+      }),
     )
   }
 
@@ -757,7 +791,9 @@ export class EccWorkspaceRuntime {
       this.ready = false
       this.sessions.clearEccWorkspaceIds()
       this.stepConfigurationCache.clear()
-      this.operationTracker.reset(new Error('ECC sidecar client was replaced.'))
+      this.operationTracker.resetForClientReplacement(
+        new Error('ECC sidecar client was replaced.'),
+      )
     }
     if (this.ready) return client
 
@@ -909,14 +945,16 @@ export class EccWorkspaceRuntime {
       return
     }
     if (event.type === 'runtime.exited') {
-      const interruptedOperationId = this.operationTracker.firstActiveOperationId()
       const inFlight = this.inFlightOperation
       const workspaceHandle =
         inFlight?.workspaceHandle ?? this.sessions.active?.workspaceHandle
+      const interrupted = this.operationTracker.interruptActiveOperations()
+      const interruptedOperationId = interrupted[0]?.operationId ?? null
       this.client = null
       this.managementHelloResult = null
       this.ready = false
       this.sessions.clearEccWorkspaceIds()
+      this.cachedSnapshot = null
       this.stepConfigurationCache.clear()
       this.operationTracker.rejectAll(
         new Error('ECC sidecar exited before the operation completed.'),
@@ -1057,6 +1095,33 @@ export class EccWorkspaceRuntime {
     return `${workspaceHandle}:${operationId}`
   }
 
+  private async settleCrashRecovery(workspaceHandle: string): Promise<void> {
+    const pending = this.pendingCrashRecoveries.get(workspaceHandle)
+    if (pending) await pending
+    const retry = this.retryFailedCrashRecovery(workspaceHandle)
+    if (retry) await retry
+  }
+
+  private async settleCrashRecoveryBeforeStart(workspaceHandle: string): Promise<void> {
+    await this.settleCrashRecovery(workspaceHandle)
+    const failed = [...this.failedCrashRecoveries.values()].some(
+      (request) => request.workspaceHandle === workspaceHandle,
+    )
+    if (failed) {
+      throw new Error(
+        'ECC Runtime recovery for an interrupted Operation failed; reopen the Workspace to retry before starting a new run.',
+      )
+    }
+  }
+
+  private emitRecoverySettled(workspaceHandle: string): void {
+    const directory = this.runtimeDirectoryForHandle(workspaceHandle)
+    this.emit({
+      type: 'runtime.idle',
+      ...(directory ? { workspaceDirectory: directory } : {}),
+    })
+  }
+
   private startCrashRecovery(
     recoveryKey: string,
     workspaceHandle: string,
@@ -1064,14 +1129,23 @@ export class EccWorkspaceRuntime {
   ): Promise<void> | null {
     if (this.crashRecoveryAttempts.has(recoveryKey)) return null
     this.crashRecoveryAttempts.add(recoveryKey)
-    return this.recoverInterrupted(workspaceHandle, operationId).then(
+    let recovery!: Promise<void>
+    recovery = this.recoverInterrupted(workspaceHandle, operationId).then(
       () => {
         this.failedCrashRecoveries.delete(recoveryKey)
         this.crashRecoveryAttempts.add(this.crashRecoveryKey(workspaceHandle, ''))
+        if (this.pendingCrashRecoveries.get(workspaceHandle) === recovery) {
+          this.pendingCrashRecoveries.delete(workspaceHandle)
+        }
+        this.emitRecoverySettled(workspaceHandle)
       },
       (error: unknown) => {
         this.crashRecoveryAttempts.delete(recoveryKey)
         this.failedCrashRecoveries.set(recoveryKey, { operationId, workspaceHandle })
+        if (this.pendingCrashRecoveries.get(workspaceHandle) === recovery) {
+          this.pendingCrashRecoveries.delete(workspaceHandle)
+        }
+        this.emitRecoverySettled(workspaceHandle)
         electronLogger.error(
           '[runtime] failed to recover interrupted operation %s: %s',
           operationId || workspaceHandle,
@@ -1079,6 +1153,8 @@ export class EccWorkspaceRuntime {
         )
       },
     )
+    this.pendingCrashRecoveries.set(workspaceHandle, recovery)
+    return recovery
   }
 
   private retryFailedCrashRecovery(workspaceHandle: string): Promise<void> | null {

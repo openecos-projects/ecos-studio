@@ -366,6 +366,26 @@ describe('EccRpcRuntimeService pool', () => {
     await expect(flowA).resolves.toEqual({ rerun: false })
   })
 
+  it('returns the post-recovery workspace revision when opening a workspace', async () => {
+    const pool = createPool()
+    const opening = pool.service.openWorkspace({ directory: '/work/demo' })
+    pool.clientFor('/work/demo').responses.push({
+      recovered: [
+        {
+          logFile: '/work/demo/place_dreamplace/log/place.log',
+          operationId: 'operation-previous',
+          step: 'place',
+          tool: 'dreamplace',
+        },
+      ],
+      workspaceRevision: 12,
+    })
+
+    const workspace = await opening
+
+    expect(workspace.workspaceRevision).toBe(12)
+  })
+
   it('checks for an interrupted marker when a workspace opens', async () => {
     const pool = createPool()
     await pool.service.openWorkspace({ directory: '/work/demo' })
@@ -430,6 +450,14 @@ describe('EccRpcRuntimeService pool', () => {
     await expect(
       pool.service.workspaceHome({ workspaceHandle: 'missing-handle' }),
     ).rejects.toThrow(WorkspaceSessionNotFoundError)
+  })
+
+  it('treats releasing an already-gone Workspace Session as a no-op', async () => {
+    const pool = createPool()
+
+    await expect(
+      pool.service.releaseWorkspace({ workspaceHandle: 'missing-handle' }),
+    ).resolves.toEqual({ ok: true })
   })
 
   it('returns an existing Workspace Session without reopening ECC', async () => {
@@ -841,6 +869,7 @@ describe('EccRpcRuntimeService pool', () => {
         }),
       ],
       outcomes: [],
+      recoveries: [],
     })
     const bounded = pool.service.operationProjection().operations[0]!
     expect(bounded.result).toBeNull()
@@ -1065,5 +1094,158 @@ describe('EccRpcRuntimeService pool', () => {
         workspaceHandle: workspaceA.workspaceHandle,
       }),
     ).resolves.toEqual({ rerun: false })
+  })
+
+  it('projects an interrupted outcome and its recovery state without touching a sibling workspace', async () => {
+    const pool = createPool()
+    const workspaceA = await pool.service.openWorkspace({ directory: '/work/a' })
+    await pool.service.openWorkspace({ directory: '/work/b' })
+    for (const directory of ['/work/a', '/work/b']) {
+      pool.sidecarNotification(directory, {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: `run-${directory}`,
+          kind: 'flow',
+          operationId: `operation-${directory === '/work/a' ? 'a' : 'b'}`,
+          origin: 'gui',
+          payload: { state: 'running', step: 'Route', workspaceRevision: 1 },
+          sequence: 1,
+          timestamp: 1,
+          type: 'operation.changed',
+          workspaceId: `id-${directory}`,
+        },
+      })
+    }
+
+    let finishRecovery!: (value: unknown) => void
+    pool.clientFor('/work/a').responses.push(
+      new Promise((resolve) => {
+        finishRecovery = resolve
+      }),
+    )
+    pool.sidecarEvent('/work/a', {
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+
+    // While recovery is in flight the interrupted outcome is already recorded,
+    // the Workspace is recovery-pending, and the sibling stays active.
+    await vi.waitFor(() => {
+      expect(pool.service.operationProjection().recoveries).toEqual([
+        expect.objectContaining({
+          state: 'pending',
+          workspaceDirectory: '/work/a',
+          workspaceHandle: workspaceA.workspaceHandle,
+        }),
+      ])
+    })
+    expect(
+      pool.service.operationProjection().operations.map((op) => op.operationId),
+    ).toEqual(['operation-b'])
+    expect(pool.service.operationProjection().outcomes).toEqual([
+      expect.objectContaining({
+        operationId: 'operation-a',
+        state: 'interrupted',
+        workspaceDirectory: '/work/a',
+        workspaceHandle: workspaceA.workspaceHandle,
+      }),
+    ])
+
+    finishRecovery({
+      recovered: [
+        {
+          logFile: '/work/a/route_openroad/log/route.log',
+          operationId: 'operation-a',
+          step: 'Route',
+          tool: 'openroad',
+        },
+      ],
+    })
+
+    await vi.waitFor(() => {
+      expect(pool.service.operationProjection().recoveries).toEqual([])
+    })
+    expect(pool.events).toContainEqual(
+      expect.objectContaining({ type: 'runtime.idle', workspaceDirectory: '/work/a' }),
+    )
+    expect(pool.events).toContainEqual(
+      expect.objectContaining({
+        code: 'interrupted',
+        operationId: 'operation-a',
+        type: 'operation.failed',
+      }),
+    )
+    expect(
+      pool.service.operationProjection().operations.map((op) => op.operationId),
+    ).toEqual(['operation-b'])
+  })
+
+  it('keeps a failed recovery visible until a later Workspace snapshot retries it', async () => {
+    const pool = createPool()
+    const workspaceA = await pool.service.openWorkspace({ directory: '/work/a' })
+    pool.sidecarNotification('/work/a', {
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'run-a',
+        kind: 'flow',
+        operationId: 'operation-a',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route', workspaceRevision: 1 },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'id-/work/a',
+      },
+    })
+    pool.clientFor('/work/a').responses.push(new Error('temporary recovery failure'))
+    pool.sidecarEvent('/work/a', {
+      code: 1,
+      reason: 'unexpected',
+      signal: null,
+      type: 'runtime.exited',
+    })
+
+    await vi.waitFor(() => {
+      expect(pool.service.operationProjection().recoveries).toEqual([
+        expect.objectContaining({
+          operationId: 'operation-a',
+          state: 'failed',
+          workspaceDirectory: '/work/a',
+          workspaceHandle: workspaceA.workspaceHandle,
+        }),
+      ])
+    })
+
+    pool.clientFor('/work/a').responses.push(
+      {
+        recovered: [
+          {
+            logFile: '/work/a/route_openroad/log/route.log',
+            operationId: 'operation-a',
+            step: 'Route',
+            tool: 'openroad',
+          },
+        ],
+      },
+      {
+        directory: '/work/a',
+        flow: { steps: [] },
+        home: {},
+        lastEventId: 'id-/work/a:2',
+        operations: [],
+        parameters: {},
+      },
+    )
+    await expect(
+      pool.service.workspaceSnapshot({ workspaceHandle: workspaceA.workspaceHandle }),
+    ).resolves.toMatchObject({ operations: [] })
+    expect(pool.service.operationProjection().recoveries).toEqual([])
+    expect(pool.service.operationProjection().outcomes).toEqual([
+      expect.objectContaining({ operationId: 'operation-a', state: 'interrupted' }),
+    ])
   })
 })

@@ -183,6 +183,7 @@ export type {
   EccBackgroundOperationLogResult,
   EccBackgroundOperationOutcome,
   EccBackgroundOperationProjection,
+  EccBackgroundOperationRecovery,
   EccEngineeringAnalysis,
   EccEngineeringAnalysisArtifactRef,
   EccEngineeringAnalysisFile,

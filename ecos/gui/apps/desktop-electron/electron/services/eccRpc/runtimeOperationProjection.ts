@@ -3,6 +3,7 @@ import type {
   EccBackgroundOperation,
   EccBackgroundOperationOutcome,
   EccBackgroundOperationProjection,
+  EccBackgroundOperationRecovery,
 } from '@ecos-studio/shared'
 import type { EccWorkspaceRuntime } from './workspaceRuntime'
 
@@ -16,7 +17,7 @@ export class RuntimeOperationProjection {
   private generation = 0
   private readonly listeners = new Set<(generation: number) => void>()
   private readonly releasedOutcomes: EccBackgroundOperationOutcome[] = []
-  private signature = '{"finalizations":[],"operations":[],"outcomes":[]}'
+  private signature = '{"finalizations":[],"operations":[],"outcomes":[],"recoveries":[]}'
 
   constructor(private readonly options: RuntimeOperationProjectionOptions) {}
 
@@ -27,6 +28,7 @@ export class RuntimeOperationProjection {
       generation: this.generation,
       operations: this.operations(),
       outcomes: this.outcomes(),
+      recoveries: this.recoveries(),
     }
   }
 
@@ -60,6 +62,7 @@ export class RuntimeOperationProjection {
       finalizations: snapshot.finalizations,
       operations: snapshot.operations,
       outcomes: snapshot.outcomes,
+      recoveries: snapshot.recoveries,
     })
     if (signature === this.signature) return
     this.signature = signature
@@ -102,6 +105,15 @@ export class RuntimeOperationProjection {
       }
     }
     return [...outcomes.values()].slice(-64)
+  }
+
+  private recoveries(): EccBackgroundOperationRecovery[] {
+    return this.contexts().flatMap(({ runtime, workspaceDirectory }) =>
+      runtime.recoveryStates().map((recovery) => ({
+        ...recovery,
+        workspaceDirectory,
+      })),
+    )
   }
 
   private contexts(): Array<{

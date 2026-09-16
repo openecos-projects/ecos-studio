@@ -21,6 +21,7 @@ import {
 import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
+  isBackendFlowProjectionUnknown,
   isFlowExecutionActiveForWorkspace,
   markFlowExecutionActiveForWorkspace,
   resetFlowExecutionState,
@@ -83,8 +84,11 @@ export function useFlowRunner() {
   const route = useRoute()
 
   // 状态：当前 workspace 的运行态。flowExecutionActive 仍保留为全局兼容信号。
-  const isRunning = computed(() =>
-    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+  const isRunning = computed(
+    () =>
+      isFlowExecutionActiveForWorkspace(currentProject.value?.path) ||
+      (getCurrentDesignTool() === 'backend' &&
+        isBackendFlowProjectionUnknown(currentProject.value?.path)),
   )
   const state = ref<StateEnum>(StateEnum.Invalid)
   const error = ref<string | null>(null)

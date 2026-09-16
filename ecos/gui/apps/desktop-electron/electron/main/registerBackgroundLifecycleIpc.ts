@@ -88,6 +88,9 @@ export function registerBackgroundLifecycleIpc(options: {
       generation: generation(),
       operations: projection.operations.filter((item) => owns(item.workspaceHandle)),
       outcomes: projection.outcomes.filter((item) => owns(item.workspaceHandle)),
+      recoveries: (projection.recoveries ?? []).filter((item) =>
+        owns(item.workspaceHandle),
+      ),
     }
   })
 
