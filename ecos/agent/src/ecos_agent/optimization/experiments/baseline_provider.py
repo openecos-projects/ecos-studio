@@ -12,6 +12,7 @@ from __future__ import annotations
 from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     OptimizationKnob,
+    ProposalReason,
     RequestedKnobValue,
 )
 from ecos_agent.optimization.experiments.baselines import (
@@ -113,8 +114,13 @@ class BaselineProposalProvider:
             return OptimizationProposalV2(
                 context_ref=context.context_ref,
                 decision="continue",
-                reason_code=f"baseline_{self._method.value}_exhausted",
-                rationale_summary="no legal baseline action remains",
+                # reason_code is a contract enum; the concrete baseline method
+                # stays identifiable in rationale_summary.
+                reason_code=ProposalReason.NO_LEGAL_CANDIDATE.value,
+                rationale_summary=(
+                    f"baseline_{self._method.value}_exhausted: no legal "
+                    f"baseline action remains"
+                ),
                 observation_refs=(context.observation_ref,),
             )
         domain = next(
@@ -126,9 +132,10 @@ class BaselineProposalProvider:
         return OptimizationProposalV2(
             context_ref=context.context_ref,
             decision="propose",
-            reason_code=f"baseline_{method.value}",
+            reason_code=ProposalReason.OBSERVATION.value,
             rationale_summary=(
-                f"{method.value} deterministic selection from the static legal domain"
+                f"baseline_{method.value} deterministic selection from the "
+                f"static legal domain"
             ),
             observation_refs=(context.observation_ref,),
             knowledge_refs=(

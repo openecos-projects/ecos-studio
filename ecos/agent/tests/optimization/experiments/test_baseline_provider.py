@@ -13,6 +13,7 @@ from ecos_agent.optimization.contracts import (
     ObservationReference,
     OptimizationKnob,
     ProposalContextRef,
+    ProposalReason,
     RequestedKnobValue,
     StrategyDirection,
 )
@@ -91,6 +92,9 @@ def test_coordinate_provider_proposes_a_domain_bound_action() -> None:
     proposal = provider.propose_v2(context, (domain,))
     assert isinstance(proposal, OptimizationProposalV2)
     assert proposal.decision == "propose"
+    # The proposal contract only accepts ProposalReason enum values; free-form
+    # baseline codes fail planner validation and escalate real episodes.
+    ProposalReason(proposal.reason_code)
     action = proposal.action
     assert action is not None
     assert (action.knob_id, action.direction) in {
