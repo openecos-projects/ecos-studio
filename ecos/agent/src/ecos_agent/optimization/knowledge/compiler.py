@@ -591,6 +591,7 @@ BindingEvaluation = tuple[
 
 
 from ecos_agent.optimization.knowledge.compiler_runtime import (  # noqa: E402
+    ABSENCE_MARKER_SOURCES,
     _add_delta_features,
     _add_trend_features,
     _append_supported_action,
@@ -602,5 +603,6 @@ from ecos_agent.optimization.knowledge.compiler_runtime import (  # noqa: E402
     _validate_parameter_card_bindings,
     build_state_evidence_request,
     compile_supported_action_view,
+    expected_toolchain_ref,
     knowledge_support_catalog_from_bundles,
 )

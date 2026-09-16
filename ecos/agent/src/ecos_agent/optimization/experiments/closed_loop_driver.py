@@ -31,6 +31,7 @@ from ecos_agent.optimization.experiments.equal_budget import (
     CandidateTrace,
     _evaluation_value,
     export_episode_traces,
+    summarize_candidate_metrics,
 )
 from ecos_agent.optimization.experiments.baseline_provider import (
     BaselineProposalProvider,
@@ -50,6 +51,7 @@ from ecos_agent.optimization.experiments.knowledge_mediation import (
     read_jsonl,
     summarize_episode_mediation,
 )
+from ecos_agent.optimization.experiments.knowledge_metrics import state_match_summary
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
 from ecos_agent.optimization.ledger import (
@@ -273,6 +275,7 @@ def _build_mediation_audit(
         "objective_metric": ObjectiveMetric.ROUTE_WIRELENGTH.value,
         "calls": calls,
         "summary": summarize_episode_mediation(calls),
+        "state_match": state_match_summary(calls),
         "missing_evidence_reason_counts": missing_evidence_reason_counts(calls),
     }
 
@@ -374,6 +377,31 @@ def load_design(designs_root: Path, design_id: str) -> DesignSpec:
         rtl_list=rtl,
         sdc=sdc.resolve(),
     )
+
+
+def write_episode_reports(
+    design_report_root: Path,
+    summary: dict[str, object],
+    mediation: dict[str, object] | None,
+) -> Path:
+    """Persist episode-scoped reports under reports/<design>/<episode-id>/.
+
+    The episode id comes from the summary itself so resume/re-export of one
+    episode can never overwrite a different episode's artifacts.
+    """
+    episode_id = str(summary["episode_id"])
+    episode_output = design_report_root / episode_id
+    episode_output.mkdir(parents=True, exist_ok=True)
+    (episode_output / "episode-summary.v1.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
+    if mediation is not None:
+        (episode_output / "knowledge-mediation-audit.v1.json").write_text(
+            json.dumps(mediation, indent=2, sort_keys=True, default=str) + "\n",
+            encoding="utf-8",
+        )
+    return episode_output
 
 
 def main(provider_factory: Callable[..., Any] | None) -> int:
@@ -505,6 +533,11 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         raise SystemExit(
             f"episode already exists: {episode_id}; pass --episode-id to resume"
         )
+    # Episode-scoped reports live in their own directory so a second episode
+    # of the same design can never overwrite the first one's summary
+    # (glm4→glm8→glm9 overwrote each other three times under the old layout).
+    episode_output = output / episode_id
+    episode_output.mkdir(parents=True, exist_ok=True)
 
     if args.baseline_method:
         provider = BaselineProposalProvider(
@@ -515,7 +548,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             cwd=workspace,
             env=dict(os.environ),
             runtime_workspace_roots=(workspace,),
-            diagnostics_path=output / "codex-diagnostics.jsonl",
+            diagnostics_path=episode_output / "codex-diagnostics.jsonl",
             ephemeral=True,
         )
     else:
@@ -579,6 +612,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         traces,
         noise_epsilon["epsilon"] if noise_epsilon else {},
     )
+    candidate_metrics = summarize_candidate_metrics(traces, mode=observed_mode)
     case_replay = EmpiricalCaseAuditStore(episode_root).verify()
     mediation = _build_mediation_audit(
         episode_root=episode_root,
@@ -608,6 +642,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         "reference_runtime_seconds": reference_runtime,
         "noise_epsilon": noise_epsilon,
         "metric_comparison": metric_comparison,
+        "candidate_metrics": candidate_metrics,
         "planning_calls": planning_calls,
         "started_candidates": started_candidates,
         "terminal_artifacts_complete": started_candidates
@@ -620,15 +655,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             state_files[-1].read_text("utf-8")
         ),
     }
-    (output / "episode-summary.v1.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
-    if mediation is not None:
-        (output / "knowledge-mediation-audit.v1.json").write_text(
-            json.dumps(mediation, indent=2, sort_keys=True, default=str) + "\n",
-            encoding="utf-8",
-        )
+    write_episode_reports(output, summary, mediation)
     print(
         json.dumps(
             {

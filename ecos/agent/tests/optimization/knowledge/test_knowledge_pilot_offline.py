@@ -447,3 +447,32 @@ def test_offline_pilot_trips_breaker_and_keeps_denominator() -> None:
     assert all(row["decision"] == "not_started" for row in rows[3:])
     assert provider.calls == 3
     assert payload["summary"]["rows"] == 9
+
+
+def test_offline_gate_opportunity_floor_is_configurable() -> None:
+    from ecos_agent.optimization.experiments.knowledge_metrics import offline_gate
+
+    dual = "state-conditioned-dual-layer-zero-shot"
+    summary = {
+        "treatments": {
+            dual: {
+                "within_treatment_disagreement": 0,
+                "exact_action_divergence": {"unique_actions": 1},
+                "decision_counts": {},
+            }
+        }
+    }
+    rows = [
+        {
+            "treatment": dual,
+            "expected_behavior": "block_reject",
+            "correct": True,
+        }
+    ]
+    contexts = [{"stratum": "knowledge_opportunity", "design_id": "gcd"}]
+    assert offline_gate(summary, rows, contexts)["offline_gate_pass"] is True
+    raised = offline_gate(summary, rows, contexts, min_opportunity_contexts=2)
+    assert raised["min_opportunity_contexts"] == 2
+    assert raised["offline_gate_pass"] is False
+    with pytest.raises(ValueError, match="positive integer"):
+        offline_gate(summary, rows, contexts, min_opportunity_contexts=0)

@@ -137,7 +137,17 @@ class OptimizationRuntimeContext(BaseModel):
     seed: StrictInt = 0
     max_in_flight_candidates: Literal[1, 2] = 2
     trend_noise_epsilon: dict[str, float] | None = None
+    toolchain_sha256: str | None = None
     planner_reasoning_effort: Literal["low", "medium", "high"] | None = None
+
+    @field_validator("toolchain_sha256")
+    @classmethod
+    def validate_toolchain_sha256(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+            raise ValueError("toolchain hash is invalid")
+        return value
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -208,6 +218,14 @@ def create_optimization_runner(
         # workspace-level default-replay calibration.
         runtime = runtime.model_copy(
             update={"trend_noise_epsilon": _load_trend_noise_epsilon(workspace)}
+        )
+    if runtime.toolchain_sha256 is None:
+        # Record the running ECC toolchain identity in the state evidence so
+        # knowledge claim verification can reach "pass" (same quantity the
+        # noise context freezes as ecc_executable_sha256). The adapter opens
+        # this executable anyway, so resolution cannot fail here on its own.
+        runtime = runtime.model_copy(
+            update={"toolchain_sha256": file_sha256(_ecc_executable())}
         )
     episode_id = runtime.episode_id
     objective = runtime.objective
@@ -423,6 +441,7 @@ def _recover_or_create_controller(
         knowledge_case_pool_root=knowledge_case_pool_root,
         max_in_flight_candidates=runtime.max_in_flight_candidates,
         design_id=design_id, trend_noise_epsilon=runtime.trend_noise_epsilon,
+        toolchain_sha256=runtime.toolchain_sha256,
     )
 
 
@@ -452,6 +471,7 @@ def _recover_controller(
         knowledge_case_pool_root=knowledge_case_pool_root,
         max_in_flight_candidates=runtime.max_in_flight_candidates,
         design_id=design_id, trend_noise_epsilon=runtime.trend_noise_epsilon,
+        toolchain_sha256=runtime.toolchain_sha256,
     )
     if controller.objective != runtime.objective:
         raise OptimizationRuntimeError(

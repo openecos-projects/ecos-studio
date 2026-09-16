@@ -201,3 +201,77 @@ def test_offline_summary_splits_claim_bound_and_unbound() -> None:
     assert treatment["claim_bound_within_treatment_disagreement"] == 1
     assert treatment["unbound_exact_action_divergence"]["unique_actions"] == 1
     assert treatment["unbound_within_treatment_disagreement"] == 0
+
+
+def test_misleading_steps_count_probes_until_next_promotion() -> None:
+    traces = [
+        _trace("c1", promoted=True, status="effective"),
+        # mispromotion #1: two probes run against the wrong incumbent
+        _trace("c2", promoted=True, status="inactive"),
+        _trace("c3"),
+        _trace("c4"),
+        _trace("c5", promoted=True, status="effective"),
+        # mispromotion #2: runs until the episode ends
+        _trace("c6", promoted=True, status="unknown"),
+        _trace("c7"),
+    ]
+    metrics = summarize_candidate_metrics(traces, mode="requested-only")
+    assert metrics["mispromotion_events"] == 2
+    assert metrics["mispromotion_misleading_steps"] == {
+        "events": 2,
+        "steps_by_event": [2, 1],
+        "total_steps": 3,
+    }
+
+
+def test_state_match_summary_aggregates_coverage_and_precision() -> None:
+    from ecos_agent.optimization.experiments.knowledge_metrics import (
+        state_match_summary,
+    )
+
+    rows = [
+        {
+            "matched_claim_ids": ["claim-1"],
+            "claim_bound": True,
+            "support_status": "matched",
+        },
+        {
+            "matched_claim_ids": ["claim-2"],
+            "claim_bound": False,
+            "support_status": "matched",
+        },
+        {
+            "matched_claim_ids": [],
+            "claim_bound": False,
+            "support_status": "unknown",
+        },
+    ]
+    summary = state_match_summary(rows)
+    assert summary["planning_rows"] == 3
+    assert summary["matched_rows"] == 2
+    assert summary["state_match_coverage"] == pytest.approx(2 / 3)
+    assert summary["claim_bound_rows"] == 1
+    assert summary["state_match_precision"] == pytest.approx(0.5)
+    assert summary["unknown_ratio"] == pytest.approx(1 / 3)
+
+    empty = state_match_summary([])
+    assert empty["state_match_coverage"] is None
+    assert empty["state_match_precision"] is None
+
+
+def test_episode_final_states_counts_escalations() -> None:
+    from ecos_agent.optimization.experiments.equal_budget import (
+        summarize_episode_final_states,
+    )
+
+    summary = summarize_episode_final_states(
+        ["stopped", "escalated", "escalated", "quarantined"]
+    )
+    assert summary["episodes"] == 4
+    assert summary["final_state_counts"] == {
+        "escalated": 2,
+        "quarantined": 1,
+        "stopped": 1,
+    }
+    assert summary["escalated_episodes"] == 2
+    assert summary["escalation_rate"] == pytest.approx(0.5)

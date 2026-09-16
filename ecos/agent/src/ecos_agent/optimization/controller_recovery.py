@@ -78,6 +78,7 @@ class ControllerRecoveryMixin:
         max_in_flight_candidates: Literal[1, 2] = 1,
         design_id: str | None = None,
         trend_noise_epsilon: Mapping[str, float] | None = None,
+        toolchain_sha256: str | None = None,
     ) -> "OptimizationEpisodeController":
         path = ledger.root / _STATE_FILE
         if not path.is_file():
@@ -146,6 +147,9 @@ class ControllerRecoveryMixin:
         controller.mode = snapshot.mode
         controller._trend_noise_epsilon = controller._validated_trend_noise_epsilon(
             trend_noise_epsilon
+        )
+        controller._toolchain_sha256 = controller._validated_toolchain_sha256(
+            toolchain_sha256
         )
         controller._episode_design_id = controller._manifest_scope_check(design_id)
         if snapshot.knowledge_case_shots != knowledge_case_shots:

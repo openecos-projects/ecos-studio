@@ -9,6 +9,7 @@ from ecos_agent.optimization.experiments.closed_loop_driver import (
     _DEFAULT_GOAL_TEXT,
     _episode_objective,
     build_metric_comparison,
+    write_episode_reports,
     write_noise_epsilon,
 )
 from ecos_agent.optimization.experiments.equal_budget import CandidateTrace
@@ -176,3 +177,33 @@ def test_metric_comparison_without_started_candidates_keeps_reference() -> None:
         "epsilon": None,
         "beyond_noise": None,
     }
+
+
+def test_episode_reports_are_isolated_per_episode_id(tmp_path: Path) -> None:
+    """同 design 两个 episode 的摘要必须共存，后写者不得覆写先写者（glm4→glm8→glm9 三度覆盖的回归）。"""
+    root = tmp_path / "reports" / "gcd"
+
+    def _summary(episode_id: str) -> dict[str, object]:
+        return {
+            "schema_version": "ecos.overnight_episode_summary.v1",
+            "design_id": "gcd",
+            "episode_id": episode_id,
+        }
+
+    first = write_episode_reports(
+        root, _summary("closeloop-20260916T010000-gcd"), None
+    )
+    second = write_episode_reports(
+        root, _summary("closeloop-20260916T020000-gcd"), {"calls": []}
+    )
+
+    assert first == root / "closeloop-20260916T010000-gcd"
+    assert second == root / "closeloop-20260916T020000-gcd"
+    assert json.loads(
+        (first / "episode-summary.v1.json").read_text(encoding="utf-8")
+    )["episode_id"] == "closeloop-20260916T010000-gcd"
+    assert json.loads(
+        (second / "episode-summary.v1.json").read_text(encoding="utf-8")
+    )["episode_id"] == "closeloop-20260916T020000-gcd"
+    assert (second / "knowledge-mediation-audit.v1.json").is_file()
+    assert not (first / "knowledge-mediation-audit.v1.json").exists()

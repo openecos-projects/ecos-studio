@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterable, Literal
@@ -634,6 +635,7 @@ def summarize_candidate_metrics(
             "receipt: "
             + ", ".join(item.candidate_id for item in mispromotions)
         )
+    misleading_steps = _misleading_step_counts(started)
     return {
         "schema_version": "ecos.optimization_candidate_metrics.v1",
         "mode": mode,
@@ -655,7 +657,54 @@ def summarize_candidate_metrics(
         ),
         "feasible_candidates": len(feasible_rows),
         "mispromotion_events": len(mispromotions),
+        "mispromotion_misleading_steps": {
+            "events": len(misleading_steps),
+            "steps_by_event": misleading_steps,
+            "total_steps": sum(misleading_steps),
+        },
         "requested_actual_deviation_spectrum": _deviation_spectrum(started),
+    }
+
+
+def _misleading_step_counts(started: list[CandidateTrace]) -> list[int]:
+    """Started probes misled by each mispromotion, until the next promotion.
+
+    A mispromoted candidate poisons the incumbent: every later probe that
+    starts before any next promotion runs against the wrong incumbent.  The
+    next promotion (effective or not) closes the window; episode end closes
+    it too.
+    """
+    counts: list[int] = []
+    window_open = False
+    steps = 0
+    for item in started:
+        if item.promoted:
+            if window_open:
+                counts.append(steps)
+                window_open = False
+            steps = 0
+            window_open = item.parameter_status != "effective"
+        elif window_open:
+            steps += 1
+    if window_open:
+        counts.append(steps)
+    return counts
+
+
+def summarize_episode_final_states(
+    final_states: Iterable[object],
+) -> dict[str, object]:
+    """Run-level escalation accounting over episode terminal states."""
+    states = Counter(str(state) for state in final_states)
+    escalated = sum(
+        count for state, count in states.items() if state.endswith("escalated")
+    )
+    return {
+        "schema_version": "ecos.optimization_episode_final_states.v1",
+        "episodes": sum(states.values()),
+        "final_state_counts": dict(sorted(states.items())),
+        "escalated_episodes": escalated,
+        "escalation_rate": escalated / sum(states.values()) if states else None,
     }
 
 

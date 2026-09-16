@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping
 
@@ -42,6 +44,18 @@ from ecos_agent.optimization.knowledge.compiler import (
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainSnapshot
 from ecos_agent.optimization.parameters.semantics import card_hash, load_parameter_cards
+
+
+# Corpus predicates declare "evidence unavailable" booleans as required
+# anti-conditions; derive them mechanically from the presence of their source
+# features instead of leaving them unknown.  True = every source is absent.
+ABSENCE_MARKER_SOURCES: dict[str, tuple[str, ...]] = {
+    "full_netlist_hpwl_unavailable": ("place_hpwl",),
+    "place_flute_wirelength_unavailable": ("place_flute_wirelength",),
+    "route_metrics_unavailable": ("route_wirelength", "route_la_total_overflow"),
+    "timing_metrics_unavailable": ("sta_setup_wns", "sta_hold_wns"),
+    "parent_terminal_reference_unavailable": ("parent_terminal_reference",),
+}
 
 
 def build_state_evidence_request(
@@ -115,6 +129,39 @@ def build_state_evidence_request(
         features[feature_id] = StateEvidenceFeature(
             feature_id=feature_id, value=value, evidence_sha256=configured_sha256,
         )
+    if incumbent is not None:
+        # Place-staged corpus predicates gate on the design's terminal state
+        # (drc_count zero, sta_* present, ...).  The checkpoint observation
+        # never carries terminal metrics, so expose the incumbent's completed
+        # flow as the current known terminal state; stage metrics win on id
+        # collisions.  This runs before the absence markers so they observe
+        # the terminal evidence too.
+        incumbent_sha256 = canonical_sha256(incumbent.model_dump(mode="json"))
+        incumbent_values: dict[str, float] = {}
+        for metric, value in incumbent.metrics.items():
+            incumbent_values[metric.value] = float(value)
+        for metric, value in incumbent.timing_guardrail.items():
+            incumbent_values.setdefault(metric.value, float(value))
+        for metric in incumbent.evaluation_metrics:
+            incumbent_values.setdefault(metric.metric_id, float(metric.value))
+        for metric_id, value in sorted(incumbent_values.items()):
+            if metric_id in features:
+                continue
+            features[metric_id] = StateEvidenceFeature(
+                feature_id=metric_id, value=value, evidence_sha256=incumbent_sha256,
+            )
+    absence_sha256 = canonical_sha256({
+        "observation_sha256": observation_ref.sha256,
+        "feature_ids": sorted(features),
+    })
+    for feature_id, sources in ABSENCE_MARKER_SOURCES.items():
+        if feature_id in features:
+            continue
+        features[feature_id] = StateEvidenceFeature(
+            feature_id=feature_id,
+            value=all(source not in features for source in sources),
+            evidence_sha256=absence_sha256,
+        )
     if reference_metrics is not None and (
         reference_sha256 is None or not _SHA256.fullmatch(reference_sha256)
     ):
@@ -160,6 +207,28 @@ def build_state_evidence_request(
         history_sha256=history_sha256,
         features=tuple(features[key] for key in sorted(features)),
     )
+
+
+def expected_toolchain_ref(binding_sha256: str) -> str:
+    """Recompute the corpus-side binding provenance identity.
+
+    Mirrors ``knowledge.generation.general_details._support_contract``: a
+    toolchain ref is a pure function of the binding content plus the audited
+    source-path inventory, so the runtime can verify binding integrity at
+    match time without touching the frozen corpus.  A binding whose recorded
+    ref diverges from this recomputation has been tampered with or was built
+    by a foreign recipe and must not pass verification.
+    """
+    from ecos_agent.knowledge.generation.general_details import (
+        GENERAL_SOURCE_PATHS,
+    )
+
+    payload = json.dumps(
+        {"binding_sha256": binding_sha256, "source_paths": GENERAL_SOURCE_PATHS},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def compile_supported_action_view(
@@ -362,9 +431,13 @@ def _match_claim(
         return KnowledgeApplicability.BLOCKED, ("unsupported_action",)
     if binding.claim_sha256 != claim.claim_sha256:
         return KnowledgeApplicability.BLOCKED, ("stale_binding",)
+    # With toolchain verification enabled (state carries the runtime toolchain
+    # identity), a binding is compatible iff its recorded provenance still
+    # recomputes; a single state value can never equal 18 distinct per-binding
+    # refs, so the check verifies integrity rather than equality.
     if (
         state.toolchain_sha256 is not None
-        and state.toolchain_sha256 != binding.toolchain_ref
+        and binding.toolchain_ref != expected_toolchain_ref(binding.binding_sha256)
     ):
         return KnowledgeApplicability.BLOCKED, ("toolchain_mismatch",)
     anti = [_evaluate(item, features) for item in claim.anti_predicates]

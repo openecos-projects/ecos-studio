@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +29,7 @@ from ecos_agent.optimization.knowledge.compiler import (
     _validate_parameter_card_bindings,
     build_state_evidence_request,
     compile_supported_action_view,
+    expected_toolchain_ref,
     load_state_rule_manifest,
 )
 
@@ -101,7 +103,9 @@ def _catalog(*, binding_claim_sha256: str = HASH) -> KnowledgeSupportCatalog:
         binding_sha256="sha256:" + "c" * 64,
         claim_id=claim.claim_ref.entity_id,
         claim_sha256=binding_claim_sha256,
-        toolchain_ref=TOOLCHAIN,
+        # Corpus bindings carry provenance-consistent toolchain refs; the
+        # runtime recomputes them when toolchain verification is enabled.
+        toolchain_ref=expected_toolchain_ref("sha256:" + "c" * 64),
         actions=(
             BoundKnowledgeAction(
                 knob_id="place.target_density",
@@ -515,6 +519,7 @@ def test_compiler_keeps_multiple_bindings_for_one_claim() -> None:
         update={
             "binding_id": "ecos.place.target_density.decrease.alternate.v1",
             "binding_sha256": "sha256:" + "8" * 64,
+            "toolchain_ref": expected_toolchain_ref("sha256:" + "8" * 64),
         }
     )
     catalog = base.model_copy(update={"bindings": (*base.bindings, second)})
@@ -615,13 +620,41 @@ def test_compiler_blocks_objective_mismatch_and_unverified_objective() -> None:
 
 
 def test_compiler_blocks_toolchain_mismatch_and_flags_unverified() -> None:
-    mismatched = _compile(*_hotspot_feature(), toolchain="sha256:" + "9" * 64)
+    # A binding whose recorded toolchain ref no longer matches its provenance
+    # is tampered; with verification enabled (non-None state value) it blocks.
+    base = _catalog()
+    tampered = base.bindings[0].model_copy(update={"toolchain_ref": TOOLCHAIN})
+    catalog = KnowledgeSupportCatalog(
+        catalog_sha256=base.catalog_sha256,
+        claims=base.claims,
+        bindings=(tampered,),
+    )
+    mismatched = _compile(*_hotspot_feature(), catalog=catalog)
     assert mismatched.matches[0].applicability == KnowledgeApplicability.BLOCKED
     assert mismatched.matches[0].reason_codes == ("toolchain_mismatch",)
     view = _compile(*_hotspot_feature(), toolchain=None)
     assert view.matches[0].applicability == KnowledgeApplicability.WEAK
     assert view.matches[0].reason_codes == ("toolchain_unverified",)
     assert view.actions[0].reason_codes == ("toolchain_unverified",)
+
+
+def test_expected_toolchain_ref_matches_generation_recipe() -> None:
+    """Runtime recomputation must reproduce the corpus generator's refs."""
+    import glob
+
+    payloads = sorted(glob.glob("knowledge/general/*/catalog.json"))
+    assert payloads, "run from ecos/agent"
+    verified = 0
+    for path in payloads:
+        for entity in json.loads(Path(path).read_text(encoding="utf-8"))["entities"]:
+            binding = (entity.get("support") or {}).get("binding")
+            if binding is None:
+                continue
+            assert binding["toolchain_ref"] == expected_toolchain_ref(
+                binding["binding_sha256"]
+            )
+            verified += 1
+    assert verified >= 18
 
 
 def test_state_evidence_trend_uses_frozen_epsilon_for_noise_ties() -> None:

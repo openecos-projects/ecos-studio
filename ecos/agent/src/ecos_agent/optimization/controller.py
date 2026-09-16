@@ -189,6 +189,7 @@ class OptimizationEpisodeController(
         max_in_flight_candidates: Literal[1, 2] = 1,
         design_id: str | None = None,
         trend_noise_epsilon: Mapping[str, float] | None = None,
+        toolchain_sha256: str | None = None,
     ) -> None:
         if not _ID.fullmatch(episode_id) or not _ID.fullmatch(checkpoint_id):
             raise OptimizationEpisodeControllerError("episode identifiers are invalid")
@@ -203,6 +204,7 @@ class OptimizationEpisodeController(
         self._trend_noise_epsilon = self._validated_trend_noise_epsilon(
             trend_noise_epsilon
         )
+        self._toolchain_sha256 = self._validated_toolchain_sha256(toolchain_sha256)
         self._episode_design_id = self._manifest_scope_check(design_id)
         if type(max_in_flight_candidates) is not int or max_in_flight_candidates not in {
             1, 2,
@@ -322,6 +324,13 @@ class OptimizationEpisodeController(
                     "trend noise epsilon entries must be finite and non-negative"
                 )
         return dict(trend_noise_epsilon)
+
+    def _validated_toolchain_sha256(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not _SHA256.fullmatch(value):
+            raise OptimizationEpisodeControllerError("toolchain hash is invalid")
+        return value
 
     def _manifest_scope_check(self, design_id: str | None) -> str | None:
         """Gate knowledge-consuming episodes on manifest scope and calibration.

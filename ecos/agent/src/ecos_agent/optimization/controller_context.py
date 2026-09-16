@@ -270,6 +270,7 @@ class ControllerContextMixin:
                         else None
                     ),
                     state_rule_manifest_sha256=state_rule_manifest.manifest_sha256,
+                    toolchain_sha256=self._toolchain_sha256,
                     incumbent=self._incumbent,
                     historical_metrics=tuple(
                         {

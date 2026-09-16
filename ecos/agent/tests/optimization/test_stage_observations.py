@@ -114,6 +114,14 @@ def test_stage_observation_reads_only_the_fixed_stage_artifacts(
             ),
             "evidence_ref": "place_dreamplace/analysis/qor_hotspots.json#/hotspots/1",
         },
+        {
+            "feature_id": "timing_report",
+            "value": True,
+            "evidence_sha256": file_sha256(
+                frozen_workspace / "sta_ecc/feature/sta.step.json"
+            ),
+            "evidence_ref": "sta_ecc/feature/sta.step.json",
+        },
     ]
     assert observation.requested_knobs == ()
     assert observation.budget.remaining_candidates == 19

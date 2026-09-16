@@ -296,14 +296,48 @@ def summarize_offline_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, ob
     }
 
 
+def state_match_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Run-level state-match coverage/precision/unknown over planning rows.
+
+    Rows are mediation-audit planning-call records (episode or offline shape):
+    coverage counts rows whose state evidence matched at least one claim,
+    precision counts how many of those matched rows actually bound a claim
+    into the proposal, and unknown is the unmatched remainder.
+    """
+    values = list(rows)
+    matched = [
+        row
+        for row in values
+        if row.get("matched_claim_ids")
+        or row.get("support_status") == "matched"
+    ]
+    claim_bound = sum(bool(row.get("claim_bound")) for row in values)
+    unknown = len(values) - len(matched)
+    return {
+        "schema_version": "ecos.knowledge_state_match_summary.v1",
+        "planning_rows": len(values),
+        "matched_rows": len(matched),
+        "state_match_coverage": len(matched) / len(values) if values else None,
+        "claim_bound_rows": claim_bound,
+        "state_match_precision": (
+            claim_bound / len(matched) if matched else None
+        ),
+        "unknown_rows": unknown,
+        "unknown_ratio": unknown / len(values) if values else None,
+    }
+
+
 def offline_gate(
     summary: Mapping[str, object],
     rows: Sequence[Mapping[str, object]],
     contexts: Sequence[Mapping[str, object]],
     *,
     design_id: str = "gcd",
+    min_opportunity_contexts: int = 1,
 ) -> dict[str, object]:
     """Pilot gate: replayable bank, clean negative controls, real divergence."""
+    if type(min_opportunity_contexts) is not int or min_opportunity_contexts < 1:
+        raise ValueError("min_opportunity_contexts must be a positive integer")
     dual_layer = summary["treatments"].get(
         "state-conditioned-dual-layer-zero-shot", {}
     )
@@ -338,11 +372,12 @@ def offline_gate(
         "dual_layer_divergence_exceeds_disagreement": divergence > disagreement,
         "divergence_without_repair": errors == 0,
         "knowledge_opportunity_contexts": opportunity_contexts,
+        "min_opportunity_contexts": min_opportunity_contexts,
         "offline_gate_pass": bool(
             contexts
             and controls_rejected
             and divergence > disagreement
             and errors == 0
-            and opportunity_contexts >= 1
+            and opportunity_contexts >= min_opportunity_contexts
         ),
     }

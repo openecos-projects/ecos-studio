@@ -88,6 +88,9 @@ _PLACE_STATE_EVIDENCE_FILES = {
     "net_density_map": "place_dreamplace/feature/density_map/place_allnet_density.csv",
     "pin_density_map": "place_dreamplace/feature/density_map/place_allcell_pin_density.csv",
     "macro_density_map": "place_dreamplace/feature/density_map/place_macro_density.csv",
+    # Corpus timing predicates gate on an existing STA report; produce it only
+    # when the file actually exists (presence predicates never emit False).
+    "timing_report": "sta_ecc/feature/sta.step.json",
 }
 _TERMINAL_METRICS = ROUTABILITY_OBJECTIVE_ORDER
 _CTS_FEATURE_FILE = "CTS_ecc/feature/CTS.step.json"
