@@ -58,6 +58,19 @@ export interface DesktopAgentSendMessageResponse {
   turnId?: string
 }
 
+export type DesktopAgentOperationAssociationCommand =
+  | 'workspace.run'
+  | 'workspace.runStep'
+  | 'candidate.rerun'
+  | 'candidate.resume'
+
+export interface DesktopAgentOperationAssociationRequest extends DesktopAgentProviderRequest {
+  command: DesktopAgentOperationAssociationCommand
+  operationId: string
+  sessionId: string
+  workspaceHandle?: string
+}
+
 export type DesktopAgentReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
 export interface DesktopAgentModelOption {

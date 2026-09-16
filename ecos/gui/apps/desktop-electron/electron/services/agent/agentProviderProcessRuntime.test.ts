@@ -7,6 +7,10 @@ import {
   type AgentProviderProtocolRequest,
 } from './agentProviderProcessRuntime'
 import { supportedAgentProviderProtocolVersion } from './agentProviderPlugin'
+import {
+  getAgentOperationAssociation,
+  resetAgentOperationAssociations,
+} from './agentOperationAssociations'
 
 class FakeStdin extends EventEmitter {
   readonly write = vi.fn()
@@ -91,6 +95,251 @@ describe('AgentProviderProcessRuntime', () => {
 
     await expect(response).resolves.toEqual({
       sessionId: 'session-1',
+    })
+  })
+
+  it('answers inbound host Product Commands from the agent child', async () => {
+    const harness = createSpawnHarness()
+    const host = {
+      candidateCapabilities: vi.fn().mockResolvedValue({
+        schema: 'ecc.candidate_capabilities.v1',
+        schemaVersion: 1,
+        targets: [],
+      }),
+      candidateRerun: vi.fn(),
+      candidateResume: vi.fn(),
+      cancelOperation: vi.fn(),
+      openWorkspace: vi.fn(),
+      operationStatus: vi.fn(),
+      startFlowOperation: vi.fn(),
+      waitForOperation: vi.fn(),
+      workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
+    }
+    const runtime = new AgentProviderProcessRuntime({
+      host,
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const started = runtime.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'handle-1',
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: 'host-1',
+        method: 'candidate.capabilities',
+        params: { workspaceHandle: 'handle-1' },
+      })}\n`,
+    )
+    await vi.waitFor(() => {
+      expect(host.candidateCapabilities).toHaveBeenCalledWith({
+        workspaceHandle: 'handle-1',
+      })
+    })
+    const reply = JSON.parse(
+      String(child.stdin.write.mock.calls.at(-1)?.[0]).trim(),
+    ) as { id: string; result: unknown }
+    expect(reply).toEqual({
+      id: 'host-1',
+      result: {
+        schema: 'ecc.candidate_capabilities.v1',
+        schemaVersion: 1,
+        targets: [],
+      },
+    })
+  })
+
+  it('opens a calibration replay Workspace through the Product Command host', async () => {
+    const harness = createSpawnHarness()
+    const host = {
+      candidateCapabilities: vi.fn(),
+      candidateRerun: vi.fn(),
+      candidateResume: vi.fn(),
+      cancelOperation: vi.fn(),
+      openWorkspace: vi.fn().mockResolvedValue({
+        directory: '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+        workspaceHandle: 'handle-replay',
+        workspaceRevision: 1,
+      }),
+      operationStatus: vi.fn(),
+      startFlowOperation: vi.fn(),
+      waitForOperation: vi.fn(),
+    }
+    const runtime = new AgentProviderProcessRuntime({
+      host,
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const started = runtime.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: 'host-open',
+        method: 'workspace.open',
+        params: {
+          directory:
+            '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+        },
+      })}\n`,
+    )
+    await vi.waitFor(() => {
+      expect(host.openWorkspace).toHaveBeenCalledWith({
+        directory:
+          '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+      })
+    })
+  })
+
+  it('passes workspaceRevision through sendMessage so the provider refreshes its session', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const started = runtime.startSession({
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceRevision: 4,
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    const response = runtime.sendMessage({
+      message: 'lower target density',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceRevision: 5,
+    })
+    const messageRequest = readProtocolRequest(child, 1)
+    expect(messageRequest).toEqual({
+      id: expect.any(String),
+      method: 'sendMessage',
+      params: expect.objectContaining({ workspaceRevision: 5 }),
+    })
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: messageRequest.id,
+        result: { messageId: 'message-1', sessionId: 'session-1', turnId: 'turn-1' },
+      })}\n`,
+    )
+    await expect(response).resolves.toEqual({
+      messageId: 'message-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+    })
+  })
+
+  it('records operation associations for host execution commands', async () => {
+    resetAgentOperationAssociations()
+    const harness = createSpawnHarness()
+    const host = {
+      candidateCapabilities: vi.fn(),
+      candidateRerun: vi.fn().mockResolvedValue({ operationId: 'op-rerun' }),
+      candidateResume: vi.fn().mockResolvedValue({ operationId: 'op-resume' }),
+      cancelOperation: vi.fn(),
+      openWorkspace: vi.fn(),
+      operationStatus: vi.fn(),
+      startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'op-run' }),
+      waitForOperation: vi.fn(),
+      workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
+    }
+    const runtime = new AgentProviderProcessRuntime({
+      host,
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const started = runtime.startSession({
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    for (const [id, method] of [
+      ['host-run', 'workspace.run'],
+      ['host-rerun', 'candidate.rerun'],
+      ['host-resume', 'candidate.resume'],
+    ] as const) {
+      child.stdout.emit(
+        'data',
+        `${JSON.stringify({
+          id,
+          method,
+          params: { workspaceHandle: 'handle-1' },
+        })}\n`,
+      )
+    }
+
+    await vi.waitFor(() => {
+      expect(getAgentOperationAssociation('codex', 'op-run')).toMatchObject({
+        command: 'workspace.run',
+      })
+      expect(getAgentOperationAssociation('codex', 'op-rerun')).toMatchObject({
+        command: 'candidate.rerun',
+      })
+      expect(getAgentOperationAssociation('codex', 'op-resume')).toMatchObject({
+        command: 'candidate.resume',
+      })
     })
   })
 

@@ -1,12 +1,16 @@
 import { homedir } from 'node:os'
 import path from 'node:path'
-import { AgentProviderProcessRuntime } from './agentProviderProcessRuntime'
+import {
+  AgentProviderProcessRuntime,
+  type AgentProviderHost,
+} from './agentProviderProcessRuntime'
 import { discoverAgentProviderManifests } from './agentProviderPlugin'
 import { AgentRuntimeManager } from './agentRuntimeManager'
 
 export async function createAgentRuntimeFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   builtInProviderRoot?: string,
+  host?: AgentProviderHost,
 ): Promise<AgentRuntimeManager | null> {
   const roots = configuredProviderRoots(
     env.ECOS_AGENT_PROVIDER_ROOTS,
@@ -28,7 +32,7 @@ export async function createAgentRuntimeFromEnvironment(
       providers.find(({ providerId }) => providerId === 'ecos_agent')?.providerId,
     providers: providers.map((manifest) => ({
       providerId: manifest.providerId,
-      runtime: new AgentProviderProcessRuntime({ env, manifest }),
+      runtime: new AgentProviderProcessRuntime({ env, host, manifest }),
     })),
   })
 }

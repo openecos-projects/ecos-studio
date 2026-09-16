@@ -81,6 +81,18 @@ const knobs: Record<string, Knob> = {
   },
 }
 
+/**
+ * ECC flow steps whose Step Options can override the Agent knob table. Derived
+ * from the knob domains: floorplan knobs live on preFloorplan, place knobs on
+ * place, cts knobs on CTS, and route knobs on route.
+ */
+export const AGENT_STEP_OPTION_STEPS: readonly string[] = [
+  'preFloorplan',
+  'place',
+  'CTS',
+  'route',
+]
+
 function validString(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -114,7 +126,7 @@ function validValue(value: ParameterValue, knob: Knob): boolean {
 
 export function readAgentWorkspaceParameterValues(
   workspaceSpec: Record<string, unknown>,
-  _stepConfigurations: Record<string, Record<string, unknown>>,
+  stepConfigurations: Record<string, Record<string, unknown>>,
 ): Record<string, ParameterValue> {
   const parameters =
     workspaceSpec.parameters &&
@@ -122,9 +134,17 @@ export function readAgentWorkspaceParameterValues(
     !Array.isArray(workspaceSpec.parameters)
       ? (workspaceSpec.parameters as Record<string, unknown>)
       : {}
+  // Step Options are step-specific values keyed by ECC parameter name; they
+  // win over the workspace-wide projection for the same parameter.
+  const stepValues: Record<string, unknown> = {}
+  for (const configuration of Object.values(stepConfigurations)) {
+    for (const [parameter, value] of Object.entries(configuration)) {
+      stepValues[parameter] = value
+    }
+  }
   const result: Record<string, ParameterValue> = {}
   for (const [knobId, knob] of Object.entries(knobs)) {
-    const value = parameters[knob.parameter]
+    const value = stepValues[knob.parameter] ?? parameters[knob.parameter]
     let normalized = value
     if (
       knob.kind === 'boolean' &&

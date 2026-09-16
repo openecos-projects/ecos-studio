@@ -38,10 +38,19 @@ import {
   hasSafeJsonPath,
   parameterWritesMatchPatch,
 } from '@ecos-studio/shared'
+import type {
+  EccCandidateCapabilitiesRequest,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
+  EccRuntimeOperationRequest,
+  EccRuntimeStartFlowRequest,
+  EccWorkspaceOpenRequest,
+} from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import type { ResolvedAgentProviderManifest } from './agentProviderPlugin'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
 import { deriveAgentWorkspaceParameterUpdates } from './agentWorkspaceParameterUpdates'
+import { recordAgentOperationAssociation } from './agentOperationAssociations'
 
 type SpawnLike = typeof spawnChild
 type AgentProviderMethod =
@@ -70,8 +79,24 @@ interface AgentProviderProtocolResponse {
   result?: unknown
 }
 
+export interface AgentProviderHost {
+  candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
+  candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
+  candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
+  cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+  hello?(): Promise<unknown>
+  openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
+  operationStatus(request: EccRuntimeOperationRequest): Promise<unknown>
+  startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<unknown>
+  waitForOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+  workspaceSession?(
+    workspaceHandle: string,
+  ): Promise<{ workspaceHandle: string } | null> | { workspaceHandle: string } | null
+}
+
 interface AgentProviderProcessRuntimeOptions {
   env?: NodeJS.ProcessEnv
+  host?: AgentProviderHost
   manifest: ResolvedAgentProviderManifest
   spawn?: SpawnLike
 }
@@ -91,6 +116,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private readonly baseEnv: NodeJS.ProcessEnv
   private env: NodeJS.ProcessEnv
   private readonly eventFanout = new RuntimeEventFanout<DesktopAgentEvent>()
+  private readonly host: AgentProviderHost | undefined
   private readonly manifest: ResolvedAgentProviderManifest
   private readonly pendingRequests = new Map<string, PendingRequest>()
   private readonly pendingExecutionConfirmations = new Map<
@@ -116,6 +142,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   constructor(options: AgentProviderProcessRuntimeOptions) {
     this.baseEnv = { ...(options.env ?? process.env) }
     this.env = { ...this.baseEnv, ...options.manifest.environment }
+    this.host = options.host
     this.manifest = options.manifest
     this.spawnImpl = options.spawn ?? spawnChild
   }
@@ -157,7 +184,6 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       this.workspaceRevisions.set(request.sessionId ?? '', request.workspaceRevision)
     }
     const {
-      workspaceRevision: _workspaceRevision,
       workspaceDesignId: _workspaceDesignId,
       workspaceParameterValues: _workspaceParameterValues,
       ...providerRequest
@@ -187,11 +213,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         this.workspaceRevisions.set(request.sessionId, request.workspaceRevision)
       }
     }
-    const {
-      confirmationToken: _confirmationToken,
-      workspaceRevision: _workspaceRevision,
-      ...providerRequest
-    } = request
+    const { confirmationToken: _confirmationToken, ...providerRequest } = request
     try {
       return (await this.sendRequest(
         'sendMessage',
@@ -404,6 +426,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       return
     }
 
+    if (typeof record.method === 'string' && record.method && typeof record.id === 'string') {
+      void this.handleHostRequest(record)
+      return
+    }
+
     const response = record as AgentProviderProtocolResponse
     if (!response.id) return
     const pending = this.pendingRequests.get(response.id)
@@ -419,6 +446,113 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       return
     }
     pending.resolve(response.result)
+  }
+
+  private async handleHostRequest(record: Record<string, unknown>): Promise<void> {
+    const id = String(record.id)
+    const method = String(record.method)
+    const params = isRecord(record.params) ? record.params : {}
+    try {
+      const result = await this.dispatchHostRequest(method, params)
+      this.writeHostReply({ id, result })
+    } catch (error) {
+      this.writeHostReply({
+        id,
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+  }
+
+  private async dispatchHostRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.host) {
+      throw new Error('Agent Product Command host is unavailable.')
+    }
+    if (method === 'rpc.hello') {
+      if (!this.host.hello) {
+        throw new Error('Agent Product Command host is unavailable.')
+      }
+      return await this.host.hello()
+    }
+    if (method === 'workspace.open') {
+      return await this.host.openWorkspace({
+        directory: readRequiredString(params, 'directory'),
+      })
+    }
+    const workspaceHandle = readRequiredString(params, 'workspaceHandle')
+    if (this.host.workspaceSession) {
+      const session = await this.host.workspaceSession(workspaceHandle)
+      if (!session) {
+        throw new Error('Product Command does not own this Workspace handle')
+      }
+    }
+    switch (method) {
+      case 'candidate.capabilities':
+        return await this.host.candidateCapabilities({ workspaceHandle })
+      case 'candidate.rerun': {
+        const result = await this.host.candidateRerun(
+          params as unknown as EccCandidateRerunRequest,
+        )
+        this.recordHostOperationAssociation('candidate.rerun', result)
+        return result
+      }
+      case 'candidate.resume': {
+        const result = await this.host.candidateResume(
+          params as unknown as EccCandidateResumeRequest,
+        )
+        this.recordHostOperationAssociation('candidate.resume', result)
+        return result
+      }
+      case 'workspace.run': {
+        const result = await this.host.startFlowOperation(
+          params as unknown as EccRuntimeStartFlowRequest,
+        )
+        this.recordHostOperationAssociation('workspace.run', result)
+        return result
+      }
+      case 'operation.cancel':
+        return await this.host.cancelOperation({
+          workspaceHandle,
+          operationId: readRequiredString(params, 'operationId'),
+        })
+      case 'operation.status':
+        return await this.host.operationStatus({
+          workspaceHandle,
+          operationId: readRequiredString(params, 'operationId'),
+        })
+      case 'operation.wait':
+        return await this.host.waitForOperation({
+          workspaceHandle,
+          operationId: readRequiredString(params, 'operationId'),
+        })
+      default:
+        throw new Error(`Unsupported host method: ${method}`)
+    }
+  }
+
+  private recordHostOperationAssociation(command: string, result: unknown): void {
+    // Host requests carry no per-session identity; key by providerId.
+    const operationId =
+      isRecord(result) && typeof result.operationId === 'string'
+        ? result.operationId
+        : null
+    if (!operationId) return
+    recordAgentOperationAssociation(this.manifest.providerId, {
+      command,
+      operationId,
+    })
+  }
+
+  private writeHostReply(payload: Record<string, unknown>): void {
+    const stdin = this.child?.stdin
+    if (!stdin || stdin.destroyed || stdin.writableEnded) {
+      throw new Error(`Agent provider ${this.manifest.providerId} stdin is closed`)
+    }
+    stdin.write(`${JSON.stringify(payload)}\n`)
   }
 
   private acceptConfirmedWorkspaceAction(
@@ -550,6 +684,18 @@ function errorMessage(error: string | { message?: string }): string {
 
 function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readRequiredString(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Host request requires ${key}`)
+  }
+  return value
 }
 
 const agentEventTypes = new Set<DesktopAgentEventType>([

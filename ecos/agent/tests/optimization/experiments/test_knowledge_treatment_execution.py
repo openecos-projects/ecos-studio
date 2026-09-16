@@ -131,7 +131,7 @@ def test_phase8_runner_uses_gui_origin_for_canonical_flow(tmp_path, monkeypatch)
             pass
 
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
-    monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(runner, "build_terminal_observation", lambda _workspace: _terminal_observation())
@@ -185,7 +185,7 @@ def test_phase8_runner_resumes_created_unstarted_workspace(
     )
     observation = _terminal_observation()
     monkeypatch.setattr(runner, "EccContentLengthRpcClient", FakeClient)
-    monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(
@@ -267,7 +267,7 @@ def _patch_calibration(
 ) -> None:
     runner = _load_experiment_execution()
     (tmp_path / "ecc").write_bytes(b"ecc-agent-rpc")
-    monkeypatch.setattr(runner, "_ecc_executable", lambda: tmp_path / "ecc")
+    monkeypatch.setattr(runner, "ecc_rpc_serve_executable", lambda: tmp_path / "ecc")
     monkeypatch.setattr(runner, "_verify_workspace_binding", lambda *_args: None)
     monkeypatch.setattr(runner, "_verify_workspace_inputs", lambda *_args: None)
     monkeypatch.setattr(

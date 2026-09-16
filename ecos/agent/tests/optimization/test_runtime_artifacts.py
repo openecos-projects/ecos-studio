@@ -30,7 +30,6 @@ from ecos_agent.optimization.runtime import (
     _assemble_runner,
     _current_values,
     _design_id,
-    _ecc_executable,
     _incumbent_workspace,
     _knowledge_case_pool_root,
     _optimization_execution_context,
@@ -40,6 +39,7 @@ from ecos_agent.optimization.runtime import (
     _wait_for_terminal_receipt,
     create_optimization_runner,
 )
+from ecos_agent.optimization.host_transport import bind_host_transport
 from ecos_agent.workspace.parameters import WorkspaceParametersError
 from tests.optimization.controller.support import _eligible_terminal
 
@@ -63,13 +63,12 @@ _STAGES = (
 _HASH = "sha256:" + "a" * 64
 
 
-def test_ecc_executable_uses_dedicated_agent_rpc_override(monkeypatch, tmp_path: Path) -> None:
-    executable = tmp_path / "ecc-agent-rpc"
-    executable.write_text("#!/bin/sh\n", encoding="utf-8")
-    executable.chmod(0o755)
-    monkeypatch.setenv("ECOS_AGENT_ECC_RPC_BIN", str(executable))
+def test_production_runtime_requires_an_electron_host() -> None:
+    from ecos_agent.optimization.host_transport import _require_host_transport
 
-    assert _ecc_executable() == executable.resolve()
+    bind_host_transport(None)
+    with pytest.raises(OptimizationRuntimeError, match="Product Command host"):
+        _require_host_transport()
 
 
 def _write_flow(tmp_path: Path, *, states: dict[str, str] | None = None) -> None:
@@ -569,15 +568,14 @@ def test_terminal_waiter_cancels_when_timeout_expires_between_clock_reads(
 
 class _FakeRpc:
     def __init__(self, _executable: Path) -> None:
-        self.calls: list[Path] = []
+        self.calls: list[tuple[str, dict[str, object]]] = []
         self.closed = False
 
-    def open_workspace(self, workspace: Path) -> str:
-        self.calls.append(workspace)
-        return "workspace-1"
-
-    def ecc_revision(self) -> str:
-        return "ecc-test-revision"
+    def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
+        self.calls.append((method, params))
+        if method == "rpc.hello":
+            return {"eccVersion": "ecc-test-revision"}
+        raise AssertionError(f"unexpected host method {method}")
 
     def close(self) -> None:
         self.closed = True
@@ -594,7 +592,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     )
     rpc = _FakeRpc(Path("ecc"))
     monkeypatch.setattr(
-        "ecos_agent.optimization.runtime.EccContentLengthRpcClient", lambda _path: rpc
+        "ecos_agent.optimization.host_transport._require_host_transport",
+        lambda: rpc,
     )
     monkeypatch.setattr(
         "ecos_agent.optimization.runtime.build_terminal_observation",
@@ -623,6 +622,8 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     runner = create_optimization_runner(
         {
             "workspace": str(workspace),
+            "workspace_handle": "handle-1",
+            "expected_workspace_revision": 1,
             "episode_id": "episode-new",
             "objective": _semantic_objective(),
             "objective_alignment": _alignment(_semantic_objective()),
@@ -633,7 +634,7 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
         planner=object(),
     )
 
-    assert rpc.calls == [workspace]
+    assert ("rpc.hello", {"version": 1}) in rpc.calls
     assert not (workspace / ".agent/optimization/baseline-replays.v2.json").exists()
     episode_root = workspace / ".agent" / "optimization" / "episode-new"
     assert (episode_root / "optimization-task-memory-scope.v1.json").is_file()

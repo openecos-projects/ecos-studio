@@ -456,6 +456,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.agentStartSession, request),
     sendMessage: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentSendMessage, request),
+    registerOperationAssociation: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentRegisterOperationAssociation, request),
     getModelSettings: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentGetModelSettings, request),
     setModelSettings: (request) =>

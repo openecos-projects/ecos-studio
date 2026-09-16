@@ -25,7 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ecos_agent.hashing import canonical_sha256, file_sha256
-from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
+from ecos_agent.optimization.host_transport import _require_host_transport
 from ecos_agent.optimization.observation_contracts import (
     TerminalObservation,
     deterministic_noise_profile,
@@ -34,7 +34,6 @@ from ecos_agent.optimization.observations import build_terminal_observation
 from ecos_agent.optimization.runtime import (
     OptimizationRuntimeError,
     WorkspaceParametersError,
-    _ecc_executable,
     _runtime_parameters,
 )
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
@@ -126,17 +125,30 @@ def _tree_sha256(root: Path) -> str:
     )
 
 
+def _host_call(method: str, params: dict[str, object]) -> dict[str, object]:
+    host = _require_host_transport()
+    if callable(host) and not hasattr(host, "call"):
+        result = host(method, params)
+    else:
+        invoke = getattr(host, "call", None)
+        if not callable(invoke):
+            raise OptimizationRuntimeError("host Product Command caller is invalid")
+        result = invoke(method, params)
+    if not isinstance(result, dict):
+        raise OptimizationRuntimeError("host Product Command result is invalid")
+    return result
+
+
 def _environment_fingerprint(workspace: Path) -> dict[str, str]:
     """Identify every input that decides cached-replay reusability.
 
     The ECC handshake is cheap (one ``rpc.hello``) and runs even on the
     full-cache path so that a drifted toolchain is never silently accepted.
     """
-    client = EccContentLengthRpcClient(_ecc_executable())
-    try:
-        ecc_revision = client.ecc_revision()
-    finally:
-        client.close()
+    revision = _host_call("rpc.hello", {"version": 1}).get("eccVersion")
+    if not isinstance(revision, str) or not revision.strip():
+        raise OptimizationRuntimeError("ECC revision is invalid")
+    ecc_revision = revision.strip()
     try:
         parameters_ref, parameters = _runtime_parameters(workspace)
         pdk_root = Path(parameters["pdk_root"])
@@ -243,41 +255,56 @@ def _run_replay(
         shutil.copytree(
             workspace, replay_workspace, ignore=shutil.ignore_patterns(".agent")
         )
-    client = EccContentLengthRpcClient(_ecc_executable())
-    request = {
-        "workspaceId": client.open_workspace(replay_workspace),
-        "rerun": True,
-        "origin": "gui",
-        "idempotencyKey": f"noise-calibration.default-replay-{index}",
-    }
-    try:
-        operation = client._request(
-            "operation.start_flow", request, timeout_seconds=30.0
-        )
-        if progress is not None:
-            progress("flow rerun started")
-        if operation.get("state") not in _TERMINAL_STATES:
-            operation_id = operation.get("operationId")
-            if not isinstance(operation_id, str) or not operation_id:
-                raise OptimizationRuntimeError(
-                    "ECC start_flow response has no operation id"
-                )
-            heartbeat = _heartbeat_emitter(progress) if progress is not None else None
-            terminal = client.wait_for_terminal(
-                operation_id, timeout_seconds, poll_callback=heartbeat
-            )
-            if terminal is None:
-                raise OptimizationRuntimeError(
-                    f"default replay {index} timed out after {timeout_seconds}s"
-                )
-        else:
-            terminal = operation
-        if terminal.get("state") != "succeeded":
+    opened = _host_call("workspace.open", {"directory": str(replay_workspace)})
+    workspace_handle = opened.get("workspaceHandle")
+    revision = opened.get("workspaceRevision")
+    if not isinstance(workspace_handle, str) or not workspace_handle.strip():
+        raise OptimizationRuntimeError("calibration workspace handle is missing")
+    if type(revision) is not int or revision < 1:
+        revision = 1
+    operation = _host_call(
+        "workspace.run",
+        {
+            "workspaceHandle": workspace_handle.strip(),
+            "expectedWorkspaceRevision": revision,
+            "rerun": True,
+            "idempotencyKey": f"noise-calibration.default-replay-{index}",
+        },
+    )
+    if progress is not None:
+        progress("flow rerun started")
+    if operation.get("state") not in _TERMINAL_STATES:
+        operation_id = operation.get("operationId")
+        if not isinstance(operation_id, str) or not operation_id:
             raise OptimizationRuntimeError(
-                f"default replay {index} failed: {terminal.get('state')}"
+                "ECC start_flow response has no operation id"
             )
-    finally:
-        client.close()
+        heartbeat = _heartbeat_emitter(progress) if progress is not None else None
+        started = time.monotonic()
+        terminal = None
+        while time.monotonic() - started < timeout_seconds:
+            status = _host_call(
+                "operation.wait",
+                {
+                    "workspaceHandle": workspace_handle.strip(),
+                    "operationId": operation_id,
+                },
+            )
+            if heartbeat is not None:
+                heartbeat(status)
+            if status.get("state") in _TERMINAL_STATES:
+                terminal = status
+                break
+        if terminal is None:
+            raise OptimizationRuntimeError(
+                f"default replay {index} timed out after {timeout_seconds}s"
+            )
+    else:
+        terminal = operation
+    if terminal.get("state") != "succeeded":
+        raise OptimizationRuntimeError(
+            f"default replay {index} failed: {terminal.get('state')}"
+        )
     observation = _terminal_observation(replay_workspace)
     _store_replay_cache(replay_root, observation, fingerprint, "produced")
     return observation

@@ -32,10 +32,15 @@ import {
   type EccRuntimeEvent,
   type EccRuntimeOperation,
   type EccRuntimeOperationRequest,
+  type EccCandidateCapabilitiesRequest,
+  type EccCandidateResumeRequest,
+  type EccCandidateRerunRequest,
   type EccRuntimeStartFlowRequest,
   type EccRuntimeStartStepRequest,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
+  type EccWorkspaceDeriveRequest,
+  type EccWorkspaceDeriveResult,
   type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
   type EccWorkspaceInfoRequest,
@@ -67,7 +72,9 @@ import {
   type DesktopAgentReasoningEffort,
   type DesktopAgentSetModelSettingsRequest,
   type DesktopAgentWorkspaceRerunContract,
+  type DesktopAgentWorkspaceRerunParameterValue,
   type DesktopAgentSendMessageRequest,
+  type DesktopAgentOperationAssociationRequest,
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
   type DesktopCodexInstallProgressEvent,
@@ -98,7 +105,11 @@ import {
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
-import { readAgentWorkspaceParameterValues } from '../services/agent/agentWorkspaceParameterUpdates'
+import {
+  AGENT_STEP_OPTION_STEPS,
+  readAgentWorkspaceParameterValues,
+} from '../services/agent/agentWorkspaceParameterUpdates'
+import { recordAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
 import {
   closeWindow,
   isWindowMaximized,
@@ -116,7 +127,7 @@ import {
 } from '../services/workspaceWindowRegistry'
 import {
   executeWorkspaceRerun,
-  prepareWorkspaceRerun,
+  verifyWorkspaceRerunContract,
 } from '../services/eccRpc/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
@@ -157,6 +168,8 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
     'workspace.exportSignoff',
     'workspace.continueCreation',
     'workspace.abandonCreation',
+    'candidate.rerun',
+    'candidate.resume',
   ].includes(value.command)
 }
 
@@ -435,12 +448,18 @@ export interface DesktopBridgeServices {
       options?: { timeoutMs?: number },
     ): Promise<T>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+    candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
+    candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
+    candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
     cancelOperationLegacy(
       operationId?: string,
     ): Promise<{ cancelled: boolean; operationId?: string }>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     describeWorkspaceSpec(): Promise<unknown>
+    deriveWorkspace(
+      request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
+    ): Promise<EccWorkspaceDeriveResult>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
@@ -883,6 +902,7 @@ export function registerIpc(
       sender: IpcMainInvokeEvent['sender']
       onDestroyed: () => void
       workspaceId?: string
+      directory?: string
     }
   >()
   const pendingWorkspaceReruns = new Map<
@@ -1010,7 +1030,13 @@ export function registerIpc(
     if (previous && previous.sender !== sender) {
       throw new Error('Agent session belongs to another window.')
     }
-    if (previous) return
+    if (previous) {
+      // Rebind: the same window refreshes its Workspace context, e.g. after
+      // the runtime released an idle handle under the previous one.
+      if (request.workspaceId) previous.workspaceId = request.workspaceId
+      if (request.directory) previous.directory = request.directory
+      return
+    }
 
     const onDestroyed = (): void => {
       agentSessionSubscriptions.delete(key)
@@ -1019,6 +1045,7 @@ export function registerIpc(
       sender,
       onDestroyed,
       ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+      ...(request.directory ? { directory: request.directory } : {}),
     })
     if (typeof sender.once === 'function') sender.once('destroyed', onDestroyed)
     if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) onDestroyed()
@@ -1036,6 +1063,81 @@ export function registerIpc(
       throw new Error('Unknown agent session for this window.')
     }
     return subscription
+  }
+
+  interface AgentWorkspaceContext {
+    workspaceHandle: string
+    workspaceRevision: number
+    workspaceParameterValues: Record<string, DesktopAgentWorkspaceRerunParameterValue>
+    workspaceDesignId?: string
+  }
+
+  /**
+   * Resolves the current canonical Workspace context for an Agent session.
+   * openWorkspace reuses the live runtime handle or reopens it, so a handle
+   * released by idle cleanup is healed by re-resolution.
+   * ponytail: canonical parameter values are still read from files by the
+   * Python provider when generating contracts, so an external config sync or a
+   * partially applied save can leave Python's displayed values briefly stale;
+   * the upgrade path is a host `workspace.parameters` query command.
+   */
+  const resolveAgentWorkspaceContext = async (
+    directory: string,
+  ): Promise<AgentWorkspaceContext> => {
+    const opened = await services.eccRuntimeService.openWorkspace({ directory })
+    const workspaceHandle = workspaceHandleFromResult(opened)
+    if (!workspaceHandle) throw new Error('ECC Workspace handle is unavailable.')
+    const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+      workspaceHandle,
+    })
+    if (
+      !isRecord(snapshot) ||
+      typeof snapshot.directory !== 'string' ||
+      normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(directory)
+    ) {
+      throw new Error('Agent Workspace context does not match its ECC session.')
+    }
+    const configuration = isRecord(snapshot.configuration) ? snapshot.configuration : null
+    const workspaceSpec = isRecord(configuration?.workspaceSpec)
+      ? configuration.workspaceSpec
+      : null
+    if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
+    const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
+      ? snapshot.engineeringSnapshot
+      : null
+    const workspaceRevision = engineeringSnapshot?.workspaceRevision
+    if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
+      throw new Error('ECC Workspace Revision is unavailable.')
+    }
+    const stepConfigurations: Record<string, Record<string, unknown>> = {}
+    await Promise.all(
+      AGENT_STEP_OPTION_STEPS.map(async (step) => {
+        try {
+          const result = await services.eccRuntimeService.readWorkspaceStepConfiguration({
+            step,
+            workspaceHandle,
+          })
+          if (result.status !== 'available') return
+          stepConfigurations[step] = Object.fromEntries(
+            result.parameters.map((parameter) => [parameter.param, parameter.value]),
+          )
+        } catch {
+          // The step is not part of this Workspace flow; it contributes no options.
+        }
+      }),
+    )
+    const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
+    return {
+      workspaceHandle,
+      workspaceRevision: Number(workspaceRevision),
+      workspaceParameterValues: readAgentWorkspaceParameterValues(
+        workspaceSpec,
+        stepConfigurations,
+      ),
+      ...(typeof design?.name === 'string' && design.name
+        ? { workspaceDesignId: design.name }
+        : {}),
+    }
   }
 
   const deliverDirectoryScopedEvent = (
@@ -1413,10 +1515,48 @@ export function registerIpc(
       throw new Error('Workspace rerun source is not bound to this window.')
     }
     pendingWorkspaceReruns.delete(token)
-    const prepared = await prepareWorkspaceRerun(pending.contract)
+    // Isolated rerun preparation is delegated to the ECC workspace.derive
+    // domain command; Electron only verifies the frozen contract evidence.
+    const verified = await verifyWorkspaceRerunContract(pending.contract)
+    // openWorkspace reuses the live handle or reopens one released by idle
+    // cleanup, so a stale source binding self-heals before ownership checks.
+    const openedSource = await services.eccRuntimeService.openWorkspace({
+      directory: verified.sourceWorkspace,
+    })
+    const sourceWorkspaceHandle = workspaceHandleFromResult(openedSource)
+    const openedSourceDirectory = workspaceDirectoryFromResult(openedSource)
+    if (!sourceWorkspaceHandle || !openedSourceDirectory) {
+      throw new Error('Workspace rerun source is not active in this window.')
+    }
+    trackWorkspaceHandle(event.sender, sourceWorkspaceHandle, openedSourceDirectory)
+    const derived = (await executeProductCommand(
+      {
+        command: 'workspace.derive',
+        payload: {
+          workspaceHandle: sourceWorkspaceHandle,
+          directory: verified.sourceWorkspace,
+          targetDirectory: verified.targetWorkspace,
+          resetFromStep: pending.contract.target_step,
+        },
+      },
+      {
+        ownsWorkspaceHandle: (workspaceHandle) =>
+          workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
+        prepareCreate: async (createRequest) => createRequest,
+        runtime: services.eccRuntimeService,
+        trackCreateResult: () => undefined,
+      },
+    )) as { directory?: unknown }
+    if (
+      typeof derived.directory !== 'string' ||
+      normalizeWorkspacePath(derived.directory) !==
+        normalizeWorkspacePath(verified.targetWorkspace)
+    ) {
+      throw new Error('Workspace derive returned an unexpected target directory.')
+    }
     const executionToken = randomUUID()
     pendingWorkspaceRerunExecutions.set(executionToken, pending)
-    return { ...prepared, executionToken }
+    return { directory: derived.directory, executionToken }
   })
 
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
@@ -2640,40 +2780,15 @@ export function registerIpc(
     if (!agentRequest.directory && windowDirectory) {
       agentRequest.directory = windowDirectory
     }
-    if (agentRequest.workspaceId && agentRequest.directory) {
-      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-        workspaceHandle: agentRequest.workspaceId,
-      })
-      if (
-        !isRecord(snapshot) ||
-        typeof snapshot.directory !== 'string' ||
-        normalizeWorkspacePath(snapshot.directory) !==
-          normalizeWorkspacePath(agentRequest.directory)
-      ) {
-        throw new Error('Agent Workspace context does not match its ECC session.')
-      }
-      const configuration = isRecord(snapshot.configuration)
-        ? snapshot.configuration
-        : null
-      const workspaceSpec = isRecord(configuration?.workspaceSpec)
-        ? configuration.workspaceSpec
-        : null
-      if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
-      const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
-        ? snapshot.engineeringSnapshot
-        : null
-      const workspaceRevision = engineeringSnapshot?.workspaceRevision
-      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
-        throw new Error('ECC Workspace Revision is unavailable.')
-      }
-      agentRequest.workspaceRevision = Number(workspaceRevision)
-      agentRequest.workspaceParameterValues = readAgentWorkspaceParameterValues(
-        workspaceSpec,
-        {},
-      )
-      const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
-      if (typeof design?.name === 'string' && design.name) {
-        agentRequest.workspaceDesignId = design.name
+    if (agentRequest.directory) {
+      // The renderer only sends a directory, so main process resolves the
+      // current handle, revision, canonical parameters, and Step Options.
+      const context = await resolveAgentWorkspaceContext(agentRequest.directory)
+      agentRequest.workspaceId = context.workspaceHandle
+      agentRequest.workspaceRevision = context.workspaceRevision
+      agentRequest.workspaceParameterValues = context.workspaceParameterValues
+      if (context.workspaceDesignId) {
+        agentRequest.workspaceDesignId = context.workspaceDesignId
       }
     }
     trackAgentSession(event.sender, agentRequest)
@@ -2683,22 +2798,49 @@ export function registerIpc(
   handle(desktopApiIpcChannels.agentSendMessage, async (event, request) => {
     const agentRequest = readAgentSendMessageRequest(request)
     const subscription = requireAgentSessionOwner(event.sender, agentRequest)
-    if (!agentRequest.confirmationToken && subscription.workspaceId) {
-      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-        workspaceHandle: subscription.workspaceId,
-      })
-      const engineeringSnapshot =
-        isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
-          ? snapshot.engineeringSnapshot
-          : null
-      const workspaceRevision = engineeringSnapshot?.workspaceRevision
-      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
-        throw new Error('ECC Workspace Revision is unavailable.')
+    if (!agentRequest.confirmationToken) {
+      if (subscription.directory) {
+        // Refresh Revision, canonical parameters, and Step Options before the
+        // turn; openWorkspace reuses or reopens the runtime handle, so an
+        // idle-released handle is healed and the session rebinds to it.
+        const context = await resolveAgentWorkspaceContext(subscription.directory)
+        agentRequest.workspaceRevision = context.workspaceRevision
+        subscription.workspaceId = context.workspaceHandle
+      } else if (subscription.workspaceId) {
+        const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+          workspaceHandle: subscription.workspaceId,
+        })
+        const engineeringSnapshot =
+          isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
+            ? snapshot.engineeringSnapshot
+            : null
+        const workspaceRevision = engineeringSnapshot?.workspaceRevision
+        if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
+          throw new Error('ECC Workspace Revision is unavailable.')
+        }
+        agentRequest.workspaceRevision = Number(workspaceRevision)
       }
-      agentRequest.workspaceRevision = Number(workspaceRevision)
     }
     return await requireAgentRuntime(services).sendMessage(agentRequest)
   })
+
+  handle(
+    desktopApiIpcChannels.agentRegisterOperationAssociation,
+    async (event, request) => {
+      const association = readAgentOperationAssociationRequest(request)
+      requireAgentSessionOwner(event.sender, association)
+      recordAgentOperationAssociation(
+        agentSessionKey(readAgentProviderId(association), association.sessionId),
+        {
+          command: association.command,
+          operationId: association.operationId,
+          ...(association.workspaceHandle
+            ? { workspaceHandle: association.workspaceHandle }
+            : {}),
+        },
+      )
+    },
+  )
 
   handle(desktopApiIpcChannels.agentGetModelSettings, async (event, request) => {
     const agentRequest = readAgentModelSettingsRequest(request)
@@ -2844,7 +2986,8 @@ function readCodexModelSourceRequest(value: unknown): 'codex' | 'glm' {
 }
 
 function readApiKeyRequest(value: unknown, label: string): string {
-  const apiKey = isRecord(value) && typeof value.apiKey === 'string' ? value.apiKey : value
+  const apiKey =
+    isRecord(value) && typeof value.apiKey === 'string' ? value.apiKey : value
   if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 4096) {
     throw new Error(`Invalid ${label} API key request`)
   }
@@ -2922,6 +3065,41 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
     message,
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+const agentOperationAssociationCommands = new Set([
+  'workspace.run',
+  'workspace.runStep',
+  'candidate.rerun',
+  'candidate.resume',
+])
+
+function readAgentOperationAssociationRequest(
+  value: unknown,
+): DesktopAgentOperationAssociationRequest {
+  const record = readAgentRecord(value)
+  const command = record.command
+  const operationId = record.operationId
+  const workspaceHandle =
+    typeof record.workspaceHandle === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(record.workspaceHandle)
+      ? record.workspaceHandle
+      : undefined
+  if (
+    typeof command !== 'string' ||
+    !agentOperationAssociationCommands.has(command) ||
+    typeof operationId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(operationId)
+  ) {
+    throw new Error('Agent operation association is invalid.')
+  }
+  return {
+    command: command as DesktopAgentOperationAssociationRequest['command'],
+    operationId,
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+    ...(workspaceHandle ? { workspaceHandle } : {}),
   }
 }
 

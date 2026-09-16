@@ -13,7 +13,6 @@ import { describe, expect, it } from 'vitest'
 import {
   createEccRuntimeEnv,
   resolveDataHome,
-  resolveEccAgentExecutable,
   resolveEccExecutable,
   resolveEccSidecarLaunch,
 } from './runtimeEnv'
@@ -536,88 +535,15 @@ describe('createEccRuntimeEnv', () => {
     expect(executable).toBe(join(fixture.userDataPath, 'runtime-bin', 'ecc'))
   })
 
-  it('resolves the dedicated Agent RPC executable in development', () => {
-    const fixture = createRepoFixture()
-    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
-    const executable = join(fixture.repoRoot, 'ecc', '.venv', 'bin', 'ecc-agent-rpc')
-    mkdirSync(join(fixture.repoRoot, 'ecc', '.venv', 'bin'), { recursive: true })
-    writeFileSync(executable, '#!/usr/bin/env bash\n')
-    chmodSync(executable, 0o755)
-
-    expect(
-      resolveEccAgentExecutable({
-        appPath: fixture.appPath,
-        cwd: fixture.appPath,
-        env: { PATH: '/usr/bin' },
-        isPackaged: false,
-        platform: 'linux',
-        userDataPath: fixture.userDataPath,
-      }),
-    ).toBe(executable)
-  })
-
-  it('resolves the Agent RPC executable from PATH like the Python agent', () => {
-    const pathDir = join(createRepoFixture().userDataPath, 'path-bin')
-    mkdirSync(pathDir, { recursive: true })
-    const executable = join(pathDir, 'ecc-agent-rpc')
-    writeFileSync(executable, '#!/usr/bin/env bash\n')
-    chmodSync(executable, 0o755)
-
-    expect(
-      resolveEccAgentExecutable({
-        appPath: '/nonexistent-app',
-        cwd: '/nonexistent-app',
-        env: { PATH: pathDir },
-        isPackaged: false,
-        platform: 'linux',
-        userDataPath: pathDir,
-      }),
-    ).toBe(executable)
-  })
-
-  it('fails loudly when ECOS_AGENT_ECC_RPC_BIN is set but not executable', () => {
-    const fixture = createRepoFixture()
-    const configured = join(fixture.userDataPath, 'ecc-agent-rpc')
-    writeFileSync(configured, '#!/usr/bin/env bash\n')
-
-    expect(() =>
-      resolveEccAgentExecutable({
-        appPath: fixture.appPath,
-        cwd: fixture.appPath,
-        env: { ECOS_AGENT_ECC_RPC_BIN: configured, PATH: '/usr/bin' },
-        isPackaged: false,
-        platform: 'linux',
-        userDataPath: fixture.userDataPath,
-      }),
-    ).toThrow('ECOS_AGENT_ECC_RPC_BIN is not executable')
-  })
-
-  it('routes explicit Agent requests to the Agent RPC executable', () => {
-    const options = {
-      agentEccExecutable: '/runtime/ecc-agent-rpc',
-      eccExecutable: '/runtime/ecc',
-    }
-
+  it('launches every sidecar through ecc rpc serve', () => {
     expect(
       resolveEccSidecarLaunch({
-        ...options,
-        runtimeTarget: 'agent',
+        eccExecutable: '/runtime/ecc',
       }),
-    ).toEqual({ command: '/runtime/ecc-agent-rpc', commandArgs: [] })
-    expect(resolveEccSidecarLaunch(options)).toEqual({
+    ).toEqual({
       command: '/runtime/ecc',
       commandArgs: ['rpc', 'serve', '--stdio', '--persistent-db'],
     })
-  })
-
-  it('fails closed when an Agent request has no dedicated Agent RPC executable', () => {
-    expect(() =>
-      resolveEccSidecarLaunch({
-        agentEccExecutable: null,
-        eccExecutable: '/runtime/ecc',
-        runtimeTarget: 'agent',
-      }),
-    ).toThrow('ECC Agent RPC executable is unavailable')
   })
 
   it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {

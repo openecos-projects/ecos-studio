@@ -387,6 +387,62 @@ export interface EccRuntimeStartStepRequest extends EccRuntimeStartFlowRequest {
   step: string
 }
 
+export interface EccCandidatePatchItem {
+  knob_id: string
+  value: unknown
+}
+
+export interface EccCandidateCapabilitiesRequest extends EccWorkspaceHandleRequest {}
+
+export interface EccCandidateCapabilitiesResult {
+  registrySha256?: string
+  schema: string
+  schemaVersion: number
+  targets: Record<string, unknown>[]
+}
+
+export interface EccCandidateRerunRequest extends EccWorkspaceMutationRequest {
+  candidateId: string
+  contextSha256: string
+  executionScope: string
+  endStep: string
+  floorplanMode?: string
+  idempotencyKey: string
+  parameterCardSha256: string
+  parentCandidateRootRef?: string
+  patch: EccCandidatePatchItem[]
+  seed: number
+  targetStep: string
+}
+
+export interface EccWorkspaceDeriveRequest {
+  /** Defaults to "workspace.derived". */
+  cause?: string
+  /** Defaults to "". */
+  commandId?: string
+  /** Source workspace directory owned by the caller. */
+  directory: string
+  /** Empty resets the whole flow; otherwise this step and its successors reset. */
+  resetFromStep: string
+  /** New target directory; must not exist yet and must differ from the source. */
+  targetDirectory: string
+}
+
+export interface EccWorkspaceDeriveResult {
+  directory: string
+  workspaceHandle: string
+  workspaceId?: string
+  workspaceRevision: number
+}
+
+export interface EccCandidateResumeRequest extends EccWorkspaceMutationRequest {
+  candidateId: string
+  contextSha256: string
+  idempotencyKey: string
+  parameterCardSha256: string
+  seed: number
+}
+
 export interface EccRuntimeOperationRequest extends EccWorkspaceHandleRequest {
   operationId: string
 }

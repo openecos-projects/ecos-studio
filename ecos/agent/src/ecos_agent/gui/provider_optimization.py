@@ -523,16 +523,18 @@ class ProviderOptimizationMixin:
                     ),
                 )
                 self._inherit_chat_model_settings(session, provider)
-            runner = self.optimization_runner_factory(
-                {
-                    "session_id": session.session_id,
-                    "episode_id": session.optimization_episode_id,
-                    "workspace": workspace,
-                    "objective": session.optimization_objective,
-                    "objective_alignment": session.optimization_objective_alignment,
-                },
-                provider,
-            )
+            runner_context: dict[str, Any] = {
+                "session_id": session.session_id,
+                "episode_id": session.optimization_episode_id,
+                "workspace": workspace,
+                "objective": session.optimization_objective,
+                "objective_alignment": session.optimization_objective_alignment,
+            }
+            if session.workspace_handle:
+                runner_context["workspace_handle"] = session.workspace_handle
+            if session.workspace_revision is not None:
+                runner_context["expected_workspace_revision"] = session.workspace_revision
+            runner = self.optimization_runner_factory(runner_context, provider)
             if not isinstance(runner, OptimizationEpisodeRunner):
                 raise ValueError("Optimization runner factory returned an invalid runner.")
         except Exception as exc:

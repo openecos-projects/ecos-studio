@@ -1,11 +1,16 @@
 import type {
+  EccCandidateCapabilitiesRequest,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
   EccRuntimeOperationRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
+  EccWorkspaceDeriveRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceHandleRequest,
+  EccWorkspaceOpenRequest,
   EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceUpdateRequest,
   ProductCommandRequest,
@@ -13,9 +18,16 @@ import type {
 
 interface ProductCommandRuntime {
   cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+  candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
+  candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
+  candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
+  deriveWorkspace(
+    request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
+  ): Promise<unknown>
   retryFinalSnapshot(request: EccWorkspaceHandleRequest): Promise<boolean>
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
   exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
+  openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
   releaseWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
   resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
   startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<unknown>
@@ -117,6 +129,9 @@ export async function executeProductCommand(
       throw error
     }
   }
+  if (request.command === 'workspace.open') {
+    return await context.runtime.openWorkspace(request.payload)
+  }
 
   const workspaceHandle = request.payload.workspaceHandle
   if (!context.ownsWorkspaceHandle(workspaceHandle)) {
@@ -153,8 +168,16 @@ export async function executeProductCommand(
       }
     case 'workspace.reset':
       return await context.runtime.resetFlow(request.payload)
+    case 'workspace.derive':
+      return await context.runtime.deriveWorkspace(request.payload)
     case 'workspace.exportSignoff':
       return await context.runtime.exportSignoff(request.payload)
+    case 'candidate.capabilities':
+      return await context.runtime.candidateCapabilities(request.payload)
+    case 'candidate.rerun':
+      return await context.runtime.candidateRerun(request.payload)
+    case 'candidate.resume':
+      return await context.runtime.candidateResume(request.payload)
   }
 }
 
@@ -228,6 +251,51 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireString(payload, 'workspaceHandle')
       requireString(payload, 'outputPath')
       break
+    case 'workspace.open':
+      requireString(payload, 'directory')
+      break
+    case 'workspace.derive':
+      requireString(payload, 'workspaceHandle')
+      requireString(payload, 'directory')
+      requireString(payload, 'targetDirectory')
+      if (payload.directory === payload.targetDirectory) {
+        throw new Error(
+          'Product Command requires targetDirectory different from directory',
+        )
+      }
+      if (typeof payload.resetFromStep !== 'string') {
+        throw new Error('Product Command requires resetFromStep')
+      }
+      requireOptionalString(payload, 'commandId')
+      requireOptionalString(payload, 'cause')
+      break
+    case 'candidate.capabilities':
+      requireString(payload, 'workspaceHandle')
+      break
+    case 'candidate.rerun':
+      requireString(payload, 'workspaceHandle')
+      requireString(payload, 'candidateId')
+      requireString(payload, 'contextSha256')
+      requireString(payload, 'executionScope')
+      requireString(payload, 'endStep')
+      requireString(payload, 'idempotencyKey')
+      requireString(payload, 'parameterCardSha256')
+      requireString(payload, 'targetStep')
+      requireOptionalString(payload, 'floorplanMode')
+      requireOptionalString(payload, 'parentCandidateRootRef')
+      requirePatch(payload)
+      requireSeed(payload.seed)
+      validateRevision(payload.expectedWorkspaceRevision)
+      break
+    case 'candidate.resume':
+      requireString(payload, 'workspaceHandle')
+      requireString(payload, 'candidateId')
+      requireString(payload, 'contextSha256')
+      requireString(payload, 'idempotencyKey')
+      requireString(payload, 'parameterCardSha256')
+      requireSeed(payload.seed)
+      validateRevision(payload.expectedWorkspaceRevision)
+      break
     default:
       throw new Error('Unsupported Product Command')
   }
@@ -251,6 +319,22 @@ function requireOptionalString(payload: Record<string, unknown>, key: string): v
 function validateRevision(value: unknown): void {
   if (!Number.isInteger(value) || Number(value) < 0) {
     throw new Error('Product Command revision must be a non-negative integer')
+  }
+}
+
+function requireSeed(value: unknown): void {
+  if (!Number.isInteger(value)) {
+    throw new Error('Product Command requires seed')
+  }
+}
+
+function requirePatch(payload: Record<string, unknown>): void {
+  if (!Array.isArray(payload.patch) || payload.patch.length !== 1) {
+    throw new Error('Product Command requires exactly one patch item')
+  }
+  const item = payload.patch[0]
+  if (!isRecord(item) || typeof item.knob_id !== 'string' || !item.knob_id.trim()) {
+    throw new Error('Product Command requires patch knob_id')
   }
 }
 
