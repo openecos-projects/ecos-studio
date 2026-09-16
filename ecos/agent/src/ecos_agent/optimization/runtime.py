@@ -163,6 +163,29 @@ class OptimizationRuntimeContext(BaseModel):
         return value
 
 
+def _calibration_reference_observation(workspace: Path) -> TerminalObservation | None:
+    """Middle default replay as the rerun-path incumbent anchor.
+
+    The workspace-create observation differs systematically from every rerun
+    (site-quantized config write-back), so the first candidate must be judged
+    against a rerun observation. Replays are byte-identical in practice; the
+    middle replay stands in for the per-metric median.
+    """
+    replays = sorted(
+        (workspace / ".agent" / "optimization" / "noise-calibration").glob(
+            "default-replay-*/terminal-observation.v1.json"
+        )
+    )
+    if len(replays) < 2:
+        return None
+    observation = TerminalObservation.model_validate_json(
+        replays[len(replays) // 2].read_bytes()
+    )
+    if not observation.eligible_for_incumbent:
+        return None
+    return observation
+
+
 def create_optimization_runner(
     context: Mapping[str, Any], planner: object
 ) -> OptimizationEpisodeRunner:
@@ -193,6 +216,13 @@ def create_optimization_runner(
         runtime.knowledge_case_pool_root
     )
     terminal_observation = build_terminal_observation(workspace)
+    # The first candidate must be judged against the rerun path, not the
+    # workspace-create path: the canonical observation differs systematically
+    # from every rerun (site-quantized config write-back), while replays and
+    # candidates share the rerun path.
+    incumbent_observation = (
+        _calibration_reference_observation(workspace) or terminal_observation
+    )
     try:
         validate_objective_alignment(
             runtime.objective_alignment, objective, terminal_observation
@@ -257,6 +287,7 @@ def create_optimization_runner(
             memory_store=memory_store,
             budget=budget,
             terminal_observation=terminal_observation,
+            incumbent_observation=incumbent_observation,
             parent_manifest=parent_manifest,
             execution_context=execution_context,
             knowledge_case_pool_root=knowledge_case_pool_root, design_id=design_id,
@@ -340,6 +371,7 @@ def _recover_or_create_controller(
     memory_store: OptimizationTaskMemoryStore,
     budget: BudgetSnapshot,
     terminal_observation: TerminalObservation,
+    incumbent_observation: TerminalObservation,
     parent_manifest: str,
     execution_context: Mapping[str, object],
     knowledge_case_pool_root: Path | None, design_id: str | None,
@@ -379,7 +411,7 @@ def _recover_or_create_controller(
         executor=executor,
         ledger=ledger,
         clock=_monotonic,
-        incumbent=terminal_observation,
+        incumbent=incumbent_observation,
         parent_manifest_sha256=parent_manifest,
         objective=runtime.objective,
         objective_alignment=runtime.objective_alignment,

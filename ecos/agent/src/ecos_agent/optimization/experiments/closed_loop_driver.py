@@ -308,7 +308,8 @@ def build_metric_comparison(
     traces: tuple[CandidateTrace, ...],
     epsilon: dict[str, float],
 ) -> dict[str, object]:
-    """Free-run-style comparison table: canonical baseline vs best candidate.
+    """Free-run-style comparison table: calibration replay reference vs best
+    candidate.
 
     The best candidate is the terminal-success candidate with the highest
     frozen objective utility. ``beyond_noise`` is None where the key has no
@@ -574,7 +575,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
     )
     metric_comparison = build_metric_comparison(
-        canonical,
+        reference,
         traces,
         noise_epsilon["epsilon"] if noise_epsilon else {},
     )
