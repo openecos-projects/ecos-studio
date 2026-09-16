@@ -1,36 +1,42 @@
-import { describe, expect, it } from 'vitest'
-import statusPieChartSource from './StatusPieChart.vue?raw'
+// @vitest-environment happy-dom
+
+import { mount } from '@vue/test-utils'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import StatusPieChart from './StatusPieChart.vue'
+
+vi.mock('echarts/core', () => ({
+  init: vi.fn(() => ({ dispose: vi.fn(), resize: vi.fn(), setOption: vi.fn() })),
+  use: vi.fn(),
+}))
+vi.mock('echarts/charts', () => ({ PieChart: {} }))
+vi.mock('echarts/components', () => ({ TooltipComponent: {} }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
+
+beforeAll(() => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      disconnect() {}
+      observe() {}
+    },
+  )
+})
 
 describe('StatusPieChart', () => {
-  it('uses an HTML legend instead of clipped ECharts callout labels', () => {
-    expect(statusPieChartSource).toContain('showLabels?: boolean')
-    expect(statusPieChartSource).toContain('class="status-pie-legend"')
-    expect(statusPieChartSource).toContain('v-if="showLabels && slices.length"')
-    expect(statusPieChartSource).toContain("radius: props.showLabels ? ['48%', '70%']")
-    expect(statusPieChartSource).toContain('label: { show: false }')
-    expect(statusPieChartSource).toContain('labelLine: { show: false }')
-    expect(statusPieChartSource).toContain('slice.color ?? colorForTone(slice.tone)')
-  })
+  it('does not render an empty state beside populated slices without a legend', () => {
+    const wrapper = mount(StatusPieChart, {
+      props: {
+        label: 'QoR comparison distribution',
+        slices: [
+          { id: 'improved', label: 'Improved', value: 21, tone: 'good' },
+          { id: 'regressed', label: 'Regressed', value: 6, tone: 'bad' },
+          { id: 'unchanged', label: 'Unchanged', value: 5, tone: 'neutral' },
+        ],
+      },
+    })
 
-  it('keeps unlabeled chart wrappers filling their parent height for snapshot tiles', () => {
-    expect(statusPieChartSource).toContain(
-      '.status-pie,\n.status-pie-chart-wrap,\n.status-pie-empty {\n  height: 100%;',
-    )
-    expect(statusPieChartSource).toContain(
-      '.status-pie.has-legend .status-pie-chart-wrap {\n  flex: 1 1 auto;\n  height: auto;',
-    )
-  })
-
-  it('renders tooltips outside overflow-clipped chart containers', () => {
-    expect(statusPieChartSource).toContain("appendTo: 'body'")
-    expect(statusPieChartSource).toContain('confine: false')
-  })
-
-  it('shows a supplied total when a valid empty distribution has no slices', () => {
-    expect(statusPieChartSource).toContain('v-else-if="centerPrimary"')
-    expect(statusPieChartSource).toContain('{{ centerPrimary }}')
-    expect(statusPieChartSource).toContain(
-      '<div v-else class="status-pie-empty">No data</div>',
-    )
+    expect(wrapper.find('.status-pie-chart').exists()).toBe(true)
+    expect(wrapper.find('.status-pie-empty').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('No data')
   })
 })

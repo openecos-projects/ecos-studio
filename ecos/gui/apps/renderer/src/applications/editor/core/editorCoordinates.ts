@@ -12,18 +12,6 @@ export interface Vec2 {
   y: number
 }
 
-/** 显示坐标系下的一点 → Pixi 世界坐标（点） */
-export function worldPointFromDisplay(
-  displayX: number,
-  displayY: number,
-  worldHeight: number,
-): Vec2 {
-  return {
-    x: displayX,
-    y: worldHeight - displayY,
-  }
-}
-
 /** Pixi 世界坐标 → 显示坐标系下的一点 */
 export function displayPointFromWorld(
   worldX: number,
@@ -33,25 +21,6 @@ export function displayPointFromWorld(
   return {
     x: worldX,
     y: worldHeight - worldY,
-  }
-}
-
-/**
- * 显示/EDA 坐标系下矩形 **左下角** 为 (displayX, displayY) 时，Pixi 里 **左上角** 的世界坐标。
- * 适用于锚点在左上角的 Sprite、Graphics.rect、Container 等（与具体节点类型无关）。
- * `worldHeight` 使用与 `Editor` 一致的世界高度，例如 `editor.worldHeight`。
- */
-export function worldTopLeftFromDisplayBottomLeft(
-  displayX: number,
-  displayY: number,
-  _contentWidth: number,
-  contentHeight: number,
-  worldHeight: number,
-): Vec2 {
-  const bottomWorldY = worldHeight - displayY
-  return {
-    x: displayX,
-    y: bottomWorldY - contentHeight,
   }
 }
 

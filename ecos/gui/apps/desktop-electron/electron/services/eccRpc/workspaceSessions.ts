@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { normalizeWorkspacePath } from '../workspacePath'
 
 export interface WorkspaceSessionRecord {
   directory: string
   eccWorkspaceId: string | null
+  workspaceBindings?: Record<string, unknown>
   workspaceHandle: string
+  workspaceRevision: number
 }
 
 export class WorkspaceSessionNotFoundError extends Error {
@@ -38,11 +41,18 @@ export class WorkspaceSessionRegistry {
     return this.sessions.size
   }
 
-  activate(directory: string, eccWorkspaceId: string | null): WorkspaceSessionRecord {
+  activate(
+    directory: string,
+    eccWorkspaceId: string | null,
+    workspaceRevision = 0,
+    workspaceBindings?: Record<string, unknown>,
+  ): WorkspaceSessionRecord {
     const session = {
       directory,
       eccWorkspaceId,
+      ...(workspaceBindings ? { workspaceBindings } : {}),
       workspaceHandle: this.idProvider(),
+      workspaceRevision,
     }
     this.sessions.set(session.workspaceHandle, session)
     this.activeHandle = session.workspaceHandle
@@ -54,6 +64,7 @@ export class WorkspaceSessionRegistry {
       this.sessions.set(workspaceHandle, {
         ...session,
         eccWorkspaceId: null,
+        workspaceRevision: 0,
       })
     }
   }
@@ -65,14 +76,32 @@ export class WorkspaceSessionRegistry {
     this.activeHandle = Array.from(this.sessions.keys()).at(-1) ?? null
   }
 
-  rebind(workspaceHandle: string, eccWorkspaceId: string): WorkspaceSessionRecord {
+  rebind(
+    workspaceHandle: string,
+    eccWorkspaceId: string,
+    workspaceRevision = 0,
+  ): WorkspaceSessionRecord {
     const session = this.require(workspaceHandle)
     const rebound = {
       ...session,
       eccWorkspaceId,
+      workspaceRevision,
     }
     this.sessions.set(workspaceHandle, rebound)
     return { ...rebound }
+  }
+
+  updateRevision(workspaceHandle: string, workspaceRevision: number): void {
+    const session = this.require(workspaceHandle)
+    this.sessions.set(workspaceHandle, { ...session, workspaceRevision })
+  }
+
+  updateBindings(
+    workspaceHandle: string,
+    workspaceBindings: Record<string, unknown>,
+  ): void {
+    const session = this.require(workspaceHandle)
+    this.sessions.set(workspaceHandle, { ...session, workspaceBindings })
   }
 
   hasOtherEccWorkspaceReference(
@@ -100,8 +129,9 @@ export class WorkspaceSessionRegistry {
   }
 
   findByDirectory(directory: string): WorkspaceSessionRecord | null {
+    const normalizedDirectory = normalizeWorkspacePath(directory)
     for (const session of this.sessions.values()) {
-      if (session.directory === directory) {
+      if (normalizeWorkspacePath(session.directory) === normalizedDirectory) {
         return { ...session }
       }
     }

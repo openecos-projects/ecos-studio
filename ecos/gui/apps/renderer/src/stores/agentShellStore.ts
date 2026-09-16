@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import type { DesktopCodexDependencyStatus } from '@ecos-studio/shared'
 import {
   clampAgentPanelWidth,
   persistAgentPanelWidth,
+  persistWorkspaceAgentCollapsed,
   readStoredAgentPanelWidth,
+  readStoredWorkspaceAgentCollapsed,
 } from '@/composables/agentPanelWidth'
 import { resolveAgentTabTitle, type AgentTabContextInput } from './agentTabContext'
 
@@ -41,6 +44,8 @@ export const useAgentShellStore = defineStore('agentShell', () => {
   const preserveSessionOnWorkspaceSwitch = ref(false)
   const pendingPostCreateFlow = ref<AgentPostCreateFlowHandoff | null>(null)
   const panelWidthPx = ref(readStoredAgentPanelWidth())
+  const workspaceAgentCollapsed = ref(readStoredWorkspaceAgentCollapsed())
+  const codexStatus = ref<DesktopCodexDependencyStatus | null>(null)
 
   const activeTab = computed(
     () => tabs.value.find((tab) => tab.id === activeTabId.value) ?? null,
@@ -176,6 +181,19 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     persistAgentPanelWidth(next)
   }
 
+  function setWorkspaceAgentCollapsed(collapsed: boolean): void {
+    workspaceAgentCollapsed.value = collapsed
+    persistWorkspaceAgentCollapsed(collapsed)
+  }
+
+  function toggleWorkspaceAgent(): void {
+    setWorkspaceAgentCollapsed(!workspaceAgentCollapsed.value)
+  }
+
+  function setCodexStatus(status: DesktopCodexDependencyStatus | null): void {
+    codexStatus.value = status
+  }
+
   return {
     homeAgentOpen,
     tabs,
@@ -184,6 +202,8 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     sessionId,
     mode,
     panelWidthPx,
+    workspaceAgentCollapsed,
+    codexStatus,
     preserveMessagesOnWorkspaceSwitch,
     preserveSessionOnWorkspaceSwitch,
     pendingPostCreateFlow,
@@ -194,6 +214,9 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     setSessionId,
     setMode,
     setPanelWidthPx,
+    setWorkspaceAgentCollapsed,
+    toggleWorkspaceAgent,
+    setCodexStatus,
     activateTab,
     createTab,
     markTabStarted,

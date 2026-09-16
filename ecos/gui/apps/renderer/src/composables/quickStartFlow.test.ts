@@ -8,7 +8,6 @@ import { runQuickStartFlow } from './quickStartFlow'
 
 function operation(state: EccRuntimeOperation['state'] = 'running'): EccRuntimeOperation {
   return {
-    awaitingEventId: null,
     createdAt: 0,
     currentStep: 'Harden',
     currentTool: 'ecc',
@@ -41,9 +40,9 @@ function stage(
       origin: 'gui',
       sequence: 1,
       timestamp: 1,
-      type,
+      type: 'execution.progress',
       workspaceId: 'workspace-1',
-      payload: { step, state },
+      payload: { sourceType: type, step, state },
     },
   }
 }
@@ -62,7 +61,10 @@ function fixture() {
         }),
       },
     },
-    ecc: { runtime: { waitForOperation, cancel } },
+    ecc: { runtime: { waitForOperation } },
+    productCommands: {
+      execute: cancel,
+    },
   } as unknown as DesktopApi
   const narrate = vi.fn()
   const onStarted = vi.fn(async () => undefined)
@@ -171,8 +173,11 @@ describe('Quick Start flow narration', () => {
       (await runQuickStartFlow({ ...options, signal: controller.signal })).state,
     ).toBe('cancelled')
     expect(cancel).toHaveBeenCalledExactlyOnceWith({
-      workspaceHandle: 'handle-1',
-      operationId: 'op-1',
+      command: 'workspace.cancel',
+      payload: {
+        workspaceHandle: 'handle-1',
+        operationId: 'op-1',
+      },
     })
     expect(waitForOperation).toHaveBeenCalledOnce()
   })

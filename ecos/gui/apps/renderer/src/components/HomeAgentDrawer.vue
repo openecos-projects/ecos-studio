@@ -1,5 +1,6 @@
 <template>
-  <Teleport to="body">
+  <!-- Share the app stacking context so TopBar popovers stay above the drawer. -->
+  <Teleport to="#app">
     <Transition name="home-agent-drawer">
       <aside
         v-if="homeAgentOpen"

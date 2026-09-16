@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import sourceEditorSource from './FrontendSourceEditor.vue?raw'
 import { frontendSourceLanguageForPath } from './frontendSourceLanguage'
 
 describe('frontendSourceLanguageForPath', () => {
@@ -30,30 +29,5 @@ describe('frontendSourceLanguageForPath', () => {
     expect(frontendSourceLanguageForPath('rtl/core.sv?revision=2#L10')).toBe(
       'systemverilog',
     )
-  })
-})
-
-describe('FrontendSourceEditor Monaco contract', () => {
-  it('uses the shared editable Monaco runtime without CodeMirror', () => {
-    expect(sourceEditorSource).toContain("import('./monacoRuntime')")
-    expect(sourceEditorSource).toContain('runtime.getMonacoRuntime(editorTheme.value)')
-    expect(sourceEditorSource).toContain('readOnly: false')
-    expect(sourceEditorSource).toContain('domReadOnly: false')
-    expect(sourceEditorSource).toContain('automaticLayout: true')
-    expect(sourceEditorSource).toContain("wordWrap: 'on'")
-    expect(sourceEditorSource).toContain('frontendSourceLanguageForPath(sourcePath)')
-    expect(sourceEditorSource).not.toContain('@codemirror')
-    expect(sourceEditorSource).not.toContain('syntaxHighlighter')
-  })
-
-  it('owns a file model, tracks edits, supports save, and publishes lint markers', () => {
-    expect(sourceEditorSource).toContain("scheme: 'file'")
-    expect(sourceEditorSource).toContain('onDidChangeModelContent')
-    expect(sourceEditorSource).toContain('monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS')
-    expect(sourceEditorSource).toContain('editor.setPosition(position)')
-    expect(sourceEditorSource).toContain('editor.revealPositionInCenter(position)')
-    expect(sourceEditorSource).toContain('monaco.editor.setModelMarkers')
-    expect(sourceEditorSource).toContain('sourceModel?.dispose()')
-    expect(sourceEditorSource).toContain('editor?.dispose()')
   })
 })

@@ -73,9 +73,10 @@ const emit = defineEmits<{
   flex: 1;
   gap: 4px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(68px, 1fr));
   min-height: 0;
   min-width: 0;
+  overflow: auto;
   padding: 6px;
 }
 
@@ -84,12 +85,13 @@ const emit = defineEmits<{
   border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
   color: inherit;
   cursor: pointer;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   font: inherit;
   gap: 4px;
-  grid-template-rows: auto minmax(0, 1fr);
+  justify-content: space-between;
   margin: 0;
-  min-height: 0;
+  min-height: 68px;
   min-width: 0;
   overflow: hidden;
   padding: 6px 7px;
@@ -125,7 +127,6 @@ const emit = defineEmits<{
   color: var(--accent-color);
 }
 .snapshot-tile-copy {
-  align-self: end;
   display: flex;
   flex-direction: column;
   gap: 2px;

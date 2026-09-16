@@ -203,9 +203,8 @@ function statusIcon(status: AgentToolStepStatus): string {
 
 .step__detail-line > span:last-child {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 @keyframes tool-spin {

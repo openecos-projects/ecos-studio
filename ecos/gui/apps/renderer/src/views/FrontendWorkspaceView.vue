@@ -121,7 +121,7 @@
                   </div>
                   <span class="frontend-config-card__badge">Read only</span>
                 </div>
-                <div class="frontend-config-grid">
+                <div v-if="parametersLoaded" class="frontend-config-grid">
                   <div
                     v-for="item in frontendConfigItems"
                     :key="item.label"
@@ -137,6 +137,26 @@
                       {{ item.value }}
                     </strong>
                   </div>
+                </div>
+                <div
+                  v-else
+                  class="frontend-config-state"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <i
+                    :class="
+                      parametersLoading
+                        ? 'ri-loader-4-line spin'
+                        : 'ri-error-warning-line'
+                    "
+                    aria-hidden="true"
+                  ></i>
+                  <span>{{
+                    parametersLoading
+                      ? 'Loading configuration...'
+                      : 'Configuration unavailable.'
+                  }}</span>
                 </div>
               </section>
             </SplitterPanel>
@@ -2379,7 +2399,11 @@ const {
   invalidateWorkspaceResources,
   workspaceSession,
 } = useWorkspace()
-const { config } = useParameters()
+const {
+  config,
+  isLoading: parametersLoading,
+  isLoaded: parametersLoaded,
+} = useParameters()
 const { isLoading: subflowLoading, subflowSteps } = useSubflow()
 const CONSOLE_MIN_HEIGHT = 128
 const CONSOLE_DEFAULT_HEIGHT = 178
@@ -5980,6 +6004,21 @@ button:disabled {
   min-height: 0;
   overflow: auto;
   padding: 12px;
+}
+
+.frontend-config-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  min-height: 120px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.frontend-config-state i {
+  font-size: 16px;
 }
 
 .frontend-config-item {

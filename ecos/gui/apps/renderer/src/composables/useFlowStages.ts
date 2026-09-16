@@ -1,14 +1,7 @@
 import { ref, computed, getCurrentInstance, onUnmounted, watch } from 'vue'
 import { useWorkspace } from './useWorkspace'
-import { useDesktopRuntime, isDesktopRuntime } from './useDesktopRuntime'
-import { convertRemoteToLocalPath } from './useHomeData'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
-import { readProjectTextFile } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
-import {
-  getWorkspaceRuntimeSnapshotApi,
-  readWorkspaceFlowResourceApi,
-} from '@/api/workspaceResources'
+import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
   consumePendingHomeRunArtifactReset,
@@ -105,6 +98,8 @@ function normalizeFlowStageState(value: string | null | undefined): string {
     case 'completed':
     case 'complete':
       return 'Success'
+    case 'warning':
+      return 'Warning'
     case 'ongoing':
     case 'running':
       return 'Ongoing'
@@ -120,33 +115,6 @@ function normalizeFlowStageState(value: string | null | undefined): string {
     default:
       return value || 'Unstart'
   }
-}
-
-/**
- * 从工程读取 flow.json，返回全部 run 步骤的 path（用作路由 stepKey）。
- * 读取失败时回退为 STEP_METADATA 中 `group === 'run'` 的全集。
- */
-export async function loadFlowRunStepKeysFromProject(
-  projectPath: string,
-): Promise<string[]> {
-  if (!isDesktopRuntime() || !projectPath) {
-    return fallbackRunStepKeys()
-  }
-  try {
-    const flowData = (await readWorkspaceFlowResourceApi()) as FlowData | null
-    if (!flowData) return fallbackRunStepKeys()
-    const stages = transformFlowData(flowData)
-    return stages.map((s) => s.path)
-  } catch (e) {
-    console.warn('[loadFlowRunStepKeysFromProject]', e)
-    return fallbackRunStepKeys()
-  }
-}
-
-function fallbackRunStepKeys(): string[] {
-  return Object.values(STEP_METADATA)
-    .filter((m) => m.group === 'run')
-    .map((m) => m.path)
 }
 
 function flowDataHasStartedRun(flowData: FlowData): boolean {
@@ -188,7 +156,6 @@ async function readFrontendFlowWithRetry(
  * 负责从 flow.json 加载流程步骤并管理状态
  */
 export function useFlowStages() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const { currentProject, resourceVersions, runtimeEvents, workspaceSession } =
     useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
@@ -339,72 +306,13 @@ export function useFlowStages() {
   )
 
   /**
-   * 将远程路径转换为本地项目路径
-   */
-  function convertToLocalPath(remotePath: string): string {
-    const projectPath = currentProject.value?.path
-    return projectPath ? convertRemoteToLocalPath(remotePath, projectPath) : remotePath
-  }
-
-  /**
-   * 从指定的 flow.json 路径加载流程步骤
-   */
-  async function loadFlowStagesFromPath(flowJsonPath: string): Promise<void> {
-    const loadGeneration = ++flowLoadGeneration
-    if (!isDesktopRuntimeAvailable || !flowJsonPath) {
-      console.warn('Cannot load flow.json: desktop bridge unavailable or path is empty')
-      return
-    }
-
-    const sessionId = workspaceLifecycle.currentSessionId.value
-    const isCurrent = () =>
-      workspaceLifecycle.isCurrentSession(sessionId) &&
-      loadGeneration === flowLoadGeneration
-    isLoading.value = true
-    error.value = null
-
-    try {
-      const localPath = convertToLocalPath(flowJsonPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(localPath),
-      )
-      if (!isCurrent()) return
-      console.log('Loading flow.json from path:', resolvedPath ?? localPath)
-      if (!resolvedPath) return
-
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
-      )
-      if (!isCurrent() || fileContent === undefined) return
-      const flowData: FlowData = JSON.parse(fileContent)
-      if (!shouldApplyFlowData(flowData)) return
-
-      console.log('Loaded flow data from path:', flowData)
-
-      dynamicFlowStages.value = applyRuntimeStepOverrides(transformFlowData(flowData))
-      console.log('Flow stages loaded from path:', dynamicFlowStages.value)
-    } catch (err) {
-      if (!isCurrent()) return
-      console.error('Failed to load flow.json from path:', flowJsonPath, err)
-      error.value = err instanceof Error ? err.message : String(err)
-      dynamicFlowStages.value = []
-    } finally {
-      if (isCurrent()) {
-        isLoading.value = false
-      }
-    }
-  }
-
-  /**
    * 从 flow.json 加载流程步骤
    * 通过共享缓存获取 home.json 数据（不重复调用 API），从中提取 flow 路径
    */
   async function loadFlowStages(): Promise<void> {
     const loadGeneration = ++flowLoadGeneration
-    if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn(
-        'Cannot load flow.json: desktop bridge unavailable or no project is open',
-      )
+    if (!currentProject.value?.path) {
+      console.warn('Cannot load flow.json: no project is open')
       dynamicFlowStages.value = []
       return
     }
@@ -427,25 +335,8 @@ export function useFlowStages() {
     error.value = null
 
     try {
-      const workspaceHandle = workspaceSession?.value?.workspaceId ?? ''
       const flowData = await workspaceLifecycle.runForSession(sessionId, async () => {
-        // ECC-FE owns its workspace handle through DesignRuntime. The shared
-        // ECC snapshot API only understands backend workspace handles, so
-        // frontend projects must continue to read their complete flow.json.
-        if (!workspaceHandle || currentProject.value?.designTool === 'frontend') {
-          return await readFrontendFlowWithRetry(isCurrent)
-        }
-        const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
-        return {
-          steps: snapshot.flow.steps.map((step) => ({
-            'peak memory (mb)': step.peakMemory,
-            info: {},
-            name: step.name,
-            runtime: step.runtime,
-            state: step.state,
-            tool: step.tool,
-          })),
-        } satisfies FlowData
+        return await readFrontendFlowWithRetry(isCurrent)
       })
       if (!isCurrent()) return
       if (!flowData) {
@@ -783,7 +674,6 @@ export function useFlowStages() {
 
     // 方法
     loadFlowStages,
-    loadFlowStagesFromPath,
     refreshFlowStages,
     clearFlowStages,
     setFirstRunStepOngoing,

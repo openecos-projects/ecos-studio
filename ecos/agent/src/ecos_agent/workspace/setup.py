@@ -300,6 +300,7 @@ def workspace_setup_contract(
     workspace_directory = _workspace_directory(inputs, proposal)
     mpc = _project_mpc_snapshot(inputs.project_root) if mpc_enabled is not False else None
     resolved_mpc_enabled = mpc_enabled if mpc_enabled is not None else mpc is not None
+    filelist = inputs.filelist_path or None
     contract = {
         "schema_version": "flow-agent.workspace_setup_contract.v2",
         "title": "Workspace 运行方案" if language == "zh" else "Workspace run plan",
@@ -309,8 +310,8 @@ def workspace_setup_contract(
         "directory": workspace_directory,
         "pdk": "ics55",
         "pdk_root": inputs.pdk_root,
-        "rtl_list": [inputs.rtl_path],
-        "filelist": inputs.filelist_path or None,
+        "rtl_list": [] if filelist else [inputs.rtl_path],
+        "filelist": filelist,
         "sdc": inputs.sdc_path or None,
         "origin_def": "",
         "origin_verilog": "",

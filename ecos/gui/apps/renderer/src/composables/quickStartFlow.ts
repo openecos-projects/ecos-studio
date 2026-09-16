@@ -37,15 +37,21 @@ const STAGES: Record<EccFlowStep, [string, string]> = {
   Harden: ['最终结果生成', '整理设计输出并生成 GDS 等交付文件'],
 }
 
+function protocolSourceType(event: EccRuntimeProtocolEvent): string {
+  const sourceType = event.event.payload.sourceType
+  return typeof sourceType === 'string' ? sourceType : event.event.type
+}
+
 function stageNarration(event: EccRuntimeProtocolEvent): string | null {
   const step = event.event.payload.step
   if (typeof step !== 'string' || !step) return null
   const description = step in STAGES ? STAGES[step as EccFlowStep] : undefined
   const label = description ? `${step}（${description[0]}）` : step
-  if (event.event.type === 'step.started') {
+  const sourceType = protocolSourceType(event)
+  if (sourceType === 'step.started') {
     return description ? `正在进行 ${label}：${description[1]}。` : `正在执行 ${label}。`
   }
-  if (event.event.type !== 'step.completed') return null
+  if (sourceType !== 'step.completed') return null
   const state = String(event.event.payload.state).toLowerCase()
   if (state === 'skipped') return `${label}复用已有结果，本次未重新执行。`
   return state === 'success' ? `${label}执行完成。` : `${label}未成功完成。`
@@ -69,11 +75,16 @@ export async function runQuickStartFlow(options: {
   const earlyEvents: EccRuntimeProtocolEvent[] = []
   const seen = new Set<string>()
   const cancel = () => {
-    void runtime.cancel({ workspaceHandle, operationId }).catch((error: unknown) => {
-      narrate(
-        `停止请求未成功，仍在等待流程终态：${error instanceof Error ? error.message : String(error)}`,
-      )
-    })
+    void options.api.productCommands
+      .execute({
+        command: 'workspace.cancel',
+        payload: { workspaceHandle, operationId },
+      })
+      .catch((error: unknown) => {
+        narrate(
+          `停止请求未成功，仍在等待流程终态：${error instanceof Error ? error.message : String(error)}`,
+        )
+      })
   }
   const report = (event: EccRuntimeProtocolEvent) => {
     if (event.event.operationId !== operationId) return
@@ -91,8 +102,8 @@ export async function runQuickStartFlow(options: {
       normalizedPath(event.workspaceDirectory) !== normalizedPath(workspacePath)
     )
       return
-    if (event.event.type !== 'step.started' && event.event.type !== 'step.completed')
-      return
+    const sourceType = protocolSourceType(event)
+    if (sourceType !== 'step.started' && sourceType !== 'step.completed') return
     if (operationId) report(event)
     else earlyEvents.push(event)
   })

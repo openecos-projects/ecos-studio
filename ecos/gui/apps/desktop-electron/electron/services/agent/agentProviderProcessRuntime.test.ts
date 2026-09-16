@@ -838,7 +838,7 @@ describe('AgentProviderProcessRuntime', () => {
     )
   })
 
-  it('forwards execution contracts with every resolved parameter field', () => {
+  it('rebuilds rerun confirmation fields from the frozen execution payload', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
       manifest: {
@@ -859,14 +859,27 @@ describe('AgentProviderProcessRuntime', () => {
       `${JSON.stringify({
         event: {
           contract: {
-            fields: Array.from({ length: 25 }, (_, index) => ({
-              label: `parameter_${index}`,
-              value: String(index),
-            })),
+            fields: [{ label: 'untrusted', value: 'untrusted' }],
             presentation: 'workspace_rerun',
             schema_version: 'flow-agent.resolved_execution_contract.v1',
             title: 'Workspace rerun plan',
+            workspace_rerun: {
+              design_id: 'gcd',
+              end_step: 'place',
+              execution_scope: 'single_step',
+              parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+              requires_gui_review: true,
+              rerun_id: 'gcd_rerun_place',
+              schema_version: 'flow-agent.workspace_rerun_contract.v1',
+              source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+              source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
+              source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
+              source_workspace: '/runs/gcd',
+              target_step: 'place',
+              target_workspace: '/runs/gcd_rerun_place',
+            },
           },
+          sessionId: 'session-1',
           type: 'contract',
         },
         type: 'event',
@@ -876,7 +889,10 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).toHaveBeenCalledWith(
       expect.objectContaining({
         contract: expect.objectContaining({
-          fields: expect.arrayContaining([{ label: 'parameter_24', value: '24' }]),
+          confirmation_token: expect.any(String),
+          fields: expect.arrayContaining([
+            { label: 'place.target_density', value: '0.55' },
+          ]),
           presentation: 'workspace_rerun',
         }),
         type: 'contract',
@@ -1099,7 +1115,7 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
-  it('forwards validated workspace rerun contracts from provider stdout', () => {
+  it('forwards a validated workspace rerun only after the user confirms it', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
       manifest: {
@@ -1114,36 +1130,54 @@ describe('AgentProviderProcessRuntime', () => {
     const listener = vi.fn()
     runtime.onEvent(listener)
 
-    void runtime.getStatus({ providerId: 'local' })
+    void runtime.startSession({ providerId: 'local', sessionId: 'session-1' })
+    const workspaceRerun = {
+      design_id: 'gcd',
+      end_step: 'place',
+      execution_scope: 'single_step',
+      parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_place',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+      source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
+      source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
+      source_workspace: '/runs/gcd',
+      target_step: 'place',
+      target_workspace: '/runs/gcd_rerun_place',
+    }
     harness.children[0].stdout.emit(
       'data',
       `${JSON.stringify({
         event: {
-          type: 'workspace_rerun',
-          workspaceRerun: {
-            design_id: 'gcd',
-            end_step: 'place',
-            execution_scope: 'single_step',
-            parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
-            writes: [
-              {
-                file: 'home/parameters.json',
-                json_path: ['Target density'],
-                knob_id: 'place.target_density',
-                surface: 'parameters',
-                value: 0.55,
-              },
-            ],
-            requires_gui_review: true,
-            rerun_id: 'gcd_rerun_place',
-            schema_version: 'flow-agent.workspace_rerun_contract.v1',
-            source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
-            source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
-            source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
-            source_workspace: '/runs/gcd',
-            target_step: 'place',
-            target_workspace: '/runs/gcd_rerun_place',
+          contract: {
+            fields: [{ label: 'ignored', value: 'ignored' }],
+            presentation: 'workspace_rerun',
+            schema_version: 'flow-agent.resolved_execution_contract.v1',
+            title: 'Workspace rerun plan',
+            workspace_rerun: workspaceRerun,
           },
+          sessionId: 'session-1',
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+    const confirmationToken = listener.mock.calls[0][0].contract.confirmation_token
+    listener.mockClear()
+    void runtime.sendMessage({
+      confirmationToken,
+      message: '1',
+      providerId: 'local',
+      sessionId: 'session-1',
+    })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          sessionId: 'session-1',
+          type: 'workspace_rerun',
+          workspaceRerun,
         },
         type: 'event',
       })}\n`,
@@ -1151,38 +1185,39 @@ describe('AgentProviderProcessRuntime', () => {
 
     expect(listener).toHaveBeenCalledWith({
       providerId: 'local',
+      sessionId: 'session-1',
       type: 'workspace_rerun',
       workspaceRerun: expect.objectContaining({
         rerun_id: 'gcd_rerun_place',
         end_step: 'place',
         source_flow_json_sha256: 'a'.repeat(64),
         source_stage_artifact_sha256: 'b'.repeat(64),
-        writes: [
-          expect.objectContaining({
-            file: 'home/parameters.json',
-            knob_id: 'place.target_density',
-          }),
-        ],
+        workspace_parameters: { 'place.target_density': 0.55 },
+        step_configurations: [],
       }),
     })
   })
 
-  const parameterUpdateEvent = (writes: unknown): string =>
+  const parameterUpdateEvent = (overrides: Record<string, unknown> = {}): string =>
     `${JSON.stringify({
       event: {
+        sessionId: 'session-1',
         type: 'workspace_parameter_update',
         workspaceParameterUpdate: {
           parameter_patch: [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
-          schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+          schema_version: 'flow-agent.workspace_parameter_update_contract.v3',
           update_id: 'update_1',
           workspace: '/runs/gcd',
-          writes,
+          ...overrides,
         },
       },
       type: 'event',
     })}\n`
 
-  const emitParameterUpdate = (writes: unknown) => {
+  const emitParameterUpdate = (
+    overrides: Record<string, unknown> = {},
+    action: 'confirm' | 'cancel' | 'none' = 'confirm',
+  ) => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
       manifest: {
@@ -1196,103 +1231,113 @@ describe('AgentProviderProcessRuntime', () => {
     })
     const listener = vi.fn()
     runtime.onEvent(listener)
-    void runtime.getStatus({ providerId: 'local' })
-    harness.children[0].stdout.emit('data', parameterUpdateEvent(writes))
+    void runtime.startSession({
+      providerId: 'local',
+      sessionId: 'session-1',
+      workspaceRevision: 4,
+    })
+    const patch =
+      (overrides.confirmation_patch as unknown[]) ??
+      (overrides.parameter_patch as unknown[]) ?? [
+        { knob_id: 'floorplan.utilitization', value: 0.7 },
+      ]
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: {
+            fields: [{ label: 'ignored', value: 'ignored' }],
+            parameter_patch: patch,
+            presentation: 'workspace_parameter_update',
+            schema_version: 'flow-agent.resolved_execution_contract.v1',
+            title: 'Confirm parameter update',
+            update_id: 'update_1',
+            workspace: '/runs/gcd',
+          },
+          sessionId: 'session-1',
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+    const confirmationToken = listener.mock.calls[0]?.[0].contract?.confirmation_token
+    if (confirmationToken && action !== 'none') {
+      void runtime.sendMessage({
+        ...(action === 'confirm' ? { confirmationToken } : {}),
+        message: action === 'confirm' ? '1' : '2',
+        providerId: 'local',
+        sessionId: 'session-1',
+      })
+    }
+    listener.mockClear()
+    harness.children[0].stdout.emit('data', parameterUpdateEvent(overrides))
     return listener
   }
 
-  it('forwards resolved parameter write targets from provider stdout', () => {
-    const listener = emitParameterUpdate([
-      {
-        file: 'home/parameters.json',
-        json_path: ['Core', 'Utilitization'],
-        knob_id: 'floorplan.utilitization',
-        surface: 'parameters',
-        value: 0.7,
-      },
-    ])
+  it('derives canonical domain updates from the confirmed logical patch', () => {
+    const listener = emitParameterUpdate({
+      parameter_patch: [
+        { knob_id: 'floorplan.utilitization', value: 0.7 },
+        { knob_id: 'cts.skew_bound', value: 0.08 },
+      ],
+    })
 
     expect(listener).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'workspace_parameter_update',
         workspaceParameterUpdate: expect.objectContaining({
-          schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
-          writes: [
-            {
-              file: 'home/parameters.json',
-              json_path: ['Core', 'Utilitization'],
-              knob_id: 'floorplan.utilitization',
-              surface: 'parameters',
-              value: 0.7,
-            },
-          ],
+          schema_version: 'flow-agent.workspace_parameter_update_contract.v3',
+          workspace_parameters: {
+            'floorplan.core_util': 0.7,
+            'cts.skew_bound': '0.08',
+          },
+          step_configurations: [],
+          workspace_revision: 4,
         }),
       }),
     )
   })
 
-  it.each([
-    ['a file outside the parameter allowlist', 'home/../../etc/passwd'],
-    ['an arbitrary project source file', 'rtl/gcd.v'],
-    ['a flow definition', 'home/flow.json'],
-  ])('drops parameter updates that target %s', (_label, file) => {
-    const listener = emitParameterUpdate([
-      {
-        file,
-        json_path: ['Core', 'Utilitization'],
-        knob_id: 'floorplan.utilitization',
-        surface: 'parameters',
-        value: 0.7,
-      },
-    ])
-
-    expect(listener).not.toHaveBeenCalled()
+  it('drops parameter updates that were not confirmed or were cancelled', () => {
+    expect(emitParameterUpdate({}, 'none')).not.toHaveBeenCalled()
+    expect(emitParameterUpdate({}, 'cancel')).not.toHaveBeenCalled()
   })
 
-  it('drops parameter updates whose writes do not cover every patch entry', () => {
-    expect(emitParameterUpdate([])).not.toHaveBeenCalled()
-    expect(emitParameterUpdate(undefined)).not.toHaveBeenCalled()
-  })
-
-  it('drops parameter updates whose write value does not match the advertised patch', () => {
+  it('drops obsolete provider-supplied domain updates', () => {
     expect(
-      emitParameterUpdate([
-        {
-          file: 'home/params.toml',
-          json_path: ['pdk_root'],
-          knob_id: 'floorplan.utilitization',
-          surface: 'parameters',
-          value: '/tmp/other',
-        },
-      ]),
+      emitParameterUpdate({ workspace_parameters: { core_utilization: 0.8 } }),
+    ).not.toHaveBeenCalled()
+    expect(
+      emitParameterUpdate({
+        workspace_parameters: { core_utilization: 0.7 },
+        step_configurations: [{ step_id: 'CTS', options: { skew_bound: 0.08 } }],
+      }),
     ).not.toHaveBeenCalled()
   })
 
-  it('drops parameter updates whose json_path would pollute Object.prototype', () => {
+  it('drops an update whose patch differs from the confirmed card', () => {
     expect(
-      emitParameterUpdate([
-        {
-          file: 'config/dreamplace_ecc.json',
-          json_path: ['__proto__', 'toString'],
-          knob_id: 'floorplan.utilitization',
-          surface: 'step_config',
-          value: 0.7,
-        },
-      ]),
+      emitParameterUpdate({
+        confirmation_patch: [{ knob_id: 'floorplan.utilitization', value: 0.6 }],
+        parameter_patch: [{ knob_id: 'floorplan.utilitization', value: 0.7 }],
+      }),
     ).not.toHaveBeenCalled()
   })
 
-  it('drops parameter updates that pair the parameters surface with a step-config file', () => {
+  it('drops legacy file-write contracts', () => {
     expect(
-      emitParameterUpdate([
-        {
-          file: 'config/dreamplace_ecc.json',
-          json_path: ['utilitization'],
-          knob_id: 'floorplan.utilitization',
-          surface: 'parameters',
-          value: 0.7,
-        },
-      ]),
+      emitParameterUpdate({
+        schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+        writes: [{ file: 'home/parameters.json', json_path: ['Core'] }],
+      }),
+    ).not.toHaveBeenCalled()
+  })
+
+  it('drops invalid Workspace Parameter identities', () => {
+    expect(
+      emitParameterUpdate({
+        parameter_patch: [{ knob_id: 'Core.Utilitization', value: 0.7 }],
+      }),
     ).not.toHaveBeenCalled()
   })
 

@@ -1,5 +1,5 @@
-import type { ProjectManifestMpc, ProjectManifestMpcCandidate } from './projectManagement'
-import { validateMpcSpec } from '@ecos-studio/shared'
+import { validateMpcSpec, type ProjectManifestMpc } from '@ecos-studio/shared'
+import type { ProjectManifestMpcCandidate } from './projectManagement'
 
 export interface MpcSpecDesign {
   index: number

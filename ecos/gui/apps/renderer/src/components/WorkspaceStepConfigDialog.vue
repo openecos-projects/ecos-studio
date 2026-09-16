@@ -1,7 +1,7 @@
 <template>
   <div class="workspace-step-config-dialog">
     <aside class="workspace-step-config-nav" aria-label="Flow step configuration">
-      <header>
+      <header class="workspace-step-config-heading">
         <span>Flow steps</span>
         <small>{{ configurableSteps.length }}</small>
       </header>
@@ -25,7 +25,11 @@
           <i :class="item.icon" aria-hidden="true" />
           <span class="workspace-step-config-step">
             <span>{{ item.label }}</span>
-            <small v-if="item.tool">{{ item.tool }}</small>
+            <small>
+              <template v-if="item.tool">{{ item.tool }} · </template
+              >{{ item.parameterCount }}
+              {{ item.parameterCount === 1 ? 'param' : 'params' }}
+            </small>
           </span>
         </button>
       </div>
@@ -47,12 +51,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { formatStepToolName, StepEnum } from '@/api/type'
+import { computed, onMounted, ref, watch } from 'vue'
+import { catalogAppliesToFlowStep, formatStepToolName, StepEnum } from '@/api/type'
 import StepConfigPanel from '@/components/StepConfigPanel.vue'
-import { useFlowStages } from '@/composables/useFlowStages'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
+import { getDesktopApi } from '@/platform/desktop'
 
-const { dynamicFlowStages, error, isLoading: loading } = useFlowStages()
+const {
+  dynamicFlowStages,
+  error: flowError,
+  isLoading: flowLoading,
+} = useBackendFlowStages()
+const catalogApplies = ref<string[] | null>(null)
+const catalogError = ref<string | null>(null)
+const loading = computed(() => flowLoading.value || catalogApplies.value === null)
+const error = computed(() => flowError.value ?? catalogError.value)
 const selectedStep = ref<StepEnum | undefined>()
 const stepConfigPanel = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const hasUnsavedChanges = computed(
@@ -61,11 +74,15 @@ const hasUnsavedChanges = computed(
 
 const configurableSteps = computed(() => {
   const seen = new Set<StepEnum>()
-  return dynamicFlowStages.value.flatMap((stage) => {
+  return dynamicFlowStages.value.flatMap((stage, index) => {
     const step = Object.values(StepEnum).find(
       (candidate) => candidate.toLowerCase() === stage.path.toLowerCase(),
     )
-    if (!step || seen.has(step)) return []
+    const applies = catalogApplies.value ?? []
+    const parameterCount = applies.filter((target) =>
+      target === 'all' ? index === 0 : catalogAppliesToFlowStep(target, stage.path),
+    ).length
+    if (!step || seen.has(step) || parameterCount === 0) return []
     seen.add(step)
     return [
       {
@@ -73,9 +90,27 @@ const configurableSteps = computed(() => {
         label: stage.label,
         icon: stage.icon,
         tool: formatStepToolName(stage.tool),
+        parameterCount,
       },
     ]
   })
+})
+
+onMounted(async () => {
+  try {
+    const model = await getDesktopApi().workspaceCreationModel.get()
+    const catalog = Array.isArray(model.discovery.parameterCatalog)
+      ? model.discovery.parameterCatalog
+      : []
+    catalogApplies.value = catalog.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const appliesTo = (entry as Record<string, unknown>).appliesTo
+      return typeof appliesTo === 'string' ? [appliesTo] : []
+    })
+  } catch (cause) {
+    catalogError.value = cause instanceof Error ? cause.message : String(cause)
+    catalogApplies.value = []
+  }
 })
 
 const selectedTool = computed(
@@ -126,7 +161,6 @@ defineExpose({ hasUnsavedChanges })
 
 .workspace-step-config-nav header {
   display: flex;
-  min-height: 38px;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-color);
@@ -134,6 +168,13 @@ defineExpose({ hasUnsavedChanges })
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 700;
+}
+
+.workspace-step-config-nav > .workspace-step-config-heading,
+.workspace-step-config-editor :deep(.workspace-step-config-heading) {
+  height: 60px;
+  min-height: 60px;
+  flex: 0 0 60px;
 }
 
 .workspace-step-config-nav small {

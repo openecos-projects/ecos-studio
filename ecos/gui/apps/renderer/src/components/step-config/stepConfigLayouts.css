@@ -482,6 +482,13 @@
   margin-bottom: 8px;
 }
 
+.step-config-root .sc-pro-subpanel__description {
+  margin: -2px 0 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 /* Inline action buttons */
 .step-config-root .sc-pro-inline-actions {
   display: flex;

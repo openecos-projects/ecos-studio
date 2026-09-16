@@ -60,7 +60,10 @@ export function isWindowMaximized(window: BrowserWindowLike): boolean {
   return window.isMaximized()
 }
 
-export function bindWindowEvents(window: BrowserWindowLike): () => void {
+export function bindWindowEvents(
+  window: BrowserWindowLike,
+  options: { onCloseRequest: () => void },
+): () => void {
   const listeners: Array<['maximize' | 'resize' | 'unmaximize', WindowEventListener]> = [
     [
       'resize',
@@ -88,7 +91,7 @@ export function bindWindowEvents(window: BrowserWindowLike): () => void {
     }
 
     event.preventDefault()
-    window.webContents.send(desktopApiEventChannels.windowCloseRequested)
+    options.onCloseRequest()
   }
 
   for (const [eventName, listener] of listeners) {

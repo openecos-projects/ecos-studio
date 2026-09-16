@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ProjectManifestMpc } from './projectManagement'
+import type { ProjectManifestMpc } from '@ecos-studio/shared'
 import { mpcDieAreaConstraint, validateMpcDieArea } from './mpcWorkspace'
 
 const mpc: ProjectManifestMpc = {

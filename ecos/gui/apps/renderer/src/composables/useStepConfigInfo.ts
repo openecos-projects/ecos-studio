@@ -1,12 +1,10 @@
 import { computed, nextTick, ref, unref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { CMDEnum, InfoEnum, ResponseEnum, StepEnum } from '@/api/type'
-import { syncConfigApi } from '@/api/flow'
-import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
-import { convertRemoteToLocalPath } from '@/composables/useHomeData'
-import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { sameFlowStepName, StepEnum } from '@/api/type'
+import {
+  readWorkspaceStepConfigurationApi,
+  updateWorkspaceStepConfigurationApi,
+} from '@/api/workspace'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
@@ -14,8 +12,6 @@ import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 const stepEnumValues = Object.values(StepEnum)
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
-const ROUTE_STEP_BOTTOM_LAYER = 'MET2'
-const ROUTE_STEP_TOP_LAYER = 'MET5'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -57,36 +53,50 @@ function stableJsonSig(v: unknown): string {
   }
 }
 
-function pinRouteStepConfigRoutingLayers(
-  value: unknown,
-  step: StepEnum | undefined,
-): unknown {
-  if (step !== StepEnum.ROUTING || !isRecord(value)) return value
-
-  const routeBlock = isRecord(value.RT) ? value.RT : value
-  routeBlock['-bottom_routing_layer'] = ROUTE_STEP_BOTTOM_LAYER
-  routeBlock['-top_routing_layer'] = ROUTE_STEP_TOP_LAYER
-  return value
-}
-
-function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | undefined {
-  for (const value of [data.config, data.path]) {
-    if (typeof value === 'string' && value.trim()) return value.trim()
+function parameterValues(records: unknown[]): Record<string, unknown> | null {
+  const values: Record<string, unknown> = {}
+  for (const record of records) {
+    if (!isRecord(record) || typeof record.param !== 'string' || !('value' in record)) {
+      return null
+    }
+    values[record.param] = record.value
   }
-  return undefined
+  return values
 }
 
-function firstResponseMessage(
-  response: { message?: string[] } | undefined,
-  fallback: string,
-): string {
-  return response?.message?.[0] || fallback
+function parameterDescriptions(records: unknown[]): Record<string, string> {
+  return Object.fromEntries(
+    records.flatMap((record) => {
+      if (
+        !isRecord(record) ||
+        typeof record.param !== 'string' ||
+        typeof record.description !== 'string'
+      ) {
+        return []
+      }
+      return [[record.param, record.description]]
+    }),
+  )
+}
+
+function parameterTypes(records: unknown[]): Record<string, string> {
+  return Object.fromEntries(
+    records.flatMap((record) => {
+      if (
+        !isRecord(record) ||
+        typeof record.param !== 'string' ||
+        typeof record.type !== 'string'
+      ) {
+        return []
+      }
+      return [[record.param, record.type]]
+    }),
+  )
 }
 
 export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undefined>) {
   const route = useRoute()
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject } = useWorkspace()
+  const { currentProject, showToast, workspaceSession } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
   const { resourceVersions } = workspaceLifecycle
 
@@ -94,12 +104,15 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   const loading = ref(true)
   const error = ref<string | null>(null)
   const info = ref<Record<string, unknown> | null>(null)
+  const workspaceRevision = ref<number | null>(null)
   const runtimeMessages = ref<string[]>([])
   const responseKind = ref<'idle' | 'success' | 'warning' | 'failed' | 'error'>('idle')
 
   const stepConfigPathResolved = ref<string | null>(null)
   const stepConfigRaw = ref<string | null>(null)
   const stepConfigReadError = ref<string | null>(null)
+  const stepConfigParameterDescriptions = ref<Record<string, string>>({})
+  const stepConfigParameterTypes = ref<Record<string, string>>({})
 
   /** Editable draft (matches disk when JSON is valid; baseline updates after save). */
   const stepConfigDraft = ref<unknown | null>(null)
@@ -131,7 +144,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
   const hasFlowStep = computed(() => currentStep.value !== undefined)
 
-  async function refetch(): Promise<void> {
+  async function fetchStepConfiguration(): Promise<void> {
     const stepEnum = currentStep.value
     const sessionId = workspaceLifecycle.currentSessionId.value
     const refetchToken = Symbol('step-config-refetch')
@@ -142,6 +155,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     if (!stepEnum) {
       info.value = null
       error.value = null
+      workspaceRevision.value = null
       runtimeMessages.value = []
       responseKind.value = 'idle'
       clearFileState()
@@ -150,38 +164,106 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       return
     }
 
-    loading.value = true
+    loading.value = lastLoadedStep !== stepEnum
     error.value = null
+    workspaceRevision.value = null
     runtimeMessages.value = []
     if (lastLoadedStep !== stepEnum) {
       clearFileState()
     }
 
     try {
-      const response = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveWorkspaceStepInfoApi({
+      const response = await workspaceLifecycle.runForSession(sessionId, async () => {
+        const session = workspaceSession.value
+        if (!currentProject.value?.path) throw new Error('Workspace path is unavailable.')
+        if (session.state !== 'active' || !session.workspaceId) {
+          return null
+        }
+        return await readWorkspaceStepConfigurationApi({
           step: stepEnum,
-          id: InfoEnum.config,
-        }),
-      )
-      if (!canApply() || !response) return
-      runtimeMessages.value = response.message ?? []
-
-      const payload = response.info
-
-      if (response.response === 'available') {
+          workspaceHandle: session.workspaceId,
+        })
+      })
+      if (!canApply()) return
+      if (!response) {
+        info.value = null
+        const waiting = ['validating', 'loading', 'switching'].includes(
+          workspaceSession.value.state,
+        )
+        responseKind.value = waiting ? 'warning' : 'error'
+        error.value = waiting ? null : 'Workspace Session is unavailable.'
+        runtimeMessages.value = waiting ? ['Waiting for Workspace Session.'] : []
+        clearFileState()
+        lastLoadedStep = null
+        return
+      }
+      if (
+        (response.status === 'available' || response.status === 'missing') &&
+        (typeof response.workspaceId !== 'string' ||
+          typeof response.workspaceRevision !== 'number' ||
+          !Number.isInteger(response.workspaceRevision) ||
+          response.workspaceRevision < 1)
+      ) {
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Step configuration response has no valid Workspace identity.'
+        clearFileState()
+        return
+      }
+      const responseStep = response.stepId ?? response.step
+      if (!sameFlowStepName(responseStep, stepEnum)) {
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Step configuration response belongs to another Flow Step.'
+        clearFileState()
+        return
+      }
+      const currentRevision = workspaceSession.value.workspaceRevision
+      if (
+        typeof response.workspaceRevision === 'number' &&
+        typeof currentRevision === 'number' &&
+        response.workspaceRevision !== currentRevision
+      ) {
+        responseKind.value = 'error'
+        info.value = null
+        error.value = 'Step configuration response belongs to another Workspace Revision.'
+        clearFileState()
+        return
+      }
+      if (response.status === 'available' && Array.isArray(response.parameters)) {
+        const parameters = parameterValues(response.parameters)
+        if (parameters === null) {
+          responseKind.value = 'error'
+          info.value = null
+          error.value = 'Step configuration response is invalid.'
+          clearFileState()
+          return
+        }
+        stepConfigParameterDescriptions.value = parameterDescriptions(response.parameters)
+        stepConfigParameterTypes.value = parameterTypes(response.parameters)
+        const payload = {
+          parameters,
+          stepId: response.stepId ?? response.step,
+        }
         responseKind.value = 'success'
-        info.value = payload ?? {}
-        await loadStepConfigFileFromInfo(info.value, sessionId, refetchToken)
+        workspaceRevision.value = response.workspaceRevision
+        info.value = payload
+        await loadStepConfigFileFromInfo(payload, sessionId, refetchToken)
         if (canApply()) {
           lastLoadedStep = stepEnum
         }
         return
       }
 
-      if (response.response === 'missing') {
-        info.value = payload
-        responseKind.value = 'idle'
+      if (response.status === 'missing' || response.status === 'unavailable') {
+        info.value = {}
+        responseKind.value = 'warning'
+        runtimeMessages.value = [
+          response.reason === 'step_configuration_unavailable'
+            ? 'This Flow Step has no configurable parameters.'
+            : `Step configuration unavailable: ${response.reason}`,
+        ]
+        workspaceRevision.value = response.workspaceRevision ?? null
         clearFileState()
         lastLoadedStep = stepEnum
         return
@@ -189,8 +271,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
       responseKind.value = 'error'
       info.value = null
-      error.value =
-        (response.message && response.message[0]) || 'Failed to load step configuration'
+      error.value = 'Failed to load step configuration'
       clearFileState()
     } catch (e) {
       if (!canApply()) return
@@ -198,16 +279,22 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
       info.value = null
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
-      if (canApply()) {
+      if (isLatestRefetch()) {
         loading.value = false
       }
     }
+  }
+
+  function refetch(): Promise<void> {
+    return fetchStepConfiguration()
   }
 
   function clearFileState() {
     stepConfigPathResolved.value = null
     stepConfigRaw.value = null
     stepConfigReadError.value = null
+    stepConfigParameterDescriptions.value = {}
+    stepConfigParameterTypes.value = {}
     stepConfigDraft.value = null
     stepConfigBaselineSig.value = ''
     stepConfigTextDraft.value = ''
@@ -244,15 +331,9 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     }
     try {
       const parsed = JSON.parse(raw) as unknown
-      stepConfigDraft.value = pinRouteStepConfigRoutingLayers(
-        deepClone(parsed),
-        currentStep.value,
-      )
+      stepConfigDraft.value = deepClone(parsed)
       stepConfigBaselineSig.value = stableJsonSig(parsed)
-      // Floorplan/placement/DRC forms materialize missing containers on mount. Let
-      // that view-only initialization become the baseline, but keep routing's
-      // enforced layer pinning dirty so it still requires an explicit save.
-      initialEditorDraftPending = currentStep.value !== StepEnum.ROUTING
+      initialEditorDraftPending = true
       if (stepConfigEditorMounted) {
         void nextTick(markStepConfigEditorInitialized)
       }
@@ -266,55 +347,23 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
 
   async function loadStepConfigFileFromInfo(
     data: Record<string, unknown>,
-    sessionId: string,
-    refetchToken: symbol,
+    _sessionId: string,
+    _refetchToken: symbol,
   ) {
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
-    const isLatestRefetch = () => activeRefetchToken === refetchToken
-    const canApply = () => isCurrent() && isLatestRefetch()
-    const rawPath = pickStepConfigPathFromInfo(data)
-    if (!rawPath) {
-      return
-    }
-
-    const localPath = await workspaceLifecycle.runForSession(sessionId, () => {
-      const projectPath = currentProject.value?.path ?? ''
-      return projectPath ? convertRemoteToLocalPath(rawPath, projectPath) : rawPath
-    })
-    if (!canApply() || !localPath) return
-    stepConfigPathResolved.value = localPath
-
-    if (!isDesktopRuntimeAvailable) {
-      stepConfigReadError.value =
-        'Reading local config requires the ECOS Studio desktop runtime. Browser mode cannot access project files.'
-      return
-    }
-
-    try {
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(localPath),
-      )
-      if (!canApply()) return
-      if (!resolvedPath) {
-        stepConfigRaw.value = null
-        stepConfigReadError.value = `No file-system access to ${localPath}`
-        return
-      }
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
-      )
-      if (!canApply() || fileContent === undefined) return
-      stepConfigRaw.value = fileContent
-      stepConfigReadError.value = null
-    } catch (e) {
-      if (!canApply()) return
-      stepConfigRaw.value = null
-      stepConfigReadError.value = e instanceof Error ? e.message : String(e)
-    }
+    if (!isRecord(data.parameters)) return
+    const stepId = typeof data.stepId === 'string' ? data.stepId : currentStep.value
+    stepConfigPathResolved.value = stepId ? `${stepId} parameters` : 'Step parameters'
+    stepConfigRaw.value = JSON.stringify(data.parameters, null, 2)
+    stepConfigReadError.value = null
   }
 
   watch(
-    currentStep,
+    [
+      currentStep,
+      () => workspaceSession.value.sessionId,
+      () => workspaceSession.value.state,
+      () => workspaceSession.value.workspaceId,
+    ],
     () => {
       void refetch()
     },
@@ -322,7 +371,7 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
   )
 
   watch(
-    () => [resourceVersions.value['step-config'], resourceVersions.value.all],
+    () => resourceVersions.value['step-config'],
     () => {
       void refetch()
     },
@@ -361,6 +410,10 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     }
   })
 
+  const stepConfigParameterCount = computed(() =>
+    isRecord(stepConfigDraft.value) ? Object.keys(stepConfigDraft.value).length : 0,
+  )
+
   watch(
     [() => stepConfigRaw.value, () => stepConfigReadError.value],
     () => {
@@ -395,15 +448,28 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     return stableJsonSig(stepConfigDraft.value) !== stepConfigBaselineSig.value
   })
 
+  function notifyStepConfigSaveFailure(detail: string): void {
+    showToast({
+      severity: 'error',
+      summary: 'Failed to save parameters',
+      detail,
+      life: 6000,
+    })
+  }
+
+  function setStepConfigSaveError(detail: string): void {
+    stepConfigSaveError.value = detail
+    notifyStepConfigSaveFailure(detail)
+  }
+
   function blockStepConfigSaveWhileFlowRunning(): boolean {
     if (!isMutationLocked.value) return false
-    stepConfigSaveError.value = FLOW_RUNNING_SAVE_BLOCKED_MESSAGE
+    setStepConfigSaveError(FLOW_RUNNING_SAVE_BLOCKED_MESSAGE)
     return true
   }
 
   async function saveStepConfig(): Promise<boolean> {
     stepConfigSaveError.value = null
-    const path = stepConfigPathResolved.value
     const sessionId = workspaceLifecycle.currentSessionId.value
     const step = currentStep.value
     const saveToken = Symbol('step-config-save')
@@ -416,120 +482,70 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
         if (!value) activeStepConfigSave.value = null
       }
     }
-    if (!path) {
-      stepConfigSaveError.value = 'No configuration file path resolved'
-      return false
-    }
-    if (!isDesktopRuntimeAvailable) {
-      stepConfigSaveError.value = 'Saving requires the ECOS Studio desktop runtime'
+    if (!stepConfigPathResolved.value || !step) {
+      setStepConfigSaveError('No editable Step configuration is available')
       return false
     }
     if (blockStepConfigSaveWhileFlowRunning()) {
       return false
     }
     const rawBeforeSave = stepConfigRaw.value
-    const textDraftBeforeSave = stepConfigTextDraft.value
     const draftBeforeSave =
       stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
     activeStepConfigSave.value = saveToken
     isSavingStepConfig.value = true
     try {
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(path),
-      )
-      if (!canApply()) return false
-      if (!resolvedPath) {
-        stepConfigSaveError.value = `No file-system access to ${path}`
-        return false
-      }
       if (blockStepConfigSaveWhileFlowRunning()) {
         return false
       }
-
-      const syncWorkspaceConfig = async (): Promise<boolean> => {
-        const projectPath = currentProject.value?.path
-        if (!projectPath) {
-          stepConfigSaveError.value = 'No workspace is open'
-          return false
-        }
-        const syncResult = await workspaceLifecycle.runForSession(sessionId, () =>
-          syncConfigApi({
-            cmd: CMDEnum.sync_config,
-            data: {
-              config_path: resolvedPath,
-              ...(currentProject.value?.designTool === 'frontend'
-                ? { designTool: 'frontend' as const }
-                : {}),
-              directory: projectPath,
-              workspaceHandle: workspaceLifecycle.session.value.workspaceId,
-            },
-          }),
-        )
-        if (!canApply()) return false
-
-        workspaceLifecycle.invalidate('step-config', {
-          reason: 'step-config-save',
-          sessionId,
-          step,
-        })
-
-        if (syncResult?.data?.parameters_changed === true) {
-          workspaceLifecycle.invalidate(['parameters', 'home'], {
-            reason: 'step-config-sync',
-            sessionId,
-            step,
-          })
-        }
-
-        if (syncResult?.response !== ResponseEnum.success) {
-          stepConfigSaveError.value = firstResponseMessage(
-            syncResult,
-            'Sync workspace config failed',
-          )
-          return false
-        }
-
-        workspaceLifecycle.invalidate('step', {
-          reason: 'step-config-save',
-          sessionId,
-          step,
-        })
-
-        return true
-      }
-
-      let text: string
       if (!rawLooksValidJson(rawBeforeSave ?? '')) {
-        text = textDraftBeforeSave
-        const writeResult = await workspaceLifecycle.runForSession(
-          sessionId,
-          async () => {
-            await writeProjectTextFile(resolvedPath, text)
-            return true
-          },
-        )
-        if (!canApply() || writeResult !== true) return false
-        stepConfigRaw.value = text
-        stepConfigTextBaseline.value = text
-        return await syncWorkspaceConfig()
-      }
-      if (draftBeforeSave === null) {
-        stepConfigSaveError.value = 'Nothing to save'
+        setStepConfigSaveError('Step configuration must be valid JSON')
         return false
       }
-      const normalizedDraft = pinRouteStepConfigRoutingLayers(draftBeforeSave, step)
-      text = JSON.stringify(normalizedDraft, null, 4)
-      const writeResult = await workspaceLifecycle.runForSession(sessionId, async () => {
-        await writeProjectTextFile(resolvedPath, text)
-        return true
+      if (draftBeforeSave === null) {
+        setStepConfigSaveError('Nothing to save')
+        return false
+      }
+      if (!isRecord(draftBeforeSave)) {
+        setStepConfigSaveError('Step configuration must be an object')
+        return false
+      }
+      const expectedWorkspaceRevision = workspaceLifecycle.session.value.workspaceRevision
+      if (typeof expectedWorkspaceRevision !== 'number') {
+        setStepConfigSaveError('Workspace Revision is unavailable')
+        return false
+      }
+      const stepResult = await workspaceLifecycle.runForSession(sessionId, () =>
+        updateWorkspaceStepConfigurationApi({
+          commandId: crypto.randomUUID(),
+          expectedWorkspaceRevision,
+          parameters: draftBeforeSave,
+          stepId: step,
+          workspaceHandle: workspaceLifecycle.session.value.workspaceId,
+        }),
+      )
+      if (
+        !canApply() ||
+        !stepResult ||
+        !('workspaceRevision' in stepResult) ||
+        typeof stepResult.workspaceRevision !== 'number'
+      )
+        return false
+      const nextWorkspaceRevision = stepResult.workspaceRevision
+      workspaceLifecycle.updateWorkspaceRevision(nextWorkspaceRevision, sessionId)
+      workspaceRevision.value = nextWorkspaceRevision
+      if (!canApply()) return false
+      workspaceLifecycle.invalidate(['step-config', 'step', 'home'], {
+        reason: 'step-config-save',
+        sessionId,
+        step,
       })
-      if (!canApply() || writeResult !== true) return false
-      stepConfigRaw.value = text
-      stepConfigBaselineSig.value = stableJsonSig(normalizedDraft)
-      return await syncWorkspaceConfig()
+      stepConfigRaw.value = JSON.stringify(draftBeforeSave, null, 2)
+      stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)
+      return true
     } catch (e) {
       if (!canApply()) return false
-      stepConfigSaveError.value = e instanceof Error ? e.message : String(e)
+      setStepConfigSaveError(e instanceof Error ? e.message : String(e))
       return false
     } finally {
       setSavingForToken(false)
@@ -556,11 +572,15 @@ export function useStepConfigInfo(stepOverride?: StepEnum | Ref<StepEnum | undef
     isEmpty,
     refetch,
     stepConfigPathResolved,
+    workspaceRevision,
     stepConfigRaw,
     stepConfigDisplay,
     stepConfigReadError,
     stepConfigParsed,
     stepConfigJsonInvalid,
+    stepConfigParameterCount,
+    stepConfigParameterDescriptions,
+    stepConfigParameterTypes,
     stepConfigDraft,
     stepConfigTextDraft,
     hasStepConfigChanges,

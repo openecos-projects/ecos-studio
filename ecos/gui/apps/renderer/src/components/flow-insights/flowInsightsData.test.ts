@@ -24,7 +24,6 @@ import {
   parseFirstStaPathPreview,
   parsePeakMemoryMb,
   parseRuntimeSeconds,
-  parseStaCornerSummaries,
   peakMemoryFromFlowStep,
   selectStaCriticalPaths,
   selectStaPathGroup,
@@ -57,6 +56,9 @@ describe('flow insights data', () => {
     expect(canonicalStepKey('Timing optimization')).toBe('Sizer')
     expect(canonicalStepKey('timing_optimization_sizer')).toBe('Sizer')
     expect(canonicalStepKey('sta_ecc')).toBe('STA')
+    expect(canonicalStepKey('preFloorplan')).toBe('Floor')
+    expect(canonicalStepKey('macroPlacement')).toBe('Floor')
+    expect(canonicalStepKey('postFloorplan')).toBe('Floor')
     expect(parseRuntimeSeconds('0:3:35')).toBe(215)
     expect(parseRuntimeSeconds('0:1:6')).toBe(66)
     expect(parsePeakMemoryMb(11482.379)).toBe(11482.379)
@@ -261,23 +263,6 @@ describe('flow insights data', () => {
   })
 
   it('builds STA corner overview from per-corner summaries and takes min WNS as worst', () => {
-    const refs = parseStaCornerSummaries({
-      sta: {
-        signoff_metrics: {
-          corners: [
-            {
-              sta_corner: 'MAX_125/Cworst',
-              summary_file: 'feature/MAX_125/Cworst/qor_summary.json',
-            },
-            {
-              sta_corner: 'MIN_m40/Cworst',
-              summary_file: 'feature/MIN_m40/Cworst/qor_summary.json',
-            },
-          ],
-        },
-      },
-    })
-    expect(refs).toHaveLength(2)
     const model = buildStaOverviewModel([
       {
         corner: 'MAX_125/Cworst',

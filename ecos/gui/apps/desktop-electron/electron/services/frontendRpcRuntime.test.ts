@@ -180,12 +180,13 @@ describe('normalizeFrontendRuntimeEvent', () => {
       kind: 'flow',
       operationId: 'frontend-op-1',
       origin: 'gui',
-      type: 'step.completed',
+      type: 'workspace.committed',
       workspaceId: 'workspace-frontend-1',
     })
     expect(normalized.event.payload).toMatchObject({
       state: 'Success',
       step: 'prepare',
+      sourceType: 'step.completed',
       tool: 'fe',
     })
   })
@@ -213,11 +214,12 @@ describe('normalizeFrontendRuntimeEvent', () => {
     expect(normalized.event).toMatchObject({
       kind: 'flow',
       operationId: 'frontend-op-2',
-      type: 'subflow.stage',
+      type: 'execution.progress',
     })
     expect(normalized.event.payload).toMatchObject({
       state: 'Success',
       step: 'prepare',
+      sourceType: 'subflow.stage',
       subflowPeakMemory: 12.5,
       subflowRuntime: '0:0:1',
       subflowStep: 'collect inputs',

@@ -55,6 +55,7 @@ describe('CodexDependencyService', () => {
       arch: 'x64',
       settingsStore: new MemorySettingsStore(),
       spawn: vi.fn() as never,
+      homedir: () => root,
     })
 
     await expect(service.getStatus()).resolves.toMatchObject({
@@ -111,6 +112,49 @@ describe('CodexDependencyService', () => {
     })
   })
 
+  it('finds Codex in well-known user install directories before PATH', async () => {
+    const root = await createRoot()
+    const binDir = join(root, '.nvm', 'versions', 'node', 'v22.1.0', 'bin')
+    const codexBin = join(binDir, 'codex')
+    await mkdir(binDir, { recursive: true })
+    await writeFile(codexBin, '#!/bin/sh\necho codex-cli 1.0.0\n')
+    await chmod(codexBin, 0o755)
+
+    const spawn = vi.fn((command: string, args: string[]) => {
+      const child = new FakeChild()
+      queueMicrotask(() => {
+        if (args[0] === '--version') {
+          child.stdout.emit('data', 'codex-cli 1.0.0\n')
+          child.emit('close', 0)
+          return
+        }
+        if (command === codexBin && args[0] === 'login' && args[1] === 'status') {
+          child.stdout.emit('data', 'Logged in\n')
+          child.emit('close', 0)
+          return
+        }
+        child.emit('close', 1)
+      })
+      return child as never
+    })
+
+    const service = new CodexDependencyService({
+      env: { PATH: join(root, 'empty-bin') },
+      installRoot: join(root, 'managed'),
+      platform: 'linux',
+      arch: 'x64',
+      settingsStore: new MemorySettingsStore(),
+      spawn: spawn as never,
+      homedir: () => root,
+    })
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      state: 'needs_api_key',
+      binPath: codexBin,
+      authState: 'unauthenticated',
+    })
+  })
+
   it('rejects install on non-linux platforms', async () => {
     const root = await createRoot()
     const service = new CodexDependencyService({
@@ -119,6 +163,7 @@ describe('CodexDependencyService', () => {
       platform: 'darwin',
       arch: 'arm64',
       settingsStore: new MemorySettingsStore(),
+      homedir: () => root,
     })
 
     await expect(service.getStatus()).resolves.toMatchObject({

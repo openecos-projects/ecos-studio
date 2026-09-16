@@ -35,6 +35,8 @@ const testState = vi.hoisted(() => ({
   routerPush: vi.fn(),
   routerReplace: vi.fn(),
   currentProject: undefined as unknown,
+  parametersLoaded: undefined as unknown,
+  parametersLoading: undefined as unknown,
   resourceVersions: undefined as unknown,
   route: undefined as unknown,
   runtimeEvents: undefined as unknown,
@@ -56,7 +58,9 @@ vi.mock('@/composables/useFlowRunner', () => ({
 
 vi.mock('@/composables/useParameters', () => ({
   useParameters: () => ({
-    config: ref({ frontend: {} }),
+    config: reactive({ frontend: {} }),
+    isLoaded: testState.parametersLoaded,
+    isLoading: testState.parametersLoading,
   }),
 }))
 
@@ -112,6 +116,8 @@ let wrapper: VueWrapper | null = null
 describe('FrontendWorkspaceView waveform hydration', () => {
   beforeEach(() => {
     testState.currentProject = ref(project('/workspace/a', 'A'))
+    testState.parametersLoaded = ref(true)
+    testState.parametersLoading = ref(false)
     testState.resourceVersions = ref({
       all: 0,
       flow: 0,
@@ -169,6 +175,21 @@ describe('FrontendWorkspaceView waveform hydration', () => {
     expectCurrentWaveState('B')
   })
 
+  it('shows the configuration loading state before the authoritative snapshot arrives', async () => {
+    const parametersLoaded = testState.parametersLoaded as { value: boolean }
+    const parametersLoading = testState.parametersLoading as { value: boolean }
+    parametersLoaded.value = false
+    parametersLoading.value = true
+    testState.route = reactive({ params: {}, path: '/workspace/home', query: {} })
+
+    wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.frontend-config-state').text()).toContain(
+      'Loading configuration...',
+    )
+  })
+
   it('ignores workspace A fallback cases that resolve after workspace B', async () => {
     const detailA = deferred<SimulationDetail>()
     const detailB = deferred<SimulationDetail>()
@@ -214,10 +235,13 @@ function deferred<T>(): Deferred<T> {
 }
 
 function mountView(): VueWrapper {
+  const SlotStub = defineComponent({ template: '<div><slot /></div>' })
   return shallowMount(FrontendWorkspaceView, {
     global: {
       stubs: {
         FrontendWaveWorkspace: WaveWorkspaceStub,
+        Splitter: SlotStub,
+        SplitterPanel: SlotStub,
       },
     },
   })

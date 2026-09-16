@@ -28,6 +28,7 @@
                   @click="handleItemClick(item.event)"
                   class="dropdown-item"
                   :disabled="item.disabled"
+                  :title="item.title"
                 >
                   <i v-if="item.icon" :class="item.icon" class="item-icon" />
                   <span class="item-label">{{ item.label }}</span>
@@ -80,6 +81,8 @@
       >
         <i class="ri-sparkling-2-line text-base" aria-hidden="true"></i>
       </button>
+      <BackgroundTasksButton />
+      <ShutdownStatusButton />
       <NotificationCenter />
       <button
         @click="toggleTheme"
@@ -199,9 +202,11 @@ import { storeToRefs } from 'pinia'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useRoute, useRouter } from 'vue-router'
-import type { DesktopApi } from '@ecos-studio/shared'
-import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import NotificationCenter from '@/components/NotificationCenter.vue'
+import BackgroundTasksButton from '@/components/BackgroundTasksButton.vue'
+import ShutdownStatusButton from '@/components/ShutdownStatusButton.vue'
+import { rememberWorkspaceManagementReturnRoute } from '@/utils/workspaceNavigation'
 // ---- 类型定义 ----
 type TopBarMenuAction = AppMenuAction | 'step-config'
 
@@ -212,6 +217,7 @@ interface DropdownItem {
   event?: TopBarMenuAction
   separator?: boolean
   disabled?: boolean
+  title?: string
 }
 
 interface Menu {
@@ -229,6 +235,9 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 const props = defineProps<{
   projectName?: string | null
   hasWorkspace?: boolean
+  mutationsDisabled?: boolean
+  signoffExportDisabled?: boolean
+  workspaceUpdateDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -246,7 +255,7 @@ const agentShell = useAgentShellStore()
 const { homeAgentOpen } = storeToRefs(agentShell)
 const isDark = computed(() => themeStore.themeName === 'dark')
 const chatButtonActive = computed(() => homeAgentOpen.value)
-const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+const desktopApi = getDesktopApi()
 const canOpenStepConfig = computed(
   () => isWorkspaceRoute.value && Boolean(props.hasWorkspace),
 )
@@ -296,6 +305,7 @@ const menus = computed<Menu[]>(() => [
         icon: 'ri-add-line',
         shortcut: '⌘N',
         event: appMenuActionIds.newProject,
+        disabled: props.mutationsDisabled,
       },
       {
         label: 'Open Workspace',
@@ -307,7 +317,11 @@ const menus = computed<Menu[]>(() => [
         label: 'Update Workspace',
         icon: 'ri-settings-3-line',
         event: appMenuActionIds.reconfigureWorkspace,
-        disabled: !props.hasWorkspace,
+        disabled:
+          !props.hasWorkspace || props.mutationsDisabled || props.workspaceUpdateDisabled,
+        title: props.workspaceUpdateDisabled
+          ? 'Workspace update is unavailable while its flow is running. Create another Workspace for a parallel comparison.'
+          : undefined,
       },
       ...(isWorkspaceRoute.value
         ? [
@@ -315,6 +329,10 @@ const menus = computed<Menu[]>(() => [
               label: 'Export Signoff Package',
               icon: 'ri-archive-line',
               event: appMenuActionIds.exportSignoffPackage,
+              disabled: props.signoffExportDisabled,
+              title: props.signoffExportDisabled
+                ? 'Signoff export is unavailable while a flow is running.'
+                : undefined,
             },
             {
               label: 'Export Design Summary',
@@ -371,6 +389,7 @@ const menuBarRef = ref<HTMLElement | null>(null)
 const quickMenuOpen = ref(false)
 const quickMenuRef = ref<HTMLElement | null>(null)
 const quickMenuStyle = ref<Record<string, string>>({})
+const topbarOverlayEvent = 'ecos-topbar-overlay-open'
 
 function queryString(value: unknown): string {
   if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
@@ -416,13 +435,25 @@ const toggleQuickMenu = async () => {
   activeMenu.value = null
   quickMenuOpen.value = !quickMenuOpen.value
   if (quickMenuOpen.value) {
+    document.dispatchEvent(
+      new CustomEvent(topbarOverlayEvent, { detail: 'workspace-shortcuts' }),
+    )
     await nextTick()
     updateQuickMenuPosition()
   }
 }
 
+function closeForOverlay(event: Event): void {
+  if ((event as CustomEvent<string>).detail !== 'workspace-shortcuts') {
+    quickMenuOpen.value = false
+  }
+}
+
 const goToProjectManagement = () => {
   quickMenuOpen.value = false
+  if (isWorkspaceRoute.value && route.path !== '/workspace/projects') {
+    rememberWorkspaceManagementReturnRoute(route)
+  }
   const query: Record<string, string> = {}
   if (workspaceProjectRoot.value) {
     query.projectRoot = workspaceProjectRoot.value
@@ -430,7 +461,7 @@ const goToProjectManagement = () => {
   }
   if (workspaceFocusId.value) query.workspaceId = workspaceFocusId.value
   router.push({
-    path: '/projects',
+    path: isWorkspaceRoute.value ? '/workspace/projects' : '/projects',
     query,
   })
 }
@@ -476,7 +507,7 @@ const handleKeydown = (e: KeyboardEvent) => {
   if (!e.shiftKey && key === 'n') {
     e.preventDefault()
     activeMenu.value = null
-    emit('menu-action', appMenuActionIds.newProject)
+    if (!props.mutationsDisabled) emit('menu-action', appMenuActionIds.newProject)
     return
   }
   if (!e.shiftKey && key === 'o') {
@@ -494,12 +525,8 @@ const isMaximized = ref(false)
 let unlistenMaximizedChanged: (() => void) | undefined
 
 async function syncMaximizedState() {
-  if (!desktopApi.value) {
-    return
-  }
-
   try {
-    isMaximized.value = await desktopApi.value.window.isMaximized()
+    isMaximized.value = await desktopApi.window.isMaximized()
   } catch {
     /* ignore */
   }
@@ -508,29 +535,20 @@ async function syncMaximizedState() {
 onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeydown)
+  document.addEventListener(topbarOverlayEvent, closeForOverlay)
   window.addEventListener('resize', handleQuickMenuViewportChange)
   window.addEventListener('scroll', handleQuickMenuViewportChange, true)
 
-  if (!desktopApi.value) {
-    try {
-      desktopApi.value = await waitForDesktopApi({ timeoutMs: 5000 })
-    } catch (error) {
-      console.warn('[TopBar] Desktop bridge did not become available in time:', error)
-      return
-    }
-  }
-
   void syncMaximizedState()
-  unlistenMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
-    (nextIsMaximized) => {
-      isMaximized.value = nextIsMaximized
-    },
-  )
+  unlistenMaximizedChanged = desktopApi.window.onMaximizedChanged((nextIsMaximized) => {
+    isMaximized.value = nextIsMaximized
+  })
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener(topbarOverlayEvent, closeForOverlay)
   window.removeEventListener('resize', handleQuickMenuViewportChange)
   window.removeEventListener('scroll', handleQuickMenuViewportChange, true)
   unlistenMaximizedChanged?.()
@@ -538,18 +556,15 @@ onUnmounted(() => {
 
 // ---- 窗口控制 ----
 const handleMinimize = async () => {
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  await api.window.minimize()
+  await desktopApi.window.minimize()
 }
 
 const handleMaximize = async () => {
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  await api.window.toggleMaximize()
+  await desktopApi.window.toggleMaximize()
 }
 
 const handleClose = async () => {
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  await api.window.close()
+  await desktopApi.window.close()
 }
 </script>
 

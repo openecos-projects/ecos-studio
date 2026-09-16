@@ -1,11 +1,17 @@
 <template>
   <div class="step-config-root flex h-full min-h-0 w-full min-w-0 flex-col">
-    <div class="shrink-0 border-b border-(--border-color) bg-(--bg-primary) px-3 py-2">
+    <div
+      class="workspace-step-config-heading shrink-0 border-b border-(--border-color) bg-(--bg-primary) px-3 py-2"
+    >
       <h2 class="truncate text-[12px] font-bold text-(--text-primary)">
         {{ stepHeading }}
       </h2>
       <p class="mt-0.5 text-[10px] tracking-wider text-(--text-secondary) uppercase">
         Step configuration
+        <span v-if="stepConfigParameterCount" class="ml-2 normal-case">
+          · {{ stepConfigParameterCount }}
+          {{ stepConfigParameterCount === 1 ? 'parameter' : 'parameters' }}
+        </span>
       </p>
     </div>
 
@@ -73,6 +79,18 @@
             <i class="ri-folder-warning-line mt-0.5 shrink-0 text-lg text-amber-400"></i>
             <p class="text-[11px] leading-relaxed break-words text-amber-200/95">
               {{ stepConfigReadError }}
+            </p>
+          </div>
+        </div>
+
+        <div
+          v-if="stepConfigSaveError"
+          class="mx-3 mt-3 shrink-0 rounded-lg border border-red-500/40 bg-red-500/10 p-3"
+        >
+          <div class="flex items-start gap-2">
+            <i class="ri-error-warning-line mt-0.5 shrink-0 text-lg text-red-400"></i>
+            <p class="text-[11px] leading-relaxed break-words text-red-300">
+              {{ stepConfigSaveError }}
             </p>
           </div>
         </div>
@@ -171,6 +189,7 @@
                     :key="`${currentStep}-${baseline.configRelativePath.value}`"
                     v-model="baseline.viewDraft.value"
                     :step="currentStep"
+                    :parameter-descriptions="baseline.parameterDescriptions.value"
                     readonly
                   />
                   <p v-else class="px-1 text-[11px] text-(--text-secondary) italic">
@@ -279,6 +298,8 @@
                       v-if="currentStep"
                       v-model="stepConfigDraft"
                       :step="currentStep"
+                      :parameter-descriptions="stepConfigParameterDescriptions"
+                      :parameter-types="stepConfigParameterTypes"
                       @initialized="markStepConfigEditorInitialized"
                     />
                   </template>
@@ -326,6 +347,9 @@ const {
   stepConfigDisplay,
   stepConfigReadError,
   stepConfigJsonInvalid,
+  stepConfigParameterCount,
+  stepConfigParameterDescriptions,
+  stepConfigParameterTypes,
   stepConfigParsed,
   stepConfigDraft,
   stepConfigTextDraft,

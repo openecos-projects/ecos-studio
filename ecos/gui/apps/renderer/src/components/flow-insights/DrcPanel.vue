@@ -5,13 +5,11 @@
       <div class="drc-hero-row">
         <div
           class="drc-hero"
-          :class="isClean ? 'is-clean' : 'is-dirty'"
+          :class="drcCount === null ? '' : isClean ? 'is-clean' : 'is-dirty'"
           :title="heroTitle"
         >
           <strong class="drc-count">{{ displayDrcCount }}</strong>
-          <span class="drc-status">
-            {{ isClean ? 'CLEAN · all layers pass' : 'violations detected' }}
-          </span>
+          <span class="drc-status">{{ drcStatus }}</span>
         </div>
         <div class="drc-related">
           <div class="drc-related-card" :class="toneClass(related.routeDrViolations)">
@@ -127,11 +125,15 @@
                 <td v-for="layer in visibleLayers" :key="layer">
                   {{ model.totalByLayer[layerIndexOf(layer)] || '·' }}
                 </td>
-                <td>{{ model.totalCount }}</td>
+                <td>{{ model.totalCount ?? '—' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p v-if="model.truncated" class="drc-clean-baseline">
+          Showing {{ model.reportedCount ?? model.types.length }} reported rule/layer
+          entries from the bounded Snapshot summary.
+        </p>
       </section>
     </template>
   </div>
@@ -154,10 +156,16 @@ const selectedTypeName = ref<string | null>(null)
 const chartMode = ref<'bar' | 'pie'>('bar')
 
 const related = computed(() => props.related ?? buildDrcRelatedMetrics({}))
-const displayDrcCount = computed(
-  () => related.value.drcCount ?? props.model?.totalCount ?? 0,
+const drcCount = computed(() => related.value.drcCount ?? props.model?.totalCount ?? null)
+const displayDrcCount = computed(() => drcCount.value ?? '—')
+const isClean = computed(() => drcCount.value === 0)
+const drcStatus = computed(() =>
+  drcCount.value === null
+    ? 'total unavailable'
+    : isClean.value
+      ? 'CLEAN · all layers pass'
+      : 'violations detected',
 )
-const isClean = computed(() => displayDrcCount.value === 0)
 
 const chartCategories = computed(() => {
   if (!props.model) return []
@@ -221,6 +229,7 @@ function toggleType(name: string): void {
 
 const heroTitle = computed(() => {
   if (!related.value.drcStepName) return 'DRC step unavailable'
+  if (drcCount.value === null) return `${related.value.drcStepName} total unavailable`
   return isClean.value
     ? `${related.value.drcStepName} is clean`
     : `${related.value.drcStepName} violations`

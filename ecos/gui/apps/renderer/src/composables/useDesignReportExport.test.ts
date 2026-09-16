@@ -11,6 +11,7 @@ const mockRequestProjectPathAccess = vi.fn()
 const mockSaveFile = vi.fn()
 const mockWriteProjectTextFile = vi.fn()
 const mockGetVersions = vi.fn()
+const mockRuntimeSnapshot = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
@@ -31,30 +32,16 @@ vi.mock('@/platform/desktop', () => ({
     dialog: {
       saveFile: mockSaveFile,
     },
-  }),
-  getOptionalDesktopApi: () => ({
-    app: {
-      getVersions: mockGetVersions,
-    },
-    workspaceResources: {
-      getIndex: mockGetIndex,
-      readFlow: mockReadFlow,
-      readParameters: mockReadParameters,
-      readHome: mockReadHome,
-    },
-    workspace: {
-      readOptionalProjectTextFile: mockReadOptionalProjectTextFile,
-      writeProjectTextFile: mockWriteProjectTextFile,
-      requestProjectPathAccess: mockRequestProjectPathAccess,
-    },
-    dialog: {
-      saveFile: mockSaveFile,
-    },
+    ecc: { runtime: { snapshot: mockRuntimeSnapshot } },
   }),
 }))
 
 describe('useDesignReportExport', () => {
-  const currentProject = ref<{ path?: string; name?: string } | null>(null)
+  const currentProject = ref<{
+    path?: string
+    name?: string
+    designTool?: string
+  } | null>(null)
   const showToast = vi.fn()
 
   beforeEach(() => {
@@ -117,6 +104,24 @@ describe('useDesignReportExport', () => {
       PDK: 'ic55',
       CLOCK_PERIOD: 10.0,
     })
+    mockRuntimeSnapshot.mockResolvedValue({
+      engineeringSnapshot: {
+        analysis: { steps: [] },
+        artifacts: [],
+        checklist: {},
+        flow: { steps: [] },
+        metrics: [],
+        parameters: {},
+        qorAssessment: {},
+        schemaVersion: 1,
+        signoffAssessment: { groups: [], risks: [], status: 'ready' },
+        workspaceId: 'workspace-1',
+        workspaceRevision: 1,
+      },
+      flow: { steps: [] },
+      home: {},
+      parameters: { Design: 'gcd', PDK: 'ic55' },
+    })
     mockRequestProjectPathAccess.mockImplementation(async (p: string) => p)
     mockReadOptionalProjectTextFile.mockImplementation(async (p: string) => {
       if (p.includes('qor_metrics.json')) {
@@ -132,8 +137,37 @@ describe('useDesignReportExport', () => {
     })
   })
 
+  it('loads Backend configuration from ECC instead of Workspace JSON files', async () => {
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'backend',
+    }
+    const composable = useDesignReportExport({
+      currentProject,
+      showToast,
+      workspaceSession: ref({ state: 'active', workspaceId: 'workspace-1' }),
+    })
+
+    composable.openDesignReportExport('text')
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    expect(mockRuntimeSnapshot).toHaveBeenCalledWith({
+      workspaceHandle: 'workspace-1',
+    })
+    expect(mockReadFlow).not.toHaveBeenCalled()
+    expect(mockReadParameters).not.toHaveBeenCalled()
+    expect(mockReadHome).not.toHaveBeenCalled()
+    expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalled()
+    expect(mockRequestProjectPathAccess).not.toHaveBeenCalled()
+  })
+
   it('loads workspace data and generates report content on openDesignReportExport', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({
       currentProject,
       showToast,
@@ -165,7 +199,11 @@ describe('useDesignReportExport', () => {
 
   it('resolves fallback analysis paths inside the active workspace', async () => {
     const workspacePath = '/projects/gcd/ws_001'
-    currentProject.value = { path: workspacePath, name: 'gcd_run' }
+    currentProject.value = {
+      path: workspacePath,
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({ currentProject, showToast })
 
     composable.openDesignReportExport()
@@ -183,7 +221,11 @@ describe('useDesignReportExport', () => {
   })
 
   it('does not read a path when project access is denied', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     mockRequestProjectPathAccess.mockResolvedValue(null)
     const composable = useDesignReportExport({ currentProject, showToast })
 
@@ -195,7 +237,11 @@ describe('useDesignReportExport', () => {
   })
 
   it('copies content to clipboard and shows success toast', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({
       currentProject,
       showToast,
@@ -221,7 +267,11 @@ describe('useDesignReportExport', () => {
   })
 
   it('saves the current report file using dialog.saveFile and writeProjectTextFile', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({
       currentProject,
       showToast,
@@ -250,7 +300,11 @@ describe('useDesignReportExport', () => {
   })
 
   it('exports all 5 formats (.tex, .md, .typ, .csv, .txt) on exportAllFormats', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({
       currentProject,
       showToast,
@@ -289,7 +343,11 @@ describe('useDesignReportExport', () => {
   })
 
   it('invalidates in-flight report data when switching workspaces directly from A to B', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({
       currentProject,
       showToast,
@@ -329,7 +387,11 @@ describe('useDesignReportExport', () => {
     expect(composable.loading.value).toBe(true)
 
     // Switch directly from workspace A to workspace B while A is still in-flight
-    currentProject.value = { path: '/projects/aes/ws_002', name: 'aes_run' }
+    currentProject.value = {
+      path: '/projects/aes/ws_002',
+      name: 'aes_run',
+      designTool: 'frontend',
+    }
     await Promise.resolve()
 
     // Resolve the delayed in-flight read for workspace A
@@ -348,7 +410,11 @@ describe('useDesignReportExport', () => {
   })
 
   it('invalidates in-flight report data when dialog is closed', async () => {
-    currentProject.value = { path: '/projects/gcd/ws_001', name: 'gcd_run' }
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
     const composable = useDesignReportExport({
       currentProject,
       showToast,

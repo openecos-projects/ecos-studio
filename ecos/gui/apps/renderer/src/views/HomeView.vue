@@ -6,7 +6,21 @@
     :nodes="flowNodes"
   >
     <template #left>
-      <main class="home-dashboard" aria-label="Workspace dashboard">
+      <main
+        class="home-dashboard"
+        :class="{ 'has-stale': staleRevision !== null }"
+        aria-label="Workspace dashboard"
+      >
+        <div
+          v-if="staleResultNotice"
+          class="home-dashboard-stale"
+          role="status"
+          :title="staleResultNotice.detail"
+          :aria-description="staleResultNotice.detail"
+        >
+          <i class="ri-history-line" aria-hidden="true" />
+          {{ staleResultNotice.message }}
+        </div>
         <div class="home-dashboard-row home-dashboard-top">
           <section class="dashboard-section chip-card">
             <header class="dashboard-section-header">
@@ -18,8 +32,8 @@
             <dl class="dashboard-parameter-grid chip-info-grid">
               <div>
                 <dt>Project</dt>
-                <dd :title="valueOrNA(qorComparisonState.projectName)">
-                  {{ valueOrNA(qorComparisonState.projectName) }}
+                <dd :title="valueOrNA(workspaceIdentity?.projectName)">
+                  {{ valueOrNA(workspaceIdentity?.projectName) }}
                 </dd>
               </div>
               <div>
@@ -315,7 +329,13 @@
                   :title="layoutThumbnailTitle(thumbnail)"
                   @click="void openLayoutThumbnail(thumbnail)"
                 >
-                  <img :src="thumbnail.url" :alt="thumbnail.label" />
+                  <img v-if="thumbnail.url" :src="thumbnail.url" :alt="thumbnail.label" />
+                  <div v-else class="layout-thumbnail-placeholder">
+                    <i class="ri-image-2-line" aria-hidden="true" />
+                    <small>{{
+                      thumbnail.availability === 'stale' ? 'Stale' : 'Missing'
+                    }}</small>
+                  </div>
                   <i
                     v-if="thumbnail.step === openingLayoutStep"
                     class="ri-loader-4-line spin"
@@ -361,6 +381,7 @@
               :sta-critical-paths="flowInsightStaPaths"
               :sta-convergence="flowInsightStaConvergence"
               :loading="flowInsightsLoading"
+              :load-congestion="loadFlowInsightCongestion"
             />
           </section>
         </div>
@@ -438,117 +459,11 @@
     <p v-else class="dialog-empty">No checklist detail is available.</p>
   </Dialog>
 
-  <Dialog
+  <HomeQorComparisonDialog
     v-model:visible="showQor"
-    modal
-    maximizable
-    header="QoR Comparison"
-    class="qor-detail-dialog"
-    :style="{ width: 'min(1280px, calc(100vw - 32px))' }"
-    :draggable="false"
-  >
-    <div v-if="qorDetail" class="qor-detail-waterfall">
-      <article class="qor-detail-card qor-detail-summary-card">
-        <header>
-          <div>
-            <span>QoR comparison</span>
-            <strong>Baseline and current workspace</strong>
-          </div>
-          <i class="ri-scales-3-line" aria-hidden="true" />
-        </header>
-        <div class="qor-detail-summary-grid">
-          <section class="is-baseline">
-            <span>Baseline</span>
-            <strong :title="qorDetail.baseline.workspaceName">
-              {{ qorDetail.baseline.workspaceName }}
-            </strong>
-            <div class="qor-detail-score-value">
-              <strong>{{ formatQorScore(qorDetail.baseline.score) }}</strong>
-              <span v-if="qorDetail.baseline.score !== null">/ 100</span>
-            </div>
-          </section>
-          <section class="is-current" :class="`is-${qorDetail.scoreState}`">
-            <span>Current workspace</span>
-            <strong :title="qorDetail.current.workspaceName">
-              {{ qorDetail.current.workspaceName }}
-            </strong>
-            <div class="qor-detail-score-value">
-              <strong>{{ formatQorScore(qorDetail.current.score) }}</strong>
-              <span v-if="qorDetail.current.score !== null">/ 100</span>
-            </div>
-          </section>
-          <dl class="qor-detail-summary-list">
-            <div>
-              <dt>Directional metrics</dt>
-              <dd>{{ qorDetail.summary.comparableCount }}</dd>
-            </div>
-            <div class="is-improvement">
-              <dt>Improved</dt>
-              <dd>{{ qorDetail.summary.improvedCount }}</dd>
-            </div>
-            <div class="is-regression">
-              <dt>Regressed</dt>
-              <dd>{{ qorDetail.summary.regressedCount }}</dd>
-            </div>
-            <div>
-              <dt>Score trend</dt>
-              <dd :class="`is-${qorDetail.scoreState}`">
-                {{
-                  qorScoreComparisonLabel(
-                    qorDetail.current.score,
-                    qorDetail.baseline.score,
-                  )
-                }}
-              </dd>
-            </div>
-          </dl>
-        </div>
-      </article>
-
-      <p v-if="!qorDetail.steps.length" class="qor-detail-no-metrics">
-        {{ qorDetailsEmptyLabel }}
-      </p>
-
-      <article
-        v-for="step in qorDetail.steps"
-        :key="step.step"
-        class="qor-detail-card qor-detail-step-card"
-      >
-        <header>
-          <div>
-            <span>Step {{ String(step.order).padStart(2, '0') }}</span>
-            <strong>{{ step.label }}</strong>
-          </div>
-          <small>
-            {{ step.metrics.length }} metrics · {{ step.improvedCount }} improved ·
-            {{ step.regressedCount }} regressed
-          </small>
-        </header>
-        <dl class="qor-detail-metric-list">
-          <div class="qor-detail-metric-heading" aria-hidden="true">
-            <dt>Metric</dt>
-            <dd>Baseline</dd>
-            <dd>Current</dd>
-            <p>Trend</p>
-          </div>
-          <div
-            v-for="metric in step.metrics"
-            :key="`${step.step}:${metric.metricName}`"
-            :class="`is-${metric.state}`"
-          >
-            <dt>
-              <span>{{ metric.displayName }}</span>
-              <small>{{ metric.metricName }}</small>
-            </dt>
-            <dd>{{ formatQorValue(metric.baselineValue, metric.unit) }}</dd>
-            <dd>{{ formatQorValue(metric.currentValue, metric.unit) }}</dd>
-            <p :class="`is-${metric.state}`">{{ qorMetricComparisonLabel(metric) }}</p>
-          </div>
-        </dl>
-      </article>
-    </div>
-    <p v-else class="dialog-empty">{{ qorDetailsEmptyLabel }}</p>
-  </Dialog>
+    :detail="qorDetail"
+    :empty-label="qorDetailsEmptyLabel"
+  />
 </template>
 
 <script setup lang="ts">
@@ -561,47 +476,73 @@ import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flow
 import FlowInsightsPanel from '@/components/flow-insights/FlowInsightsPanel.vue'
 import { staConvergenceFromComparison } from '@/components/flow-insights/flowInsightsData'
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
+import HomeQorComparisonDialog from '@/components/home/HomeQorComparisonDialog.vue'
 import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
-  reconcileFlowChecklistItems,
+  workspaceResultFreshnessNotice,
 } from '@/components/home/dashboardData'
 import {
   buildHomeQorDetailModel,
+  formatQorScore,
   homeQorFlowStepForLabel,
+  qorScoreTone as getQorScoreTone,
   summarizeHomeQorComparison,
 } from '@/components/home/qorComparisonData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
-import { useFlowStages } from '@/composables/useFlowStages'
-import { useHomeData } from '@/composables/useHomeData'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
+import { useBackendFlowLogs } from '@/composables/useBackendFlowLogs'
 import {
   useHomeSnapshots,
   type HomeLayoutThumbnail,
 } from '@/composables/useHomeSnapshots'
 import { useFlowInsights } from '@/composables/useFlowInsights'
-import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
-import { useParameters } from '@/composables/useParameters'
-import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 import { getDesktopApi } from '@/platform/desktop'
-import { QOR_SCORE_THRESHOLD } from '@/utils/projectQorTrend'
 import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
 } from '@/components/drawingAreaChipViewer'
 
-const { config } = useParameters()
 const router = useRouter()
 const route = useRoute()
 const { currentProject } = useWorkspace()
+const backendWorkspaceSession = useBackendWorkspaceSession()
+const workspaceOverview = computed(() => backendWorkspaceSession.projection.data)
+const workspaceIdentity = computed(() => workspaceOverview.value?.identity)
+const resultFreshness = computed(() => workspaceOverview.value?.resultFreshness)
+const staleRevision = computed(() => {
+  const freshness = resultFreshness.value
+  return freshness?.status === 'stale' || freshness?.status === 'mixed'
+    ? (freshness.staleRevision ?? null)
+    : null
+})
+const workspaceConfiguration = computed(() => {
+  const section = workspaceOverview.value?.configuration
+  return section?.status === 'ready' || section?.status === 'partial'
+    ? section.data
+    : null
+})
+const config = computed(() => ({
+  clock: workspaceConfiguration.value?.clock ?? '',
+  design: workspaceConfiguration.value?.design ?? '',
+  die: { area: workspaceConfiguration.value?.dieArea ?? 0 },
+  frequencyMax: workspaceConfiguration.value?.frequencyMaxMhz ?? 0,
+  pdk: workspaceConfiguration.value?.pdk ?? '',
+  topModule: workspaceConfiguration.value?.topModule ?? '',
+}))
 const currentWorkspaceName = computed(() => {
+  if (workspaceIdentity.value?.workspaceName) {
+    return workspaceIdentity.value.workspaceName
+  }
   const pathName = currentProject.value?.path?.split(/[/\\]/).filter(Boolean).pop()
   return pathName || currentProject.value?.name || null
 })
-const { flowStages, isLoading: flowLoading } = useFlowStages()
+const { flowStages, isLoading: flowLoading } = useBackendFlowStages()
 const {
-  checklistItems,
   currentWorkspaceFlowExecutionActive,
   ensureFlowLogSegmentContentLoaded,
   flowLogContentByKey,
@@ -610,7 +551,19 @@ const {
   flowLogRerunAffectedSteps,
   flowLogSegments,
   flowLogStepName,
-} = useHomeData()
+} = useBackendFlowLogs()
+const staleResultNotice = computed(() => {
+  return workspaceResultFreshnessNotice(
+    resultFreshness.value,
+    currentWorkspaceFlowExecutionActive.value,
+  )
+})
+const checklistItems = computed(() => {
+  const section = workspaceOverview.value?.checklist
+  return section?.status === 'ready' || section?.status === 'partial'
+    ? section.data.findings
+    : []
+})
 const { layoutThumbnails } = useHomeSnapshots()
 const {
   stepResources: flowInsightResources,
@@ -623,12 +576,13 @@ const {
   sta: flowInsightSta,
   staCriticalPaths: flowInsightStaPaths,
   loading: flowInsightsLoading,
+  loadCongestion: loadFlowInsightCongestion,
 } = useFlowInsights()
 const flowInsightSteps = computed(() => flowInsightResources.value?.steps ?? [])
 const { keyMetrics, maxFanout, mpcDisplayName, mpcConstraints, qorSteps } =
   useDashboardOverview()
 const { state: qorComparisonState, refresh: refreshQorComparison } =
-  useHomeQorComparison()
+  useBackendWorkspaceQor()
 
 const showPorts = ref(false)
 const showChecklist = ref(false)
@@ -656,9 +610,7 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
-const resolvedChecklistItems = computed(() =>
-  reconcileFlowChecklistItems(checklistItems.value, flowStages.value),
-)
+const resolvedChecklistItems = checklistItems
 const checklistSlices = computed(() => checklistPieSlices(resolvedChecklistItems.value))
 const checklistSummary = computed(() =>
   checklistStatusSummary(resolvedChecklistItems.value),
@@ -682,7 +634,8 @@ const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
 const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
   if (
     qorComparisonState.value.status !== 'available' &&
-    qorComparisonState.value.status !== 'baseline'
+    qorComparisonState.value.status !== 'baseline' &&
+    qorComparisonState.value.status !== 'current-only'
   ) {
     return 'unavailable'
   }
@@ -739,20 +692,18 @@ const qorBaselineScoreValue = computed(() =>
   formatQorScore(qorComparisonState.value.comparison?.baselineScore),
 )
 const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const score = qorComparisonState.value.comparison?.score
-  if (score === null || score === undefined) return 'unrated'
-  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+  const comparison = qorComparisonState.value.comparison
+  return getQorScoreTone(comparison?.score, comparison?.scoreThreshold)
 })
 const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
-  const score = qorComparisonState.value.comparison?.baselineScore
-  if (score === null || score === undefined) return 'unrated'
-  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+  const comparison = qorComparisonState.value.comparison
+  return getQorScoreTone(comparison?.baselineScore, comparison?.scoreThreshold)
 })
 const qorScoreStatusLabel = computed(() => {
   if (qorScoreTone.value === 'unrated') return 'Not rated'
-  return qorScoreTone.value === 'pass'
-    ? `PASS >= ${QOR_SCORE_THRESHOLD}`
-    : `FAIL < ${QOR_SCORE_THRESHOLD}`
+  const threshold = qorComparisonState.value.comparison?.scoreThreshold
+  if (threshold === undefined) return 'Not rated'
+  return qorScoreTone.value === 'pass' ? `PASS >= ${threshold}` : `FAIL < ${threshold}`
 })
 const qorSummaryLabel = computed(() => {
   const state = qorComparisonState.value
@@ -763,10 +714,12 @@ const qorSummaryLabel = computed(() => {
     )} / 100`
   }
   if (state.status === 'available') {
-    const label = state.baselineSource === 'default' ? 'Default baseline' : 'Baseline'
-    return `${label}: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
+    return `Baseline: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
       state.comparison?.baselineScore,
     )} / 100`
+  }
+  if (state.status === 'current-only') {
+    return 'Baseline artifacts are unavailable · current workspace QoR shown'
   }
   if (state.status === 'no-baseline') return 'No baseline workspace is selected'
   if (state.status === 'no-project') return 'Project comparison is unavailable'
@@ -777,10 +730,13 @@ const qorDashboardSteps = computed(() => {
     qorComparisonSummary.value.steps.map((step) => [step.step, step]),
   )
   const comparisonReady = qorComparisonState.value.status === 'available'
-  const showBaselineSummary = qorComparisonState.value.status === 'baseline'
+  const showCurrentSummary =
+    qorComparisonState.value.status === 'baseline' ||
+    qorComparisonState.value.status === 'current-only'
   const currentQorReady =
     qorComparisonState.value.status === 'available' ||
-    qorComparisonState.value.status === 'baseline'
+    qorComparisonState.value.status === 'baseline' ||
+    qorComparisonState.value.status === 'current-only'
   return qorSteps.value.map((step) => {
     const comparisonStep = homeQorFlowStepForLabel(step.label)
       ? comparisonByStep.get(homeQorFlowStepForLabel(step.label)!)
@@ -790,7 +746,7 @@ const qorDashboardSteps = computed(() => {
     const unchangedCount = comparisonReady ? (comparisonStep?.unchangedCount ?? 0) : 0
     const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
     const displayMode =
-      showBaselineSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
+      showCurrentSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
     return {
       ...step,
       displayCount: displayMode === 'summary' ? step.summaryMetricCount : comparableCount,
@@ -823,6 +779,9 @@ const qorDetailsEmptyLabel = computed(() => {
   }
   if (qorComparisonState.value.status === 'available') {
     return 'No QoR metrics can be paired with the baseline.'
+  }
+  if (qorComparisonState.value.status === 'current-only') {
+    return 'Current workspace QoR is available, but baseline artifacts are unavailable.'
   }
   return 'Project QoR comparison is not available.'
 })
@@ -873,58 +832,6 @@ function sourcePath(value: Record<string, unknown>): string {
   return typeof value.path === 'string' ? value.path : '--'
 }
 
-function formatQorValue(value: number, unit?: string): string {
-  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3)
-  return unit ? `${formatted} ${unit}` : formatted
-}
-
-function formatQorScore(score: number | null | undefined): string {
-  if (score === null || score === undefined) return 'N/A'
-  return Number.isInteger(score) ? String(score) : score.toFixed(1)
-}
-
-function qorDeltaLabel(delta: {
-  absoluteDelta: number
-  relativeDeltaPct: number | null
-  state: 'improvement' | 'regression' | 'neutral'
-  unit?: string
-}): string {
-  if (delta.state === 'neutral') return 'Unchanged'
-  const direction = delta.state === 'improvement' ? 'Improved' : 'Regressed'
-  const amount = formatQorValue(Math.abs(delta.absoluteDelta), delta.unit)
-  const percent =
-    delta.relativeDeltaPct === null ? '' : ` (${Math.abs(delta.relativeDeltaPct)}%)`
-  return `${direction} by ${amount}${percent}`
-}
-
-function qorMetricComparisonLabel(metric: {
-  absoluteDelta: number
-  relativeDeltaPct: number | null
-  state: 'improvement' | 'regression' | 'neutral'
-  unit?: string
-  isDirectional: boolean
-  polarity: string
-  baselinePolarity: string
-}): string {
-  if (!metric.isDirectional) {
-    return metric.polarity === metric.baselinePolarity
-      ? 'No directional QoR rule'
-      : 'QoR rule changed'
-  }
-  return qorDeltaLabel(metric)
-}
-
-function qorScoreComparisonLabel(
-  currentScore: number | null,
-  baselineScore: number | null,
-): string {
-  if (currentScore === null || baselineScore === null) return 'Unavailable'
-  const delta = currentScore - baselineScore
-  if (delta === 0) return 'Unchanged'
-  const direction = delta > 0 ? 'Improved' : 'Regressed'
-  return `${direction} ${Math.abs(delta).toFixed(1)}`
-}
-
 function statusTone(summary: {
   total: number
   blocked: number
@@ -947,17 +854,26 @@ function openStepQorAnalysis(step: string): void {
 }
 
 function canOpenLayoutThumbnail(thumbnail: HomeLayoutThumbnail): boolean {
-  if (!thumbnail.hasGeometry) return false
+  if (
+    !thumbnail.url ||
+    thumbnail.availability !== 'available' ||
+    !thumbnail.hasGeometry
+  ) {
+    return false
+  }
   return canOpenChipViewer({
     chipViewerBusy: openingLayoutStep.value !== null,
     chipViewerEditBusy: false,
-    isDesktopRuntime: isDesktopRuntime(),
+    isDesktopRuntime: true,
     projectPath: currentProject.value?.path,
     step: thumbnail.step,
   })
 }
 
 function layoutThumbnailTitle(thumbnail: HomeLayoutThumbnail): string {
+  if (thumbnail.availability !== 'available') {
+    return `${thumbnail.label}: preview is ${thumbnail.availability}${thumbnail.reason ? ` (${thumbnail.reason})` : ''}.`
+  }
   if (!thumbnail.hasGeometry) {
     return `${thumbnail.label}: saved layout data is unavailable.`
   }
@@ -1002,6 +918,23 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   min-width: 0;
   overflow: auto;
   padding: 8px;
+}
+
+.home-dashboard.has-stale {
+  grid-template-rows: auto repeat(3, minmax(0, 1fr));
+}
+
+.home-dashboard-stale {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--warning-color, #b7791f);
+  border-radius: 6px;
+  color: var(--text-primary);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
 }
 
 .home-dashboard-row {
@@ -1288,6 +1221,31 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   min-height: 0;
   object-fit: contain;
   width: 100%;
+}
+
+.layout-thumbnail-placeholder {
+  align-items: center;
+  background: var(--dashboard-soft-surface);
+  border: 1px solid var(--dashboard-border);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  min-height: 0;
+}
+
+.layout-thumbnail-placeholder i {
+  animation: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 18px;
+  padding: 0;
+  position: static;
+}
+
+.layout-thumbnail-placeholder small {
+  font-size: 9px;
 }
 
 .layout-thumbnail-cell i {
@@ -1787,336 +1745,6 @@ async function openLayoutThumbnail(thumbnail: HomeLayoutThumbnail): Promise<void
   overflow-wrap: anywhere;
 }
 
-.qor-detail-waterfall {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: min(700px, 72vh);
-  min-height: 440px;
-  min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 0 5px 8px 0;
-}
-
-:deep(.qor-detail-dialog.p-dialog-maximized .p-dialog-content) {
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-
-:deep(.qor-detail-dialog.p-dialog-maximized) .qor-detail-waterfall {
-  flex: 1 1 auto;
-  height: auto;
-  min-height: 0;
-}
-
-.qor-detail-card header > span,
-.qor-detail-step-card header span {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.qor-detail-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-left: 3px solid var(--text-secondary);
-  border-radius: 6px;
-  flex: 0 0 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.qor-detail-card > header {
-  align-items: center;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  min-height: 34px;
-  padding: 7px 9px;
-}
-
-.qor-detail-card > header i {
-  color: var(--accent-color);
-  font-size: 15px;
-}
-
-.qor-detail-summary-card > header > div,
-.qor-detail-step-card header > div {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.qor-detail-step-card header strong {
-  color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.25;
-}
-
-.qor-detail-step-card header small {
-  color: var(--text-secondary);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qor-detail-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.qor-detail-summary-grid > section {
-  min-width: 0;
-  padding: 10px 12px 8px;
-}
-
-.qor-detail-summary-grid > section + section {
-  border-left: 1px solid var(--border-color);
-}
-
-.qor-detail-summary-grid > section > span {
-  color: var(--text-secondary);
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.qor-detail-summary-grid > section > strong {
-  color: var(--text-primary);
-  display: block;
-  font-size: 14px;
-  margin-top: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qor-detail-score-value {
-  align-items: baseline;
-  display: flex;
-  gap: 4px;
-  padding: 9px 0 0;
-}
-
-.qor-detail-score-value strong {
-  color: var(--text-primary);
-  font-size: 31px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.qor-detail-summary-grid > .is-current.is-improvement .qor-detail-score-value strong {
-  color: var(--success-color);
-}
-
-.qor-detail-summary-grid > .is-current.is-regression .qor-detail-score-value strong {
-  color: var(--danger-color);
-}
-
-.qor-detail-score-value > span {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.qor-detail-summary-list,
-.qor-detail-metric-list {
-  margin: 0;
-}
-
-.qor-detail-summary-list {
-  display: grid;
-  gap: 0;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 0 12px 10px;
-}
-
-.qor-detail-summary-list > div {
-  border-top: 1px solid var(--border-color);
-  min-width: 0;
-  padding: 7px 5px 0 0;
-}
-
-.qor-detail-summary-list > div + div {
-  padding-left: 8px;
-}
-
-.qor-detail-summary-list dt {
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin: 0;
-}
-
-.qor-detail-summary-list dd {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qor-detail-summary-list .is-improvement dd,
-.qor-detail-metric-list p.is-improvement {
-  color: var(--success-color);
-}
-
-.qor-detail-summary-list .is-regression dd,
-.qor-detail-metric-list p.is-regression {
-  color: var(--danger-color);
-}
-
-.qor-detail-summary-list .is-neutral {
-  color: var(--text-secondary);
-}
-
-.qor-detail-no-metrics {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.45;
-  margin: 2px 0;
-  padding: 4px 2px;
-}
-
-.qor-detail-metric-list > div {
-  align-items: start;
-  border-bottom: 1px solid var(--border-color);
-  display: grid;
-  gap: 6px 16px;
-  grid-template-columns:
-    minmax(180px, 1.4fr) minmax(118px, 0.8fr) minmax(118px, 0.8fr)
-    minmax(176px, 1fr);
-  min-width: 0;
-  padding: 9px 12px;
-}
-
-.qor-detail-metric-list > div:last-child {
-  border-bottom: 0;
-}
-
-.qor-detail-metric-list > .qor-detail-metric-heading {
-  align-items: center;
-  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
-  padding-bottom: 7px;
-  padding-top: 7px;
-}
-
-.qor-detail-metric-heading dt,
-.qor-detail-metric-heading dd,
-.qor-detail-metric-heading p {
-  color: inherit;
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: inherit;
-  margin: 0;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.qor-detail-metric-list dt {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.qor-detail-metric-list dt > span {
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qor-detail-metric-list dt small {
-  color: var(--text-secondary);
-  font-family: var(--font-family-mono, monospace);
-  font-size: 11px;
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qor-detail-metric-list dd {
-  color: var(--text-primary);
-  font-family: var(--font-family-mono, monospace);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  margin: 0;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.qor-detail-metric-list > div.is-improvement dd:nth-of-type(2) {
-  color: var(--success-color);
-}
-
-.qor-detail-metric-list > div.is-regression dd:nth-of-type(2) {
-  color: var(--danger-color);
-}
-
-.qor-detail-metric-list p {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.3;
-  margin: 0;
-}
-
-@media (max-width: 760px) {
-  .qor-detail-waterfall {
-    height: min(720px, 74vh);
-    padding-right: 0;
-  }
-
-  :deep(.qor-detail-dialog.p-dialog-maximized) .qor-detail-waterfall {
-    height: auto;
-  }
-
-  .qor-detail-summary-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .qor-detail-metric-list > div {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .qor-detail-metric-list > .qor-detail-metric-heading {
-    display: none;
-  }
-
-  .qor-detail-metric-list dt,
-  .qor-detail-metric-list p {
-    grid-column: 1 / -1;
-  }
-
-  .qor-detail-metric-list dd::before {
-    color: var(--text-secondary);
-    display: block;
-    font-family: var(--font-family-base, sans-serif);
-    font-size: 12px;
-    font-weight: 500;
-    margin-bottom: 2px;
-  }
-
-  .qor-detail-metric-list dd:nth-of-type(1)::before {
-    content: 'Baseline';
-  }
-
-  .qor-detail-metric-list dd:nth-of-type(2)::before {
-    content: 'Current';
-  }
-}
 @media (max-width: 1180px) {
   .home-dashboard {
     grid-template-rows: auto auto auto;

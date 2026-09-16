@@ -5,9 +5,12 @@ import StepSnapshotPanel from './StepSnapshotPanel.vue'
 import panelSource from './StepSnapshotPanel.vue?raw'
 
 describe('StepSnapshotPanel', () => {
-  it('lays the snapshot area out as a fixed 4x4 grid', () => {
+  it('lays the snapshot area out as a scrollable 4x4 grid with stable tile height', () => {
     expect(panelSource).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))')
-    expect(panelSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
+    expect(panelSource).toContain('grid-template-rows: repeat(4, minmax(68px, 1fr))')
+    expect(panelSource).toMatch(/\.snapshot-panel\s*{[^}]*overflow: auto/s)
+    expect(panelSource).toMatch(/\.snapshot-tile\s*{[^}]*display: flex/s)
+    expect(panelSource).toMatch(/\.snapshot-tile\s*{[^}]*min-height: 68px/s)
   })
 
   it('anchors exactly one Summary entry at the first row and first column', () => {

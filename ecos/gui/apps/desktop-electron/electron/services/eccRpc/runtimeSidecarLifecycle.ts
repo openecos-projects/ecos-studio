@@ -1,12 +1,9 @@
-const DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS = 30_000
-
 export interface RuntimeSidecarLifecycleOptions {
   captureFinalSnapshot(workspaceId: string): Promise<void>
   closeSidecar(): Promise<void>
   emitError(message: string): void
   emitIdle(): void
   hasActiveOperations(): boolean
-  diagnosticIdleTimeoutMs?: number
 }
 
 /**
@@ -15,8 +12,12 @@ export interface RuntimeSidecarLifecycleOptions {
  * diagnostics, then release it without leaking a long-lived sidecar.
  */
 export class RuntimeSidecarLifecycle {
-  private diagnosticReleaseTimer: ReturnType<typeof setTimeout> | null = null
   private finalSnapshotTask: Promise<void> | null = null
+  private finalizationState: {
+    issue?: string
+    state: 'finalizing' | 'snapshot-failed'
+    workspaceId: string
+  } | null = null
 
   constructor(private readonly options: RuntimeSidecarLifecycleOptions) {}
 
@@ -28,10 +29,18 @@ export class RuntimeSidecarLifecycle {
     return this.finalSnapshotTask
   }
 
-  releaseAfterSuccessfulOperation(workspaceId: string): void {
+  finalization() {
+    return this.finalizationState ? { ...this.finalizationState } : null
+  }
+
+  hasFinalizationBlocker(): boolean {
+    return this.finalizationState !== null
+  }
+
+  finalizeOperation(workspaceId: string): void {
     if (this.finalSnapshotTask || this.options.hasActiveOperations()) return
-    this.cancelDiagnosticRelease()
-    const task = this.finishSuccessfulOperation(workspaceId)
+    this.finalizationState = { state: 'finalizing', workspaceId }
+    const task = this.finishOperation(workspaceId)
     this.finalSnapshotTask = task
     void task.finally(() => {
       if (this.finalSnapshotTask === task) {
@@ -41,32 +50,23 @@ export class RuntimeSidecarLifecycle {
     })
   }
 
-  retainFailedOperationForDiagnostics(): void {
-    if (this.options.hasActiveOperations() || this.diagnosticReleaseTimer) return
-    const timeoutMs =
-      this.options.diagnosticIdleTimeoutMs ?? DEFAULT_DIAGNOSTIC_IDLE_TIMEOUT_MS
-    this.diagnosticReleaseTimer = setTimeout(() => {
-      this.diagnosticReleaseTimer = null
-      if (this.options.hasActiveOperations()) return
-      void this.options.closeSidecar().then(
-        () => this.options.emitIdle(),
-        (error: unknown) => this.options.emitError(errorMessage(error)),
-      )
-    }, timeoutMs)
+  async retryFinalSnapshot(): Promise<boolean> {
+    const workspaceId = this.finalizationState?.workspaceId
+    if (!workspaceId || this.finalizationState?.state !== 'snapshot-failed') return false
+    this.finalizeOperation(workspaceId)
+    await this.finalSnapshotTask
+    return this.finalizationState === null
   }
 
-  cancelDiagnosticRelease(): void {
-    if (!this.diagnosticReleaseTimer) return
-    clearTimeout(this.diagnosticReleaseTimer)
-    this.diagnosticReleaseTimer = null
-  }
-
-  private async finishSuccessfulOperation(workspaceId: string): Promise<void> {
+  private async finishOperation(workspaceId: string): Promise<void> {
     try {
       await this.options.captureFinalSnapshot(workspaceId)
       await this.options.closeSidecar()
+      this.finalizationState = null
     } catch (error) {
-      this.options.emitError(errorMessage(error))
+      const issue = errorMessage(error)
+      this.finalizationState = { issue, state: 'snapshot-failed', workspaceId }
+      this.options.emitError(issue)
     }
   }
 }

@@ -3,6 +3,7 @@ import {
   extractDesignReportData,
   generateDesignReport,
   joinLocalPath,
+  validateEngineeringSnapshot,
   type DesignReportFormat,
   type EccWorkspaceInspectSignoffResult,
   type SignoffAdditionalFile,
@@ -16,6 +17,7 @@ interface SignoffProject {
 interface SignoffWorkspaceSession {
   state: string
   workspaceId: string
+  workspaceRevision?: number
 }
 
 interface ToastOptions {
@@ -126,14 +128,22 @@ export function useSignoffPackageExport({
   let reviewGeneration = 0
   let reviewWorkspacePath = ''
   let reviewWorkspaceHandle = ''
+  let reviewWorkspaceRevision: number | undefined
 
   watch(
-    () => [currentProject.value?.path, workspaceSession.value.workspaceId],
+    () => [
+      currentProject.value?.path,
+      workspaceSession.value.workspaceId,
+      workspaceSession.value.workspaceRevision,
+    ],
     () => {
       if (
         signoffPackageReview.value.visible &&
         (currentProject.value?.path !== reviewWorkspacePath ||
-          workspaceSession.value.workspaceId !== reviewWorkspaceHandle)
+          workspaceSession.value.workspaceId !== reviewWorkspaceHandle ||
+          (reviewWorkspaceRevision !== undefined &&
+            workspaceSession.value.workspaceRevision !== undefined &&
+            workspaceSession.value.workspaceRevision !== reviewWorkspaceRevision))
       ) {
         closeSignoffPackageReview()
       }
@@ -149,14 +159,25 @@ export function useSignoffPackageExport({
     const workspaceHandle =
       workspaceSession.value.state === 'active' ? workspaceSession.value.workspaceId : ''
     if (!workspacePath || !workspaceHandle) return null
-    return { workspaceHandle, workspacePath }
+    return {
+      workspaceHandle,
+      workspacePath,
+      workspaceRevision: workspaceSession.value.workspaceRevision,
+    }
   }
 
-  function isActiveWorkspace(workspacePath: string, workspaceHandle: string): boolean {
+  function isActiveWorkspace(
+    workspacePath: string,
+    workspaceHandle: string,
+    workspaceRevision?: number,
+  ): boolean {
     return (
       currentProject.value?.path === workspacePath &&
       workspaceSession.value.state === 'active' &&
-      workspaceSession.value.workspaceId === workspaceHandle
+      workspaceSession.value.workspaceId === workspaceHandle &&
+      (workspaceRevision === undefined ||
+        workspaceSession.value.workspaceRevision === undefined ||
+        workspaceSession.value.workspaceRevision === workspaceRevision)
     )
   }
 
@@ -164,6 +185,7 @@ export function useSignoffPackageExport({
     reviewGeneration += 1
     reviewWorkspacePath = ''
     reviewWorkspaceHandle = ''
+    reviewWorkspaceRevision = undefined
     signoffPackageReview.value = {
       error: '',
       loading: false,
@@ -180,8 +202,10 @@ export function useSignoffPackageExport({
     }
 
     const generation = ++reviewGeneration
+    const expectedRevision = workspace.workspaceRevision ?? reviewWorkspaceRevision
     reviewWorkspacePath = workspace.workspacePath
     reviewWorkspaceHandle = workspace.workspaceHandle
+    reviewWorkspaceRevision = expectedRevision
     signoffPackageReview.value = {
       error: '',
       loading: true,
@@ -190,25 +214,46 @@ export function useSignoffPackageExport({
     }
 
     try {
-      const result = await getDesktopApi().ecc.workspace.inspectSignoff({
+      const runtime = getDesktopApi().ecc.runtime
+      if (!runtime) throw new Error('ECC Engineering Snapshot API is unavailable.')
+      const result = await runtime.engineeringSnapshot({
         workspaceHandle: workspace.workspaceHandle,
+        ...(expectedRevision !== undefined
+          ? { expectedWorkspaceRevision: expectedRevision }
+          : {}),
       })
       if (
         generation !== reviewGeneration ||
-        !isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)
+        !isActiveWorkspace(
+          workspace.workspacePath,
+          workspace.workspaceHandle,
+          result.workspaceRevision,
+        )
       ) {
         return
       }
+      const validated = validateEngineeringSnapshot(result, result.workspaceId)
+      if (!validated.ok) throw new Error(validated.issue.code)
+      if (validated.sections.signoff.status !== 'ready') {
+        throw new Error(
+          validated.sections.signoff.issues[0]?.code ?? 'ENGINEERING_SIGNOFF_INVALID',
+        )
+      }
+      reviewWorkspaceRevision = result.workspaceRevision
       signoffPackageReview.value = {
         error: '',
         loading: false,
-        result,
+        result: validated.sections.signoff.data,
         visible: true,
       }
     } catch (error) {
       if (
         generation !== reviewGeneration ||
-        !isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)
+        !isActiveWorkspace(
+          workspace.workspacePath,
+          workspace.workspaceHandle,
+          expectedRevision,
+        )
       ) {
         return
       }
@@ -242,7 +287,12 @@ export function useSignoffPackageExport({
     if (
       !workspace ||
       workspace.workspacePath !== reviewWorkspacePath ||
-      workspace.workspaceHandle !== reviewWorkspaceHandle
+      workspace.workspaceHandle !== reviewWorkspaceHandle ||
+      !isActiveWorkspace(
+        workspace.workspacePath,
+        workspace.workspaceHandle,
+        reviewWorkspaceRevision,
+      )
     ) {
       closeSignoffPackageReview()
       return
@@ -251,8 +301,20 @@ export function useSignoffPackageExport({
     closeSignoffPackageReview()
     try {
       const api = getDesktopApi()
-      const parameters = await api.workspaceResources.readParameters()
-      if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
+      const runtime = api.ecc.runtime
+      if (!runtime) throw new Error('ECC runtime snapshot API is unavailable.')
+      const runtimeSnapshot = await runtime.snapshot({
+        workspaceHandle: workspace.workspaceHandle,
+      })
+      const parameters = runtimeSnapshot.parameters
+      if (
+        !isActiveWorkspace(
+          workspace.workspacePath,
+          workspace.workspaceHandle,
+          workspace.workspaceRevision,
+        )
+      )
+        return
 
       const design = signoffPackageDesignName(parameters, workspace.workspacePath)
       const outputPath = await api.dialog.saveFile({
@@ -263,13 +325,17 @@ export function useSignoffPackageExport({
       })
       if (
         !outputPath ||
-        !isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)
+        !isActiveWorkspace(
+          workspace.workspacePath,
+          workspace.workspaceHandle,
+          workspace.workspaceRevision,
+        )
       ) {
         return
       }
 
-      const flow = await api.workspaceResources.readFlow().catch(() => null)
-      const home = await api.workspaceResources.readHome().catch(() => null)
+      const flow = runtimeSnapshot.flow
+      const home = runtimeSnapshot.home
       const versions = await api.app
         .getVersions()
         .catch(() => ({ gui: '', ecc: '', eccTools: '' }))
@@ -317,20 +383,37 @@ export function useSignoffPackageExport({
         }
       })
 
-      const result = await api.ecc.workspace.exportSignoff({
-        additionalFiles,
-        outputPath,
-        workspaceHandle: workspace.workspaceHandle,
+      const result = await api.productCommands.execute({
+        command: 'workspace.exportSignoff',
+        payload: {
+          additionalFiles,
+          outputPath,
+          workspaceHandle: workspace.workspaceHandle,
+        },
       })
-      if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
+      if (
+        !isActiveWorkspace(
+          workspace.workspacePath,
+          workspace.workspaceHandle,
+          workspace.workspaceRevision,
+        )
+      )
+        return
 
       showToast({
         severity: 'success',
         summary: 'Signoff Package Exported',
-        detail: `Saved package and design summaries to ${result.outputPath}`,
+        detail: `Saved package and design summaries to ${'outputPath' in result ? result.outputPath : outputPath}`,
       })
     } catch (error) {
-      if (!isActiveWorkspace(workspace.workspacePath, workspace.workspaceHandle)) return
+      if (
+        !isActiveWorkspace(
+          workspace.workspacePath,
+          workspace.workspaceHandle,
+          workspace.workspaceRevision,
+        )
+      )
+        return
       showToast({
         severity: 'error',
         summary: 'Failed to Export Signoff Package',

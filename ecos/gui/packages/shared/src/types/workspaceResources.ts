@@ -30,6 +30,7 @@ export interface WorkspaceStepResource {
   tool: string
   state: string
   runtime: string
+  peakMemoryMb?: number
   directory: string
   info: Record<string, unknown>
   resources: {
@@ -79,7 +80,9 @@ export interface WorkspaceResourceIndex {
 }
 
 export interface WorkspaceStepInfoRequest {
+  designTool?: 'backend' | 'frontend'
   step: string
+  workspaceHandle?: string
   id:
     | 'views'
     | 'layout'

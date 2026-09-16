@@ -13,8 +13,8 @@ SOURCE_PATHS = {
     "ecc.feature.builder": "ecc/chipcompiler/thirdparty/ecc-tools/src/feature/builder/feature_builder.cpp",
     "icts.qor": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/source/module/evaluation/qor/QOREvaluation.cc",
     "icts.qor_metrics": "ecc/chipcompiler/thirdparty/ecc-tools/src/operation/iCTS/source/module/evaluation/qor/QOREvaluationMetrics.cc",
-    "gui.qor_trend": "ecos/gui/apps/renderer/src/utils/projectQorTrend.ts",
-    "gui.qor_data": "ecos/gui/apps/renderer/src/views/project-management/projectWorkspaceAnalysisData.ts",
+    "gui.qor_trend": "ecos/gui/apps/desktop-electron/electron/services/qorAnalysis.ts",
+    "gui.qor_data": "ecos/gui/apps/desktop-electron/electron/services/qorAnalysis.ts",
 }
 
 

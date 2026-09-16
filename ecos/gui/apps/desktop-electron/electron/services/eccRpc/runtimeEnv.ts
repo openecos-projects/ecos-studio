@@ -10,7 +10,6 @@ import { constants as fsConstants } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { resolveContainedSymlinkDir } from '../cliInstallerArtifacts'
-import type { EccRuntimeTarget } from '@ecos-studio/shared'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
@@ -33,7 +32,7 @@ export interface EccRuntimeEnvOptions {
 export interface EccSidecarLaunchOptions {
   agentEccExecutable: string | null
   eccExecutable: string
-  runtimeTarget?: EccRuntimeTarget
+  runtimeTarget?: 'agent'
 }
 
 function getPathKey(env: NodeJS.ProcessEnv): string {
@@ -252,10 +251,10 @@ export function resolveEccExecutable(options: EccRuntimeEnvOptions): string | nu
     return bundleHomeBin ? join(bundleHomeBin, executableName) : null
   }
 
+  const repoRoot = findRepoRootFromAppPath(options.appPath)
+  if (!repoRoot) return null
   const developmentBinDir = resolveDevelopmentEccBinDir(options)
-  if (!developmentBinDir) {
-    return null
-  }
+  if (!developmentBinDir) return null
 
   const candidate = join(developmentBinDir, executableName)
   return existsSync(candidate) ? candidate : null

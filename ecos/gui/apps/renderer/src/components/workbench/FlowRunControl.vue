@@ -49,9 +49,8 @@
 import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
 import { useCurrentStage } from '@/composables/useCurrentStage'
-import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
-import { useFlowStages } from '@/composables/useFlowStages'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
@@ -61,13 +60,12 @@ const rerunConfirmationVisible = ref(false)
 const preparingRerun = ref(false)
 const { currentStage } = useCurrentStage()
 const { isRunning, runFlow, runAllFlow } = useFlowRunner()
-const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
 const {
   dynamicFlowStages,
   refreshFlowStages,
   setFirstRunStepOngoing,
   setRunStepOngoingByPath,
-} = useFlowStages()
+} = useBackendFlowStages()
 const { overallStatus } = useSubflow()
 const { currentProject, ensureApiReady, showToast } = useWorkspace()
 
@@ -82,7 +80,12 @@ const hasFinishedFlow = computed(
     dynamicFlowStages.value.length > 0 &&
     dynamicFlowStages.value.every((stage) => {
       const status = flowNodeStatus(stage.state)
-      return status === 'succeeded' || status === 'failed' || status === 'skipped'
+      return (
+        status === 'succeeded' ||
+        status === 'warning' ||
+        status === 'failed' ||
+        status === 'skipped'
+      )
     }),
 )
 const hasFinishedStep = computed(
@@ -133,20 +136,14 @@ async function executeRun(rerun: boolean): Promise<void> {
     }
   }
 
-  const capture = startFlowRunArtifactCapture({
-    stepNames: isHomeStage.value
-      ? dynamicFlowStages.value.map((stage) => stage.path)
-      : [currentStage.value],
-  })
-
   if (isHomeStage.value) {
     setFirstRunStepOngoing({ resetAll: rerun })
-    if (!(await runAllFlow({ rerun }))) capture.stop()
+    await runAllFlow({ rerun })
     return
   }
 
   setRunStepOngoingByPath(currentStage.value)
-  if (!(await runFlow({ rerun, resetDependents: rerun }))) capture.stop()
+  await runFlow({ rerun, resetDependents: rerun })
 }
 
 async function canRerunCurrentStep(): Promise<boolean> {

@@ -31,6 +31,10 @@ export interface DesktopAgentStartSessionRequest extends DesktopAgentProviderReq
   projectRoot?: string
   sessionId?: string
   workspaceId?: string
+  /** Electron-populated canonical context; renderer values are ignored. */
+  workspaceDesignId?: string
+  workspaceParameterValues?: Record<string, DesktopAgentWorkspaceRerunParameterValue>
+  workspaceRevision?: number
 }
 
 export interface DesktopAgentStartSessionResponse {
@@ -39,8 +43,12 @@ export interface DesktopAgentStartSessionResponse {
 }
 
 export interface DesktopAgentSendMessageRequest extends DesktopAgentProviderRequest {
+  /** Electron-issued token returned only when the user confirms an execution card. */
+  confirmationToken?: string
   message: string
   sessionId: string
+  /** Electron-populated canonical context; renderer values are ignored. */
+  workspaceRevision?: number
 }
 
 export interface DesktopAgentSendMessageResponse {
@@ -249,11 +257,22 @@ export interface DesktopAgentContractField {
   value: string
 }
 
+export interface DesktopAgentStepConfigurationUpdate {
+  options: Record<string, unknown>
+  step_id: string
+}
+
 export interface DesktopAgentExecutionContract {
+  confirmation_token?: string
   fields: DesktopAgentContractField[]
+  parameter_patch?: DesktopAgentWorkspaceRerunParameterPatch[]
   presentation?: 'workspace_rerun' | 'workspace_continue' | 'workspace_parameter_update'
   schema_version: 'flow-agent.resolved_execution_contract.v1'
   title: string
+  update_id?: string
+  workspace?: string
+  workspace_rerun?: DesktopAgentWorkspaceRerunContract
+  workspace_revision?: number
 }
 
 export interface DesktopAgentWorkspaceContinueContract {
@@ -305,10 +324,15 @@ export interface DesktopAgentWorkspaceParameterWrite {
 
 export interface DesktopAgentWorkspaceParameterUpdateContract {
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
-  schema_version: 'flow-agent.workspace_parameter_update_contract.v2'
+  schema_version:
+    | 'flow-agent.workspace_parameter_update_contract.v2'
+    | 'flow-agent.workspace_parameter_update_contract.v3'
+  step_configurations: DesktopAgentStepConfigurationUpdate[]
   update_id: string
   workspace: string
-  writes: DesktopAgentWorkspaceParameterWrite[]
+  workspace_parameters: Record<string, unknown>
+  workspace_revision?: number
+  writes?: DesktopAgentWorkspaceParameterWrite[]
 }
 
 export interface DesktopAgentWorkspaceSetupParameters {
@@ -381,6 +405,8 @@ export interface DesktopAgentWorkspaceRerunContract {
   end_step: string
   execution_scope: 'single_step' | 'full_flow'
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
+  step_configurations?: DesktopAgentStepConfigurationUpdate[]
+  workspace_parameters?: Record<string, unknown>
   /** Optional only for pre-write-contract Agent providers; nonempty patches fail closed. */
   writes?: DesktopAgentWorkspaceParameterWrite[]
   requires_gui_review: true

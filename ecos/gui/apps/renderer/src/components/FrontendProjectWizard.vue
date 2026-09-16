@@ -845,7 +845,7 @@ import {
   type FrontendValidationRequest,
   type FrontendValidationResult,
 } from '@/api/frontendCatalog'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import type { WorkspaceConfig } from '../types'
 import {
@@ -1466,7 +1466,7 @@ function compatibilityFor(
 }
 
 const selectLocation = async () => {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
     title: 'Select Project Save Location',
   })
@@ -1476,7 +1476,7 @@ const selectLocation = async () => {
 }
 
 const selectCpuFilelist = async () => {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickFiles({
     multiple: false,
     filters: [
@@ -1503,7 +1503,7 @@ async function selectCpuSourceMode(mode: CpuSourceMode): Promise<void> {
 }
 
 async function selectCpuRtlFiles(): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickFiles({
     multiple: true,
     filters: [

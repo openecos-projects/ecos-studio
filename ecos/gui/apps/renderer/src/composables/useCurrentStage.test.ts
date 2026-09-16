@@ -5,7 +5,6 @@ describe('getWorkspaceStageFlags', () => {
   it('treats tech as a workspace setup page instead of a flow step', () => {
     expect(getWorkspaceStageFlags('tech')).toEqual({
       isHome: false,
-      isConfigure: false,
       isTech: true,
       isFlowStep: false,
     })

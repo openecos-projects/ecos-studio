@@ -3,6 +3,7 @@ export const AGENT_PANEL_MAX_WIDTH = 720
 export const AGENT_PANEL_DEFAULT_WIDTH = 400
 
 const STORAGE_KEY = 'ecos.agent.panelWidthPx'
+const WORKSPACE_COLLAPSED_STORAGE_KEY = 'ecos.agent.workspaceCollapsed'
 
 export function clampAgentPanelWidth(
   width: number,
@@ -24,4 +25,14 @@ export function readStoredAgentPanelWidth(): number {
 export function persistAgentPanelWidth(width: number): void {
   if (typeof localStorage === 'undefined') return
   localStorage.setItem(STORAGE_KEY, String(clampAgentPanelWidth(width)))
+}
+
+export function readStoredWorkspaceAgentCollapsed(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  return localStorage.getItem(WORKSPACE_COLLAPSED_STORAGE_KEY) === 'true'
+}
+
+export function persistWorkspaceAgentCollapsed(collapsed: boolean): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(WORKSPACE_COLLAPSED_STORAGE_KEY, String(collapsed))
 }

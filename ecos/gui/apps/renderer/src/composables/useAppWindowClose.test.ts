@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { consoleError, waitForDesktopApi, mountedCallbacks, unmountedCallbacks } =
-  vi.hoisted(() => ({
+const { consoleError, getDesktopApi, mountedCallbacks, unmountedCallbacks } = vi.hoisted(
+  () => ({
     consoleError: vi.fn(),
-    waitForDesktopApi: vi.fn(),
+    getDesktopApi: vi.fn(),
     mountedCallbacks: [] as Array<() => void | Promise<void>>,
     unmountedCallbacks: [] as Array<() => void>,
-  }))
+  }),
+)
 
 vi.mock('vue', () => ({
   onMounted: (callback: () => void | Promise<void>) => {
@@ -18,7 +19,7 @@ vi.mock('vue', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi,
+  getDesktopApi,
 }))
 
 import { useAppWindowClose } from './useAppWindowClose'
@@ -28,7 +29,7 @@ describe('useAppWindowClose', () => {
     mountedCallbacks.length = 0
     unmountedCallbacks.length = 0
     consoleError.mockReset()
-    waitForDesktopApi.mockReset()
+    getDesktopApi.mockReset()
     vi.spyOn(console, 'error').mockImplementation(consoleError)
   })
 
@@ -37,16 +38,16 @@ describe('useAppWindowClose', () => {
     vi.restoreAllMocks()
   })
 
-  it('subscribes once and runs cleanup before confirming native window close', async () => {
+  it('subscribes once and acknowledges Renderer cleanup by shutdown attempt', async () => {
     const unsubscribe = vi.fn()
-    const confirmClose = vi.fn().mockResolvedValue(undefined)
-    let onCloseRequested: (() => void) | undefined
+    const completeCleanup = vi.fn().mockResolvedValue(undefined)
+    let onCleanupRequested: ((request: { attemptId: string }) => void) | undefined
 
-    waitForDesktopApi.mockResolvedValue({
-      window: {
-        confirmClose,
-        onCloseRequested: vi.fn((listener: () => void) => {
-          onCloseRequested = listener
+    getDesktopApi.mockReturnValue({
+      shutdown: {
+        completeCleanup,
+        onCleanupRequested: vi.fn((listener) => {
+          onCleanupRequested = listener
           return unsubscribe
         }),
       },
@@ -58,25 +59,25 @@ describe('useAppWindowClose', () => {
 
     await mountedCallbacks[0]?.()
     await Promise.resolve()
-    await onCloseRequested?.()
+    await onCleanupRequested?.({ attemptId: 'attempt-1' })
 
     expect(cleanup).toHaveBeenCalledTimes(1)
-    expect(confirmClose).toHaveBeenCalledTimes(1)
+    expect(completeCleanup).toHaveBeenCalledWith({ attemptId: 'attempt-1', ok: true })
 
     unmountedCallbacks[0]?.()
 
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  it('still confirms close when cleanup fails so the window is not trapped open', async () => {
-    const confirmClose = vi.fn().mockResolvedValue(undefined)
-    let onCloseRequested: (() => void) | undefined
+  it('reports cleanup failure without approving native close', async () => {
+    const completeCleanup = vi.fn().mockResolvedValue(undefined)
+    let onCleanupRequested: ((request: { attemptId: string }) => void) | undefined
 
-    waitForDesktopApi.mockResolvedValue({
-      window: {
-        confirmClose,
-        onCloseRequested: vi.fn((listener: () => void) => {
-          onCloseRequested = listener
+    getDesktopApi.mockReturnValue({
+      shutdown: {
+        completeCleanup,
+        onCleanupRequested: vi.fn((listener) => {
+          onCleanupRequested = listener
           return vi.fn()
         }),
       },
@@ -88,9 +89,13 @@ describe('useAppWindowClose', () => {
 
     await mountedCallbacks[0]?.()
     await Promise.resolve()
-    await onCloseRequested?.()
+    await onCleanupRequested?.({ attemptId: 'attempt-2' })
 
     expect(consoleError).toHaveBeenCalledTimes(1)
-    expect(confirmClose).toHaveBeenCalledTimes(1)
+    expect(completeCleanup).toHaveBeenCalledWith({
+      attemptId: 'attempt-2',
+      issue: 'close failed',
+      ok: false,
+    })
   })
 })

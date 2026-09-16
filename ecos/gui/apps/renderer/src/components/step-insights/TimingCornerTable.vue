@@ -94,12 +94,12 @@
               {{ formatSlack(overview.worstSetup?.wns) }}
             </td>
             <td :class="slackClass(minSetupTns)">{{ formatSlack(minSetupTns) }}</td>
-            <td>{{ overview.setupViolationCount }}</td>
+            <td>{{ overview.setupViolationCount ?? '—' }}</td>
             <td :class="slackClass(overview.worstHold?.wns)">
               {{ formatSlack(overview.worstHold?.wns) }}
             </td>
             <td :class="slackClass(minHoldTns)">{{ formatSlack(minHoldTns) }}</td>
-            <td>{{ overview.holdViolationCount }}</td>
+            <td>{{ overview.holdViolationCount ?? '—' }}</td>
             <td v-if="!compact">
               {{
                 overview.frequencyMhz === null ? '—' : Math.round(overview.frequencyMhz)
@@ -136,7 +136,9 @@ const emit = defineEmits<{
 }>()
 
 /** Corner rows to render; a single corner duplicates the Worst summary row. */
-const visibleRows = computed(() => (props.rows.length === 1 ? [] : props.rows))
+const visibleRows = computed(() =>
+  props.rows.length === 1 && !props.rows[0]?.missing ? [] : props.rows,
+)
 
 const minSetupTns = computed(() => {
   const values = props.overview.corners

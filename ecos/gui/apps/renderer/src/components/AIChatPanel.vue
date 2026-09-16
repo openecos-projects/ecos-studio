@@ -262,7 +262,6 @@ import type {
   DesktopAgentEvent,
   DesktopAgentInteractionRequest,
   DesktopAgentSetModelSettingsRequest,
-  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
@@ -292,6 +291,7 @@ import {
   pendingInteractionPresentation,
   type InteractionAnswer,
 } from './chatTurns'
+import { executeConfirmedWorkspaceParameterUpdate } from './workspaceParameterUpdateExecution'
 import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
@@ -312,10 +312,9 @@ import {
 } from '@/composables/homeRunArtifacts'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
-import { refreshConfigApi, syncConfigApi } from '@/api/flow'
+import { updateWorkspaceConfigurationApi } from '@/api/workspace'
 import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
 import { canExportSignoffPackage } from '@/composables/useSignoffPackageExport'
-import { CMDEnum, ResponseEnum } from '@/api/type'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
   registerProjectManagedWorkspace,
@@ -367,7 +366,7 @@ const {
   invalidateWorkspaceResources,
   currentProject,
   workspaceSession,
-  runtimeEvents,
+  backendRuntimeEvents,
   waitForRuntimeOperation,
 } = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
@@ -385,7 +384,7 @@ const agentFlowProgress = useAgentFlowProgress(
     // ECC terminal events are the only source of runtime-driven refreshes.
     invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
   },
-  runtimeEvents,
+  backendRuntimeEvents,
 )
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
@@ -2305,20 +2304,22 @@ async function executeWorkspaceSignoff(
       throw new Error('The signoff contract targets a workspace that is not open.')
     }
     if (contract.action === 'inspect') {
-      const review = await desktopApi.ecc.workspace.inspectSignoff({
-        runtimeTarget: 'agent',
-        workspaceHandle,
-      })
+      const runtime = desktopApi.ecc.runtime
+      if (!runtime) throw new Error('ECC Engineering Snapshot API is unavailable.')
+      const snapshot = await runtime.engineeringSnapshot({ workspaceHandle })
+      const review = snapshot.signoffAssessment
       ui.workspaceSignoffReview = review
       const blocked = review.risks
-        .filter((risk) => risk.severity === 'blocked')
-        .map((risk) => `${risk.title}: ${risk.summary}`)
+        .filter((risk: { severity: string }) => risk.severity === 'blocked')
+        .map((risk: { title: string; summary: string }) => `${risk.title}: ${risk.summary}`)
         .join('; ')
       await reportWorkspaceSignoffInspection(
         contract.signoff_id,
         review.status,
         blocked ||
-          review.risks.map((risk) => risk.summary).join('; ') ||
+          review.risks
+            .map((risk: { summary: string }) => risk.summary)
+            .join('; ') ||
           (review.status === 'blocked' ? 'Signoff checklist is blocked.' : ''),
         ownerSessionId,
       )
@@ -2328,11 +2329,16 @@ async function executeWorkspaceSignoff(
       ui.workspaceSignoffOutputPath.trim() ||
       `${normalizeWorkspaceRoot(currentProject.value?.path ?? '')}/signoff/signoff_package.tar.gz`
     if (!outputPath) throw new Error('Enter a signoff package output path.')
-    const result = await desktopApi.ecc.workspace.exportSignoff({
-      outputPath,
-      runtimeTarget: 'agent',
-      workspaceHandle,
+    const result = await desktopApi.productCommands.execute({
+      command: 'workspace.exportSignoff',
+      payload: {
+        outputPath,
+        workspaceHandle,
+      },
     })
+    if (!('outputPath' in result) || typeof result.outputPath !== 'string') {
+      throw new Error('Signoff export did not return an output path.')
+    }
     messageStore.addAssistantMessage(
       `Signoff package saved to ${result.outputPath}.`,
       'done',
@@ -2428,36 +2434,32 @@ async function executeWorkspaceParameterUpdate(
   ui.isWorkspaceParameterPending = true
   messageStore.setActiveSessionId(ownerSessionId)
   try {
-    const workspaceRoot = normalizeWorkspaceRoot(contract.workspace)
-    if (normalizeWorkspaceRoot(currentProject.value?.path ?? '') !== workspaceRoot) {
-      throw new Error('The parameter update targets a workspace that is not open.')
-    }
-    await applyWorkspaceParameterWrites(workspaceRoot, contract.writes)
-    await syncWorkspaceParameterWrites(workspaceRoot, contract.writes)
-    invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])
-    await reportWorkspaceParameterUpdateResult(
-      contract.update_id,
-      'succeeded',
-      '',
-      ownerSessionId,
-    )
-  } catch (error) {
-    const reason = agentErrorMessage(error)
-    messageStore.addAssistantMessage(
-      `Parameter update failed: ${reason}`,
-      'error',
-      ownerSessionId,
-    )
-    try {
-      await reportWorkspaceParameterUpdateResult(
-        contract.update_id,
-        'failed',
-        reason,
-        ownerSessionId,
-      )
-    } catch {
-      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
-    }
+    await executeConfirmedWorkspaceParameterUpdate(contract, {
+      commandId: () => crypto.randomUUID(),
+      currentWorkspace: currentProject.value?.path ?? '',
+      errorMessage: agentErrorMessage,
+      initialRevision: contract.workspace_revision,
+      invalidate: () =>
+        invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow']),
+      onFailure: (reason) =>
+        messageStore.addAssistantMessage(
+          `Parameter update failed: ${reason}`,
+          'error',
+          ownerSessionId,
+        ),
+      onReportFailure: (reason) =>
+        messageStore.addAssistantMessage(reason, 'error', ownerSessionId),
+      report: (status, error) =>
+        reportWorkspaceParameterUpdateResult(
+          contract.update_id,
+          status,
+          error,
+          ownerSessionId,
+        ),
+      updateConfiguration: updateWorkspaceConfigurationApi,
+      updateRevision: (revision) => workspaceLifecycle.updateWorkspaceRevision(revision),
+      workspaceHandle: workspaceLifecycle.session.value.workspaceId,
+    })
   } finally {
     ui.isWorkspaceParameterPending = false
     ui.pendingParameterUpdate = undefined
@@ -2482,66 +2484,6 @@ async function reportWorkspaceParameterUpdateResult(
 
 function normalizeWorkspaceRoot(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '')
-}
-
-/**
- * Applies the Agent's resolved write instructions. The knob-to-location mapping
- * lives in the Agent registry, so an unsupported knob fails loudly here instead
- * of being dropped by a second, out-of-date table. The main process commits
- * every file through the serialized atomic parameter queue and rolls back
- * only the revision this operation produced.
- */
-async function applyWorkspaceParameterWrites(
-  workspaceRoot: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  if (!desktopApi) throw new Error('Desktop API is unavailable.')
-  await desktopApi.workspace.applyWorkspaceParameterWrites(workspaceRoot, writes)
-}
-
-/**
- * Pushes the edited files back through ECC. Without this the two parameter
- * surfaces drift apart and the change never reaches the next run: a step-config
- * edit must be synced into `parameters.json` before that file is re-expanded.
- */
-async function syncWorkspaceParameterWrites(
-  workspaceRoot: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const workspaceHandle = workspaceLifecycle.session.value.workspaceId
-  const stepConfigFiles = [
-    ...new Set(
-      writes
-        .filter((write) => write.surface === 'step_config')
-        .map((write) => write.file),
-    ),
-  ]
-  for (const configPath of stepConfigFiles) {
-    assertEccSuccess(
-      await syncConfigApi({
-        cmd: CMDEnum.sync_config,
-        data: {
-          config_path: configPath,
-          directory: workspaceRoot,
-          runtimeTarget: 'agent',
-          workspaceHandle,
-        },
-      }),
-      `Failed to sync ${configPath}`,
-    )
-  }
-  assertEccSuccess(
-    await refreshConfigApi({
-      cmd: CMDEnum.refresh_config,
-      data: { directory: workspaceRoot, runtimeTarget: 'agent', workspaceHandle },
-    }),
-    'Failed to refresh the workspace configuration',
-  )
-}
-
-function assertEccSuccess(result: { response?: string } | null, message: string): void {
-  if (result?.response !== ResponseEnum.success) throw new Error(`${message}.`)
 }
 
 function resetInputHistory(): void {

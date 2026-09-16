@@ -13,7 +13,7 @@ import type {
   ProjectStepStatus,
   ProjectWorkspace,
 } from '@/utils/projectManagement'
-import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
+import type { ProjectQorTrendSummary } from '@ecos-studio/shared'
 
 export function metricPointFixture(
   workspaceId: string,
@@ -120,59 +120,12 @@ export function trendSummaryWithScoresFixture(): ProjectQorTrendSummary {
     workspaces: summary.workspaces.map((workspace) => ({
       ...workspace,
       overallScore: scores[workspace.workspaceId] ?? null,
-      scoringEngine: 'qor-v3' as const,
-      profile: 'balanced',
-      qphys:
+      gateStatus:
         workspace.workspaceId === 'ws_a'
-          ? [
-              {
-                key: 'timing' as const,
-                value: 100,
-                state: 'PASS',
-                features: [],
-              },
-              {
-                key: 'interconnect' as const,
-                value: 52,
-                state: 'WATCH',
-                features: [
-                  {
-                    featureId: 'F_PL_I_PLACE',
-                    value: 1.4,
-                    state: 'WATCH',
-                    interpretation: 'Global-routing realization overhead.',
-                  },
-                ],
-              },
-              { key: 'area' as const, value: null, state: 'UNKNOWN', features: [] },
-            ]
-          : [],
-      diagnoses:
-        workspace.workspaceId === 'ws_a'
-          ? [
-              {
-                diagnosisId: 'diag.place.congestion',
-                state: 'WATCH',
-                severity: 0.5,
-                confidence: 'HIGH' as const,
-                interpretation: 'Congestion proxies are elevated.',
-                affectedDimensions: ['interconnect'],
-                interventions: [
-                  {
-                    hypothesis: 'evaluate placement density adjustments.',
-                    tier: 'TIER_2_BOTTLENECK' as const,
-                    confidence: 'LOW' as const,
-                    parameterKnob: null,
-                    validationProcedure: 'Rerun placement and compare.',
-                  },
-                ],
-              },
-            ]
-          : [],
-      evidence:
-        workspace.workspaceId === 'ws_a'
-          ? { index: 100, state: 'HIGH', integrity: 1, coverage: 1, consistency: 1 }
-          : null,
+          ? 'blocked'
+          : workspace.workspaceId === 'ws_b'
+            ? 'pass'
+            : 'unavailable',
       signoffReadiness: {
         ...workspace.signoffReadiness,
         status: workspace.workspaceId === 'ws_c' ? 'incomplete' : 'pass',

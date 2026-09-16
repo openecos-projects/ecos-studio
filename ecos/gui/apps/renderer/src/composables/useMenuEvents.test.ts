@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mountedCallbacks, unmountedCallbacks, waitForDesktopApi } = vi.hoisted(() => ({
-  waitForDesktopApi: vi.fn(),
+const { getDesktopApi, mountedCallbacks, unmountedCallbacks } = vi.hoisted(() => ({
+  getDesktopApi: vi.fn(),
   mountedCallbacks: [] as Array<() => void | Promise<void>>,
   unmountedCallbacks: [] as Array<() => void>,
 }))
@@ -16,7 +16,7 @@ vi.mock('vue', () => ({
 }))
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi,
+  getDesktopApi,
 }))
 
 import { useMenuEvents } from './useMenuEvents'
@@ -25,7 +25,7 @@ describe('useMenuEvents', () => {
   beforeEach(() => {
     mountedCallbacks.length = 0
     unmountedCallbacks.length = 0
-    waitForDesktopApi.mockReset()
+    getDesktopApi.mockReset()
   })
 
   afterEach(() => {
@@ -36,7 +36,7 @@ describe('useMenuEvents', () => {
     const unsubscribe = vi.fn()
     let onAction: ((eventId: string) => void) | undefined
 
-    waitForDesktopApi.mockResolvedValue({
+    getDesktopApi.mockReturnValue({
       menu: {
         onAction: vi.fn((listener: (eventId: string) => void) => {
           onAction = listener
@@ -60,7 +60,7 @@ describe('useMenuEvents', () => {
     onAction?.('documentation')
     onAction?.('open_project')
 
-    expect(waitForDesktopApi).toHaveBeenCalledTimes(1)
+    expect(getDesktopApi).toHaveBeenCalledTimes(1)
     expect(newProject).toHaveBeenCalledTimes(1)
     expect(documentation).toHaveBeenCalledTimes(1)
 
@@ -69,19 +69,17 @@ describe('useMenuEvents', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  it('stays inert when the desktop bridge is unavailable', async () => {
-    waitForDesktopApi.mockRejectedValue(
-      new Error('ECOS desktop bridge is not available.'),
-    )
+  it('fails immediately when the desktop bridge is unavailable', () => {
+    getDesktopApi.mockImplementation(() => {
+      throw new Error('ECOS desktop bridge is not available.')
+    })
 
     useMenuEvents({
       new_project: vi.fn(),
     })
 
-    await mountedCallbacks[0]?.()
-    await Promise.resolve()
-
-    expect(waitForDesktopApi).toHaveBeenCalledTimes(1)
+    expect(() => mountedCallbacks[0]?.()).toThrow('ECOS desktop bridge is not available.')
+    expect(getDesktopApi).toHaveBeenCalledTimes(1)
 
     unmountedCallbacks[0]?.()
   })

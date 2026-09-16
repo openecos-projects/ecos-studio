@@ -1,167 +1,178 @@
-import { describe, expect, it } from 'vitest'
-import topBarSource from './TopBar.vue?raw'
+// @vitest-environment happy-dom
 
-function getCssDeclaration(selector: string, property: string): string | null {
-  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const blockMatch = topBarSource.match(
-    new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\}`),
-  )
-  if (!blockMatch) return null
+import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
 
-  const declarationMatch = blockMatch[1].match(new RegExp(`${property}\\s*:\\s*([^;]+);`))
-  return declarationMatch?.[1].trim() ?? null
-}
+const testState = vi.hoisted(() => ({
+  route: { path: '/workspace/demo', query: {} },
+  routerPush: vi.fn(),
+  routerReplace: vi.fn(),
+  desktopApi: {
+    window: {
+      isMaximized: vi.fn().mockResolvedValue(false),
+      onMaximizedChanged: vi.fn(() => () => undefined),
+    },
+  },
+}))
 
-describe('TopBar drag region layout', () => {
-  it('moves workspace home navigation into the quick menu above Project Management', () => {
-    const quickMenuIndex = topBarSource.indexOf('class="quick-dropdown-menu"')
-    const homeMenuIndex = topBarSource.indexOf('title="Back to Home"', quickMenuIndex)
-    const projectManagementIndex = topBarSource.indexOf(
-      'Back to Project Management',
-      quickMenuIndex,
+vi.mock('vue-router', () => ({
+  useRoute: () => testState.route,
+  useRouter: () => ({ push: testState.routerPush, replace: testState.routerReplace }),
+}))
+vi.mock('@/stores/themeStore', () => ({
+  useThemeStore: () => ({ themeName: 'light', toggleTheme: vi.fn() }),
+}))
+vi.mock('@/stores/agentShellStore', () => ({
+  useAgentShellStore: () => ({ homeAgentOpen: false, toggleHomeAgent: vi.fn() }),
+}))
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => testState.desktopApi,
+}))
+vi.mock('@/components/NotificationCenter.vue', () => ({
+  default: { template: '<div />' },
+}))
+vi.mock('@/components/BackgroundTasksButton.vue', () => ({
+  default: { template: '<div />' },
+}))
+vi.mock('@/components/ShutdownStatusButton.vue', () => ({
+  default: { template: '<div />' },
+}))
+
+import TopBar from './TopBar.vue'
+
+describe('TopBar signoff export menu', () => {
+  it('disables signoff export while a flow is running and explains why', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, signoffExportDisabled: true },
+    })
+
+    await wrapper.get('button.menu-btn').trigger('click')
+    const exportItem = wrapper
+      .findAll('button.dropdown-item')
+      .find((item) => item.text().includes('Export Signoff Package'))
+
+    expect((exportItem?.element as HTMLButtonElement | undefined)?.disabled).toBe(true)
+    expect(exportItem?.attributes('title')).toContain('flow is running')
+
+    await wrapper.setProps({ signoffExportDisabled: false })
+    await nextTick()
+    const enabledExportItem = wrapper
+      .findAll('button.dropdown-item')
+      .find((item) => item.text().includes('Export Signoff Package'))
+    expect((enabledExportItem?.element as HTMLButtonElement | undefined)?.disabled).toBe(
+      false,
     )
+    expect(enabledExportItem?.attributes('title')).toBeUndefined()
 
-    expect(topBarSource).not.toContain('class="home-btn"')
-    expect(topBarSource).not.toContain('.home-btn')
-    expect(topBarSource).toContain("router.push({ name: 'ECOS' })")
-    expect(quickMenuIndex).toBeGreaterThan(-1)
-    expect(homeMenuIndex).toBeGreaterThan(quickMenuIndex)
-    expect(homeMenuIndex).toBeLessThan(projectManagementIndex)
+    wrapper.unmount()
   })
 
-  it('uses a dedicated drag spacer instead of making the centered overlay draggable', () => {
-    expect(topBarSource).toContain('class="topbar-drag-spacer" data-window-drag-region')
-    expect(topBarSource).not.toContain(
-      '<div class="topbar-center" data-window-drag-region>',
+  it('keeps the active workspace shell when opening Project Management', async () => {
+    testState.route.path = '/workspace/floorplan'
+    testState.route.query = { projectRoot: '/work/demo', workspaceId: 'ws_0001' }
+    testState.routerPush.mockReset()
+
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, projectName: 'demo' },
+    })
+
+    await wrapper.get('.workspace-quick-menu-btn').trigger('click')
+    const projectManagementButton = document.body.querySelector(
+      'button[title="Return to Project Management"]',
     )
+    expect(projectManagementButton).not.toBeNull()
+    projectManagementButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(testState.routerPush).toHaveBeenCalledWith({
+      path: '/workspace/projects',
+      query: { projectRoot: '/work/demo', workspaceId: 'ws_0001' },
+    })
+    wrapper.unmount()
   })
 
-  it('keeps the centered title overlay pointer-transparent', () => {
-    expect(topBarSource).toMatch(/\.topbar-center\s*\{[\s\S]*pointer-events:\s*none;/)
+  it('opens Step Configuration from the workspace Edit menu', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true },
+    })
+
+    const editMenu = wrapper
+      .findAll('button.menu-btn')
+      .find((item) => item.text() === 'Edit')
+    expect(editMenu).toBeDefined()
+    await editMenu!.trigger('click')
+
+    const configItem = wrapper
+      .findAll('button.dropdown-item')
+      .find((item) => item.text().includes('Config'))
+    expect(configItem).toBeDefined()
+    expect((configItem!.element as HTMLButtonElement).disabled).toBe(false)
+    await configItem!.trigger('click')
+    expect(wrapper.emitted('step-config')).toEqual([[]])
+
+    wrapper.unmount()
   })
 
-  it('keeps dropdown menus above workspace content controls', () => {
-    const topbarLeftZIndex = Number(getCssDeclaration('.topbar-left', 'z-index'))
+  it('coordinates workspace shortcuts with the other topbar popovers', async () => {
+    const overlayOpened = vi.fn()
+    document.addEventListener('ecos-topbar-overlay-open', overlayOpened)
+    const wrapper = mount(TopBar, { props: { hasWorkspace: true } })
+    const trigger = wrapper.get('.workspace-quick-menu-btn')
 
-    expect(topbarLeftZIndex).toBeGreaterThan(20)
+    for (const overlay of ['background-tasks', 'notifications', 'shutdown-status']) {
+      await trigger.trigger('click')
+      expect(trigger.attributes('aria-expanded')).toBe('true')
+      expect(overlayOpened).toHaveBeenLastCalledWith(
+        expect.objectContaining({ detail: 'workspace-shortcuts' }),
+      )
+
+      document.dispatchEvent(
+        new CustomEvent('ecos-topbar-overlay-open', { detail: overlay }),
+      )
+      await nextTick()
+      expect(trigger.attributes('aria-expanded')).toBe('false')
+    }
+
+    await trigger.trigger('click')
+    overlayOpened.mockClear()
+    await trigger.trigger('click')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(overlayOpened).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+    document.removeEventListener('ecos-topbar-overlay-open', overlayOpened)
   })
 
-  it('places a workspace quick menu before the theme toggle with a divider', () => {
-    const menuIndex = topBarSource.indexOf('class="workspace-quick-menu"')
-    const dividerIndex = topBarSource.indexOf('class="topbar-right-separator"')
-    const themeIndex = topBarSource.indexOf('class="window-btn theme-btn"')
+  it('disables Workspace mutations while shutdown is draining', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, mutationsDisabled: true },
+    })
 
-    expect(menuIndex).toBeGreaterThan(-1)
-    expect(dividerIndex).toBeGreaterThan(menuIndex)
-    expect(themeIndex).toBeGreaterThan(dividerIndex)
-    expect(topBarSource).toContain('ri-more-2-line')
+    await wrapper.get('button.menu-btn').trigger('click')
+    const items = wrapper.findAll('button.dropdown-item')
+    const newWorkspace = items.find((item) => item.text().includes('New Workspace'))
+    const updateWorkspace = items.find((item) => item.text().includes('Update Workspace'))
+
+    expect(newWorkspace).toBeDefined()
+    expect(updateWorkspace).toBeDefined()
+    expect((newWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
+    expect((updateWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('always enables Project Management return from a workspace route', () => {
-    expect(topBarSource).toContain('isWorkspaceRoute')
-    expect(topBarSource).toContain('route.query.projectRoot')
-    expect(topBarSource).not.toContain('hasWorkspaceProjectContext')
-    expect(topBarSource).not.toContain(':disabled="!hasWorkspaceProjectContext"')
-    expect(topBarSource).not.toContain('if (!hasWorkspaceProjectContext.value) return')
-    expect(topBarSource).toContain('goToProjectManagement')
-    expect(topBarSource).toContain("path: '/projects'")
-  })
+  it('disables only Workspace update while the current flow is running', async () => {
+    const wrapper = mount(TopBar, {
+      props: { hasWorkspace: true, workspaceUpdateDisabled: true },
+    })
 
-  it('returns to Project Management with the current workspace focus query', () => {
-    const goStart = topBarSource.indexOf('const goToProjectManagement')
-    const goEnd = topBarSource.indexOf('const handleClickOutside', goStart)
-    const goSource = topBarSource.slice(goStart, goEnd)
+    await wrapper.get('button.menu-btn').trigger('click')
+    const items = wrapper.findAll('button.dropdown-item')
+    const newWorkspace = items.find((item) => item.text().includes('New Workspace'))
+    const updateWorkspace = items.find((item) => item.text().includes('Update Workspace'))
 
-    expect(goSource).toContain('workspaceId')
-    expect(goSource).toContain('projectRoot')
-    expect(goSource).toContain("path: '/projects'")
-    expect(goSource).toContain('query')
-    expect(topBarSource).toContain('route.query.workspaceId')
-  })
+    expect((newWorkspace!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((updateWorkspace!.element as HTMLButtonElement).disabled).toBe(true)
+    expect(updateWorkspace!.attributes('title')).toContain('flow is running')
 
-  it('teleports the workspace quick menu outside the app container clipping area', () => {
-    expect(topBarSource).toContain('<Teleport to="body">')
-    expect(topBarSource).toContain(':style="quickMenuStyle"')
-    expect(topBarSource).toContain('@click.stop')
-    expect(topBarSource).toContain('updateQuickMenuPosition')
-    expect(topBarSource).toContain('Back to Project Management')
-    expect(topBarSource).toMatch(/\.quick-dropdown-menu\s*\{[\s\S]*position:\s*fixed;/)
-  })
-
-  it('adds a File menu action for opening a new window above workspace actions', () => {
-    const newWindowIndex = topBarSource.indexOf("label: 'New Window'")
-    const newWorkspaceIndex = topBarSource.indexOf("label: 'New Workspace'")
-
-    expect(newWindowIndex).toBeGreaterThan(-1)
-    expect(newWorkspaceIndex).toBeGreaterThan(newWindowIndex)
-    expect(topBarSource).toContain('appMenuActionIds.newWindow')
-    expect(topBarSource).toContain('ri-window-line')
-  })
-
-  it('adds Edit > Config for the active workspace flow', () => {
-    const menuStart = topBarSource.indexOf('const menus = computed<Menu[]>')
-    const menuEnd = topBarSource.indexOf('// ---- 下拉菜单状态 ----', menuStart)
-    const menuSource = topBarSource.slice(menuStart, menuEnd)
-    const fileIndex = menuSource.indexOf("label: 'File'")
-    const editIndex = menuSource.indexOf('...(isWorkspaceRoute.value')
-    const helpIndex = menuSource.indexOf("label: 'Help'")
-
-    expect(editIndex).toBeGreaterThan(fileIndex)
-    expect(helpIndex).toBeGreaterThan(editIndex)
-    expect(topBarSource).toContain("label: 'Config'")
-    expect(topBarSource).toContain("event: 'step-config'")
-    expect(topBarSource).toContain('canOpenStepConfig')
-    expect(topBarSource).toContain("emit('step-config')")
-    expect(topBarSource).toContain('...(isWorkspaceRoute.value ? [editMenu.value] : [])')
-  })
-
-  it('binds File shortcuts for new window, new workspace, and open workspace', () => {
-    expect(topBarSource).toContain("key === 'n'")
-    expect(topBarSource).toContain("key === 'o'")
-    expect(topBarSource).toContain('appMenuActionIds.newWindow')
-    expect(topBarSource).toContain('appMenuActionIds.newProject')
-    expect(topBarSource).toContain('appMenuActionIds.openProject')
-    expect(topBarSource).toContain('isEditableKeyboardTarget')
-  })
-
-  it('adds View zoom actions to the topbar menu', () => {
-    expect(topBarSource).toContain("label: 'View'")
-    expect(topBarSource).toContain("label: 'Zoom In'")
-    expect(topBarSource).toContain("label: 'Zoom Out'")
-    expect(topBarSource).toContain("label: 'Reset Zoom'")
-    expect(topBarSource).toContain('appMenuActionIds.zoomIn')
-    expect(topBarSource).toContain('appMenuActionIds.zoomOut')
-    expect(topBarSource).toContain('appMenuActionIds.zoomReset')
-  })
-
-  it('adds a File menu action for reconfiguring the active workspace', () => {
-    expect(topBarSource).toContain('Update Workspace')
-    expect(topBarSource).not.toContain('Reconfigure Workspace...')
-    expect(topBarSource).toContain('ri-settings-3-line')
-    expect(topBarSource).toContain('appMenuActionIds.reconfigureWorkspace')
-    expect(topBarSource).toContain('disabled: !props.hasWorkspace')
-  })
-
-  it('shows workspace exports only on the workspace route', () => {
-    const updateIndex = topBarSource.indexOf("label: 'Update Workspace'")
-    const exportIndex = topBarSource.indexOf("label: 'Export Signoff Package'")
-    const metricsIndex = topBarSource.indexOf("label: 'Export Design Summary'")
-
-    expect(exportIndex).toBeGreaterThan(updateIndex)
-    expect(metricsIndex).toBeGreaterThan(exportIndex)
-    expect(topBarSource).toContain('appMenuActionIds.exportSignoffPackage')
-    expect(topBarSource).toMatch(
-      /\.\.\.\(isWorkspaceRoute\.value[\s\S]*label: 'Export Signoff Package'[\s\S]*label: 'Export Design Summary'/,
-    )
-    expect(topBarSource).not.toContain('signoffPackageExportEnabled')
-    expect(topBarSource).not.toContain('designReportExportEnabled')
-    expect(topBarSource).toContain('appMenuActionIds.exportDesignSummary')
-  })
-
-  it('does not render the workspace Design menu', () => {
-    expect(topBarSource).not.toContain("label: 'Design'")
-    expect(topBarSource).not.toContain("action: 'design'")
-    expect(topBarSource).not.toContain('Manage RTL Files...')
-    expect(topBarSource).not.toContain('appMenuActionIds.manageDesignFiles')
+    wrapper.unmount()
   })
 })

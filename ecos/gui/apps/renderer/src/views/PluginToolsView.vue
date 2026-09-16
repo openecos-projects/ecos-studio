@@ -447,11 +447,7 @@ import { useRouter } from 'vue-router'
 import CliInstallerCard from '@/components/CliInstallerCard.vue'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import {
-  getOptionalDesktopApi,
-  hasDesktopApi,
-  waitForDesktopApi,
-} from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import {
   canImportLocalResource,
   compactResourceMessage,
@@ -716,7 +712,7 @@ async function handleLocalImport(row: ResourceRow): Promise<void> {
       return
     }
 
-    const desktopApi = await waitForDesktopApi()
+    const desktopApi = getDesktopApi()
     const path = await desktopApi.dialog.pickDirectory({
       title: `Select Local ${row.name} Directory`,
     })
@@ -780,12 +776,7 @@ async function openDocs(): Promise<void> {
   const docsUrl =
     'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
   try {
-    if (hasDesktopApi()) {
-      const desktopApi = getOptionalDesktopApi() ?? (await waitForDesktopApi())
-      await desktopApi.system.openExternal(docsUrl)
-      return
-    }
-    window.open(docsUrl, '_blank', 'noopener,noreferrer')
+    await getDesktopApi().system.openExternal(docsUrl)
   } catch (error) {
     console.error('Failed to open documentation:', error)
   }

@@ -117,7 +117,8 @@ export interface StepResourcesModel {
 
 const FLOW_STEP_CANONICAL_KEYS: Array<[RegExp, string]> = [
   [/^synth/i, 'Synth'],
-  [/^floorplan/i, 'Floor'],
+  [/^(?:pre|post)?floorplan/i, 'Floor'],
+  [/^macroplacement/i, 'Floor'],
   [/^place/i, 'Place'],
   [/^cts/i, 'CTS'],
   [/^legal/i, 'Legal'],
@@ -615,6 +616,7 @@ export interface CongestionMapTileModel {
   csvPath: string
   /** 网格 → die 坐标映射文件（与 png/csv 同目录） */
   layoutCsvPath: string
+  sourceRevision?: number
   stats: CongestionMapStats | null
 }
 
@@ -787,7 +789,9 @@ export interface DrcLayerTypeMatrix {
     maxLayer: string | null
   }>
   totalByLayer: number[]
-  totalCount: number
+  totalCount: number | null
+  reportedCount?: number
+  truncated?: boolean
 }
 
 export interface DrcRelatedMetrics {
@@ -918,8 +922,8 @@ export interface StaOverviewModel {
   worstSetup: { corner: string; wns: number } | null
   worstHold: { corner: string; wns: number } | null
   frequencyMhz: number | null
-  setupViolationCount: number
-  holdViolationCount: number
+  setupViolationCount: number | null
+  holdViolationCount: number | null
   allCornersMet: boolean | null
 }
 
@@ -942,45 +946,6 @@ function checkFromRecord(
     nvp: finiteMetricNumber(source.nvp),
     frequencyMhz: includeFrequency ? finiteMetricNumber(source.frequency_mhz) : null,
   }
-}
-
-export interface StaCornerSummaryRef {
-  /** "MAX_125/Cworst" 形式的 corner 名 */
-  corner: string
-  /** 相对 step 目录的 qor_summary.json 路径（如 feature/MAX_125/Cworst/qor_summary.json） */
-  summaryPath: string
-  /** 相对 step 目录的 timing_paths.json 路径 */
-  pathsPath: string
-}
-
-/**
- * 从 sta.step.json 的 signoff_metrics.corners 提取 corner 列表与 summary 文件路径。
- * 每项形如 { corner: "MAX_125/Cworst", summary_file: "feature/MAX_125/Cworst/qor_summary.json" }。
- */
-export function parseStaCornerSummaries(
-  staStepJson: Record<string, unknown>,
-): StaCornerSummaryRef[] {
-  const sta = record(staStepJson.sta)
-  const signoff = record(sta?.signoff_metrics)
-  const corners = Array.isArray(signoff?.corners) ? signoff.corners : []
-  return corners.flatMap((candidate) => {
-    const corner = record(candidate)
-    const cornerName = typeof corner?.sta_corner === 'string' ? corner.sta_corner : ''
-    const summaryFile =
-      typeof corner?.summary_file === 'string' ? corner.summary_file : ''
-    const pathsFile =
-      typeof corner?.timing_paths_file === 'string' ? corner.timing_paths_file : ''
-    if (!cornerName) return []
-    const summaryPath = summaryFile || `feature/${cornerName}/qor_summary.json`
-    return [
-      {
-        corner: cornerName,
-        summaryPath,
-        pathsPath:
-          pathsFile || summaryPath.replace(/qor_summary\.json$/i, 'timing_paths.json'),
-      },
-    ]
-  })
 }
 
 function parseStaPathGroupMap(
@@ -1182,12 +1147,6 @@ export function formatStaPathPreview(preview: StaPathPreview | null): string {
     .join(' · ')
 }
 
-export function staCornerSummaryPath(stepDirectory: string, corner: string): string {
-  const [group, sub] = corner.split('/')
-  if (!sub) return `${stepDirectory}/feature/${group}/qor_summary.json`
-  return `${stepDirectory}/feature/${group}/${sub}/qor_summary.json`
-}
-
 export interface StaPathStage {
   pin: string
   cell: string
@@ -1331,7 +1290,7 @@ export function staConvergenceFromComparison(
     metrics: Array<{
       metricName: string
       currentValue: number
-      baselineValue: number
+      baselineValue: number | null
     }>
   } | null,
 ): StaConvergenceModel | null {

@@ -175,21 +175,18 @@
 }
 
 .project-list-panel {
-  min-width: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.project-list-panel {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
   gap: 14px;
   padding: 0;
   overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .project-list-toolbar {
@@ -285,6 +282,7 @@
 
 .project-list-preview-toggle {
   width: 100%;
+  flex: 0 0 auto;
   margin-top: 2px;
 }
 
@@ -603,7 +601,8 @@
   background: var(--success-color);
 }
 
-.workspace-tree-item.flow-hint-running::after {
+.workspace-tree-item.flow-hint-running::after,
+.workspace-tree-item.flow-hint-warning::after {
   background: var(--warn-color);
 }
 
@@ -613,9 +612,10 @@
 
 .workspace-tree-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   min-height: 58px;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -634,7 +634,8 @@
   background: color-mix(in srgb, var(--danger-color) 7%, var(--bg-primary));
 }
 
-.workspace-tree-item.flow-hint-running .workspace-tree-row {
+.workspace-tree-item.flow-hint-running .workspace-tree-row,
+.workspace-tree-item.flow-hint-warning .workspace-tree-row {
   background: color-mix(in srgb, var(--warn-color) 7%, var(--bg-primary));
 }
 
@@ -691,12 +692,13 @@
 }
 
 .workspace-flow-hint {
-  max-width: 82px;
+  max-width: 100%;
   overflow: hidden;
   border-radius: 999px;
   padding: 4px 7px;
   font-size: 10px;
   font-weight: 750;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -706,7 +708,8 @@
   background: var(--success-bg);
 }
 
-.workspace-flow-hint.flow-hint-running {
+.workspace-flow-hint.flow-hint-running,
+.workspace-flow-hint.flow-hint-warning {
   color: var(--warn-color);
   background: var(--warn-bg);
 }
@@ -961,10 +964,16 @@
 }
 
 .project-analysis-shell {
-  display: grid;
+  display: flex;
   min-height: 0;
+  flex-direction: column;
   flex: 1 1 auto;
   overflow: hidden;
+}
+
+.project-analysis-shell > :last-child {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .legend-list {
@@ -1215,6 +1224,10 @@
 .step-running {
   color: var(--info-color);
   background: var(--info-bg);
+}
+.step-warning {
+  color: var(--warn-color);
+  background: var(--warn-bg);
 }
 .step-failed {
   color: var(--danger-color);

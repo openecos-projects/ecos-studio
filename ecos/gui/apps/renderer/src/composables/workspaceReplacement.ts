@@ -1,7 +1,7 @@
 import type { WorkspaceDirectoryReplacement } from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
 import { mutateProjectManifest } from '@/api/projectManifest'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 
 interface WorkspaceReplacementToast {
   severity: 'warn'
@@ -78,7 +78,7 @@ export async function recordWorkspaceReplacementBackup(
   const projectRoot = normalizePath(config.project_context?.project_root ?? '')
 
   if (!projectRoot) {
-    const desktopApi = await waitForDesktopApi()
+    const desktopApi = getDesktopApi()
     await desktopApi.workspace.retainProjectDirectoryReplacement(replacement.id)
     return
   }
@@ -95,7 +95,7 @@ export async function recordWorkspaceReplacementBackup(
   } catch (error) {
     console.warn('Failed to record workspace replacement backup:', error)
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       await desktopApi.workspace.retainProjectDirectoryReplacement(replacement.id)
     } catch (retainError) {
       console.error('Failed to release workspace replacement backup:', retainError)
