@@ -371,7 +371,7 @@ def test_loader_rejects_unregistered_runtime_probe(tmp_path) -> None:
 def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
     wheel_dir = tmp_path / "wheel"
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
+        ["uv", "build", "--wheel", "--offline", "--out-dir", str(wheel_dir)],
         cwd=AGENT_ROOT,
         check=True,
         capture_output=True,
@@ -380,7 +380,7 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
     wheel = next(wheel_dir.glob("*.whl"))
     site_dir = tmp_path / "site"
     subprocess.run(
-        ["uv", "pip", "install", "--quiet", "--target", str(site_dir), str(wheel)],
+        ["uv", "pip", "install", "--quiet", "--offline", "--target", str(site_dir), str(wheel)],
         check=True,
         capture_output=True,
         text=True,
