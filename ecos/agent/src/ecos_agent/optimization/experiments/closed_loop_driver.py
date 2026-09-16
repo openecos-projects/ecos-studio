@@ -382,9 +382,9 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--designs-root", type=Path, required=True)
     parser.add_argument("--pdk-root", type=Path, required=True)
-    parser.add_argument("--model", default="gpt-5.6-terra")
+    parser.add_argument("--model", default="glm-5.3-flash")
     parser.add_argument(
-        "--reasoning-effort", default=None, choices=("low", "medium", "high")
+        "--reasoning-effort", default="high", choices=("low", "medium", "high")
     )
     parser.add_argument(
         "--goal-text",
