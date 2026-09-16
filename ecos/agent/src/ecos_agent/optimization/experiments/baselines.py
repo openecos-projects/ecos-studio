@@ -143,12 +143,11 @@ def _rule_selection(
             action, current_values=current_values, attempted=attempted
         )
         if requested is not None:
-            return BaselineSelection(
-                action,
-                requested,
-                coordinate_index,
-                _rule_references()[entity_id],
-            )
+            # No runtime knowledge_ref: the planner contract only accepts
+            # references supplied by the retrieval context, and the rule
+            # table's corpus provenance is declared by
+            # rule_guided_policy_manifest() instead.
+            return BaselineSelection(action, requested, coordinate_index)
     return _coordinate_selection(current_values, attempted, coordinate_index)
 
 

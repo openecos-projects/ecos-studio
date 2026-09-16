@@ -124,9 +124,12 @@ def test_assembly_feeds_design_block_statistics(tmp_path: Path) -> None:
 def test_assembly_rejects_episode_without_feasible_candidate(tmp_path: Path) -> None:
     _seed_run(tmp_path, feasible=False)
 
-    with pytest.raises(ValueError, match="no feasible candidate"):
+    def empty_loader(episode_root: Path):
+        return []
+
+    with pytest.raises(ValueError, match="terminal-eligible candidate"):
         assemble_baseline_design_statistics(
-            tmp_path, ["gcd"], outcome_loader=_outcome_loader()
+            tmp_path, ["gcd"], outcome_loader=empty_loader
         )
 
 

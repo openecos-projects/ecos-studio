@@ -11,7 +11,7 @@ feeds ``statistics.baseline_design_statistics``, and adds assembly provenance
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from ecos_agent.optimization.contracts import (
@@ -23,12 +23,11 @@ from ecos_agent.optimization.experiments.baselines import (
     ONLINE_BASELINE_METHODS,
     BaselineMethod,
 )
-from ecos_agent.optimization.experiments.equal_budget import (
-    CandidateTrace,
-    summarize_candidate_metrics,
-)
+from ecos_agent.optimization.experiments.equal_budget import CandidateTrace
 from ecos_agent.optimization.experiments.statistics import (
+    _terminal_metrics,
     baseline_design_statistics,
+    compare_observations,
     success_curve_auc,
 )
 
@@ -60,16 +59,13 @@ def _calibration_dir(run_root: Path, design_id: str) -> Path:
     )
 
 
-def _success_curve_at_20(metrics: dict[str, object]) -> dict[int, bool]:
-    """Pad the episode's cumulative success curve out to the frozen budget.
+def _padded_curve(observed: Mapping[int, bool]) -> dict[int, bool]:
+    """Pad a cumulative success curve out to the frozen 20-candidate budget.
 
     A short episode (wall-budget stop) pads with its last cumulative value:
-    once feasible stays feasible, and never-feasible stays infeasible.
+    once a better-than-default candidate exists it stays, and if none exists
+    the curve stays all-False.
     """
-    observed = {
-        int(key): bool(value)
-        for key, value in dict(metrics["success_at_k"]).items()
-    }
     if not observed:
         return {k: False for k in range(1, _SUCCESS_BUDGET + 1)}
     if max(observed) > _SUCCESS_BUDGET:
@@ -87,6 +83,8 @@ def _method_episode_inputs(
     design_id: str,
     method: BaselineMethod,
     outcome_loader: Callable[[Path], Sequence],
+    epsilon: Mapping[str, float],
+    default_observation: TerminalObservation,
 ) -> tuple[dict[str, object], str]:
     reports_root = run_root / "reports" / design_id
     expected_policy = f"baseline:{method.value}"
@@ -100,45 +98,51 @@ def _method_episode_inputs(
             f"no baseline episode summary with planner_policy="
             f"{expected_policy!r} under {reports_root}"
         )
-    episode_id, (summary_path, summary) = sorted(selections.items())[-1]
-    traces = tuple(CandidateTrace(**row) for row in summary["traces"])
-    mode = summary.get("planning_evidence") or "receipt-aware"
-    metrics = summarize_candidate_metrics(traces, mode=mode)
-    curve = _success_curve_at_20(metrics)
-    best_id = metrics["best_feasible_candidate_id"]
-    if best_id is None:
-        raise ValueError(
-            f"baseline episode {episode_id} of design {design_id} has no "
-            f"feasible candidate; design-block statistics need a terminal"
-        )
+    episode_id, (_summary_path, summary) = sorted(selections.items())[-1]
     episode_root = (
         run_root / "workspaces" / design_id / ".agent" / "optimization" / episode_id
     )
     prefix = f"{episode_id}."
-    if not best_id.startswith(prefix):
-        raise ValueError(f"best candidate id does not match episode: {best_id}")
-    intervention_id = best_id[len(prefix):]
+    traces = tuple(CandidateTrace(**row) for row in summary["traces"])
+    started = [item for item in traces if item.started]
     outcomes = outcome_loader(episode_root)
-    observation = next(
-        (
-            outcome.terminal_observation
-            for outcome in outcomes
-            if outcome.intervention_id == intervention_id
-            and outcome.terminal_observation is not None
-        ),
-        None,
-    )
-    if observation is None:
-        raise ValueError(
-            f"episode {episode_id} has no terminal observation for candidate "
-            f"{best_id}"
+    observations = {
+        outcome.intervention_id: outcome.terminal_observation
+        for outcome in outcomes
+        if outcome.terminal_observation is not None
+    }
+    # Design-block "success" is a started candidate that strictly beats the
+    # default anchor beyond noise; the success curve records, per started
+    # index, whether such a candidate exists up to and including it.
+    default_metrics = _terminal_metrics(default_observation)
+    better: list[tuple[float, TerminalObservation]] = []
+    observed: dict[int, bool] = {}
+    fallback: TerminalObservation | None = None
+    for index, item in enumerate(started, 1):
+        suffix = item.candidate_id[len(prefix):] if item.candidate_id.startswith(prefix) else None
+        observation = (
+            TerminalObservation.model_validate(observations[suffix])
+            if suffix is not None and suffix in observations
+            else None
         )
+        if observation is not None and observation.eligible_for_incumbent:
+            if compare_observations(default_metrics, observation, epsilon) == "better":
+                better.append((float(item.terminal_utility or 0.0), observation))
+            if fallback is None:
+                fallback = observation
+        observed[index] = bool(better)
+    if fallback is None:
+        raise ValueError(
+            f"baseline episode {episode_id} of design {design_id} has no "
+            f"terminal-eligible candidate; design-block statistics need a "
+            f"terminal"
+        )
+    curve = _padded_curve(observed)
+    best = max(better, key=lambda pair: pair[0], default=(0.0, fallback))[1]
     return {
         "auc_success_at_20": success_curve_auc(curve),
         "lex_success_at_20": curve[_SUCCESS_BUDGET],
-        "best_terminal_observation": TerminalObservation.model_validate(
-            observation
-        ).model_dump(mode="json"),
+        "best_terminal_observation": best.model_dump(mode="json"),
     }, episode_id
 
 
@@ -184,6 +188,8 @@ def assemble_baseline_design_statistics(
                 design_id=design_id,
                 method=method,
                 outcome_loader=outcome_loader,
+                epsilon={key: full_epsilon[key] for key in _STATISTICS_KEYS},
+                default_observation=reference,
             )
             methods_input[method.value] = payload
             design_selection[method.value] = episode_id

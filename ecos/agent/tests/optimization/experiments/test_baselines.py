@@ -130,18 +130,14 @@ def test_rule_guided_direction_uses_audited_card_mappings() -> None:
     assert congested.requested == RequestedKnobValue(
         knob_id="place.cell_padding_x", value=3
     )
-    assert congested.knowledge_ref is not None
-    assert congested.knowledge_ref.entity_id == (
-        "strategy.congestion.padding_spreads_hotspot_cells.v1"
-    )
+    # Rule selections carry no runtime knowledge_ref (corpus provenance is
+    # declared by rule_guided_policy_manifest, not the proposal contract).
+    assert congested.knowledge_ref is None
     assert clean is not None
     assert clean.requested == RequestedKnobValue(
         knob_id="place.cell_padding_x", value=1
     )
-    assert clean.knowledge_ref is not None
-    assert clean.knowledge_ref.entity_id == (
-        "strategy.wirelength.reduce_excessive_place_spreading.v1"
-    )
+    assert clean.knowledge_ref is None
 
 
 def test_rule_guided_direction_fills_the_candidate_budget() -> None:
