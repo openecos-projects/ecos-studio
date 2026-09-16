@@ -2,16 +2,13 @@
  * API module exports
  */
 
-export { waitForRuntimeReady, type WaitForRuntimeReadyOptions } from './client'
-
 export {
   closeWorkspaceApi,
+  backendWorkspaceOptions,
   loadWorkspaceApi,
   createWorkspaceApi,
-  type ProjectInfo,
+  updateWorkspaceApi,
   type WorkspaceResponse,
-  type LoadWorkspaceRequest,
-  type CreateWorkspaceRequest,
 } from './workspace'
 
 export {
@@ -22,17 +19,6 @@ export {
   type FrontendValidationIssue,
   type FrontendValidationResult,
 } from './frontendCatalog'
-
-export {
-  createRuntimeEventClient,
-  type RuntimeEventClient,
-  type RuntimeEventResponse,
-  type RuntimeNotifyType,
-  type RuntimeEventHandler,
-  type RuntimeEventClientConfig,
-  type RuntimeEventClientState,
-  type RuntimeResponseType,
-} from './runtimeEvents'
 
 export {
   checkResourceUpdatesApi,

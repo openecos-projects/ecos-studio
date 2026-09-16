@@ -12,57 +12,72 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
-import {
-  assignOwnJsonPathValue,
-  ECC_CATALOG_END_STEP as CATALOG_END_STEP,
-  ECC_DEFAULT_STEP_TOOLS as DEFAULT_STEP_TOOLS,
-  ECC_FLOW_STEPS as FLOW_STEP_SEQUENCE,
-  ECC_FLOW_STEP_SET as FLOW_STEPS,
-  hasSafeJsonPath,
-  parameterWritesMatchPatch,
-  type DesktopAgentWorkspaceParameterWrite,
-  type DesktopAgentWorkspaceRerunContract,
-} from '@ecos-studio/shared'
+import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 import { isPathWithinRoot, isRelativePathOutsideRoot } from '../pathScope'
 import {
-  assertNoSubMillisecondDatetimes,
-  editWorkspaceParameters,
-  locateWorkspaceParametersFile,
-  parseTomlDocument,
-  readWorkspaceConfigContained,
-  stringifyTomlDocument,
-  WORKSPACE_CONFIG_BASENAME,
-  writeTextAtomically,
-} from '../workspaceParametersFile'
+  executeWorkspaceRerunDomain,
+  hasValidWorkspaceRerunDomainUpdates,
+  isWorkspaceRerunParameterValue,
+  type WorkspaceRerunRuntime,
+} from './workspaceRerunDomain'
 
-interface WorkspaceRerunRuntime {
-  refreshConfig(request: { workspaceHandle: string }): Promise<unknown>
-  startFlowOperation(request: {
-    idempotencyKey: string
-    rerun: boolean
-    workspaceHandle: string
-  }): Promise<{ operationId: string }>
-  startStepOperation(request: {
-    idempotencyKey: string
-    rerun: boolean
-    step: string
-    workspaceHandle: string
-  }): Promise<{ operationId: string }>
-  syncConfig(request: { configPath: string; workspaceHandle: string }): Promise<unknown>
-  waitForOperation(request: {
-    operationId: string
-    workspaceHandle: string
-  }): Promise<{ error: { message: string } | null; state: string }>
+const FLOW_STEP_SEQUENCE = [
+  'Synthesis',
+  'Floorplan',
+  'place',
+  'CTS',
+  'legalization',
+  'Timing optimization',
+  'route',
+  'drc',
+  'lvs',
+  'filler',
+  'postRouteLec',
+  'RCX',
+  'sta',
+  'Harden',
+] as const
+const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
+const CATALOG_END_STEP = FLOW_STEP_SEQUENCE[FLOW_STEP_SEQUENCE.length - 1]!
+const OBSOLETE_STEP_DIRECTORY = 'fixFanout_ecc'
+/** Default tool names when extending a short source flow to the catalog end. */
+const DEFAULT_STEP_TOOLS: Record<(typeof FLOW_STEP_SEQUENCE)[number], string> = {
+  Synthesis: 'yosys',
+  Floorplan: 'ecc',
+  place: 'dreamplace',
+  CTS: 'ecc',
+  legalization: 'dreamplace',
+  'Timing optimization': 'sizer',
+  route: 'ecc',
+  drc: 'ecc',
+  lvs: 'ecc',
+  filler: 'ecc',
+  postRouteLec: 'yosys_lec',
+  RCX: 'ecc',
+  sta: 'ecc',
+  Harden: 'ecc',
+}
+const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
+
+/** Sizer publishes underscored lowercase directory and file stems. */
+function sizerStepStem(stepName: string): string {
+  return stepName.trim().split(/\s+/).join('_').toLowerCase()
 }
 
-// FLOW_STEP_SEQUENCE / FLOW_STEPS / CATALOG_END_STEP / DEFAULT_STEP_TOOLS come
-// from the shared ECC flow catalog (@ecos-studio/shared, contracts/eccFlowSteps).
-
-const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
+/** Mirrors the workspace resource index's step directory naming. */
+function rerunStageDirectoryName(stepName: string, tool: string): string {
+  return tool.toLowerCase() === 'sizer'
+    ? `${sizerStepStem(stepName)}_sizer`
+    : `${stepName}_${tool}`
+}
 
 /** Step slug for rerun target directories and ids; spaces are not path-safe. */
 function rerunStepSlug(stepName: string): string {
   return stepName.trim().split(/\s+/).join('_').toLowerCase()
+}
+
+function isObsoleteFlowStep(stepName: string): boolean {
+  return stepName.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
 }
 const AUTHORIZED_KNOBS = {
   place: new Set([
@@ -155,7 +170,6 @@ export async function prepareWorkspaceRerun(
   try {
     await cp(verified.sourceWorkspace, stagedWorkspace, {
       errorOnExist: true,
-      filter: (source) => source !== join(verified.sourceWorkspace, OWNER_MARKER),
       force: false,
       recursive: true,
     })
@@ -172,7 +186,6 @@ export async function prepareWorkspaceRerun(
       targetStep: contract.target_step,
       targetWorkspace: verified.targetWorkspace,
     })
-    await materializeWorkspaceRerunParameterWrites(stagedWorkspace, verified.writes)
     const stagedHome = await resolvePathWithinWorkspace(
       stagedWorkspace,
       join(stagedWorkspace, 'home'),
@@ -200,50 +213,15 @@ export async function executeWorkspaceRerun(
   contract: DesktopAgentWorkspaceRerunContract,
   runtime: WorkspaceRerunRuntime,
   workspaceHandle: string,
+  initialWorkspaceRevision: number | undefined,
 ): Promise<void> {
-  const writes = contract.writes ?? []
-  if (!hasValidParameterWrites(contract.parameter_patch, writes)) {
-    throw new Error('Workspace rerun contract is invalid.')
-  }
-  for (const file of new Set(
-    writes.filter((write) => write.surface === 'step_config').map((write) => write.file),
-  )) {
-    await runtime.syncConfig({
-      configPath: join(contract.target_workspace, file),
-      workspaceHandle,
-    })
-  }
-  if (writes.length > 0) await runtime.refreshConfig({ workspaceHandle })
-  if (contract.execution_scope === 'full_flow') {
-    const operation = await runtime.startFlowOperation({
-      idempotencyKey: randomUUID(),
-      rerun: false,
-      workspaceHandle,
-    })
-    const completed = await runtime.waitForOperation({
-      operationId: operation.operationId,
-      workspaceHandle,
-    })
-    if (completed.state !== 'succeeded') {
-      throw new Error(completed.error?.message || 'Rerun flow failed')
-    }
-    return
-  }
-
-  const step = contract.target_step
-  const operation = await runtime.startStepOperation({
-    idempotencyKey: randomUUID(),
-    rerun: false,
-    step,
+  await executeWorkspaceRerunDomain(
+    contract,
+    runtime,
     workspaceHandle,
-  })
-  const completed = await runtime.waitForOperation({
-    operationId: operation.operationId,
-    workspaceHandle,
-  })
-  if (completed.state !== 'succeeded') {
-    throw new Error(completed.error?.message || `Rerun step failed: ${step}`)
-  }
+    initialWorkspaceRevision,
+    FLOW_STEPS,
+  )
 }
 
 async function verifyWorkspaceRerunContract(
@@ -251,9 +229,7 @@ async function verifyWorkspaceRerunContract(
 ): Promise<{
   sourceWorkspace: string
   targetWorkspace: string
-  writes: DesktopAgentWorkspaceParameterWrite[]
 }> {
-  const writes = contract.writes ?? []
   if (
     contract.schema_version !== 'flow-agent.workspace_rerun_contract.v1' ||
     contract.requires_gui_review !== true ||
@@ -267,7 +243,7 @@ async function verifyWorkspaceRerunContract(
     !isAbsolute(contract.source_workspace) ||
     !isAbsolute(contract.target_workspace) ||
     !hasValidParameterPatch(contract.parameter_patch) ||
-    !hasValidParameterWrites(contract.parameter_patch, writes) ||
+    !hasValidWorkspaceRerunDomainUpdates(contract, FLOW_STEPS) ||
     !hasAuthorizedParameterPatch(contract.target_step, contract.parameter_patch) ||
     (contract.execution_scope !== 'single_step' &&
       contract.execution_scope !== 'full_flow') ||
@@ -322,8 +298,9 @@ async function verifyWorkspaceRerunContract(
   if (!targetTool) {
     throw new Error('Workspace rerun target step is not completed in the source flow.')
   }
-  const stageFileStem = workspaceStepArtifactName(contract.target_step, targetTool)
-  const stageOutputPrefix = `${workspaceStepDirectoryName(contract.target_step, targetTool)}/output/${contract.design_id}_${stageFileStem}`
+  const stageFileStem =
+    targetTool === 'sizer' ? sizerStepStem(contract.target_step) : contract.target_step
+  const stageOutputPrefix = `${rerunStageDirectoryName(contract.target_step, targetTool)}/output/${contract.design_id}_${stageFileStem}`
   const isStageArtifact = STAGE_OUTPUT_SUFFIXES.some(
     (suffix) => contract.source_stage_artifact === `${stageOutputPrefix}${suffix}`,
   )
@@ -345,7 +322,7 @@ async function verifyWorkspaceRerunContract(
   if (sha256(await readFile(artifact)) !== contract.source_stage_artifact_sha256) {
     throw new Error('Workspace rerun source artifact evidence is stale.')
   }
-  return { sourceWorkspace, targetWorkspace, writes }
+  return { sourceWorkspace, targetWorkspace }
 }
 
 function isValidRerunRange(
@@ -439,41 +416,8 @@ function hasValidParameterPatch(
       return false
     }
     knobs.add(item.knob_id)
-    return isValidParameterValue(item.value)
+    return isWorkspaceRerunParameterValue(item.value)
   })
-}
-
-function hasValidParameterWrites(
-  patch: DesktopAgentWorkspaceRerunContract['parameter_patch'],
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): boolean {
-  if (!Array.isArray(writes) || writes.length !== patch.length) return false
-  if (
-    !writes.every(
-      (write) => hasValidJsonPath(write.json_path) && isValidParameterValue(write.value),
-    )
-  ) {
-    return false
-  }
-  return parameterWritesMatchPatch(patch, writes)
-}
-
-function hasValidJsonPath(path: (string | number)[]): boolean {
-  return hasSafeJsonPath(path)
-}
-
-function isValidParameterValue(
-  value: DesktopAgentWorkspaceRerunContract['parameter_patch'][number]['value'],
-): boolean {
-  if (typeof value === 'boolean') return true
-  if (typeof value === 'string') return isSafeParameterString(value)
-  if (typeof value === 'number') return Number.isFinite(value)
-  if (!Array.isArray(value) || value.length > 64) return false
-  return value.every(
-    (item) =>
-      (typeof item === 'number' && Number.isFinite(item)) ||
-      (typeof item === 'string' && isSafeParameterString(item)),
-  )
 }
 
 function hasAuthorizedParameterPatch(
@@ -535,100 +479,6 @@ function isSafeParameterString(value: string): boolean {
     !value.split('').some((character) => character.charCodeAt(0) < 32) &&
     !/[;&|]|\$\(/.test(value)
   )
-}
-
-async function materializeWorkspaceRerunParameterWrites(
-  workspace: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const writesByFile = new Map<string, DesktopAgentWorkspaceParameterWrite[]>()
-  for (const write of writes) {
-    const fileWrites = writesByFile.get(write.file) ?? []
-    fileWrites.push(write)
-    writesByFile.set(write.file, fileWrites)
-  }
-  for (const [file, fileWrites] of writesByFile) {
-    if (file === 'home/params.toml' || file === 'home/parameters.json') {
-      await materializeParameterSurfaceWrites(workspace, fileWrites)
-      continue
-    }
-    const path = await resolvePathWithinWorkspace(
-      workspace,
-      join(workspace, file),
-      `parameter file ${file}`,
-    )
-    const raw = await readFile(path, 'utf8')
-    const document = parseWorkspaceParameterDocument(raw, file)
-    for (const write of fileWrites) setWorkspaceParameterValue(document, write)
-    const serialized = JSON.stringify(document, null, detectJsonIndent(raw))
-    await writeFile(path, raw.endsWith('\n') ? `${serialized}\n` : serialized, 'utf8')
-  }
-}
-
-/**
- * Apply `surface: 'parameters'` writes to the workspace configuration that
- * actually exists on disk: `home/params.toml` when present, `home/parameters.json`
- * otherwise. The contract's `file` field names the format the Agent saw; disk
- * reality wins when the two disagree, and the `json_path` keys are interpreted
- * in the on-disk file's vocabulary (display keys for JSON, flat snake_case
- * for TOML).
- */
-async function materializeParameterSurfaceWrites(
-  workspace: string,
-  writes: DesktopAgentWorkspaceParameterWrite[],
-): Promise<void> {
-  const location = await locateWorkspaceParametersFile(workspace)
-  if (!location) {
-    throw new Error(
-      `Workspace rerun parameter file is invalid: neither home/params.toml nor home/parameters.json exists`,
-    )
-  }
-  const locationStats = await lstat(location.path)
-  if (locationStats.isSymbolicLink()) {
-    // A symlinked config path makes the materialization target ambiguous —
-    // refuse it, matching the save/edit paths and ECC's own symlink refusal.
-    throw new Error(
-      `Refusing to materialize rerun parameters through a symlink: ${location.path}`,
-    )
-  }
-  const validatedPath = await resolvePathWithinWorkspace(
-    workspace,
-    location.path,
-    'workspace configuration',
-  )
-  await editWorkspaceParameters(workspace, writes, {
-    format: location.format,
-    path: validatedPath,
-    spelledPath: location.path,
-  })
-}
-
-function parseWorkspaceParameterDocument(
-  raw: string,
-  file: string,
-): Record<string, unknown> {
-  try {
-    const document = JSON.parse(raw)
-    if (typeof document !== 'object' || document === null || Array.isArray(document)) {
-      throw new Error('not an object')
-    }
-    return document as Record<string, unknown>
-  } catch {
-    throw new Error(`Workspace rerun parameter file is invalid: ${file}`)
-  }
-}
-
-function setWorkspaceParameterValue(
-  document: Record<string, unknown>,
-  write: DesktopAgentWorkspaceParameterWrite,
-): void {
-  assignOwnJsonPathValue(document, write.json_path, write.value, () => {
-    throw new Error(`Parameter ${write.knob_id} does not exist.`)
-  })
-}
-
-function detectJsonIndent(raw: string): number {
-  return /^\s*[[{]\s*\n(\s+)\S/.exec(raw)?.[1]?.length ?? 2
 }
 
 function completedStepTool(flowText: string, targetStep: string): string | null {
@@ -739,12 +589,12 @@ async function rewriteAndPruneWorkspaceRerunHome(options: {
   const flow = parseWorkspaceFlow(await readFile(join(home, 'flow.json'), 'utf8'))
   const toolByStep = new Map(flow.steps.map((step) => [step.name, step.tool]))
   const wipedStageNames = new Set<string>(FLOW_STEP_SEQUENCE.slice(targetIndex))
-  const wipedDirectories = new Set<string>()
+  const wipedDirectories = new Set<string>([OBSOLETE_STEP_DIRECTORY])
   for (const stageName of wipedStageNames) {
     const tool =
       toolByStep.get(stageName) ??
       DEFAULT_STEP_TOOLS[stageName as (typeof FLOW_STEP_SEQUENCE)[number]]
-    wipedDirectories.add(workspaceStepDirectoryName(stageName, tool))
+    wipedDirectories.add(rerunStageDirectoryName(stageName, tool))
   }
 
   await pruneWorkspaceRerunHomeJson(join(home, 'home.json'), {
@@ -868,56 +718,6 @@ export function rewriteSourceRootedPath(
   return value
 }
 
-/**
- * Rewrite source-workspace prefixes inside parsed TOML string scalars: a
- * value is workspace-rooted only when it equals the source prefix or lives
- * under it, so prose sharing the prefix is untouched and TOML escaping is
- * always correct (textual replacement would corrupt escaped paths).
- */
-function rewriteTomlSourcePathLeaves(
-  node: unknown,
-  prefixes: string[],
-  targetWorkspace: string,
-): boolean {
-  const rewriteValue = (value: string): string =>
-    rewriteSourceRootedPath(value, prefixes, targetWorkspace)
-  const visit = (current: unknown): boolean => {
-    if (Array.isArray(current)) {
-      let changed = false
-      for (let index = 0; index < current.length; index += 1) {
-        const item = current[index]
-        if (typeof item === 'string') {
-          const rewritten = rewriteValue(item)
-          if (rewritten !== item) {
-            current[index] = rewritten
-            changed = true
-          }
-        } else {
-          changed = visit(item) || changed
-        }
-      }
-      return changed
-    }
-    if (current !== null && typeof current === 'object' && !(current instanceof Date)) {
-      let changed = false
-      for (const [key, item] of Object.entries(current)) {
-        if (typeof item === 'string') {
-          const rewritten = rewriteValue(item)
-          if (rewritten !== item) {
-            ;(current as Record<string, unknown>)[key] = rewritten
-            changed = true
-          }
-        } else {
-          changed = visit(item) || changed
-        }
-      }
-      return changed
-    }
-    return false
-  }
-  return visit(node)
-}
-
 export async function rewriteHomeJsonSourcePaths(
   homeDirectory: string,
   options: {
@@ -955,7 +755,7 @@ export async function rewriteHomeJsonSourcePaths(
   }
 
   for (const entry of entries) {
-    if (entry !== WORKSPACE_CONFIG_BASENAME && !entry.endsWith('.json')) continue
+    if (!entry.endsWith('.json')) continue
     if (entry === 'flow_agent_workspace_rerun_contract.v1.json') continue
     const filePath = join(homeDirectory, entry)
     const canonicalPath = join(authorizedParent, entry)
@@ -966,28 +766,14 @@ export async function rewriteHomeJsonSourcePaths(
     // cannot retarget the rewrite.
     const entryStats = await lstat(filePath)
     if (!entryStats.isFile() || entryStats.isSymbolicLink()) continue
-    const original = await readWorkspaceConfigContained(filePath, canonicalPath)
-    if (entry === WORKSPACE_CONFIG_BASENAME) {
-      // Parse and rewrite only string scalars whose value is the source
-      // prefix or lives under it: prose is untouched and TOML escaping
-      // stays correct (a textual replacement corrupts escaped paths and
-      // misses their unescaped form).
-      assertNoSubMillisecondDatetimes(original, filePath)
-      const document = parseTomlDocument(original, filePath)
-      if (rewriteTomlSourcePathLeaves(document, prefixes, options.targetWorkspace)) {
-        await writeTextAtomically(filePath, stringifyTomlDocument(document), {
-          authorizedParent,
-        })
-      }
-      continue
-    }
+    const original = await readFile(canonicalPath, 'utf8')
     const rewritten = rewriteJsonSourcePathStrings(
       original,
       prefixes,
       options.targetWorkspace,
     )
     if (rewritten !== original) {
-      await writeTextAtomically(filePath, rewritten, { authorizedParent })
+      await writeFile(filePath, rewritten, 'utf8')
     }
   }
 }
@@ -1086,6 +872,7 @@ function pruneWorkspaceRerunMonitor(
   const keepIndexes: number[] = []
   steps.forEach((label, index) => {
     const stage = monitorStepStage(label)
+    if (isObsoleteFlowStep(stage ?? label)) return
     if (!stage) {
       keepIndexes.push(index)
       return
@@ -1117,7 +904,7 @@ function monitorStepStage(label: string): string | null {
   const separator = ' - '
   const index = label.indexOf(separator)
   const prefix = (index >= 0 ? label.slice(0, index) : label).trim()
-  return FLOW_STEPS.has(prefix) ? prefix : null
+  return FLOW_STEPS.has(prefix) || isObsoleteFlowStep(prefix) ? prefix : null
 }
 
 function pathBelongsToWipedStage(
@@ -1162,7 +949,10 @@ async function pruneWorkspaceRerunChecklistJson(
   const kept = items.filter((item) => {
     if (!item || typeof item !== 'object') return true
     const step = (item as { step?: unknown }).step
-    return typeof step !== 'string' || !wipedStageNames.has(step)
+    return (
+      typeof step !== 'string' ||
+      (!isObsoleteFlowStep(step) && !wipedStageNames.has(step))
+    )
   })
 
   let passed = 0
@@ -1200,7 +990,7 @@ async function emptyWorkspaceStepDirectory(
   workspace: string,
   step: WorkspaceFlowStep,
 ): Promise<void> {
-  const stageDirectory = join(workspace, workspaceStepDirectoryName(step.name, step.tool))
+  const stageDirectory = join(workspace, rerunStageDirectoryName(step.name, step.tool))
   try {
     const stats = await lstat(stageDirectory)
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -1234,19 +1024,26 @@ function parseWorkspaceFlow(flowText: string): {
   try {
     const data = JSON.parse(flowText) as { steps?: unknown }
     if (!Array.isArray(data.steps)) throw new Error('steps are missing')
-    const steps = data.steps.map((value) => {
-      if (
-        typeof value !== 'object' ||
-        value === null ||
-        !FLOW_STEPS.has((value as { name?: unknown }).name as string) ||
-        typeof (value as { tool?: unknown }).tool !== 'string' ||
-        !/^[A-Za-z0-9_-]+$/.test((value as { tool: string }).tool) ||
-        typeof (value as { state?: unknown }).state !== 'string'
-      ) {
-        throw new Error('step is invalid')
-      }
-      return value as WorkspaceFlowStep
-    })
+    const steps = data.steps
+      .filter(
+        (value) =>
+          typeof value !== 'object' ||
+          value === null ||
+          !isObsoleteFlowStep(String((value as { name?: unknown }).name ?? '')),
+      )
+      .map((value) => {
+        if (
+          typeof value !== 'object' ||
+          value === null ||
+          !FLOW_STEPS.has((value as { name?: unknown }).name as string) ||
+          typeof (value as { tool?: unknown }).tool !== 'string' ||
+          !/^[A-Za-z0-9_-]+$/.test((value as { tool: string }).tool) ||
+          typeof (value as { state?: unknown }).state !== 'string'
+        ) {
+          throw new Error('step is invalid')
+        }
+        return value as WorkspaceFlowStep
+      })
     if (new Set(steps.map((step) => step.name)).size !== steps.length) {
       throw new Error('step names are duplicated')
     }
@@ -1259,14 +1056,4 @@ function parseWorkspaceFlow(flowText: string): {
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
-}
-
-function workspaceStepArtifactName(stepName: string, tool: string): string {
-  return tool.toLowerCase() === 'sizer'
-    ? stepName.trim().split(/\s+/).join('_').toLowerCase()
-    : stepName
-}
-
-function workspaceStepDirectoryName(stepName: string, tool: string): string {
-  return `${workspaceStepArtifactName(stepName, tool)}_${tool}`
 }

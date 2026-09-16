@@ -1,7 +1,6 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve, win32 } from 'node:path'
 import {
-  parseProjectManifest,
   type PdkDetectedFiles,
   type ProjectManifest,
   type ScannedPdkDirectory,
@@ -32,6 +31,7 @@ export interface ProjectReadGrantProvider {
 }
 
 export interface ProjectScopeServiceOptions {
+  loadProjectManifest?: (projectRoot: string) => Promise<ProjectManifest>
   readGrantProvider?: ProjectReadGrantProvider
 }
 
@@ -123,7 +123,10 @@ async function manifestWorkspaceRoots(
   return await Promise.all(
     manifest.workspaces.map(async (workspace) => {
       const workspacePath = resolve(workspace.workspace_path)
-      if (!pathsEqual(dirname(workspacePath), projectRoot)) {
+      if (
+        pathsEqual(workspacePath, projectRoot) ||
+        !isPathWithinRoot(workspacePath, projectRoot)
+      ) {
         throw new Error(
           'Project read root manifest contains a workspace outside the project',
         )
@@ -225,14 +228,39 @@ export class ProjectScopeService {
   private readonly extraRootsByWindowId = new Map<number, string[]>()
   private readonly pendingExtraRootsByWindowId = new Map<number, string[]>()
   private readonly approvedExtraRootsByProject = new Map<string, string[]>()
+  private readonly loadProjectManifest: ProjectScopeServiceOptions['loadProjectManifest']
   private readonly readGrantProvider: ProjectReadGrantProvider | undefined
 
   constructor(options: ProjectScopeServiceOptions = {}) {
+    this.loadProjectManifest = options.loadProjectManifest
     this.readGrantProvider = options.readGrantProvider
   }
 
   async resolveProjectRoot(path: string): Promise<string> {
     return await canonicalizeExistingDirectory(path)
+  }
+
+  async canonicalizeProjectTarget(
+    requestedProjectRoot: string,
+    requestedTarget: string,
+  ): Promise<{ projectRoot: string; targetDirectory: string }> {
+    const projectRoot = resolve(requestedProjectRoot)
+    const targetDirectory = resolve(requestedTarget)
+    if (pathsEqual(projectRoot, targetDirectory)) {
+      const parent = await canonicalizeExistingDirectory(dirname(projectRoot))
+      const canonical = await canonicalizePotentialPathWithinRoot(projectRoot, parent)
+      return { projectRoot: canonical, targetDirectory: canonical }
+    }
+
+    const canonicalRoot = await this.resolveProjectRoot(projectRoot)
+    const canonicalTarget = await canonicalizePotentialPathWithinRoot(
+      targetDirectory,
+      canonicalRoot,
+    )
+    if (!isPathWithinRoot(canonicalTarget, canonicalRoot)) {
+      throw new Error('Workspace creation target is outside the Project root.')
+    }
+    return { projectRoot: canonicalRoot, targetDirectory: canonicalTarget }
   }
 
   async getProjectRoot(): Promise<string> {
@@ -324,17 +352,16 @@ export class ProjectScopeService {
       this.readScopesByWindowId.delete(windowId)
       return canonicalPath
     }
-    if (!pathsEqual(canonicalPath, dirname(activeProjectRoot))) {
-      throw new Error(
-        'Project read root must be the active workspace root or its parent directory',
-      )
+    if (!isPathWithinRoot(activeProjectRoot, canonicalPath)) {
+      throw new Error('Project read root must contain the active workspace root')
     }
 
     let manifest: ProjectManifest
     try {
-      manifest = parseProjectManifest(
-        await readFile(join(canonicalPath, 'project.json'), 'utf8'),
-      )
+      if (!this.loadProjectManifest) {
+        throw new Error('Project Manifest loader is unavailable')
+      }
+      manifest = await this.loadProjectManifest(canonicalPath)
     } catch (error) {
       throw new Error(
         `Project read root must have a valid project.json: ${

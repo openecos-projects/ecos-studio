@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildHomeQorDetailModel,
+  formatQorScore,
+  formatQorValue,
   homeQorFlowStepForLabel,
+  qorMetricComparisonLabel,
+  qorScoreTone,
+  qorScoreComparisonLabel,
   summarizeHomeQorComparison,
 } from './qorComparisonData'
-import type { ProjectQorWorkspaceComparison } from '@/utils/projectQorTrend'
+import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
 
-const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
+const directionalMetrics: BackendWorkspaceQorComparison['deltas'] = [
   {
-    workspaceId: 'ws_0004',
-    workspaceName: 'ws_0004',
-    baselineWorkspaceId: 'ws_0001',
-    baselineWorkspaceName: 'baseline-run',
     step: 'Route',
     metricName: 'route_wirelength',
     displayName: 'Route Wirelength',
@@ -20,12 +21,11 @@ const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
     absoluteDelta: -200,
     relativeDeltaPct: -3.8,
     state: 'improvement',
+    polarity: 'lower_is_better',
+    baselinePolarity: 'lower_is_better',
+    isDirectional: true,
   },
   {
-    workspaceId: 'ws_0004',
-    workspaceName: 'ws_0004',
-    baselineWorkspaceId: 'ws_0001',
-    baselineWorkspaceName: 'baseline-run',
     step: 'Route',
     metricName: 'route_via_count',
     displayName: 'Route Via Count',
@@ -34,12 +34,11 @@ const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
     absoluteDelta: 0,
     relativeDeltaPct: 0,
     state: 'neutral',
+    polarity: 'lower_is_better',
+    baselinePolarity: 'lower_is_better',
+    isDirectional: true,
   },
   {
-    workspaceId: 'ws_0004',
-    workspaceName: 'ws_0004',
-    baselineWorkspaceId: 'ws_0001',
-    baselineWorkspaceName: 'baseline-run',
     step: 'DRC',
     metricName: 'drc_count',
     displayName: 'DRC Count',
@@ -48,30 +47,27 @@ const directionalMetrics: ProjectQorWorkspaceComparison['deltas'] = [
     absoluteDelta: 1,
     relativeDeltaPct: null,
     state: 'regression',
+    polarity: 'lower_is_better',
+    baselinePolarity: 'lower_is_better',
+    isDirectional: true,
   },
 ]
 
-const comparison: ProjectQorWorkspaceComparison = {
+const comparison: BackendWorkspaceQorComparison = {
   workspaceId: 'ws_0004',
   workspaceName: 'ws_0004',
   score: 78.4,
+  scoreGate: 'pass',
+  scoreThreshold: 60,
   baselineWorkspaceId: 'ws_0001',
   baselineWorkspaceName: 'baseline-run',
   baselineScore: 72.5,
+  baselineScoreGate: 'pass',
   isBaselineWorkspace: false,
   available: true,
   metrics: [
-    ...directionalMetrics.map((metric) => ({
-      ...metric,
-      polarity: 'lower_is_better' as const,
-      baselinePolarity: 'lower_is_better' as const,
-      isDirectional: true,
-    })),
+    ...directionalMetrics,
     {
-      workspaceId: 'ws_0004',
-      workspaceName: 'ws_0004',
-      baselineWorkspaceId: 'ws_0001',
-      baselineWorkspaceName: 'baseline-run',
       step: 'Route',
       metricName: 'runtime_seconds',
       displayName: 'Runtime',
@@ -92,8 +88,9 @@ describe('Home QoR comparison data', () => {
   it('maps dashboard step labels to project QoR steps', () => {
     expect(homeQorFlowStepForLabel('Synthesis')).toBe('Synth')
     expect(homeQorFlowStepForLabel('Floorplan')).toBe('Floor')
-    expect(homeQorFlowStepForLabel('Timing optimization')).toBe('Sizer')
-    expect(homeQorFlowStepForLabel('sizer')).toBe('Sizer')
+    expect(homeQorFlowStepForLabel('Pre Floorplan')).toBe('Floor')
+    expect(homeQorFlowStepForLabel('Macro Placement')).toBe('Floor')
+    expect(homeQorFlowStepForLabel('Post Floorplan')).toBe('Floor')
     expect(homeQorFlowStepForLabel('LVS')).toBe('LVS')
     expect(homeQorFlowStepForLabel('lvs')).toBe('LVS')
     expect(homeQorFlowStepForLabel('unknown')).toBeNull()
@@ -162,5 +159,78 @@ describe('Home QoR comparison data', () => {
         }),
       ]),
     )
+  })
+
+  it('keeps current-only metrics in the detail model without inventing a baseline', () => {
+    const detail = buildHomeQorDetailModel({
+      ...comparison,
+      baselineScore: null,
+      baselineScoreGate: 'unavailable',
+      baselineWorkspaceName: null,
+      available: false,
+      deltas: [],
+      metrics: [
+        {
+          ...comparison.metrics[0]!,
+          absoluteDelta: null,
+          baselinePolarity: null,
+          baselineValue: null,
+          isDirectional: false,
+          relativeDeltaPct: null,
+          state: 'neutral',
+        },
+      ],
+    })
+
+    expect(detail).toMatchObject({
+      baseline: { score: null },
+      current: { score: 78.4 },
+      steps: [
+        {
+          metrics: [
+            expect.objectContaining({
+              baselineValue: null,
+              currentValue: 5000,
+              metricName: 'route_wirelength',
+            }),
+          ],
+          step: 'Route',
+        },
+      ],
+    })
+  })
+
+  it('formats scores, values, and comparison labels for the detail dialog', () => {
+    expect(formatQorScore(88)).toBe('88')
+    expect(formatQorScore(88.04)).toBe('88.0')
+    expect(formatQorValue(60.824, 'MB')).toBe('60.824 MB')
+    expect(
+      qorMetricComparisonLabel({
+        absoluteDelta: 0.246,
+        relativeDeltaPct: 0.404446,
+        state: 'regression',
+        unit: 'MB',
+        isDirectional: true,
+        polarity: 'lower_is_better',
+        baselinePolarity: 'lower_is_better',
+      }),
+    ).toBe('Regressed by 0.246 MB (0.404446%)')
+    expect(qorScoreComparisonLabel(88, 87.7)).toBe('Improved 0.3')
+    expect(
+      qorMetricComparisonLabel({
+        absoluteDelta: null,
+        relativeDeltaPct: null,
+        state: 'neutral',
+        isDirectional: false,
+        polarity: 'trend_only',
+        baselinePolarity: 'trend_only',
+      }),
+    ).toBe('No directional QoR rule')
+  })
+
+  it('uses the authoritative score threshold for the score tone', () => {
+    expect(qorScoreTone(62.1, 60)).toBe('pass')
+    expect(qorScoreTone(59.9, 60)).toBe('fail')
+    expect(qorScoreTone(null, 60)).toBe('unrated')
   })
 })

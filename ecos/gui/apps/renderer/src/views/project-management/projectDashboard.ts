@@ -1,7 +1,13 @@
 import { buildStepIssues, countStepIssues } from '@/components/projectStepAnalysis'
-import { stepAnalysisAvailability } from '@/utils/projectAnalysisSnapshot'
+import { stepAnalysisAvailability } from '@/utils/projectAnalysisAvailability'
+import { projectResultStatusLabel } from '@/utils/projectResultPresentation'
 import type {
-  FlowStep,
+  EccQorSnapshotExtension,
+  ProjectQorTrendSummary,
+  QorGateStatus,
+  QorStatus,
+} from '@ecos-studio/shared'
+import type {
   ProjectDashboardSummary,
   ProjectManagementProject,
   ProjectMetricRow,
@@ -10,14 +16,6 @@ import type {
   ProjectWorkspace,
   ProjectWorkspaceSummary,
 } from '@/utils/projectManagement'
-import {
-  QOR_SCORE_THRESHOLD,
-  type ProjectQorTrendWorkspaceSummary,
-  type ProjectQorTrendSummary,
-  type QphysKey,
-  QorGateStatus,
-  QorStatus,
-} from '@/utils/projectQorTrend'
 import {
   metricHasComparableData,
   metricPointForWorkspace,
@@ -109,7 +107,7 @@ export interface DashboardAttentionItem {
   kind: string
   workspaceId: string
   workspaceName: string
-  step: FlowStep | null
+  step: string | null
   title: string
   /** Null when the reporting artifact gave no description for the finding. */
   detail: string | null
@@ -117,8 +115,47 @@ export interface DashboardAttentionItem {
   metric: string | null
 }
 
+export interface DashboardQorDimension {
+  key: string
+  label: string
+  value: number | null
+  display: string
+  state: string
+  tone: DashboardTone
+  percent: number | null
+}
+
+export interface DashboardQorDiagnosis {
+  id: string
+  state: string
+  tone: DashboardTone
+  severity: number
+  confidence: string
+  evidence: string[]
+  interventions: string[]
+  validationRequired: string | null
+}
+
+export interface DashboardQorInsights {
+  status: 'available' | 'unavailable'
+  dimensions: DashboardQorDimension[]
+  diagnoses: DashboardQorDiagnosis[]
+  evidence: EccQorSnapshotExtension['evidence'] | null
+  feasibility: EccQorSnapshotExtension['feasibility'] | null
+  power: EccQorSnapshotExtension['power'] | null
+}
+
+const QOR_DIMENSION_LABELS: Record<string, string> = {
+  timing: 'Timing',
+  interconnect: 'Interconnect',
+  area: 'Area',
+  power: 'Power',
+  robustness: 'Robustness',
+}
+
 const RUN_STATE_LABELS: Record<ProjectRunStateSlice['state'], string> = {
   success: 'Success',
+  warning: 'Completed with warnings',
   failed: 'Failed',
   running: 'Running',
   unstart: 'Not started',
@@ -127,6 +164,7 @@ const RUN_STATE_LABELS: Record<ProjectRunStateSlice['state'], string> = {
 
 const WORKSPACE_STATUS_TONES: Record<ProjectWorkspace['status'], DashboardTone> = {
   success: 'good',
+  warning: 'warn',
   failed: 'bad',
   running: 'warn',
   in_progress: 'warn',
@@ -136,6 +174,7 @@ const WORKSPACE_STATUS_TONES: Record<ProjectWorkspace['status'], DashboardTone> 
 
 const WORKSPACE_STATUS_LABELS: Record<ProjectWorkspace['status'], string> = {
   success: 'Success',
+  warning: 'Completed with warnings',
   failed: 'Failed',
   running: 'Running',
   in_progress: 'In progress',
@@ -248,24 +287,95 @@ export function buildDashboardRecommendation(
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     score,
-    scoreTone: scoreTone(workspace.overallScore),
-    scoreNote: buildScoreNote(workspace.overallScore, signoff),
+    scoreTone: scoreTone(workspace.gateStatus),
+    scoreNote: buildScoreNote(
+      workspace.overallScore,
+      workspace.gateStatus,
+      signoff,
+      qorTrendSummary.scoreThreshold,
+    ),
     status: workspace.status,
     signoff,
     reason: bestReason.includes(score) ? null : bestReason,
   }
 }
 
-function buildScoreNote(score: number | null, signoff: QorGateStatus): string {
-  if (score === null) return 'Not rated: the QoR score needs a complete analysis run'
-  if (score >= QOR_SCORE_THRESHOLD) {
-    return `Meets the ${QOR_SCORE_THRESHOLD} analysis threshold`
+export function buildDashboardQorInsights(
+  qorTrendSummary: ProjectQorTrendSummary,
+  workspaceId: string,
+): DashboardQorInsights {
+  const extension = qorTrendSummary.workspaces.find(
+    (workspace) => workspace.workspaceId === workspaceId,
+  )?.qorSnapshotExtension
+  if (!extension || extension.status !== 'available') {
+    return {
+      status: 'unavailable',
+      dimensions: [],
+      diagnoses: [],
+      evidence: null,
+      feasibility: null,
+      power: null,
+    }
   }
+
+  return {
+    status: 'available',
+    dimensions: Object.entries(extension.qphys).map(([key, dimension]) => ({
+      key,
+      label: QOR_DIMENSION_LABELS[key] ?? key,
+      value: dimension.value,
+      display: dimension.value === null ? 'NR' : dimension.value.toFixed(1),
+      state: dimension.state,
+      tone: qorStateTone(dimension.state),
+      percent: dimension.value,
+    })),
+    diagnoses: extension.diagnoses.map((diagnosis) => ({
+      id: diagnosis.diagnosisId,
+      state: diagnosis.state,
+      tone: diagnosisTone(diagnosis.state),
+      severity: diagnosis.severity,
+      confidence: diagnosis.confidence,
+      evidence: diagnosis.triggerFeatures,
+      interventions: diagnosis.interventions
+        .map((intervention) => intervention.hypothesis)
+        .filter(Boolean),
+      validationRequired: diagnosis.validationRequired,
+    })),
+    evidence: extension.evidence,
+    feasibility: extension.feasibility,
+    power: extension.power,
+  }
+}
+
+function qorStateTone(
+  state: EccQorSnapshotExtension['qphys'][string]['state'],
+): DashboardTone {
+  if (state === 'PASS' || state === 'OPPORTUNITY') return 'good'
+  if (state === 'WATCH' || state === 'OVER_PROVISIONED') return 'warn'
+  if (state === 'FAIL') return 'bad'
+  return 'neutral'
+}
+
+function diagnosisTone(state: string): DashboardTone {
+  if (state === 'FAIL' || state === 'BLOCKED') return 'bad'
+  if (state === 'WATCH' || state === 'AT_RISK') return 'warn'
+  if (state === 'PASS' || state === 'CLEAR') return 'good'
+  return 'neutral'
+}
+
+function buildScoreNote(
+  score: number | null,
+  scoreGate: QorGateStatus,
+  signoff: QorGateStatus,
+  threshold: number,
+): string {
+  if (score === null) return 'Not rated: the QoR score needs a complete analysis run'
+  if (scoreGate === 'pass') return `Meets the ${threshold} analysis threshold`
   // A sub-threshold score next to a passing signoff tag reads as a contradiction.
   if (signoff === 'pass') {
-    return `Below the ${QOR_SCORE_THRESHOLD} analysis threshold, which does not gate signoff`
+    return `Below the ${threshold} analysis threshold, which does not gate signoff`
   }
-  return `Below the ${QOR_SCORE_THRESHOLD} analysis threshold`
+  return `Below the ${threshold} analysis threshold`
 }
 
 export function buildDashboardWorkspaceRows(
@@ -298,7 +408,10 @@ export function buildDashboardWorkspaceRows(
     return {
       workspaceId: workspace.id,
       workspaceName: workspace.name,
-      statusLabel: WORKSPACE_STATUS_LABELS[workspace.status],
+      statusLabel: projectResultStatusLabel(
+        workspace,
+        WORKSPACE_STATUS_LABELS[workspace.status],
+      ),
       statusTone: WORKSPACE_STATUS_TONES[workspace.status],
       isBaseline: workspace.id === project.qorTrendSummary.baselineWorkspaceId,
       isRecommended: workspace.id === recommendedWorkspaceId,
@@ -307,7 +420,7 @@ export function buildDashboardWorkspaceRows(
       stepsLabel: `${stepsDone}/${stepsTotal}`,
       stepsPercent: stepsTotal === 0 ? 0 : Math.round((stepsDone / stepsTotal) * 100),
       score: formatScore(trend?.overallScore ?? null),
-      scoreTone: scoreTone(trend?.overallScore ?? null),
+      scoreTone: scoreTone(trend?.gateStatus ?? 'unavailable'),
       blockingCount: counts.blocking,
       findingCount: counts.total,
       analysisState,
@@ -454,7 +567,7 @@ export function sortDashboardWorkspaceRows(
 
 function countWorkspaceIssues(
   summary: ProjectWorkspaceSummary | undefined,
-  steps: readonly FlowStep[],
+  steps: readonly string[],
 ): { blocking: number; total: number } {
   return steps.reduce(
     (totals, step) => {
@@ -487,158 +600,9 @@ function coverageTone(covered: number, total: number): DashboardTone {
   return 'warn'
 }
 
-function scoreTone(score: number | null): DashboardTone {
-  if (score === null) return 'neutral'
-  return score >= QOR_SCORE_THRESHOLD ? 'good' : 'warn'
-}
-
-const QPHYS_LABELS: Record<QphysKey, string> = {
-  timing: 'Timing',
-  interconnect: 'Interconnect',
-  area: 'Area',
-  power: 'Power',
-  robustness: 'Robustness',
-}
-
-export interface DashboardQphysDimension {
-  key: QphysKey
-  label: string
-  value: number | null
-  state: string
-  display: string
-  percent: number | null
-  tone: DashboardTone
-  reason: string | null
-}
-
-export interface DashboardDiagnosisIntervention {
-  hypothesis: string
-  tierLabel: string
-  confidence: string
-  validation: string | null
-}
-
-export interface DashboardDiagnosis {
-  id: string
-  stateLabel: string
-  severity: string
-  confidence: string
-  interpretation: string
-  tone: DashboardTone
-  interventions: DashboardDiagnosisIntervention[]
-}
-
-const DIAGNOSIS_TIER_LABELS: Record<string, string> = {
-  TIER_1_FEASIBILITY: 'Feasibility blocker',
-  TIER_2_BOTTLENECK: 'Quality limiter',
-  TIER_3_OPPORTUNITY: 'Optimization opportunity',
-}
-
-/**
- * The five-coordinate physical QoR record of the recommended workspace,
- * exactly as the ECC report scored it. Null dimensions surface as "N/A"
- * with their reason state instead of pretending a score.
- */
-export function buildDashboardQphys(
-  qorTrendSummary: ProjectQorTrendSummary,
-  workspaceId: string | null,
-): DashboardQphysDimension[] {
-  if (!workspaceId) return []
-  const workspace = qorTrendSummary.workspaces.find(
-    (entry) => entry.workspaceId === workspaceId,
-  )
-  if (!workspace || workspace.qphys.length === 0) return []
-  return workspace.qphys.map((dimension) => ({
-    key: dimension.key,
-    label: QPHYS_LABELS[dimension.key] ?? dimension.key,
-    value: dimension.value,
-    state: dimension.state,
-    display: dimension.value === null ? 'N/A' : dimension.value.toFixed(1),
-    percent:
-      dimension.value === null ? null : Math.max(0, Math.min(100, dimension.value)),
-    tone: qphysTone(dimension.value, dimension.state),
-    reason:
-      dimension.value === null
-        ? dimension.key === 'power'
-          ? powerReason(workspace.power)
-          : (dimension.features.find((feature) => feature.value === null)
-              ?.interpretation ?? 'Insufficient evidence.')
-        : null,
-  }))
-}
-
-function powerReason(power: ProjectQorTrendWorkspaceSummary['power']): string {
-  if (!power || power.total_uw === null) {
-    return power?.budget_uw === null || power?.budget_uw === undefined
-      ? 'No power budget or signoff power.'
-      : `Power budget ${(power.budget_uw / 1e6).toFixed(3)} W declared; no signoff power.`
-  }
-
-  const source =
-    power.source_kind === 'signoff'
-      ? 'Signoff power'
-      : power.source_kind === 'synthesis'
-        ? 'Synthesis power'
-        : 'Observed power'
-  const corner = power.corner ? ` (${power.corner})` : ''
-  const total = formatPower(power.total_uw)
-  if (power.budget_uw === null) {
-    return `${source}${corner}: ${total}; no power budget declared.`
-  }
-  return `${source}${corner}: ${total} of ${formatPower(power.budget_uw)} budget.`
-}
-
-function formatPower(valueUw: number): string {
-  const watts = valueUw / 1e6
-  if (watts >= 1) return `${watts.toFixed(3)} W`
-  return `${(valueUw / 1e3).toFixed(3)} mW`
-}
-
-function qphysTone(value: number | null, state: string): DashboardTone {
-  if (value === null) return state === 'UNKNOWN' ? 'neutral' : 'warn'
-  if (value >= QOR_SCORE_THRESHOLD) return 'good'
-  if (value >= 40) return 'warn'
-  return 'bad'
-}
-
-/**
- * Deterministic diagnoses from the ECC report, already severity-ordered
- * upstream; each intervention stays a hypothesis with its validation.
- */
-export function buildDashboardDiagnoses(
-  qorTrendSummary: ProjectQorTrendSummary,
-  workspaceId: string | null,
-  limit = 5,
-): DashboardDiagnosis[] {
-  if (!workspaceId) return []
-  const workspace = qorTrendSummary.workspaces.find(
-    (entry) => entry.workspaceId === workspaceId,
-  )
-  if (!workspace) return []
-  return workspace.diagnoses.slice(0, limit).map((diagnosis) => ({
-    id: diagnosis.diagnosisId,
-    stateLabel:
-      diagnosis.state === 'OPPORTUNITY'
-        ? 'Opportunity'
-        : diagnosis.state === 'FAIL'
-          ? 'Blocking'
-          : 'Watch',
-    severity: diagnosis.severity.toFixed(2),
-    confidence: diagnosis.confidence.toLowerCase(),
-    interpretation: diagnosis.interpretation,
-    tone:
-      diagnosis.state === 'FAIL'
-        ? 'bad'
-        : diagnosis.state === 'OPPORTUNITY'
-          ? 'good'
-          : 'warn',
-    interventions: diagnosis.interventions.map((intervention) => ({
-      hypothesis: intervention.hypothesis,
-      tierLabel: DIAGNOSIS_TIER_LABELS[intervention.tier] ?? intervention.tier,
-      confidence: intervention.confidence.toLowerCase(),
-      validation: intervention.validationProcedure,
-    })),
-  }))
+function scoreTone(gate: QorGateStatus): DashboardTone {
+  if (gate === 'unavailable' || gate === 'incomplete') return 'neutral'
+  return gate === 'pass' ? 'good' : 'warn'
 }
 
 export function formatScore(score: number | null): string {

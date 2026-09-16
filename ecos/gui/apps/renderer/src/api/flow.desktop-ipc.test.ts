@@ -44,18 +44,18 @@ describe('flow API desktop bridge payloads', () => {
       expect(() => structuredClone(request)).not.toThrow()
       return { directory: '/work/demo', refreshed: true }
     })
-    const syncConfig = vi.fn(async (request: unknown) => {
+    const execute = vi.fn(async (request: { command: string }) => {
       expect(() => structuredClone(request)).not.toThrow()
-      return {
-        configPath: '/work/demo/config/route_ecc.json',
-        directory: '/work/demo',
-        parametersChanged: true,
-        refreshed: true,
+      if (request.command === 'workspace.run') return { rerun: true }
+      if (request.command === 'workspace.runStep') {
+        return { state: 'Success', step: StepEnum.PLACEMENT }
       }
+      throw new Error(`Unexpected Product Command: ${request.command}`)
     })
 
     setWindow({
       ecosDesktop: {
+        productCommands: { execute },
         runtime: {
           flow: {
             run,
@@ -64,13 +64,12 @@ describe('flow API desktop bridge payloads', () => {
           workspace: {
             info,
             refreshConfig,
-            syncConfig,
           },
         },
       },
     })
 
-    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } =
+    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi } =
       await import('./flow')
 
     await runStepApi(
@@ -81,6 +80,7 @@ describe('flow API desktop bridge payloads', () => {
           rerun: false,
           step: StepEnum.PLACEMENT,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         },
       }),
     )
@@ -91,6 +91,7 @@ describe('flow API desktop bridge payloads', () => {
           directory: '/work/demo',
           rerun: true,
           workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
         },
       }),
     )
@@ -109,34 +110,25 @@ describe('flow API desktop bridge payloads', () => {
         cmd: CMDEnum.refresh_config,
         data: {
           directory: '/work/demo',
-          runtimeTarget: 'agent',
-          workspaceHandle: 'workspace-handle-1',
-        },
-      }),
-    )
-    await syncConfigApi(
-      reactive({
-        cmd: CMDEnum.sync_config,
-        data: {
-          config_path: '/work/demo/config/route_ecc.json',
-          directory: '/work/demo',
-          runtimeTarget: 'agent',
           workspaceHandle: 'workspace-handle-1',
         },
       }),
     )
 
-    expect(runStep).toHaveBeenCalledWith({
-      designTool: 'backend',
-      options: {},
-      rerun: false,
-      step: StepEnum.PLACEMENT,
-      workspaceHandle: 'workspace-handle-1',
+    expect(execute).toHaveBeenCalledWith({
+      command: 'workspace.runStep',
+      payload: expect.objectContaining({
+        rerun: false,
+        step: StepEnum.PLACEMENT,
+        workspaceHandle: 'workspace-handle-1',
+      }),
     })
-    expect(run).toHaveBeenCalledWith({
-      designTool: 'backend',
-      rerun: true,
-      workspaceHandle: 'workspace-handle-1',
+    expect(execute).toHaveBeenCalledWith({
+      command: 'workspace.run',
+      payload: expect.objectContaining({
+        rerun: true,
+        workspaceHandle: 'workspace-handle-1',
+      }),
     })
     expect(info).toHaveBeenCalledWith({
       designTool: 'backend',
@@ -146,13 +138,6 @@ describe('flow API desktop bridge payloads', () => {
     })
     expect(refreshConfig).toHaveBeenCalledWith({
       designTool: 'backend',
-      runtimeTarget: 'agent',
-      workspaceHandle: 'workspace-handle-1',
-    })
-    expect(syncConfig).toHaveBeenCalledWith({
-      configPath: '/work/demo/config/route_ecc.json',
-      designTool: 'backend',
-      runtimeTarget: 'agent',
       workspaceHandle: 'workspace-handle-1',
     })
   })

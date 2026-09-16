@@ -181,12 +181,6 @@ export interface StepDashboardStaInsights {
   corners: StepDashboardStaCorner[]
 }
 
-export interface StepDashboardStaSummaryPath {
-  id: string
-  path: string
-  timingPathsPath: string
-}
-
 export interface StepDashboardQor {
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
   metricCount: number
@@ -226,14 +220,14 @@ export interface StepDashboardQorMetricRating {
 export interface StepDashboardQorBaselineMetric {
   step: FlowStep
   metricName: string
-  baselineValue: number
+  baselineValue: number | null
   currentValue: number
-  absoluteDelta: number
+  absoluteDelta: number | null
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
   isDirectional: boolean
-  polarity: string
-  baselinePolarity: string
+  polarity: string | null
+  baselinePolarity: string | null
 }
 
 export interface StepDashboardQorMetricComparison extends StepDashboardQorMetric {
@@ -1130,30 +1124,6 @@ function staCornerId(corner: Record<string, unknown>, index: number): string {
   return textValue(corner.sta_corner, `Corner ${index + 1}`)
 }
 
-export function staCornerSummaryPaths(
-  value: unknown,
-  stepDirectory: string,
-): StepDashboardStaSummaryPath[] {
-  const baseDirectory = stepDirectory.replace(/\/+$/, '')
-  return staCornerRecords(value).map((corner, index) => {
-    const id = staCornerId(corner, index)
-    const sourcePath = textValue(corner.summary_file, `feature/${id}/qor_summary.json`)
-    const timingPathsFile = textValue(corner.timing_paths_file, '')
-    const timingPathsPath = timingPathsFile
-      ? timingPathsFile
-      : sourcePath.replace(/qor_summary\.json$/i, 'timing_paths.json')
-    return {
-      id,
-      path: resolveStepPath(baseDirectory, sourcePath),
-      timingPathsPath: resolveStepPath(baseDirectory, timingPathsPath),
-    }
-  })
-}
-
-function resolveStepPath(baseDirectory: string, relativePath: string): string {
-  return relativePath.startsWith('/') ? relativePath : `${baseDirectory}/${relativePath}`
-}
-
 function staCornerMetrics(
   corner: Record<string, unknown>,
   index: number,
@@ -1769,8 +1739,12 @@ export function prioritizeQorMetricComparisons(
         currentValue: comparison?.currentValue ?? metric.value,
         absoluteDelta: comparison?.absoluteDelta ?? null,
         relativeDeltaPct: comparison?.relativeDeltaPct ?? null,
-        comparisonState: comparison?.state ?? 'unavailable',
-        isComparisonAvailable: comparison !== undefined,
+        comparisonState:
+          comparison !== undefined && comparison.baselineValue !== null
+            ? comparison.state
+            : 'unavailable',
+        isComparisonAvailable:
+          comparison !== undefined && comparison.baselineValue !== null,
         isDirectional: comparison?.isDirectional ?? false,
         polarity: comparison?.polarity ?? null,
         baselinePolarity: comparison?.baselinePolarity ?? null,

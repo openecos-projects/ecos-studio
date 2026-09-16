@@ -12,6 +12,7 @@ import type {
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
   EccWorkspaceCloseResult,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
@@ -20,23 +21,26 @@ import type {
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
-  EccWorkspaceInspectSignoffResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceSpecValidationRequest,
+  EccWorkspaceSpecValidationResult,
+  EccWorkspaceUpdateRequest,
+  EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
 
-import { EccJsonRpcError } from './jsonRpcClient'
 import type { EccRpcRuntimeClient, EccRpcRuntimeSidecar } from './runtimeClient'
-import { migrateWorkspaceConfigFilenames } from './workspaceConfigMigration'
 import { WorkspaceSessionRegistry } from './workspaceSessions'
 
 export interface EccWorkspaceSessionResult {
   directory: string
   workspaceId: string
+  workspaceRevision?: number
 }
 
 export type RuntimeOperation<T> = () => Promise<T>
@@ -56,6 +60,7 @@ interface WorkspaceRuntimeCommandContext {
     metadata?: RuntimeOperationMetadata,
   ): Promise<T>
   ensureStarted(): Promise<EccRpcRuntimeClient>
+  hasActiveOperations(): boolean
   lazyWorkspaceOpen: boolean
   resolveEccWorkspaceId(workspaceHandle: string): Promise<string>
   sessions: WorkspaceSessionRegistry
@@ -68,58 +73,181 @@ export class WorkspaceRuntimeCommands {
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
     return this.context.enqueue('workspace.create', undefined, async () => {
       const client = await this.context.ensureStarted()
-      const payloadOptions = { includeFlowConfig: true, includeSdc: true }
-      let response: EccWorkspaceSessionResult | null = null
-      while (!response) {
-        try {
-          response = await client.call<EccWorkspaceSessionResult>(
-            'workspace.create',
-            workspaceCreatePayload(request, payloadOptions),
-            // PDK/workspace provisioning can exceed the 30s control-plane default.
-            { timeoutMs: 120_000 },
-          )
-        } catch (error) {
-          if (
-            payloadOptions.includeFlowConfig &&
-            isUnknownJsonRpcFieldError(error, 'flowConfig')
-          ) {
-            payloadOptions.includeFlowConfig = false
-            continue
-          }
-          if (payloadOptions.includeSdc && isUnknownJsonRpcFieldError(error, 'sdc')) {
-            payloadOptions.includeSdc = false
-            continue
-          }
-          throw error
-        }
-      }
+      const response = await client.call<EccWorkspaceSessionResult>('workspace.create', {
+        ...request,
+      })
       const session = this.context.sessions.activate(
         response.directory,
         response.workspaceId,
+        response.workspaceRevision ?? 1,
+        request.workspaceBindings,
       )
-      return { directory: session.directory, workspaceHandle: session.workspaceHandle }
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+        workspaceId: session.eccWorkspaceId ?? undefined,
+        workspaceRevision: session.workspaceRevision,
+      }
     })
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.context.enqueue('workspace.open', undefined, async () => {
-      await migrateWorkspaceConfigFilenames(request.directory)
+      const existing = this.context.sessions.findByDirectory(request.directory)
+      if (existing && this.context.hasActiveOperations()) {
+        if (request.workspaceBindings) {
+          this.context.sessions.updateBindings(
+            existing.workspaceHandle,
+            request.workspaceBindings,
+          )
+        }
+        return {
+          directory: existing.directory,
+          reused: true,
+          workspaceHandle: existing.workspaceHandle,
+          workspaceId: existing.eccWorkspaceId ?? undefined,
+          workspaceRevision: existing.workspaceRevision,
+        }
+      }
       if (this.context.lazyWorkspaceOpen) {
         const existing = this.context.sessions.findByDirectory(request.directory)
-        const session =
-          existing ?? this.context.sessions.activate(request.directory, null)
-        return { directory: session.directory, workspaceHandle: session.workspaceHandle }
+        if (existing && request.workspaceBindings) {
+          this.context.sessions.updateBindings(
+            existing.workspaceHandle,
+            request.workspaceBindings,
+          )
+        }
+        const session = existing
+          ? this.context.sessions.require(existing.workspaceHandle)
+          : this.context.sessions.activate(
+              request.directory,
+              null,
+              0,
+              request.workspaceBindings,
+            )
+        return {
+          directory: session.directory,
+          reused: Boolean(existing),
+          workspaceHandle: session.workspaceHandle,
+        }
       }
       const client = await this.context.ensureStarted()
       const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
         directory: request.directory,
+        ...(request.workspaceBindings
+          ? { workspaceBindings: request.workspaceBindings }
+          : {}),
       })
       const session = this.context.sessions.activate(
         response.directory,
         response.workspaceId,
+        response.workspaceRevision ?? 1,
+        request.workspaceBindings,
       )
-      return { directory: session.directory, workspaceHandle: session.workspaceHandle }
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+        workspaceId: session.eccWorkspaceId ?? undefined,
+        workspaceRevision: session.workspaceRevision,
+      }
     })
+  }
+
+  describeWorkspaceSpec(): Promise<Record<string, unknown>> {
+    return this.context.enqueue('workspace_spec.describe', undefined, async () => {
+      const client = await this.context.ensureStarted()
+      return await client.call<Record<string, unknown>>('workspace_spec.describe')
+    })
+  }
+
+  validateWorkspaceSpec(
+    request: EccWorkspaceSpecValidationRequest,
+  ): Promise<EccWorkspaceSpecValidationResult> {
+    return this.context.enqueue('workspace_spec.validate', undefined, async () => {
+      const client = await this.context.ensureStarted()
+      return await client.call<EccWorkspaceSpecValidationResult>(
+        'workspace_spec.validate',
+        { ...request },
+      )
+    })
+  }
+
+  async updateWorkspace(
+    request: EccWorkspaceUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.workspaceCall<EccWorkspaceUpdateResult>(
+      'workspace.update',
+      request,
+      (workspaceId) => ({
+        commandId: request.commandId,
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        workspaceBindings: request.workspaceBindings,
+        workspaceId,
+        workspaceSpec: request.workspaceSpec,
+      }),
+    )
+    this.context.sessions.updateRevision(
+      request.workspaceHandle,
+      result.workspaceRevision,
+    )
+    this.context.sessions.updateBindings(
+      request.workspaceHandle,
+      request.workspaceBindings,
+    )
+    return result
+  }
+
+  async updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const session = this.context.sessions.require(request.workspaceHandle)
+    const currentBindings = session.workspaceBindings ?? {}
+    const currentPdk = currentBindings.pdk
+    const workspaceBindings = {
+      ...currentBindings,
+      pdk: {
+        ...(typeof currentPdk === 'object' && currentPdk !== null ? currentPdk : {}),
+        ...(request.pdkRoot ? { root: request.pdkRoot } : {}),
+      },
+    }
+    const result = await this.workspaceCall<EccWorkspaceUpdateResult>(
+      'workspace.configuration.update',
+      request,
+      (workspaceId) => ({
+        commandId: request.commandId,
+        configuration: request.configuration,
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        workspaceBindings,
+        workspaceId,
+      }),
+    )
+    this.context.sessions.updateRevision(
+      request.workspaceHandle,
+      result.workspaceRevision,
+    )
+    this.context.sessions.updateBindings(request.workspaceHandle, workspaceBindings)
+    return result
+  }
+
+  async updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    const result = await this.workspaceCall<EccWorkspaceUpdateResult>(
+      'workspace.step_configuration.update',
+      request,
+      (workspaceId) => ({
+        commandId: request.commandId,
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        parameters: request.parameters,
+        stepId: request.stepId,
+        workspaceId,
+      }),
+    )
+    this.context.sessions.updateRevision(
+      request.workspaceHandle,
+      result.workspaceRevision,
+    )
+    return result
   }
 
   closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
@@ -166,6 +294,24 @@ export class WorkspaceRuntimeCommands {
     }))
   }
 
+  async readWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationReadRequest,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const client = await this.context.ensureStarted()
+    const workspaceId = await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+    const result = await client.call<EccWorkspaceStepConfigurationReadResult>(
+      'workspace.step_configuration.read',
+      {
+        step: request.step,
+        workspaceId,
+      },
+    )
+    if (result.workspaceId && result.workspaceId !== workspaceId) {
+      throw new Error('ECC Step Configuration response belongs to another Workspace.')
+    }
+    return result
+  }
+
   refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
@@ -174,19 +320,24 @@ export class WorkspaceRuntimeCommands {
     }))
   }
 
-  syncConfig(
-    request: EccWorkspaceSyncConfigRequest,
-  ): Promise<EccWorkspaceSyncConfigResult> {
-    return this.workspaceCall('workspace.sync_config', request, (workspaceId) => ({
-      configPath: request.configPath,
-      workspaceId,
-    }))
-  }
-
-  resetFlow(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceResetFlowResult> {
-    return this.workspaceCall('workspace.reset_flow', request, (workspaceId) => ({
-      workspaceId,
-    }))
+  async resetFlow(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceResetFlowResult> {
+    const result = await this.workspaceCall<EccWorkspaceResetFlowResult>(
+      'workspace.reset_flow',
+      request,
+      (workspaceId) => ({
+        expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+        workspaceId,
+      }),
+    )
+    if (typeof result.workspaceRevision === 'number') {
+      this.context.sessions.updateRevision(
+        request.workspaceHandle,
+        result.workspaceRevision,
+      )
+    }
+    return result
   }
 
   exportSignoff(
@@ -202,14 +353,6 @@ export class WorkspaceRuntimeCommands {
       }),
       { timeoutMs: 0 },
     )
-  }
-
-  inspectSignoff(
-    request: EccWorkspaceHandleRequest,
-  ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.workspaceCall('workspace.inspect_signoff', request, (workspaceId) => ({
-      workspaceId,
-    }))
   }
 
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
@@ -239,19 +382,33 @@ export class WorkspaceRuntimeCommands {
     )
   }
 
-  layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult> {
-    return this.context.enqueue('layout.edit.save', request.workspaceHandle, async () => {
-      const client = await this.context.ensureStarted()
-      await this.context.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccLayoutEditSaveResult>(
-        'layout.edit.save',
-        {
-          editSessionId: request.editSessionId,
-          expectedRevision: request.expectedRevision,
-        },
-        { timeoutMs: 0 },
+  async layoutEditSave(
+    request: EccLayoutEditSaveRequest,
+  ): Promise<EccLayoutEditSaveResult> {
+    const result = await this.context.enqueue(
+      'layout.edit.save',
+      request.workspaceHandle,
+      async () => {
+        const client = await this.context.ensureStarted()
+        await this.context.resolveEccWorkspaceId(request.workspaceHandle)
+        return await client.call<EccLayoutEditSaveResult>(
+          'layout.edit.save',
+          {
+            editSessionId: request.editSessionId,
+            expectedRevision: request.expectedRevision,
+            expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+          },
+          { timeoutMs: 0 },
+        )
+      },
+    )
+    if (typeof result.workspaceRevision === 'number') {
+      this.context.sessions.updateRevision(
+        request.workspaceHandle,
+        result.workspaceRevision,
       )
-    })
+    }
+    return result
   }
 
   layoutEditDiscard(
@@ -284,7 +441,11 @@ export class WorkspaceRuntimeCommands {
         )
         return await client.call<EccFlowRunResult>(
           'flow.run',
-          { rerun, workspaceId },
+          {
+            expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+            rerun,
+            workspaceId,
+          },
           { timeoutMs: 0 },
         )
       },
@@ -306,7 +467,12 @@ export class WorkspaceRuntimeCommands {
         )
         return await client.call<EccFlowRunStepResult>(
           'flow.run_step',
-          { rerun, step: request.step, workspaceId },
+          {
+            expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+            rerun,
+            step: request.step,
+            workspaceId,
+          },
           { timeoutMs: 0 },
         )
       },
@@ -317,53 +483,28 @@ export class WorkspaceRuntimeCommands {
   private workspaceCall<T>(
     method: string,
     request: EccWorkspaceHandleRequest,
-    params: (workspaceId: string) => Record<string, unknown>,
+    params: (workspaceId: string, workspaceRevision: number) => Record<string, unknown>,
     options?: { timeoutMs?: number },
+    metadata?: RuntimeOperationMetadata,
   ): Promise<T> {
-    return this.context.enqueue(method, request.workspaceHandle, async () => {
-      const client = await this.context.ensureStarted()
-      const workspaceId = await this.context.resolveEccWorkspaceId(
-        request.workspaceHandle,
-      )
-      return await client.call<T>(method, params(workspaceId), options)
-    })
+    return this.context.enqueue(
+      method,
+      request.workspaceHandle,
+      async () => {
+        const client = await this.context.ensureStarted()
+        const workspaceId = await this.context.resolveEccWorkspaceId(
+          request.workspaceHandle,
+        )
+        const workspaceRevision = this.context.sessions.require(
+          request.workspaceHandle,
+        ).workspaceRevision
+        return await client.call<T>(
+          method,
+          params(workspaceId, workspaceRevision),
+          options,
+        )
+      },
+      metadata,
+    )
   }
-}
-
-function isUnknownJsonRpcFieldError(error: unknown, field: string): boolean {
-  if (!(error instanceof EccJsonRpcError) || error.code !== -32602) return false
-  const data = error.data
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    'message' in data &&
-    data.message === `unknown field: ${field}`
-  )
-}
-
-function workspaceCreatePayload(
-  request: EccWorkspaceCreateRequest,
-  options: { includeFlowConfig: boolean; includeSdc: boolean },
-): Record<string, unknown> {
-  return {
-    directory: request.directory,
-    filelist: request.filelist ?? '',
-    ...(options.includeFlowConfig && hasEntries(request.flowConfig)
-      ? { flowConfig: request.flowConfig }
-      : {}),
-    originDef: request.originDef ?? '',
-    originVerilog: request.originVerilog ?? '',
-    parameters: request.parameters ?? {},
-    pdk: request.pdk ?? '',
-    pdkJson: request.pdkJson ?? null,
-    pdkRoot: request.pdkRoot ?? '',
-    rtlList: request.rtlList ?? [],
-    ...(options.includeSdc ? { sdc: request.sdc ?? '' } : {}),
-  }
-}
-
-function hasEntries(
-  value: Record<string, unknown> | undefined,
-): value is Record<string, unknown> {
-  return value !== undefined && Object.keys(value).length > 0
 }

@@ -1,5 +1,6 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
@@ -40,6 +41,7 @@ import {
 import type { AgentProviderRuntime } from './agentProviderContract'
 import type { ResolvedAgentProviderManifest } from './agentProviderPlugin'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
+import { deriveAgentWorkspaceParameterUpdates } from './agentWorkspaceParameterUpdates'
 
 type SpawnLike = typeof spawnChild
 type AgentProviderMethod =
@@ -91,6 +93,21 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private readonly eventFanout = new RuntimeEventFanout<DesktopAgentEvent>()
   private readonly manifest: ResolvedAgentProviderManifest
   private readonly pendingRequests = new Map<string, PendingRequest>()
+  private readonly pendingExecutionConfirmations = new Map<
+    string,
+    {
+      approved: boolean
+      parameter?: {
+        patch: DesktopAgentWorkspaceRerunContract['parameter_patch']
+        updateId: string
+        workspace: string
+        workspaceRevision: number
+      }
+      rerun?: DesktopAgentWorkspaceRerunContract
+      token: string
+    }
+  >()
+  private readonly workspaceRevisions = new Map<string, number>()
   private readonly spawnImpl: SpawnLike
   private child: ReturnType<SpawnLike> | null = null
   private stderrTail = ''
@@ -136,19 +153,56 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   async startSession(
     request: DesktopAgentStartSessionRequest,
   ): Promise<DesktopAgentStartSessionResponse> {
+    if (request.workspaceRevision !== undefined) {
+      this.workspaceRevisions.set(request.sessionId ?? '', request.workspaceRevision)
+    }
+    const {
+      workspaceRevision: _workspaceRevision,
+      workspaceDesignId: _workspaceDesignId,
+      workspaceParameterValues: _workspaceParameterValues,
+      ...providerRequest
+    } = request
     return (await this.sendRequest(
       'startSession',
-      request,
+      providerRequest,
     )) as DesktopAgentStartSessionResponse
   }
 
   async sendMessage(
     request: DesktopAgentSendMessageRequest,
   ): Promise<DesktopAgentSendMessageResponse> {
-    return (await this.sendRequest(
-      'sendMessage',
-      request,
-    )) as DesktopAgentSendMessageResponse
+    const pending = this.pendingExecutionConfirmations.get(request.sessionId)
+    if (request.confirmationToken) {
+      if (
+        !pending ||
+        pending.token !== request.confirmationToken ||
+        request.message.trim() !== '1'
+      ) {
+        throw new Error('Agent execution confirmation is invalid or expired.')
+      }
+      pending.approved = true
+    } else {
+      this.pendingExecutionConfirmations.delete(request.sessionId)
+      if (request.workspaceRevision !== undefined) {
+        this.workspaceRevisions.set(request.sessionId, request.workspaceRevision)
+      }
+    }
+    const {
+      confirmationToken: _confirmationToken,
+      workspaceRevision: _workspaceRevision,
+      ...providerRequest
+    } = request
+    try {
+      return (await this.sendRequest(
+        'sendMessage',
+        providerRequest,
+      )) as DesktopAgentSendMessageResponse
+    } catch (error) {
+      if (request.confirmationToken) {
+        this.pendingExecutionConfirmations.delete(request.sessionId)
+      }
+      throw error
+    }
   }
 
   async getModelSettings(
@@ -340,10 +394,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private handleProtocolRecord(record: Record<string, unknown>): void {
     if (record.type === 'event') {
       const event = readDesktopAgentEvent(record.event)
-      if (event) {
+      const accepted = event ? this.acceptConfirmedWorkspaceAction(event) : null
+      if (accepted) {
         this.eventFanout.emit({
-          ...event,
-          providerId: event.providerId ?? this.manifest.providerId,
+          ...accepted,
+          providerId: accepted.providerId ?? this.manifest.providerId,
         } as DesktopAgentEvent)
       }
       return
@@ -366,6 +421,80 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     pending.resolve(response.result)
   }
 
+  private acceptConfirmedWorkspaceAction(
+    event: DesktopAgentEvent,
+  ): DesktopAgentEvent | null {
+    const sessionId = event.sessionId
+    if (!sessionId) {
+      return event.type === 'workspace_parameter_update' ||
+        event.type === 'workspace_rerun'
+        ? null
+        : event
+    }
+    if (event.type === 'contract' && event.contract) {
+      const contract = event.contract
+      const token = randomUUID()
+      if (contract.presentation === 'workspace_parameter_update') {
+        const { parameter_patch: patch, update_id: updateId, workspace } = contract
+        const workspaceRevision = this.workspaceRevisions.get(sessionId)
+        if (!patch || !updateId || !workspace || workspaceRevision === undefined)
+          return null
+        this.pendingExecutionConfirmations.set(sessionId, {
+          approved: false,
+          parameter: { patch, updateId, workspace, workspaceRevision },
+          token,
+        })
+        return {
+          ...event,
+          contract: {
+            ...contract,
+            confirmation_token: token,
+            workspace_revision: workspaceRevision,
+          },
+        }
+      }
+      if (contract.presentation === 'workspace_rerun' && contract.workspace_rerun) {
+        this.pendingExecutionConfirmations.set(sessionId, {
+          approved: false,
+          rerun: contract.workspace_rerun,
+          token,
+        })
+        return {
+          ...event,
+          contract: { ...contract, confirmation_token: token },
+        }
+      }
+      if (contract.presentation === 'workspace_rerun') return null
+    }
+    if (event.type !== 'workspace_parameter_update' && event.type !== 'workspace_rerun') {
+      return event
+    }
+    const pending = this.pendingExecutionConfirmations.get(sessionId)
+    this.pendingExecutionConfirmations.delete(sessionId)
+    if (!pending?.approved) return null
+    if (event.type === 'workspace_rerun') {
+      return event.workspaceRerun &&
+        isDeepStrictEqual(pending.rerun, event.workspaceRerun)
+        ? event
+        : null
+    }
+    const update = event.workspaceParameterUpdate
+    const expected = pending.parameter
+    return update &&
+      expected &&
+      expected.updateId === update.update_id &&
+      expected.workspace === update.workspace &&
+      isDeepStrictEqual(expected.patch, update.parameter_patch)
+      ? {
+          ...event,
+          workspaceParameterUpdate: {
+            ...update,
+            workspace_revision: expected.workspaceRevision,
+          },
+        }
+      : null
+  }
+
   private rejectPending(error: Error): void {
     for (const pending of this.pendingRequests.values()) {
       pending.reject(error)
@@ -379,6 +508,8 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.child = null
     this.stderrTail = ''
     this.stdoutBuffer = ''
+    this.pendingExecutionConfirmations.clear()
+    this.workspaceRevisions.clear()
   }
 
   private disposeChildForEnvReload(): void {
@@ -387,6 +518,8 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.child = null
     this.stderrTail = ''
     this.stdoutBuffer = ''
+    this.pendingExecutionConfirmations.clear()
+    this.workspaceRevisions.clear()
     this.rejectPending(new Error('Agent provider restarted to apply Codex CLI path'))
     try {
       child.kill()
@@ -1153,6 +1286,7 @@ function readWorkspaceRerunContract(
   const endStep = record.end_step
   const executionScope = record.execution_scope
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
+  const derivedUpdates = patch ? deriveAgentWorkspaceParameterUpdates(patch) : null
   const writes =
     record.writes === undefined ||
     (Array.isArray(record.writes) && record.writes.length === 0)
@@ -1179,8 +1313,11 @@ function readWorkspaceRerunContract(
     workspaceSetupFlowSteps.indexOf(endStep) <
       workspaceSetupFlowSteps.indexOf(targetStep) ||
     !patch ||
-    !writes ||
-    !parameterWritesMatchPatch(patch, writes) ||
+    !derivedUpdates ||
+    writes === null ||
+    (writes.length > 0 && !parameterWritesMatchPatch(patch, writes)) ||
+    'workspace_parameters' in record ||
+    'step_configurations' in record ||
     !sourceStageArtifact ||
     !sourceFlowJsonSha256 ||
     !sourceStageArtifactSha256
@@ -1192,7 +1329,9 @@ function readWorkspaceRerunContract(
     end_step: endStep,
     execution_scope: executionScope,
     parameter_patch: patch,
-    writes,
+    ...(writes && writes.length > 0 ? { writes } : {}),
+    step_configurations: derivedUpdates.step_configurations,
+    workspace_parameters: derivedUpdates.workspace_parameters,
     requires_gui_review: true,
     rerun_id: rerunId,
     schema_version: 'flow-agent.workspace_rerun_contract.v1',
@@ -1562,23 +1701,36 @@ function readWorkspaceParameterUpdateContract(
   const workspace = readEventText(record.workspace)
   const updateId = readOptionalIdentifier(record.update_id)
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
-  const writes = readWorkspaceParameterWrites(record.writes)
+  const derivedUpdates = patch ? deriveAgentWorkspaceParameterUpdates(patch) : null
+  const writes =
+    record.writes === undefined
+      ? []
+      : readWorkspaceParameterWrites(record.writes)
   if (
-    record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v2' ||
+    (record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v2' &&
+      record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v3') ||
     !workspace ||
     !updateId ||
     !patch ||
-    !writes ||
-    !parameterWritesMatchPatch(patch, writes)
+    !derivedUpdates ||
+    writes === null ||
+    (writes.length > 0 && !parameterWritesMatchPatch(patch, writes)) ||
+    'workspace_parameters' in record ||
+    'step_configurations' in record
   ) {
     return null
   }
   return {
     parameter_patch: patch,
-    schema_version: 'flow-agent.workspace_parameter_update_contract.v2',
+    schema_version:
+      record.schema_version === 'flow-agent.workspace_parameter_update_contract.v2'
+        ? 'flow-agent.workspace_parameter_update_contract.v2'
+        : 'flow-agent.workspace_parameter_update_contract.v3',
+    step_configurations: derivedUpdates.step_configurations,
     update_id: updateId,
     workspace,
-    writes,
+    workspace_parameters: derivedUpdates.workspace_parameters,
+    ...(writes.length > 0 ? { writes } : {}),
   }
 }
 
@@ -1634,30 +1786,82 @@ function readExecutionContract(value: unknown): DesktopAgentExecutionContract | 
           record.presentation === 'workspace_parameter_update'
         ? record.presentation
         : null
+  const parameterPatch =
+    presentation === 'workspace_parameter_update'
+      ? readWorkspaceRerunPatch(record.parameter_patch)
+      : null
+  const updateId =
+    presentation === 'workspace_parameter_update'
+      ? readOptionalIdentifier(record.update_id)
+      : null
+  const workspace =
+    presentation === 'workspace_parameter_update'
+      ? readWorkspaceRerunPath(record.workspace)
+      : null
+  const workspaceRerun =
+    presentation === 'workspace_rerun'
+      ? readWorkspaceRerunContract(record.workspace_rerun)
+      : null
   if (
     record.schema_version !== 'flow-agent.resolved_execution_contract.v1' ||
     !readEventText(record.title) ||
-    !Array.isArray(record.fields) ||
-    record.fields.length === 0 ||
-    record.fields.length > 32 ||
-    presentation === null
+    presentation === null ||
+    (presentation === 'workspace_parameter_update'
+      ? !parameterPatch ||
+        !deriveAgentWorkspaceParameterUpdates(parameterPatch) ||
+        !updateId ||
+        !workspace
+      : presentation === 'workspace_rerun'
+        ? !workspaceRerun
+        : !Array.isArray(record.fields) ||
+          record.fields.length === 0 ||
+          record.fields.length > 32)
   ) {
     return null
   }
 
-  const fields = record.fields.map((value) => {
-    const field = readRecord(value)
-    const label = readEventText(field.label)
-    const fieldValue = readEventText(field.value)
-    return label && fieldValue ? { label, value: fieldValue } : null
-  })
+  const fields = parameterPatch
+    ? [
+        { label: 'Workspace', value: workspace! },
+        ...parameterPatch.map((item) => ({
+          label: item.knob_id,
+          value: Array.isArray(item.value)
+            ? JSON.stringify(item.value)
+            : String(item.value),
+        })),
+      ]
+    : workspaceRerun
+      ? [
+          { label: 'Design', value: workspaceRerun.design_id },
+          { label: 'Source workspace', value: workspaceRerun.source_workspace },
+          { label: 'Target workspace', value: workspaceRerun.target_workspace },
+          { label: 'Start stage', value: workspaceRerun.target_step },
+          { label: 'End stage', value: workspaceRerun.end_step },
+          { label: 'Execution scope', value: workspaceRerun.execution_scope },
+          ...workspaceRerun.parameter_patch.map((item) => ({
+            label: item.knob_id,
+            value: Array.isArray(item.value)
+              ? JSON.stringify(item.value)
+              : String(item.value),
+          })),
+        ]
+      : (record.fields as unknown[]).map((value) => {
+          const field = readRecord(value)
+          const label = readEventText(field.label)
+          const fieldValue = readEventText(field.value)
+          return label && fieldValue ? { label, value: fieldValue } : null
+        })
   if (fields.some((field) => field === null)) return null
 
   return {
     fields: fields as DesktopAgentExecutionContract['fields'],
+    ...(parameterPatch ? { parameter_patch: parameterPatch } : {}),
     ...(presentation ? { presentation } : {}),
     schema_version: 'flow-agent.resolved_execution_contract.v1',
     title: readEventText(record.title) as string,
+    ...(updateId ? { update_id: updateId } : {}),
+    ...(workspace ? { workspace } : {}),
+    ...(workspaceRerun ? { workspace_rerun: workspaceRerun } : {}),
   }
 }
 

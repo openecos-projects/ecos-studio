@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { EccQorSnapshotExtension } from '@ecos-studio/shared'
 import {
   dashboardSummaryFixture,
   metricPointFixture,
@@ -13,9 +14,8 @@ import {
 } from '@/components/projectStepAnalysis.fixture'
 import {
   buildDashboardAttention,
-  buildDashboardDiagnoses,
   buildDashboardHealth,
-  buildDashboardQphys,
+  buildDashboardQorInsights,
   buildDashboardRecommendation,
   buildDashboardWorkspaceRows,
   countAttentionBySeverity,
@@ -23,6 +23,59 @@ import {
   formatScore,
   sortDashboardWorkspaceRows,
 } from './projectDashboard'
+
+function qorSnapshotExtension(): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score: 74.2,
+    scalarStatus: 'GREEN',
+    profile: 'balanced',
+    qphys: {
+      timing: { value: 74.2, state: 'PASS', featureIds: ['timing.setup'] },
+      area: { value: null, state: 'UNKNOWN', featureIds: [] },
+    },
+    feasibility: { status: 'PASS', gates: [] },
+    evidence: {
+      index: 90,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    diagnoses: [
+      {
+        diagnosisId: 'timing-watch',
+        state: 'WATCH',
+        severity: 0.4,
+        confidence: 'HIGH',
+        triggerFeatures: ['timing.setup'],
+        affectedDimensions: ['timing'],
+        interventions: [
+          {
+            hypothesis: 'Review clock uncertainty',
+            tier: 'TIER_1_FEASIBILITY',
+            confidence: 'HIGH',
+            parameterKnob: null,
+            validationProcedure: null,
+          },
+        ],
+        interventionConfidence: 'HIGH',
+        validationRequired: null,
+      },
+    ],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
+}
 
 describe('buildDashboardHealth', () => {
   it('summarizes flow progress, run states, and readiness coverage', () => {
@@ -179,6 +232,69 @@ describe('buildDashboardRecommendation', () => {
   })
 })
 
+describe('buildDashboardQorInsights', () => {
+  it('maps committed Qphys and diagnosis facts without recalculating them', () => {
+    const summary = trendSummaryWithScoresFixture()
+    summary.workspaces[1]!.qorSnapshotExtension = qorSnapshotExtension()
+
+    expect(buildDashboardQorInsights(summary, 'ws_b')).toEqual({
+      status: 'available',
+      dimensions: [
+        {
+          key: 'timing',
+          label: 'Timing',
+          value: 74.2,
+          display: '74.2',
+          state: 'PASS',
+          tone: 'good',
+          percent: 74.2,
+        },
+        {
+          key: 'area',
+          label: 'Area',
+          value: null,
+          display: 'NR',
+          state: 'UNKNOWN',
+          tone: 'neutral',
+          percent: null,
+        },
+      ],
+      diagnoses: [
+        {
+          id: 'timing-watch',
+          state: 'WATCH',
+          tone: 'warn',
+          severity: 0.4,
+          confidence: 'HIGH',
+          evidence: ['timing.setup'],
+          interventions: ['Review clock uncertainty'],
+          validationRequired: null,
+        },
+      ],
+      evidence: {
+        index: 90,
+        state: 'HIGH',
+        integrity: 1,
+        coverage: 1,
+        consistency: 1,
+      },
+      feasibility: { status: 'PASS', gates: [] },
+      power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    })
+  })
+
+  it('returns unavailable when the selected workspace has no committed extension', () => {
+    expect(buildDashboardQorInsights(trendSummaryWithScoresFixture(), 'ws_b')).toEqual({
+      status: 'unavailable',
+      dimensions: [],
+      diagnoses: [],
+      evidence: null,
+      feasibility: null,
+      power: null,
+    })
+  })
+})
+
 describe('buildDashboardWorkspaceRows', () => {
   it('builds one row per workspace carrying progress, score, and signoff', () => {
     const project = projectFixture()
@@ -226,14 +342,6 @@ describe('buildDashboardWorkspaceRows', () => {
       stepCompareSummaries: [
         {
           step: 'Route',
-          title: 'Route',
-          metricLabel: '',
-          metricHint: '',
-          configuredCount: 1,
-          successCount: 1,
-          missingCount: 0,
-          points: [],
-          metrics: [],
         },
       ],
     })
@@ -355,88 +463,5 @@ describe('dashboard formatting helpers', () => {
     expect(dashboardGridTemplate([populated, empty])).toBe(
       'minmax(148px, 1.05fr) 92px 62px 76px 84px minmax(96px, 1fr) minmax(82px, 0.8fr) 78px',
     )
-  })
-})
-
-describe('buildDashboardQphys', () => {
-  it('projects the ECC-scored five-coordinate record with tones', () => {
-    const rows = buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_a')
-
-    expect(rows.map((row) => row.key)).toEqual(['timing', 'interconnect', 'area'])
-    expect(rows[0]).toMatchObject({ value: 100, display: '100.0', tone: 'good' })
-    expect(rows[1]).toMatchObject({ value: 52, state: 'WATCH', tone: 'warn' })
-    // Null coordinates read as N/A, never a fabricated zero.
-    expect(rows[2]).toMatchObject({ value: null, display: 'N/A', tone: 'neutral' })
-  })
-
-  it('returns nothing for workspaces without a report', () => {
-    expect(buildDashboardQphys(trendSummaryWithScoresFixture(), 'ws_b')).toEqual([])
-    expect(buildDashboardQphys(trendSummaryWithScoresFixture(), null)).toEqual([])
-  })
-
-  it('explains an unrated power coordinate with the observed signoff power', () => {
-    const summary = trendSummaryWithScoresFixture()
-    const workspace = summary.workspaces.find((entry) => entry.workspaceId === 'ws_a')!
-    const rows = buildDashboardQphys(
-      {
-        ...summary,
-        workspaces: [
-          {
-            ...workspace,
-            power: {
-              total_uw: 12400,
-              budget_uw: null,
-              source_path: '/ws/sta_ecc/feature/MAX_125/Cworst/power_summary.json',
-              source_kind: 'signoff',
-              corner: 'MAX_125/Cworst',
-            },
-            qphys: [
-              ...workspace.qphys,
-              {
-                key: 'power',
-                value: null,
-                state: 'UNKNOWN',
-                features: [
-                  {
-                    featureId: 'F_SYN_LEAK_FRAC',
-                    value: null,
-                    state: 'UNKNOWN',
-                    interpretation: 'Synthesis leakage fraction unavailable.',
-                  },
-                ],
-              },
-            ],
-          },
-          ...summary.workspaces.filter((entry) => entry.workspaceId !== 'ws_a'),
-        ],
-      },
-      'ws_a',
-    )
-
-    expect(rows.find((row) => row.key === 'power')).toMatchObject({
-      display: 'N/A',
-      reason: 'Signoff power (MAX_125/Cworst): 12.400 mW; no power budget declared.',
-    })
-  })
-})
-
-describe('buildDashboardDiagnoses', () => {
-  it('surfaces severity-ordered diagnoses with their intervention hypotheses', () => {
-    const diagnoses = buildDashboardDiagnoses(trendSummaryWithScoresFixture(), 'ws_a')
-
-    expect(diagnoses).toHaveLength(1)
-    expect(diagnoses[0]).toMatchObject({
-      id: 'diag.place.congestion',
-      stateLabel: 'Watch',
-      tone: 'warn',
-    })
-    expect(diagnoses[0]?.interventions[0]).toMatchObject({
-      tierLabel: 'Quality limiter',
-      validation: 'Rerun placement and compare.',
-    })
-  })
-
-  it('returns nothing for workspaces without a report', () => {
-    expect(buildDashboardDiagnoses(trendSummaryWithScoresFixture(), 'ws_c')).toEqual([])
   })
 })

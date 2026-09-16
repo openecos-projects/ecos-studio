@@ -34,19 +34,41 @@ async function loadDesktopBridge() {
       getVersions(): Promise<unknown>
       getQuickStartResources(): Promise<unknown>
     }
+    shutdown: {
+      cancel(): Promise<void>
+      completeCleanup(request: unknown): Promise<void>
+      getStatus(): Promise<unknown>
+      onCleanupRequested(listener: (event: unknown) => void): () => void
+      onStatusChanged(listener: (event: unknown) => void): () => void
+      reviewOptions(): Promise<void>
+    }
+    backendWorkspace: {
+      getArtifact(request: unknown): Promise<unknown>
+      getOverview(): Promise<unknown>
+      getStepDetail(request: unknown): Promise<unknown>
+      refreshOverview(): Promise<unknown>
+      onInvalidated(listener: (event: unknown) => void): () => void
+    }
+    backendProjectComparison: {
+      closeProject(request: unknown): Promise<void>
+      selectProject(request: unknown): Promise<unknown>
+      getComparison(request: unknown): Promise<unknown>
+      getExecutionSnapshot(request: unknown): Promise<unknown>
+      getStepFindings(request: unknown): Promise<unknown>
+      refreshComparison(request: unknown): Promise<unknown>
+      onInvalidated(listener: (event: unknown) => void): () => void
+      onExecutionInvalidated(listener: (event: unknown) => void): () => void
+    }
     ecc: {
       events: {
         onEvent(listener: (event: unknown) => void): () => void
       }
-      flow: {
-        runStep(request: unknown): Promise<unknown>
-      }
       runtime: {
+        engineeringSnapshot(request: unknown): Promise<unknown>
+        operationProjection(): Promise<unknown>
+        operationLog(request: unknown): Promise<unknown>
+        onOperationProjectionInvalidated(listener: (event: unknown) => void): () => void
         waitForOperation(request: unknown): Promise<unknown>
-      }
-      workspace: {
-        exportSignoff(request: unknown): Promise<unknown>
-        inspectSignoff(request: unknown): Promise<unknown>
       }
     }
     agent: {
@@ -103,18 +125,78 @@ describe('preload desktop bridge contract', () => {
           getVersions: expect.any(Function),
           getQuickStartResources: expect.any(Function),
         }),
-        ecc: expect.objectContaining({
-          events: expect.objectContaining({
-            onEvent: expect.any(Function),
-          }),
-          flow: expect.objectContaining({
-            runStep: expect.any(Function),
-          }),
+        backendProjectComparison: expect.objectContaining({
+          closeProject: expect.any(Function),
+          selectProject: expect.any(Function),
+          getComparison: expect.any(Function),
+          getExecutionSnapshot: expect.any(Function),
+          getStepFindings: expect.any(Function),
+          refreshComparison: expect.any(Function),
         }),
         workspace: expect.objectContaining({
           readProjectTextFile: expect.any(Function),
         }),
       }),
+    )
+  })
+
+  it('routes Project Comparison close through its typed IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { projectComparisonContextId: 'context-1' }
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(
+      bridge.backendProjectComparison.closeProject(request),
+    ).resolves.toBeUndefined()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.backendProjectComparisonCloseProject,
+      request,
+    )
+  })
+
+  it('routes Project execution queries and invalidation through typed channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { projectComparisonContextId: 'context-1' }
+    const result = { data: { operations: [] }, generation: 0, ok: true }
+    ipcRenderer.invoke.mockResolvedValueOnce(result)
+
+    await expect(
+      bridge.backendProjectComparison.getExecutionSnapshot(request),
+    ).resolves.toEqual(result)
+    const listener = vi.fn()
+    const unsubscribe = bridge.backendProjectComparison.onExecutionInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { generation: 1, projectComparisonContextId: 'context-1' })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot,
+      request,
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendProjectExecutionInvalidated,
+      eventListener,
+    )
+    expect(listener).toHaveBeenCalledWith({
+      generation: 1,
+      projectComparisonContextId: 'context-1',
+    })
+  })
+
+  it('routes the path-free Step Findings query through its typed channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      projectComparisonContextId: 'context-1',
+      projectWorkspaceId: 'ws_1',
+      step: 'Route',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({ ok: false, code: 'FINDINGS_READ_FAILED' })
+
+    await bridge.backendProjectComparison.getStepFindings(request)
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.backendProjectComparisonGetStepFindings,
+      request,
     )
   })
 
@@ -208,25 +290,72 @@ describe('preload desktop bridge contract', () => {
     )
   })
 
-  it('routes ECC flow calls through the shared IPC channel constant', async () => {
+  it('routes Backend Workspace queries and invalidation through typed channels', async () => {
     const bridge = await loadDesktopBridge()
-    ipcRenderer.invoke.mockResolvedValueOnce({
-      state: 'Success',
-      step: 'place',
-    })
-    const request = {
-      rerun: false,
-      step: 'place',
-      workspaceHandle: 'workspace-handle-1',
+    const overview = {
+      generation: 0,
+      overview: { identity: { workspaceName: 'Workspace A' } },
+      workspaceContextId: 'workspace-context-1',
+    }
+    ipcRenderer.invoke.mockResolvedValue(overview)
+    const detailRequest = {
+      stepId: 'Place',
+      workspaceContextId: 'workspace-context-1',
+      workspaceRevision: 9,
     }
 
-    await expect(bridge.ecc.flow.runStep(request)).resolves.toMatchObject({
-      state: 'Success',
-      step: 'place',
+    await expect(bridge.backendWorkspace.getOverview()).resolves.toEqual(overview)
+    await expect(bridge.backendWorkspace.getStepDetail(detailRequest)).resolves.toEqual(
+      overview,
+    )
+    await expect(
+      bridge.backendWorkspace.getArtifact({
+        artifactId: 'layout-place',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      }),
+    ).resolves.toEqual(overview)
+    await expect(bridge.backendWorkspace.refreshOverview()).resolves.toEqual(overview)
+
+    const listener = vi.fn()
+    const unsubscribe = bridge.backendWorkspace.onInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { generation: 1, workspaceContextId: 'workspace-context-1' })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.backendWorkspaceGetOverview,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.backendWorkspaceGetStepDetail,
+      detailRequest,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.backendWorkspaceGetArtifact,
+      {
+        artifactId: 'layout-place',
+        workspaceContextId: 'workspace-context-1',
+        workspaceRevision: 9,
+      },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      4,
+      desktopApiIpcChannels.backendWorkspaceRefreshOverview,
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendWorkspaceInvalidated,
+      eventListener,
+    )
+    expect(listener).toHaveBeenCalledWith({
+      generation: 1,
+      workspaceContextId: 'workspace-context-1',
     })
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.eccFlowRunStep,
-      request,
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.backendWorkspaceInvalidated,
+      eventListener,
     )
   })
 
@@ -259,6 +388,69 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccRuntimeWaitForOperation,
       request,
+    )
+  })
+
+  it('exposes the authoritative background Operation projection', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValueOnce({ generation: 3, operations: [] })
+
+    await expect(bridge.ecc.runtime.operationProjection()).resolves.toEqual({
+      generation: 3,
+      operations: [],
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccRuntimeOperationProjection,
+    )
+
+    const logRequest = { operationId: 'operation-1', workspaceHandle: 'handle-1' }
+    ipcRenderer.invoke.mockResolvedValueOnce({ content: 'log', truncated: false })
+    await expect(bridge.ecc.runtime.operationLog(logRequest)).resolves.toEqual({
+      content: 'log',
+      truncated: false,
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccRuntimeOperationLog,
+      logRequest,
+    )
+
+    const unsubscribe = bridge.ecc.runtime.onOperationProjectionInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.find(
+      ([channel]) =>
+        channel === desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+    )?.[1]
+    eventListener?.({}, { generation: 4 })
+    expect(listener).toHaveBeenCalledWith({ generation: 4 })
+    unsubscribe()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
+      eventListener,
+    )
+  })
+
+  it('routes shutdown status and Renderer cleanup through typed channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const cleanupListener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValueOnce({ state: 'draining' })
+
+    await expect(bridge.shutdown.getStatus()).resolves.toEqual({ state: 'draining' })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.shutdownGetStatus,
+    )
+
+    bridge.shutdown.onCleanupRequested(cleanupListener)
+    const eventListener = ipcRenderer.on.mock.calls.find(
+      ([channel]) => channel === desktopApiEventChannels.shutdownCleanupRequested,
+    )?.[1]
+    eventListener?.({}, { attemptId: 'attempt-1' })
+    expect(cleanupListener).toHaveBeenCalledWith({ attemptId: 'attempt-1' })
+
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+    await bridge.shutdown.completeCleanup({ attemptId: 'attempt-1', ok: true })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.shutdownCompleteCleanup,
+      { attemptId: 'attempt-1', ok: true },
     )
   })
 
@@ -394,34 +586,15 @@ describe('preload desktop bridge contract', () => {
     })
   })
 
-  it('routes ECC signoff export through the shared IPC channel constant', async () => {
-    const bridge = await loadDesktopBridge()
-    const request = {
-      outputPath: '/exports/custom package.tar.gz',
-      workspaceHandle: 'workspace-handle-1',
-    }
-    ipcRenderer.invoke.mockResolvedValueOnce({
-      outputPath: request.outputPath,
-    })
-
-    await expect(bridge.ecc.workspace.exportSignoff(request)).resolves.toEqual({
-      outputPath: request.outputPath,
-    })
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.eccWorkspaceExportSignoff,
-      request,
-    )
-  })
-
-  it('routes ECC signoff inspection through the shared IPC channel constant', async () => {
+  it('routes Engineering Snapshot reads through the shared IPC channel constant', async () => {
     const bridge = await loadDesktopBridge()
     const request = { workspaceHandle: 'workspace-handle-1' }
-    const result = { groups: [], risks: [], status: 'ready' }
+    const result = { workspaceId: 'workspace-1', workspaceRevision: 7 }
     ipcRenderer.invoke.mockResolvedValueOnce(result)
 
-    await expect(bridge.ecc.workspace.inspectSignoff(request)).resolves.toEqual(result)
+    await expect(bridge.ecc.runtime.engineeringSnapshot(request)).resolves.toEqual(result)
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
-      desktopApiIpcChannels.eccWorkspaceInspectSignoff,
+      desktopApiIpcChannels.eccRuntimeEngineeringSnapshot,
       request,
     )
   })
@@ -451,26 +624,6 @@ describe('preload desktop bridge contract', () => {
       desktopApiIpcChannels.menuSetActionEnabled,
       desktopMenuEventIds.exportSignoffPackage,
       true,
-    )
-  })
-
-  it('subscribes and unsubscribes with shared event channel constants', async () => {
-    const bridge = await loadDesktopBridge()
-    const listener = vi.fn()
-
-    const unsubscribe = bridge.ecc.events.onEvent(listener)
-    const eventListener = ipcRenderer.on.mock.calls[0]?.[1]
-    eventListener?.({}, { type: 'runtime.ready' })
-    unsubscribe()
-
-    expect(ipcRenderer.on).toHaveBeenCalledWith(
-      desktopApiEventChannels.eccEvent,
-      expect.any(Function),
-    )
-    expect(listener).toHaveBeenCalledWith({ type: 'runtime.ready' })
-    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
-      desktopApiEventChannels.eccEvent,
-      eventListener,
     )
   })
 

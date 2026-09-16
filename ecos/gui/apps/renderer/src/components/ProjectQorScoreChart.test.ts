@@ -2,7 +2,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ProjectQorScoreChart from './ProjectQorScoreChart.vue'
-import type { ProjectQorTrendPoint } from '@/utils/projectQorTrend'
+import type { ProjectQorTrendPoint } from '@ecos-studio/shared'
 
 const TREND_POINTS: ProjectQorTrendPoint[] = [
   { workspaceId: 'ws_a', label: 'ws_a', score: 58.4, status: 'Yellow' },

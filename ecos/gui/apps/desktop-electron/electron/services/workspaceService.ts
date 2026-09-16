@@ -1,56 +1,38 @@
 import { randomUUID } from 'node:crypto'
 import {
-  lstat,
   mkdir,
   open,
   readFile,
   readdir,
-  realpath,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { watch, type FSWatcher } from 'chokidar'
-import {
-  desktopAgentParameterWriteFiles,
-  hasSafeJsonPath,
-  type DesktopAgentWorkspaceParameterWrite,
-  type DesktopProjectFileChangedEvent,
-  type DesktopProjectFileChangeEventType,
-  type DesktopProjectDirectoryEntry,
-  type DesktopProjectTextFileChunk,
-  type DesktopProjectTextFileTail,
-  type DesktopProjectTextFileUpdate,
-  type ScannedPdkDirectory,
-  type ScannedRtlDirectory,
-  type WorkspaceDesignFileAddResult,
-  type WorkspaceDesignFileEntry,
-  type WorkspaceDirectoryReplacement,
+import type {
+  DesktopProjectDirectoryEntry,
+  DesktopProjectTextFileChunk,
+  DesktopProjectTextFileTail,
+  HdlModuleDiscoveryRequest,
+  HdlModuleDiscoveryResult,
+  ScannedPdkDirectory,
+  ScannedRtlDirectory,
+  WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
-import { LogTailService } from './logTailService'
-import { isPathWithinRoot, isSameOrAncestorPath } from './pathScope'
+import { isPathWithinRoot } from './pathScope'
 import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
+import { discoverHdlModules as discoverHdlModulesFromSources } from './hdlModuleDiscovery'
 import {
   addWorkspaceDesignFiles,
   getWorkspaceFilelistPath,
   listWorkspaceDesignFiles,
   removeWorkspaceDesignFile,
 } from './designFileService'
-import {
-  applyQueuedWorkspaceParameterWrites,
-  editWorkspaceParameters as editWorkspaceParametersFile,
-  enqueueParameterWrite,
-  hasWorkspaceConfigShadow as hasWorkspaceConfigShadowFile,
-  locateWorkspaceParametersFile,
-  parseWorkspaceParametersText,
-  readWorkspaceConfigContained,
-  WORKSPACE_CONFIG_BASENAME,
-  workspaceParameterWriteQueueKey,
-  writeTextAtomically,
-  type PreparedStepConfigWrite,
-} from './workspaceParametersFile'
+import type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+} from '@ecos-studio/shared'
 
 export interface ProjectScopeProvider {
   approvePendingExternalReadRoots?(
@@ -104,8 +86,10 @@ interface DirectoryReplacementJournalRecord {
 }
 
 const UTF8_MAX_BYTES_PER_CODE_UNIT = 4
-export const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
+const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
   'Cannot save workspace configuration while the workspace flow is running. Wait for it to finish before editing parameters or step config.'
+const WORKSPACE_CONFIGURATION_WRITE_BLOCKED_MESSAGE =
+  'Backend Workspace configuration must be changed through an ECC configuration command.'
 const WORKSPACE_REPLACEMENT_BLOCKED_MESSAGE =
   'Cannot replace a workspace while its flow is running. Wait for it to finish before deleting or replacing the workspace.'
 
@@ -181,10 +165,6 @@ function isSamePath(path: string, otherPath: string): boolean {
   return relative(path, otherPath) === ''
 }
 
-function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
-  return !isSameOrAncestorPath(path, targetPath)
-}
-
 function normalizeRelativePathForMatch(path: string): string {
   return path.replace(/\\/g, '/')
 }
@@ -234,38 +214,23 @@ async function readManifestReplacementReferences(
   }
 }
 
-function isRuntimeProtectedProjectPath(
-  canonicalPath: string,
-  projectRoot: string,
-): boolean {
-  const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
-  return (
-    relativePath === 'home/params.toml' ||
-    relativePath === 'home/parameters.json' ||
-    (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
-  )
-}
-
-async function findProjectFileWatchDirectory(
-  path: string,
-  rootPath: string,
-): Promise<string> {
-  let candidate = dirname(path)
-
-  while (candidate && isPathWithinRoot(candidate, rootPath)) {
-    try {
-      const candidateStats = await stat(candidate)
-      if (candidateStats.isDirectory()) return candidate
-    } catch (error) {
-      if (!isNodeErrorWithCode(error, 'ENOENT')) {
-        throw error
-      }
-    }
-
-    candidate = dirname(candidate)
+function protectedWorkspaceRoot(canonicalPath: string): string | null {
+  const parent = dirname(canonicalPath)
+  const directory = basename(parent).toLowerCase()
+  const filename = basename(canonicalPath).toLowerCase()
+  if (
+    directory === 'home' &&
+    [
+      'workspace.toml',
+      'params.toml',
+      'parameters.json',
+      'pdk.json',
+      'flow.json',
+    ].includes(filename)
+  ) {
+    return dirname(parent)
   }
-
-  return rootPath
+  return directory === 'config' && filename.endsWith('.json') ? dirname(parent) : null
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -295,83 +260,24 @@ async function createUniqueReplacementBackupPath(targetPath: string): Promise<st
   throw new Error(`Unable to allocate a replacement backup path for ${targetPath}`)
 }
 
-type ChokidarProjectFileEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir'
-
-function mapChokidarEventType(
-  eventType: ChokidarProjectFileEvent,
-): DesktopProjectFileChangeEventType {
-  switch (eventType) {
-    case 'add':
-    case 'change':
-      return 'change'
-    case 'addDir':
-    case 'unlink':
-    case 'unlinkDir':
-      return 'rename'
-  }
-}
-
-function getRawEventPath(
-  rawPath: string,
-  details: unknown,
-  watchDirectory: string,
-  targetPath: string,
-): string {
-  if (isAbsolute(rawPath)) return rawPath
-
-  const watchedPath =
-    typeof details === 'object' &&
-    details !== null &&
-    'watchedPath' in details &&
-    typeof details.watchedPath === 'string'
-      ? details.watchedPath
-      : watchDirectory
-
-  if (isSamePath(watchedPath, targetPath)) return targetPath
-  return join(watchedPath, rawPath)
-}
-
-async function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      watcher.off('ready', onReady)
-      watcher.off('error', onError)
-    }
-    const onReady = () => {
-      cleanup()
-      resolve()
-    }
-    const onError = (error: unknown) => {
-      cleanup()
-      reject(error)
-    }
-
-    watcher.once('ready', onReady)
-    watcher.once('error', onError)
-  })
-}
-
 export class WorkspaceService {
   private readonly projectScopeProvider: ProjectScopeProvider
   private readonly replacementJournalDirectory: string
   private readonly runtimeMutationGuard?: RuntimeMutationGuard
-  private readonly logTailService: LogTailService
   private readonly directoryReplacements = new Map<string, DirectoryReplacementRecord>()
-  private readonly projectFileWatchers = new Map<string, { close: () => Promise<void> }>()
-  private nextProjectFileWatchId = 1
 
   constructor(options: WorkspaceServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
     this.replacementJournalDirectory = options.replacementJournalDirectory
     this.runtimeMutationGuard = options.runtimeMutationGuard
-    this.logTailService = new LogTailService({
-      projectScopeProvider: this.projectScopeProvider,
-      textReader: this,
-    })
   }
 
   async isProjectDirectory(path: string): Promise<boolean> {
     return await this.projectScopeProvider.isProjectDirectory(path)
+  }
+
+  async getProjectRoot(): Promise<string> {
+    return await this.projectScopeProvider.getProjectRoot()
   }
 
   async pathExists(path: string): Promise<boolean> {
@@ -442,8 +348,6 @@ export class WorkspaceService {
   }
 
   async clearProjectRoot(): Promise<void> {
-    // Per-window scope only. File/log subscriptions are tracked by the IPC layer
-    // and cleaned up for the calling window (or on sender destroy).
     await this.projectScopeProvider.clearProjectRoot()
   }
 
@@ -466,219 +370,6 @@ export class WorkspaceService {
 
       throw error
     }
-  }
-
-  /** True when a workspace home/ holds both the canonical TOML and the
-   * legacy JSON: the JSON is inert and the user should delete it. */
-  async hasWorkspaceConfigShadow(workspacePath: string): Promise<boolean> {
-    // Advisory probe, but still scope-checked like the parameter read it
-    // rides on: one access check on the TOML candidate covers its JSON
-    // sibling (scope is per-root, not per-file).
-    await this.projectScopeProvider.requestProjectPathAccess(
-      join(workspacePath, 'home', WORKSPACE_CONFIG_BASENAME),
-    )
-    return await hasWorkspaceConfigShadowFile(workspacePath)
-  }
-
-  /**
-   * Read a workspace's persisted parameters (home/params.toml preferred,
-   * home/parameters.json fallback) for callers that only know the workspace
-   * directory — e.g. wizard prefill before the workspace is opened.
-   */
-  async readWorkspaceParameters(
-    workspacePath: string,
-  ): Promise<Record<string, unknown> | null> {
-    const location = await locateWorkspaceParametersFile(workspacePath)
-    if (!location) return null
-    try {
-      const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
-        location.path,
-      )
-      const raw = await readWorkspaceConfigContained(location.path, canonicalPath)
-      return parseWorkspaceParametersText(raw, location.format, workspacePath)
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return null
-      }
-
-      throw error
-    }
-  }
-
-  /**
-   * Apply existing-path-only parameter edits (agent surface) to the
-   * workspace configuration on disk. The path vocabulary is interpreted in
-   * the on-disk file's format by the shared helper.
-   */
-  async editWorkspaceParameters(
-    workspacePath: string,
-    edits: { json_path: (string | number)[]; value: unknown }[],
-  ): Promise<{ format: 'toml' | 'json'; path: string }> {
-    const location = await locateWorkspaceParametersFile(workspacePath)
-    if (!location) {
-      throw new Error(`Workspace parameters file not found under: ${workspacePath}`)
-    }
-    const targetStats = await lstat(location.path)
-    if (targetStats.isSymbolicLink()) {
-      // A symlinked config path escapes the runtime mutation guard's
-      // spelled-path protection and makes the write target ambiguous —
-      // refuse it, matching ECC's own refusal to write through symlinks.
-      throw new Error(
-        `Refusing to edit workspace parameters through a symlink: ${location.path}`,
-      )
-    }
-    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
-    const [canonicalWorkspace, canonicalRoot] = await Promise.all([
-      realpath(workspacePath),
-      realpath(authorizingRoot),
-    ])
-    if (canonicalWorkspace !== canonicalRoot) {
-      throw new Error(
-        'Refusing to edit workspace parameters: the target is not the active workspace',
-      )
-    }
-    const canonicalPath =
-      await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
-    await this.assertCanWriteProjectTextFile(canonicalPath)
-    return await editWorkspaceParametersFile(
-      workspacePath,
-      edits,
-      {
-        format: location.format,
-        path: canonicalPath,
-        spelledPath: location.path,
-      },
-      // Re-checked inside the serialized operation: the authorization was
-      // issued against THIS root, so an active-root change (or a flow
-      // starting while the edit queued behind another writer) blocks it.
-      async () => {
-        const activeRoot = await this.projectScopeProvider.getProjectRoot()
-        const [expected, active, target] = await Promise.all([
-          realpath(authorizingRoot),
-          realpath(activeRoot),
-          realpath(workspacePath),
-        ])
-        if (expected !== active || target !== active) {
-          throw new Error(
-            'Refusing to edit workspace parameters: the active workspace ' +
-              'changed before the edit completed',
-          )
-        }
-        await this.assertCanWriteProjectTextFile(canonicalPath)
-      },
-    )
-  }
-
-  /**
-   * Apply Agent parameter writes (workspace config + step configs) through
-   * the serialized atomic parameter queue. Rollback restores only the
-   * revision this operation produced.
-   */
-  async applyWorkspaceParameterWrites(
-    workspacePath: string,
-    writes: DesktopAgentWorkspaceParameterWrite[],
-  ): Promise<void> {
-    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
-    const [canonicalWorkspace, canonicalRoot] = await Promise.all([
-      realpath(workspacePath),
-      realpath(authorizingRoot),
-    ])
-    if (canonicalWorkspace !== canonicalRoot) {
-      throw new Error(
-        'Refusing to apply workspace parameter writes: the target is not the active workspace',
-      )
-    }
-
-    const parameterEdits: { json_path: (string | number)[]; value: unknown }[] = []
-    const stepConfigWrites: PreparedStepConfigWrite[] = []
-    const seenStepFiles = new Set<string>()
-    for (const write of writes) {
-      if (
-        !(desktopAgentParameterWriteFiles as readonly string[]).includes(write.file) ||
-        !hasSafeJsonPath(write.json_path)
-      ) {
-        throw new Error(
-          `Parameter path ${JSON.stringify(write.json_path)} is not allowed in ${write.file}.`,
-        )
-      }
-      if (write.file === 'home/params.toml' || write.file === 'home/parameters.json') {
-        parameterEdits.push({ json_path: write.json_path, value: write.value })
-        continue
-      }
-      const spelledPath = join(workspacePath, write.file)
-      const targetStats = await lstat(spelledPath)
-      if (targetStats.isSymbolicLink()) {
-        throw new Error(`Refusing to edit step config through a symlink: ${spelledPath}`)
-      }
-      const canonicalPath =
-        await this.projectScopeProvider.requestWritableProjectPathAccess(spelledPath)
-      await this.assertCanWriteProjectTextFile(canonicalPath)
-      if (!seenStepFiles.has(write.file)) {
-        seenStepFiles.add(write.file)
-        stepConfigWrites.push({
-          canonicalPath,
-          edits: writes
-            .filter((item) => item.file === write.file)
-            .map((item) => ({ json_path: item.json_path, value: item.value })),
-          spelledPath,
-        })
-      }
-    }
-
-    let authorizedLocation:
-      | {
-          format: 'toml' | 'json'
-          path: string
-          spelledPath: string
-        }
-      | undefined
-    if (parameterEdits.length > 0) {
-      const location = await locateWorkspaceParametersFile(workspacePath)
-      if (!location) {
-        throw new Error(`Workspace parameters file not found under: ${workspacePath}`)
-      }
-      const targetStats = await lstat(location.path)
-      if (targetStats.isSymbolicLink()) {
-        throw new Error(
-          `Refusing to edit workspace parameters through a symlink: ${location.path}`,
-        )
-      }
-      const canonicalPath =
-        await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
-      await this.assertCanWriteProjectTextFile(canonicalPath)
-      authorizedLocation = {
-        format: location.format,
-        path: canonicalPath,
-        spelledPath: location.path,
-      }
-    }
-
-    await applyQueuedWorkspaceParameterWrites(
-      workspacePath,
-      parameterEdits,
-      stepConfigWrites,
-      authorizedLocation,
-      async () => {
-        const activeRoot = await this.projectScopeProvider.getProjectRoot()
-        const [expected, active, target] = await Promise.all([
-          realpath(authorizingRoot),
-          realpath(activeRoot),
-          realpath(workspacePath),
-        ])
-        if (expected !== active || target !== active) {
-          throw new Error(
-            'Refusing to apply workspace parameter writes: the active workspace ' +
-              'changed before the write completed',
-          )
-        }
-        if (authorizedLocation) {
-          await this.assertCanWriteProjectTextFile(authorizedLocation.path)
-        }
-        for (const step of stepConfigWrites) {
-          await this.assertCanWriteProjectTextFile(step.canonicalPath)
-        }
-      },
-    )
   }
 
   async readProjectTextFileTail(path: string, maxChars: number): Promise<string | null> {
@@ -707,54 +398,6 @@ export class WorkspaceService {
         content: raw.slice(-boundedMaxChars),
         truncated: start > 0 || raw.length > boundedMaxChars,
         sizeBytes: fileStats.size,
-      }
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return null
-      }
-
-      throw error
-    } finally {
-      await handle?.close()
-    }
-  }
-
-  async readOptionalProjectTextFileUpdate(
-    path: string,
-    fromOffsetBytes: number,
-    maxChars: number,
-  ): Promise<DesktopProjectTextFileUpdate | null> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-    const boundedMaxChars = boundedTextCharCount(maxChars)
-    const readBytes = boundedMaxChars * UTF8_MAX_BYTES_PER_CODE_UNIT
-
-    let handle: Awaited<ReturnType<typeof open>> | null = null
-    try {
-      handle = await open(canonicalPath, 'r')
-      const fileStats = await handle.stat()
-      const normalizedOffset = Math.max(0, Math.floor(fromOffsetBytes))
-      const fileWasTruncated = normalizedOffset > fileStats.size
-      const unreadBytes = Math.max(0, fileStats.size - normalizedOffset)
-      const tooMuchUnread = unreadBytes > readBytes
-      const start =
-        fileWasTruncated || tooMuchUnread
-          ? Math.max(0, fileStats.size - readBytes)
-          : normalizedOffset
-      const length = fileStats.size - start
-      const buffer = Buffer.alloc(length)
-      const result =
-        length > 0 ? await handle.read(buffer, 0, length, start) : { bytesRead: 0 }
-      const raw = buffer.subarray(0, result.bytesRead).toString('utf8')
-      const decodedTooLong = raw.length > boundedMaxChars
-      const truncated = fileWasTruncated || tooMuchUnread || decodedTooLong
-
-      return {
-        content: truncated ? raw.slice(-boundedMaxChars) : raw,
-        fromOffsetBytes: start,
-        nextOffsetBytes: fileStats.size,
-        sizeBytes: fileStats.size,
-        reset: fileWasTruncated || tooMuchUnread || decodedTooLong,
-        truncated,
       }
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -818,59 +461,16 @@ export class WorkspaceService {
     }
   }
 
-  async subscribeProjectLogTail(
-    path: string,
-    options: {
-      maxInitialChars?: number
-      maxChunkChars?: number
-      pollIntervalMs?: number
-    } = {},
-    listener: (event: import('@ecos-studio/shared').DesktopProjectLogTailEvent) => void,
-  ): Promise<string> {
-    return await this.logTailService.subscribeProjectLogTail(path, options, listener)
-  }
-
-  async unsubscribeProjectLogTail(subscriptionId: string): Promise<void> {
-    await this.logTailService.unsubscribeProjectLogTail(subscriptionId)
-  }
-
   async readProjectBinaryFile(path: string): Promise<Uint8Array> {
     const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
     return new Uint8Array(await readFile(canonicalPath))
   }
 
   async writeProjectTextFile(path: string, content: string): Promise<void> {
-    const authorizingRoot = await this.projectScopeProvider.getProjectRoot()
     const canonicalPath =
       await this.projectScopeProvider.requestWritableProjectPathAccess(path)
-    await this.assertCanWriteProjectTextFile(canonicalPath, authorizingRoot)
-    if (!isRuntimeProtectedProjectPath(canonicalPath, authorizingRoot)) {
-      await writeFile(canonicalPath, content, 'utf8')
-      return
-    }
-    // Step-config and workspace-parameter files share the agent RMW queue:
-    // an editor save that lands between an agent read and rename would
-    // otherwise be clobbered, and CAS rollback only runs on failure.
-    await enqueueParameterWrite(
-      await workspaceParameterWriteQueueKey(authorizingRoot),
-      async () => {
-        const activeRoot = await this.projectScopeProvider.getProjectRoot()
-        const [expected, active] = await Promise.all([
-          realpath(authorizingRoot),
-          realpath(activeRoot),
-        ])
-        if (expected !== active) {
-          throw new Error(
-            'Refusing to write project text file: the active workspace ' +
-              'changed before the write completed',
-          )
-        }
-        await this.assertCanWriteProjectTextFile(canonicalPath, authorizingRoot)
-        await writeTextAtomically(canonicalPath, content, {
-          authorizedParent: dirname(canonicalPath),
-        })
-      },
-    )
+    await this.assertCanWriteProjectTextFile(canonicalPath)
+    await writeFile(canonicalPath, content, 'utf8')
   }
 
   async listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]> {
@@ -1231,105 +831,18 @@ export class WorkspaceService {
     await rm(journalPath, { force: true })
   }
 
-  async watchProjectFile(
-    path: string,
-    listener: (event: DesktopProjectFileChangedEvent) => void,
-  ): Promise<string> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-    const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    const watchDirectory = await findProjectFileWatchDirectory(canonicalPath, projectRoot)
-    const subscriptionId = `project-file-watch-${this.nextProjectFileWatchId++}`
-    let closed = false
-    let pendingRawEmitTimer: ReturnType<typeof setTimeout> | null = null
-    let pendingRawEventType: DesktopProjectFileChangeEventType = 'change'
-
-    const clearPendingRawEmit = () => {
-      if (!pendingRawEmitTimer) return
-      clearTimeout(pendingRawEmitTimer)
-      pendingRawEmitTimer = null
-    }
-
-    const emit = (eventType: DesktopProjectFileChangeEventType) => {
-      if (closed) return
-      listener({
-        subscriptionId,
-        path: canonicalPath,
-        eventType,
-      })
-    }
-
-    const scheduleRawFallbackEmit = (eventType: DesktopProjectFileChangeEventType) => {
-      pendingRawEventType = eventType
-      if (pendingRawEmitTimer) return
-      pendingRawEmitTimer = setTimeout(() => {
-        pendingRawEmitTimer = null
-        emit(pendingRawEventType)
-      }, 50)
-    }
-
-    const watcher = watch(watchDirectory, {
-      ignored: (path) => shouldIgnoreWatchPath(path, canonicalPath),
-      ignoreInitial: true,
-      persistent: false,
-    })
-
-    watcher.on('all', (eventType, changedPath) => {
-      if (
-        eventType !== 'add' &&
-        eventType !== 'addDir' &&
-        eventType !== 'change' &&
-        eventType !== 'unlink' &&
-        eventType !== 'unlinkDir'
-      ) {
-        return
-      }
-      if (!isSamePath(changedPath, canonicalPath)) return
-
-      clearPendingRawEmit()
-      emit(mapChokidarEventType(eventType))
-    })
-    watcher.on('raw', (rawEventType, rawPath, details) => {
-      if (rawEventType !== 'change' && rawEventType !== 'rename') return
-      if (typeof rawPath !== 'string' || !rawPath) return
-      const changedPath = getRawEventPath(rawPath, details, watchDirectory, canonicalPath)
-      if (!isSamePath(changedPath, canonicalPath)) return
-
-      scheduleRawFallbackEmit(rawEventType === 'rename' ? 'rename' : 'change')
-    })
-    watcher.on('error', () => {
-      emit('error')
-    })
-
-    try {
-      await waitForWatcherReady(watcher)
-    } catch (error) {
-      await watcher.close()
-      throw error
-    }
-
-    this.projectFileWatchers.set(subscriptionId, {
-      close: async () => {
-        closed = true
-        clearPendingRawEmit()
-        await watcher.close()
-      },
-    })
-    return subscriptionId
-  }
-
-  async unwatchProjectFile(subscriptionId: string): Promise<void> {
-    const record = this.projectFileWatchers.get(subscriptionId)
-    if (!record) return
-    await record.close()
-    this.projectFileWatchers.delete(subscriptionId)
-  }
-
   async scanPdkDirectory(path: string): Promise<ScannedPdkDirectory> {
     return await this.projectScopeProvider.scanPdkDirectory(path)
   }
 
   async scanRtlDirectory(path: string): Promise<ScannedRtlDirectory> {
     return await scanRtlDirectoryFiles(path)
+  }
+
+  async discoverHdlModules(
+    request: HdlModuleDiscoveryRequest,
+  ): Promise<HdlModuleDiscoveryResult> {
+    return await discoverHdlModulesFromSources(request)
   }
 
   async listDesignFiles(): Promise<WorkspaceDesignFileEntry[]> {
@@ -1359,26 +872,21 @@ export class WorkspaceService {
     return await removeWorkspaceDesignFile(projectRoot, filelistEntry)
   }
 
-  private async closeAllProjectFileWatchers(): Promise<void> {
-    await Promise.all(
-      [...this.projectFileWatchers.values()].map(async (record) => {
-        await record.close()
-      }),
+  private async assertCanWriteProjectTextFile(canonicalPath: string): Promise<void> {
+    const workspaceRoot = protectedWorkspaceRoot(canonicalPath)
+    if (!workspaceRoot) return
+
+    const relativePath = normalizeRelativePathForMatch(
+      relative(workspaceRoot, canonicalPath),
     )
-    this.projectFileWatchers.clear()
-  }
+    if (
+      relativePath === 'home/workspace.toml' ||
+      (await pathExists(join(workspaceRoot, 'home', 'workspace.toml')))
+    ) {
+      throw new Error(WORKSPACE_CONFIGURATION_WRITE_BLOCKED_MESSAGE)
+    }
 
-  private async assertCanWriteProjectTextFile(
-    canonicalPath: string,
-    authorizingRoot?: string,
-  ): Promise<void> {
-    if (!this.runtimeMutationGuard) return
-
-    const projectRoot =
-      authorizingRoot ?? (await this.projectScopeProvider.getProjectRoot())
-    if (!isRuntimeProtectedProjectPath(canonicalPath, projectRoot)) return
-
-    if (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(projectRoot)) {
+    if (await this.runtimeMutationGuard?.isWorkspaceRuntimeActive(workspaceRoot)) {
       throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
     }
   }

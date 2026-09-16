@@ -269,9 +269,8 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("ui.lastContractSurface = 'signoff'")
     expect(source).toContain("event.type === 'interaction'")
     expect(source).toContain('markContractInteractionAnswered(sessionId, requestId)')
-    expect(source).toMatch(
-      /inspectSignoff\(\{\s*runtimeTarget: 'agent',\s*workspaceHandle,?\s*\}\)/,
-    )
+    expect(source).toContain('runtime.engineeringSnapshot({ workspaceHandle })')
+    expect(source).toContain('snapshot.signoffAssessment')
     expect(source).toContain("risk.severity === 'blocked'")
     expect(source).toContain('workspace_signoff_inspection:')
     expect(source).toContain('review.status')
@@ -284,7 +283,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('workspaceSignoffOutputPath')
     expect(source).not.toContain('handleWorkspaceSignoffPathConfirm')
     expect(source).toContain('signoff/signoff_package.tar.gz')
-    expect(source).toContain('exportSignoff({')
+    expect(source).toContain("command: 'workspace.exportSignoff'")
     expect(source).toContain('workspace_signoff_result:')
     expect(source).toContain("canExportSignoffPackage(flow) ? 'Harden'")
   })
@@ -303,32 +302,22 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain(
       "invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'])",
     )
-    expect(source).toContain(
-      'applyWorkspaceParameterWrites(workspaceRoot, contract.writes)',
-    )
-    expect(source).toContain(
-      'desktopApi.workspace.applyWorkspaceParameterWrites(workspaceRoot, writes)',
-    )
+    expect(source).toContain('executeConfirmedWorkspaceParameterUpdate(contract, {')
+    expect(source).toContain('updateWorkspaceConfigurationApi')
+    expect(source).not.toContain('applyWorkspaceParameterWrites')
     expect(source).not.toContain('restorations.reverse()')
     expect(source).not.toContain('readExistingWorkspaceConfig')
     expect(source).not.toContain('writeProjectTextFile')
   })
 
-  it('pushes parameter writes back through ECC so the next run sees them', () => {
-    expect(source).toContain(
-      'syncWorkspaceParameterWrites(workspaceRoot, contract.writes)',
-    )
-    expect(source).toContain('cmd: CMDEnum.sync_config')
-    expect(source).toContain('cmd: CMDEnum.refresh_config')
-    // sync_config must run first: refresh_config re-expands parameters.json over
-    // the step configs and would discard an unsynced step-config edit.
-    expect(source.indexOf('cmd: CMDEnum.sync_config')).toBeLessThan(
-      source.indexOf('cmd: CMDEnum.refresh_config'),
-    )
-    expect(source).toContain('assertEccSuccess(')
-    expect(source).toContain(
-      "throw new Error('The parameter update targets a workspace that is not open.')",
-    )
+  it('commits confirmed parameter updates through Workspace configuration, not file writes', () => {
+    expect(source).toContain('executeConfirmedWorkspaceParameterUpdate(contract, {')
+    expect(source).toContain('updateConfiguration: updateWorkspaceConfigurationApi')
+    expect(source).toContain('initialRevision: contract.workspace_revision')
+    expect(source).not.toContain('cmd: CMDEnum.sync_config')
+    expect(source).not.toContain('cmd: CMDEnum.refresh_config')
+    expect(source).not.toContain('syncWorkspaceParameterWrites')
+    expect(source).not.toContain('desktopApi.workspace.applyWorkspaceParameterWrites')
   })
 
   it('does not serialize parameter files in the renderer', () => {

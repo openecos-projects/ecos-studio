@@ -1,40 +1,30 @@
 import {
-  ensureProjectQorBaseline,
+  normalizeProjectManifestFlowStep,
   projectManifestFlowSteps,
-  type PdkRequirement,
+  type BackendProjectComparison,
+  type ProjectAnalysisSnapshot,
+  type ProjectManifest,
+  type ProjectManifestBaseDesign,
+  type ProjectManifestFlowStep,
+  type ProjectManifestWorkspace,
+  type ProjectManifestWorkspaceStatus,
+  type ProjectQorMetricRecord,
+  type ProjectStepComparison,
+  type ProjectQorTrendSummary,
+  type ProjectQorTrendWorkspaceSummary,
+  type ProjectRecommendation,
+  type ProjectStepStatus as SharedProjectStepStatus,
+  type ReadSection,
   type ResourceInfo,
 } from '@ecos-studio/shared'
 import type { Project } from '@/types'
-import {
-  buildProjectQorTrendSummary,
-  type ProjectQorMetricRecord,
-  type ProjectQorTimingSummary,
-  type ProjectQorTrendSummary,
-  type ProjectQorTrendWorkspaceSummary,
-} from './projectQorTrend'
-import {
-  buildProjectAnalysisSnapshot,
-  type ProjectAnalysisSnapshot,
-} from './projectAnalysisSnapshot'
+import { applyProjectResultStates } from './projectResultPresentation'
 
-// Shared 13-step project dashboard catalog (@ecos-studio/shared, projectManifest).
 export const FLOW_STEPS = projectManifestFlowSteps
 
-export type FlowStep = (typeof FLOW_STEPS)[number]
-export type ProjectStepStatus =
-  | 'success'
-  | 'reused'
-  | 'skipped'
-  | 'unstart'
-  | 'running'
-  | 'failed'
-export type ProjectWorkspaceStatus =
-  | 'success'
-  | 'failed'
-  | 'running'
-  | 'in_progress'
-  | 'not_started'
-  | 'archived'
+export type FlowStep = ProjectManifestFlowStep
+export type ProjectStepStatus = SharedProjectStepStatus
+export type ProjectWorkspaceStatus = ProjectManifestWorkspaceStatus
 export type MetricsRowKind = 'line' | 'bar'
 export type ProjectMetricId =
   | 'wns'
@@ -51,66 +41,7 @@ export type ProjectMetricId =
   | 'frequency'
 export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
-export interface ProjectManifestBaseDesign {
-  pdk?: string
-  pdk_root?: string
-  pdk_requirement?: PdkRequirement
-  top_module?: string
-  clock?: string
-  rtl_list?: string[]
-  origin_verilog?: string
-  origin_def?: string
-  parameters?: Record<string, unknown>
-}
-
-export interface ProjectWorkspaceAnalysisInput {
-  stepMetricTexts?: Partial<Record<FlowStep, string | null>>
-  stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
-  stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
-  staTimingIssuesText?: string | null
-  qorReportText?: string | null
-  flowText?: string | null
-}
-
-export type ProjectWorkspaceAnalysisInputsById = Record<
-  string,
-  ProjectWorkspaceAnalysisInput
->
-
-export interface ProjectWorkspaceManifest {
-  workspace_id: string
-  name: string
-  workspace_path: string
-  source_workspace_id: string | null
-  branch_from: {
-    source_workspace_id: string
-    source_step: FlowStep | string
-    source_output_type?: string
-    source_output_path?: string
-  } | null
-  start_step: FlowStep | string
-  end_step: FlowStep | string
-  status: ProjectWorkspaceStatus
-  created_at: string
-  updated_at: string
-  parameter_patch: Record<string, unknown>
-}
-
-export interface ProjectManifestMpc {
-  resource_id: string
-  display_name: string
-  installed_version: string
-  path: string
-  spec_path: string
-  design: ProjectManifestMpcDesign
-  core_template: Record<string, unknown>
-}
-
-export interface ProjectManifestMpcDesign {
-  index: number
-  design_name: string
-  directory?: string
-}
+export type { ProjectManifestMpc } from '@ecos-studio/shared'
 
 export interface ProjectManifestMpcCandidate {
   resource_id: string
@@ -120,31 +51,7 @@ export interface ProjectManifestMpcCandidate {
   spec_path: string
 }
 
-export interface ProjectManifest {
-  schema_version: 1
-  project_id: string
-  name: string
-  design_name: string
-  description: string
-  root_path: string
-  created_at: string
-  updated_at: string
-  base_design: ProjectManifestBaseDesign
-  objectives: {
-    primary: string
-    directions: Record<string, 'maximize' | 'minimize'>
-  }
-  workspaces: ProjectWorkspaceManifest[]
-  mpc: ProjectManifestMpc | null
-  best_workspace: {
-    workspace_id: string
-    reason: string
-  } | null
-  qor_baseline: {
-    workspace_id: string
-    reason: string
-  } | null
-}
+type ProjectWorkspaceManifest = ProjectManifestWorkspace
 
 export type ProjectQorBaselineSource = 'selected' | 'default'
 
@@ -173,11 +80,12 @@ export interface ProjectWorkspace {
   endStep: FlowStep
   depth: number
   flowStatusHint: ProjectFlowStatusHint
+  resultState?: ProjectAnalysisSnapshot['resultState']
   steps: ProjectStepCell[]
 }
 
 export interface ProjectFlowStatusHint {
-  state: 'success' | 'failed' | 'running' | 'unstart' | 'skipped'
+  state: 'success' | 'warning' | 'failed' | 'running' | 'unstart' | 'skipped'
   step?: FlowStep
   label: string
 }
@@ -278,23 +186,8 @@ export interface ProjectWorkspaceSummary {
   analysis: ProjectAnalysisSnapshot
 }
 
-export interface ProjectStepCompareMetric {
-  id: string
-  label: string
-  hint: string
-  points: ProjectMetricPoint[]
-}
-
 export interface ProjectStepCompareSummary {
-  step: FlowStep
-  title: string
-  metricLabel: string
-  metricHint: string
-  configuredCount: number
-  successCount: number
-  missingCount: number
-  points: ProjectMetricPoint[]
-  metrics: ProjectStepCompareMetric[]
+  step: string
 }
 
 export interface ProjectRunStateSlice {
@@ -356,36 +249,6 @@ export interface ProjectSelectionState {
   selectedStep: FlowStep
 }
 
-export interface ProjectManifestDraftInput {
-  rootPath: string
-  name: string
-  designName: string
-  mpc?: ProjectManifestMpc | null
-  now?: string
-}
-
-export interface ProjectWorkspaceRegistrationInput {
-  projectRoot: string
-  projectName?: string
-  workspacePath: string
-  sourceWorkspaceId?: string
-  sourceStep?: FlowStep | string
-  sourceOutputPath?: string
-  sourceOutputType?: string
-  startStep?: FlowStep | string
-  endStep?: FlowStep | string
-  now?: string
-  config?: {
-    pdk?: string
-    pdk_root?: string
-    pdk_requirement?: PdkRequirement
-    rtl_list?: string[]
-    origin_verilog?: string
-    origin_def?: string
-    parameters?: Record<string, unknown>
-  }
-}
-
 export interface WorkspaceBranchDraft {
   sourceWorkspaceId: string
   sourceWorkspacePath: string
@@ -401,46 +264,6 @@ export interface WorkspaceBranchDraft {
   originSdc?: string
 }
 
-const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
-  synthesis: 'Synth',
-  synth: 'Synth',
-  floorplan: 'Floor',
-  floor: 'Floor',
-  // The floorplan phase runs as three ECC sub-steps sharing the Floorplan
-  // configuration; report them under the coarse Floor step.
-  prefloorplan: 'Floor',
-  macroplacement: 'Floor',
-  postfloorplan: 'Floor',
-  place: 'Place',
-  placement: 'Place',
-  cts: 'CTS',
-  legalization: 'Legal',
-  legal: 'Legal',
-  'timing optimization': 'Sizer',
-  timing_optimization: 'Sizer',
-  timing_optimization_sizer: 'Sizer',
-  sizer: 'Sizer',
-  // Timing Opt runs between Legal and Route; report it under the preceding
-  // coarse step. parseWorkspaceFlowStateMap merges duplicate coarse entries
-  // failure-first so a failed Timing Opt still fails the workspace.
-  timingopt: 'Legal',
-  timingoptimization: 'Sizer',
-  timingoptimizationsizer: 'Sizer',
-  route: 'Route',
-  routing: 'Route',
-  drc: 'DRC',
-  lvs: 'LVS',
-  filler: 'Filler',
-  // postRouteLec runs between Filler and RCX; same failure-first rationale.
-  postlec: 'Filler',
-  postroutelec: 'Filler',
-  rcx: 'RCX',
-  sta: 'STA',
-  gds: 'Harden',
-  signoff: 'Harden',
-  harden: 'Harden',
-}
-
 const RUNTIME_STEP_ARTIFACTS: Record<
   FlowStep,
   {
@@ -449,15 +272,23 @@ const RUNTIME_STEP_ARTIFACTS: Record<
   }
 > = {
   Synth: { directory: 'Synthesis_yosys', outputName: 'Synthesis' },
+  LEC: { directory: 'lec_yosys_lec', outputName: 'lec' },
   Floor: { directory: 'Floorplan_ecc', outputName: 'Floorplan' },
   Place: { directory: 'place_dreamplace', outputName: 'place' },
   CTS: { directory: 'CTS_ecc', outputName: 'CTS' },
   Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
-  Sizer: { directory: 'timing_optimization_sizer', outputName: 'timing_optimization' },
+  'Timing Opt': {
+    directory: 'timing_optimization_sizer',
+    outputName: 'timing_optimization',
+  },
   Route: { directory: 'route_ecc', outputName: 'route' },
   DRC: { directory: 'drc_ecc', outputName: 'drc' },
   LVS: { directory: 'lvs_ecc', outputName: 'lvs' },
   Filler: { directory: 'filler_ecc', outputName: 'filler' },
+  'Post-route LEC': {
+    directory: 'postRouteLec_yosys_lec',
+    outputName: 'postRouteLec',
+  },
   RCX: { directory: 'RCX_ecc', outputName: 'RCX' },
   STA: { directory: 'sta_ecc', outputName: 'sta' },
   Harden: { directory: 'Harden_ecc', outputName: 'Harden' },
@@ -468,45 +299,6 @@ const RUNTIME_STEP_ARTIFACTS: Record<
  * is shared by Project Management and Home so both surfaces use exactly the same
  * baseline, scoring, lineage ordering, and comparable-metric rules.
  */
-export function buildProjectQorTrendForManifest(
-  manifest: ProjectManifest,
-  workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
-  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
-  options: { baselineWorkspaceId?: string | null } = {},
-): ProjectQorTrendSummary {
-  const sortedWorkspaces = sortWorkspacesByLineage(manifest.workspaces).map(
-    (item) => item.workspace,
-  )
-  return buildProjectQorTrendSummary(
-    sortedWorkspaces.map((workspace) => ({
-      workspaceId: workspace.workspace_id,
-      workspaceName: workspaceDisplayName(workspace),
-      workspacePath: workspace.workspace_path,
-      createdAt: workspace.created_at,
-      status: workspaceStatusFromFlow(
-        workspace.status,
-        workspaceFlowStates[workspace.workspace_id] ?? {},
-      ),
-      branchFrom: workspace.branch_from,
-      stepMetricTexts:
-        workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
-      stepSummaryTexts:
-        workspaceAnalysisInputs[workspace.workspace_id]?.stepSummaryTexts ?? {},
-      stepHotspotTexts:
-        workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
-      staTimingIssuesText:
-        workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
-      qorReportText:
-        workspaceAnalysisInputs[workspace.workspace_id]?.qorReportText ?? null,
-      stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
-    })),
-    {
-      baselineWorkspaceId:
-        options.baselineWorkspaceId ?? manifest.qor_baseline?.workspace_id ?? null,
-    },
-  )
-}
-
 /** Resolve the baseline Home stores in project.json when older projects omit one. */
 export function resolveProjectQorBaselineWorkspace(
   manifest: ProjectManifest,
@@ -544,7 +336,7 @@ export function buildProjectManagementProject(
   project?: Project | null,
   manifest?: ProjectManifest | null,
   workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
-  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
+  comparison?: BackendProjectComparison | null,
 ): ProjectManagementProject {
   const path = manifest?.root_path ?? project?.path ?? ''
   const name = manifest?.name ?? project?.name ?? 'No Project Selected'
@@ -570,28 +362,27 @@ export function buildProjectManagementProject(
       ),
     )
   })
-  const qorTrendSummary = manifest
-    ? buildProjectQorTrendForManifest(
-        manifest,
-        workspaceFlowStates,
-        workspaceAnalysisInputs,
-      )
-    : buildProjectQorTrendSummary([])
-  const snapshots = buildProjectAnalysisSnapshots(
-    sortedWorkspaces,
-    workspaceAnalysisInputs,
-    workspaceFlowStates,
+  const qorTrendSummary = sectionData(comparison?.trend) ?? emptyProjectQorTrendSummary()
+  const stepComparisons = sectionData(comparison?.stepComparisons)?.steps ?? []
+  const snapshots = new Map(
+    (sectionData(comparison?.workspaceSnapshots)?.items ?? []).map((snapshot) => [
+      snapshot.workspaceId,
+      snapshot,
+    ]),
   )
   const workspaceSummaries = buildV3WorkspaceSummaries(
     sortedWorkspaces,
     workspaces,
     snapshots,
     qorTrendSummary,
+    stepComparisons,
   )
+  applyProjectResultStates(workspaces, snapshots)
   const comparisonSummary = buildV3ComparisonSummary(
     manifest,
     sortedWorkspaces,
     qorTrendSummary,
+    sectionData(comparison?.recommendation),
   )
 
   return {
@@ -606,9 +397,7 @@ export function buildProjectManagementProject(
     workspaces,
     metricsRows: buildV3MetricRows(workspaceSummaries),
     workspaceSummaries,
-    stepCompareSummaries: manifest
-      ? buildStepCompareSummaries(sortedWorkspaces, workspaces, workspaceSummaries)
-      : [],
+    stepCompareSummaries: stepComparisons.map(({ stepId }) => ({ step: stepId })),
     dashboardSummary: buildProjectDashboardSummary(
       workspaces,
       workspaceSummaries,
@@ -621,35 +410,8 @@ export function buildProjectManagementProject(
   }
 }
 
-function buildProjectAnalysisSnapshots(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
-  inputs: ProjectWorkspaceAnalysisInputsById,
-  flowStates: ProjectWorkspaceFlowStatesById,
-): Map<string, ProjectAnalysisSnapshot> {
-  return new Map(
-    manifestWorkspaces.map((workspace) => {
-      const input = inputs[workspace.workspace_id]
-      return [
-        workspace.workspace_id,
-        buildProjectAnalysisSnapshot(
-          {
-            workspaceId: workspace.workspace_id,
-            workspaceName: workspaceDisplayName(workspace),
-            workspacePath: workspace.workspace_path,
-            createdAt: workspace.created_at,
-            status: workspace.status,
-            branchFrom: workspace.branch_from,
-            stepMetricTexts: input?.stepMetricTexts ?? {},
-            stepSummaryTexts: input?.stepSummaryTexts ?? {},
-            stepHotspotTexts: input?.stepHotspotTexts ?? {},
-            staTimingIssuesText: input?.staTimingIssuesText ?? null,
-            stepStatuses: flowStates[workspace.workspace_id] ?? {},
-          },
-          FLOW_STEPS,
-        ),
-      ]
-    }),
-  )
+function sectionData<T>(section: ReadSection<T> | null | undefined): T | null {
+  return section && 'data' in section ? section.data : null
 }
 
 function buildV3WorkspaceSummaries(
@@ -657,17 +419,41 @@ function buildV3WorkspaceSummaries(
   workspaces: ProjectWorkspace[],
   snapshots: Map<string, ProjectAnalysisSnapshot>,
   qorTrendSummary: ProjectQorTrendSummary,
+  comparisons: readonly ProjectStepComparison[],
 ): ProjectWorkspaceSummary[] {
+  const comparisonMetrics = new Map(
+    comparisons.flatMap((comparison) =>
+      comparison.workspaces.map(
+        (workspace) =>
+          [`${workspace.workspaceId}\0${comparison.stepId}`, workspace.metrics] as const,
+      ),
+    ),
+  )
   return manifestWorkspaces.map((workspace) => {
     const projectWorkspace = workspaces.find((item) => item.id === workspace.workspace_id)
     const snapshot =
       snapshots.get(workspace.workspace_id) ??
-      emptyProjectAnalysisSnapshot(workspace.workspace_id, workspace.workspace_path)
+      emptyProjectAnalysisSnapshot(workspace.workspace_id)
     const qorWorkspace = qorTrendSummary.workspaces.find(
       (item) => item.workspaceId === workspace.workspace_id,
     )
     const finalMetrics = v3FinalMetrics(qorWorkspace)
-    const flowMetrics = v3FlowMetrics(snapshot, projectWorkspace)
+    const authoritativeSnapshot = {
+      ...snapshot,
+      steps: Object.fromEntries(
+        Object.entries(snapshot.steps).map(([step, details]) => [
+          step,
+          details
+            ? {
+                ...details,
+                metrics:
+                  comparisonMetrics.get(`${workspace.workspace_id}\0${step}`) ?? [],
+              }
+            : details,
+        ]),
+      ),
+    }
+    const flowMetrics = v3FlowMetrics(qorWorkspace, projectWorkspace)
 
     return {
       workspaceId: workspace.workspace_id,
@@ -678,7 +464,7 @@ function buildV3WorkspaceSummaries(
       steps: FLOW_STEPS.map((step) => {
         const status =
           projectWorkspace?.steps.find((cell) => cell.step === step)?.status ?? 'skipped'
-        const analysis = snapshot.steps[step]
+        const analysis = authoritativeSnapshot.steps[step]
         return {
           step,
           title: step,
@@ -694,18 +480,14 @@ function buildV3WorkspaceSummaries(
         }
       }),
       deltaSummaries: [],
-      analysis: snapshot,
+      analysis: authoritativeSnapshot,
     }
   })
 }
 
-function emptyProjectAnalysisSnapshot(
-  workspaceId: string,
-  workspacePath: string,
-): ProjectAnalysisSnapshot {
+function emptyProjectAnalysisSnapshot(workspaceId: string): ProjectAnalysisSnapshot {
   return {
     workspaceId,
-    workspacePath,
     steps: {},
     signoffReadiness: {
       status: 'unavailable',
@@ -718,6 +500,30 @@ function emptyProjectAnalysisSnapshot(
       fingerprint: null,
       sourceFile: null,
       step: null,
+    },
+  }
+}
+
+function emptyProjectQorTrendSummary(): ProjectQorTrendSummary {
+  return {
+    workspaces: [],
+    trendPoints: [],
+    baselineWorkspaceId: null,
+    baselineLabel: 'No baseline',
+    scoreThreshold: 0,
+    regressions: [],
+    improvements: [],
+    risks: [],
+    timingClosure: {
+      issues: [],
+      coverage: [],
+      triage: [],
+      criticalCount: 0,
+      warningCount: 0,
+      cleanWorkspaceCount: 0,
+      atRiskWorkspaceCount: 0,
+      incompleteWorkspaceCount: 0,
+      unavailableWorkspaceCount: 0,
     },
   }
 }
@@ -765,24 +571,14 @@ function v3SummaryMetric(record: ProjectQorMetricRecord): ProjectSummaryMetric {
 }
 
 function v3MetricState(record: ProjectQorMetricRecord): ProjectMetricPoint['state'] {
-  if (record.value === null) return 'pending'
-  if (
-    record.metricName.includes('drc') ||
-    record.metricName.includes('lvs') ||
-    record.metricName.includes('violation') ||
-    record.metricName.includes('missing_corner') ||
-    record.metricName.includes('parse_failure')
-  ) {
-    return record.value === 0 ? 'good' : record.value <= 3 ? 'warn' : 'bad'
-  }
-  if (record.metricName.includes('wns') || record.metricName.includes('tns')) {
-    return record.value >= 0 ? 'good' : 'bad'
-  }
-  return 'good'
+  if (record.verdict === 'pass') return 'good'
+  if (record.verdict === 'warning') return 'warn'
+  if (record.verdict === 'fail') return 'bad'
+  return 'pending'
 }
 
 function v3FlowMetrics(
-  snapshot: ProjectAnalysisSnapshot,
+  qorWorkspace: ProjectQorTrendWorkspaceSummary | undefined,
   workspace: ProjectWorkspace | undefined,
 ): ProjectWorkspaceFlowMetrics {
   const successfulSteps = new Set(
@@ -790,8 +586,8 @@ function v3FlowMetrics(
       .filter((step) => step.status === 'success' || step.status === 'reused')
       .map((step) => step.step) ?? [],
   )
-  const metrics = Object.values(snapshot.steps).flatMap((step) =>
-    step && successfulSteps.has(step.step) ? step.metrics : [],
+  const metrics = (qorWorkspace?.comparisonRecords ?? []).filter((metric) =>
+    successfulSteps.has(metric.step),
   )
   const runtimes = metrics
     .filter((metric) => metric.metricName === 'runtime_seconds')
@@ -910,34 +706,15 @@ function buildV3ComparisonSummary(
   manifest: ProjectManifest | null | undefined,
   workspaces: ProjectWorkspaceManifest[],
   qorTrendSummary: ProjectQorTrendSummary,
+  recommendation: ProjectRecommendation | null,
 ): ProjectComparisonSummary {
-  const bestRatedWorkspace = qorTrendSummary.workspaces
-    .filter(
-      (workspace) =>
-        workspace.overallScore !== null && workspace.signoffReadiness.scoreEligible,
-    )
-    .sort((left, right) => (right.overallScore ?? -1) - (left.overallScore ?? -1))[0]
   const explicitBest = manifest?.best_workspace?.workspace_id
-  const explicitBestSummary = explicitBest
-    ? qorTrendSummary.workspaces.find(
-        (workspace) => workspace.workspaceId === explicitBest,
-      )
-    : undefined
-  const eligibleExplicitBest =
-    explicitBestSummary === undefined ||
-    (explicitBestSummary.overallScore !== null &&
-      explicitBestSummary.signoffReadiness.scoreEligible)
-      ? explicitBest
-      : undefined
   const bestWorkspaceId =
-    bestRatedWorkspace?.workspaceId ??
-    eligibleExplicitBest ??
-    workspaces[0]?.workspace_id ??
-    ''
+    recommendation?.workspaceId ?? explicitBest ?? workspaces[0]?.workspace_id ?? ''
   return {
     bestWorkspaceId,
-    bestReason: bestRatedWorkspace
-      ? `Highest eligible QoR score: ${bestRatedWorkspace.overallScore}`
+    bestReason: recommendation
+      ? recommendation.reasons.join(' ')
       : 'No workspace has eligible V3 signoff readiness.',
     riskLabels: Array.from(
       new Set(
@@ -994,71 +771,6 @@ export function resolveProjectSelectionUpdate(
   }
 }
 
-export function createProjectManifestDraft(
-  input: ProjectManifestDraftInput,
-): ProjectManifest {
-  const now = input.now ?? new Date().toISOString()
-  const designName = input.designName.trim()
-  if (!designName) throw new Error('Project manifest design_name is required.')
-  return {
-    schema_version: 1,
-    project_id: `proj_${slugify(input.name || basenamePath(input.rootPath) || 'project')}`,
-    name: input.name || basenamePath(input.rootPath) || 'project',
-    design_name: designName,
-    description: '',
-    root_path: normalizePath(input.rootPath),
-    created_at: now,
-    updated_at: now,
-    base_design: {
-      parameters: { design: designName },
-      rtl_list: [],
-    },
-    objectives: {
-      primary: 'timing',
-      directions: {
-        wns: 'maximize',
-        tns: 'maximize',
-        area: 'minimize',
-        drc_count: 'minimize',
-        lvs_count: 'minimize',
-        power: 'minimize',
-      },
-    },
-    workspaces: [],
-    mpc: normalizeProjectManifestMpc(input.mpc),
-    best_workspace: null,
-    qor_baseline: null,
-  }
-}
-
-export function serializeProjectManifest(manifest: ProjectManifest): string {
-  return `${JSON.stringify(manifest, null, 2)}\n`
-}
-
-export function parseProjectManifest(content: string): ProjectManifest {
-  const parsed = JSON.parse(content) as ProjectManifest
-  if (
-    parsed.schema_version !== 1 ||
-    !Array.isArray(parsed.workspaces) ||
-    !optionalString(parsed.design_name)
-  ) {
-    throw new Error('Invalid project manifest.')
-  }
-  return {
-    ...parsed,
-    design_name: optionalString(parsed.design_name),
-    base_design: {
-      ...parsed.base_design,
-      parameters: {
-        ...parsed.base_design.parameters,
-        design: optionalString(parsed.design_name),
-      },
-    },
-    mpc: normalizeProjectManifestMpc(parsed.mpc),
-    qor_baseline: parsed.qor_baseline ?? null,
-  }
-}
-
 export function projectMpcOptionFromResource(
   resource: ResourceInfo,
 ): ProjectManifestMpcCandidate | null {
@@ -1085,106 +797,6 @@ export function projectMpcOptionFromResource(
     installed_version: installedVersion,
     path,
     spec_path: joinPath(path, 'spec', 'spec.json.in'),
-  }
-}
-
-function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null {
-  if (value === undefined || value === null) return null
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid project manifest MPC.')
-  }
-
-  const source = value as Record<string, unknown>
-  const resourceId = optionalString(source.resource_id)
-  const displayName = optionalString(source.display_name)
-  const installedVersion = optionalString(source.installed_version)
-  const mpcPath = optionalString(source.path)
-  const specPath = optionalString(source.spec_path)
-  const design = recordValue(source.design)
-  const coreTemplate = recordValue(source.core_template)
-  if (!resourceId || !resourceId.startsWith('mpc:') || resourceId.length === 4) {
-    throw new Error('Invalid project manifest MPC resource_id.')
-  }
-  if (!displayName || !installedVersion || !mpcPath || !specPath) {
-    throw new Error('Invalid project manifest MPC fields.')
-  }
-
-  const normalizedPath = normalizeProjectManifestMpcPath(mpcPath)
-  const normalizedSpecPath = normalizeProjectManifestMpcPath(specPath)
-  if (normalizedSpecPath !== `${normalizedPath}/spec/spec.json.in`) {
-    throw new Error('Invalid project manifest MPC spec_path.')
-  }
-  if (
-    !design ||
-    !Number.isInteger(design.index) ||
-    (design.index as number) < 0 ||
-    !optionalString(design.design_name)
-  ) {
-    throw new Error('Invalid project manifest MPC design.')
-  }
-  if (!coreTemplate) {
-    throw new Error('Invalid project manifest MPC core_template.')
-  }
-
-  return {
-    resource_id: resourceId,
-    display_name: displayName,
-    installed_version: installedVersion,
-    path: normalizedPath,
-    spec_path: normalizedSpecPath,
-    design: {
-      index: design.index as number,
-      design_name: optionalString(design.design_name),
-      ...(optionalString(design.directory)
-        ? { directory: optionalString(design.directory) }
-        : {}),
-    },
-    core_template: coreTemplate,
-  }
-}
-
-function normalizeProjectManifestMpcPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/')
-  return normalized.length <= 1 ? normalized : normalized.replace(/\/+$/g, '')
-}
-
-export function parseWorkspaceFlowStateMap(
-  content: string,
-): ProjectWorkspaceFlowStateMap {
-  const parsed = JSON.parse(content) as {
-    steps?: Array<{ name?: unknown; state?: unknown }>
-  }
-  if (!Array.isArray(parsed.steps)) return {}
-
-  return parsed.steps.reduce<ProjectWorkspaceFlowStateMap>((stateMap, step) => {
-    const name = optionalString(step.name)
-    const status = projectStepStatusFromFlowState(step.state)
-    const flowStep = knownFlowStep(name)
-    if (!flowStep || !status) return stateMap
-
-    // Timing Opt and postRouteLec alias onto the preceding coarse step; the
-    // aliased gate's state wins whenever it is more urgent than the
-    // predecessor's, so a pending or failed gate keeps the workspace out of
-    // success and blocks branching past it.
-    const existing = stateMap[flowStep]
-    if (existing === undefined || statusUrgency(status) > statusUrgency(existing)) {
-      stateMap[flowStep] = status
-    }
-    return stateMap
-  }, {})
-}
-
-/** Project-step status severity for merging aliased gates: failed > running > unstart. */
-function statusUrgency(status: ProjectStepStatus): number {
-  switch (status) {
-    case 'failed':
-      return 3
-    case 'running':
-      return 2
-    case 'unstart':
-      return 1
-    default:
-      return 0
   }
 }
 
@@ -1246,179 +858,6 @@ export function createWorkspaceBranchDraft(
   }
 }
 
-export function registerWorkspaceInManifest(
-  manifest: ProjectManifest,
-  input: ProjectWorkspaceRegistrationInput,
-): ProjectManifest {
-  const now = input.now ?? new Date().toISOString()
-  const workspacePath = normalizePath(input.workspacePath)
-  const workspaceId = basenamePath(workspacePath) || nextManifestWorkspaceId(manifest)
-  const existingWorkspace = manifest.workspaces.find(
-    (workspace) =>
-      workspace.workspace_id === workspaceId ||
-      normalizePath(workspace.workspace_path) === workspacePath,
-  )
-  const sourceStep = input.sourceStep ? normalizeFlowStep(input.sourceStep) : null
-  const sourceWorkspaceId =
-    input.sourceWorkspaceId || existingWorkspace?.source_workspace_id || null
-  const branchFrom =
-    sourceWorkspaceId && sourceStep
-      ? {
-          source_workspace_id: sourceWorkspaceId,
-          source_step: sourceStep,
-          source_output_type:
-            input.sourceOutputType ||
-            existingWorkspace?.branch_from?.source_output_type ||
-            defaultSourceOutputType(sourceStep),
-          source_output_path:
-            input.sourceOutputPath || existingWorkspace?.branch_from?.source_output_path,
-        }
-      : (existingWorkspace?.branch_from ?? null)
-  const startStep = input.startStep
-    ? normalizeFlowStep(input.startStep)
-    : sourceStep
-      ? nextFlowStep(sourceStep)
-      : normalizeFlowStep(existingWorkspace?.start_step ?? 'Synth')
-  const endStep = input.endStep
-    ? normalizeFlowStep(input.endStep)
-    : normalizeFlowStep(existingWorkspace?.end_step ?? 'Harden')
-  const workspaceName = manifest.design_name
-  const workspaceParameters = {
-    ...input.config?.parameters,
-    design: manifest.design_name,
-  }
-  const parameterPatch = input.config
-    ? {
-        ...existingWorkspace?.parameter_patch,
-        ...buildParameterPatch(
-          manifest.base_design.parameters ?? {},
-          workspaceParameters,
-        ),
-      }
-    : { ...existingWorkspace?.parameter_patch }
-
-  const workspace: ProjectWorkspaceManifest = {
-    workspace_id: workspaceId,
-    name: workspaceName,
-    workspace_path: workspacePath,
-    source_workspace_id: sourceWorkspaceId,
-    branch_from: branchFrom,
-    start_step: startStep,
-    end_step: endStep,
-    status: existingWorkspace?.status ?? 'not_started',
-    created_at: existingWorkspace?.created_at ?? now,
-    updated_at: now,
-    parameter_patch: parameterPatch,
-  }
-
-  const workspaces = existingWorkspace
-    ? manifest.workspaces.map((item) =>
-        item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
-      )
-    : [...manifest.workspaces, workspace]
-  const qorBaseline = ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
-
-  return {
-    ...manifest,
-    name: input.projectName || manifest.name,
-    root_path: normalizePath(input.projectRoot || manifest.root_path),
-    updated_at: now,
-    base_design: withProjectDesignName(
-      manifest.qor_baseline === null || manifest.qor_baseline.workspace_id === workspaceId
-        ? mergeBaseDesignConfig(manifest.base_design, {
-            ...input.config,
-            parameters: workspaceParameters,
-          })
-        : manifest.base_design,
-      manifest.design_name,
-    ),
-    workspaces,
-    qor_baseline: qorBaseline,
-  }
-}
-
-export function archiveWorkspaceInManifest(
-  manifest: ProjectManifest,
-  workspaceId: string,
-  now = new Date().toISOString(),
-): ProjectManifest {
-  const workspaces = manifest.workspaces.map((workspace) =>
-    workspace.workspace_id === workspaceId
-      ? { ...workspace, status: 'archived' as const, updated_at: now }
-      : workspace,
-  )
-  return {
-    ...manifest,
-    updated_at: now,
-    best_workspace:
-      manifest.best_workspace?.workspace_id === workspaceId
-        ? null
-        : manifest.best_workspace,
-    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
-    workspaces,
-  }
-}
-
-export function setQorBaselineInManifest(
-  manifest: ProjectManifest,
-  workspaceId: string,
-  reason = 'Selected from Project QoR Trend',
-  now = new Date().toISOString(),
-): ProjectManifest {
-  const hasWorkspace = manifest.workspaces.some(
-    (workspace) =>
-      workspace.workspace_id === workspaceId && workspace.status !== 'archived',
-  )
-  if (!hasWorkspace) return manifest
-
-  return {
-    ...manifest,
-    updated_at: now,
-    qor_baseline: {
-      workspace_id: workspaceId,
-      reason,
-    },
-  }
-}
-
-export function deleteWorkspaceFromManifest(
-  manifest: ProjectManifest,
-  workspaceId: string,
-  now = new Date().toISOString(),
-): ProjectManifest {
-  const workspaces = manifest.workspaces
-    .filter((workspace) => workspace.workspace_id !== workspaceId)
-    .map((workspace) => {
-      const clearsSource =
-        workspace.source_workspace_id === workspaceId ||
-        workspace.branch_from?.source_workspace_id === workspaceId
-      if (!clearsSource) return workspace
-
-      return {
-        ...workspace,
-        source_workspace_id:
-          workspace.source_workspace_id === workspaceId
-            ? null
-            : workspace.source_workspace_id,
-        branch_from:
-          workspace.branch_from?.source_workspace_id === workspaceId
-            ? null
-            : workspace.branch_from,
-        updated_at: now,
-      }
-    })
-  return {
-    ...manifest,
-    updated_at: now,
-    best_workspace:
-      manifest.best_workspace?.workspace_id === workspaceId
-        ? null
-        : manifest.best_workspace,
-    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
-    workspaces,
-  }
-}
-
 function buildObjective(
   project?: Project | null,
   manifest?: ProjectManifest | null,
@@ -1435,10 +874,10 @@ function buildProjectWorkspace(
   depth = 0,
   artifactDesignName = '',
 ): ProjectWorkspace {
-  const startStep = normalizeFlowStep(workspace.start_step)
-  const endStep = normalizeFlowStep(workspace.end_step)
+  const startStep = normalizeProjectManifestFlowStep(workspace.start_step)
+  const endStep = normalizeProjectManifestFlowStep(workspace.end_step)
   const branchStep = workspace.branch_from
-    ? normalizeFlowStep(workspace.branch_from.source_step)
+    ? normalizeProjectManifestFlowStep(workspace.branch_from.source_step)
     : null
 
   const steps = FLOW_STEPS.map((step) =>
@@ -1474,6 +913,7 @@ export function workspaceStatusFromFlow(
   if (states.includes('failed')) return 'failed'
   if (states.includes('running')) return 'running'
   if (states.includes('unstart')) return 'in_progress'
+  if (states.includes('warning')) return 'warning'
   if (states.some((state) => state === 'success' || state === 'reused')) return 'success'
   return manifestStatus
 }
@@ -1551,9 +991,10 @@ function buildFlowStatusHint(
     (cell) => !isCompletedStepStatus(cell.status),
   )
   if (!firstIncomplete) {
+    const warning = configuredSteps.some((cell) => cell.status === 'warning')
     return {
-      state: 'success',
-      label: 'Success',
+      state: warning ? 'warning' : 'success',
+      label: warning ? 'Completed with warnings' : 'Success',
     }
   }
 
@@ -1567,6 +1008,7 @@ function buildFlowStatusHint(
 function flowHintState(status: ProjectStepStatus): ProjectFlowStatusHint['state'] {
   if (status === 'failed') return 'failed'
   if (status === 'running') return 'running'
+  if (status === 'warning') return 'warning'
   if (status === 'success' || status === 'reused') return 'success'
   if (status === 'skipped') return 'skipped'
   return 'unstart'
@@ -1594,7 +1036,7 @@ function buildStepCell(
   let status: ProjectStepStatus
 
   const flowStatus = flowStateMap[step]
-  if (workspace.status !== 'archived' && flowStatus) {
+  if (flowStatus) {
     status = flowStatus
   } else if (workspace.status === 'archived') {
     status = 'skipped'
@@ -1625,109 +1067,24 @@ function buildStepCell(
   }
 }
 
-function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | null {
-  const normalized = optionalString(state).toLowerCase()
-  if (!normalized) return null
-
-  if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized))
-    return 'success'
-  if (['reused', 'reuse'].includes(normalized)) return 'reused'
-  if (['skipped', 'skip'].includes(normalized)) return 'skipped'
-  if (['ongoing', 'running', 'run'].includes(normalized)) return 'running'
-  if (['failed', 'failure', 'error', 'invalid', 'incomplete'].includes(normalized))
-    return 'failed'
-  if (
-    ['unstart', 'unstarted', 'not_started', 'not started', 'pending', 'created'].includes(
-      normalized,
-    )
-  )
-    return 'unstart'
-  return null
-}
-
 function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranchLink[] {
   return workspaces.flatMap((workspace) => {
     if (!workspace.branch_from) return []
     return [
       {
         fromWorkspaceId: workspace.branch_from.source_workspace_id,
-        fromStep: normalizeFlowStep(workspace.branch_from.source_step),
+        fromStep: normalizeProjectManifestFlowStep(workspace.branch_from.source_step),
         toWorkspaceId: workspace.workspace_id,
-        toStep: normalizeFlowStep(workspace.start_step),
+        toStep: normalizeProjectManifestFlowStep(workspace.start_step),
       },
     ]
-  })
-}
-
-function buildStepCompareSummaries(
-  manifestWorkspaces: ProjectWorkspaceManifest[],
-  workspaces: ProjectWorkspace[],
-  workspaceSummaries: ProjectWorkspaceSummary[],
-): ProjectStepCompareSummary[] {
-  return FLOW_STEPS.map((step) => {
-    const definitions = stepMetricDefinitions(step, workspaceSummaries)
-    const metrics = definitions.map((definition) => ({
-      id: definition.id,
-      label: definition.label,
-      hint: definition.hint,
-      points: manifestWorkspaces.map((workspace) => {
-        const summary = workspaceSummaries.find(
-          (item) => item.workspaceId === workspace.workspace_id,
-        )
-        const metric = stepMetricFromSummary(summary, step, definition.id)
-        const value = metric?.value ?? null
-        return {
-          workspaceId: workspace.workspace_id,
-          workspaceName: workspaceDisplayName(workspace),
-          label: metric?.display ?? 'N/A',
-          value,
-          state: metric?.state ?? 'pending',
-        }
-      }),
-    }))
-    const primaryMetric = metrics[0] ?? {
-      id: 'none',
-      label: 'metric',
-      hint: 'No metric available',
-      points: manifestWorkspaces.map((workspace) => ({
-        workspaceId: workspace.workspace_id,
-        workspaceName: workspaceDisplayName(workspace),
-        label: 'N/A',
-        value: null,
-        state: 'pending' as const,
-      })),
-    }
-    const configuredCount = workspaces.filter(
-      (workspace) =>
-        workspace.steps.find((cell) => cell.step === step)?.status !== 'skipped',
-    ).length
-    const successCount = workspaces.filter((workspace) =>
-      isCompletedStepStatus(
-        workspace.steps.find((cell) => cell.step === step)?.status ?? 'skipped',
-      ),
-    ).length
-    const missingCount = primaryMetric.points.filter(
-      (point) => point.value === null,
-    ).length
-
-    return {
-      step,
-      title: `${step} Compare`,
-      metricLabel: primaryMetric.label,
-      metricHint: primaryMetric.hint,
-      configuredCount,
-      successCount,
-      missingCount,
-      points: primaryMetric.points,
-      metrics,
-    }
   })
 }
 
 function buildProjectDashboardSummary(
   workspaces: ProjectWorkspace[],
   workspaceSummaries: ProjectWorkspaceSummary[],
-  timingClosure: ProjectQorTimingSummary,
+  timingClosure: ProjectQorTrendSummary['timingClosure'],
   qorTrendSummary: ProjectQorTrendSummary,
 ): ProjectDashboardSummary {
   const isStepComplete = (cell: ProjectStepCell): boolean =>
@@ -1783,6 +1140,7 @@ function buildProjectDashboardSummary(
 function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSlice[] {
   const labels: Record<ProjectFlowStatusHint['state'], string> = {
     success: 'Success',
+    warning: 'Completed with warnings',
     failed: 'Failed',
     running: 'Running',
     unstart: 'Not Started',
@@ -1798,6 +1156,7 @@ function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSli
   return (
     [
       'success',
+      'warning',
       'failed',
       'running',
       'unstart',
@@ -1890,118 +1249,20 @@ function metricFromNumber(
   }
 }
 
-interface StepCompareDefinition {
-  id: string
-  label: string
-  hint: string
-}
-
-const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
-  Synth: [
-    'synthesis_cell_area',
-    'synthesis_cell_count',
-    'synthesis_port_count',
-    'synthesis_wire_count',
-  ],
-  Floor: ['die_area', 'core_area', 'core_utilization', 'instance_count', 'net_count'],
-  Place: [
-    'place_congestion_egr_overflow_max',
-    'place_congestion_egr_overflow_total',
-    'place_flute_wirelength',
-    'place_grwl',
-    'place_hpwl',
-    'place_lutrudy_utilization_max',
-    'place_rudy_utilization_max',
-  ],
-  CTS: [
-    'clock_path_max_buffer',
-    'clock_path_min_buffer',
-    'clock_wirelength',
-    'cts_buffer_area',
-    'cts_buffer_count',
-    'cts_clock_tree_max_level',
-    'cts_clock_wirelength_max',
-    'cts_worst_optimized_skew_ns',
-    'cts_worst_max_insertion_latency_ns',
-    'cts_skew_target_unmet_count',
-    'instance_count',
-    'io_pin_count',
-    'net_count',
-  ],
-  Legal: [],
-  Sizer: ['instance_count', 'io_pin_count', 'net_count'],
-  Route: [
-    'route_dr_total_patch_count',
-    'route_dr_total_via_count',
-    'route_dr_total_violation_count',
-    'route_dr_total_wirelength',
-    'route_la_total_demand',
-    'route_la_total_overflow',
-    'route_via_count',
-    'route_wirelength',
-  ],
-  DRC: ['drc_count'],
-  LVS: ['lvs_count'],
-  Filler: [],
-  RCX: [
-    'rcx_missing_corner_count',
-    'rcx_spef_parse_failure_count',
-    'rcx_worst_total_capacitance_ff',
-    'rcx_worst_total_resistance_ohm',
-  ],
-  STA: [
-    'sta_setup_wns',
-    'sta_setup_tns',
-    'sta_hold_wns',
-    'sta_hold_tns',
-    'sta_frequency_mhz',
-  ],
-  Harden: ['harden_artifact_missing_count'],
-}
-
-function stepMetricDefinitions(
-  step: FlowStep,
-  workspaceSummaries: ProjectWorkspaceSummary[],
-): StepCompareDefinition[] {
-  const definitionsById = new Map<string, StepCompareDefinition>()
-  for (const summary of workspaceSummaries) {
-    const stepSummary = summary.steps.find((item) => item.step === step)
-    for (const metric of stepSummary?.metrics ?? []) {
-      if (definitionsById.has(metric.id)) continue
-      definitionsById.set(metric.id, {
-        id: metric.id,
-        label: metric.label,
-        hint: metric.hint ?? metric.label,
-      })
-    }
-  }
-  return STEP_ANALYSIS_METRIC_IDS[step].flatMap(
-    (metricId) => definitionsById.get(metricId) ?? [],
-  )
-}
-
-function stepMetricFromSummary(
-  summary: ProjectWorkspaceSummary | undefined,
-  step: FlowStep,
-  metricId: string,
-): ProjectSummaryMetric | undefined {
-  return summary?.steps
-    .find((item) => item.step === step)
-    ?.metrics.find((metric) => metric.id === metricId)
-}
-
 function detailHintForStep(step: FlowStep): string {
   const hints: Record<FlowStep, string> = {
     Synth: 'Open workspace Synthesis for cell type and netlist details.',
-    Floor: 'Open workspace Floorplan for geometry and pin details.',
+    LEC: 'Open workspace LEC for synthesis equivalence evidence.',
+    Floor: 'Open workspace Floorplan for geometry, pin and fanout details.',
     Place: 'Open workspace Place for density and congestion maps.',
     CTS: 'Open workspace CTS for clock tree and post-CTS congestion.',
     Legal: 'Open workspace Legalization for placement cleanup details.',
-    Sizer: 'Open workspace Sizer for timing optimization details.',
+    'Timing Opt': 'Open workspace Timing Optimization for timing repair details.',
     Route: 'Open workspace Route for route iterations and layer pressure.',
     DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
     LVS: 'Open workspace LVS for netlist-to-layout connectivity and violation count.',
     Filler: 'Open workspace Filler for final filler impact details.',
+    'Post-route LEC': 'Open workspace post-route LEC for equivalence evidence.',
     RCX: 'Open workspace RCX for extraction readiness details.',
     STA: 'Open workspace STA for path detail and corner matrix.',
     Harden: 'Open workspace Harden for final artifact details.',
@@ -2117,104 +1378,13 @@ function defaultSourceOutputType(step: FlowStep): 'verilog' | 'def' {
   return step === 'Synth' ? 'verilog' : 'def'
 }
 
-function buildParameterPatch(
-  baseParameters: Record<string, unknown>,
-  nextParameters: Record<string, unknown>,
-): Record<string, { from: unknown; to: unknown }> {
-  return Object.fromEntries(
-    Object.entries(nextParameters)
-      .filter(([key, value]) => baseParameters[key] !== value)
-      .map(([key, value]) => [
-        key,
-        {
-          from: Object.prototype.hasOwnProperty.call(baseParameters, key)
-            ? baseParameters[key]
-            : undefined,
-          to: value,
-        },
-      ]),
-  )
-}
-
-function normalizeFlowStep(step: FlowStep | string): FlowStep {
-  return knownFlowStep(step) ?? 'Synth'
-}
-
-function knownFlowStep(step: FlowStep | string): FlowStep | null {
-  if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return (
-    FLOW_STEP_ALIASES[
-      String(step)
-        .toLowerCase()
-        .replace(/[_\-\s]+/g, '')
-    ] ?? null
-  )
-}
-
 function isCompletedStepStatus(status: ProjectStepStatus): boolean {
-  return status === 'success' || status === 'reused'
+  return status === 'success' || status === 'warning' || status === 'reused'
 }
 
 function nextFlowStep(step: FlowStep): FlowStep {
   const index = FLOW_STEPS.indexOf(step)
   return FLOW_STEPS[Math.min(index + 1, FLOW_STEPS.length - 1)]
-}
-
-function nextManifestWorkspaceId(manifest: ProjectManifest): string {
-  const numbers = manifest.workspaces
-    .map((workspace) => Number(workspace.workspace_id.replace(/^ws_/, '')))
-    .filter(Number.isFinite)
-  const next = Math.max(0, ...numbers) + 1
-  return `ws_${String(next).padStart(4, '0')}`
-}
-
-function mergeBaseDesignConfig(
-  baseDesign: ProjectManifestBaseDesign,
-  config: ProjectWorkspaceRegistrationInput['config'],
-): ProjectManifestBaseDesign {
-  if (!config) return baseDesign
-
-  const parameters = config.parameters ?? {}
-  const next: ProjectManifestBaseDesign = {
-    ...baseDesign,
-    parameters: {
-      ...baseDesign.parameters,
-      ...parameters,
-    },
-  }
-  const pdk = optionalString(config.pdk)
-  const pdkRoot = optionalString(config.pdk_root)
-  const topModule = optionalString(parameters.top_module)
-  const clock = optionalString(parameters.clock)
-  const originVerilog = optionalString(config.origin_verilog)
-  const originDef = optionalString(config.origin_def)
-
-  if (pdk) next.pdk = pdk
-  if (pdkRoot) next.pdk_root = pdkRoot
-  if (config.pdk_requirement) {
-    next.pdk_requirement = config.pdk_requirement
-    delete next.pdk_root
-  }
-  if (topModule) next.top_module = topModule
-  if (clock) next.clock = clock
-  if (originVerilog) next.origin_verilog = originVerilog
-  if (originDef) next.origin_def = originDef
-  if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
-
-  return next
-}
-
-function withProjectDesignName(
-  baseDesign: ProjectManifestBaseDesign,
-  designName: string,
-): ProjectManifestBaseDesign {
-  return {
-    ...baseDesign,
-    parameters: {
-      ...baseDesign.parameters,
-      design: designName,
-    },
-  }
 }
 
 function formatRuntimeLabel(seconds: number): string {
@@ -2237,19 +1407,10 @@ function formatMetricValue(
   return String(Number(value.toFixed(3)))
 }
 
-function optionalString(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : ''
-}
-
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
 function labelForStepStatus(status: ProjectStepStatus): string {
   const map: Record<ProjectStepStatus, string> = {
     success: 'S',
+    warning: 'W',
     reused: 'R',
     skipped: '-',
     unstart: 'U',
@@ -2257,15 +1418,6 @@ function labelForStepStatus(status: ProjectStepStatus): string {
     failed: '!',
   }
   return map[status]
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-  return slug || 'project'
 }
 
 function normalizePath(path: string): string {

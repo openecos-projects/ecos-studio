@@ -1,4 +1,4 @@
-import { spawn as spawnChild } from 'node:child_process'
+import { spawn as spawnChild, type SpawnOptions } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import {
   access,
@@ -252,6 +252,23 @@ export class CodexDependencyService {
     return await this.installPromise
   }
 
+  async login(): Promise<DesktopCodexDependencyStatus> {
+    const bin = await this.resolveBinPath()
+    if (!bin) {
+      throw new Error('请先安装或选择 Codex CLI')
+    }
+    await this.runCommand(bin, ['login'], {
+      env: this.commandEnv(bin),
+      stdio: 'ignore',
+      detached: true,
+    }).catch(() => {
+      // Browser login may keep the process attached; launching is best-effort.
+    })
+    // Detached spawn returns immediately; give auth files a brief chance to appear
+    // only if the user already completed login in another session.
+    return await this.getStatus()
+  }
+
   async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
     const binPath = await this.resolveBinPath()
     if (!binPath) return {}
@@ -412,12 +429,59 @@ export class CodexDependencyService {
     const managedValidated = await this.validateExecutable(managed)
     if (managedValidated) return managedValidated
 
+    const wellKnown = await this.findCodexInDirectories(await this.wellKnownCodexDirs())
+    if (wellKnown) return wellKnown
+
     return await this.whichCodex()
+  }
+
+  private async wellKnownCodexDirs(): Promise<string[]> {
+    const home = this.resolveHomedir()
+    const directories = [
+      join(home, '.npm-global', 'bin'),
+      join(home, '.volta', 'bin'),
+      join(home, '.bun', 'bin'),
+      join(home, '.local', 'share', 'pnpm'),
+      join(home, '.local', 'bin'),
+    ]
+
+    if (this.platform !== 'win32') {
+      directories.push('/usr/local/bin', '/opt/homebrew/bin')
+    }
+
+    const nvmRoot = join(home, '.nvm', 'versions', 'node')
+    try {
+      const entries = await readdir(nvmRoot, { withFileTypes: true })
+      directories.splice(
+        1,
+        0,
+        ...entries
+          .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+          .sort((left, right) =>
+            right.name.localeCompare(left.name, undefined, { numeric: true }),
+          )
+          .map((entry) => join(nvmRoot, entry.name, 'bin')),
+      )
+    } catch {
+      // NVM is optional and its directory may not exist.
+    }
+
+    return directories
+  }
+
+  private async findCodexInDirectories(
+    directories: readonly string[],
+  ): Promise<string | null> {
+    for (const directory of directories) {
+      const validated = await this.validateExecutable(join(directory, 'codex'))
+      if (validated) return validated
+    }
+    return null
   }
 
   private async whichCodex(): Promise<string | null> {
     const pathValue = this.env.PATH ?? ''
-    for (const entry of pathValue.split(':')) {
+    for (const entry of pathValue.split(delimiter)) {
       if (!entry) continue
       const candidate = join(entry, 'codex')
       const validated = await this.validateExecutable(candidate)
@@ -477,6 +541,29 @@ export class CodexDependencyService {
       child.on('close', (code) => {
         if (code === 0) resolve()
         else reject(new Error(`tar failed: ${stderr.trim() || `exit ${code}`}`))
+      })
+    })
+  }
+
+  private runCommand(
+    command: string,
+    args: string[],
+    options: SpawnOptions,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = this.spawnImpl(command, args, {
+        ...options,
+        env: options.env ?? this.env,
+      })
+      child.on('error', reject)
+      if (options.detached) {
+        child.unref()
+        resolve()
+        return
+      }
+      child.on('close', (code) => {
+        if (code === 0) resolve()
+        else reject(new Error(`${command} exited with code ${code ?? 'unknown'}`))
       })
     })
   }

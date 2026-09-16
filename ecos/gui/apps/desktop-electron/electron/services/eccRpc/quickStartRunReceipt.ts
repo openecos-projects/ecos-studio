@@ -1,15 +1,10 @@
 import type { EccRuntimeEvent, EccRuntimeOperation } from '@ecos-studio/shared'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-
-import { writeTextAtomically } from '../workspaceParametersFile'
+import { randomInt } from 'node:crypto'
+import { chmod, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 const pendingReceipts = new Map<string, Promise<boolean>>()
-const TERMINAL_PROTOCOL_TYPES = new Set([
-  'operation.cancelled',
-  'operation.completed',
-  'operation.failed',
-])
+const TERMINAL_PROTOCOL_STATES = new Set(['succeeded', 'failed', 'cancelled'])
 
 interface ReconcileOptions {
   now?: () => Date
@@ -109,15 +104,14 @@ function terminalRuntimeEventFrom(
   options: ReconcileOptions,
 ): TerminalRuntimeEvent | null {
   if (event.type === 'runtime.protocol') {
-    if (!TERMINAL_PROTOCOL_TYPES.has(event.event.type)) return null
     if (!event.workspaceDirectory) return null
-    const status =
-      event.event.type === 'operation.completed' ? 'flow_completed' : 'flow_failed'
+    const state = protocolOperationState(event)
+    if (!state || !TERMINAL_PROTOCOL_STATES.has(state)) return null
     return {
-      error: failureMessageFromProtocol(event),
+      error: failureMessageFromProtocol(event, state),
       occurredAt: isoFromRuntimeTimestamp(event.event.timestamp, options),
       operationId: event.event.operationId,
-      status,
+      status: state === 'succeeded' ? 'flow_completed' : 'flow_failed',
       workspaceDirectory: event.workspaceDirectory,
     }
   }
@@ -144,13 +138,57 @@ function terminalRuntimeEventFrom(
   }
 }
 
-function failureMessageFromProtocol(
+function protocolOperationState(
   event: Extract<EccRuntimeEvent, { type: 'runtime.protocol' }>,
 ): string | undefined {
-  if (event.event.type === 'operation.cancelled') return 'ECC operation cancelled.'
+  if (event.event.type === 'operation.changed') {
+    const state = event.event.payload.state
+    return typeof state === 'string' ? state : undefined
+  }
+  if (event.event.type === 'execution.progress') {
+    const sourceType = event.event.payload.sourceType
+    if (sourceType === 'operation.completed') return 'succeeded'
+    if (sourceType === 'operation.failed') return 'failed'
+    if (sourceType === 'operation.cancelled') return 'cancelled'
+  }
+  return undefined
+}
+
+function failureMessageFromProtocol(
+  event: Extract<EccRuntimeEvent, { type: 'runtime.protocol' }>,
+  state: string,
+): string | undefined {
+  if (state === 'cancelled') return 'ECC operation cancelled.'
   const error = event.event.payload.error
   if (isRecord(error) && typeof error.message === 'string') return error.message
   return undefined
+}
+
+async function writeTextAtomically(path: string, content: string): Promise<void> {
+  const parent = dirname(path)
+  const canonicalParent = await realpath(parent)
+  let mode: number | undefined
+  try {
+    mode = (await stat(path)).mode & 0o777
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporaryPath = `${path}.${process.pid}.${Date.now()}.${randomInt(0, 1_000_000)}.tmp`
+  try {
+    await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx' })
+    if (mode !== undefined) {
+      await chmod(temporaryPath, mode)
+    }
+    if ((await realpath(parent)) !== canonicalParent) {
+      throw new Error(`Refusing to write ${path}: parent directory changed during the write`)
+    }
+    await rename(temporaryPath, path)
+  } catch (error) {
+    if ((await realpath(parent).catch(() => '')) === canonicalParent) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined)
+    }
+    throw error
+  }
 }
 
 function isoFromRuntimeTimestamp(

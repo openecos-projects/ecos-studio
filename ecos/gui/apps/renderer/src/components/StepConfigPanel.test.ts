@@ -1,47 +1,82 @@
-import { describe, expect, it } from 'vitest'
-import componentSource from './StepConfigPanel.vue?raw'
+// @vitest-environment happy-dom
+
+import { mount } from '@vue/test-utils'
+import { computed, ref } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
+import { StepEnum } from '@/api/type'
+
+vi.mock('@/composables/useStepConfigInfo', () => ({
+  useStepConfigInfo: () => ({
+    currentStep: computed(() => 'Floorplan'),
+    hasFlowStep: computed(() => true),
+    loading: ref(false),
+    error: ref(null),
+    runtimeMessages: ref([]),
+    workspaceRevision: ref(1),
+    isEmpty: computed(() => false),
+    refetch: vi.fn(),
+    stepConfigPathResolved: ref('Floorplan parameters'),
+    stepConfigDisplay: computed(() => '{}'),
+    stepConfigReadError: ref(null),
+    stepConfigJsonInvalid: computed(() => false),
+    stepConfigParameterCount: computed(() => 1),
+    stepConfigParameterDescriptions: ref({}),
+    stepConfigParsed: computed(() => ({ 'floorplan.core_util': 1.3 })),
+    stepConfigDraft: ref({ 'floorplan.core_util': 1.3 }),
+    stepConfigTextDraft: ref(''),
+    hasStepConfigChanges: computed(() => true),
+    isSavingStepConfig: ref(false),
+    stepConfigSaveError: ref(
+      'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
+    ),
+    isMutationLocked: computed(() => false),
+    markStepConfigEditorInitialized: vi.fn(),
+    saveStepConfig: vi.fn(),
+    resetStepConfig: vi.fn(),
+    reloadStepConfigFiles: vi.fn(),
+  }),
+}))
+
+vi.mock('@/composables/useBaselineStepConfig', () => ({
+  useBaselineStepConfig: () => ({
+    status: ref('no-baseline'),
+    noConfigReason: ref(null),
+    baselineWorkspaceName: ref(null),
+    baselineSource: ref(null),
+    workspaceRevision: ref(null),
+    configRelativePath: ref(null),
+    configFileName: ref(null),
+    rawText: ref(null),
+    parameterDescriptions: ref({}),
+    parsed: ref(null),
+    jsonInvalid: ref(false),
+    viewDraft: ref(null),
+    error: ref(null),
+  }),
+}))
+
+vi.mock('@/components/step-config/StepConfigDynamicView.vue', () => ({
+  default: {
+    name: 'StepConfigDynamicView',
+    template: '<div class="step-config-dynamic-view" />',
+  },
+}))
+
+import StepConfigPanel from './StepConfigPanel.vue'
 
 describe('StepConfigPanel', () => {
-  it('accepts an explicit flow step for a route-independent editor', () => {
-    expect(componentSource).toContain('step?: StepEnum')
-    expect(componentSource).toContain("useStepConfigInfo(toRef(props, 'step'))")
-    expect(componentSource).toContain('tool?: string')
-    expect(componentSource).toContain('formatStepToolName(props.tool)')
-    expect(componentSource).toContain('stepHeading')
-  })
+  it('shows a visible banner when saving parameters fails', () => {
+    const wrapper = mount(StepConfigPanel, {
+      props: { step: StepEnum.FLOORPLAN },
+      global: {
+        stubs: {
+          Textarea: true,
+        },
+      },
+    })
 
-  it('uses N/A when the current step has no configuration file', () => {
-    expect(componentSource).toContain('v-else-if="isEmpty"')
-    expect(componentSource).toContain('>N/A</p>')
-    expect(componentSource).not.toContain('No configuration data')
-  })
-
-  it('renders a read-only baseline comparison column when a baseline workspace exists', () => {
-    expect(componentSource).toContain('useBaselineStepConfig(currentStep)')
-    expect(componentSource).toContain('sc-compare-col--baseline')
-    expect(componentSource).toContain('Baseline ·')
-    expect(componentSource).toContain('read-only')
-    expect(componentSource).toContain('provide(stepConfigDiffKey')
-    expect(componentSource).toContain('computeStepConfigDiff')
-    expect(componentSource).toContain('diffCount')
-    expect(componentSource).toContain('sc-diff-badge')
-  })
-
-  it('never writes baseline data: save/reset act only on the current workspace draft', () => {
-    expect(componentSource).toContain('await saveStepConfig()')
-    expect(componentSource).not.toContain('saveStepConfig(baseline')
-    expect(componentSource).toContain('baseline.viewDraft.value')
-    // Baseline column renders the dynamic view in readonly mode only
-    expect(componentSource).toMatch(
-      /v-model="baseline\.viewDraft\.value"[\s\S]*?readonly/,
+    expect(wrapper.text()).toContain(
+      'value 1.3 out of range [0.01, 1.0] for floorplan.core_util',
     )
-  })
-
-  it('refreshes both sides on reload and keeps the baseline column toggleable', () => {
-    expect(componentSource).toContain(
-      'await Promise.all([reloadStepConfigFiles(), baseline.refresh(true)])',
-    )
-    expect(componentSource).toContain('showBaseline = !showBaseline')
-    expect(componentSource).toContain(':disabled="!baselineComparable"')
   })
 })

@@ -12,6 +12,7 @@ import {
 describe('flow status presentation', () => {
   it('normalizes workspace and subflow state names', () => {
     expect(flowNodeStatus('Success')).toBe('succeeded')
+    expect(flowNodeStatus('Warning')).toBe('warning')
     expect(flowNodeStatus('Ongoing')).toBe('running')
     expect(flowNodeStatus('Invalid')).toBe('failed')
     expect(flowNodeStatus('Unstart')).toBe('queued')
@@ -20,6 +21,7 @@ describe('flow status presentation', () => {
   it('summarizes every visible node without dropping compact states', () => {
     const nodes: FlowStatusNode[] = [
       { id: 'a', label: 'A', status: 'succeeded', runtime: '', peakMemoryMb: null },
+      { id: 'w', label: 'W', status: 'warning', runtime: '', peakMemoryMb: null },
       { id: 'b', label: 'B', status: 'running', runtime: '', peakMemoryMb: null },
       { id: 'c', label: 'C', status: 'failed', runtime: '', peakMemoryMb: null },
       { id: 'd', label: 'D', status: 'queued', runtime: '', peakMemoryMb: null },
@@ -30,6 +32,7 @@ describe('flow status presentation', () => {
       queued: 1,
       running: 1,
       succeeded: 1,
+      warning: 1,
       failed: 1,
       skipped: 1,
     })

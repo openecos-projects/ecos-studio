@@ -1,28 +1,32 @@
-import { app, BrowserWindow, crashReporter, ipcMain, protocol } from 'electron'
-import { appendFileSync, readFileSync } from 'node:fs'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
+import {
+  projectManifestForPresentation,
+  type EccProjectManifest,
+} from '@ecos-studio/shared'
+import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
 import { applyHeadlessDisplayHint, parseCliInvocation, runCliCommand } from './cliEntry'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
-import { installProcessDiagnostics, reportPreviousCrashDumps } from './processDiagnostics'
 import { registerIpc } from './registerIpc'
-import { installRuntimeQuitGuard } from './runtimeQuitGuard'
+import type { ShutdownCoordinator } from './shutdownCoordinator'
+import { createShutdownCoordinator } from './createShutdownCoordinator'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
 import { AppInfoService } from '../services/appInfoService'
+import { BackendWorkspaceService } from '../services/backendWorkspaceService'
+import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
+import { BackendProjectComparisonService } from '../services/backendProjectComparisonService'
 import { prepareDesktopLogs } from '../services/desktopLogPaths'
 import {
   createEccRuntimeEnv,
-  resolveEccAgentExecutable,
   resolveEccExecutable,
-  resolveEccSidecarLaunch,
   resolveExternalEccBinDir,
 } from '../services/eccRpc/runtimeEnv'
 import type { EccRuntimeEnvOptions } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
-import { WorkspaceSnapshotLoader } from '../services/eccRpc/workspaceSnapshotLoader'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import {
@@ -42,8 +46,10 @@ import {
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
-import { ProjectManagementReadService } from '../services/projectManagementReadService'
-import { QuickStartResourceService } from '../services/quickStartResourceService'
+import {
+  ProjectManagementReadService,
+  type ProjectWorkspaceConfiguration,
+} from '../services/projectManagementReadService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
@@ -55,6 +61,8 @@ import {
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
+import { WorkspaceCreationJournal } from '../services/workspaceCreationJournal'
+import { QuickStartResourceService } from '../services/quickStartResourceService'
 import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
@@ -75,17 +83,14 @@ if (!gotSingleInstanceLock) {
   app.quit()
 }
 
-// Capture native crashes (browser/renderer/GPU) locally. Without this,
-// hard exits leave no trace: distro apport is bypassed when `ulimit -c` is 0.
-crashReporter.start({ uploadToServer: false })
-
 let ipcRegistered = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
 let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
-  runtimeEnv: NodeJS.ProcessEnv
+  backendWorkspaceService: BackendWorkspaceService
+  backendProjectComparisonService: BackendProjectComparisonService
   cliInstallerService: CliInstallerService
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
@@ -101,6 +106,8 @@ let services: {
   surferProtocolService: SurferProtocolService
   workspaceResourceService: WorkspaceResourceService
   workspaceService: WorkspaceService
+  workspaceCreationJournal: WorkspaceCreationJournal
+  shutdownCoordinator: ShutdownCoordinator
 } | null = null
 
 function readHostInfo(path: string): string {
@@ -122,16 +129,6 @@ configureGpuMode({
 
 const { mainLogFile, sessionDirectory: logSessionDirectory } = prepareDesktopLogs()
 configureElectronLoggerFile(mainLogFile)
-installProcessDiagnostics(app, {
-  syncWrite: (line) => {
-    try {
-      appendFileSync(mainLogFile, `${line}\n`)
-    } catch {
-      // Best effort only: crash dumps are the durable native-crash record.
-    }
-  },
-})
-reportPreviousCrashDumps(join(app.getPath('userData'), 'Crashpad', 'reports'))
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
 registerSurferProtocolSchemes(protocol)
@@ -157,9 +154,6 @@ function getDesktopServices() {
   const projectReadGrantStore = new ProjectReadGrantStore({
     filePath: join(app.getPath('userData'), 'project-read-grants.json'),
   })
-  projectScopeService = new ProjectScopeService({
-    readGrantProvider: projectReadGrantStore,
-  })
   const eccRuntimeOptions = {
     appPath: app.getAppPath(),
     cwd: process.cwd(),
@@ -172,36 +166,18 @@ function getDesktopServices() {
     userDataPath: app.getPath('userData'),
     externalEccBinDir: resolveExternalEccOverride(),
   }
-  const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
-  let eccAgentExecutable: string | null = null
-  try {
-    eccAgentExecutable = resolveEccAgentExecutable(eccRuntimeOptions)
-  } catch (error) {
-    // A misconfigured ECOS_AGENT_ECC_RPC_BIN disables the agent runtime target
-    // but must not block app startup; the error names the exact cause.
-    electronLogger.error('[runtime] Agent RPC executable resolution failed', error)
-  }
   const runtimeEnv = createEccRuntimeEnv(eccRuntimeOptions)
-  if (eccAgentExecutable) runtimeEnv.ECOS_AGENT_ECC_RPC_BIN = eccAgentExecutable
+  const eccExecutable = resolveEccExecutable(eccRuntimeOptions)
   if (eccExecutable) {
     electronLogger.info('[runtime] Using ECC executable %s', eccExecutable)
   } else {
     electronLogger.warn(
-      '[runtime] Packaged/dev ECC executable was not resolved; falling back to PATH lookup for ecc',
+      '[runtime] ECC executable is unavailable on this platform or installation',
     )
   }
   const appInfoService = new AppInfoService({
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
-  })
-  const runtimeMutationGuard = {
-    isWorkspaceRuntimeActive: async (directory: string) =>
-      eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
-      frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
-  }
-  const workspaceResourceService = new WorkspaceResourceService({
-    projectScopeProvider: projectScopeService,
-    runtimeMutationGuard,
   })
   const resourceManagerService = new ResourceManagerService()
   const pdkInventoryService = resourceManagerService.getPdkInventoryService()
@@ -226,7 +202,7 @@ function getDesktopServices() {
     })
   }
   const eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (_directory, onEvent, onNotification, runtimeTarget) =>
+    createSidecar: (_directory, onEvent, onNotification) =>
       new EccRpcSidecarProcess({
         // Re-resolve the executable on every start so a bundle downloaded by
         // the CLI installer (or refreshed by drift sync) is picked up without
@@ -234,15 +210,6 @@ function getDesktopServices() {
         // is deliberately no PATH fallback: launching a wrong/unavailable
         // binary would be harder to diagnose than a clear error.
         resolveLaunch: async () => {
-          const target = runtimeTarget()
-          if (target === 'agent') {
-            const launch = resolveEccSidecarLaunch({
-              agentEccExecutable: eccAgentExecutable,
-              eccExecutable: 'ecc',
-              runtimeTarget: target,
-            })
-            return { args: launch.commandArgs, command: launch.command }
-          }
           const executable = resolveEccExecutable(eccRuntimeOptions)
           if (!executable) {
             throw new Error(
@@ -260,19 +227,26 @@ function getDesktopServices() {
         onEvent,
         onNotification,
       }),
-    lazyWorkspaceOpen: true,
-    snapshotLoader: (directory) => new WorkspaceSnapshotLoader().load(directory),
+    lazyWorkspaceOpen: false,
   })
-  installRuntimeQuitGuard({
-    app,
-    onShutdownError: (error) => {
-      electronLogger.error('[runtime] Failed to shut down ECC sidecars', error)
-    },
-    runtime: eccRuntimeService,
+  projectScopeService = new ProjectScopeService({
+    loadProjectManifest: async (projectRoot) =>
+      projectManifestForPresentation(
+        await eccRuntimeService.callRuntime<EccProjectManifest>('project.manifest.load', {
+          projectRoot,
+        }),
+        projectRoot,
+      ),
+    readGrantProvider: projectReadGrantStore,
+  })
+  const workspaceResourceService = new WorkspaceResourceService({
+    projectScopeProvider: projectScopeService,
   })
   const frontendRpcCore = new EccRpcRuntimeService({
+    managementRpc: true,
     createSidecar: (directory, onEvent) =>
       new EccRpcSidecarProcess({
+        managementRpc: true,
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
         logDirectoryProvider: () => resolveEccSidecarLogDirectory(logSessionDirectory),
@@ -298,17 +272,55 @@ function getDesktopServices() {
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
     replacementJournalDirectory: join(app.getPath('userData'), 'workspace-replacements'),
-    runtimeMutationGuard,
+    runtimeMutationGuard: {
+      isWorkspaceRuntimeActive: async (directory) =>
+        eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
+        frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
+    },
   })
   const projectManifestService = new ProjectManifestService(
     projectScopeService,
     workspaceService,
+    eccRuntimeService,
   )
-  const projectManagementReadService = new ProjectManagementReadService()
+  const creationProjectScope = projectScopeService
+  const workspaceCreationJournal = new WorkspaceCreationJournal({
+    canonicalizePaths: (projectRoot, targetDirectory) =>
+      creationProjectScope.canonicalizeProjectTarget(projectRoot, targetDirectory),
+    directory: join(app.getPath('userData'), 'workspace-creations'),
+    inspectWorkspaceIdentity: (path) => eccRuntimeService.inspectWorkspaceIdentity(path),
+    isWorkspace: (path) => workspaceService.isProjectDirectory(path),
+    projectManifestService,
+    settingsStore,
+  })
+  const shutdownCoordinator = createShutdownCoordinator(
+    eccRuntimeService,
+    workspaceCreationJournal,
+  )
   const quickStartResourceService = new QuickStartResourceService({
     appPath: app.getAppPath(),
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
+  })
+  const projectManagementReadService = new ProjectManagementReadService(
+    projectManifestService,
+    (directory, step) =>
+      eccRuntimeService.readWorkspaceStepConfigurationForDirectory(directory, step),
+    (directory) =>
+      eccRuntimeService.callRuntime<ProjectWorkspaceConfiguration>(
+        'workspace.configuration.read',
+        { directory },
+      ),
+  )
+  const backendProjectComparisonService = new BackendProjectComparisonService(
+    projectManagementReadService,
+    undefined,
+    () => eccRuntimeService.operationProjection().operations,
+  )
+  const backendWorkspaceService = new BackendWorkspaceService({
+    projectManagementReadService,
+    snapshotWatcherFactory: (callbacks) => new ProjectComparisonFileWatcher(callbacks),
+    workspaceRootProvider: projectScopeService,
   })
   const shellService = new ShellPtyService({
     env: runtimeEnv,
@@ -348,7 +360,8 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
-    runtimeEnv,
+    backendWorkspaceService,
+    backendProjectComparisonService,
     cliInstallerService,
     frontendRpcRuntimeService,
     chipViewerService,
@@ -364,6 +377,8 @@ function getDesktopServices() {
     surferProtocolService,
     workspaceResourceService,
     workspaceService,
+    workspaceCreationJournal,
+    shutdownCoordinator,
   }
 
   return services
@@ -372,22 +387,22 @@ function getDesktopServices() {
 async function ensureDesktopBridgeReady(): Promise<void> {
   const desktopServices = getDesktopServices()
   if (!workspaceReplacementRecoveryComplete) {
-    workspaceReplacementRecovery ??= desktopServices.workspaceService
-      .recoverProjectDirectoryReplacements()
+    workspaceReplacementRecovery ??= desktopServices.workspaceCreationJournal
+      .initialize()
+      .then(() => desktopServices.workspaceService.recoverProjectDirectoryReplacements())
+      .then(() => undefined)
       .catch((error) => {
-        electronLogger.error('[desktop] Failed to recover workspace replacements', error)
+        electronLogger.error('[desktop] Failed to recover workspace state', error)
+        workspaceReplacementRecovery = null
+        throw error
       })
     await workspaceReplacementRecovery
     workspaceReplacementRecoveryComplete = true
   }
 
   if (!ipcRegistered) {
-    const agentEnv = await desktopServices.resourceManagerService.createRuntimeEnv(
-      desktopServices.runtimeEnv,
-      { platform: process.platform },
-    )
     const agentRuntimeService = await createAgentRuntimeFromEnvironment(
-      agentEnv,
+      process.env,
       app.isPackaged
         ? join(process.resourcesPath, 'agent')
         : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
@@ -396,6 +411,8 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
+      backendWorkspaceService: desktopServices.backendWorkspaceService,
+      backendProjectComparisonService: desktopServices.backendProjectComparisonService,
       cliInstallerService: desktopServices.cliInstallerService,
       codexDependencyService: desktopServices.codexDependencyService,
       createWindow: async (options) => {
@@ -417,6 +434,8 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       surferProtocolService: desktopServices.surferProtocolService,
       workspaceResourceService: desktopServices.workspaceResourceService,
       workspaceService: desktopServices.workspaceService,
+      workspaceCreationJournal: desktopServices.workspaceCreationJournal,
+      shutdownCoordinator: desktopServices.shutdownCoordinator,
     })
     ipcRegistered = true
   }
@@ -431,14 +450,38 @@ async function launchWindow(
     openWorkspacePath: options.openWorkspacePath,
   })
   const windowId = mainWindow.webContents.id
-  bindWindowEvents(mainWindow)
+  bindWindowEvents(mainWindow, {
+    onCloseRequest: () => {
+      const coordinator = services?.shutdownCoordinator
+      if (!coordinator) return
+      const openWindowCount = BrowserWindow.getAllWindows().filter(
+        (window) => !window.isDestroyed(),
+      ).length
+      void (openWindowCount <= 1
+        ? coordinator.requestApplicationQuit()
+        : coordinator.requestWindowClose(windowId))
+    },
+  })
   mainWindow.on('closed', () => {
+    services?.shutdownCoordinator.windowClosed(windowId)
     workspaceWindowRegistry.unregisterByWindow(mainWindow as WorkspaceWindowLike)
+    services?.backendWorkspaceService.clearWindow(windowId)
+    services?.backendProjectComparisonService.disposeWindow(windowId)
     projectScopeService?.clearWindow(windowId)
     clearWindowMenuState(windowId)
   })
   mainWindow.on('focus', () => {
     applyWindowMenuState(windowId)
+    void services?.backendWorkspaceService
+      .checkForUpdates(windowId)
+      .catch((error) =>
+        electronLogger.warn('[backend-workspace] focus check failed', error),
+      )
+    void services?.backendProjectComparisonService
+      .checkForUpdates(windowId)
+      .catch((error) =>
+        electronLogger.warn('[project-comparison] focus check failed', error),
+      )
   })
   return mainWindow
 }

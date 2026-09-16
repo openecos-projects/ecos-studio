@@ -62,6 +62,12 @@ export function useNotificationStore() {
     if (item) item.read = true
   }
 
+  function markAllRead(): void {
+    notifications.value.forEach((notification) => {
+      notification.read = true
+    })
+  }
+
   function remove(id: string): void {
     notifications.value = notifications.value.filter(
       (notification) => notification.id !== id,
@@ -77,6 +83,7 @@ export function useNotificationStore() {
     unreadCount,
     addNotification,
     markRead,
+    markAllRead,
     remove,
     clear,
   }

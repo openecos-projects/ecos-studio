@@ -1,5 +1,27 @@
 const testState = vi.hoisted(() => ({
-  currentProject: null as import('vue').Ref<{ path: string } | null> | null,
+  backendRuntimeEvents: null as
+    | import('vue').Ref<import('@ecos-studio/shared').DesignRuntimeEvent[]>
+    | null,
+  currentProject: null as
+    | import('vue').Ref<{
+        path: string
+        designTool?: 'backend' | 'frontend'
+      } | null>
+    | null,
+  getStepDetail: vi.fn(),
+  backendSession: {
+    generation: 0,
+    projection: {
+      data: {
+        revision: {
+          status: 'ready',
+          data: { workspaceId: 'engineering-workspace', workspaceRevision: 9 },
+          issues: [],
+        },
+      },
+    },
+    workspaceContextId: 'context-a',
+  },
   readProjectTextFile: vi.fn(),
   resolveProjectPathAccess: vi.fn(async (path: string) => path),
   resolveWorkspaceStepInfoApi: vi.fn(),
@@ -23,7 +45,7 @@ const testState = vi.hoisted(() => ({
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
-import { InfoEnum, StepEnum } from '@/api/type'
+import { StepEnum } from '@/api/type'
 
 vi.mock('vue-router', () => ({
   useRoute: () => testState.route,
@@ -31,19 +53,14 @@ vi.mock('vue-router', () => ({
 
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
+    backendRuntimeEvents: testState.backendRuntimeEvents,
     currentProject: testState.currentProject,
     runtimeEvents: testState.runtimeEvents,
     resourceVersions: testState.resourceVersions,
   }),
 }))
 
-vi.mock('./useDesktopRuntime', () => ({
-  useDesktopRuntime: () => ({
-    isDesktopRuntimeAvailable: true,
-  }),
-}))
-
-vi.mock('./useHomeData', () => ({
+vi.mock('./useBackendFlowLogs', () => ({
   convertRemoteToLocalPath: (path: string) => path,
 }))
 
@@ -59,8 +76,41 @@ vi.mock('@/utils/projectFs', () => ({
   resolveProjectPathAccess: testState.resolveProjectPathAccess,
 }))
 
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => ({
+    backendWorkspace: { getStepDetail: testState.getStepDetail },
+  }),
+}))
+
+vi.mock('@/stores/backendWorkspaceSession', () => ({
+  useBackendWorkspaceSession: () => testState.backendSession,
+}))
+
 import { useSubflow } from './useSubflow'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+
+function backendRuntimeEvent(
+  sourceType: string,
+  payload: Record<string, unknown>,
+): import('@ecos-studio/shared').DesignRuntimeEvent {
+  return {
+    designTool: 'backend',
+    event: {
+      eventId: `event-${sourceType}`,
+      kind: 'flow',
+      operationId: 'operation-1',
+      origin: 'gui',
+      payload: { sourceType, ...payload },
+      sequence: 1,
+      timestamp: 1,
+      type: 'execution.progress',
+      workspaceId: 'engineering-workspace',
+    },
+    type: 'runtime.protocol',
+    workspaceDirectory: '/workspace/demo',
+    workspaceHandle: 'workspace-demo',
+  }
+}
 
 describe('useSubflow runtime refresh', () => {
   beforeEach(() => {
@@ -74,6 +124,7 @@ describe('useSubflow runtime refresh', () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.route.path = '/workspace/floorplan'
     testState.runtimeEvents = ref([])
+    testState.backendRuntimeEvents = ref([])
     testState.resourceVersions = ref({
       home: 0,
       flow: 0,
@@ -87,6 +138,31 @@ describe('useSubflow runtime refresh', () => {
     testState.readProjectTextFile.mockReset()
     testState.resolveProjectPathAccess.mockClear()
     testState.resolveWorkspaceStepInfoApi.mockReset()
+    testState.getStepDetail.mockReset()
+    testState.getStepDetail.mockImplementation(
+      async ({ stepId }: { stepId: string }) => ({
+        detail: {
+          status: 'ready',
+          issues: [],
+          data: {
+            subflow: {
+              status: 'available',
+              steps: [
+                {
+                  name: stepId.toLowerCase() === 'harden' ? 'run harden' : 'floorplan',
+                  state: 'Success',
+                  runtime: stepId.toLowerCase() === 'harden' ? '9.0s' : '1.0s',
+                  peakMemoryMb: stepId.toLowerCase() === 'harden' ? 830 : 12,
+                },
+              ],
+            },
+          },
+        },
+        generation: 0,
+        workspaceContextId: 'context-a',
+        workspaceRevision: 9,
+      }),
+    )
 
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
@@ -144,9 +220,10 @@ describe('useSubflow runtime refresh', () => {
     const subflow = useSubflow()
 
     await vi.waitFor(() => {
-      expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledWith({
-        step: StepEnum.HARDEN,
-        id: InfoEnum.subflow,
+      expect(testState.getStepDetail).toHaveBeenCalledWith({
+        stepId: StepEnum.HARDEN,
+        workspaceContextId: 'context-a',
+        workspaceRevision: 9,
       })
     })
     await vi.waitFor(() => {
@@ -154,11 +231,11 @@ describe('useSubflow runtime refresh', () => {
     })
   })
 
-  it('reloads the current subflow when the workspace step resource version changes', async () => {
+  it('reloads the current subflow when committed facts are invalidated', async () => {
     useSubflow()
 
     await vi.waitFor(() => {
-      expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledTimes(1)
+      expect(testState.getStepDetail).toHaveBeenCalledTimes(1)
     })
 
     testState.resourceVersions!.value = {
@@ -168,7 +245,7 @@ describe('useSubflow runtime refresh', () => {
     await nextTick()
 
     await vi.waitFor(() => {
-      expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledTimes(2)
+      expect(testState.getStepDetail).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -179,28 +256,24 @@ describe('useSubflow runtime refresh', () => {
       expect(subflow.subflowSteps.value).toHaveLength(1)
     })
 
-    testState.runtimeEvents!.value.push({
-      data: {
-        runtimeProtocolType: 'step.started',
-        step: 'Floorplan',
-      },
-    })
+    testState.backendRuntimeEvents!.value.push(
+      backendRuntimeEvent('step.started', { step: 'Floorplan' }),
+    )
     await nextTick()
     expect(subflow.subflowSteps.value[0]).toMatchObject({
       name: 'floorplan',
       status: 'running',
     })
 
-    testState.runtimeEvents!.value.push({
-      data: {
-        runtimeProtocolType: 'subflow.stage',
+    testState.backendRuntimeEvents!.value.push(
+      backendRuntimeEvent('subflow.stage', {
         state: 'Success',
         step: 'Floorplan',
         subflowPeakMemory: 24,
         subflowRuntime: '0:0:3',
         subflowStep: 'floorplan',
-      },
-    })
+      }),
+    )
     await nextTick()
     expect(subflow.subflowSteps.value[0]).toMatchObject({
       duration: '0:0:3',
@@ -228,6 +301,10 @@ describe('useSubflow runtime refresh', () => {
   })
 
   it('builds and advances a first-run frontend subflow from live stages', async () => {
+    testState.currentProject!.value = {
+      path: '/workspace/demo',
+      designTool: 'frontend',
+    }
     testState.route.path = '/workspace/prepare'
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
@@ -297,6 +374,10 @@ describe('useSubflow runtime refresh', () => {
   })
 
   it('ignores a stale subflow read after the workspace session changes', async () => {
+    testState.currentProject!.value = {
+      path: '/workspace/demo',
+      designTool: 'frontend',
+    }
     let resolveFirstRead: ((content: string) => void) | undefined
     testState.readProjectTextFile
       .mockReturnValueOnce(
@@ -331,7 +412,10 @@ describe('useSubflow runtime refresh', () => {
       projectRoot: '/workspace/other',
     })
     lifecycle.activateSession(nextSession.sessionId)
-    testState.currentProject!.value = { path: '/workspace/other' }
+    testState.currentProject!.value = {
+      path: '/workspace/other',
+      designTool: 'frontend',
+    }
     testState.resourceVersions!.value = {
       ...testState.resourceVersions!.value,
       step: 1,

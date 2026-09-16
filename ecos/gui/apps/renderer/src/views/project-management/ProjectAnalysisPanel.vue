@@ -173,55 +173,13 @@
           <p class="dash-recommend-reason">No workspace has an eligible QoR score yet.</p>
         </section>
 
-        <section
-          v-if="recommendedQphys.length > 0"
-          class="dash-qphys"
-          aria-label="Physical QoR record breakdown"
-        >
-          <header class="dash-section-head">
-            <span>QoR record breakdown</span>
-            <small>scored by ECC</small>
-          </header>
-          <div
-            v-for="dimension in recommendedQphys"
-            :key="dimension.key"
-            class="dash-qphys-row"
-          >
-            <span class="dash-qphys-label">{{ dimension.label }}</span>
-            <span
-              class="dash-qphys-bar"
-              role="img"
-              :aria-label="`${dimension.label} ${dimension.display} of 100`"
-            >
-              <i
-                :class="dashboardToneClass(dimension.tone)"
-                :style="{ width: `${dimension.percent ?? 0}%` }"
-              ></i>
-            </span>
-            <strong class="dash-qphys-value">{{ dimension.display }}</strong>
-            <small class="dash-qphys-state">
-              {{ dimension.state
-              }}<span v-if="dimension.reason"> · {{ dimension.reason }}</span>
-            </small>
-          </div>
-          <div v-if="recommendedDiagnoses.length > 0" class="dash-diagnoses">
-            <details v-for="diagnosis in recommendedDiagnoses" :key="diagnosis.id">
-              <summary :class="dashboardToneClass(diagnosis.tone)">
-                {{ diagnosis.stateLabel }} · {{ diagnosis.id }}
-              </summary>
-              <p>{{ diagnosis.interpretation }}</p>
-              <p
-                v-for="intervention in diagnosis.interventions"
-                :key="intervention.hypothesis"
-                class="dash-diagnosis-hypothesis"
-              >
-                [{{ intervention.tierLabel }}] {{ intervention.hypothesis }}
-              </p>
-            </details>
-          </div>
-        </section>
+        <ProjectQorSnapshotPanel
+          v-if="hasProjectData"
+          :insights="recommendedQorInsights"
+        />
 
         <ProjectQorScoreChart
+          class="dash-qor-chart"
           :trend-points="project.qorTrendSummary.trendPoints"
           :baseline-workspace-id="project.qorTrendSummary.baselineWorkspaceId"
           :baseline-label="baselineDisplayLabel"
@@ -347,6 +305,7 @@
                   <button
                     type="button"
                     class="dash-cell-action"
+                    :title="row.workspaceId"
                     :aria-label="`Select workspace ${row.workspaceId}`"
                     @click="selectWorkspace(row.workspaceId)"
                   >
@@ -497,6 +456,7 @@
       v-show="selectedAnalysisTab === 'step'"
     >
       <ProjectStepAnalysisPanel
+        :findings="findings"
         :steps="project.stepCompareSummaries"
         :workspace-summaries="project.workspaceSummaries"
         :qor-trend-summary="project.qorTrendSummary"
@@ -536,14 +496,15 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import type { ProjectStepFindingsProjectionState } from '@/stores/backendProjectComparisonSession'
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
+import ProjectQorSnapshotPanel from './ProjectQorSnapshotPanel.vue'
 import {
-  type FlowStep,
   type ProjectManagementProject,
   type ProjectMetricPoint,
 } from '@/utils/projectManagement'
-import type { QorGateStatus } from '@/utils/projectQorTrend'
+import type { QorGateStatus } from '@ecos-studio/shared'
 import {
   buildBestWorkspacePpaMetrics,
   buildDashboardMetricRows,
@@ -558,9 +519,8 @@ import {
 } from './projectAnalysisPresentation'
 import {
   buildDashboardAttention,
-  buildDashboardDiagnoses,
   buildDashboardHealth,
-  buildDashboardQphys,
+  buildDashboardQorInsights,
   buildDashboardRecommendation,
   buildDashboardWorkspaceRows,
   countAttentionBySeverity,
@@ -594,16 +554,17 @@ const SIGNOFF_DISPLAY: Record<QorGateStatus, { label: string; tone: string }> = 
 }
 
 const props = defineProps<{
+  findings?: ProjectStepFindingsProjectionState
   project: ProjectManagementProject
   selectedAnalysisTab: AnalysisTab
-  selectedStep: FlowStep
+  selectedStep: string
   selectedWorkspaceId: string
   selectedIssueMetric?: string | null
 }>()
 
 const emit = defineEmits<{
   'select-analysis-tab': [tab: AnalysisTab]
-  'select-step': [step: FlowStep]
+  'select-step': [step: string]
   'select-workspace': [workspaceId: string]
   'select-issue-metric': [metric: string | null]
   'set-baseline': [{ workspaceId: string }]
@@ -640,7 +601,7 @@ const analysisContext = computed(() => {
   if (!baselineId || baselineId === workspaceId) {
     return `${props.project.name} / ${workspaceId} is the QoR reference workspace`
   }
-  return `${props.project.name} / ${workspaceId} compared with ${baselineId}`
+  return `${props.project.name} / ${workspaceId} · QoR baseline ${baselineId}`
 })
 const dashboardMetricRows = computed(() =>
   buildDashboardMetricRows(
@@ -667,16 +628,10 @@ const recommendedPpaMetrics = computed(() =>
     recommendation.value?.workspaceId,
   ),
 )
-const recommendedQphys = computed(() =>
-  buildDashboardQphys(
+const recommendedQorInsights = computed(() =>
+  buildDashboardQorInsights(
     props.project.qorTrendSummary,
-    recommendation.value?.workspaceId ?? null,
-  ),
-)
-const recommendedDiagnoses = computed(() =>
-  buildDashboardDiagnoses(
-    props.project.qorTrendSummary,
-    recommendation.value?.workspaceId ?? null,
+    recommendation.value?.workspaceId || props.selectedWorkspaceId,
   ),
 )
 const workspaceRows = computed(() =>
@@ -877,7 +832,7 @@ function resetDashboardWorkspaceFilters(): void {
 /** Hands the user from the overview to the detail view already pointed at the finding. */
 function drillDown(
   workspaceId: string,
-  step: FlowStep | null,
+  step: string | null,
   metric: string | null = null,
 ): void {
   emit('select-workspace', workspaceId)
@@ -908,7 +863,7 @@ function handleAnalysisTabKeydown(event: KeyboardEvent, currentTab: AnalysisTab)
   document.getElementById(`analysis-tab-${nextTab}`)?.focus()
 }
 
-function selectStep(step: FlowStep): void {
+function selectStep(step: string): void {
   emit('select-step', step)
 }
 

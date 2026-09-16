@@ -500,11 +500,15 @@ async function handleClearRunResults() {
           ? { designTool: 'frontend' as const }
           : {}),
         directory: projectPath,
+        workspaceRevision: workspaceSession.value.workspaceRevision,
         workspaceHandle: workspaceSession.value.workspaceId,
       },
     })
     if (result.response !== 'success') {
       throw new Error(result.message?.[0] || 'Failed to reset workspace run results.')
+    }
+    if (typeof result.data?.workspaceRevision === 'number') {
+      workspaceSession.value.workspaceRevision = result.data.workspaceRevision
     }
 
     requestHomeRunArtifactReset(projectPath)

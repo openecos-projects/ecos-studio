@@ -38,6 +38,28 @@ describe('notificationStore', () => {
     expect(store.notifications.value).toHaveLength(0)
   })
 
+  it('marks all notifications as read without removing them', () => {
+    const store = useNotificationStore()
+    store.addNotification({
+      severity: 'info',
+      title: 'First',
+      message: 'First notification.',
+    })
+    store.addNotification({
+      severity: 'warn',
+      title: 'Second',
+      message: 'Second notification.',
+    })
+
+    store.markAllRead()
+
+    expect(store.notifications.value).toHaveLength(2)
+    expect(store.notifications.value.every((notification) => notification.read)).toBe(
+      true,
+    )
+    expect(store.unreadCount.value).toBe(0)
+  })
+
   it('updates one operation notification in place', () => {
     const store = useNotificationStore()
     store.addNotification({

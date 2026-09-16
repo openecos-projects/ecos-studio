@@ -1,18 +1,24 @@
 import { ref, computed, onScopeDispose, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
-import { convertRemoteToLocalPath } from './useHomeData'
+import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { FrontendStepEnum, InfoEnum, StepEnum, getStepMetadata } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
+import {
+  backendRuntimeEventKind,
+  backendRuntimeEventPayload,
+  backendRuntimeEventStep,
+} from '@/api/backendRuntimeEvents'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
   normalizeWorkspaceProjectPath,
   onWorkspaceRerunPrepared,
 } from './homeRunArtifacts'
 import { registerRuntimeStepRenderTask } from './runtimeStepRenderSync'
+import { getDesktopApi } from '@/platform/desktop'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
 // ============ 类型定义 ============
 
@@ -123,9 +129,10 @@ function parseTimeString(timeStr: string): number {
  * 负责获取和管理当前步骤的子流程信息
  */
 export function useSubflow() {
-  const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions, runtimeEvents } = useWorkspace()
+  const { backendRuntimeEvents, currentProject, resourceVersions, runtimeEvents } =
+    useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
+  const backendSession = useBackendWorkspaceSession()
   const route = useRoute()
 
   // 状态
@@ -247,6 +254,39 @@ export function useSubflow() {
     error.value = null
 
     try {
+      if (currentProject.value?.designTool !== 'frontend') {
+        const revisionSection = backendSession.projection.data?.revision
+        const revision =
+          revisionSection?.status === 'ready' || revisionSection?.status === 'partial'
+            ? revisionSection.data.workspaceRevision
+            : null
+        const contextId = backendSession.workspaceContextId
+        if (!contextId || revision === null) return
+        const result = await getDesktopApi().backendWorkspace.getStepDetail({
+          stepId: stepEnum,
+          workspaceContextId: contextId,
+          workspaceRevision: revision,
+        })
+        if (
+          !isCurrent() ||
+          result.workspaceContextId !== contextId ||
+          result.workspaceRevision !== revision ||
+          (result.detail.status !== 'ready' && result.detail.status !== 'partial')
+        ) {
+          return
+        }
+        if (expectedRuntimeRevision === runtimeUpdateRevision) {
+          subflowSteps.value = result.detail.data.subflow.steps.map((step, index) => ({
+            id: `step-${index}`,
+            name: step.name,
+            description: `Peak Memory: ${step.peakMemoryMb ?? 0} MB`,
+            status: mapState(step.state),
+            duration: step.runtime || undefined,
+            peakMemory: step.peakMemoryMb,
+          }))
+        }
+        return
+      }
       const response = await workspaceLifecycle.runForSession(sessionId, () =>
         resolveWorkspaceStepInfoApi({
           step: stepEnum,
@@ -254,8 +294,6 @@ export function useSubflow() {
         }),
       )
       if (!isCurrent() || !response) return
-
-      console.log('workspace subflow response:', response)
 
       if (response.response === 'error') {
         console.warn('workspace subflow resolver failed:', response.message)
@@ -280,12 +318,6 @@ export function useSubflow() {
         return
       }
 
-      // 2. 使用桌面桥接读取 JSON 文件
-      if (!isDesktopRuntimeAvailable) {
-        console.warn('Desktop bridge unavailable, cannot read local file')
-        return
-      }
-
       const projectPath = currentProject.value?.path
       const localPath = projectPath
         ? convertRemoteToLocalPath(subflowPath, projectPath)
@@ -303,8 +335,6 @@ export function useSubflow() {
       if (!isCurrent() || fileContent === undefined) return
       const subflowData: SubflowData = JSON.parse(fileContent)
 
-      console.log('subflow data:', subflowData)
-
       // 3. 转换数据格式并更新步骤
       if (expectedRuntimeRevision === runtimeUpdateRevision) {
         subflowSteps.value = convertSubflowToSteps(subflowData)
@@ -319,48 +349,6 @@ export function useSubflow() {
       if (isCurrent()) {
         isLoading.value = false
       }
-    }
-  }
-
-  /**
-   * 从指定路径直接加载子流程数据
-   * 用于 runtime event 推送的 subflow_path
-   */
-  async function loadSubflowFromPath(subflowPath: string): Promise<void> {
-    if (!isDesktopRuntimeAvailable || !subflowPath) {
-      console.warn('Cannot load subflow: desktop bridge unavailable or path is empty')
-      return
-    }
-
-    const sessionId = workspaceLifecycle.currentSessionId.value
-    const expectedRuntimeRevision = runtimeUpdateRevision
-    const isCurrent = () => workspaceLifecycle.isCurrentSession(sessionId)
-    try {
-      const localPath = currentProject.value?.path
-        ? convertRemoteToLocalPath(subflowPath, currentProject.value.path)
-        : subflowPath
-
-      console.log('Loading subflow from runtime event path:', localPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
-        resolveProjectPathAccess(localPath),
-      )
-      if (!isCurrent()) return
-      if (!resolvedPath) return
-
-      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
-        readProjectTextFile(resolvedPath),
-      )
-      if (!isCurrent() || fileContent === undefined) return
-      const subflowData: SubflowData = JSON.parse(fileContent)
-
-      console.log('Subflow data from runtime event path:', subflowData)
-
-      if (expectedRuntimeRevision === runtimeUpdateRevision) {
-        subflowSteps.value = convertSubflowToSteps(subflowData)
-      }
-    } catch (err) {
-      if (!isCurrent()) return
-      console.error('Failed to load subflow from path:', subflowPath, err)
     }
   }
 
@@ -411,13 +399,11 @@ export function useSubflow() {
     async (newPath) => {
       const pathParts = newPath.split('/')
       const currentPath = pathParts[pathParts.length - 1] || ''
-      console.log('Current path:', currentPath)
 
       // 检查当前路由是否是步骤页面
       const stepEnum = getStepEnumFromPath(currentPath)
       if (stepEnum) {
         updateCurrentStep(stepEnum)
-        console.log('Fetching subflow for:', stepEnum)
         await fetchSubflowInfo(stepEnum)
       } else {
         clearSubflow()
@@ -430,6 +416,7 @@ export function useSubflow() {
   watch(
     [
       () => currentProject.value?.path,
+      () => backendSession.generation,
       () => resourceVersions.value.step,
       () => resourceVersions.value.all,
     ],
@@ -466,6 +453,70 @@ export function useSubflow() {
   for (const event of runtimeEvents.value) {
     if (event && typeof event === 'object') existingRuntimeEvents.add(event)
   }
+
+  const existingBackendRuntimeEvents = new WeakSet<object>(backendRuntimeEvents.value)
+  const handledBackendRuntimeEvents = new WeakSet<object>()
+  const stopWatchingBackendRuntimeEvents = watch(
+    backendRuntimeEvents,
+    (events) => {
+      const currentStep = getCurrentRouteStep()
+      if (!currentStep) return
+      for (const event of events) {
+        if (
+          existingBackendRuntimeEvents.has(event) ||
+          handledBackendRuntimeEvents.has(event) ||
+          !sameStepName(backendRuntimeEventStep(event) ?? '', currentStep)
+        ) {
+          continue
+        }
+        handledBackendRuntimeEvents.add(event)
+        const kind = backendRuntimeEventKind(event)
+        if (kind === 'step.started') {
+          stepExecutionActive = true
+          runtimeUpdateRevision += 1
+          resetSubflowForRerun(true)
+          continue
+        }
+        if (kind === 'step.completed') {
+          stepExecutionActive = false
+          continue
+        }
+        if (kind !== 'subflow.stage') continue
+
+        const payload = backendRuntimeEventPayload(event)
+        const subflowStep =
+          typeof payload.subflowStep === 'string'
+            ? payload.subflowStep
+            : typeof payload.subflow_step === 'string'
+              ? payload.subflow_step
+              : ''
+        if (!subflowStep) continue
+        runtimeUpdateRevision += 1
+        updateSubflowStage(
+          subflowStep,
+          typeof payload.state === 'string' ? payload.state : 'Unstart',
+          typeof payload.subflowRuntime === 'string'
+            ? payload.subflowRuntime
+            : typeof payload.runtime === 'string'
+              ? payload.runtime
+              : '',
+          typeof payload.subflowPeakMemory === 'number'
+            ? payload.subflowPeakMemory
+            : typeof payload.peakMemory === 'number'
+              ? payload.peakMemory
+              : undefined,
+        )
+        const subflowState =
+          typeof payload.state === 'string' ? payload.state.trim().toLowerCase() : ''
+        if (['incomplete', 'invalid', 'failed'].includes(subflowState)) {
+          stepExecutionActive = false
+        } else {
+          advanceRunningSubflowStage()
+        }
+      }
+    },
+    { deep: true, flush: 'sync' },
+  )
 
   const stopWatchingRuntimeEvents = watch(
     runtimeEvents,
@@ -545,6 +596,7 @@ export function useSubflow() {
   onScopeDispose(() => {
     unregisterWorkspaceRerunPrepared()
     unregisterStepRenderTask()
+    stopWatchingBackendRuntimeEvents()
     stopWatchingRuntimeEvents()
   })
 
@@ -566,7 +618,6 @@ export function useSubflow() {
     // 方法
     fetchSubflowInfo,
     refreshCurrentSubflow,
-    loadSubflowFromPath,
     clearSubflow,
     updateCurrentStep,
   }

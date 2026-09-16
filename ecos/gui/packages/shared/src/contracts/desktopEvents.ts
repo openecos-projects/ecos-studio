@@ -42,32 +42,3 @@ export const appMenuActionIds = {
 export type AppMenuAction = (typeof appMenuActionIds)[keyof typeof appMenuActionIds]
 
 export type DesktopEventUnsubscribe = () => void
-
-export type DesktopProjectFileChangeEventType = 'change' | 'rename' | 'error'
-
-export interface DesktopProjectFileChangedEvent {
-  subscriptionId: string
-  path: string
-  eventType: DesktopProjectFileChangeEventType
-}
-
-export type DesktopProjectLogTailEventType =
-  | 'snapshot'
-  | 'append'
-  | 'reset'
-  | 'waiting'
-  | 'error'
-  | 'closed'
-
-export interface DesktopProjectLogTailEvent {
-  subscriptionId: string
-  path: string
-  eventType: DesktopProjectLogTailEventType
-  content?: string
-  fromOffsetBytes?: number
-  nextOffsetBytes?: number
-  sizeBytes?: number
-  reset?: boolean
-  truncated?: boolean
-  reason?: string
-}
