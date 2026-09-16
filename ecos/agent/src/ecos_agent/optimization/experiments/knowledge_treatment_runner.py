@@ -633,7 +633,7 @@ def main(provider_factory: Callable[..., Any]) -> None:
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--model", default="gpt-5.6-sol")
+    parser.add_argument("--model", default="glm-5.3-flash")
     parser.add_argument("--seed", type=int, default=20260827)
     parser.add_argument("--tool-revision", required=True)
     parser.add_argument("--max-workers", type=int, default=2)

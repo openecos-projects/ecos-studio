@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument("--design", default="gcd")
     parser.add_argument("--bank", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--model", default="gpt-5.6-terra")
+    parser.add_argument("--model", default="glm-5.3-flash")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--planning-call-limit", type=int, default=60)
     parser.add_argument("--watchdog-minutes", type=float, default=30.0)
