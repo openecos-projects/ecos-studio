@@ -7,6 +7,7 @@
 [submodule "ecc"]
 	path = ecc
 	url = https://github.com/openecos-projects/ecc.git
+	branch = yhqiu/agent-research
 [submodule "ecc-fe"]
 	path = ecc-fe
 	url = https://github.com/openecos-projects/ecc-fe.git
