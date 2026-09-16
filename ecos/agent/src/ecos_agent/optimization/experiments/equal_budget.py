@@ -270,8 +270,6 @@ def export_episode_traces(
     decisions = OptimizationDecisionAudit(episode_root).replay()
     cases = EmpiricalCaseAuditStore(episode_root).replay()
     _verify_episode_heads(state, ledger, planning, provider, decisions, cases)
-    if ledger.pending_intervention_ids:
-        raise ValueError("episode trace contains pending interventions")
     mode: Mode = (
         "receipt-aware"
         if state.get("receipt_aware_planning", True)
@@ -288,18 +286,27 @@ def export_episode_traces(
         for item in decisions.entries
         if item.requested is not None and item.state.value == "awaiting_execution"
     )
+    # A wall-budget stop can cut a started candidate before any terminal is
+    # recorded; such pending interventions must trail the merged ones, and
+    # only merged candidates produce traces.
+    merged_starts = tuple(
+        start for start in starts if start.intervention_id in outcomes
+    )
+    pending_starts = len(starts) - len(merged_starts)
+    if pending_starts and starts[-1].intervention_id in outcomes:
+        raise ValueError("episode trace contains mid-episode pending interventions")
     if (
-        len(candidate_decisions) < len(starts)
-        or set(outcomes) != {item.intervention_id for item in starts}
+        len(candidate_decisions) < len(merged_starts)
+        or not set(outcomes) <= {item.intervention_id for item in starts}
     ):
         raise ValueError("episode lifecycle does not match planning decisions")
     # A wall-budget stop can accept one final decision that never begins an
     # intervention; starts and decisions stay chronologically 1:1 up to that
     # trailing tail, so pair only the decisions that actually started.
-    candidate_decisions = candidate_decisions[: len(starts)]
+    candidate_decisions = candidate_decisions[: len(merged_starts)]
     traces: list[CandidateTrace] = []
     episode_id = str(state["episode_id"])
-    for start, decision in zip(starts, candidate_decisions, strict=True):
+    for start, decision in zip(merged_starts, candidate_decisions, strict=True):
         if start.requested != decision.requested:
             raise ValueError("episode request does not match planning decision")
         outcome = outcomes[start.intervention_id]
