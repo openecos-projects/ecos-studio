@@ -167,8 +167,17 @@ def main() -> int:
         "--scratch-root", type=Path, default=None,
         help="transient capture copies (default: <run-root>/opportunity-analysis/scratch)",
     )
+    parser.add_argument(
+        "--output-root", type=Path, default=None,
+        help="where the coverage reports land (default: --run-root; point "
+        "outside a frozen run when re-running for a version boundary)",
+    )
     args = parser.parse_args()
     run_root = args.run_root.resolve()
+    output_root = (
+        args.output_root.resolve() if args.output_root is not None else run_root
+    )
+    output_root.mkdir(parents=True, exist_ok=True)
     scratch_root = (
         args.scratch_root or run_root / "opportunity-analysis" / "scratch"
     ).resolve()
@@ -235,7 +244,7 @@ def main() -> int:
         "covered_count": len(covered),
         "replays": replays,
     }
-    out_json = run_root / "opportunity-coverage.v1.json"
+    out_json = output_root / "opportunity-coverage.v1.json"
     out_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     flat_rows = []
@@ -252,7 +261,7 @@ def main() -> int:
                         "near_miss_distance": near.get("distance_to_threshold", ""),
                     }
                 )
-    out_csv = run_root / "opportunity-coverage.csv"
+    out_csv = output_root / "opportunity-coverage.csv"
     with out_csv.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(flat_rows[0].keys()))
         writer.writeheader()
@@ -366,7 +375,7 @@ def main() -> int:
     else:
         lines.append("- no level-predicate near-misses on any design")
     lines.append("")
-    out_md = run_root / "opportunity-coverage.md"
+    out_md = output_root / "opportunity-coverage.md"
     out_md.write_text("\n".join(lines), encoding="utf-8")
     print(
         f"[opportunity] covered {len(covered)}/{len(args.designs)}: "
