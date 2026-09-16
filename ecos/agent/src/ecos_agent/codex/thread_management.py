@@ -25,7 +25,7 @@ _REPAIR_INSTRUCTION = (
     "The previous reply was rejected: it must be exactly one JSON object matching the "
     "output schema, with no extra fields, no missing required fields, and no markdown. "
     "Include every field named in schema_violation. Respect the schema string "
-    "length limits: rationale and summary text is capped at 512 characters. Return the "
+    "length limits: rationale and summary text is capped at 1024 characters. Return the "
     "corrected JSON object only."
 )
 _REPAIR_EXCERPT_LIMIT = 1200

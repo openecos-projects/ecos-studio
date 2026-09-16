@@ -518,7 +518,10 @@ class OptimizationProposal(_ContractModel):
     context_ref: ProposalContextRef
     decision: OptimizationDecision
     reason_code: ProposalReason
-    rationale_summary: str = Field(min_length=1, max_length=512)
+    # 1024: high-effort planners already write 440-511-character rationales
+    # against the old 512 cap, and the medium-effort default crosses it, which
+    # rejected whole proposals and escalated episodes on a formatting quibble.
+    rationale_summary: str = Field(min_length=1, max_length=1024)
     observation_refs: tuple[ObservationReference, ...] = Field(
         min_length=1, max_length=13
     )
