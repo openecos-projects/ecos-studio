@@ -28,6 +28,11 @@ from ecos_agent.optimization.metrics.contracts import (
     EvaluationMetricRole,
     TerminalEvaluationMetric,
 )
+from ecos_agent.optimization.memory import (
+    OptimizationTaskMemoryScope,
+    OptimizationTaskMemorySnapshot,
+    OptimizationTaskMemorySummary,
+)
 from ecos_agent.optimization.observation_contracts import (
     SignoffGates,
     TerminalObservation,
@@ -355,11 +360,73 @@ def test_planning_payload_stays_within_budget_for_a_full_episode():
         json.dumps(smaller, separators=(",", ":"), ensure_ascii=False).encode()
     )
 
-    # The full 20-candidate budget must stay well inside a 256KB prompt and
-    # each recorded outcome must add a bounded projected entry, not a full
-    # 44KB terminal observation.
+    # The full 20-candidate budget must stay well inside a 256KB prompt, each
+    # recorded outcome must add a bounded projected entry, not a full 44KB
+    # terminal observation, and the out-of-window tail must collapse to
+    # one-line summaries instead of growing the payload linearly.
+    assert payload["parameter_trajectories_omitted"] == (
+        CANDIDATE_EXECUTION_LIMIT - 8
+    )
     assert size < 256 * 1024
     assert size - smaller_size < 8192
+
+
+def test_planning_payload_windows_out_of_range_trajectories():
+    trajectories = tuple(
+        _history_item(
+            f"intervention-{index}", _terminal_observation(f"terminal-{index}")
+        )
+        for index in range(10)
+    )
+
+    payload = planning_context_payload(
+        _context(incumbent=None, trajectories=trajectories)
+    )
+
+    listed = payload["parameter_trajectories"]
+    assert payload["parameter_trajectories_omitted"] == 2
+    assert [item["intervention_id"] for item in listed[:2]] == [
+        "intervention-0",
+        "intervention-1",
+    ]
+    assert all(item["summary_only"] for item in listed[:2])
+    assert listed[0]["outcome"] == OptimizationOutcomeKind.DEGRADED.value
+    assert listed[0]["requested_value"] == 0.8
+    assert all("summary_only" not in item for item in listed[2:])
+    # The in-window tail keeps the full projection and evidence binding.
+    assert listed[-1]["terminal_observation"]["schema_version"] == (
+        "ecos.terminal_observation.projection.v1"
+    )
+
+
+def test_planning_payload_windows_task_memory_summaries():
+    scope = OptimizationTaskMemoryScope.model_construct(
+        workspace_manifest_sha256=HASH,
+        design_id="gcd",
+        checkpoint_id="place",
+        episode_id="episode-1",
+        objective_contract_sha256=HASH,
+        scope_sha256=HASH,
+    )
+    snapshot = OptimizationTaskMemorySnapshot.model_construct(
+        schema_version="ecos.optimization_task_memory_snapshot.v2",
+        scope=scope,
+        source_event_count=10,
+        source_evidence_sha256=HASH,
+        summaries=tuple(
+            OptimizationTaskMemorySummary.model_construct() for _ in range(10)
+        ),
+        snapshot_sha256=HASH,
+    )
+    context = replace(
+        _context(incumbent=None, trajectories=()), task_memory=snapshot
+    )
+
+    payload = planning_context_payload(context)
+
+    memory = payload["task_memory"]
+    assert memory["summaries_omitted"] == 4
+    assert len(memory["summaries"]) == 6
 
 
 def _receipt_with_floor(floor: float):

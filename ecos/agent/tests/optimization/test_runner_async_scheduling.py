@@ -155,12 +155,13 @@ def _runner(controller, executor, **kwargs):
     )
 
 
-def test_a1_first_terminal_feeds_the_next_plan_without_waiting(tmp_path):
-    """A1: A finishes first, is absorbed, and C is planned while B still runs."""
+def test_a1_turn_collects_every_terminal_before_the_next_plan(tmp_path):
+    """A1 (batched): the turn collects A and B; the next plan sees both."""
     planner = _ScriptedPlanner(
         ("place.cell_padding_x", StrategyDirection.INCREASE, 3),
         ("place.target_density", StrategyDirection.INCREASE, 0.25),
         ("place.target_density", StrategyDirection.DECREASE, 0.15),
+        ("place.target_overflow", StrategyDirection.DECREASE, 0.05),
     )
     executor = _ConcurrentExecutor(
         {
@@ -175,6 +176,10 @@ def test_a1_first_terminal_feeds_the_next_plan_without_waiting(tmp_path):
                 "execution-3", "place.target_density", 0.15,
                 outcome=OptimizationOutcomeKind.DEGRADED,
             ),
+            "execution-4": _terminal_receipt(
+                "execution-4", "place.target_overflow", 0.05,
+                outcome=OptimizationOutcomeKind.DEGRADED,
+            ),
         }
     )
     controller = _controller(tmp_path, planner, executor)
@@ -182,22 +187,21 @@ def test_a1_first_terminal_feeds_the_next_plan_without_waiting(tmp_path):
 
     first = runner.run_turn()
 
-    assert controller.pending_execution_ids == ("execution-2",)
-    assert controller.state.value == "executing"
-    assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
-    # A's degraded terminal is already part of the completed trajectory.
-    assert [item.requested.value for item in planner.contexts[1].history] == []
+    # Both slots were filled and both terminals were collected in one turn.
+    assert controller.pending_execution_ids == ()
+    assert controller.state.value == "planning"
+    # The second slot was planned before any terminal completed.
+    assert [item.outcome for item in planner.contexts[1].history] == []
+    assert first.incumbent_comparison.decision == IncumbentDecision.INITIALIZED
     second = runner.run_turn()
-    # C was planned knowing A's outcome and B's in-flight request.
-    assert any(
-        item.execution_id == "execution-2"
-        for item in planner.contexts[2].in_flight
-    )
+    # C was planned knowing A's and B's outcomes; nothing stayed in flight.
     assert [item.outcome for item in planner.contexts[2].history] == [
-        OptimizationOutcomeKind.DEGRADED
+        OptimizationOutcomeKind.DEGRADED,
+        OptimizationOutcomeKind.EXECUTION_SUCCEEDED,
     ]
-    assert second.incumbent_comparison is not None
-    assert controller.pending_execution_ids == ("execution-3",)
+    assert planner.contexts[2].in_flight == ()
+    assert second.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    assert controller.pending_execution_ids == ()
     runner.close()
 
 
@@ -300,11 +304,9 @@ def test_a3_promotion_switches_to_the_winners_full_configuration(tmp_path):
     )
 
     runner.run_turn()
-    assert runner.current_values["place.target_density"] == 0.25
-    assert runner.current_values["place.cell_padding_x"] == 2
-    runner.request_stop()
-    runner.run_turn()
 
+    # Both candidates merged in order inside the turn; the final promotion
+    # adopted B's complete configuration, never splicing A's density into it.
     assert runner.current_values == {
         **_CURRENT_VALUES, "place.cell_padding_x": 4,
     }
@@ -338,17 +340,15 @@ def test_a5_simultaneous_terminals_merge_once_in_recorded_order(tmp_path):
     runner = _runner(controller, executor)
 
     first = runner.run_turn()
-    assert controller.pending_execution_ids == ("execution-2",)
-    assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_BETTER
-    runner.request_stop()
-    second = runner.run_turn()
-
     assert controller.pending_execution_ids == ()
-    assert controller.state.value == "planning"
+    assert first.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
     assert controller.budget.consumed_candidates == 2
     assert len(controller.ledger.replay().terminal_outcomes) == 2
     # The second merge judged B against the incumbent the first merge produced.
-    assert second.incumbent_comparison.decision == IncumbentDecision.CANDIDATE_INELIGIBLE
+    assert (
+        controller.ledger.replay().terminal_outcomes[-1].incumbent_decision
+        == "candidate_ineligible"
+    )
     runner.close()
 
 
@@ -468,10 +468,11 @@ def test_a6_recovery_stage_change_rejudges_the_late_candidate(tmp_path):
 
 
 def test_paused_turn_collects_terminals_without_dispatching(tmp_path):
-    """Pause holds new dispatch but never strands in-flight evidence."""
+    """Pause holds new dispatch and never strands in-flight evidence."""
     planner = _ScriptedPlanner(
         ("place.target_density", StrategyDirection.INCREASE, 0.6),
         ("place.cell_padding_x", StrategyDirection.INCREASE, 4),
+        ("place.target_density", StrategyDirection.DECREASE, 0.3),
     )
     executor = _ConcurrentExecutor(
         {
@@ -487,10 +488,14 @@ def test_paused_turn_collects_terminals_without_dispatching(tmp_path):
     runner.run_turn()
     assert len(executor.requests) == 2
     assert len(planner.contexts) == 2
-    assert runner.pending_execution_ids == ("execution-2",)
+    assert runner.pending_execution_ids == ()
 
     runner.run_turn(paused=True)
 
+    # Paused skips dispatch and planning entirely: the scripted third
+    # proposal stays unconsumed.
     assert len(executor.requests) == 2
     assert len(planner.contexts) == 2
+    assert len(planner.scripts) == 1
     assert runner.pending_execution_ids == ()
+    runner.close()

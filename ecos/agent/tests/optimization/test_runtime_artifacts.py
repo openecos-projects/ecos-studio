@@ -27,6 +27,8 @@ from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import (
     OptimizationRuntimeContext,
     OptimizationRuntimeError,
+    PLANNER_REASONING_EFFORT_ENV,
+    _apply_planner_reasoning_effort,
     _assemble_runner,
     _current_values,
     _design_id,
@@ -648,3 +650,37 @@ def test_runner_uses_parent_terminal_baseline_without_replaying(
     assert runner.budget.budget.wall_time_limit_seconds == 264.0
     runner.close()
     assert rpc.closed is True
+
+
+def test_planner_reasoning_effort_policy(monkeypatch) -> None:
+    monkeypatch.delenv(PLANNER_REASONING_EFFORT_ENV, raising=False)
+    calls: list[dict[str, str]] = []
+
+    def record(**kwargs: str) -> None:
+        calls.append(kwargs)
+
+    # The default is medium: the provider default and the GUI chat selection
+    # would otherwise inherit high effort for every planning turn.
+    _apply_planner_reasoning_effort(None, SimpleNamespace(set_model_settings=record))
+    assert calls[-1] == {"reasoning_effort": "medium"}
+
+    # Explicit runtime context beats the environment.
+    monkeypatch.setenv(PLANNER_REASONING_EFFORT_ENV, "low")
+    _apply_planner_reasoning_effort("high", SimpleNamespace(set_model_settings=record))
+    assert calls[-1] == {"reasoning_effort": "high"}
+
+    # The environment beats the default.
+    _apply_planner_reasoning_effort(None, SimpleNamespace(set_model_settings=record))
+    assert calls[-1] == {"reasoning_effort": "low"}
+
+    # An invalid override fails closed instead of falling back silently.
+    monkeypatch.setenv(PLANNER_REASONING_EFFORT_ENV, "ultra")
+    with pytest.raises(OptimizationRuntimeError):
+        _apply_planner_reasoning_effort(
+            None, SimpleNamespace(set_model_settings=record)
+        )
+
+    # Deterministic baseline providers have no model settings to set.
+    monkeypatch.delenv(PLANNER_REASONING_EFFORT_ENV)
+    _apply_planner_reasoning_effort(None, SimpleNamespace())
+    assert len(calls) == 3

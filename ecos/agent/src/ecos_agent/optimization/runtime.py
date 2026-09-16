@@ -95,6 +95,31 @@ _OPTIMIZATION_RERUN_STAGES = tuple(
 assert _OPTIMIZATION_RERUN_STAGES[-1] == CANDIDATE_END_STEP
 _DESIGN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 
+# Optimization planning runs at its own reasoning-effort policy, shared by the
+# headless driver and the GUI: both funnel through create_optimization_runner,
+# and both would otherwise inherit a high-effort default (app-server fallback
+# or the GUI chat selection).  Receipt-aware planning pays one full LLM turn
+# per decision, so effort dominates the episode wall-clock budget.  Explicit
+# runtime context beats the environment beats the default.
+PLANNER_REASONING_EFFORTS = ("low", "medium", "high")
+DEFAULT_PLANNER_REASONING_EFFORT = "medium"
+PLANNER_REASONING_EFFORT_ENV = "ECOS_OPTIMIZATION_PLANNER_REASONING_EFFORT"
+
+
+def _apply_planner_reasoning_effort(explicit: str | None, planner: object) -> None:
+    effort = (
+        explicit
+        or os.environ.get(PLANNER_REASONING_EFFORT_ENV, "").strip()
+        or DEFAULT_PLANNER_REASONING_EFFORT
+    )
+    if effort not in PLANNER_REASONING_EFFORTS:
+        raise OptimizationRuntimeError(
+            f"{PLANNER_REASONING_EFFORT_ENV} is invalid: {effort}"
+        )
+    setter = getattr(planner, "set_model_settings", None)
+    if callable(setter):
+        setter(reasoning_effort=effort)
+
 
 class OptimizationRuntimeContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -112,6 +137,7 @@ class OptimizationRuntimeContext(BaseModel):
     seed: StrictInt = 0
     max_in_flight_candidates: Literal[1, 2] = 2
     trend_noise_epsilon: dict[str, float] | None = None
+    planner_reasoning_effort: Literal["low", "medium", "high"] | None = None
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -148,6 +174,7 @@ def create_optimization_runner(
         raise OptimizationRuntimeError(
             "legacy objective has no parameter policy; confirm a new optimization objective"
         )
+    _apply_planner_reasoning_effort(runtime.planner_reasoning_effort, planner)
     workspace = _workspace(runtime.workspace)
     if (
         runtime.trend_noise_epsilon is None

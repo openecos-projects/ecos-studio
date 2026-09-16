@@ -58,9 +58,10 @@ class OptimizationEpisodeTurn:
 class OptimizationEpisodeRunner:
     """Build fresh bounded inputs and let the controller own all side effects.
 
-    One turn fills every free candidate slot (plan and start), then absorbs
-    exactly one completed terminal so its evidence immediately feeds the next
-    turn.  With a single-slot controller this is the original serial turn.
+    One turn fills every free candidate slot (plan and start), then collects
+    every completed terminal before returning, so the next turn always plans
+    against the full in-flight evidence.  With a single-slot controller this
+    is the original serial turn.
     """
 
     def __init__(
@@ -272,9 +273,10 @@ class OptimizationEpisodeRunner:
             == OptimizationEpisodeState.AWAITING_EXECUTION
         ):
             execution = self._controller.stop_before_execution()
-        # Wait phase: absorb exactly one completed candidate so its evidence
-        # reaches the next planning turn without waiting for the other slot.
-        absorbed = self._absorb_one_terminal(observation)
+        # Wait phase: collect every completed candidate before returning, so
+        # the next planning turn sees the full in-flight evidence instead of
+        # spending planning-only turns re-planning around partial results.
+        absorbed = self._collect_pending_terminals(observation)
         if absorbed is not None:
             terminal_observation, comparison, active_before, active_after, (
                 completed,
@@ -323,6 +325,38 @@ class OptimizationEpisodeRunner:
             stage: item for stage, item in supplied.items()
             if isinstance(item, StageObservation)
         }
+
+    def _collect_pending_terminals(self, observation: StageObservation):
+        """Absorb every pending terminal; None when nothing was pending.
+
+        The turn summary keeps the last absorbed terminal and the first
+        absorb's active objective, so a batch shows the objective the turn
+        started from and the candidate judged last.  Quarantine stops the
+        collection: the episode must surface the indeterminate state instead
+        of absorbing further candidates.  Runners without a real waiter
+        (fakes) keep the single-absorb contract: one indeterminate per turn
+        so state advances gradually.
+        """
+        if not self._controller.pending_execution_ids:
+            return None
+        if self._terminal_waiter is None and self._terminal_waiter_any is None:
+            return self._indeterminate_absorb(observation, None, None)
+        collected = self._absorb_one_terminal(observation)
+        while (
+            self._controller.pending_execution_ids
+            and self._controller.state in _PLANNABLE_STATES
+        ):
+            terminal_observation, comparison, _before, active_after, completed = (
+                self._absorb_one_terminal(observation)
+            )
+            collected = (
+                terminal_observation,
+                comparison,
+                collected[2],
+                active_after,
+                completed,
+            )
+        return collected
 
     def _absorb_one_terminal(self, observation: StageObservation):
         pending_ids = self._controller.pending_execution_ids

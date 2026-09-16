@@ -60,7 +60,7 @@ class BaselineProposalProvider:
     def select_model(self, model: str) -> None:  # noqa: ARG002
         return None
 
-    def set_model_settings(self, *, model: str, reasoning_effort: str) -> None:  # noqa: ARG002
+    def set_model_settings(self, *, model: str | None = None, reasoning_effort: str | None = None) -> None:  # noqa: ARG002
         return None
 
     def close(self) -> None:

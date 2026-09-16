@@ -384,7 +384,11 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     parser.add_argument("--pdk-root", type=Path, required=True)
     parser.add_argument("--model", default="glm-5.3-flash")
     parser.add_argument(
-        "--reasoning-effort", default="high", choices=("low", "medium", "high")
+        "--reasoning-effort",
+        default="medium",
+        choices=("low", "medium", "high"),
+        help="optimization planner reasoning effort; applied by the shared "
+        "runtime (create_optimization_runner), not by this driver",
     )
     parser.add_argument(
         "--goal-text",
@@ -521,12 +525,9 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         model = args.model
         if args.baseline_method:
             model = None
-        elif args.reasoning_effort:
-            # set_model_settings 内部会先 select_model 再校验 effort 合法性
-            provider.set_model_settings(
-                model=model, reasoning_effort=args.reasoning_effort
-            )
         else:
+            # reasoning effort is applied by create_optimization_runner from
+            # the runtime context below, shared with the GUI episode path
             provider.select_model(model)
         objective = _episode_objective(args.goal_text, args.geometry_mode)
         # alignment 必须锚定 workspace 本体（canonical）观测：runner 启动时用
@@ -548,6 +549,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             ),
             "agent_mode": args.agent_mode,
             "knowledge_case_shots": 0,
+            "planner_reasoning_effort": args.reasoning_effort,
         }
         runner = create_optimization_runner(runtime_context, provider)
         try:
