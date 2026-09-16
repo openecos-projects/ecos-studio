@@ -28,6 +28,26 @@ describe('Agent Workspace parameter mapping', () => {
     })
   })
 
+  it('lets Backend Step Options override the workspace-wide knob values', () => {
+    const values = readAgentWorkspaceParameterValues(
+      {
+        parameters: {
+          'place.target_density': 0.4,
+          'cts.skew_bound': '0.08',
+        },
+      },
+      {
+        place: { 'place.target_density': 0.55 },
+        CTS: { 'cts.skew_bound': '0.12' },
+      },
+    )
+
+    expect(values).toMatchObject({
+      'place.target_density': 0.55,
+      'cts.skew_bound': 0.12,
+    })
+  })
+
   it('derives the exact ECC commands from a validated logical patch', () => {
     expect(
       deriveAgentWorkspaceParameterUpdates([

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
-import shutil
 import threading
 from time import monotonic as _monotonic
 from pathlib import Path
@@ -34,10 +32,8 @@ from ecos_agent.optimization.controller import (
     OptimizationAgentMode,
     OptimizationEpisodeController,
 )
-from ecos_agent.optimization.ecc.adapter import (
-    EccCandidateRerunAdapter,
-    EccContentLengthRpcClient,
-)
+from ecos_agent.optimization.ecc.adapter import EccCandidateRerunAdapter
+from ecos_agent.optimization.host_transport import open_execution_adapter
 from ecos_agent.optimization.execution import (
     CANDIDATE_END_STEP,
     CandidateExecutionReceipt,
@@ -112,6 +108,8 @@ class OptimizationRuntimeContext(BaseModel):
     seed: StrictInt = 0
     max_in_flight_candidates: Literal[1, 2] = 2
     trend_noise_epsilon: dict[str, float] | None = None
+    workspace_handle: str | None = None
+    expected_workspace_revision: StrictInt | None = None
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -208,7 +206,7 @@ def create_optimization_runner(
     )
     memory_store = OptimizationTaskMemoryStore(ledger_root.parent, memory_scope)
     ledger = _ledger(ledger_root)
-    executor, execution_context = _open_execution_adapter(
+    executor, execution_context = open_execution_adapter(
         runtime=runtime,
         workspace=workspace,
         site_width_dbu=site_width_dbu,
@@ -245,61 +243,6 @@ def create_optimization_runner(
         routability_objective=routability_objective,
         site_width_dbu=site_width_dbu,
     )
-
-
-def _open_execution_adapter(
-    *,
-    runtime: OptimizationRuntimeContext,
-    workspace: Path,
-    site_width_dbu: int,
-    parent_manifest: str,
-    design_id: str,
-) -> tuple[EccCandidateRerunAdapter, dict[str, object]]:
-    rpc = EccContentLengthRpcClient(_ecc_executable())
-    try:
-        ecc_revision = rpc.ecc_revision()
-        try:
-            execution_context = _optimization_execution_context(
-                workspace,
-                site_width_dbu,
-                parent_manifest,
-                ecc_revision,
-                design_id=design_id,
-            )
-        except OptimizationRuntimeError:
-            if (workspace / "origin").exists():
-                raise
-            execution_context = _legacy_execution_context(
-                runtime, design_id, parent_manifest, ecc_revision, site_width_dbu
-            )
-        executor = EccCandidateRerunAdapter(
-            rpc,
-            workspace_id=rpc.open_workspace(workspace),
-            site_width_dbu=site_width_dbu,
-            workspace_root=workspace,
-        )
-    except Exception:
-        rpc.close()
-        raise
-    return executor, execution_context
-
-
-def _legacy_execution_context(
-    runtime: OptimizationRuntimeContext,
-    design_id: str,
-    parent_manifest: str,
-    ecc_revision: str,
-    site_width_dbu: int,
-) -> dict[str, object]:
-    """Compatibility for unit fixtures without production materialized inputs."""
-    return {
-        "design_sha256": parent_manifest,
-        "design_id": design_id,
-        "parent_lineage_sha256": parent_manifest,
-        "ecc_revision": ecc_revision,
-        "site_width_dbu": site_width_dbu,
-        "seed": runtime.seed,
-    }
 
 
 def _recover_or_create_controller(
@@ -794,37 +737,6 @@ def _current_values(
 
 def _ledger(root: Path):
     return OptimizationLedger(root)
-
-
-def _ecc_executable() -> Path:
-    """Resolve the ECC Agent RPC executable.
-
-    Resolution order is shared with the Electron resolver
-    (`eccRpc/runtimeEnv.ts` resolveEccAgentExecutable): explicit env override
-    (validated, failing loudly), PATH lookup, then repo-relative candidates.
-    The GUI additionally prefers its packaged copy before PATH. The joint
-    contract lives in `ecos/agent/docs/ecc-agent-rpc.md`.
-    """
-    candidate = os.environ.get("ECOS_AGENT_ECC_RPC_BIN", "").strip()
-    if candidate:
-        path = Path(candidate).expanduser()
-        if path.is_file() and os.access(path, os.X_OK):
-            return path.resolve()
-        raise OptimizationRuntimeError("ECOS_AGENT_ECC_RPC_BIN is not executable")
-    resolved = shutil.which("ecc-agent-rpc")
-    if resolved:
-        return Path(resolved).resolve()
-    repo_root = Path(__file__).resolve().parents[5]
-    for relative in (
-        "ecc/.venv/bin/ecc-agent-rpc",
-        # Windows venv layout; mirrors the Electron resolver's candidates.
-        "ecc/.venv/Scripts/ecc-agent-rpc.exe",
-        "ecc/dist/ecc/ecc-agent-rpc",
-    ):
-        path = repo_root / relative
-        if path.is_file() and os.access(path, os.X_OK):
-            return path.resolve()
-    raise OptimizationRuntimeError("ECC Agent RPC executable is unavailable")
 
 
 def _site_width_dbu(workspace: Path) -> int:

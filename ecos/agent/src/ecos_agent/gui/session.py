@@ -100,6 +100,8 @@ class ProviderSession:
     rerun_stage: str | None = None
     rerun_resolver: GuiWorkspaceRerunResolver | None = None
     rerun_workspace_path: str | None = None
+    workspace_handle: str | None = None
+    workspace_revision: int | None = None
     quick_start_results: set[tuple[str, str]] = field(default_factory=set)
     rerun_discovery: GuiWorkspaceRerunDiscovery | None = None
     rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)

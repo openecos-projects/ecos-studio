@@ -133,6 +133,7 @@ export const desktopApiIpcChannels = {
   agentStart: 'agent:start',
   agentStartSession: 'agent:start-session',
   agentSendMessage: 'agent:send-message',
+  agentRegisterOperationAssociation: 'agent:register-operation-association',
   agentGetModelSettings: 'agent:get-model-settings',
   agentSetModelSettings: 'agent:set-model-settings',
   agentAnswerInteraction: 'agent:answer-interaction',

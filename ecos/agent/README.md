@@ -132,9 +132,13 @@ signoff checklist 检查与可选导出。
 ### 4. Workspace：修改参数（只保存）
 
 在聊天中明确描述参数变更后，Agent 只接受当前 workspace 已发现的 tunable knobs，
-验证补丁并展示当前值到目标值的保存合同。确认后 GUI 按 knob registry 给出的目标
-写入 `home/parameters.json` 或对应 `config/*.json`，再通过 ECC sync/refresh 保持两个
-参数 surface 一致，**不会**自动跑 flow。
+验证补丁并展示当前值到目标值的保存合同。确认后 Studio 通过 `workspace.updateConfiguration`
+（workspace 级参数）或 `workspace.updateStepConfiguration`（step-private 参数）提交
+规范参数名与目标值；ECC 对照 Parameter Catalog 校验并原子更新 Workspace Descriptor，
+同时推进 Workspace Revision，Agent 合同、Renderer 与 Electron IPC 不直接读写
+`params.toml`、`parameters.json` 或 `config/*.json`，**不会**自动跑 flow
+（见 docs/adr/0038-agent-parameter-updates-use-domain-commands.md 与
+docs/adr/0040-step-configuration-updates-use-ecc-commands.md）。
 
 ### 5. Workspace：在当前 Project 下新建 Workspace
 

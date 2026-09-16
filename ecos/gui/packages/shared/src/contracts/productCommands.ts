@@ -1,13 +1,21 @@
 import type {
+  EccCandidateCapabilitiesRequest,
+  EccCandidateCapabilitiesResult,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
   EccRuntimeOperation,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceOpenRequest,
+  EccWorkspaceOpenResult,
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
+  EccWorkspaceDeriveRequest,
+  EccWorkspaceDeriveResult,
   EccWorkspaceMutationRequest,
   EccWorkspaceResetFlowResult,
   EccWorkspaceUpdateResult,
@@ -63,13 +71,24 @@ export type ProductCommandRequest =
     }
   | { command: 'workspace.reset'; payload: EccWorkspaceMutationRequest }
   | { command: 'workspace.exportSignoff'; payload: EccWorkspaceExportSignoffRequest }
+  | { command: 'workspace.open'; payload: EccWorkspaceOpenRequest }
+  | {
+      command: 'workspace.derive'
+      payload: EccWorkspaceDeriveRequest & { workspaceHandle: string }
+    }
+  | { command: 'candidate.capabilities'; payload: EccCandidateCapabilitiesRequest }
+  | { command: 'candidate.rerun'; payload: EccCandidateRerunRequest }
+  | { command: 'candidate.resume'; payload: EccCandidateResumeRequest }
 
 export type ProductCommandResult =
   | EccWorkspaceCreateResult
+  | EccWorkspaceOpenResult
+  | EccWorkspaceDeriveResult
   | EccWorkspaceUpdateResult
   | EccWorkspaceResetFlowResult
   | EccWorkspaceExportSignoffResult
   | EccRuntimeOperation
+  | EccCandidateCapabilitiesResult
   | { accepted: boolean; operationId: string; state: string }
   | { recovered: boolean }
   | { recovered: boolean; issue?: string }

@@ -1237,7 +1237,7 @@ async function maybeRunPostCreateFlow(): Promise<void> {
   try {
     await agentFlowProgress.start(handoff.workspacePath)
     try {
-      const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })
+      const flowResult = await runAllFlow({ rerun: false })
       if (flowResult === null) {
         throw new Error('Flow execution did not complete successfully.')
       }
@@ -2221,9 +2221,20 @@ async function executeWorkspaceContinue(
   messageStore.setActiveSessionId(ownerSessionId)
   try {
     await agentFlowProgress.start(contract.workspace)
-    const flowResult = await runAllFlow({ rerun: false, runtimeTarget: 'agent' })
+    const flowResult = await runAllFlow({ rerun: false })
     if (flowResult === null) {
       throw new Error('Flow execution did not complete successfully.')
+    }
+    const desktopAgent = getOptionalDesktopApi()?.agent
+    if (typeof desktopAgent?.registerOperationAssociation === 'function') {
+      void desktopAgent
+        .registerOperationAssociation({
+          command: 'workspace.run',
+          operationId: flowResult.operationId,
+          providerId: AGENT_PROVIDER_ID,
+          sessionId: ownerSessionId,
+        })
+        .catch(() => undefined)
     }
     await waitForRuntimeOperation(flowResult.operationId)
     const flow = await readWorkspaceFlowResourceApi()

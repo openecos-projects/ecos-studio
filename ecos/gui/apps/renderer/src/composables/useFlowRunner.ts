@@ -32,8 +32,6 @@ import {
 export interface FlowRunOptions {
   rerun?: boolean
   resetDependents?: boolean
-  /** Accepted for Agent callers; ordinary Workspace Flow still uses the generic Runtime. */
-  runtimeTarget?: 'agent'
 }
 
 // A completed backend or frontend flow can update every Home data source. Keep

@@ -31,7 +31,7 @@ def main() -> int:
         "--ecc-bin",
         type=Path,
         default=(
-            Path(__file__).resolve().parents[3] / "ecc/.venv/bin/ecc-agent-rpc"
+            Path(__file__).resolve().parents[3] / "ecc/.venv/bin/ecc"
         ),
     )
     args = parser.parse_args()

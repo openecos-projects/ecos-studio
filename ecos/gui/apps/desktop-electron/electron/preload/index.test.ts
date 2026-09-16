@@ -75,6 +75,7 @@ async function loadDesktopBridge() {
       getModelSettings(request: unknown): Promise<unknown>
       interrupt(request: unknown): Promise<void>
       onEvent(listener: (event: unknown) => void): () => void
+      registerOperationAssociation(request: unknown): Promise<void>
       sendMessage(request: unknown): Promise<unknown>
       setModelSettings(request: unknown): Promise<unknown>
       start(request: unknown): Promise<void>
@@ -538,6 +539,25 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       desktopApiEventChannels.agentEvent,
       eventListener,
+    )
+  })
+
+  it('routes agent operation association registration through its IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      command: 'workspace.run',
+      operationId: 'operation-1',
+      providerId: 'ecos_agent',
+      sessionId: 'gui-session-1',
+    }
+    ipcRenderer.invoke.mockResolvedValue(undefined)
+
+    await expect(
+      bridge.agent.registerOperationAssociation(request),
+    ).resolves.toBeUndefined()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.agentRegisterOperationAssociation,
+      request,
     )
   })
 

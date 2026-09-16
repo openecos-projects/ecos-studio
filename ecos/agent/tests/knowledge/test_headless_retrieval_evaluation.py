@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tests.paths import AGENT_ROOT
+
+PROVIDER_BINARY = AGENT_ROOT / "dist" / "ecos-agent"
+
+requires_provider_binary = pytest.mark.skipif(
+    not os.access(PROVIDER_BINARY, os.X_OK),
+    reason="packaged provider binary is not built (run .github/scripts/build-binaries.sh)",
+)
 
 
 def _evaluate(tmp_path: Path, config: dict[str, object]) -> dict[str, object]:
@@ -20,7 +30,7 @@ def _evaluate(tmp_path: Path, config: dict[str, object]) -> dict[str, object]:
             "--config",
             str(config_path),
             "--provider-binary",
-            str(AGENT_ROOT / "dist" / "ecos-agent"),
+            str(PROVIDER_BINARY),
             "--output",
             str(output_path),
         ],
@@ -32,6 +42,7 @@ def _evaluate(tmp_path: Path, config: dict[str, object]) -> dict[str, object]:
     return json.loads(output_path.read_text(encoding="utf-8"))
 
 
+@requires_provider_binary
 def test_headless_evaluation_audits_frozen_retrieval_and_packaged_fallback(tmp_path: Path) -> None:
     payload = _evaluate(
         tmp_path,

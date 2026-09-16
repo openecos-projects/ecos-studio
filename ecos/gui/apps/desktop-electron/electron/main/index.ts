@@ -406,6 +406,35 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       app.isPackaged
         ? join(process.resourcesPath, 'agent')
         : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
+      {
+        candidateCapabilities: (request) =>
+          desktopServices.eccRuntimeService.candidateCapabilities(request),
+        candidateRerun: (request) =>
+          desktopServices.eccRuntimeService.candidateRerun(request),
+        candidateResume: (request) =>
+          desktopServices.eccRuntimeService.candidateResume(request),
+        cancelOperation: (request) =>
+          desktopServices.eccRuntimeService.cancelOperation(request),
+        hello: () =>
+          desktopServices.eccRuntimeService.callRuntime('rpc.hello', { version: 1 }),
+        openWorkspace: (request) =>
+          desktopServices.eccRuntimeService.openWorkspace(request),
+        operationStatus: (request) =>
+          desktopServices.eccRuntimeService.operationStatus(request),
+        startFlowOperation: (request) =>
+          desktopServices.eccRuntimeService.startFlowOperation(request),
+        waitForOperation: (request) =>
+          desktopServices.eccRuntimeService.waitForOperation(request),
+        workspaceSession: async (workspaceHandle) => {
+          try {
+            return await desktopServices.eccRuntimeService.workspaceSession(
+              workspaceHandle,
+            )
+          } catch {
+            return null
+          }
+        },
+      },
     )
     registerIpc(undefined, {
       agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),

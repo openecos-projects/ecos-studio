@@ -116,11 +116,16 @@ describe('executeProductCommand Workspace creation', () => {
           registerCreateWorkspace,
           runtime: {
             cancelOperation: vi.fn(),
+            candidateCapabilities: vi.fn(),
+            candidateRerun: vi.fn(),
+            candidateResume: vi.fn(),
             createWorkspace: vi.fn().mockResolvedValue({
               directory: payload.targetDirectory,
               workspaceHandle: 'handle-1',
             }),
+            deriveWorkspace: vi.fn(),
             exportSignoff: vi.fn(),
+            openWorkspace: vi.fn(),
             releaseWorkspace,
             resetFlow: vi.fn(),
             retryFinalSnapshot: vi.fn(),
@@ -163,8 +168,13 @@ describe('executeProductCommand Workspace creation', () => {
         registerCreateWorkspace: vi.fn(),
         runtime: {
           cancelOperation: vi.fn(),
+          candidateCapabilities: vi.fn(),
+          candidateRerun: vi.fn(),
+          candidateResume: vi.fn(),
           createWorkspace,
+          deriveWorkspace: vi.fn(),
           exportSignoff: vi.fn(),
+          openWorkspace: vi.fn(),
           releaseWorkspace: vi.fn(),
           resetFlow: vi.fn(),
           retryFinalSnapshot: vi.fn(),
@@ -182,5 +192,262 @@ describe('executeProductCommand Workspace creation', () => {
       ...payload,
       targetDirectory: '/projects/real/ws_1',
     })
+  })
+
+  it('routes owned Candidate commands to the Runtime', async () => {
+    const candidateCapabilities = vi.fn().mockResolvedValue({
+      schema: 'ecc.workspace.candidate_capabilities.v1',
+      schemaVersion: 1,
+      targets: [],
+    })
+    const candidateRerun = vi.fn().mockResolvedValue({ operationId: 'operation-1' })
+    const candidateResume = vi.fn().mockResolvedValue({ operationId: 'operation-2' })
+    const runtime = {
+      candidateCapabilities,
+      candidateRerun,
+      candidateResume,
+    } as never
+    const context = {
+      ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+      runtime,
+    } as never
+    const rerunPayload = {
+      candidateId: 'candidate-1',
+      contextSha256: `sha256:${'a'.repeat(64)}`,
+      endStep: 'Harden',
+      executionScope: 'full_flow',
+      expectedWorkspaceRevision: 1,
+      idempotencyKey: 'episode-1.intervention-1',
+      parameterCardSha256: `sha256:${'b'.repeat(64)}`,
+      patch: [{ knob_id: 'place.target_density', value: 0.6 }],
+      seed: 17,
+      targetStep: 'place',
+      workspaceHandle: 'handle-1',
+    }
+
+    await expect(
+      executeProductCommand(
+        { command: 'candidate.capabilities', payload: { workspaceHandle: 'handle-1' } },
+        context,
+      ),
+    ).resolves.toEqual({
+      schema: 'ecc.workspace.candidate_capabilities.v1',
+      schemaVersion: 1,
+      targets: [],
+    })
+    await expect(
+      executeProductCommand(
+        { command: 'candidate.rerun', payload: rerunPayload },
+        context,
+      ),
+    ).resolves.toEqual({ operationId: 'operation-1' })
+    await expect(
+      executeProductCommand(
+        {
+          command: 'candidate.resume',
+          payload: {
+            candidateId: 'candidate-1',
+            contextSha256: rerunPayload.contextSha256,
+            expectedWorkspaceRevision: 1,
+            idempotencyKey: 'episode-1.resume-1',
+            parameterCardSha256: rerunPayload.parameterCardSha256,
+            seed: 17,
+            workspaceHandle: 'handle-1',
+          },
+        },
+        context,
+      ),
+    ).resolves.toEqual({ operationId: 'operation-2' })
+    expect(candidateCapabilities).toHaveBeenCalledWith({ workspaceHandle: 'handle-1' })
+    expect(candidateRerun).toHaveBeenCalledWith(rerunPayload)
+    expect(candidateResume).toHaveBeenCalledWith({
+      candidateId: 'candidate-1',
+      contextSha256: rerunPayload.contextSha256,
+      expectedWorkspaceRevision: 1,
+      idempotencyKey: 'episode-1.resume-1',
+      parameterCardSha256: rerunPayload.parameterCardSha256,
+      seed: 17,
+      workspaceHandle: 'handle-1',
+    })
+  })
+
+  it('opens a calibration replay Workspace without requiring an existing handle', async () => {
+    const openWorkspace = vi.fn().mockResolvedValue({
+      directory:
+        '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+      workspaceHandle: 'handle-replay',
+      workspaceRevision: 1,
+    })
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.open',
+          payload: {
+            directory:
+              '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+          },
+        },
+        {
+          ownsWorkspaceHandle: () => false,
+          runtime: { openWorkspace } as never,
+        } as never,
+      ),
+    ).resolves.toMatchObject({ workspaceHandle: 'handle-replay' })
+    expect(openWorkspace).toHaveBeenCalledWith({
+      directory:
+        '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+    })
+  })
+
+  it('rejects a Candidate rerun that does not own the Workspace handle', async () => {
+    await expect(
+      executeProductCommand(
+        {
+          command: 'candidate.rerun',
+          payload: {
+            candidateId: 'candidate-1',
+            contextSha256: `sha256:${'a'.repeat(64)}`,
+            endStep: 'Harden',
+            executionScope: 'full_flow',
+            expectedWorkspaceRevision: 1,
+            idempotencyKey: 'episode-1.intervention-1',
+            parameterCardSha256: `sha256:${'b'.repeat(64)}`,
+            patch: [{ knob_id: 'place.target_density', value: 0.6 }],
+            seed: 17,
+            targetStep: 'place',
+            workspaceHandle: 'handle-2',
+          },
+        },
+        {
+          ownsWorkspaceHandle: () => false,
+          runtime: { candidateRerun: vi.fn() } as never,
+        } as never,
+      ),
+    ).rejects.toThrow('Product Command does not own this Workspace handle')
+  })
+
+  it('routes an owned Workspace derive to the Runtime', async () => {
+    const deriveWorkspace = vi.fn().mockResolvedValue({
+      directory: '/runs/gcd_rerun_place',
+      workspaceHandle: 'handle-derived',
+      workspaceRevision: 1,
+    })
+    const payload = {
+      workspaceHandle: 'handle-1',
+      directory: '/runs/gcd',
+      targetDirectory: '/runs/gcd_rerun_place',
+      resetFromStep: 'place',
+      commandId: 'derive-1',
+      cause: 'workspace.derived',
+    }
+
+    await expect(
+      executeProductCommand({ command: 'workspace.derive', payload }, {
+        ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+        runtime: { deriveWorkspace } as never,
+      } as never),
+    ).resolves.toEqual({
+      directory: '/runs/gcd_rerun_place',
+      workspaceHandle: 'handle-derived',
+      workspaceRevision: 1,
+    })
+    expect(deriveWorkspace).toHaveBeenCalledWith(payload)
+  })
+
+  it.each([
+    [
+      'directory',
+      {
+        workspaceHandle: 'handle-1',
+        targetDirectory: '/runs/gcd_rerun_place',
+        resetFromStep: 'place',
+      },
+      'Product Command requires directory',
+    ],
+    [
+      'targetDirectory',
+      {
+        workspaceHandle: 'handle-1',
+        directory: '/runs/gcd',
+        resetFromStep: 'place',
+      },
+      'Product Command requires targetDirectory',
+    ],
+    [
+      'resetFromStep',
+      {
+        workspaceHandle: 'handle-1',
+        directory: '/runs/gcd',
+        targetDirectory: '/runs/gcd_rerun_place',
+      },
+      'Product Command requires resetFromStep',
+    ],
+    [
+      'a targetDirectory equal to the source directory',
+      {
+        workspaceHandle: 'handle-1',
+        directory: '/runs/gcd',
+        targetDirectory: '/runs/gcd',
+        resetFromStep: 'place',
+      },
+      'Product Command requires targetDirectory different from directory',
+    ],
+  ])('rejects a Workspace derive without %s', async (_case, payload, message) => {
+    await expect(
+      executeProductCommand({ command: 'workspace.derive', payload }, {
+        ownsWorkspaceHandle: () => true,
+        runtime: { deriveWorkspace: vi.fn() } as never,
+      } as never),
+    ).rejects.toThrow(message)
+  })
+
+  it('allows an empty resetFromStep for a full reset', async () => {
+    const deriveWorkspace = vi.fn().mockResolvedValue({
+      directory: '/runs/gcd_rerun_place',
+      workspaceHandle: 'handle-derived',
+      workspaceRevision: 1,
+    })
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.derive',
+          payload: {
+            workspaceHandle: 'handle-1',
+            directory: '/runs/gcd',
+            targetDirectory: '/runs/gcd_rerun_place',
+            resetFromStep: '',
+          },
+        },
+        {
+          ownsWorkspaceHandle: (handle: string) => handle === 'handle-1',
+          runtime: { deriveWorkspace } as never,
+        } as never,
+      ),
+    ).resolves.toMatchObject({ workspaceHandle: 'handle-derived' })
+    expect(deriveWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ resetFromStep: '' }),
+    )
+  })
+
+  it('rejects a Workspace derive that does not own the source handle', async () => {
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.derive',
+          payload: {
+            workspaceHandle: 'handle-2',
+            directory: '/runs/gcd',
+            targetDirectory: '/runs/gcd_rerun_place',
+            resetFromStep: 'place',
+          },
+        },
+        {
+          ownsWorkspaceHandle: () => false,
+          runtime: { deriveWorkspace: vi.fn() } as never,
+        } as never,
+      ),
+    ).rejects.toThrow('Product Command does not own this Workspace handle')
   })
 })

@@ -69,8 +69,11 @@ Entry hashes are computed over the key set actually stored in each record
 - Do not overwrite a source workspace when the operation requires an isolated
   rerun target.
 - Do not report success without terminal execution evidence.
-- Read `PERMISSION_MODEL.md` before changing permission, path, network, parameter
-  authorization, or audit behavior.
+- Keep permission, path, network, parameter authorization, and audit
+  behavior behind the typed-proposal chain described in `README.md`
+  (「边界靠什么保证」); `PERMISSION_MODEL.md` was removed, so align changes
+  with `src/ecos_agent/codex/provider.py` policy and
+  `tests/codex/test_app_server_policy.py`.
 
 ## Dependencies And Packaging
 

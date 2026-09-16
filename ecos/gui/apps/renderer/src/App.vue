@@ -463,7 +463,7 @@ async function createWorkspaceFromAgent(
   }
   const agentShell = useAgentShellStore()
   agentShell.beginPreserveForAgentWorkspaceSwitch()
-  const success = await newProject(config, { runtimeTarget: 'agent' })
+  const success = await newProject(config)
   if (!success) {
     agentShell.consumePreserveMessages()
     agentShell.consumePreserveSession()
@@ -720,7 +720,7 @@ const runQuickStart: QuickStartRunner = async (onEvent, signal, onNarration) => 
           workspacePath: input.workspace.path,
           narrate,
           signal,
-          start: () => runAllFlow({ rerun: false, runtimeTarget: 'agent' }),
+          start: () => runAllFlow({ rerun: false }),
           onStarted: async (flowResult) => {
             await writeQuickStartRunRecord(api, input.workspace.path, {
               flow: {
@@ -1269,7 +1269,7 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     quickStartWizardResolve = null
     quickStartWizardReject = null
     resetWorkspaceWizard()
-    const success = await newProject(config, { runtimeTarget: 'agent' })
+    const success = await newProject(config)
     if (!success) {
       reject?.(
         new Error(lastWorkspaceCreationError.value || 'Workspace creation failed.'),

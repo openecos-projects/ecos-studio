@@ -1003,7 +1003,7 @@ export function useWorkspace() {
    */
   const newProject = async (
     config?: WorkspaceConfig,
-    options: { shouldActivate?: () => boolean; runtimeTarget?: 'agent' } = {},
+    options: { shouldActivate?: () => boolean } = {},
   ) => {
     if (activeWorkspaceCreationRequest) {
       lastWorkspaceCreationError.value =

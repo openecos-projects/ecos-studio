@@ -16,6 +16,10 @@ import type {
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
   EccRuntimeEvent,
+  EccCandidateCapabilitiesRequest,
+  EccCandidateCapabilitiesResult,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
   EccRuntimeStartFlowRequest,
@@ -24,6 +28,8 @@ import type {
   EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceDeriveRequest,
+  EccWorkspaceDeriveResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
@@ -328,6 +334,20 @@ export class EccRpcRuntimeService {
     ).updateWorkspaceStepConfiguration(request)
   }
 
+  async deriveWorkspace(
+    request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
+  ): Promise<EccWorkspaceDeriveResult> {
+    // Validate the caller-owned source handle before ECC creates the target.
+    this.runtimeForHandle(request.workspaceHandle)
+    const requestKey = normalizeWorkspacePath(request.targetDirectory)
+    const runtime = this.getOrCreateRuntime(request.targetDirectory)
+    const result = await runtime.deriveWorkspace(request)
+    this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+    await runtime.releaseIdleSidecar()
+    this.projection.refresh()
+    return result
+  }
+
   async openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     const requestKey = normalizeWorkspacePath(request.directory)
     const runtime = this.getOrCreateRuntime(request.directory)
@@ -490,6 +510,30 @@ export class EccRpcRuntimeService {
   ): Promise<EccRuntimeOperation> {
     const runtime = this.runtimeForHandle(request.workspaceHandle)
     const operation = await runtime.startStepOperation(request)
+    runtime.trackOperationSnapshot(operation)
+    this.projection.refresh()
+    return operation
+  }
+
+  async candidateCapabilities(
+    request: EccCandidateCapabilitiesRequest,
+  ): Promise<EccCandidateCapabilitiesResult> {
+    return this.runtimeForHandle(request.workspaceHandle).candidateCapabilities(request)
+  }
+
+  async candidateRerun(request: EccCandidateRerunRequest): Promise<EccRuntimeOperation> {
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    const operation = await runtime.candidateRerun(request)
+    runtime.trackOperationSnapshot(operation)
+    this.projection.refresh()
+    return operation
+  }
+
+  async candidateResume(
+    request: EccCandidateResumeRequest,
+  ): Promise<EccRuntimeOperation> {
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    const operation = await runtime.candidateResume(request)
     runtime.trackOperationSnapshot(operation)
     this.projection.refresh()
     return operation

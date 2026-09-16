@@ -17,14 +17,14 @@ from ecos_agent.hashing import canonical_sha256, file_sha256
 from ecos_agent.optimization.contracts import (
     TerminalObservation,
 )
-from ecos_agent.optimization.ecc.adapter import EccContentLengthRpcClient
+from ecos_agent.optimization.ecc.rpc_client import EccContentLengthRpcClient
 from ecos_agent.optimization.experiments.equal_budget import (
     validate_design_manifest,
 )
 from ecos_agent.optimization.observations import build_terminal_observation
 from ecos_agent.optimization.observation_contracts import deterministic_noise_profile
+from ecos_agent.optimization.experiments.offline_runtime import ecc_rpc_serve_executable
 from ecos_agent.optimization.runtime import (
-    _ecc_executable,
     _optimization_rerun_runtime_seconds,
 )
 from ecos_agent.workspace.parameters import (
@@ -190,7 +190,7 @@ def _ensure_workspace(
             _verify_workspace_inputs(manifest, design, workspace)
             return _terminal_observation(workspace)
         _verify_workspace_binding(manifest, design, workspace)
-        client = EccContentLengthRpcClient(_ecc_executable())
+        client = EccContentLengthRpcClient(ecc_rpc_serve_executable())
         try:
             workspace_id = client.open_workspace(workspace)
             _run_canonical_flow(client, workspace_id, design.design_id, timeout)
@@ -200,7 +200,7 @@ def _ensure_workspace(
         return _terminal_observation(workspace)
     if workspace.exists():
         raise ValueError("incomplete Phase 8 workspace already exists")
-    client = EccContentLengthRpcClient(_ecc_executable())
+    client = EccContentLengthRpcClient(ecc_rpc_serve_executable())
     try:
         request = _workspace_request(manifest, design, workspace)
         created = _setup_request(client, "workspace.create", request, 120.0)
@@ -492,7 +492,7 @@ def _noise_context_payload(
     manifest: ExperimentManifest, workspace: Path
 ) -> dict[str, object]:
     repo_root = Path(__file__).resolve().parents[6]
-    ecc_executable = _ecc_executable()
+    ecc_executable = ecc_rpc_serve_executable()
     # Design inputs enter through workspace/origin/ (the exact bytes the
     # canonical flow consumed); `design` itself needs no separate entry.
     return {
@@ -564,7 +564,7 @@ def _run_default_replay(
     )
     started = time.monotonic()
     if not isinstance(terminal, dict) or terminal.get("state") != "succeeded":
-        client = EccContentLengthRpcClient(_ecc_executable())
+        client = EccContentLengthRpcClient(ecc_rpc_serve_executable())
         request = {
             "workspaceId": client.open_workspace(replay_workspace),
             "rerun": True,

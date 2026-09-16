@@ -130,27 +130,43 @@ def test_missing_workspace_reruns_the_flow_and_records_provenance(
         lambda workspace_path: produced,
     )
 
-    class FakeClient:
-        def __init__(self, executable: str) -> None:
-            self.executable = executable
+    class FakeHost:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
 
-        def open_workspace(self, path: object) -> str:
-            return "ws-1"
+        def call(self, method: str, params: dict[str, object]) -> dict[str, object]:
+            self.calls.append((method, params))
+            if method == "workspace.open":
+                return {
+                    "workspaceHandle": "handle-1",
+                    "workspaceRevision": 2,
+                    "directory": str(params["directory"]),
+                }
+            if method == "workspace.run":
+                return {
+                    "operationId": "operation-1",
+                    "state": "succeeded",
+                    "workspaceId": "workspace-1",
+                }
+            raise AssertionError(f"unexpected host method {method}")
 
-        def _request(
-            self, method: str, params: dict[str, object], timeout_seconds: float
-        ) -> dict[str, object]:
-            return {"state": "succeeded"}
-
-        def close(self) -> None:
-            return None
-
+    host = FakeHost()
     monkeypatch.setattr(
-        "ecos_agent.optimization.calibrate_workspace.EccContentLengthRpcClient",
-        FakeClient,
+        "ecos_agent.optimization.calibrate_workspace._require_host_transport",
+        lambda: host,
     )
 
     result = _run_replay(workspace, replay_root, 1, 60.0, dict(_FINGERPRINT))
+    assert host.calls[0][0] == "workspace.open"
+    assert host.calls[1] == (
+        "workspace.run",
+        {
+            "workspaceHandle": "handle-1",
+            "expectedWorkspaceRevision": 2,
+            "rerun": True,
+            "idempotencyKey": "noise-calibration.default-replay-1",
+        },
+    )
 
     assert result == produced
     assert _load_replay_manifest(replay_root)["provenance"] == "produced"

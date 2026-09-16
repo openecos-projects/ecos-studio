@@ -60,6 +60,7 @@ import type {
   DesktopAgentWorkspaceRerunPrepareResult,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentOperationAssociationRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
@@ -398,6 +399,9 @@ export interface DesktopApi {
     sendMessage(
       request: DesktopAgentSendMessageRequest,
     ): Promise<DesktopAgentSendMessageResponse>
+    registerOperationAssociation(
+      request: DesktopAgentOperationAssociationRequest,
+    ): Promise<void>
     getModelSettings(
       request: DesktopAgentModelSettingsRequest,
     ): Promise<DesktopAgentModelSettings>

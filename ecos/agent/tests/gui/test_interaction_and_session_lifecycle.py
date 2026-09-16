@@ -228,6 +228,33 @@ def test_interaction_answers_are_one_time_and_resume_reuses_the_pending_request(
         )
 
 
+def test_send_message_refreshes_workspace_revision() -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(
+        emit=events.append,
+        chat_response_parser=lambda context: {
+            "schema_version": "flow-agent.gui_chat_response.v1",
+            "operation": None,
+            "answer": "I can help with ECOS design-flow questions.",
+        },
+    )
+    session_id = provider.start_session(
+        {"mode": "home", "workspaceRevision": 3}
+    )["sessionId"]
+    assert provider.sessions[session_id].workspace_revision == 3
+    provider.sessions[session_id].pending_interaction = None
+
+    provider.send_message(
+        {
+            "sessionId": session_id,
+            "message": "Explain placement.",
+            "workspaceRevision": 7,
+        }
+    )
+
+    assert provider.sessions[session_id].workspace_revision == 7
+
+
 def test_clarification_interaction_resumes_read_only_model_continuation() -> None:
     events: list[dict[str, object]] = []
     contexts: list[str] = []

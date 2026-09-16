@@ -213,6 +213,12 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
         directory = _optional_text(request.get("directory"))
         if directory:
             session.rerun_workspace_path = directory
+        workspace_handle = _optional_text(request.get("workspaceId"))
+        if workspace_handle:
+            session.workspace_handle = workspace_handle
+        workspace_revision = request.get("workspaceRevision")
+        if type(workspace_revision) is int and workspace_revision >= 1:
+            session.workspace_revision = workspace_revision
         project_root = _optional_text(request.get("projectRoot"))
         if project_root:
             session.project_root = project_root
@@ -246,6 +252,9 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
 
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
+        workspace_revision = request.get("workspaceRevision")
+        if type(workspace_revision) is int and workspace_revision >= 1:
+            session.workspace_revision = workspace_revision
         message = _required_message(request.get("message"))
         quick_start_result = message.startswith("quick_start_result:")
         with session.state_lock:

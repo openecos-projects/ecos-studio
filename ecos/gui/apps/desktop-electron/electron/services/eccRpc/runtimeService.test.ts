@@ -74,7 +74,7 @@ class FakeRpcClient implements EccRpcRuntimeClient {
 
     if (method === 'rpc.hello') {
       return {
-        capabilities: [],
+        capabilities: ['candidate.capabilities', 'candidate.rerun', 'candidate.resume'],
         eccVersion: '0.1.0',
         version: 1,
       } as T
@@ -504,6 +504,7 @@ describe('EccRpcRuntimeService pool', () => {
 
     await expect(query).resolves.toMatchObject({ workspaceId: 'id-/work/idle' })
     expect(client.calls.map((call) => call.method)).toEqual([
+      'rpc.hello',
       'workspace.open',
       'workspace.recover_interrupted',
       'workspace.engineering_snapshot',

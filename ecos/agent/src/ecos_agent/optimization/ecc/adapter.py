@@ -70,6 +70,7 @@ class EccCandidateRerunAdapter:
         workspace_id: str,
         site_width_dbu: int,
         workspace_root: Path | None = None,
+        expected_workspace_revision: int | None = None,
     ) -> None:
         if not _ID.fullmatch(workspace_id):
             raise OptimizationEccAdapterError("workspace id is invalid")
@@ -77,6 +78,7 @@ class EccCandidateRerunAdapter:
             raise OptimizationEccAdapterError("site width is invalid")
         self._rpc = rpc
         self._workspace_id = workspace_id
+        self._expected_workspace_revision = expected_workspace_revision
         self._site_width_dbu = site_width_dbu
         self._workspace_root = (
             Path(workspace_root).resolve() if workspace_root else None
@@ -162,6 +164,8 @@ class EccCandidateRerunAdapter:
             ),
             "seed": seed,
         }
+        if self._expected_workspace_revision is not None:
+            params["expectedWorkspaceRevision"] = self._expected_workspace_revision
         method = "candidate.resume" if patch is None else "candidate.rerun"
         if patch is not None:
             params.update(
@@ -236,7 +240,10 @@ class EccCandidateRerunAdapter:
     def cancel(self, intervention_id: str) -> CandidateExecutionReceipt:
         if not _ID.fullmatch(intervention_id):
             raise OptimizationEccAdapterError("operation id is invalid")
-        response = self._rpc.call("operation.cancel", {"operationId": intervention_id})
+        cancel_params: dict[str, object] = {"operationId": intervention_id}
+        if self._expected_workspace_revision is not None:
+            cancel_params["workspaceHandle"] = self._workspace_id
+        response = self._rpc.call("operation.cancel", cancel_params)
         returned_id = response.get("operationId")
         if returned_id is not None and returned_id != intervention_id:
             raise OptimizationEccAdapterError("cancel operation id does not match")
@@ -575,8 +582,15 @@ class EccCandidateRerunAdapter:
         """
         if not isinstance(workspace_id, str):
             return False
-        return workspace_id == self._workspace_id or workspace_id.startswith(
+        if workspace_id == self._workspace_id or workspace_id.startswith(
             f"{self._workspace_id}::candidate::"
+        ):
+            return True
+        # Product Command host calls use the Electron handle as workspace_id;
+        # ECC still reports the isolated candidate operation identity.
+        return (
+            self._expected_workspace_revision is not None
+            and "::candidate::" in workspace_id
         )
 
 

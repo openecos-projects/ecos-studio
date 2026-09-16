@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import uuid
 from typing import Any
 
 from ecos_agent.gui.provider import EcosAgentProvider
+from ecos_agent.optimization.host_transport import (
+    ProtocolHostTransport,
+    _PendingHostCall,
+    bind_host_transport,
+)
 from ecos_agent.optimization.runtime import create_optimization_runner
 
 
@@ -15,10 +21,12 @@ class EcosAgentProtocolServer:
     def __init__(self) -> None:
         self._threads: list[threading.Thread] = []
         self._write_lock = threading.Lock()
+        self._pending_host: dict[str, _PendingHostCall] = {}
         self.provider = EcosAgentProvider(
             emit=self._emit,
             optimization_runner_factory=create_optimization_runner,
         )
+        bind_host_transport(ProtocolHostTransport(self.call_host))
 
     def serve(self) -> int:
         for raw_line in sys.stdin:
@@ -27,20 +35,54 @@ class EcosAgentProtocolServer:
             thread.join()
         return 0
 
+    def call_host(
+        self, method: str, params: dict[str, object], *, timeout_seconds: float = 600.0
+    ) -> dict[str, object]:
+        request_id = uuid.uuid4().hex
+        pending = _PendingHostCall()
+        self._pending_host[request_id] = pending
+        try:
+            self._write({"id": request_id, "method": method, "params": params})
+            payload = pending.wait(timeout_seconds)
+        except TimeoutError as exc:
+            raise TimeoutError(f"host Product Command {method} timed out") from exc
+        finally:
+            self._pending_host.pop(request_id, None)
+        if "error" in payload:
+            error = payload["error"]
+            if isinstance(error, dict):
+                message = error.get("message")
+            else:
+                message = error
+            raise RuntimeError(str(message or f"host Product Command {method} failed"))
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeError(f"host Product Command {method} result is invalid")
+        return result
+
     def _handle_line(self, raw_line: str) -> None:
-        request, request_id = _protocol_request(raw_line)
-        if request is None:
+        payload, request_id = _protocol_record(raw_line)
+        if payload is None:
             self._write({"id": request_id, "error": {"message": "Invalid provider request."}})
             return
-        if request.get("method") in {"sendMessage", "answerInteraction"}:
+        if request_id is not None and not payload.get("method"):
+            pending = self._pending_host.get(request_id)
+            if pending is not None:
+                pending.complete(payload)
+                return
+            if "result" in payload or "error" in payload:
+                return
+            self._write({"id": request_id, "error": {"message": "Unknown host response."}})
+            return
+        if payload.get("method") in {"sendMessage", "answerInteraction"}:
             self._threads = [thread for thread in self._threads if thread.is_alive()]
             thread = threading.Thread(
-                target=self._handle_request, args=(request, request_id), daemon=True
+                target=self._handle_request, args=(payload, request_id), daemon=True
             )
             self._threads.append(thread)
             thread.start()
             return
-        self._handle_request(request, request_id)
+        self._handle_request(payload, request_id)
 
     def _handle_request(self, request: dict[str, Any], request_id: str | None) -> None:
         try:
@@ -91,16 +133,21 @@ def main() -> int:
     return EcosAgentProtocolServer().serve()
 
 
-def _protocol_request(raw_line: str) -> tuple[dict[str, Any] | None, str | None]:
+def _protocol_record(raw_line: str) -> tuple[dict[str, Any] | None, str | None]:
     try:
         payload = json.loads(raw_line)
     except json.JSONDecodeError:
         return None, None
     if not isinstance(payload, dict):
         return None, None
-    request_id, method = payload.get("id"), payload.get("method")
-    if not isinstance(request_id, str) or not request_id or not isinstance(method, str) or not method:
+    request_id = payload.get("id")
+    if not isinstance(request_id, str) or not request_id:
         return None, request_id if isinstance(request_id, str) else None
+    method = payload.get("method")
+    if method is None:
+        return payload, request_id
+    if not isinstance(method, str) or not method:
+        return None, request_id
     return payload, request_id
 
 
