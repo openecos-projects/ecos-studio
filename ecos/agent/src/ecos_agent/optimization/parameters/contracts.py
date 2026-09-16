@@ -705,7 +705,16 @@ class OptimizationProposalV2(_Model):
     context_ref: ProposalContextRef
     decision: Literal["continue", "propose", "stop", "escalate"]
     reason_code: str
-    rationale_summary: str
+    # The cap rides into the JSON output schema the model decodes against:
+    # without it the model never sees a limit and medium-effort turns wrote
+    # four-digit rationales that only failed the post-hoc v1 validation.
+    rationale_summary: str = Field(
+        min_length=1,
+        max_length=512,
+        description=(
+            "One concise falsifiable paragraph, at most 512 characters."
+        ),
+    )
     observation_refs: tuple[ObservationReference, ...] = Field(
         min_length=1, max_length=13
     )

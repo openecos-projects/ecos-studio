@@ -475,6 +475,16 @@ def test_planner_schema_keeps_strategy_optional() -> None:
     assert set(condition["required"]) == {"metric_id", "expects"}
 
 
+def test_planner_schema_declares_the_rationale_length_cap() -> None:
+    """The cap must be schema-visible so decoding respects it, not post-hoc."""
+    domain = _domain()
+    schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))
+
+    rationale_schema = schema["properties"]["rationale_summary"]
+    assert rationale_schema["maxLength"] == 512
+    assert rationale_schema["minLength"] == 1
+
+
 def test_planner_schema_is_closed_and_allows_unsampled_values() -> None:
     domain = _domain()
     schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))
