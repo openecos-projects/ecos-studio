@@ -151,7 +151,7 @@ def test_bare_continue_still_escalates_at_the_default_stall_limit(
     assert results[3].state == OptimizationEpisodeState.ESCALATED
 
 
-def test_controller_escalates_after_codex_parse_and_repair_errors(tmp_path: Path) -> None:
+def test_controller_defers_after_codex_parse_and_repair_errors(tmp_path: Path) -> None:
     controller = _controller(
         tmp_path,
         _AuditedFakeCodex(
@@ -174,7 +174,9 @@ def test_controller_escalates_after_codex_parse_and_repair_errors(tmp_path: Path
     second = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
     assert first.rejection_reason == "observation_reference"
-    assert second.state == OptimizationEpisodeState.ESCALATED
+    # A failed repair defers instead of killing the episode: the next turn
+    # retries, and max_planning_only_turns bounds consecutive stalls.
+    assert second.state == OptimizationEpisodeState.PLANNING
     assert second.requested is None
     assert second.rejection_reason == "proposal_repair_failed"
 
@@ -349,7 +351,7 @@ def test_controller_rejects_old_proposal_schemas(
     controller = _controller(tmp_path, _FakeCodex(old_proposal, old_proposal), _FakeEcc())
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
-    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.state == OptimizationEpisodeState.PLANNING
     assert result.requested is None
     assert result.rejection_reason == "proposal_repair_failed"
 
@@ -504,7 +506,7 @@ def test_v2_repair_does_not_exceed_planning_call_budget(
     assert len(OptimizationPlanningAudit(tmp_path / "episode").replay().entries) == 1
 
 
-def test_controller_escalates_immediately_after_v2_repair_failure(
+def test_controller_defers_after_v2_repair_failure(
     tmp_path: Path,
 ) -> None:
     planner = _V2FakeCodex(
@@ -515,7 +517,7 @@ def test_controller_escalates_immediately_after_v2_repair_failure(
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.state == OptimizationEpisodeState.PLANNING
     assert result.requested is None
     assert result.rejection_reason == "proposal_repair_failed"
     assert result.planner_source == "repair"
@@ -705,7 +707,7 @@ def test_controller_records_schema_violation_detail_for_feedback(
 
     result = controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
 
-    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.state == OptimizationEpisodeState.PLANNING
     assert result.rejection_reason == "proposal_repair_failed"
     decisions = OptimizationDecisionAudit(tmp_path / "episode").replay().entries
     assert decisions[0].rejection_reason == (

@@ -188,13 +188,17 @@ class ControllerPlanningMixin:
                     planning_entry,
                     expected_payload_sha256=provider_payload_sha256,
                 )
+                # A failed repair is a formatting stall, not a fatal blocker:
+                # one flaky output must not kill the episode (the glm7 pilot
+                # escalated on a single misnamed strategy field).  Defer and
+                # let the next turn retry; max_planning_only_turns still
+                # bounds consecutive non-productive turns.
                 return self._defer_or_escalate(
                     planning_entry,
                     context,
                     proposal=None,
                     reason="proposal_repair_failed",
                     planner_source="repair",
-                    immediate_escalation=True,
                 )
             planner_source = "repair"
             self._record_planning_provider_evidence(

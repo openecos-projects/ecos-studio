@@ -518,7 +518,7 @@ def test_raw_rag_rejects_action_from_a_stage_that_was_not_observed(
         for action in codex.contexts[0].legal_actions
     } == {"place"}
     assert result.rejection_reason == "proposal_repair_failed"
-    assert result.state == OptimizationEpisodeState.ESCALATED
+    assert result.state == OptimizationEpisodeState.PLANNING
 
 
 def test_floorplan_observation_exposes_only_floorplan_actions(tmp_path: Path) -> None:
