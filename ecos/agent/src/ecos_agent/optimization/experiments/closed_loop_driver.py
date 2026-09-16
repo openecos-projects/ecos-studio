@@ -55,6 +55,7 @@ from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
 from ecos_agent.optimization.ledger import (
     OptimizationInterventionStart,
     OptimizationLedger,
+    OptimizationPlanningAudit,
 )
 from ecos_agent.optimization.metrics.contracts import TELEMETRY_METRIC_IDS
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
