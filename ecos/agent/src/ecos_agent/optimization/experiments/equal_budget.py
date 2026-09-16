@@ -288,16 +288,25 @@ def export_episode_traces(
         for item in decisions.entries
         if item.requested is not None and item.state.value == "awaiting_execution"
     )
-    if len(starts) != len(candidate_decisions) or set(outcomes) != {
-        item.intervention_id for item in starts
-    }:
+    if (
+        len(candidate_decisions) < len(starts)
+        or set(outcomes) != {item.intervention_id for item in starts}
+    ):
         raise ValueError("episode lifecycle does not match planning decisions")
+    # A wall-budget stop can accept one final decision that never begins an
+    # intervention; starts and decisions stay chronologically 1:1 up to that
+    # trailing tail, so pair only the decisions that actually started.
+    candidate_decisions = candidate_decisions[: len(starts)]
     traces: list[CandidateTrace] = []
     episode_id = str(state["episode_id"])
     for start, decision in zip(starts, candidate_decisions, strict=True):
         if start.requested != decision.requested:
             raise ValueError("episode request does not match planning decision")
         outcome = outcomes[start.intervention_id]
+        if not outcome.candidate_root_ref:
+            # A wall-budget stop can cut the last started candidate before any
+            # evidence lands; nothing observable exists for that probe.
+            continue
         runtime, memory = _candidate_resources(
             Path(workspace), outcome.candidate_root_ref, start.target_step
         )
