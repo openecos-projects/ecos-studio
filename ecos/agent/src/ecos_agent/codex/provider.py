@@ -211,6 +211,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
             '"requested_value": <exact probe value>, '
             '"effective_domain_sha256": "<copy supplied snapshot_sha256>", '
             '"expected_effects": [{"metric_id": "<metric_id>", "direction": "decrease"}]},\n'
+            "The action object must contain exactly the keys shown above and no others: extra keys "
+            "such as claim_id, claim_ref, or parameter_card_ref are rejected even when the supplied "
+            "supported actions display them. Strategy steps likewise contain only: step_id, knob_id, "
+            "direction, requested_value, intent, condition, depends_on, rationale. Output only valid "
+            "JSON: no trailing commas, no comments.\n"
             '  "strategy": null\n'
             "}\n"
             "For decision continue, stop, or escalate set action to null. strategy is optional on every "
