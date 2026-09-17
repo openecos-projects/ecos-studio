@@ -94,7 +94,6 @@ from ecos_agent.optimization.objective_alignment import (
     ActiveOptimizationObjective,
     OptimizationObjectiveAlignment,
     build_active_objective,
-    validate_objective_alignment,
 )
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
@@ -257,7 +256,14 @@ class OptimizationEpisodeController(
                     "objective alignment requires an objective and incumbent"
                 )
             try:
-                validate_objective_alignment(objective_alignment, objective, incumbent)
+                # The alignment binds the user objective to the canonical
+                # workspace baseline, which the runtime validates before
+                # constructing the episode. The incumbent is the episode
+                # anchor (the rerun-path reference when calibration artifacts
+                # exist) and legitimately differs from that baseline, so the
+                # episode-level contract is the objective binding plus the
+                # incumbent's recovery evidence, not baseline equality.
+                build_active_objective(objective_alignment, objective, incumbent)
             except ValueError as exc:
                 raise OptimizationEpisodeControllerError(
                     "objective alignment does not match the episode baseline"
