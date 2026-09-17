@@ -352,7 +352,10 @@ class OptimizationEpisodeController(
             return None
         if not _ID.fullmatch(design_id):
             raise OptimizationEpisodeControllerError("design id is invalid")
-        if self.mode != OptimizationAgentMode.FULL_AGENT:
+        if self.mode not in (
+            OptimizationAgentMode.FULL_AGENT,
+            OptimizationAgentMode.UNCONDITIONED_SUPPORT,
+        ):
             return design_id
         manifest = load_state_rule_manifest()
         if design_id not in manifest.scope:

@@ -124,6 +124,7 @@ def _compile(
     *features: StateEvidenceFeature,
     catalog=None,
     toolchain: str | None = TOOLCHAIN,
+    state_gated: bool = True,
     **state_kwargs,
 ):
     catalog = catalog or _catalog()
@@ -145,7 +146,41 @@ def _compile(
             LegalAction(knob_id="place.target_density", direction="decrease"),
         ),
         effective_domains=(_domain(),),
+        state_gated=state_gated,
     )
+
+
+def test_unconditioned_support_skips_only_the_state_predicate_gate() -> None:
+    """The unconditioned-support ablation arm keeps the compiled scaffold,
+    bindings, and exposure format, but the state predicate gate is skipped:
+    a state that is UNKNOWN from missing required evidence (and BLOCKED from
+    a failed anti-condition) exposes the bound action when ungated."""
+    missing_evidence = _compile()
+    assert missing_evidence.matches[0].applicability == KnowledgeApplicability.UNKNOWN
+    assert missing_evidence.actions == ()
+
+    failed_anti = _compile(
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=True,
+            evidence_sha256=HASH,
+        )
+    )
+    assert failed_anti.matches[0].reason_codes == ("anti_condition",)
+    assert failed_anti.actions == ()
+
+    unconditioned = _compile(
+        StateEvidenceFeature(
+            feature_id="long_net_pressure_dominant",
+            value=True,
+            evidence_sha256=HASH,
+        ),
+        state_gated=False,
+    )
+    assert unconditioned.matches[0].applicability == KnowledgeApplicability.PASS
+    assert [
+        (item.knob_id.value, item.direction.value) for item in unconditioned.actions
+    ] == [("place.target_density", "decrease")]
 
 
 def _multi_claim_catalog(*, count: int, matched_from: int = 0) -> KnowledgeSupportCatalog:

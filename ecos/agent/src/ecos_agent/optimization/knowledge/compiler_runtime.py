@@ -239,7 +239,12 @@ def compile_supported_action_view(
     retrieval_ranked_refs: tuple[KnowledgeReference, ...],
     legal_actions: tuple[LegalAction, ...],
     effective_domains: tuple[EffectiveDomainSnapshot, ...],
+    state_gated: bool = True,
 ) -> SupportedActionView:
+    """When ``state_gated`` is False the state predicate gate is skipped for
+    every claim (the unconditioned-support ablation arm); objective, stage,
+    toolchain, and legality gates stay on so the compiled scaffold, bindings,
+    and exposure format are identical to the gated arm."""
     candidate_keys = _reference_keys(candidate_refs)
     ranked_keys = _reference_keys(retrieval_ranked_refs)
     if len(candidate_keys) != len(candidate_refs) or not ranked_keys <= candidate_keys:
@@ -265,7 +270,12 @@ def compile_supported_action_view(
     for reference in candidate_refs:
         claim = claims[(reference.entity_id, reference.chunk_sha256)]
         evaluated = _evaluate_bindings(
-            claim, bindings.get(claim.claim_ref.entity_id, []), state, features, legal
+            claim,
+            bindings.get(claim.claim_ref.entity_id, []),
+            state,
+            features,
+            legal,
+            state_gated,
         )
         binding, applicability, reasons = max(
             evaluated,
@@ -360,11 +370,17 @@ def _evaluate_bindings(
     state: OptimizationStateEvidenceRequest,
     features: Mapping[str, StateValue],
     legal: set[tuple[str, StrategyDirection]],
+    state_gated: bool = True,
 ) -> tuple[BindingEvaluation, ...]:
     return tuple(
-        (binding, *_match_claim(claim, binding, state, features, legal))
+        (binding, *_match_claim(claim, binding, state, features, legal, state_gated))
         for binding in bindings
-    ) or ((None, *_match_claim(claim, None, state, features, legal)),)
+    ) or (
+        (
+            None,
+            *_match_claim(claim, None, state, features, legal, state_gated),
+        ),
+    )
 
 
 def _append_supported_action(
@@ -415,6 +431,7 @@ def _match_claim(
     state: OptimizationStateEvidenceRequest,
     features: Mapping[str, StateValue],
     legal: set[tuple[str, StrategyDirection]],
+    state_gated: bool = True,
 ) -> tuple[KnowledgeApplicability, tuple[str, ...]]:
     if claim.objectives:
         if state.primary_metric is None:
@@ -440,17 +457,29 @@ def _match_claim(
         and binding.toolchain_ref != expected_toolchain_ref(binding.binding_sha256)
     ):
         return KnowledgeApplicability.BLOCKED, ("toolchain_mismatch",)
-    anti = [_evaluate(item, features) for item in claim.anti_predicates]
+    anti = (
+        [_evaluate(item, features) for item in claim.anti_predicates]
+        if state_gated
+        else []
+    )
     if any(value is True for value in anti):
         return KnowledgeApplicability.BLOCKED, ("anti_condition",)
-    state_matches = [_evaluate(item, features) for item in claim.state_predicates]
+    state_matches = (
+        [_evaluate(item, features) for item in claim.state_predicates]
+        if state_gated
+        else []
+    )
     if any(value is False for value in state_matches):
         return KnowledgeApplicability.BLOCKED, ("state_condition",)
-    required = [
-        value
-        for predicate, value in zip((*claim.state_predicates, *claim.anti_predicates), (*state_matches, *anti))
-        if predicate.required
-    ]
+    required = (
+        [
+            value
+            for predicate, value in zip((*claim.state_predicates, *claim.anti_predicates), (*state_matches, *anti))
+            if predicate.required
+        ]
+        if state_gated
+        else []
+    )
     if any(value is None for value in required):
         return KnowledgeApplicability.UNKNOWN, ("missing_observation",)
     supported = any((item.knob_id, item.direction) in legal for item in binding.actions)

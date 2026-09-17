@@ -20,6 +20,7 @@ _T = TypeVar("_T")
 class KnowledgeTreatment(StrEnum):
     LLM_NO_KNOWLEDGE = "llm-no-knowledge"
     CURRENT_METRIC_ID_RAW_RAG = "current-metric-id-raw-rag"
+    UNCONDITIONED_SUPPORT_ZERO_SHOT = "unconditioned-support-zero-shot"
     STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT = (
         "state-conditioned-dual-layer-zero-shot"
     )
@@ -36,7 +37,12 @@ class KnowledgeTreatmentConfig:
     receipt_aware_planning: bool = True
 
     def __post_init__(self) -> None:
-        if self.agent_mode not in {"llm_no_knowledge", "raw_rag", "full_agent"}:
+        if self.agent_mode not in {
+            "llm_no_knowledge",
+            "raw_rag",
+            "unconditioned_support",
+            "full_agent",
+        }:
             raise ValueError("knowledge treatment agent mode is invalid")
         if self.knowledge_case_shots not in {0, 3}:
             raise ValueError("knowledge treatment case shots must be zero or three")
@@ -53,6 +59,14 @@ ZERO_SHOT_GATE_TREATMENTS = (
     KnowledgeTreatmentConfig(
         KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG,
         "raw_rag",
+        0,
+    ),
+    # Attribution arm: identical compiled scaffold and exposure format as the
+    # state-conditioned arm, but the state predicate gate is skipped.  The
+    # paired difference isolates state-conditioning from typed-action binding.
+    KnowledgeTreatmentConfig(
+        KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT,
+        "unconditioned_support",
         0,
     ),
     KnowledgeTreatmentConfig(
@@ -577,6 +591,12 @@ def _zero_shot_comparisons(
         ),
         "zero_shot_vs_raw_rag": paired_design_statistics(
             scores[zero_shot], scores[KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG]
+        ),
+        # The attribution pair: both arms share the typed support scaffold, so
+        # this difference isolates the state predicate gate itself.
+        "state_conditioned_vs_unconditioned": paired_design_statistics(
+            scores[zero_shot],
+            scores[KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT],
         ),
     }
     if rule_scores is not None:

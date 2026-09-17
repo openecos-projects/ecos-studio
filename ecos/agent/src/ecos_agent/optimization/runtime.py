@@ -211,7 +211,8 @@ def create_optimization_runner(
     workspace = _workspace(runtime.workspace)
     if (
         runtime.trend_noise_epsilon is None
-        and runtime.agent_mode is OptimizationAgentMode.FULL_AGENT
+        and runtime.agent_mode
+        in (OptimizationAgentMode.FULL_AGENT, OptimizationAgentMode.UNCONDITIONED_SUPPORT)
     ):
         # The manifest scope gate rejects scoped full-agent episodes without a
         # calibrated epsilon; the GUI never passes one explicitly, so load the

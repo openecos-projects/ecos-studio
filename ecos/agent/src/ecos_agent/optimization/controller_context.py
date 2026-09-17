@@ -305,6 +305,9 @@ class ControllerContextMixin:
                 ),
                 legal_actions=available_actions,
                 effective_domains=effective_domains,
+                state_gated=(
+                    self.mode is not OptimizationAgentMode.UNCONDITIONED_SUPPORT
+                ),
             )
             tool_refs = tuple(
                 item

@@ -58,6 +58,7 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
 )
 from ecos_agent.optimization.experiments.knowledge_treatments import (
     ZERO_SHOT_GATE_TREATMENTS,
+    KnowledgeTreatment,
 )
 from ecos_agent.optimization.experiments.closed_loop_driver import load_design
 from ecos_agent.optimization.knowledge.compiler import (
@@ -561,10 +562,19 @@ def run_offline_pilot(
     if model is not None:
         provider.select_model(model)
     ordered = sorted(contexts, key=lambda item: str(item["context_fingerprint"]))
+    # The unconditioned-support arm is online-only: its mechanistic role is to
+    # propose where the state gate abstains, which inverts the bank's strata
+    # correctness contract (missing-evidence strata expect abstention), so
+    # offline correctness gating cannot score it.
+    pilot_treatments = tuple(
+        config
+        for config in ZERO_SHOT_GATE_TREATMENTS
+        if config.treatment is not KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT
+    )
     cells = [
         (context, config.treatment.value, repeat, variant)
         for context in ordered
-        for config in ZERO_SHOT_GATE_TREATMENTS
+        for config in pilot_treatments
         for repeat in range(1, repeats + 1)
         for variant in [apply_treatment(
             rebuild_planning_context(context["planning_context"]),

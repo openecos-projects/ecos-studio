@@ -140,6 +140,10 @@ class OptimizationAgentMode(StrEnum):
     FULL_AGENT = "full_agent"
     LLM_NO_KNOWLEDGE = "llm_no_knowledge"
     RAW_RAG = "raw_rag"
+    # Ablation arm: the full compiled support view (candidates, bindings,
+    # exposure format) without the state predicate gate.  Isolates the
+    # state-conditioning contribution against the identical typed scaffold.
+    UNCONDITIONED_SUPPORT = "unconditioned_support"
 
 
 @dataclass(frozen=True)

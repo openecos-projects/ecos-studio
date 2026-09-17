@@ -44,16 +44,24 @@ def test_frozen_knowledge_treatments_map_to_bounded_runtime_modes() -> None:
     assert [item.treatment for item in KNOWLEDGE_TREATMENTS] == [
         KnowledgeTreatment.LLM_NO_KNOWLEDGE,
         KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG,
+        KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT,
         KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT,
         KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT,
     ]
     assert [item.agent_mode for item in KNOWLEDGE_TREATMENTS] == [
         "llm_no_knowledge",
         "raw_rag",
+        "unconditioned_support",
         "full_agent",
         "full_agent",
     ]
-    assert [item.knowledge_case_shots for item in KNOWLEDGE_TREATMENTS] == [0, 0, 0, 3]
+    assert [item.knowledge_case_shots for item in KNOWLEDGE_TREATMENTS] == [
+        0,
+        0,
+        0,
+        0,
+        3,
+    ]
     assert all(item.receipt_aware_planning for item in KNOWLEDGE_TREATMENTS)
 
 
@@ -137,6 +145,7 @@ def test_zero_shot_gate_requires_audited_positive_signal() -> None:
 def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
     no_knowledge = KnowledgeTreatment.LLM_NO_KNOWLEDGE
     raw_rag = KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG
+    unconditioned = KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT
     zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
     full = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT
     design_ids = tuple(f"d{index}" for index in range(10))
@@ -158,6 +167,17 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 design_id,
                 9.0,
                 effective=design_id == "d0",
+                candidate_index=candidate_index,
+            )
+            for design_id in design_ids
+            for candidate_index in range(2)
+        ),
+        unconditioned: tuple(
+            _trace(
+                unconditioned,
+                design_id,
+                9.5,
+                effective=True,
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
@@ -221,6 +241,10 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
         "tie": 0,
         "loss": 0,
     }
+    # The attribution pair: identical scaffold, only the state gate differs.
+    assert report["zero_shot_gate"]["paired_utility"][
+        "state_conditioned_vs_unconditioned"
+    ]["mean_paired_difference"] == 0.5
     assert report["zero_shot_gate"]["decision"] == "pass"
     assert report["diagnostics"][full.value]["effective_intervention_rate"] == 1.0
     assert (
@@ -269,6 +293,7 @@ def test_treatment_report_does_not_assess_incomplete_evidence() -> None:
 def test_full_treatment_with_partial_case_coverage_remains_not_assessed() -> None:
     no_knowledge = KnowledgeTreatment.LLM_NO_KNOWLEDGE
     raw_rag = KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG
+    unconditioned = KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT
     zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
     full = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT
     design_ids = tuple(f"d{index}" for index in range(10))
@@ -286,6 +311,11 @@ def test_full_treatment_with_partial_case_coverage_remains_not_assessed() -> Non
                 effective=design_id == "d0",
                 candidate_index=index,
             )
+            for design_id in design_ids
+            for index in range(2)
+        ),
+        unconditioned: tuple(
+            _trace(unconditioned, design_id, 9.5, effective=True, candidate_index=index)
             for design_id in design_ids
             for index in range(2)
         ),
