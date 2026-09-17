@@ -76,6 +76,17 @@ ZERO_SHOT_GATE_TREATMENTS = (
     ),
 )
 
+# The unconditioned-support arm is online-only: its mechanistic role is to
+# propose where the state gate abstains, which inverts the bank's strata
+# correctness contract (missing-evidence strata expect abstention), so
+# offline correctness gating cannot score it.  Protocol manifests and the
+# offline pilot loop must both derive from this tuple.
+OFFLINE_GATE_TREATMENTS = tuple(
+    config
+    for config in ZERO_SHOT_GATE_TREATMENTS
+    if config.treatment is not KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT
+)
+
 FEW_SHOT_TREATMENT = KnowledgeTreatmentConfig(
     KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT,
     "full_agent",

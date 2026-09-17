@@ -10,6 +10,7 @@ from ecos_agent.optimization.experiments.equal_budget import (
 )
 from ecos_agent.optimization.experiments.knowledge_treatments import (
     KNOWLEDGE_TREATMENTS,
+    OFFLINE_GATE_TREATMENTS,
     ZERO_SHOT_GATE_TREATMENTS,
     KnowledgeTreatment,
     build_knowledge_treatment_report,
@@ -394,3 +395,15 @@ def test_treatment_report_rejects_reused_candidate_execution() -> None:
                 treatment: 0 for treatment in traces
             },
         )
+
+
+def test_offline_gate_treatments_exclude_the_online_only_arm() -> None:
+    """The protocol manifest and the offline pilot loop must score the same
+    set: the unconditioned-support arm is online-only, so it stays out of the
+    offline enumeration both consumers derive from."""
+    assert tuple(item.treatment for item in OFFLINE_GATE_TREATMENTS) == (
+        KnowledgeTreatment.LLM_NO_KNOWLEDGE,
+        KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG,
+        KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT,
+    )
+    assert len(ZERO_SHOT_GATE_TREATMENTS) == len(OFFLINE_GATE_TREATMENTS) + 1
