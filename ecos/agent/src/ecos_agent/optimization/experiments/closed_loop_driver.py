@@ -85,32 +85,64 @@ BASELINE: dict[str, object] = {
     "density_weight": 0.00085,
 }
 
-# 与 knowledge_treatment_runner._objective 逐字一致（同 goal 文本、同
-# variable 几何）：默认调用（不带 --goal-text/--geometry-mode）冻结出与
-# 该 runner 完全相同的 objective contract。显式 --geometry-mode fixed 可
-# 钉死外框，对齐历史 fixed 批次的口径。
-_DEFAULT_GOAL_TEXT = (
-    "Minimize routed wirelength while preserving DRC and global-routing overflow."
-)
+# wirelength 与 knowledge_treatment_runner._objective 逐字一致（同 goal 文本、
+# 同 variable 几何）：默认调用（不带 --objective/--goal-text/--geometry-mode）
+# 冻结出与该 runner 完全相同的 objective contract。overflow 是第二目标泛化
+# 抽查臂：主/保护指标对调（primary=route_la_total_overflow，preserve=DRC+线
+# 长），工具链、knob 面、预算与 candidate 终点 Harden 全部不变，只有 objective
+# contract 不同。显式 --geometry-mode fixed 可钉死外框，对齐历史 fixed 批次的
+# 口径。
+_OBJECTIVES = {
+    "wirelength": {
+        "goal_text": (
+            "Minimize routed wirelength while preserving DRC and "
+            "global-routing overflow."
+        ),
+        "primary_metric": ObjectiveMetric.ROUTE_WIRELENGTH,
+        "preserve_metrics": (
+            ObjectiveMetric.DRC_COUNT,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+        ),
+        "rationale_summary": (
+            "Minimize wirelength while preserving final DRC and "
+            "global-routing overflow."
+        ),
+    },
+    "overflow": {
+        "goal_text": (
+            "Minimize global-routing overflow while preserving DRC and "
+            "routed wirelength."
+        ),
+        "primary_metric": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+        "preserve_metrics": (
+            ObjectiveMetric.DRC_COUNT,
+            ObjectiveMetric.ROUTE_WIRELENGTH,
+        ),
+        "rationale_summary": (
+            "Minimize global-routing overflow while preserving final DRC "
+            "and routed wirelength."
+        ),
+    },
+}
+_DEFAULT_OBJECTIVE = "wirelength"
+# 兼容旧引用（测试/文档）的 wirelength 默认口径。
+_DEFAULT_GOAL_TEXT = _OBJECTIVES["wirelength"]["goal_text"]
 _DEFAULT_GEOMETRY_MODE = "variable"
 
 
-def _episode_objective(goal_text: str, geometry_mode: str):
+def _episode_objective(
+    objective_name: str, goal_text: str, geometry_mode: str
+):
+    spec = _OBJECTIVES[objective_name]
     return freeze_optimization_objective(
         goal_text,
         OptimizationObjectiveProposal(
-            primary_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
-            preserve_metrics=(
-                ObjectiveMetric.DRC_COUNT,
-                ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
-            ),
+            primary_metric=spec["primary_metric"],
+            preserve_metrics=spec["preserve_metrics"],
             parameter_policy=OptimizationParameterPolicy(
                 geometry_mode=geometry_mode
             ),
-            rationale_summary=(
-                "Minimize wirelength while preserving final DRC and "
-                "global-routing overflow."
-            ),
+            rationale_summary=spec["rationale_summary"],
         ),
     )
 
@@ -243,6 +275,7 @@ def _build_mediation_audit(
     design_id: str,
     reference_observation: TerminalObservation,
     noise_epsilon: dict[str, object] | None,
+    objective_metric: ObjectiveMetric,
 ) -> dict[str, object] | None:
     """Join the episode's persisted chains into one mediation audit artifact."""
     observation_path = episode_root / "optimization-proposal-observations.v1.jsonl"
@@ -255,7 +288,7 @@ def _build_mediation_audit(
     if noise_epsilon:
         metric_epsilon = noise_epsilon.get("epsilon")
         if isinstance(metric_epsilon, dict):
-            value = metric_epsilon.get(ObjectiveMetric.ROUTE_WIRELENGTH.value)
+            value = metric_epsilon.get(objective_metric.value)
             if isinstance(value, (int, float)):
                 epsilon = float(value)
     calls = audit_episode_mediation(
@@ -272,13 +305,13 @@ def _build_mediation_audit(
             item.intervention_id: item for item in ledger.terminal_outcomes
         },
         reference_observation=reference_observation,
-        objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH.value,
+        objective_metric=objective_metric.value,
         epsilon=epsilon,
     )
     return {
         "schema_version": EPISODE_AUDIT_SCHEMA_VERSION,
         "design_id": design_id,
-        "objective_metric": ObjectiveMetric.ROUTE_WIRELENGTH.value,
+        "objective_metric": objective_metric.value,
         "calls": calls,
         "summary": summarize_episode_mediation(calls),
         "state_match": state_match_summary(calls),
@@ -410,7 +443,7 @@ def write_episode_reports(
     return episode_output
 
 
-def main(provider_factory: Callable[..., Any] | None) -> int:
+def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = None) -> int:
     _self_check()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--design", required=True)
@@ -418,6 +451,15 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     parser.add_argument("--designs-root", type=Path, required=True)
     parser.add_argument("--pdk-root", type=Path, required=True)
     parser.add_argument("--model", default="glm-5.3-flash")
+    parser.add_argument(
+        "--objective",
+        choices=sorted(_OBJECTIVES),
+        default=_DEFAULT_OBJECTIVE,
+        help="frozen objective contract; 'overflow' is the second-objective "
+        "generalization probe (primary route_la_total_overflow, DRC and "
+        "routed wirelength preserved) on an otherwise identical contract: "
+        "same toolchain, knob surface, budget, and Harden candidate endpoint",
+    )
     parser.add_argument(
         "--reasoning-effort",
         default="medium",
@@ -427,9 +469,10 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     )
     parser.add_argument(
         "--goal-text",
-        default=_DEFAULT_GOAL_TEXT,
+        default=None,
         help="natural-language goal frozen into the objective contract "
-        "(hashed as source_goal_sha256)",
+        "(hashed as source_goal_sha256); defaults to the canonical text of "
+        "the selected --objective",
     )
     parser.add_argument(
         "--geometry-mode",
@@ -473,9 +516,10 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         help="default replay count for calibration; 1 skips the noise-epsilon artifact",
     )
     parser.add_argument("--episode-id", default=None)  # 同 id 重启 = resume
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not _RUN_ID.fullmatch(args.design):
         raise SystemExit(f"design id is invalid: {args.design}")
+    goal_text = args.goal_text or _OBJECTIVES[args.objective]["goal_text"]
 
     design = load_design(args.designs_root.resolve(), args.design)
     manifest = ExperimentManifest(
@@ -587,7 +631,10 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             # reasoning effort is applied by create_optimization_runner from
             # the runtime context below, shared with the GUI episode path
             provider.select_model(model)
-        objective = _episode_objective(args.goal_text, args.geometry_mode)
+        objective = _episode_objective(
+            args.objective, goal_text, args.geometry_mode
+        )
+        primary_metric = _OBJECTIVES[args.objective]["primary_metric"]
         # alignment 必须锚定 workspace 本体（canonical）观测：runner 启动时用
         # build_terminal_observation(workspace) 重建 alignment 并做整对象比较，而
         # terminal observation 含 flow_tool_runtime/flow_peak_memory 等易变遥测，
@@ -629,7 +676,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         episode_root=episode_root,
         design_id=args.design,
         reference_observation=reference,
-        objective_metric=ObjectiveMetric.ROUTE_WIRELENGTH,
+        objective_metric=primary_metric,
     )
     metric_comparison = build_metric_comparison(
         reference,
@@ -643,6 +690,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         design_id=args.design,
         reference_observation=canonical,
         noise_epsilon=noise_epsilon,
+        objective_metric=primary_metric,
     )
     state_files = sorted(episode_root.glob("optimization-episode-state.v*.json"))
     if not state_files:
@@ -654,6 +702,9 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         "utility_claim": "not_assessed",
         "design_id": args.design,
         "episode_id": episode_id,
+        "objective": args.objective,
+        "primary_metric": primary_metric.value,
+        "goal_text": goal_text,
         "agent_mode": args.agent_mode,
         "planning_evidence": args.planning_evidence,
         "planner_policy": (

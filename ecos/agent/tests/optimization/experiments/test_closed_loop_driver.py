@@ -8,6 +8,7 @@ from ecos_agent.optimization.contracts import ObjectiveMetric, OptimizationKnob
 from ecos_agent.optimization.experiments.closed_loop_driver import (
     _DEFAULT_GEOMETRY_MODE,
     _DEFAULT_GOAL_TEXT,
+    _OBJECTIVES,
     _episode_objective,
     build_metric_comparison,
     write_episode_reports,
@@ -26,15 +27,41 @@ def test_default_episode_objective_matches_treatment_freeze() -> None:
     # Both arms default to variable geometry: the same frozen wirelength
     # objective with the floorplan knobs open.
     assert _episode_objective(
-        _DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE
+        "wirelength", _DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE
     ) == _objective()
+
+
+def test_overflow_objective_swaps_primary_and_preserve() -> None:
+    """第二目标泛化抽查臂：除 objective contract 外与线长臂完全同构。"""
+    contract = _episode_objective(
+        "overflow", _OBJECTIVES["overflow"]["goal_text"], _DEFAULT_GEOMETRY_MODE
+    )
+    assert contract.primary_metric == ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW
+    assert contract.preserve_metrics == (
+        ObjectiveMetric.DRC_COUNT,
+        ObjectiveMetric.ROUTE_WIRELENGTH,
+    )
+    assert contract.source_goal_sha256 == canonical_sha256(
+        _OBJECTIVES["overflow"]["goal_text"]
+    )
+    # 同一 knob 面（variable geometry），与线长臂只差 objective。
+    wirelength = _episode_objective(
+        "wirelength", _DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE
+    )
+    assert set(allowed_knobs(contract)) == set(allowed_knobs(wirelength))
+    assert {
+        OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+    } <= set(allowed_knobs(contract))
 
 
 def test_default_geometry_mode_opens_the_floorplan_domain() -> None:
     """The default driver run must allow adjusting floorplan knobs; the
     treatment runner parity above holds only for an explicit fixed mode."""
     assert _DEFAULT_GEOMETRY_MODE == "variable"
-    contract = _episode_objective(_DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE)
+    contract = _episode_objective(
+        "wirelength", _DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE
+    )
     assert {
         OptimizationKnob.FLOORPLAN_CORE_UTIL,
         OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
@@ -43,7 +70,7 @@ def test_default_geometry_mode_opens_the_floorplan_domain() -> None:
 
 def test_variable_geometry_goal_opens_floorplan_domain_only() -> None:
     goal = "reduce routed wirelength and you can adjust floorplan knobs"
-    contract = _episode_objective(goal, "variable")
+    contract = _episode_objective("wirelength", goal, "variable")
     assert contract.source_goal_sha256 == canonical_sha256(goal)
     assert contract.primary_metric == ObjectiveMetric.ROUTE_WIRELENGTH
     assert contract.preserve_metrics == (
@@ -52,7 +79,7 @@ def test_variable_geometry_goal_opens_floorplan_domain_only() -> None:
     )
     assert contract.parameter_policy is not None
     assert contract.parameter_policy.geometry_mode == "variable"
-    baseline = _episode_objective(_DEFAULT_GOAL_TEXT, "fixed")
+    baseline = _episode_objective("wirelength", _DEFAULT_GOAL_TEXT, "fixed")
     assert baseline.parameter_policy is not None
     assert baseline.parameter_policy.geometry_mode == "fixed"
 
