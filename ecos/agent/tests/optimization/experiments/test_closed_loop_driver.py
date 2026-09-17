@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 from ecos_agent.hashing import canonical_sha256
-from ecos_agent.optimization.contracts import ObjectiveMetric
+from ecos_agent.optimization.contracts import ObjectiveMetric, OptimizationKnob
 from ecos_agent.optimization.experiments.closed_loop_driver import (
+    _DEFAULT_GEOMETRY_MODE,
     _DEFAULT_GOAL_TEXT,
     _episode_objective,
     build_metric_comparison,
@@ -14,6 +15,7 @@ from ecos_agent.optimization.experiments.closed_loop_driver import (
 )
 from ecos_agent.optimization.experiments.equal_budget import CandidateTrace
 from ecos_agent.optimization.experiments.knowledge_treatment_runner import _objective
+from ecos_agent.optimization.knob_policy import allowed_knobs
 from ecos_agent.optimization.metrics.contracts import TerminalEvaluationMetric
 from tests.optimization.experiments.equal_budget_support import (
     _terminal_observation,
@@ -22,6 +24,17 @@ from tests.optimization.experiments.equal_budget_support import (
 
 def test_default_episode_objective_matches_treatment_freeze() -> None:
     assert _episode_objective(_DEFAULT_GOAL_TEXT, "fixed") == _objective()
+
+
+def test_default_geometry_mode_opens_the_floorplan_domain() -> None:
+    """The default driver run must allow adjusting floorplan knobs; the
+    treatment runner parity above holds only for an explicit fixed mode."""
+    assert _DEFAULT_GEOMETRY_MODE == "variable"
+    contract = _episode_objective(_DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE)
+    assert {
+        OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+    } <= set(allowed_knobs(contract))
 
 
 def test_variable_geometry_goal_opens_floorplan_domain_only() -> None:

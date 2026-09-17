@@ -82,11 +82,14 @@ BASELINE: dict[str, object] = {
     "density_weight": 0.00085,
 }
 
-# 与 knowledge_treatment_runner._objective 的硬编码目标逐字一致；默认调用
-# （不带 --goal-text/--geometry-mode）冻结出完全相同的 objective contract。
+# 与 knowledge_treatment_runner._objective 的硬编码目标逐字一致；显式传
+# --geometry-mode fixed 时不带 --goal-text 仍冻结出与该 runner 完全相同的
+# objective contract。几何默认是 variable（打开 floorplan 旋钮），而该
+# runner 冻结的是 fixed，跨这两条管线做对照时必须对齐口径。
 _DEFAULT_GOAL_TEXT = (
     "Minimize routed wirelength while preserving DRC and global-routing overflow."
 )
+_DEFAULT_GEOMETRY_MODE = "variable"
 
 
 def _episode_objective(goal_text: str, geometry_mode: str):
@@ -428,9 +431,10 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     parser.add_argument(
         "--geometry-mode",
         choices=("fixed", "variable"),
-        default="fixed",
-        help="floorplan knob domain; variable matches goals that explicitly "
-        "allow adjusting floorplan knobs",
+        default=_DEFAULT_GEOMETRY_MODE,
+        help="floorplan knob domain; variable (default) opens the two "
+        "floorplan knobs, fixed pins the outline and matches the "
+        "knowledge_treatment_runner freeze",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--agent-mode", default="full_agent")
