@@ -55,8 +55,8 @@ export class ProjectComparisonFileWatcher {
         if (isNodeErrorWithCode(error, 'ENOENT')) continue
         throw error
       }
-      if (canonical === project || !isPathWithinRoot(canonical, project)) {
-        throw new Error('Workspace watcher path resolves outside the Project root.')
+      if (canonical === project || isPathWithinRoot(project, canonical)) {
+        throw new Error('Workspace watcher path resolves to a protected Project path.')
       }
       const unresolvedHome = join(canonical, 'home')
       try {

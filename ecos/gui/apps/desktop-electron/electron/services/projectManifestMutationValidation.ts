@@ -33,6 +33,16 @@ export function validateProjectManifestMutation(
       if (input.config !== undefined) validateWorkspaceConfig(input.config)
       return
     }
+    case 'import-workspace': {
+      const input = requireRecord(
+        mutation.input,
+        'Project manifest workspace import input',
+      )
+      requireString(input.projectRoot, 'Project manifest workspace projectRoot')
+      requireString(input.workspacePath, 'Project manifest workspace path')
+      requireOptionalString(input.workspaceId, 'Project manifest workspace id')
+      return
+    }
     case 'archive-workspace':
     case 'delete-workspace':
       requireString(mutation.workspaceId, 'Project manifest workspace id')

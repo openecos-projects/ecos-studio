@@ -116,28 +116,38 @@ describe('ProjectComparisonFileWatcher', () => {
     }
   })
 
-  it('refuses to watch a Workspace symlink outside the Project root', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-comparison-project-'))
-    const outside = await mkdtemp(join(tmpdir(), 'ecos-comparison-outside-'))
-    const workspaceRoot = join(projectRoot, 'ws_1')
-    await symlink(outside, workspaceRoot, 'dir')
-    const watcher = new ProjectComparisonFileWatcher({
-      onError: vi.fn(),
-      onManifestChanged: vi.fn(),
-      onSnapshotChanged: vi.fn(),
+  it('watches a declared Workspace outside the Project root', async () => {
+    const created: Array<{ path: string; watcher: FakeWatcher }> = []
+    const watch = vi.fn((path: string) => {
+      const watcher = new FakeWatcher()
+      created.push({ path, watcher })
+      return watcher as unknown as FSWatcher
     })
+    const watcher = new ProjectComparisonFileWatcher(
+      { onError: vi.fn(), onManifestChanged: vi.fn(), onSnapshotChanged: vi.fn() },
+      watch as never,
+      async (path) => path,
+    )
 
-    try {
-      await expect(watcher.reconcile(projectRoot, [workspaceRoot])).rejects.toThrow(
-        'outside the Project root',
-      )
-    } finally {
-      await watcher.close()
-      await Promise.all([
-        rm(projectRoot, { force: true, recursive: true }),
-        rm(outside, { force: true, recursive: true }),
-      ])
-    }
+    const pending = watcher.reconcile('/project', ['/external/ws_1'])
+    await vi.waitFor(() => expect(created).toHaveLength(1))
+    expect(created[0]!.path).toBe('/external/ws_1/home')
+    created[0]!.watcher.emit('ready')
+    await pending
+    await watcher.close()
+  })
+
+  it('refuses to watch the Project root itself as a Workspace', async () => {
+    const watcher = new ProjectComparisonFileWatcher(
+      { onError: vi.fn(), onManifestChanged: vi.fn(), onSnapshotChanged: vi.fn() },
+      vi.fn() as never,
+      async (path) => path,
+    )
+
+    await expect(watcher.reconcile('/project', ['/project'])).rejects.toThrow(
+      'protected Project path',
+    )
+    await watcher.close()
   })
 
   it('keeps valid Workspace watchers when a selected baseline is missing', async () => {

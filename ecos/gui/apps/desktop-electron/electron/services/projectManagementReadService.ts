@@ -246,15 +246,29 @@ export class ProjectManagementReadService {
     try {
       const projectRoot = await canonicalizeExistingDirectory(request.projectRoot)
       const workspaceCandidate = resolve(request.workspacePath)
-      if (
-        pathsEqual(workspaceCandidate, projectRoot) ||
-        !isPathWithinRoot(workspaceCandidate, projectRoot)
-      ) {
+      if (pathsEqual(workspaceCandidate, projectRoot)) {
         return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
       }
-      const workspaceRoot = await canonicalizeExistingDirectory(workspaceCandidate)
-      if (!isPathWithinRoot(workspaceRoot, projectRoot)) {
-        return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+      let workspaceRoot: string
+      if (isPathWithinRoot(workspaceCandidate, projectRoot)) {
+        workspaceRoot = await canonicalizeExistingDirectory(workspaceCandidate)
+        if (!isPathWithinRoot(workspaceRoot, projectRoot)) {
+          return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+        }
+      } else {
+        try {
+          const project = await this.loadProject(projectRoot)
+          if (!project.manifest) {
+            return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+          }
+          workspaceRoot = await this.resolveDeclaredWorkspace(
+            project.root,
+            project.manifest.workspaces.map((workspace) => workspace.workspace_path),
+            request.workspacePath,
+          )
+        } catch {
+          return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+        }
       }
 
       let snapshotPath: string

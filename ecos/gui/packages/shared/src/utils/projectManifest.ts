@@ -147,6 +147,12 @@ export interface ProjectManifestReplacementBackupInput {
   replacementId: string
 }
 
+export interface ProjectManifestWorkspaceImportInput {
+  projectRoot: string
+  workspaceId?: string
+  workspacePath: string
+}
+
 export type ProjectManifestMutation =
   | {
       type: 'create'
@@ -155,6 +161,7 @@ export type ProjectManifestMutation =
       mpc?: ProjectManifestMpc | null
     }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
+  | { input: ProjectManifestWorkspaceImportInput; type: 'import-workspace' }
   | { type: 'archive-workspace'; workspaceId: string }
   | {
       deleteDirectory?: boolean

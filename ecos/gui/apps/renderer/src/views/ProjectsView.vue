@@ -1716,10 +1716,6 @@ async function importProject() {
       ...projectManifests.value,
       [project.path]: manifest,
     }
-    workspaceFlowStates.value = {
-      ...workspaceFlowStates.value,
-      [project.path]: {},
-    }
     const wasSelected = selectedProjectId.value === project.id
     selectedProjectId.value = project.id
     if (wasSelected) void loadSelectedProjectWorkspaceData()
@@ -1746,6 +1742,19 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
     await applyProjectManifestForProject(result.manifest, projectRoot)
     selectedProjectId.value = project.id
     selectedWorkspaceId.value = result.workspaceId
+    showToast(
+      result.status === 'already_registered'
+        ? {
+            severity: 'info',
+            summary: 'Workspace already registered',
+            detail: `${result.workspaceId} is already part of this project.`,
+          }
+        : {
+            severity: 'success',
+            summary: 'Workspace imported',
+            detail: `${result.workspaceId} was imported into this project.`,
+          },
+    )
   } catch (error) {
     console.warn('Failed to import workspace into project.', error)
     showToast({
@@ -2096,11 +2105,6 @@ async function applyProjectManifestForProject(
     ...projectManifests.value,
     [projectRoot]: manifest,
     [normalizedRoot]: manifest,
-  }
-  workspaceFlowStates.value = {
-    ...workspaceFlowStates.value,
-    [projectRoot]: {},
-    [normalizedRoot]: {},
   }
   projectHistory.value = await rememberProjectHistoryEntry(
     projectFromManifest(manifest, normalizedRoot),

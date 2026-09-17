@@ -424,6 +424,7 @@ export type {
   ProjectManifestMutationResult,
   ProjectManifestReplacementBackupInput,
   ProjectManifestWorkspace,
+  ProjectManifestWorkspaceImportInput,
   ProjectManifestWorkspaceRegistrationInput,
   ProjectManifestWorkspaceStatus,
 } from './utils/projectManifest.ts'

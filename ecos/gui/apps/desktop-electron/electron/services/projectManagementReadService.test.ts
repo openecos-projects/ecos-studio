@@ -80,6 +80,27 @@ async function createProject(): Promise<{ projectRoot: string; workspaceRoot: st
   return { projectRoot, workspaceRoot }
 }
 
+async function declareExternalWorkspace(
+  projectRoot: string,
+  workspaceRoot: string,
+): Promise<void> {
+  const manifestPath = join(projectRoot, 'project.json')
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+    workspaces: Array<Record<string, unknown>>
+  }
+  const now = '2026-08-09T00:00:00.000Z'
+  manifest.workspaces.push({
+    workspace_id: 'ws_external',
+    name: 'external',
+    workspace_path: workspaceRoot,
+    source_workspace_id: null,
+    lifecycle: 'active',
+    created_at: now,
+    updated_at: now,
+  })
+  await writeFile(manifestPath, JSON.stringify(manifest))
+}
+
 function createReadService(
   readStepConfiguration?: (
     workspacePath: string,
@@ -456,6 +477,50 @@ describe('ProjectManagementReadService', () => {
       createReadService().readEngineeringSnapshot({
         projectRoot,
         workspacePath: workspaceRoot,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      readBytes: 0,
+      issue: { code: 'WORKSPACE_PATH_OUTSIDE_PROJECT' },
+    })
+  })
+
+  it('reads the Engineering Snapshot of a declared Workspace outside the Project root', async () => {
+    const { projectRoot } = await createProject()
+    const outside = await mkdtemp(join(tmpdir(), 'ecos-project-workspace-external-'))
+    temporaryDirectories.push(outside)
+    await mkdir(join(outside, 'home'))
+    await writeFile(
+      join(outside, 'home', 'engineering-snapshot.json'),
+      JSON.stringify(engineeringSnapshot()),
+    )
+    await declareExternalWorkspace(projectRoot, outside)
+
+    const result = await createReadService().readEngineeringSnapshot({
+      projectRoot,
+      workspacePath: outside,
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.snapshot.workspaceId).toBe('engineering-workspace')
+    }
+  })
+
+  it('rejects an undeclared Workspace path outside the Project root', async () => {
+    const { projectRoot } = await createProject()
+    const outside = await mkdtemp(join(tmpdir(), 'ecos-project-workspace-undeclared-'))
+    temporaryDirectories.push(outside)
+    await mkdir(join(outside, 'home'))
+    await writeFile(
+      join(outside, 'home', 'engineering-snapshot.json'),
+      JSON.stringify(engineeringSnapshot()),
+    )
+
+    await expect(
+      createReadService().readEngineeringSnapshot({
+        projectRoot,
+        workspacePath: outside,
       }),
     ).resolves.toEqual({
       ok: false,
