@@ -15,6 +15,9 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
     build_protocol_manifest,
     validate_protocol_manifest,
 )
+from ecos_agent.optimization.experiments.knowledge_treatments import (
+    ZERO_SHOT_GATE_TREATMENTS,
+)
 from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
 
 
@@ -44,11 +47,10 @@ def main() -> int:
     ecc_bin = args.ecc_bin.resolve()
     manifest = build_protocol_manifest(
         design_ids=[design_id],
-        treatments=[
-            "llm-no-knowledge",
-            "current-metric-id-raw-rag",
-            "state-conditioned-dual-layer-zero-shot",
-        ],
+        # Derive from the gate-treatment enumeration so the protocol hash can
+        # never diverge from what run_offline_pilot actually executes (the
+        # unconditioned-support attribution arm was added in 7680e19b).
+        treatments=[config.treatment.value for config in ZERO_SHOT_GATE_TREATMENTS],
         knowledge_bundle_sha256=knowledge_bundle_sha256,
         state_rule_manifest_sha256=load_state_rule_manifest().manifest_sha256,
         objective_contract_sha256=objective_contract_sha256,
