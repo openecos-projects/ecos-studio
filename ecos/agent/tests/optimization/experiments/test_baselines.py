@@ -8,6 +8,7 @@ from ecos_agent.optimization.experiments.baselines import (
 from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
+    OptimizationKnob,
     RequestedKnobValue,
     SignoffGates,
     StrategyDirection,
@@ -103,6 +104,70 @@ def test_random_action_is_seeded_legal_and_replayable() -> None:
 
     assert sequence() == sequence()
     assert len(set(sequence())) == 20
+
+
+def _fixed_geometry_surface() -> frozenset:
+    """The task-legal surface when floorplan knobs are not permitted."""
+    floorplan = {
+        OptimizationKnob.FLOORPLAN_CORE_UTIL,
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+    }
+    return frozenset(
+        (knob, direction)
+        for knob in OptimizationKnob
+        if knob not in floorplan
+        for direction in StrategyDirection
+    )
+
+
+def test_coordinate_selection_patrols_only_the_permitted_surface() -> None:
+    """A reduced legal surface must rotate across permitted slots instead of
+    stalling the cursor on never-permitted ones (fixed-geometry regression)."""
+    permitted = _fixed_geometry_surface()
+    values = _values()
+    attempted: list[RequestedKnobValue] = []
+    coordinate_index = 0
+    knobs = []
+    for turn_index in range(9):
+        selection = select_baseline_candidate(
+            BaselineMethod.CONTROLLED_COORDINATE,
+            design_id="gcd",
+            turn_index=turn_index,
+            coordinate_index=coordinate_index,
+            random_seed=0,
+            current_values=values,
+            attempted=attempted,
+            incumbent=_terminal(0, 1, 100),
+            permitted=permitted,
+        )
+        assert selection is not None
+        assert (selection.action.knob_id, selection.action.direction) in permitted
+        attempted.append(selection.requested)
+        coordinate_index = selection.next_coordinate_index
+        knobs.append(selection.requested.knob_id)
+
+    # The patrol reaches every permitted knob instead of dwelling on the
+    # first fallback action until its lattice is exhausted.
+    assert len(set(knobs)) == 5
+    assert knobs[0] == OptimizationKnob.TARGET_DENSITY
+
+
+def test_random_selection_draws_within_the_permitted_surface() -> None:
+    permitted = _fixed_geometry_surface()
+    for turn_index in range(20):
+        selection = select_baseline_candidate(
+            BaselineMethod.RANDOM_ACTION,
+            design_id="i2c",
+            turn_index=turn_index,
+            coordinate_index=0,
+            random_seed=20260824,
+            current_values=_values(),
+            attempted=(),
+            incumbent=_terminal(0, 2, 100),
+            permitted=permitted,
+        )
+        assert selection is not None
+        assert (selection.action.knob_id, selection.action.direction) in permitted
 
 
 def test_rule_guided_direction_uses_audited_card_mappings() -> None:

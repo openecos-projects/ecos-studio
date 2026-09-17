@@ -62,8 +62,14 @@ def select_baseline_candidate(
     current_values: Mapping[str, bool | int | float],
     attempted: Iterable[RequestedKnobValue],
     incumbent: TerminalObservation,
+    permitted: Iterable[tuple[OptimizationKnob, StrategyDirection]] | None = None,
 ) -> BaselineSelection | None:
-    """Choose one legal direction; the local numeric selector still owns its value."""
+    """Choose one legal direction; the local numeric selector still owns its value.
+
+    ``permitted`` is the task-permitted (knob, direction) surface; when given,
+    every policy patrols or draws within it directly instead of relying on the
+    provider-level rejection path.
+    """
     method = BaselineMethod(method)
     if not _DESIGN_ID.fullmatch(design_id):
         raise ValueError("baseline design id is invalid")
@@ -72,26 +78,36 @@ def select_baseline_candidate(
     if type(random_seed) is not int:
         raise ValueError("baseline random seed is invalid")
     attempted_values = tuple(attempted)
+    permitted_pairs = (
+        None if permitted is None else frozenset(permitted)
+    )
     if method == BaselineMethod.DEFAULT:
         return None
     if method == BaselineMethod.CONTROLLED_COORDINATE:
-        return _coordinate_selection(current_values, attempted_values, coordinate_index)
+        return _coordinate_selection(
+            current_values, attempted_values, coordinate_index, permitted_pairs
+        )
     if method == BaselineMethod.RANDOM_ACTION:
         return _random_selection(
-            design_id, turn_index, random_seed, current_values, attempted_values
+            design_id, turn_index, random_seed, current_values, attempted_values,
+            permitted_pairs,
         )
-    return _rule_selection(current_values, attempted_values, incumbent, coordinate_index)
+    return _rule_selection(
+        current_values, attempted_values, incumbent, coordinate_index, permitted_pairs
+    )
 
 
 def _coordinate_selection(
     current_values: Mapping[str, bool | int | float],
     attempted: tuple[RequestedKnobValue, ...],
     coordinate_index: int,
+    permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
 ) -> BaselineSelection | None:
     selection = next_coordinate_selection(
         current_values=current_values,
         attempted=attempted,
         start_action_index=coordinate_index,
+        permitted=permitted,
     )
     if selection is None:
         return None
@@ -116,8 +132,15 @@ def _random_selection(
     random_seed: int,
     current_values: Mapping[str, bool | int | float],
     attempted: tuple[RequestedKnobValue, ...],
+    permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
 ) -> BaselineSelection | None:
     actions = legal_actions(current_values=current_values, attempted=attempted)
+    if permitted is not None:
+        actions = tuple(
+            action
+            for action in actions
+            if (action.knob_id, action.direction) in permitted
+        )
     if not actions:
         return None
     action = random.Random(f"{random_seed}:{design_id}:{turn_index}").choice(actions)
@@ -134,10 +157,13 @@ def _rule_selection(
     attempted: tuple[RequestedKnobValue, ...],
     incumbent: TerminalObservation,
     coordinate_index: int,
+    permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
 ) -> BaselineSelection | None:
     overflow = incumbent.metrics[ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW]
     rule_actions = _CONGESTED_RULES if overflow > 0 else _CLEAN_RULES
     for rule in rule_actions:
+        if permitted is not None and (rule.knob_id, rule.direction) not in permitted:
+            continue
         if not _rule_state_matches(rule, current_values):
             continue
         action = LegalAction(knob_id=rule.knob_id, direction=rule.direction)

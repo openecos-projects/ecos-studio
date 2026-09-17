@@ -670,15 +670,30 @@ def next_coordinate_selection(
     current_values: Mapping[str, bool | int | float],
     attempted: Iterable[RequestedKnobValue],
     start_action_index: int = 0,
+    permitted: Iterable[tuple[OptimizationKnob, StrategyDirection]] | None = None,
 ) -> CoordinateSelection | None:
+    """Patrol the fixed direction order, optionally within a task-legal surface.
+
+    ``permitted`` restricts the patrol to concrete (knob, direction) pairs so a
+    reduced legal surface (for example fixed geometry without floorplan knobs)
+    never stalls the cursor on slots it can never accept.  The returned index
+    stays in full-table space so cursors remain comparable across turns.
+    """
     if not 0 <= start_action_index < len(CONTROLLED_COORDINATE_ORDER):
         raise ValueError("coordinate action index is invalid")
     for knob_id in ACTIVE_OPTIMIZATION_KNOBS:
         _current_value(knob_id, current_values)
     attempted_values = tuple(attempted)
+    permitted_pairs = (
+        None if permitted is None else {(knob, direction) for knob, direction in permitted}
+    )
     for offset in range(len(CONTROLLED_COORDINATE_ORDER)):
         index = (start_action_index + offset) % len(CONTROLLED_COORDINATE_ORDER)
         action = CONTROLLED_COORDINATE_ORDER[index]
+        if permitted_pairs is not None and not _slot_permitted(
+            action, current_values, permitted_pairs
+        ):
+            continue
         requested = _next_requested_value(action, current_values, attempted_values)
         if requested is not None:
             return CoordinateSelection(
@@ -687,6 +702,22 @@ def next_coordinate_selection(
                 (index + 1) % len(CONTROLLED_COORDINATE_ORDER),
             )
     return None
+
+
+def _slot_permitted(
+    action: CoordinateAction,
+    current_values: Mapping[str, bool | int | float],
+    permitted: set[tuple[OptimizationKnob, StrategyDirection]],
+) -> bool:
+    if action.direction == CoordinateDirection.TOGGLE:
+        concrete = (
+            StrategyDirection.ENABLE
+            if not _current_value(action.knob_id, current_values)
+            else StrategyDirection.DISABLE
+        )
+    else:
+        concrete = StrategyDirection(action.direction.value)
+    return (action.knob_id, concrete) in permitted
 
 
 def select_requested_value(

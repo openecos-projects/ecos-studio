@@ -155,3 +155,29 @@ def test_policy_choice_outside_the_legal_surface_falls_back() -> None:
     assert (proposal.action.knob_id, proposal.action.direction) in {
         (item.knob_id, item.direction) for item in restricted
     }
+
+
+def test_coordinate_patrol_rotates_within_the_permitted_surface() -> None:
+    """Regression: with floorplan knobs absent from the legal surface, the
+    coordinate patrol must rotate across permitted directions instead of
+    stalling the cursor on out-of-surface slots and falling back to the same
+    direction every turn."""
+    domain = _density_domain()
+    context = _planning_context(domain, legal_actions=_legal_surface())
+    provider = BaselineProposalProvider(
+        "controlled_coordinate", design_id="gcd", seed=0
+    )
+    first = provider.propose_v2(context, (domain,))
+    assert first.decision == "propose"
+    assert first.action.direction == StrategyDirection.DECREASE
+    assert first.action.requested_value == 0.15
+
+    # The accepted first request enters the domain's attempted set; the next
+    # patrol lap must take the other permitted direction.
+    domain = _density_domain(
+        attempted=[RequestedKnobValue(knob_id="place.target_density", value=0.15)]
+    )
+    context = _planning_context(domain, legal_actions=_legal_surface())
+    second = provider.propose_v2(context, (domain,))
+    assert second.decision == "propose"
+    assert second.action.direction == StrategyDirection.INCREASE

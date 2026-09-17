@@ -3,8 +3,10 @@
 The adapter speaks the planner protocol (``propose_v2``) so baselines run the
 same controller, budget, receipts, ledger, and promotion contract as the LLM
 treatments; only the selection policy differs.  Requested values always come
-from the frozen lattice selector, and policy choices outside the task-permitted
-legal surface fall back deterministically instead of triggering repair.
+from the frozen lattice selector, policies patrol the task-permitted legal
+surface directly, and the deterministic fallback remains as a guard for
+surface changes (for example late stage evidence) instead of triggering
+repair.
 """
 
 from __future__ import annotations
@@ -87,6 +89,9 @@ class BaselineProposalProvider:
             # The rule table reads incumbent overflow; an uninitialized
             # episode falls back to coordinate order deterministically.
             method = BaselineMethod.CONTROLLED_COORDINATE
+        legal = {
+            (action.knob_id, action.direction) for action in context.legal_actions
+        }
         selection = select_baseline_candidate(
             method,
             design_id=self._design_id,
@@ -96,11 +101,11 @@ class BaselineProposalProvider:
             current_values=current_values,
             attempted=attempted,
             incumbent=context.incumbent,
+            permitted=legal,
         )
         self._turn += 1
-        legal = {
-            (action.knob_id, action.direction) for action in context.legal_actions
-        }
+        # Final guard before the planner contract: selections must be legal
+        # even if a policy or the legal surface changes underneath.
         if selection is not None and (
             selection.action.knob_id,
             selection.action.direction,
