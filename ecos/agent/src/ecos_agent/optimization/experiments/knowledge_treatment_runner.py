@@ -40,6 +40,7 @@ from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
 )
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.objective_alignment import build_objective_alignment
+from ecos_agent.optimization.objective_intent import OptimizationParameterPolicy
 from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runtime import create_optimization_runner
 
@@ -605,6 +606,9 @@ def _episode_evidence(workspace: Path, episode_root: Path) -> dict[str, object]:
 
 
 def _objective():
+    # Variable geometry mirrors the closed-loop driver default: both
+    # experiment arms freeze the same wirelength objective with the two
+    # floorplan knobs open.
     return freeze_optimization_objective(
         "Minimize routed wirelength while preserving DRC and global-routing overflow.",
         OptimizationObjectiveProposal(
@@ -613,6 +617,7 @@ def _objective():
                 ObjectiveMetric.DRC_COUNT,
                 ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
             ),
+            parameter_policy=OptimizationParameterPolicy(geometry_mode="variable"),
             rationale_summary="Minimize wirelength while preserving final DRC and global-routing overflow.",
         ),
     )

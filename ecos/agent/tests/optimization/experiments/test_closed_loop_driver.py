@@ -23,7 +23,11 @@ from tests.optimization.experiments.equal_budget_support import (
 
 
 def test_default_episode_objective_matches_treatment_freeze() -> None:
-    assert _episode_objective(_DEFAULT_GOAL_TEXT, "fixed") == _objective()
+    # Both arms default to variable geometry: the same frozen wirelength
+    # objective with the floorplan knobs open.
+    assert _episode_objective(
+        _DEFAULT_GOAL_TEXT, _DEFAULT_GEOMETRY_MODE
+    ) == _objective()
 
 
 def test_default_geometry_mode_opens_the_floorplan_domain() -> None:
