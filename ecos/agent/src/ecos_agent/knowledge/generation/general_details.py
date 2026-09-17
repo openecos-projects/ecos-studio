@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ecos_agent.optimization.contracts import ObjectiveMetric
 from ecos_agent.optimization.parameters.semantics import CARD_ROOT, card_hash, load_parameter_cards
 from ecos_agent.optimization.parameters.contracts import ParameterSemanticsCard
 from ecos_agent.optimization.knowledge.compiler import GeneralDomainClaim, VersionBoundToolBinding
@@ -36,6 +37,12 @@ GENERAL_SOURCE_PATHS = {
     },
 }
 GENERAL_KNOWLEDGE_METRICS = tuple(GENERAL_SOURCE_PATHS)
+# Objective each metric corpus serves; claims carry it so the compiler's
+# objective gate can reject cross-objective knowledge injection.
+_METRIC_OBJECTIVES = {
+    "congestion": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW,
+    "wirelength": ObjectiveMetric.ROUTE_WIRELENGTH,
+}
 _ALLOWED_STAGES = {stage.slug for stage in STAGES}
 # ECC sub-step name (casefolded) -> knowledge phase slug covering it.
 _KNOWLEDGE_PHASE = {
@@ -173,7 +180,7 @@ def _strategy_entries(metric: str) -> tuple[
         )
         entries[-1]["metric"] = statement_metric
         entries[-1]["support"] = _support_contract(
-            statement, binding, entries[-1], actions
+            statement, binding, entries[-1], actions, metric
         )
     return entries, documents, sources
 
@@ -183,12 +190,15 @@ def _support_contract(
     binding: dict[str, object] | None,
     entry: dict[str, object],
     actions: list[dict[str, object]],
+    metric: str,
 ) -> dict[str, object]:
     diagnosis = statement["diagnosis"]
     if not isinstance(diagnosis, dict):
         raise ValueError(f"invalid diagnosis: {statement['id']}")
     claim_sha256 = "sha256:" + _sha256(_json(statement).encode("utf-8"))
-    claim = _claim_contract(statement, entry, diagnosis, claim_sha256)
+    claim = _claim_contract(
+        statement, entry, diagnosis, claim_sha256, _METRIC_OBJECTIVES[metric]
+    )
     GeneralDomainClaim.model_validate(claim)
     if binding is None or not actions:
         return {"claim": claim, "binding": None}
@@ -221,8 +231,10 @@ def _claim_contract(
     entry: dict[str, object],
     diagnosis: dict[str, object],
     claim_sha256: str,
+    metric: str,
 ) -> dict[str, object]:
     return {
+        "objectives": [metric],
         "schema_version": "ecos.general_domain_claim.v1",
         "claim_ref": {
             "entity_id": statement["id"],

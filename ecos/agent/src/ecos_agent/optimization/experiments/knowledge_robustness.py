@@ -40,12 +40,10 @@ def build_wrong_objective_gate(
     mismatched candidate bundle: what raw retrieval would have injected as
     prose (``raw_rag_contrast``), how the compiler classified every candidate
     (``blocked_reason_counts``), and that no claim or action was exposed.
-
-    ponytail: the bundled corpus claims declare no per-claim objectives, so
-    the objective gate is inert on the real corpus and mismatch protection
-    rests on stage/legality/state gates; populate ``GeneralDomainClaim.
-    objectives`` in the generation pipeline and regenerate the corpus to arm
-    the objective gate, then this gate report flips its residual-risk metric.
+    Corpus claims carry their serving objective (see the generator's
+    ``_METRIC_OBJECTIVES``), so the objective gate rejects the mismatch
+    outright; ``unblocked_candidate_count`` stays zero and any nonzero value
+    means a corpus claim is missing its objective metadata.
     """
     view = compile_supported_action_view(
         state=state,

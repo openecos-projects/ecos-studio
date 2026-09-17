@@ -82,8 +82,10 @@ def test_wrong_objective_candidates_are_blocked_and_never_exposed() -> None:
     assert report["assessed"] is True
     assert report["exposed_claim_count"] == 0
     assert report["exposed_action_count"] == 0
-    # Corpus reality: claims carry no objectives, so the objective gate is
-    # inert and some candidates survive gating on legality alone.  The gate
-    # report must surface that residual risk instead of hiding it.
-    assert report["blocked_reason_counts"].get("unsupported_action", 0) > 0
-    assert report["unblocked_candidate_count"] > 0
+    # The corpus claims carry their serving objective, so the objective gate
+    # rejects every mismatched candidate outright: no candidate survives on
+    # legality alone.
+    assert report["blocked_reason_counts"]["objective_mismatch"] == len(
+        candidate_refs
+    )
+    assert report["unblocked_candidate_count"] == 0
