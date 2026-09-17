@@ -49,6 +49,8 @@ def test_native_evidence_is_checked_against_source(tmp_path, monkeypatch):
      "strategy.congestion.trial_core_whitespace.v1"),
     ("floorplan", "aspect ratio above one trial lower configured ratio geometry perimeter",
      "strategy.wirelength.trial_wide_core_shape.v1"),
+    ("floorplan", "die-util tighten core utilization shrink core area shorter wirelength trial",
+     "strategy.wirelength.trial_tighter_core_area.v1"),
 ])
 def test_new_knob_strategies_are_retrievable_with_source_limits(stage, query, entity):
     retriever = GlobalKnowledgeRetriever(load_default_general_knowledge_bundles())

@@ -137,8 +137,10 @@ def _rule_selection(
 ) -> BaselineSelection | None:
     overflow = incumbent.metrics[ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW]
     rule_actions = _CONGESTED_RULES if overflow > 0 else _CLEAN_RULES
-    for knob_id, direction, entity_id in rule_actions:
-        action = LegalAction(knob_id=knob_id, direction=direction)
+    for rule in rule_actions:
+        if not _rule_state_matches(rule, current_values):
+            continue
+        action = LegalAction(knob_id=rule.knob_id, direction=rule.direction)
         requested = select_requested_value(
             action, current_values=current_values, attempted=attempted
         )
@@ -151,17 +153,61 @@ def _rule_selection(
     return _coordinate_selection(current_values, attempted, coordinate_index)
 
 
+def _rule_state_matches(
+    rule: _Rule, current_values: Mapping[str, bool | int | float]
+) -> bool:
+    if rule.value_above is None and rule.value_below is None:
+        return True
+    value = float(current_values[rule.knob_id.value])
+    if rule.value_above is not None:
+        return value > rule.value_above
+    return value < rule.value_below
+
+
+@dataclass(frozen=True)
+class _Rule:
+    knob_id: OptimizationKnob
+    direction: StrategyDirection
+    entity_id: str
+    # Activation bounds on the rule's own current knob value; unconstrained
+    # when both are None (mirrors the bound state predicates on the card).
+    value_above: float | None = None
+    value_below: float | None = None
+
+
 _INCREASE_PADDING = "strategy.congestion.padding_spreads_hotspot_cells.v1"
 _DECREASE_DENSITY = "strategy.congestion.lower_packing_when_overflow_persists.v1"
+_ENABLE_ROUTABILITY = "strategy.congestion.enable_congestion_guided_area_adjust.v1"
+_CORE_WHITESPACE = "strategy.congestion.trial_core_whitespace.v1"
 _REDUCE_SPREADING = "strategy.wirelength.reduce_excessive_place_spreading.v1"
+_WIDE_CORE = "strategy.wirelength.trial_wide_core_shape.v1"
+_TALL_CORE = "strategy.wirelength.trial_tall_core_shape.v1"
+_WEAKER_DENSITY_PENALTY = "strategy.wirelength.trial_weaker_initial_density_penalty.v1"
+_TIGHTER_CORE_AREA = "strategy.wirelength.trial_tighter_core_area.v1"
 
 _CONGESTED_RULES = (
-    (OptimizationKnob.CELL_PADDING_X, StrategyDirection.INCREASE, _INCREASE_PADDING),
-    (OptimizationKnob.TARGET_DENSITY, StrategyDirection.DECREASE, _DECREASE_DENSITY),
+    _Rule(OptimizationKnob.CELL_PADDING_X, StrategyDirection.INCREASE, _INCREASE_PADDING),
+    _Rule(OptimizationKnob.TARGET_DENSITY, StrategyDirection.DECREASE, _DECREASE_DENSITY),
+    _Rule(OptimizationKnob.ROUTABILITY_OPT, StrategyDirection.ENABLE, _ENABLE_ROUTABILITY),
+    _Rule(OptimizationKnob.FLOORPLAN_CORE_UTIL, StrategyDirection.DECREASE, _CORE_WHITESPACE),
 )
 _CLEAN_RULES = (
-    (OptimizationKnob.CELL_PADDING_X, StrategyDirection.DECREASE, _REDUCE_SPREADING),
-    (OptimizationKnob.TARGET_DENSITY, StrategyDirection.INCREASE, _REDUCE_SPREADING),
+    _Rule(OptimizationKnob.CELL_PADDING_X, StrategyDirection.DECREASE, _REDUCE_SPREADING),
+    _Rule(OptimizationKnob.TARGET_DENSITY, StrategyDirection.INCREASE, _REDUCE_SPREADING),
+    _Rule(
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+        StrategyDirection.DECREASE,
+        _WIDE_CORE,
+        value_above=1.0,
+    ),
+    _Rule(
+        OptimizationKnob.FLOORPLAN_ASPECT_RATIO,
+        StrategyDirection.INCREASE,
+        _TALL_CORE,
+        value_below=1.0,
+    ),
+    _Rule(OptimizationKnob.DENSITY_WEIGHT, StrategyDirection.DECREASE, _WEAKER_DENSITY_PENALTY),
+    _Rule(OptimizationKnob.FLOORPLAN_CORE_UTIL, StrategyDirection.INCREASE, _TIGHTER_CORE_AREA),
 )
 
 
@@ -173,16 +219,17 @@ def rule_guided_policy_manifest() -> dict[str, object]:
             {
                 "priority": priority,
                 "action": {
-                    "knob_id": knob_id.value,
-                    "direction": direction.value,
+                    "knob_id": rule.knob_id.value,
+                    "direction": rule.direction.value,
                 },
-                "knowledge_ref": references[entity_id].model_dump(mode="json"),
+                "active_when": _active_when(rule),
+                "knowledge_ref": references[rule.entity_id].model_dump(mode="json"),
             }
-            for priority, (knob_id, direction, entity_id) in enumerate(rules, 1)
+            for priority, rule in enumerate(rules, 1)
         )
 
     return {
-        "schema_version": "ecos.optimization_rule_guided_policy.v2",
+        "schema_version": "ecos.optimization_rule_guided_policy.v3",
         "condition_metric": ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW.value,
         "exhaustion_policy": "controlled_coordinate_order",
         "congested_when": "> 0",
@@ -190,6 +237,14 @@ def rule_guided_policy_manifest() -> dict[str, object]:
         "clean_when": "<= 0",
         "clean_rules": rows(_CLEAN_RULES),
     }
+
+
+def _active_when(rule: _Rule) -> dict[str, object] | None:
+    if rule.value_above is not None:
+        return {"op": ">", "value": rule.value_above}
+    if rule.value_below is not None:
+        return {"op": "<", "value": rule.value_below}
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -200,7 +255,17 @@ def _rule_references() -> dict[str, KnowledgeReference]:
         for entity in load_default_general_knowledge(metric).entities
     }
     result = {}
-    for entity_id in {_INCREASE_PADDING, _DECREASE_DENSITY, _REDUCE_SPREADING}:
+    for entity_id in {
+        _INCREASE_PADDING,
+        _DECREASE_DENSITY,
+        _ENABLE_ROUTABILITY,
+        _CORE_WHITESPACE,
+        _REDUCE_SPREADING,
+        _WIDE_CORE,
+        _TALL_CORE,
+        _WEAKER_DENSITY_PENALTY,
+        _TIGHTER_CORE_AREA,
+    }:
         entity = entities.get(entity_id)
         if entity is None:
             raise ValueError(f"rule-guided knowledge is unavailable: {entity_id}")

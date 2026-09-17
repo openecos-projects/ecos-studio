@@ -276,3 +276,34 @@
 **Evidence sources:** source.dreamplace.density_weight_initialization.
 
 **Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**, **source.dreamplace.density_weight_initialization**
+
+<a id="strategy.wirelength.trial_tighter_core_area.v1"></a>
+## strategy.wirelength.trial_tighter_core_area.v1
+
+**Topic:** wirelength strategy.
+
+**Metric:** wirelength.
+
+**Applies to steps:** floorplan.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. In die-util mode, increase positive floorplan.core_util within the legal (0,1] domain to shrink the core area that cells must span at fixed aspect ratio. The source proves the area mechanism, not that a tighter core improves routed wirelength; denser packing can raise congestion and erosion of timing margin, and site-grid alignment changes realized dimensions.
+
+**Diagnosis:** core area wirelength tradeoff.
+
+**Required evidence:** floorplan_die_util_mode, floorplan.core_util.
+
+**Action intent:** reduce core area wirelength trial (`reduce_core_area_wirelength_trial`).
+
+**Effects:** route_wirelength may_decrease; congestion may_increase; timing may_increase.
+
+**Anti-conditions:** .
+
+**ECOS analog:** increase `floorplan.core_util` (coarse analog)
+
+**Binding limits:** Canonical controlled identity for legacy floorplan.utilitization. Active only in die-util mode, not explicit die-size mode. Core area is cell area divided by utilization before alignment; a tighter core shortens the geometric span but raises local density, and macro placement plus site-grid alignment can offset the wirelength benefit.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.ifp.core_geometry.
+
+**Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**, **source.ifp.core_geometry**

@@ -72,7 +72,7 @@ def test_general_bundles_keep_congestion_and_wirelength_separate() -> None:
     assert congestion_catalog["publication"]["metrics"] == ["congestion"]
     assert wirelength_catalog["publication"]["metrics"] == ["wirelength"]
     assert len(congestion.entities) == 21
-    assert len(wirelength.entities) == 9
+    assert len(wirelength.entities) == 10
     assert all(entity_id.startswith("strategy.congestion.") for entity_id in congestion.entity_ids)
     assert all(entity_id.startswith("strategy.wirelength.") for entity_id in wirelength.entity_ids)
     assert not (CONGESTION_ROOT / "regression" / "wirelength_questions.jsonl").exists()
@@ -97,7 +97,7 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
         item for item in catalog.bindings if item.claim_id == spreading.claim_ref.entity_id
     )
 
-    assert len(catalog.claims) == 30
+    assert len(catalog.claims) == 31
     assert spreading.claim_sha256.startswith("sha256:")
     assert spreading.required_evidence == ("overflow_map", "cell_density_map")
     assert spreading.action_intents == ("decrease_packing_density",)

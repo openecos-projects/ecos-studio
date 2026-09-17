@@ -10,6 +10,7 @@ from ecos_agent.optimization.contracts import (
     ObjectiveMetric,
     RequestedKnobValue,
     SignoffGates,
+    StrategyDirection,
     TerminalObservation,
     TimingMetric,
 )
@@ -168,7 +169,47 @@ def test_rule_guided_policy_manifest_freezes_order_and_knowledge_hashes() -> Non
     manifest = rule_guided_policy_manifest()
 
     assert manifest["exhaustion_policy"] == "controlled_coordinate_order"
-    assert [rule["priority"] for rule in manifest["congested_rules"]] == [1, 2]
-    assert [rule["priority"] for rule in manifest["clean_rules"]] == [1, 2]
+    assert [rule["priority"] for rule in manifest["congested_rules"]] == [1, 2, 3, 4]
+    assert [rule["priority"] for rule in manifest["clean_rules"]] == [1, 2, 3, 4, 5, 6]
     for rule in (*manifest["congested_rules"], *manifest["clean_rules"]):
         assert len(rule["knowledge_ref"]["chunk_sha256"]) == 64
+    bound = [rule for rule in manifest["clean_rules"] if rule["active_when"]]
+    assert [rule["action"]["direction"] for rule in bound] == ["decrease", "increase"]
+    assert all(rule["action"]["knob_id"] == "floorplan.aspect_ratio" for rule in bound)
+    assert [rule["active_when"] for rule in bound] == [
+        {"op": ">", "value": 1.0},
+        {"op": "<", "value": 1.0},
+    ]
+    assert all(rule["active_when"] is None for rule in manifest["congested_rules"])
+
+
+def test_rule_guided_aspect_ratio_rules_follow_the_current_side_of_one() -> None:
+    def clean_selection(aspect_ratio: float) -> BaselineSelection:
+        values = {
+            **_values(),
+            "place.cell_padding_x": 0,
+            "place.target_density": 0.95,
+            "floorplan.aspect_ratio": aspect_ratio,
+        }
+        selection = select_baseline_candidate(
+            BaselineMethod.RULE_GUIDED_DIRECTION,
+            design_id="gcd",
+            turn_index=0,
+            coordinate_index=0,
+            random_seed=0,
+            current_values=values,
+            attempted=(),
+            incumbent=_terminal(0, 0, 100),
+        )
+        assert selection is not None
+        return selection
+
+    wide = clean_selection(2.0)
+    assert wide.action.knob_id.value == "floorplan.aspect_ratio"
+    assert wide.action.direction == StrategyDirection.DECREASE
+    tall = clean_selection(0.5)
+    assert tall.action.knob_id.value == "floorplan.aspect_ratio"
+    assert tall.action.direction == StrategyDirection.INCREASE
+    square = clean_selection(1.0)
+    assert square.action.knob_id.value == "place.density_weight"
+    assert square.action.direction == StrategyDirection.DECREASE
