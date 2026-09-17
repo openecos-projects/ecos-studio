@@ -37,6 +37,9 @@ from ecos_agent.optimization.experiments.baseline_provider import (
     BaselineProposalProvider,
 )
 from ecos_agent.optimization.experiments.baselines import BaselineMethod
+from ecos_agent.optimization.experiments.direction_only_provider import (
+    DirectionOnlyProposalProvider,
+)
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
@@ -452,6 +455,16 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
         help="RQ1 system-level arm: requested-only also drops the "
         "effective-receipt promotion gate (D1 ablation)",
     )
+    parser.add_argument(
+        "--value-policy",
+        choices=("model", "lattice"),
+        default="model",
+        help="LLM-arm value policy: 'model' lets the planner pick the exact "
+        "probe value; 'lattice' keeps the planner's (knob, direction) but "
+        "rewrites the value through the frozen lattice selector, the same "
+        "value mechanism as the deterministic baselines (direction-only "
+        "ablation arm)",
+    )
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
     parser.add_argument(
         "--calibration-replays",
@@ -544,6 +557,11 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
     episode_output.mkdir(parents=True, exist_ok=True)
 
     if args.baseline_method:
+        if args.value_policy != "model":
+            raise SystemExit(
+                "--value-policy applies to the LLM arm only; baselines always "
+                "select lattice values"
+            )
         provider = BaselineProposalProvider(
             args.baseline_method, design_id=args.design, seed=args.seed
         )
@@ -555,6 +573,8 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             diagnostics_path=episode_output / "codex-diagnostics.jsonl",
             ephemeral=True,
         )
+        if args.value_policy == "lattice":
+            provider = DirectionOnlyProposalProvider(provider)
     else:
         raise SystemExit(
             "either --baseline-method or an LLM provider factory is required"
@@ -641,6 +661,7 @@ def main(provider_factory: Callable[..., Any] | None) -> int:
             if args.baseline_method
             else "llm"
         ),
+        "value_policy": args.value_policy,
         "model": model,
         "seed": args.seed,
         "reference_runtime_seconds": reference_runtime,
