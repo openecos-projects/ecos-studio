@@ -5,6 +5,7 @@ from ecos_agent.optimization.experiments.baselines import (
     rule_guided_policy_manifest,
     select_baseline_candidate,
 )
+from ecos_agent.optimization.rules import lattice_values
 from ecos_agent.optimization.contracts import (
     GateResult,
     ObjectiveMetric,
@@ -278,3 +279,88 @@ def test_rule_guided_aspect_ratio_rules_follow_the_current_side_of_one() -> None
     square = clean_selection(1.0)
     assert square.action.knob_id.value == "place.density_weight"
     assert square.action.direction == StrategyDirection.DECREASE
+
+
+_CORE_UTIL_SURFACE = {
+    (OptimizationKnob.FLOORPLAN_CORE_UTIL, StrategyDirection.INCREASE),
+    (OptimizationKnob.FLOORPLAN_CORE_UTIL, StrategyDirection.DECREASE),
+}
+_CORE_UTIL_DECREASE_SURFACE = {
+    (OptimizationKnob.FLOORPLAN_CORE_UTIL, StrategyDirection.DECREASE),
+}
+
+
+def _run_tpe_episode(
+    *,
+    permitted=_CORE_UTIL_SURFACE,
+    seed=17,
+    max_turns=20,
+    start_core_util=0.6,
+    utility=lambda value: -abs(value - 0.45),
+):
+    values = {**_values(), "floorplan.core_util": start_core_util}
+    attempted: list[RequestedKnobValue] = []
+    observations: list[tuple[RequestedKnobValue, float]] = []
+    selections = []
+    for turn_index in range(max_turns):
+        selection = select_baseline_candidate(
+            BaselineMethod.BAYESIAN_TPE,
+            design_id="gcd",
+            turn_index=turn_index,
+            coordinate_index=0,
+            random_seed=seed,
+            current_values=values,
+            attempted=attempted,
+            incumbent=None,
+            permitted=permitted,
+            observations=tuple(observations),
+        )
+        if selection is None:
+            break
+        selections.append(selection)
+        observations.append(
+            (selection.requested, utility(float(selection.requested.value)))
+        )
+        attempted.append(selection.requested)
+        values[selection.requested.knob_id.value] = selection.requested.value
+    return selections
+
+
+def test_bayesian_tpe_is_deterministic_and_exhausts_the_lattice() -> None:
+    first = _run_tpe_episode(max_turns=20)
+    assert len(first) == 16
+    lattice = lattice_values(OptimizationKnob.FLOORPLAN_CORE_UTIL)
+    for selection in first:
+        assert selection.action.knob_id == OptimizationKnob.FLOORPLAN_CORE_UTIL
+        assert selection.requested.value in lattice
+    assert len({item.requested.value for item in first}) == 16
+    assert _run_tpe_episode(max_turns=20) == first
+
+
+def test_bayesian_tpe_finds_the_observed_optimum_value() -> None:
+    selections = _run_tpe_episode(max_turns=20)
+    best = min(selections, key=lambda item: abs(float(item.requested.value) - 0.45))
+    assert float(best.requested.value) == 0.45
+
+
+def test_bayesian_tpe_stays_within_a_one_direction_surface() -> None:
+    selections = _run_tpe_episode(permitted=_CORE_UTIL_DECREASE_SURFACE)
+    assert selections
+    for selection in selections:
+        assert selection.action.direction == StrategyDirection.DECREASE
+        assert float(selection.requested.value) < 0.6
+
+
+def test_bayesian_tpe_skips_toggle_only_surfaces() -> None:
+    selection = select_baseline_candidate(
+        BaselineMethod.BAYESIAN_TPE,
+        design_id="gcd",
+        turn_index=0,
+        coordinate_index=0,
+        random_seed=0,
+        current_values=_values(),
+        attempted=(),
+        incumbent=None,
+        permitted={(OptimizationKnob.ROUTABILITY_OPT, StrategyDirection.DISABLE)},
+    )
+    assert selection is None

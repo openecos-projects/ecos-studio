@@ -145,6 +145,7 @@ def test_design_block_statistics_reports_win_tie_loss_and_holm() -> None:
                     "controlled_coordinate": method(0.5, True, better),
                     "random_action": method(0.0, False, baseline),
                     "rule_guided_direction": method(0.0, False, baseline),
+                    "bayesian_tpe": method(0.5, True, better),
                 },
             },
             "i2c": {
@@ -154,6 +155,7 @@ def test_design_block_statistics_reports_win_tie_loss_and_holm() -> None:
                     "controlled_coordinate": method(0.0, False, baseline),
                     "random_action": method(1.0, True, better),
                     "rule_guided_direction": method(0.0, False, baseline),
+                    "bayesian_tpe": method(0.0, False, baseline),
                 },
             },
         }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import re
+import zlib
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -20,7 +21,9 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization.rules import (
+    ACTIVE_OPTIMIZATION_KNOBS,
     CoordinateDirection,
+    lattice_values,
     legal_actions,
     next_coordinate_selection,
     select_requested_value,
@@ -35,12 +38,14 @@ class BaselineMethod(StrEnum):
     CONTROLLED_COORDINATE = "controlled_coordinate"
     RANDOM_ACTION = "random_action"
     RULE_GUIDED_DIRECTION = "rule_guided_direction"
+    BAYESIAN_TPE = "bayesian_tpe"
 
 
 ONLINE_BASELINE_METHODS = (
     BaselineMethod.CONTROLLED_COORDINATE,
     BaselineMethod.RANDOM_ACTION,
     BaselineMethod.RULE_GUIDED_DIRECTION,
+    BaselineMethod.BAYESIAN_TPE,
 )
 
 
@@ -63,12 +68,15 @@ def select_baseline_candidate(
     attempted: Iterable[RequestedKnobValue],
     incumbent: TerminalObservation,
     permitted: Iterable[tuple[OptimizationKnob, StrategyDirection]] | None = None,
+    observations: tuple[tuple[RequestedKnobValue, float], ...] = (),
 ) -> BaselineSelection | None:
     """Choose one legal direction; the local numeric selector still owns its value.
 
     ``permitted`` is the task-permitted (knob, direction) surface; when given,
     every policy patrols or draws within it directly instead of relying on the
-    provider-level rejection path.
+    provider-level rejection path.  ``observations`` carries the executed
+    (requested value, signed objective utility) pairs consumed by the
+    observation-driven TPE arm; the objective-blind arms ignore it.
     """
     method = BaselineMethod(method)
     if not _DESIGN_ID.fullmatch(design_id):
@@ -91,6 +99,16 @@ def select_baseline_candidate(
         return _random_selection(
             design_id, turn_index, random_seed, current_values, attempted_values,
             permitted_pairs,
+        )
+    if method == BaselineMethod.BAYESIAN_TPE:
+        return _tpe_selection(
+            observations,
+            current_values,
+            attempted_values,
+            turn_index=turn_index,
+            random_seed=random_seed,
+            design_id=design_id,
+            permitted=permitted_pairs,
         )
     return _rule_selection(
         current_values, attempted_values, incumbent, coordinate_index, permitted_pairs
@@ -150,6 +168,107 @@ def _random_selection(
     if requested is None:
         return None
     return BaselineSelection(action, requested, 0)
+
+
+def _tpe_selection(
+    observations: tuple[tuple[RequestedKnobValue, float], ...],
+    current_values: Mapping[str, bool | int | float],
+    attempted: tuple[RequestedKnobValue, ...],
+    *,
+    turn_index: int,
+    random_seed: int,
+    design_id: str,
+    permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
+) -> BaselineSelection | None:
+    """Ask an in-process Optuna TPE sampler for the next lattice value.
+
+    The study is rebuilt from ``observations`` on every call, so the arm keeps
+    no state between turns and replays deterministically from the episode
+    history.  Suggestions snap to the nearest task-permitted, unrequested
+    lattice value; single-knob permitted surfaces (the target protocol) get
+    exact TPE behavior, while wider surfaces patrol feasible knobs in active
+    order.
+    """
+    feasible = _feasible_lattice_moves(current_values, attempted, permitted)
+    if not feasible:
+        return None
+    import optuna
+
+    # ponytail: global optuna log level; the experiment driver is single-threaded
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    study = optuna.create_study(
+        sampler=optuna.samplers.TPESampler(
+            seed=zlib.crc32(f"{random_seed}:{design_id}:{turn_index}".encode())
+        ),
+        direction="maximize",
+    )
+    for requested, utility in observations:
+        choices = lattice_values(requested.knob_id)
+        if not choices or requested.value not in choices:
+            continue
+        study.add_trial(
+            optuna.trial.create_trial(
+                params={requested.knob_id.value: requested.value},
+                distributions={
+                    requested.knob_id.value: optuna.distributions.CategoricalDistribution(
+                        choices
+                    )
+                },
+                value=float(utility),
+            )
+        )
+    trial = study.ask()
+    for knob_id, moves in feasible.items():
+        if not moves:
+            continue
+        current = float(current_values[knob_id.value])
+        suggested = trial.suggest_categorical(knob_id.value, lattice_values(knob_id))
+        value = min(
+            moves, key=lambda item: (abs(float(item) - suggested), float(item))
+        )
+        return BaselineSelection(
+            LegalAction(
+                knob_id=knob_id,
+                direction=(
+                    StrategyDirection.INCREASE
+                    if value > current
+                    else StrategyDirection.DECREASE
+                ),
+            ),
+            RequestedKnobValue(knob_id=knob_id, value=value),
+            0,
+        )
+    return None
+
+
+def _feasible_lattice_moves(
+    current_values: Mapping[str, bool | int | float],
+    attempted: tuple[RequestedKnobValue, ...],
+    permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
+) -> dict[OptimizationKnob, tuple[float | int, ...]]:
+    """Unrequested lattice values reachable under the permitted surface."""
+    tried = {(item.knob_id, item.value) for item in attempted}
+    feasible: dict[OptimizationKnob, tuple[float | int, ...]] = {}
+    for knob_id in ACTIVE_OPTIMIZATION_KNOBS:
+        lattice = lattice_values(knob_id)
+        if not lattice:
+            continue
+        current = float(current_values[knob_id.value])
+        moves = []
+        for value in lattice:
+            if value == current or (knob_id, value) in tried:
+                continue
+            direction = (
+                StrategyDirection.INCREASE
+                if value > current
+                else StrategyDirection.DECREASE
+            )
+            if permitted is not None and (knob_id, direction) not in permitted:
+                continue
+            moves.append(value)
+        if moves:
+            feasible[knob_id] = tuple(moves)
+    return feasible
 
 
 def _rule_selection(

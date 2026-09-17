@@ -379,8 +379,14 @@ def test_wheel_loads_cards_without_source_checkout(tmp_path) -> None:
     )
     wheel = next(wheel_dir.glob("*.whl"))
     site_dir = tmp_path / "site"
+    # --no-deps: the check only needs the wheel's packaged data files; runtime
+    # dependencies (pydantic, optuna) resolve from the ambient interpreter, and
+    # offline resolution of the full dependency tree is not part of this check.
     subprocess.run(
-        ["uv", "pip", "install", "--quiet", "--offline", "--target", str(site_dir), str(wheel)],
+        [
+            "uv", "pip", "install", "--quiet", "--offline", "--no-deps",
+            "--target", str(site_dir), str(wheel),
+        ],
         check=True,
         capture_output=True,
         text=True,

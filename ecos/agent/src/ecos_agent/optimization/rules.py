@@ -720,6 +720,11 @@ def _slot_permitted(
     return (action.knob_id, concrete) in permitted
 
 
+def lattice_values(knob_id: OptimizationKnob) -> tuple[float | int, ...]:
+    """Frozen numeric value lattice for one knob; empty for toggle-only knobs."""
+    return _LATTICE_VALUES.get(knob_id, ())
+
+
 def select_requested_value(
     action: ProposalAction,
     *,

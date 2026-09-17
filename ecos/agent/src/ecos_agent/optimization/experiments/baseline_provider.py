@@ -16,6 +16,7 @@ from ecos_agent.optimization.contracts import (
     OptimizationKnob,
     ProposalReason,
     RequestedKnobValue,
+    objective_metric_utility,
 )
 from ecos_agent.optimization.experiments.baselines import (
     BaselineMethod,
@@ -102,6 +103,11 @@ class BaselineProposalProvider:
             attempted=attempted,
             incumbent=context.incumbent,
             permitted=legal,
+            observations=(
+                _tpe_observations(context)
+                if method == BaselineMethod.BAYESIAN_TPE
+                else ()
+            ),
         )
         self._turn += 1
         # Final guard before the planner contract: selections must be legal
@@ -154,6 +160,28 @@ class BaselineProposalProvider:
                 expected_effects=(_NO_HYPOTHESIS_EFFECT,),
             ),
         )
+
+
+def _tpe_observations(
+    context: OptimizationPlanningContext,
+) -> tuple[tuple[RequestedKnobValue, float], ...]:
+    """Executed (requested, signed primary-metric utility) pairs for TPE."""
+    objective = context.objective
+    if objective is None:
+        return ()
+    metric = objective.primary_metric
+    rows = []
+    for entry in context.history:
+        terminal = entry.terminal_observation
+        if terminal is None or metric not in terminal.metrics:
+            continue
+        rows.append(
+            (
+                entry.requested,
+                objective_metric_utility(metric, float(terminal.metrics[metric])),
+            )
+        )
+    return tuple(rows)
 
 
 def _fallback_selection(

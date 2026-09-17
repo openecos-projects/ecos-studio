@@ -9,12 +9,16 @@ from tests.optimization.parameters.effectiveness_support import (
     domain_context,
 )
 
+from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import (
     ObservationReference,
+    ObjectiveMetric,
     OptimizationKnob,
+    OptimizationObjectiveContract,
     ProposalContextRef,
     ProposalReason,
     RequestedKnobValue,
+    REQUIRED_SIGNOFF_GATES,
     StrategyDirection,
 )
 from ecos_agent.optimization.experiments.baseline_provider import (
@@ -181,3 +185,47 @@ def test_coordinate_patrol_rotates_within_the_permitted_surface() -> None:
     second = provider.propose_v2(context, (domain,))
     assert second.decision == "propose"
     assert second.action.direction == StrategyDirection.INCREASE
+
+
+def test_tpe_provider_uses_primary_metric_history() -> None:
+    domain = _density_domain()
+    objective_payload = {
+        "schema_version": "ecos.optimization_objective.v1",
+        "source_goal_sha256": HASH,
+        "primary_metric": ObjectiveMetric.ROUTE_WIRELENGTH.value,
+        "preserve_metrics": [],
+        "required_signoff_gates": list(REQUIRED_SIGNOFF_GATES),
+        "rationale_summary": "test objective",
+    }
+    objective = OptimizationObjectiveContract(
+        **objective_payload,
+        contract_sha256=canonical_sha256(objective_payload),
+    )
+    history = (
+        SimpleNamespace(
+            requested=RequestedKnobValue(knob_id="place.target_density", value=0.3),
+            terminal_observation=SimpleNamespace(
+                metrics={ObjectiveMetric.ROUTE_WIRELENGTH: 100.0}
+            ),
+        ),
+        SimpleNamespace(
+            requested=RequestedKnobValue(knob_id="place.target_density", value=0.25),
+            terminal_observation=SimpleNamespace(
+                metrics={ObjectiveMetric.ROUTE_WIRELENGTH: 90.0}
+            ),
+        ),
+    )
+    base = _planning_context(domain, legal_actions=_legal_surface())
+    context = SimpleNamespace(
+        **{**base.__dict__, "objective": objective, "history": history}
+    )
+    provider = BaselineProposalProvider("bayesian_tpe", design_id="gcd", seed=3)
+    proposal = provider.propose_v2(context, (domain,))
+    assert proposal.decision == "propose"
+    action = proposal.action
+    assert action.knob_id == OptimizationKnob.TARGET_DENSITY
+    assert (action.knob_id, action.direction) in {
+        (item.knob_id, item.direction) for item in context.legal_actions
+    }
+    assert domain.accepts(action.requested_value)
+    assert action.requested_value not in {0.3, 0.25}
