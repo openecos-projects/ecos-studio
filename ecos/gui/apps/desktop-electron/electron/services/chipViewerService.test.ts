@@ -107,6 +107,7 @@ function createService(options: {
   layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
   modifiedTimes?: Record<string, number>
   openLogFile?: (path: string, flags: string) => number
+  readBinaryFile?: ChipViewerServiceOptions['readBinaryFile']
   readTextFile?: ChipViewerServiceOptions['readTextFile']
   resourcesPath?: string
   spawnProcess?: ChipViewerServiceOptions['spawnProcess']
@@ -148,7 +149,7 @@ function createService(options: {
     }),
   )
   const renameFile = vi.fn(async () => undefined)
-  const writeTextFile = vi.fn(async () => undefined)
+  const writeTextFile = vi.fn(async (_path: string, _content: string) => undefined)
   const workspaceResourceService = {
     resolveStepInfo: vi.fn(async (request: { id: 'layout'; step: string }) => {
       const result: WorkspaceStepInfoResult = options.stepInfoResult ?? {
@@ -233,6 +234,15 @@ function createService(options: {
     layoutEditRuntime,
     openLogFile,
     platform: 'linux',
+    readBinaryFile:
+      options.readBinaryFile ??
+      (async (path) => {
+        const text = files.get(path)
+        if (text === undefined) {
+          throw new Error(`file not found: ${path}`)
+        }
+        return Buffer.from(text, 'utf8')
+      }),
     readTextFile:
       options.readTextFile ??
       (async (path) => {
@@ -1311,6 +1321,332 @@ describe('ChipViewerService', () => {
       }),
     ).rejects.toThrow(
       `Packaged chip viewer binaries are incomplete. Missing: ${ecc}, ${viewer}`,
+    )
+  })
+
+  it('publishes the macro staging manifest for preFloorplan edit sessions', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const stagingPath = join(EDIT_SESSION_COMMAND_DIR, 'macro-staging.json')
+    const { renameFile, service, spawnProcess, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]: [
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count',
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        ].join('\n'),
+        [DEF_PATH]: [
+          'VERSION 5.8 ;',
+          'DESIGN gcd ;',
+          'UNITS DISTANCE MICRONS 1000 ;',
+          'DIEAREA ( 0 0 ) ( 52000 53000 ) ;',
+          'COMPONENTS 2 ;',
+          '    - u_sram01 SRAM_64x32 ;',
+          '    - u_core_cell BUFX1 ;',
+          'END COMPONENTS',
+          'END DESIGN',
+        ].join('\n'),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'preFloorplan',
+    })
+
+    const stagingWrite = writeTextFile.mock.calls.find(
+      ([path]) => path === `${stagingPath}.tmp`,
+    )
+    expect(stagingWrite).toBeDefined()
+    expect(renameFile).toHaveBeenCalledWith(`${stagingPath}.tmp`, stagingPath)
+    expect(stagingWrite?.[1]).toMatchInlineSnapshot(`
+        "{
+          "schema": 1,
+          "dbuPerMicron": 1000,
+          "dieArea": {
+            "lx": 0,
+            "ly": 0,
+            "hx": 52000,
+            "hy": 53000
+          },
+          "macros": [
+            {
+              "name": "u_sram01",
+              "master": "SRAM_64x32",
+              "widthDbu": 40000,
+              "heightDbu": 30000,
+              "orient": "R0",
+              "placed": false
+            }
+          ]
+        }
+        "
+      `)
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      expect.arrayContaining(['--macro-staging-file', stagingPath]),
+      expect.any(Object),
+    )
+  })
+
+  it('still opens the viewer without macro staging when the DEF is malformed', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { service, spawnProcess, writeTextFile } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]:
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n' +
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        [DEF_PATH]:
+          'COMPONENTS 1 ; - u_sram01 SRAM_64x32 + FIXED BROKEN ;\nEND COMPONENTS\n',
+      },
+    })
+
+    try {
+      await service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: 'preFloorplan',
+      })
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('macro staging unavailable'),
+      )
+      expect(
+        writeTextFile.mock.calls.some(([path]) =>
+          path.endsWith('macro-staging.json.tmp'),
+        ),
+      ).toBe(false)
+      expect(spawnProcess).toHaveBeenCalledWith(
+        devBinaries.viewer,
+        expect.not.arrayContaining(['--macro-staging-file']),
+        expect.any(Object),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('forwards orient and placement status from bridged macro edit commands', async () => {
+    const devBinaries = devChipViewerPaths()
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'command-7.json')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { layoutEditRuntime, service, watchDirectory } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {
+        [commandPath]: JSON.stringify({
+          command_id: 7,
+          expected_version: 0,
+          instance_name: 'u_sram01',
+          op: 'move_shape',
+          orient: 'R90',
+          placement_status: 'fixed',
+          requested_bbox: { hx: 1400, hy: 800, lx: 0, ly: 0 },
+          shape_id: 0,
+        }),
+      },
+    })
+
+    try {
+      await service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: 'preFloorplan',
+      })
+      const editListener = watchDirectory.mock.calls[0]?.[1]
+
+      editListener?.('command-7.json')
+
+      await vi.waitFor(() => {
+        expect(layoutEditRuntime.layoutEditApply).toHaveBeenCalledWith(
+          expect.objectContaining({
+            operation: expect.objectContaining({
+              orient: 'R90',
+              placementStatus: 'fixed',
+            }),
+          }),
+        )
+      })
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('saves macro-placement sessions with the macro location export flag', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-9.json')
+    const { layoutEditRuntime, service, watchDirectory } = createService({
+      execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+        DB_PATH,
+        GDS_PATH,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]:
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n' +
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        [DEF_PATH]: 'COMPONENTS 1 ; - u_sram01 SRAM_64x32 ;\nEND COMPONENTS\n',
+        [commandPath]: JSON.stringify({ action: 'save', command_id: 9 }),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'preFloorplan',
+    })
+    const controlListener = watchDirectory.mock.calls[0]?.[1]
+
+    controlListener?.('control-save-9.json')
+
+    await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditSave).toHaveBeenCalledWith(
+        expect.objectContaining({ writeMacroLocation: true }),
+      )
+    })
+  })
+
+  it('omits the macro location export flag for non-macro edit sessions', async () => {
+    const devBinaries = devChipViewerPaths()
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-11.json')
+    const { layoutEditRuntime, service, watchDirectory } = createService({
+      execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        DB_PATH,
+        GDS_PATH,
+      ],
+      files: {
+        [commandPath]: JSON.stringify({ action: 'save', command_id: 11 }),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    const controlListener = watchDirectory.mock.calls[0]?.[1]
+
+    controlListener?.('control-save-11.json')
+
+    await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditSave).toHaveBeenCalled()
+    })
+    const saveCall = (layoutEditRuntime.layoutEditSave as ReturnType<typeof vi.fn>).mock
+      .calls[0][0]
+    expect(saveCall).not.toHaveProperty('writeMacroLocation')
+  })
+
+  it('retries the save without the macro location flag on older ECC runtimes', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-12.json')
+    const saveResult = {
+      artifacts: {
+        dbPath: DB_PATH,
+        defPath: DEF_PATH,
+        gdsPath: GDS_PATH,
+        geometryManifestPath: GEOMETRY_MANIFEST,
+      },
+      dirty: false,
+      editSessionId: EDIT_SESSION_ID,
+      geometryRevision: 1,
+      revision: 1,
+      saved: true,
+    }
+    const layoutEditSave = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('unknown field: write_macro_location'))
+      .mockResolvedValue(saveResult)
+    const { renameFile, service, watchDirectory, writeTextFile } = createService({
+      execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+        DB_PATH,
+        GDS_PATH,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]:
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n' +
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        [DEF_PATH]: 'COMPONENTS 1 ; - u_sram01 SRAM_64x32 ;\nEND COMPONENTS\n',
+        [commandPath]: JSON.stringify({ action: 'save', command_id: 12 }),
+      },
+      layoutEditRuntime: {
+        layoutEditApply: vi.fn(),
+        layoutEditBegin: vi.fn(async () => ({
+          dirty: false,
+          editSessionId: EDIT_SESSION_ID,
+          geometryManifestPath: GEOMETRY_MANIFEST,
+          geometryRevision: 0,
+          revision: 0,
+          sourceFingerprint: 'source-1',
+        })),
+        layoutEditDiscard: vi.fn(),
+        layoutEditSave,
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'preFloorplan',
+    })
+    const controlListener = watchDirectory.mock.calls[0]?.[1]
+
+    controlListener?.('control-save-12.json')
+
+    await vi.waitFor(() => {
+      expect(layoutEditSave).toHaveBeenCalledTimes(2)
+      expect(layoutEditSave.mock.calls[1][0]).not.toHaveProperty('writeMacroLocation')
+      expect(renameFile).toHaveBeenCalledWith(
+        join(EDIT_SESSION_RESULT_DIR, 'control-result-save-12.json.tmp'),
+        join(EDIT_SESSION_RESULT_DIR, 'control-result-save-12.json'),
+      )
+    })
+    const saveResultText = writeTextFile.mock.calls.find(
+      ([path]) =>
+        path === join(EDIT_SESSION_RESULT_DIR, 'control-result-save-12.json.tmp'),
+    )?.[1]
+    expect(saveResultText).toContain(
+      'macro_location.tcl export skipped (ECC runtime too old)',
     )
   })
 })

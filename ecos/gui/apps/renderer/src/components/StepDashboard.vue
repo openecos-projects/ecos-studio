@@ -272,6 +272,22 @@
             <div class="header-actions">
               <span v-if="data.hasGeometry" class="dashboard-muted">Geometry ready</span>
               <button
+                v-if="macroPlacementAvailable"
+                type="button"
+                class="dashboard-icon-button"
+                :disabled="!chipViewerAvailable || chipViewerEditBusy"
+                title="Place Macros"
+                aria-label="Place Macros"
+                @click="void openChipViewer('edit')"
+              >
+                <i
+                  :class="
+                    chipViewerEditBusy ? 'ri-loader-4-line spin' : 'ri-drag-move-2-line'
+                  "
+                  aria-hidden="true"
+                />
+              </button>
+              <button
                 type="button"
                 class="dashboard-icon-button"
                 :disabled="!chipViewerAvailable || chipViewerBusy"
@@ -1202,6 +1218,7 @@ const {
   stepConfigPathResolved,
 } = useStepConfigInfo()
 const chipViewerBusy = ref(false)
+const chipViewerEditBusy = ref(false)
 const dataChartIndex = ref(0)
 const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
@@ -1221,11 +1238,19 @@ const chipViewerStep = computed(() =>
 const chipViewerAvailable = computed(() =>
   canOpenChipViewer({
     chipViewerBusy: chipViewerBusy.value,
-    chipViewerEditBusy: false,
+    chipViewerEditBusy: chipViewerEditBusy.value,
     isDesktopRuntime: true,
     projectPath: currentProject.value?.path,
     step: chipViewerStep.value,
   }),
+)
+// Manual macro placement enters the layout edit session on the
+// preFloorplan result, before macroPlacement/postFloorplan run.
+const macroPlacementAvailable = computed(
+  () =>
+    chipViewerStep.value === StepEnum.PRE_FLOORPLAN &&
+    data.value?.hasGeometry === true &&
+    chipViewerAvailable.value,
 )
 const currentFlowStage = computed(() => {
   const step = (data.value?.step ?? currentStep.value).trim().toLowerCase()
@@ -1532,20 +1557,21 @@ function onSnapshotAction(actionId: string): void {
   else if (actionId === 'congestion') showCongestionDialog.value = true
 }
 
-async function openChipViewer(): Promise<void> {
+async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
   const projectPath = currentProject.value?.path
   const step = chipViewerStep.value
   if (!projectPath || !step || !chipViewerAvailable.value) return
 
-  chipViewerBusy.value = true
+  const busy = mode === 'edit' ? chipViewerEditBusy : chipViewerBusy
+  busy.value = true
   try {
     await getDesktopApi().chipViewer.open(
-      buildChipViewerOpenRequest(projectPath, step, 'view'),
+      buildChipViewerOpenRequest(projectPath, step, mode),
     )
   } catch (cause) {
     console.error('Failed to open Chip Viewer from step dashboard:', cause)
   } finally {
-    chipViewerBusy.value = false
+    busy.value = false
   }
 }
 
