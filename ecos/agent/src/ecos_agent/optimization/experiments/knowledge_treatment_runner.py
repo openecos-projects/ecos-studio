@@ -18,6 +18,9 @@ from ecos_agent.optimization.contracts import (
     OptimizationObjectiveProposal,
     TerminalObservation,
 )
+from ecos_agent.optimization.experiments.direction_only_provider import (
+    DirectionOnlyProposalProvider,
+)
 from ecos_agent.optimization.experiments.equal_budget import (
     EqualBudgetConfig,
     _verified_episode_state,
@@ -64,9 +67,12 @@ def run_experiment(
     provider_factory: Callable[..., Any],
     rule_guided_utility_by_design: Mapping[str, float | int] | None = None,
     knowledge_case_pool_root: Path | None = None,
+    value_policy: str = "model",
 ) -> dict[str, object]:
     if not _ID.fullmatch(run_id) or type(seed) is not int or max_workers <= 0:
         raise ValueError("Phase 8 run arguments are invalid")
+    if value_policy not in {"model", "lattice"}:
+        raise ValueError("treatment value policy is invalid")
     output = Path(output).resolve()
     workspace_root = Path(workspace_root).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -123,6 +129,7 @@ def run_experiment(
                     treatment=treatment,
                     provider_factory=provider_factory,
                     knowledge_case_pool_root=knowledge_case_pool_root,
+                    value_policy=value_policy,
                     canonical=canonical,
                     noise_epsilon=noise_epsilon,
                 )
@@ -159,6 +166,7 @@ def run_experiment(
         "run_id": run_id,
         "model": model,
         "seed": seed,
+        "value_policy": value_policy,
         "tool_revision": tool_revision,
         "input_manifest_sha256": manifest.manifest_sha256,
         "design_manifest_ref": str(Path(manifest_path)),
@@ -431,6 +439,7 @@ def _run_treatment(
     knowledge_case_pool_root: Path | None = None,
     canonical: TerminalObservation | None = None,
     noise_epsilon: dict[str, float] | None = None,
+    value_policy: str = "model",
 ) -> dict[str, object]:
     if canonical is None:
         raise ValueError(
@@ -450,6 +459,11 @@ def _run_treatment(
         ephemeral=True,
     )
     provider.select_model(model)
+    if value_policy == "lattice":
+        # Direction-only cross cell: the planner keeps (knob, direction)
+        # authority while the frozen lattice selector owns probe values, the
+        # same value mechanism as the deterministic baselines.
+        provider = DirectionOnlyProposalProvider(provider)
     objective = _objective()
     # Alignment must anchor on the workspace (canonical) observation: the
     # runner rebuilds alignment from the workspace and compares whole objects,
@@ -517,6 +531,7 @@ def _run_treatment(
             "design_id": design.design_id,
             "treatment": treatment.treatment.value,
             "agent_mode": treatment.agent_mode,
+            "value_policy": value_policy,
             "knowledge_case_shots": treatment.knowledge_case_shots,
             "episode_id": episode_id,
             "planning_calls": planning_calls,
@@ -645,6 +660,14 @@ def main(provider_factory: Callable[..., Any]) -> None:
     parser.add_argument("--terminal-timeout-seconds", type=float, default=900.0)
     parser.add_argument("--rule-guided-utility-by-design", type=Path)
     parser.add_argument("--knowledge-case-pool-root", type=Path)
+    parser.add_argument(
+        "--value-policy",
+        choices=("model", "lattice"),
+        default="model",
+        help="'model' lets the planner pick exact probe values (default); "
+        "'lattice' keeps the planner's (knob, direction) but rewrites values "
+        "through the frozen lattice selector (direction-only cross cell)",
+    )
     args = parser.parse_args()
     manifest = load_experiment_manifest(
         args.design_manifest, args.benchmark_root, args.pdk_root
@@ -669,4 +692,5 @@ def main(provider_factory: Callable[..., Any]) -> None:
             else None
         ),
         knowledge_case_pool_root=args.knowledge_case_pool_root,
+        value_policy=args.value_policy,
     )
