@@ -20,6 +20,11 @@ use eframe::egui;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::macro_ops::{plan_macro_op, MacroOp, PlannedMacroMove};
+use crate::macro_orient::MacroOrientation;
+use crate::macro_staging::{
+    clamp_rect_into, instance_names_intersecting, rect_fits_inside, MacroStagingState, MacroTarget,
+};
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -97,6 +102,7 @@ struct LoadingViewer {
     initial_session_dirty: bool,
     edit_command_dir: Option<PathBuf>,
     edit_result_dir: Option<PathBuf>,
+    macro_staging_path: Option<PathBuf>,
     drc_data_path: Option<PathBuf>,
     drc_statis_path: Option<PathBuf>,
     antenna_data_path: Option<PathBuf>,
@@ -117,6 +123,7 @@ struct LoadedViewer {
     edit_enabled: bool,
     edit_command_dir: Option<PathBuf>,
     edit_result_dir: Option<PathBuf>,
+    macro_staging: Option<MacroStagingState>,
     query_input_mode: QueryInputMode,
     search_text: String,
     search_mode: SearchMode,
@@ -512,6 +519,11 @@ struct EditDraft {
     instance_name: Option<String>,
     original_bbox: Rect32,
     requested_bbox: Rect32,
+    /// Explicit R-notation orientation for macro placements; `None` keeps
+    /// the preserve-orientation behavior of plain instance moves.
+    orient: Option<MacroOrientation>,
+    /// Explicit placement status for macro placements (e.g. "fixed").
+    placement_status: Option<String>,
 }
 
 struct PendingEdit {
@@ -524,6 +536,10 @@ struct ViewerEditCommand<'a> {
     command: &'a GeometryEditCommand,
     #[serde(skip_serializing_if = "Option::is_none")]
     instance_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    orient: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    placement_status: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1396,6 +1412,7 @@ impl ChipViewerApp {
         edit_command_dir: Option<PathBuf>,
         edit_result_dir: Option<PathBuf>,
         initial_session_dirty: bool,
+        macro_staging_path: Option<PathBuf>,
         drc_data_path: Option<PathBuf>,
         drc_statis_path: Option<PathBuf>,
         antenna_data_path: Option<PathBuf>,
@@ -1421,6 +1438,7 @@ impl ChipViewerApp {
                 initial_session_dirty,
                 edit_command_dir,
                 edit_result_dir,
+                macro_staging_path,
                 drc_data_path,
                 drc_statis_path,
                 antenna_data_path,
@@ -1497,6 +1515,7 @@ impl ChipViewerApp {
                     loading.initial_session_dirty,
                     loading.edit_command_dir.clone(),
                     loading.edit_result_dir.clone(),
+                    loading.macro_staging_path.clone(),
                     loading.drc_data_path.clone(),
                     loading.drc_statis_path.clone(),
                     loading.antenna_data_path.clone(),
@@ -2058,6 +2077,7 @@ impl LoadedViewer {
         initial_session_dirty: bool,
         edit_command_dir: Option<PathBuf>,
         edit_result_dir: Option<PathBuf>,
+        macro_staging_path: Option<PathBuf>,
         drc_data_path: Option<PathBuf>,
         drc_statis_path: Option<PathBuf>,
         antenna_data_path: Option<PathBuf>,
@@ -2094,6 +2114,15 @@ impl LoadedViewer {
             .map(|category| BTreeSet::from([category.id.clone()]))
             .unwrap_or_default();
         let map_thumbnail_worker = map_catalog.as_ref().map(|_| spawn_map_thumbnail_worker());
+        let macro_staging = macro_staging_path.as_deref().and_then(|path| {
+            MacroStagingState::load(path, &db).or_else(|| {
+                log::warn!(
+                    "macro staging manifest could not be loaded: {}",
+                    path.display()
+                );
+                None
+            })
+        });
         let gpu_canvas = match render_mode {
             crate::RenderMode::Gpu => Some(crate::canvas_gpu::GpuCanvasState::new_with_wgpu(
                 true,
@@ -2117,6 +2146,7 @@ impl LoadedViewer {
             edit_enabled,
             edit_command_dir,
             edit_result_dir,
+            macro_staging,
             query_input_mode: QueryInputMode::Search,
             search_text: String::new(),
             search_mode: SearchMode::All,
@@ -3529,6 +3559,13 @@ impl LoadedViewer {
             );
             return;
         };
+        // The macro staging column lives left of the die; widen the world
+        // rect so pan/zoom/fit can reach it.
+        let world = self
+            .macro_staging
+            .as_ref()
+            .map(|staging| staging.expanded_world(world))
+            .unwrap_or(world);
 
         self.handle_canvas_keyboard_shortcuts(ui, world, canvas);
 
@@ -3674,6 +3711,15 @@ impl LoadedViewer {
             if self.ruler_tool.enabled {
                 if let Some(point) = ruler_snap.or(interaction_point) {
                     self.ruler_tool.commit(point);
+                }
+            } else if self.macro_staging.is_some() {
+                let additive = ui.ctx().input(|input| input.modifiers.shift);
+                let handled =
+                    interaction_point.is_some_and(|point| self.select_macro_at(point, additive));
+                if !handled {
+                    self.selected = response
+                        .interact_pointer_pos()
+                        .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
                 }
             } else {
                 self.selected = response
@@ -4209,13 +4255,19 @@ impl LoadedViewer {
         if let Some(draft) = &self.draft {
             let screen =
                 world_to_screen_rect(draft.requested_bbox, world, canvas, self.zoom, self.pan);
+            let stroke_color = if self.macro_draft_collider().is_some() {
+                egui::Color32::from_rgb(248, 113, 113)
+            } else {
+                ecos_accent()
+            };
             painter.rect_stroke(
                 screen.expand(2.0),
                 0.0,
-                egui::Stroke::new(2.0_f32, ecos_accent()),
+                egui::Stroke::new(2.0_f32, stroke_color),
                 egui::StrokeKind::Inside,
             );
         }
+        self.paint_macro_staging(&painter, world, canvas);
 
         paint_scale_ruler(
             &painter,
@@ -6066,7 +6118,8 @@ impl LoadedViewer {
             self.draft.is_some(),
             self.pending_edit.is_some(),
             self.pending_session_action.is_some(),
-        ) {
+        ) || self.macro_queue_busy()
+        {
             self.last_edit_result = Some("wait for the current edit to finish".to_string());
             return false;
         }
@@ -6105,6 +6158,22 @@ impl LoadedViewer {
         )
         .then(|| self.db.owner_name(owner).map(str::to_owned))
         .flatten();
+        // Macro placements always carry an explicit orientation and fixed
+        // status so that already-fixed macros stay editable.
+        let (orient, placement_status) = instance_name
+            .as_deref()
+            .filter(|name| {
+                self.macro_staging
+                    .as_ref()
+                    .is_some_and(|staging| staging.is_macro_instance(&self.db, name))
+            })
+            .map(|name| {
+                (
+                    Some(self.macro_staging.as_ref().unwrap().orient_of(name)),
+                    Some("fixed".to_string()),
+                )
+            })
+            .unwrap_or((None, None));
         self.draft = Some(EditDraft {
             command_id: self.allocate_command_id(),
             shape_id,
@@ -6112,6 +6181,8 @@ impl LoadedViewer {
             instance_name,
             original_bbox,
             requested_bbox: original_bbox,
+            orient,
+            placement_status,
         });
         true
     }
@@ -6123,6 +6194,10 @@ impl LoadedViewer {
         canvas: egui::Rect,
     ) -> bool {
         let point = screen_to_world_point(pos, world, canvas, self.zoom, self.pan);
+        if let Some(draft) = self.begin_macro_staged_drag(point) {
+            self.draft = Some(draft);
+            return true;
+        }
         if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
             self.selected = Some(shape_id);
         }
@@ -6134,7 +6209,19 @@ impl LoadedViewer {
             return;
         };
         let (dx, dy) = screen_to_world_delta(screen_delta, world, canvas, self.zoom);
-        draft.requested_bbox = translate_rect(draft.original_bbox, dx, dy);
+        let mut requested = translate_rect(draft.original_bbox, dx, dy);
+        // Macro placements are confined to the core area once the draft
+        // enters it; the staging column itself stays unconstrained.
+        if let Some(core) = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.core_rect)
+        {
+            if requested.intersects(core) {
+                requested = clamp_rect_into(requested, core);
+            }
+        }
+        draft.requested_bbox = requested;
     }
 
     fn commit_draft(&mut self) {
@@ -6150,6 +6237,10 @@ impl LoadedViewer {
             return;
         };
 
+        if !self.validate_macro_draft(&draft) {
+            return;
+        }
+
         let command = GeometryEditCommand {
             command_id: draft.command_id,
             shape_id: draft.shape_id,
@@ -6160,7 +6251,13 @@ impl LoadedViewer {
         let command_path = command_dir.join(format!("command-{}.json", command.command_id));
         let result_path = result_dir.join(format!("result-{}.json", command.command_id));
 
-        match write_edit_command(&command_path, &command, draft.instance_name.as_deref()) {
+        match write_edit_command(
+            &command_path,
+            &command,
+            draft.instance_name.as_deref(),
+            draft.orient.map(|orient| orient.as_str()),
+            draft.placement_status.as_deref(),
+        ) {
             Ok(()) => {
                 self.pending_edit = Some(PendingEdit { result_path });
                 self.last_edit_result = Some(format!("command {} pending", command.command_id));
@@ -6171,7 +6268,386 @@ impl LoadedViewer {
         }
     }
 
+    fn macro_queue_busy(&self) -> bool {
+        self.macro_staging
+            .as_ref()
+            .is_some_and(|staging| staging.queue.is_busy())
+    }
+
+    /// Starts dragging an unplaced macro from its staging slot. The draft
+    /// uses `shape_id 0` because the instance has no snapshot shape until
+    /// the placement command is accepted.
+    fn begin_macro_staged_drag(&mut self, point: Point32) -> Option<EditDraft> {
+        if !can_start_edit_command(
+            self.draft.is_some(),
+            self.pending_edit.is_some(),
+            self.pending_session_action.is_some(),
+        ) || self.macro_queue_busy()
+        {
+            self.last_edit_result = Some("wait for the current edit to finish".to_string());
+            return None;
+        }
+        if !self.edit_enabled {
+            return None;
+        }
+        let (name, rect, orient) = {
+            let staging = self.macro_staging.as_ref()?;
+            let index = staging.staged_index_at(point)?;
+            let staged = &staging.staged[index];
+            (staged.name.clone(), staged.rect, staged.orient)
+        };
+        Some(EditDraft {
+            command_id: self.allocate_command_id(),
+            shape_id: 0,
+            expected_version: 0,
+            instance_name: Some(name),
+            original_bbox: rect,
+            requested_bbox: rect,
+            orient: Some(orient),
+            placement_status: Some("fixed".to_string()),
+        })
+    }
+
+    /// Enforces the macro placement constraints for a committed draft:
+    /// releases inside the staging column cancel the move, and positions
+    /// that overlap another placed instance are refused. Returns false when
+    /// the draft must not become an edit command.
+    fn validate_macro_draft(&mut self, draft: &EditDraft) -> bool {
+        let Some(staging) = self.macro_staging.as_ref() else {
+            return true;
+        };
+        let Some(name) = draft.instance_name.as_deref() else {
+            return true;
+        };
+        if draft.shape_id != 0 && !staging.is_macro_instance(&self.db, name) {
+            return true;
+        }
+        let Some(core) = staging.core_rect else {
+            self.last_edit_result = Some("macro move rejected: core area is unknown".to_string());
+            return false;
+        };
+        if !draft.requested_bbox.intersects(core) {
+            self.last_edit_result =
+                Some("macro move cancelled: released outside the core".to_string());
+            return false;
+        }
+        let colliders = instance_names_intersecting(&self.db, draft.requested_bbox, name);
+        if let Some(first) = colliders.first() {
+            self.last_edit_result = Some(format!("macro move rejected: overlaps {first}"));
+            return false;
+        }
+        true
+    }
+
+    /// First instance name overlapping the current macro draft, if any; used
+    /// to paint the draft outline red while the move would be refused.
+    fn macro_draft_collider(&self) -> Option<String> {
+        let staging = self.macro_staging.as_ref()?;
+        let draft = self.draft.as_ref()?;
+        let name = draft.instance_name.as_deref()?;
+        if draft.shape_id != 0 && !staging.is_macro_instance(&self.db, name) {
+            return None;
+        }
+        let core = staging.core_rect?;
+        if !draft.requested_bbox.intersects(core) {
+            return None;
+        }
+        instance_names_intersecting(&self.db, draft.requested_bbox, name)
+            .into_iter()
+            .next()
+    }
+
+    fn placed_shape_is_macro(&self, shape_id: ShapeId) -> bool {
+        let Some(staging) = self.macro_staging.as_ref() else {
+            return false;
+        };
+        let Some(shape) = self.db.find_shape(shape_id) else {
+            return false;
+        };
+        let Some(name) = crate::macro_staging::shape_instance_name(&self.db, shape) else {
+            return false;
+        };
+        staging.is_macro_instance(&self.db, name)
+    }
+
+    /// Handles a primary click in macro placement mode: staged slots and
+    /// placed block macros join the multi-selection. Returns true when the
+    /// click selected a macro target.
+    fn select_macro_at(&mut self, point: Point32, additive: bool) -> bool {
+        let staged_hit = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.staged_index_at(point))
+            .map(MacroTarget::Staged);
+        let placed_hit = if staged_hit.is_none() {
+            self.pick_editable_instance_bbox_at(point)
+                .filter(|shape_id| self.placed_shape_is_macro(*shape_id))
+                .map(MacroTarget::Placed)
+        } else {
+            None
+        };
+        let target = staged_hit.or(placed_hit);
+        let Some(staging) = self.macro_staging.as_mut() else {
+            return false;
+        };
+        match target {
+            Some(target) => {
+                if additive && !staging.selection.insert(target) {
+                    staging.selection.remove(&target);
+                } else if !additive {
+                    staging.selection.clear();
+                    staging.selection.insert(target);
+                }
+            }
+            None if !additive => staging.selection.clear(),
+            None => {}
+        }
+        match target {
+            Some(MacroTarget::Placed(shape_id)) => {
+                self.selected = Some(shape_id);
+                true
+            }
+            Some(MacroTarget::Staged(_)) => {
+                self.selected = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn macro_toolbar(&mut self, ui: &mut egui::Ui) {
+        let Some(staging) = self.macro_staging.as_mut() else {
+            return;
+        };
+        let views = staging.selected_placement_views(&self.db);
+        let state = crate::macro_toolbar::MacroToolbarState {
+            unplaced_count: staging.staged.len(),
+            selected_count: views.len(),
+            rotation_allowed: views.iter().all(|view| view.symmetry.rotation_allowed()),
+            mirror_allowed: views.iter().all(|view| view.symmetry.mirror_allowed()),
+            queue_busy: staging.queue.is_busy(),
+            queue_status: staging.queue.status(),
+        };
+        let mut requested: Vec<MacroOp> = Vec::new();
+        crate::macro_toolbar::show_macro_toolbar(ui, &state, |op| requested.push(op));
+        for op in &requested {
+            self.run_macro_op(op);
+        }
+    }
+
+    fn run_macro_op(&mut self, op: &MacroOp) {
+        let core = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.core_rect);
+        let Some(staging) = self.macro_staging.as_mut() else {
+            return;
+        };
+        if staging.queue.is_busy() {
+            return;
+        }
+        let views = staging.selected_placement_views(&self.db);
+        let plan = plan_macro_op(op, &views, core);
+        let skipped_summary = plan
+            .skipped
+            .iter()
+            .map(|(name, reason)| format!("{name}: {reason}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        staging.message = (!skipped_summary.is_empty()).then_some(skipped_summary);
+        if plan.moves.is_empty() {
+            return;
+        }
+        staging.queue.enqueue(plan.moves);
+        self.pump_macro_queue();
+    }
+
+    /// Emits the next queued macro placement command when the edit bridge is
+    /// idle. Versions are resolved fresh from the reloaded snapshot for
+    /// every command.
+    fn pump_macro_queue(&mut self) {
+        if self.draft.is_some()
+            || self.pending_edit.is_some()
+            || self.pending_session_action.is_some()
+            || self.edit_command_dir.is_none()
+            || self.edit_result_dir.is_none()
+        {
+            return;
+        }
+        let head: PlannedMacroMove = {
+            let Some(staging) = self.macro_staging.as_ref() else {
+                return;
+            };
+            if staging.queue.active.is_some() {
+                return;
+            }
+            match staging.queue.pending.front() {
+                Some(head) => head.clone(),
+                None => return,
+            }
+        };
+        let (shape_id, expected_version) =
+            match crate::macro_staging::instance_shape(&self.db, &head.name) {
+                Some(shape) => (shape.id, shape.version),
+                None => (0, 0),
+            };
+        let Some(staging) = self.macro_staging.as_mut() else {
+            return;
+        };
+        if let Some(core) = staging.core_rect {
+            if !rect_fits_inside(head.rect, core) {
+                staging
+                    .queue
+                    .abort(format!("{} would leave the core area", head.name));
+                return;
+            }
+        }
+        let colliders = instance_names_intersecting(&self.db, head.rect, &head.name);
+        if let Some(first) = colliders.first() {
+            staging
+                .queue
+                .abort(format!("{} overlaps {first}", head.name));
+            return;
+        }
+        staging.queue.pending.pop_front();
+        let command_id = self.allocate_command_id();
+        let command = GeometryEditCommand {
+            command_id,
+            shape_id,
+            expected_version,
+            op: GeometryEditOp::MoveShape,
+            requested_bbox: head.rect,
+        };
+        let command_path = self
+            .edit_command_dir
+            .as_ref()
+            .expect("checked above")
+            .join(format!("command-{command_id}.json"));
+        let result_path = self
+            .edit_result_dir
+            .as_ref()
+            .expect("checked above")
+            .join(format!("result-{command_id}.json"));
+        match write_edit_command(
+            &command_path,
+            &command,
+            Some(head.name.as_str()),
+            Some(head.orient.as_str()),
+            Some("fixed"),
+        ) {
+            Ok(()) => {
+                if let Some(staging) = self.macro_staging.as_mut() {
+                    staging.queue.active = Some(crate::macro_ops::ActiveMacroCommand {
+                        command_id,
+                        name: head.name.clone(),
+                        orient: head.orient,
+                    });
+                }
+                self.pending_edit = Some(PendingEdit { result_path });
+                self.last_edit_result = Some(format!("command {command_id} pending"));
+            }
+            Err(err) => {
+                if let Some(staging) = self.macro_staging.as_mut() {
+                    staging
+                        .queue
+                        .abort(format!("failed to write edit command: {err}"));
+                }
+            }
+        }
+    }
+
+    /// Reconciles macro staging after a snapshot reload and advances the
+    /// macro operation queue. Called from the edit result poller.
+    fn finish_macro_edit_result(&mut self, result: &GeometryEditResult) {
+        let accepted = matches!(
+            result.status,
+            GeometryEditStatus::Accepted | GeometryEditStatus::AdjustedAccepted
+        );
+        let Some(staging) = self.macro_staging.as_mut() else {
+            return;
+        };
+        if let Some(active) = staging.queue.active.take() {
+            if active.command_id == result.command_id {
+                if accepted {
+                    staging.orient_by_name.insert(active.name, active.orient);
+                } else {
+                    staging.queue.abort(format!(
+                        "placement of {} was rejected by the layout edit session",
+                        active.name
+                    ));
+                }
+            } else {
+                staging.queue.active = Some(active);
+            }
+        }
+        staging.reconcile(&self.db);
+    }
+
+    fn paint_macro_staging(&self, painter: &egui::Painter, world: Rect32, canvas: egui::Rect) {
+        let Some(staging) = self.macro_staging.as_ref() else {
+            return;
+        };
+        let staged_fill = egui::Color32::from_rgba_unmultiplied(96, 140, 210, 70);
+        let staged_selected_fill = egui::Color32::from_rgba_unmultiplied(96, 160, 230, 120);
+        for (index, staged) in staging.staged.iter().enumerate() {
+            let screen = world_to_screen_rect(staged.rect, world, canvas, self.zoom, self.pan);
+            if !screen.is_positive() || !screen.intersects(canvas) {
+                continue;
+            }
+            let selected = staging.selection.contains(&MacroTarget::Staged(index));
+            painter.rect_filled(
+                screen,
+                0.0,
+                if selected {
+                    staged_selected_fill
+                } else {
+                    staged_fill
+                },
+            );
+            painter.rect_stroke(
+                screen.expand(1.0),
+                0.0,
+                egui::Stroke::new(
+                    1.5_f32,
+                    if selected {
+                        ecos_accent()
+                    } else {
+                        ecos_text_secondary()
+                    },
+                ),
+                egui::StrokeKind::Inside,
+            );
+            if screen.width() > 40.0 {
+                painter.text(
+                    screen.left_top() + egui::vec2(4.0, 2.0),
+                    egui::Align2::LEFT_TOP,
+                    staged.name.as_str(),
+                    egui::FontId::proportional(11.0),
+                    ecos_text_secondary(),
+                );
+            }
+        }
+        for target in &staging.selection {
+            let MacroTarget::Placed(shape_id) = target else {
+                continue;
+            };
+            let Some(shape) = self.db.find_shape(*shape_id) else {
+                continue;
+            };
+            let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
+            painter.rect_stroke(
+                screen.expand(2.0),
+                0.0,
+                egui::Stroke::new(2.0_f32, ecos_accent()),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+
     fn poll_edit_result(&mut self) {
+        if self.pending_edit.is_none() && self.macro_queue_busy() {
+            self.pump_macro_queue();
+        }
         let Some(pending) = &self.pending_edit else {
             return;
         };
@@ -6192,7 +6668,9 @@ impl LoadedViewer {
         };
 
         let action = edit_result_action(&result);
-        self.selected = action.selected_shape_id;
+        // Shape id 0 is the placeholder used for staged macro placements;
+        // it never identifies a real snapshot shape.
+        self.selected = action.selected_shape_id.filter(|shape_id| *shape_id != 0);
         if action.reload_snapshot {
             match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
                 Ok(()) => {}
@@ -6203,6 +6681,7 @@ impl LoadedViewer {
                 }
             }
         }
+        self.finish_macro_edit_result(&result);
 
         if matches!(
             result.status,
@@ -6223,6 +6702,7 @@ impl LoadedViewer {
         if self.pending_edit.is_some()
             || self.draft.is_some()
             || self.pending_session_action.is_some()
+            || self.macro_queue_busy()
         {
             self.last_edit_result = Some("wait for the current edit to finish".to_string());
             return;
@@ -6653,6 +7133,9 @@ impl LoadedViewer {
         self.drawing_category_counts = drawing_category_counts(&db);
         self.layers = layer_ui_states(&db, &visibility, self.color_theme);
         self.db = db;
+        if let Some(staging) = self.macro_staging.as_mut() {
+            staging.reconcile(&self.db);
+        }
         self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
         self.render_cache.clear();
         self.view_tile_cache.clear();
@@ -7136,6 +7619,13 @@ impl eframe::App for ChipViewerApp {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         if let ViewerState::Loaded(loaded) = &mut self.state {
+            if loaded.macro_staging.is_some() {
+                egui::SidePanel::left("chip_viewer_macro_tools")
+                    .resizable(false)
+                    .min_width(190.0)
+                    .default_width(220.0)
+                    .show(ctx, |ui| loaded.macro_toolbar(ui));
+            }
             if loaded.has_analysis_panel() {
                 egui::SidePanel::left("chip_viewer_analysis")
                     .resizable(true)
@@ -7208,7 +7698,7 @@ fn ecos_text_primary() -> egui::Color32 {
     egui::Color32::from_rgb(227, 227, 232)
 }
 
-fn ecos_text_secondary() -> egui::Color32 {
+pub(crate) fn ecos_text_secondary() -> egui::Color32 {
     egui::Color32::from_rgb(161, 161, 170)
 }
 
@@ -7216,7 +7706,7 @@ fn ecos_info_text() -> egui::Color32 {
     egui::Color32::from_rgb(216, 216, 224)
 }
 
-fn ecos_accent() -> egui::Color32 {
+pub(crate) fn ecos_accent() -> egui::Color32 {
     egui::Color32::from_rgb(0, 191, 165)
 }
 
@@ -11061,6 +11551,8 @@ fn write_edit_command(
     path: &Path,
     command: &GeometryEditCommand,
     instance_name: Option<&str>,
+    orient: Option<&str>,
+    placement_status: Option<&str>,
 ) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -11068,6 +11560,8 @@ fn write_edit_command(
     let content = serde_json::to_vec_pretty(&ViewerEditCommand {
         command,
         instance_name,
+        orient,
+        placement_status,
     })
     .map_err(std::io::Error::other)?;
     let temp_path = path.with_extension("json.tmp");
@@ -11791,6 +12285,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -11865,6 +12360,7 @@ mod tests {
             db,
             false,
             false,
+            None,
             None,
             None,
             None,
@@ -13824,6 +14320,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -13865,6 +14362,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             wgpu::TextureFormat::Bgra8Unorm,
             crate::RenderMode::Gpu,
         );
@@ -13884,6 +14382,7 @@ mod tests {
             db,
             false,
             false,
+            None,
             None,
             None,
             None,
@@ -14348,7 +14847,7 @@ mod tests {
             },
         };
 
-        write_edit_command(&path, &command, Some("u_sram_0")).unwrap();
+        write_edit_command(&path, &command, Some("u_sram_0"), None, None).unwrap();
 
         let content: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -14356,7 +14855,115 @@ mod tests {
         assert_eq!(content["shape_id"], 11);
         assert_eq!(content["instance_name"], "u_sram_0");
         assert_eq!(content["requested_bbox"]["lx"], 100);
+        // Legacy move commands stay byte-compatible: orientation and
+        // placement status are only serialized for macro placements.
+        assert!(content.get("orient").is_none());
+        assert!(content.get("placement_status").is_none());
+
+        let macro_path = directory.join("command-43.json");
+        write_edit_command(
+            &macro_path,
+            &command,
+            Some("u_sram_0"),
+            Some("R90"),
+            Some("fixed"),
+        )
+        .unwrap();
+        let macro_content: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&macro_path).unwrap()).unwrap();
+        assert_eq!(macro_content["orient"], "R90");
+        assert_eq!(macro_content["placement_status"], "fixed");
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn macro_staging_load_parses_manifest_and_reconciles_against_snapshot() {
+        let dir = temp_snapshot_dir("macro-staging-load");
+        write_empty_snapshot(&dir, true);
+        fs::write(
+            dir.join("geometry.masters.txt"),
+            "name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n\
+             SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0\n",
+        )
+        .unwrap();
+        let staging_path = dir.join("macro-staging.json");
+        fs::write(
+            &staging_path,
+            r#"{
+                "schema": 1,
+                "dbuPerMicron": 1000,
+                "dieArea": {"lx": 0, "ly": 0, "hx": 52000, "hy": 53000},
+                "macros": [
+                    {"name": "u_sram01", "master": "SRAM_64x32", "widthDbu": 40000,
+                     "heightDbu": 30000, "orient": "R0", "placed": false},
+                    {"name": "u_core_cell", "master": "BUFX1", "widthDbu": 4800,
+                     "heightDbu": 1400, "orient": "R0", "placed": false},
+                    {"name": "u_sram02", "master": "SRAM_64x32", "widthDbu": 40000,
+                     "heightDbu": 30000, "orient": "R90", "placed": true}
+                ],
+                "futureField": {"unknown": true}
+            }"#,
+        )
+        .unwrap();
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+
+        let mut state = crate::macro_staging::MacroStagingState::load(&staging_path, &db)
+            .expect("staging manifest loads");
+
+        // Unplaced macros stage in manifest order; placed macros only carry
+        // their orientation into the tracking map.
+        assert_eq!(
+            state
+                .staged
+                .iter()
+                .map(|staged| staged.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u_sram01", "u_core_cell"]
+        );
+        assert_eq!(
+            state.orient_by_name.get("u_sram02").copied(),
+            Some(crate::macro_orient::MacroOrientation::R90)
+        );
+        // The synthetic snapshot has no die or core shapes yet.
+        assert!(state.core_rect.is_none());
+
+        state.staged[0].rect = Rect32 {
+            lx: -5000,
+            ly: 0,
+            hx: -1000,
+            hy: 4000,
+        };
+        let world = state.expanded_world(Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1000,
+            hy: 1000,
+        });
+        assert_eq!(
+            world,
+            Rect32 {
+                lx: -5000,
+                ly: 0,
+                hx: 1000,
+                hy: 4000
+            }
+        );
+
+        state.reconcile(&db);
+        assert_eq!(state.staged.len(), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn macro_staging_load_rejects_unknown_schema() {
+        let dir = temp_snapshot_dir("macro-staging-schema");
+        write_empty_snapshot(&dir, false);
+        let staging_path = dir.join("macro-staging.json");
+        fs::write(&staging_path, r#"{"schema": 2, "macros": []}"#).unwrap();
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+
+        assert!(crate::macro_staging::MacroStagingState::load(&staging_path, &db).is_none());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

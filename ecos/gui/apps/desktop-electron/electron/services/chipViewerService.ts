@@ -28,11 +28,22 @@ import {
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
+import {
+  buildMacroStagingManifest,
+  isMacroPlacementStep,
+  readDefComponents,
+  type ReadBinaryFile,
+  serializeMacroStagingManifest,
+} from './chipViewerMacroStaging'
 
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
 const GEOMETRY_SCHEMA_VERSION = 1
 const VIEWER_STARTUP_HEALTH_CHECK_MS = 800
+/** R-notation orientations accepted by the ECC place_instance operation. */
+const R_ORIENTATIONS = new Set(['R0', 'R90', 'R180', 'R270', 'MX', 'MY', 'MX90', 'MY90'])
+/** Placement status vocabulary accepted by the ECC place_instance operation. */
+const PLACEMENT_STATUSES = new Set(['preserve', 'placed', 'fixed', 'unplaced'])
 const REQUIRED_GEOMETRY_MANIFEST_FILE_KEYS = [
   'meta',
   'shapes',
@@ -129,6 +140,8 @@ interface LayoutEditContext {
   dirty: boolean
   editSessionId: string
   geometryManifestPath: string
+  /** True when the macro staging manifest was published for this session. */
+  macroPlacement: boolean
   revision: number
   step: string
   workspaceHandle: string
@@ -140,6 +153,9 @@ interface NativeGeometryEditCommand {
   expected_version: number
   instance_name?: string
   op: string
+  /** R-notation orientation; empty when the viewer wants to preserve it. */
+  orient?: string
+  placement_status?: string
   requested_bbox: {
     hx: number
     hy: number
@@ -171,6 +187,7 @@ export interface ChipViewerServiceOptions {
   layoutEditRuntime?: LayoutEditRuntime
   openLogFile?: OpenLogFile
   platform?: NodeJS.Platform
+  readBinaryFile?: ReadBinaryFile
   readTextFile?: ReadTextFile
   renameFile?: RenameFile
   resourcesPath?: string
@@ -327,10 +344,30 @@ function parseNativeGeometryEditCommand(raw: string): NativeGeometryEditCommand 
   if (typeof parsed.op !== 'string') {
     throw new Error('native edit command is missing op')
   }
+  const orient = parsed.orient
+  if (orient !== undefined && typeof orient !== 'string') {
+    throw new Error('native edit command orient must be a string')
+  }
+  if (orient !== undefined && orient !== '' && !R_ORIENTATIONS.has(orient)) {
+    throw new Error(`native edit command orient is not an R-notation value: ${orient}`)
+  }
+  const placementStatus = parsed.placement_status
+  if (placementStatus !== undefined && typeof placementStatus !== 'string') {
+    throw new Error('native edit command placement_status must be a string')
+  }
+  if (
+    placementStatus !== undefined &&
+    placementStatus !== '' &&
+    !PLACEMENT_STATUSES.has(placementStatus)
+  ) {
+    throw new Error(`native edit command placement_status is invalid: ${placementStatus}`)
+  }
   return {
     command_id: requireInteger(parsed.command_id, 'command_id'),
     expected_version: requireInteger(parsed.expected_version, 'expected_version'),
     ...(instanceName?.trim() ? { instance_name: instanceName.trim() } : {}),
+    ...(orient ? { orient } : {}),
+    ...(placementStatus ? { placement_status: placementStatus } : {}),
     op: parsed.op,
     requested_bbox: {
       hx: requireInteger(parsed.requested_bbox.hx, 'requested_bbox.hx'),
@@ -538,6 +575,7 @@ export class ChipViewerService {
   private readonly layoutEditRuntime?: LayoutEditRuntime
   private readonly openLogFile: OpenLogFile
   private readonly platform: NodeJS.Platform
+  private readonly readBinaryFile: ReadBinaryFile
   private readonly readTextFile: ReadTextFile
   private readonly renameFile: RenameFile
   private readonly resourcesPath?: string
@@ -570,6 +608,7 @@ export class ChipViewerService {
     this.layoutEditRuntime = options.layoutEditRuntime
     this.openLogFile = options.openLogFile ?? openSync
     this.platform = options.platform ?? process.platform
+    this.readBinaryFile = options.readBinaryFile ?? readFile
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
     this.renameFile = options.renameFile ?? rename
     this.resourcesPath = options.resourcesPath
@@ -594,6 +633,7 @@ export class ChipViewerService {
     let editCommandDirectory: string | undefined
     let editResultDirectory: string | undefined
     let layoutEdit: LayoutEditContext | undefined
+    let macroStagingPath: string | undefined
     let viewerSnapshotInputs = snapshotInputs
     if (mode === 'edit') {
       layoutEdit = await this.beginLayoutEdit(projectPath, request.step)
@@ -616,6 +656,12 @@ export class ChipViewerService {
       this.startEditCommandBridge(binaries, viewerSnapshotInputs, layoutEdit)
       editCommandDirectory = viewerSnapshotInputs.editCommandDirectory
       editResultDirectory = viewerSnapshotInputs.editResultDirectory
+      if (isMacroPlacementStep(request.step)) {
+        macroStagingPath = await this.prepareMacroStaging(
+          viewerSnapshotInputs,
+          layoutEdit,
+        )
+      }
     }
 
     const viewerArgs = ['--manifest', viewerManifestPath, '--mode', mode]
@@ -637,6 +683,9 @@ export class ChipViewerService {
       )
       if (layoutEdit?.dirty) {
         viewerArgs.push('--edit-dirty')
+      }
+      if (macroStagingPath) {
+        viewerArgs.push('--macro-staging-file', macroStagingPath)
       }
     }
 
@@ -939,10 +988,51 @@ export class ChipViewerService {
       dirty: editSession.dirty,
       editSessionId: editSession.editSessionId,
       geometryManifestPath: editSession.geometryManifestPath,
+      macroPlacement: false,
       revision: editSession.revision,
       step,
       workspaceHandle: workspace.workspaceHandle,
       workspaceRevision: workspace.workspaceRevision!,
+    }
+  }
+
+  /**
+   * Builds the macro staging manifest for a macro-placement edit session and
+   * publishes it into the bridge command directory. Returns undefined (and
+   * keeps the session non-macro) when the DEF or master metadata cannot be
+   * parsed, so the viewer still opens in move-only edit mode.
+   */
+  private async prepareMacroStaging(
+    snapshotInputs: SnapshotInputs,
+    layoutEdit: LayoutEditContext,
+  ): Promise<string | undefined> {
+    try {
+      const manifestValues = parseGeometryManifestText(
+        await this.readTextFile(layoutEdit.geometryManifestPath),
+      )
+      const mastersKey = manifestValues.get('masters')
+      if (!mastersKey) {
+        throw new Error('geometry manifest is missing the masters side file')
+      }
+      const mastersPath = resolveManifestPath(layoutEdit.geometryManifestPath, mastersKey)
+      const defComponents = await readDefComponents(
+        snapshotInputs.defPath,
+        this.readBinaryFile,
+      )
+      const manifest = buildMacroStagingManifest({
+        defComponents,
+        mastersText: await this.readTextFile(mastersPath),
+      })
+      const stagingPath = join(snapshotInputs.editCommandDirectory, 'macro-staging.json')
+      const temporaryPath = `${stagingPath}.tmp`
+      await this.writeTextFile(temporaryPath, serializeMacroStagingManifest(manifest))
+      await this.renameFile(temporaryPath, stagingPath)
+      layoutEdit.macroPlacement = true
+      return stagingPath
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`chip viewer macro staging unavailable: ${message}`)
+      return undefined
     }
   }
 
@@ -1045,6 +1135,50 @@ export class ChipViewerService {
     await this.renameFile(temporaryResultPath, resultPath)
   }
 
+  /**
+   * Saves a layout edit session, requesting the macro_location.tcl export for
+   * macro-placement sessions. Older ECC runtimes reject the unknown field
+   * before mutating anything, so the request is retried once without it.
+   */
+  private async layoutEditSaveWithMacroFallback(layoutEdit: LayoutEditContext): Promise<{
+    saved: EccLayoutEditSaveResult
+    skippedMacroLocation: boolean
+  }> {
+    const runtime = this.layoutEditRuntime
+    if (!runtime) {
+      throw new Error('ECC layout edit runtime is not configured')
+    }
+    const request = (writeMacroLocation: boolean): EccLayoutEditSaveRequest => ({
+      editSessionId: layoutEdit.editSessionId,
+      expectedRevision: layoutEdit.revision,
+      workspaceHandle: layoutEdit.workspaceHandle,
+      expectedWorkspaceRevision: layoutEdit.workspaceRevision,
+      ...(writeMacroLocation ? { writeMacroLocation: true } : {}),
+    })
+
+    if (!layoutEdit.macroPlacement) {
+      return {
+        saved: await runtime.layoutEditSave(request(false)),
+        skippedMacroLocation: false,
+      }
+    }
+    try {
+      return {
+        saved: await runtime.layoutEditSave(request(true)),
+        skippedMacroLocation: false,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/unknown field: write_?macro_?location/i.test(message)) {
+        throw error
+      }
+      return {
+        saved: await runtime.layoutEditSave(request(false)),
+        skippedMacroLocation: true,
+      }
+    }
+  }
+
   private async handleGeometryEditCommand(
     commandPath: string,
     resultPath: string,
@@ -1073,8 +1207,8 @@ export class ChipViewerService {
           kind: 'place_instance',
           llx: command.requested_bbox.lx,
           lly: command.requested_bbox.ly,
-          orient: '',
-          placementStatus: 'preserve',
+          orient: command.orient ?? '',
+          placementStatus: command.placement_status ?? 'preserve',
           source: '',
         },
         workspaceHandle: layoutEdit.workspaceHandle,
@@ -1133,12 +1267,8 @@ export class ChipViewerService {
           percent: 15,
           phase: 'saving',
         })
-        const saved = await this.layoutEditRuntime.layoutEditSave({
-          editSessionId: layoutEdit.editSessionId,
-          expectedRevision: layoutEdit.revision,
-          workspaceHandle: layoutEdit.workspaceHandle,
-          expectedWorkspaceRevision: layoutEdit.workspaceRevision,
-        })
+        const { saved, skippedMacroLocation } =
+          await this.layoutEditSaveWithMacroFallback(layoutEdit)
         if (!saved.saved || saved.dirty) {
           throw new Error('ECC did not confirm that dirty layout edits were published')
         }
@@ -1155,6 +1285,9 @@ export class ChipViewerService {
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
         message = 'layout edit saved; verified DEF, IDB, GDS, and geometry manifest'
+        if (skippedMacroLocation) {
+          message += '; macro_location.tcl export skipped (ECC runtime too old)'
+        }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Refreshing layout image',
           percent: 75,

@@ -262,6 +262,7 @@ export interface EccLayoutEditApplyResult {
 export interface EccLayoutEditSaveRequest extends EccWorkspaceMutationRequest {
   editSessionId: string
   expectedRevision: number
+  writeMacroLocation?: boolean
 }
 
 export interface EccLayoutEditSaveResult {
@@ -274,6 +275,7 @@ export interface EccLayoutEditSaveResult {
   dirty: boolean
   editSessionId: string
   geometryRevision: number
+  macroLocationPath?: string
   revision: number
   saved: boolean
   workspaceRevision?: number

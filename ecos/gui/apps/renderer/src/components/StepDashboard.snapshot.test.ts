@@ -8,6 +8,7 @@ import type { WorkspaceStepDetail } from '@ecos-studio/shared'
 const testState = vi.hoisted(() => ({
   dashboard: null as Record<string, unknown> | null,
   openReport: vi.fn(),
+  chipViewerOpen: vi.fn(),
 }))
 
 vi.mock('@/composables/useStepDashboardData', () => ({
@@ -42,7 +43,7 @@ vi.mock('@/composables/useWorkspace', () => ({
   useWorkspace: () => ({ currentProject: ref({ path: '/project/ws-a' }) }),
 }))
 vi.mock('@/platform/desktop', () => ({
-  getDesktopApi: () => ({ chipViewer: { open: vi.fn() } }),
+  getDesktopApi: () => ({ chipViewer: { open: testState.chipViewerOpen } }),
 }))
 
 import StepDashboard from './StepDashboard.vue'
@@ -105,6 +106,7 @@ function detail(): WorkspaceStepDetail {
 describe('StepDashboard committed Snapshot rendering', () => {
   beforeEach(() => {
     testState.openReport.mockReset()
+    testState.chipViewerOpen.mockReset()
     testState.dashboard = {
       currentStep: ref('Place'),
       data: ref(snapshotStepDashboardData(detail())),
@@ -144,6 +146,55 @@ describe('StepDashboard committed Snapshot rendering', () => {
 
   it('keeps scrollable data highlights aligned to the top', () => {
     expect(dashboardSource).toMatch(/\.data-highlights\s*{[^}]*align-content: start/s)
+  })
+
+  it('opens the macro placement edit session from preFloorplan geometry', async () => {
+    const preFloorplanDetail = detail()
+    preFloorplanDetail.step = {
+      stepId: 'preFloorplan',
+      order: 0,
+      name: 'preFloorplan',
+      state: 'succeeded',
+    }
+    preFloorplanDetail.artifacts.push({
+      artifactId: 'geometry-prefloorplan',
+      availability: 'available',
+      kind: 'layout_geometry',
+      name: 'gcd_preFloorplan',
+      stepId: 'preFloorplan',
+    })
+    testState.dashboard = {
+      currentStep: ref('preFloorplan'),
+      data: ref(snapshotStepDashboardData(preFloorplanDetail)),
+      error: ref(null),
+      loading: ref(false),
+      refresh: vi.fn(),
+    }
+
+    const wrapper = mount(StepDashboard, {
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+          StatusPieChart: true,
+          StepConfigPanel: true,
+          TimingAnalysisDialog: true,
+          TimingCornerTable: true,
+          TimingKpis: true,
+          StepDataSummaryDialog: true,
+          StepSnapshotPanel: true,
+          CongestionPanel: true,
+        },
+      },
+    })
+
+    const placeMacrosButton = wrapper.get('[aria-label="Place Macros"]')
+    await placeMacrosButton.trigger('click')
+
+    expect(testState.chipViewerOpen).toHaveBeenCalledWith({
+      mode: 'edit',
+      projectPath: '/project/ws-a',
+      step: 'preFloorplan',
+    })
   })
 
   it('keeps STA report rows from overlapping long names and paths', () => {

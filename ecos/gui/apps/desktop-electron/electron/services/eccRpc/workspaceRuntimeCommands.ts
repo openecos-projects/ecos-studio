@@ -397,6 +397,7 @@ export class WorkspaceRuntimeCommands {
             editSessionId: request.editSessionId,
             expectedRevision: request.expectedRevision,
             expectedWorkspaceRevision: request.expectedWorkspaceRevision,
+            ...(request.writeMacroLocation ? { writeMacroLocation: true } : {}),
           },
           { timeoutMs: 0 },
         )
