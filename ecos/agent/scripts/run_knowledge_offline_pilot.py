@@ -5,6 +5,7 @@ import argparse
 import functools
 import json
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -17,6 +18,9 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
 )
 from ecos_agent.optimization.experiments.knowledge_treatments import (
     ZERO_SHOT_GATE_TREATMENTS,
+)
+from ecos_agent.optimization.experiments.runner_environment import (
+    apply_runner_environment,
 )
 from ecos_agent.optimization.knowledge.compiler import load_state_rule_manifest
 
@@ -37,7 +41,11 @@ def main() -> int:
             Path(__file__).resolve().parents[3] / "ecc/.venv/bin/ecc-agent-rpc"
         ),
     )
+    # P0.9 parity: the GLM default needs the model-aware CODEX_HOME wiring the
+    # other headless entries use, otherwise the provider sees the default
+    # config and rejects the model name.
     args = parser.parse_args()
+    print("[runner-env]", apply_runner_environment(model=args.model), flush=True)
 
     bank = json.loads(args.bank.read_text(encoding="utf-8"))
     contexts = bank["contexts"]
