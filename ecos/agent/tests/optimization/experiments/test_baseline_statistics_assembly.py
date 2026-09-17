@@ -121,16 +121,27 @@ def test_assembly_feeds_design_block_statistics(tmp_path: Path) -> None:
     assert statistics["paired_auc_permutation_tests"]
 
 
-def test_assembly_rejects_episode_without_feasible_candidate(tmp_path: Path) -> None:
+def test_assembly_encodes_fully_invalid_episode_as_failed_cell(tmp_path: Path) -> None:
+    """An episode whose outcomes carry no terminal observation (all
+    evidence-invalid) still counts: the cell records zero success with an
+    ineligible synthetic observation, and provenance marks the failure."""
     _seed_run(tmp_path, feasible=False)
 
-    def empty_loader(episode_root: Path):
+    def evidence_free_loader(episode_root: Path):
         return []
 
-    with pytest.raises(ValueError, match="terminal-eligible candidate"):
-        assemble_baseline_design_statistics(
-            tmp_path, ["gcd"], outcome_loader=empty_loader
-        )
+    report = assemble_baseline_design_statistics(
+        tmp_path, ["gcd"], outcome_loader=evidence_free_loader
+    )
+    selection = report["episode_selection"]["gcd"]
+    marked = [m for m, e in selection.items() if "failed" in e]
+    assert sorted(marked) == sorted(selection.keys())
+    statistics = report["statistics"]["methods"]
+    for method in ("controlled_coordinate", "random_action", "rule_guided_direction"):
+        row = statistics[method]["by_design"]["gcd"]
+        assert row["auc_success_at_20"] == 0.0
+        assert row["lex_success_at_20"] is False
+        assert row["comparison_vs_default"] == "candidate_ineligible"
 
 
 def test_assembly_rejects_missing_method_episode(tmp_path: Path) -> None:

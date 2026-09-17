@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import json
+
 import pytest
 
 from ecos_agent.hashing import canonical_sha256
@@ -425,3 +427,49 @@ def _terminal_observation() -> TerminalObservation:
         sta_corner_ids=("typical",),
         sta_corner_set_sha256=canonical_sha256({"corners": ["typical"]}),
     )
+
+
+def test_candidate_resources_skip_steps_that_never_ran(tmp_path: Path) -> None:
+    """A failed candidate stops mid-flow; unexecuted steps (empty runtime)
+    carry no resource evidence instead of breaking the trace export."""
+    candidate = tmp_path / ".agent/candidates/candidate-1"
+    candidate.mkdir(parents=True)
+    (candidate / "home").mkdir()
+    (candidate / "home/flow.json").write_text(
+        json.dumps(
+            {
+                "steps": [
+                    {
+                        "name": "place",
+                        "runtime": "0:01:40",
+                        "peak memory (mb)": 900.0,
+                    },
+                    {"name": "CTS", "runtime": "0:00:30", "peak memory (mb)": 500.0},
+                    {"name": "lvs", "runtime": "", "peak memory (mb)": None},
+                    {"name": "Harden", "runtime": "", "peak memory (mb)": None},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime, memory = _candidate_resources(
+        tmp_path, ".agent/candidates/candidate-1", "place"
+    )
+    assert runtime == 130.0
+    assert memory == 900.0
+
+
+def test_candidate_resources_fail_closed_when_no_step_ran(tmp_path: Path) -> None:
+    candidate = tmp_path / ".agent/candidates/candidate-1"
+    candidate.mkdir(parents=True)
+    (candidate / "home").mkdir()
+    (candidate / "home/flow.json").write_text(
+        json.dumps(
+            {"steps": [{"name": "place", "runtime": "", "peak memory (mb)": None}]}
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="candidate resource evidence"):
+        _candidate_resources(tmp_path, ".agent/candidates/candidate-1", "place")

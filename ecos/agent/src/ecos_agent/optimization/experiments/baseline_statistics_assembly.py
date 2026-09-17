@@ -125,25 +125,37 @@ def _method_episode_inputs(
             if suffix is not None and suffix in observations
             else None
         )
-        if observation is not None and observation.eligible_for_incumbent:
+        if observation is None:
+            continue
+        if observation.eligible_for_incumbent:
             if compare_observations(default_metrics, observation, epsilon) == "better":
                 better.append((float(item.terminal_utility or 0.0), observation))
-            if fallback is None:
-                fallback = observation
+        if fallback is None:
+            # A fully failed episode still contributes a "no success" row:
+            # keep one terminal observation (eligible or not) so the
+            # comparison records candidate_ineligible instead of failing.
+            fallback = observation
         observed[index] = bool(better)
     if fallback is None:
-        raise ValueError(
-            f"baseline episode {episode_id} of design {design_id} has no "
-            f"terminal-eligible candidate; design-block statistics need a "
-            f"terminal"
-        )
+        # A fully evidence-invalid episode carries no terminal observation at
+        # all. Encode the cell as zero success with an explicitly ineligible
+        # synthetic observation (compare_observations then records
+        # candidate_ineligible), and let the caller mark the failure in
+        # provenance — the episode still counts, its outcomes do not.
+        fallback = default_observation.model_copy(update={"evidence_valid": False})
+        failed_episode = True
+    else:
+        failed_episode = False
     curve = _padded_curve(observed)
     best = max(better, key=lambda pair: pair[0], default=(0.0, fallback))[1]
-    return {
+    payload = {
         "auc_success_at_20": success_curve_auc(curve),
         "lex_success_at_20": curve[_SUCCESS_BUDGET],
         "best_terminal_observation": best.model_dump(mode="json"),
-    }, episode_id
+    }
+    if failed_episode:
+        payload["failed_episode"] = True
+    return payload, episode_id
 
 
 def assemble_baseline_design_statistics(
@@ -192,7 +204,12 @@ def assemble_baseline_design_statistics(
                 default_observation=reference,
             )
             methods_input[method.value] = payload
-            design_selection[method.value] = episode_id
+            if payload.pop("failed_episode", False):
+                design_selection[method.value] = (
+                    f"{episode_id} (failed: no terminal observation)"
+                )
+            else:
+                design_selection[method.value] = episode_id
         selection[design_id] = design_selection
         design_inputs[design_id] = {
             "noise_profile": {

@@ -442,16 +442,28 @@ def _candidate_resources(
     if start is None:
         raise ValueError("candidate resource evidence lacks the target step")
     selected = steps[start:]
-    runtime = sum(_runtime_seconds(item.get("runtime")) for item in selected)
-    memory_values = [item.get("peak memory (mb)") for item in selected]
-    if runtime <= 0 or any(
-        type(value) not in {int, float}
-        or not math.isfinite(float(value))
-        or float(value) < 0
-        for value in memory_values
-    ):
+    # A failed candidate stops mid-flow: steps that never ran carry an empty
+    # runtime and no peak memory, and contribute no resource evidence.
+    runtime = 0.0
+    memory_values: list[float] = []
+    ran_any_step = False
+    for item in selected:
+        raw_runtime = item.get("runtime")
+        if raw_runtime is None or raw_runtime == "":
+            continue
+        runtime += _runtime_seconds(raw_runtime)
+        ran_any_step = True
+        memory = item.get("peak memory (mb)")
+        if (
+            type(memory) not in {int, float}
+            or not math.isfinite(float(memory))
+            or float(memory) < 0
+        ):
+            raise ValueError("candidate resource evidence is invalid")
+        memory_values.append(float(memory))
+    if not ran_any_step or runtime <= 0 or not memory_values:
         raise ValueError("candidate resource evidence is invalid")
-    memory = max(float(value) for value in memory_values)
+    memory = max(memory_values)
     return runtime, memory
 
 
