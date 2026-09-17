@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Chip Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  canvas { width: 100%; height: 100%; display: block; }
+</style>
+<canvas id="chip-viewer"></canvas>
+<script type="module">
+  import init, { ChipViewerHandle } from './pkg/chip_viewer_wasm.js';
+  await init();
+  await new ChipViewerHandle().start(document.getElementById('chip-viewer'));
+</script>
