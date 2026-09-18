@@ -65,6 +65,7 @@ from ecos_agent.codex.provider_helpers import (
     _source_search_output_schema,
     _stage_catalog,
     _stage_routing_slots_output_schema,
+    _strict_response_schema,
     _text_sha256,
     _timeout_from_env,
 )
@@ -324,6 +325,8 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 else ()
             ),
         )
+        if self._model is not None and not self._model.startswith("glm"):
+            output_schema = _strict_response_schema(output_schema)
         envelope_payload = {
             "schema_version": "ecos.optimization_planning_provider_envelope.v1",
             "provider_id": "codex_app_server",

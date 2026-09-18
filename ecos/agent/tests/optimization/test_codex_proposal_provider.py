@@ -768,3 +768,4 @@ def test_planner_prompt_claim_contract_is_consistent(
     ]
     for field in claim_fields:
         assert field in system
+

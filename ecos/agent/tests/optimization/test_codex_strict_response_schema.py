@@ -1,0 +1,55 @@
+"""Strict-mode response schema normalization for non-GLM providers."""
+
+from __future__ import annotations
+
+import pytest
+
+
+def test_strict_response_schema_requires_every_property_and_recurses() -> None:
+    from ecos_agent.codex.provider import _strict_response_schema
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "schema_version": {"type": "string"},
+            "decision": {"type": "string", "const": "propose"},
+            "either": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+            "already_null": {"type": ["string", "null"]},
+        },
+        "required": ["decision"],
+        "$defs": {
+            "Effect": {
+                "type": "object",
+                "properties": {"metric_id": {"type": "string"}, "note": {"type": "string"}},
+                "required": ["metric_id"],
+            }
+        },
+    }
+
+    strict = _strict_response_schema(schema)
+
+    assert strict["required"] == ["already_null", "decision", "either", "schema_version"]
+    assert strict["properties"]["schema_version"]["type"] == ["string", "null"]
+    assert strict["properties"]["decision"]["type"] == "string"
+    assert strict["properties"]["either"]["anyOf"][-1] == {"type": "null"}
+    assert strict["properties"]["already_null"]["type"] == ["string", "null"]
+    assert strict["$defs"]["Effect"]["required"] == ["metric_id", "note"]
+    assert strict["$defs"]["Effect"]["properties"]["note"]["type"] == ["string", "null"]
+    assert strict["additionalProperties"] is False
+    assert strict["$defs"]["Effect"]["additionalProperties"] is False
+
+
+def test_strict_response_schema_covers_the_real_proposal_envelope() -> None:
+    from ecos_agent.codex.provider import (
+        _optimization_proposal_output_schema_v2,
+        _strict_response_schema,
+    )
+    from ecos_agent.optimization.parameters.contracts import OptimizationProposalV2
+
+    schema = OptimizationProposalV2.model_json_schema()
+    strict = _strict_response_schema(schema)
+
+    assert not set(strict["properties"]) - set(strict["required"])
+    for definition in strict.get("$defs", {}).values():
+        if definition.get("type") == "object" and "properties" in definition:
+            assert not set(definition["properties"]) - set(definition["required"])

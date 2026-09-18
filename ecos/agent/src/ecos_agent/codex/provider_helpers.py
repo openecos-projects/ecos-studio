@@ -513,6 +513,57 @@ def _optimization_objective_output_schema() -> dict[str, Any]:
     return schema
 
 
+def _strict_response_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a JSON schema for providers that enforce strict outputs.
+
+    OpenAI-family response formats reject schemas whose ``required`` list
+    omits declared properties.  Making an optional field required without
+    allowance would also force the model to invent values (claim hashes on
+    unbound probes), so every newly required property becomes nullable
+    instead — the JSON-schema shape of the fill-or-null contract.  GLM's
+    endpoint accepts the pydantic schema as-is, so this is only applied on
+    the strict provider path.
+    """
+    strict = copy.deepcopy(schema)
+    _strictify_schema_node(strict)
+    return strict
+
+
+def _strictify_schema_node(node: Any) -> None:
+    if isinstance(node, dict):
+        properties = node.get("properties")
+        if node.get("type") == "object" and isinstance(properties, dict):
+            node.setdefault("additionalProperties", False)
+            required = node.get("required")
+            previously = set(required) if isinstance(required, list) else set()
+            for name, subschema in properties.items():
+                if name not in previously:
+                    properties[name] = _nullable_schema(subschema)
+            node["required"] = sorted(properties)
+        for value in node.values():
+            _strictify_schema_node(value)
+    elif isinstance(node, list):
+        for value in node:
+            _strictify_schema_node(value)
+
+
+def _nullable_schema(subschema: dict[str, Any]) -> dict[str, Any]:
+    if "const" in subschema:
+        return subschema
+    if "anyOf" in subschema:
+        if any(branch == {"type": "null"} for branch in subschema["anyOf"]):
+            return subschema
+        return {**subschema, "anyOf": [*subschema["anyOf"], {"type": "null"}]}
+    declared = subschema.get("type")
+    if isinstance(declared, list):
+        if "null" in declared:
+            return subschema
+        return {**subschema, "type": [*declared, "null"]}
+    if isinstance(declared, str):
+        return {**subschema, "type": [declared, "null"]}
+    return subschema
+
+
 def _require_all_schema_properties(value: object) -> None:
     if isinstance(value, dict):
         properties = value.get("properties")
