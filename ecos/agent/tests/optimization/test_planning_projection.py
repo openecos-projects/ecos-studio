@@ -44,6 +44,7 @@ from ecos_agent.optimization.parameters.contracts import (
 )
 from ecos_agent.optimization.planning import (
     OptimizationHistory,
+    applied_divergence_summary,
     OptimizationPlanningContext,
     clamped_density_equivalent_error,
     optimization_history_payload,
@@ -508,3 +509,44 @@ def test_planning_payload_declares_measurement_stability():
     stability = payload["measurement_stability"]
     assert "pinned" in stability["protocol"]
     assert "reversal" in stability["planning_guidance"]
+
+
+def test_applied_divergence_summary_marks_only_meaningful_gaps() -> None:
+    adjusted = applied_divergence_summary(
+        knob="place.target_density", requested=0.3, actual=0.4509
+    )
+    assert adjusted == {
+        "knob": "place.target_density",
+        "requested": 0.3,
+        "actual": 0.4509,
+        "adjusted": True,
+    }
+    # grid snap within the protection tolerance is not a divergence
+    assert (
+        applied_divergence_summary(
+            knob="floorplan.aspect_ratio", requested=0.67, actual=0.6722
+        )
+        is None
+    )
+    # exact application stays unannotated
+    assert (
+        applied_divergence_summary(
+            knob="place.target_density", requested=0.55, actual=0.55
+        )
+        is None
+    )
+
+
+def test_applied_divergence_summary_skips_non_numeric_knobs() -> None:
+    assert (
+        applied_divergence_summary(
+            knob="place.routability_opt", requested=False, actual=False
+        )
+        is None
+    )
+    assert (
+        applied_divergence_summary(
+            knob="place.target_density", requested=0.3, actual=None
+        )
+        is None
+    )

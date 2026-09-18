@@ -467,7 +467,7 @@ def compare_incumbent(
         if (
             incumbent_value is None
             or candidate_value is None
-            or not _meaningful_metric_change(incumbent_value, candidate_value)
+            or not meaningful_metric_change(incumbent_value, candidate_value)
         ):
             continue
         incumbent_utility = objective_metric_utility(metric_id, incumbent_value)
@@ -570,7 +570,7 @@ def _protected_metric_regression(
         if (
             objective_metric_utility(metric_id, candidate_value)
             < objective_metric_utility(metric_id, incumbent_value)
-            and _meaningful_metric_change(incumbent_value, candidate_value)
+            and meaningful_metric_change(incumbent_value, candidate_value)
         ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
         reference_value = frozen_references.get(metric_id)
@@ -582,11 +582,11 @@ def _protected_metric_regression(
             and not (
                 objective_metric_utility(metric_id, incumbent_value)
                 < objective_metric_utility(metric_id, reference_value)
-                and _meaningful_metric_change(reference_value, incumbent_value)
+                and meaningful_metric_change(reference_value, incumbent_value)
             )
             and objective_metric_utility(metric_id, candidate_value)
             < objective_metric_utility(metric_id, reference_value)
-            and _meaningful_metric_change(reference_value, candidate_value)
+            and meaningful_metric_change(reference_value, candidate_value)
         ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     return None
@@ -602,12 +602,12 @@ def _frozen_timing_regression(
     for reference in objective.timing_guardrail.references:
         metric_id = TimingMetric(reference.metric_id)
         incumbent_value = incumbent.timing_guardrail[metric_id]
-        if incumbent_value < reference.reference_value and _meaningful_metric_change(
+        if incumbent_value < reference.reference_value and meaningful_metric_change(
             reference.reference_value, incumbent_value
         ):
             continue
         candidate_value = candidate.timing_guardrail[metric_id]
-        if candidate_value < reference.reference_value and _meaningful_metric_change(
+        if candidate_value < reference.reference_value and meaningful_metric_change(
             reference.reference_value, candidate_value
         ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
@@ -644,7 +644,7 @@ def timing_guardrail_regression(reference_value: float, candidate_value: float) 
     return (
         candidate_value < 0
         and candidate_value < reference_value
-        and _meaningful_metric_change(reference_value, candidate_value)
+        and meaningful_metric_change(reference_value, candidate_value)
     )
 
 
@@ -667,7 +667,13 @@ def _timing_regression(
     return None
 
 
-def _meaningful_metric_change(reference: float, candidate: float) -> bool:
+def meaningful_metric_change(reference: float, candidate: float) -> bool:
+    """Whether two evidence values differ beyond the protection tolerance.
+
+    Public single source for the "meaningful change" threshold shared by the
+    incumbent-protection rules, the timing veto, and the requested-vs-actual
+    divergence accounting (planning context and candidate metrics).
+    """
     return not math.isclose(
         reference,
         candidate,

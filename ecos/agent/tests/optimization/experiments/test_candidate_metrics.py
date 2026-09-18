@@ -275,3 +275,59 @@ def test_episode_final_states_counts_escalations() -> None:
     }
     assert summary["escalated_episodes"] == 2
     assert summary["escalation_rate"] == pytest.approx(0.5)
+
+
+def test_shadow_duplicates_and_divergence_counters() -> None:
+    """The PPU prototype: requests 0.3 and 0.2 both applied 0.4509 — the
+    second probe explored nothing new, and a requested-only planner cannot
+    perceive that.  Divergence counts meaningful (protection-tolerance)
+    requested-vs-actual gaps; grid-snap-sized wobble stays unadjusted."""
+    traces = [
+        _trace("c1", requested=0.3, actual=0.4509, feasible=True, utility=1.0),
+        _trace("c2", requested=0.2, actual=0.4509),
+        _trace("c3", requested=0.55, actual=0.55),
+        _trace("c4", requested=0.65, actual=0.65, promoted=True),
+        # grid snap within the protection tolerance is not a divergence
+        _trace("c5", requested=0.67, actual=0.6722),
+    ]
+    metrics = summarize_candidate_metrics(traces, mode="requested-only")
+    assert metrics["requested_actual_divergence"] == {
+        "observed": 5,
+        "adjusted": 2,
+        "adjusted_rate": pytest.approx(0.4),
+    }
+    shadow = metrics["shadow_duplicate_configs"]
+    assert shadow["count"] == 1
+    assert shadow["events"] == [
+        {
+            "candidate_id": "c2",
+            "requested": 0.2,
+            "actual": 0.4509,
+            "first_requested": 0.3,
+        }
+    ]
+
+
+def test_shadow_duplicate_ignores_exact_request_repeats() -> None:
+    """An identical requested value repeated is an application-signature
+    repeat (already counted elsewhere), not a shadow duplicate."""
+    traces = [
+        _trace("c1", requested=0.3, actual=0.4509),
+        _trace("c2", requested=0.3, actual=0.4509),
+    ]
+    metrics = summarize_candidate_metrics(traces, mode="requested-only")
+    assert metrics["shadow_duplicate_configs"]["count"] == 0
+
+
+def test_divergence_counters_are_empty_without_numeric_pairs() -> None:
+    traces = [
+        _trace("c1", knob="place.routability_opt", requested=False, actual=False),
+        _trace("c2", knob=None, requested=None, actual=None),
+    ]
+    metrics = summarize_candidate_metrics(traces, mode="requested-only")
+    assert metrics["requested_actual_divergence"] == {
+        "observed": 0,
+        "adjusted": 0,
+        "adjusted_rate": 0.0,
+    }
+    assert metrics["shadow_duplicate_configs"]["count"] == 0

@@ -93,6 +93,7 @@ from ecos_agent.optimization.objective_alignment import (
 from ecos_agent.optimization.planning import (
     InFlightExperiment,
     OptimizationHistory,
+    applied_divergence_summary,
     OptimizationPlannerTurn,
     OptimizationPlanningContext,
     OptimizationProposalPlanner,
@@ -694,6 +695,19 @@ class ControllerContextMixin:
                     terminal_observation=outcome.terminal_observation,
                     parameter_application_receipt=(
                         outcome.parameter_application_receipt
+                        if include_receipts
+                        else None
+                    ),
+                    applied_divergence=(
+                        applied_divergence_summary(
+                            knob=str(start.requested.knob_id),
+                            requested=start.requested.value,
+                            actual=(
+                                getattr(outcome.parameter_application_receipt, "actual_value", None)
+                                if include_receipts
+                                else None
+                            ),
+                        )
                         if include_receipts
                         else None
                     ),

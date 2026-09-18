@@ -29,7 +29,10 @@ from ecos_agent.optimization.ledger import (
 )
 from ecos_agent.optimization.parameters.contracts import ParameterApplicationReceipt
 from ecos_agent.optimization.experiments.statistics import success_curve_auc
-from ecos_agent.optimization.rules import PROMOTING_DECISIONS
+from ecos_agent.optimization.rules import (
+    PROMOTING_DECISIONS,
+    meaningful_metric_change,
+)
 
 Mode = Literal["requested-only", "receipt-aware"]
 
@@ -675,7 +678,89 @@ def summarize_candidate_metrics(
             "total_steps": sum(misleading_steps),
         },
         "requested_actual_deviation_spectrum": _deviation_spectrum(started),
+        "requested_actual_divergence": _requested_actual_divergence(started),
+        "shadow_duplicate_configs": _shadow_duplicate_configs(started),
     }
+
+
+def _numeric_pair(requested: object, actual: object) -> bool:
+    return (
+        actual is not None
+        and not isinstance(requested, bool)
+        and not isinstance(actual, bool)
+        and isinstance(requested, (int, float))
+        and isinstance(actual, (int, float))
+    )
+
+
+def _requested_actual_divergence(started: list[CandidateTrace]) -> dict[str, object]:
+    """How often the tool applied something other than what was requested.
+
+    RQ1 evidence-exposure quantity: the receipt's actual value diverging
+    meaningfully (protection tolerance) from the request is information a
+    requested-only planner never sees, even though the application itself is
+    effective (e.g. target_density 0.3 applied as 0.4509).
+    """
+    observed = adjusted = 0
+    for item in started:
+        if not _numeric_pair(item.requested_value, item.actual_value):
+            continue
+        observed += 1
+        if meaningful_metric_change(
+            float(item.requested_value), float(item.actual_value)
+        ):
+            adjusted += 1
+    return {
+        "observed": observed,
+        "adjusted": adjusted,
+        "adjusted_rate": adjusted / observed if observed else 0.0,
+    }
+
+
+def _shadow_duplicate_configs(started: list[CandidateTrace]) -> dict[str, object]:
+    """Different requested values that landed on an already-tried actual config.
+
+    The planner believed it explored a new operating point; the receipt shows
+    the same applied value as an earlier probe.  A requested-only evidence
+    view cannot perceive the repeat, so these are invalid executions by
+    construction (PPU prototype: requests 0.3 and 0.2 both applied 0.4509).
+    """
+    seen: dict[tuple[str, object], object] = {}
+    duplicates = 0
+    events: list[dict[str, object]] = []
+    for item in started:
+        if item.requested_knob is None or item.actual_value is None:
+            continue
+        key = (item.requested_knob, item.actual_value)
+        first_requested = seen.get(key, _MISSING)
+        if first_requested is _MISSING:
+            seen[key] = item.requested_value
+            continue
+        repeated = not _same_request(first_requested, item.requested_value)
+        if repeated:
+            duplicates += 1
+            events.append(
+                {
+                    "candidate_id": item.candidate_id,
+                    "requested": item.requested_value,
+                    "actual": item.actual_value,
+                    "first_requested": first_requested,
+                }
+            )
+    return {"count": duplicates, "events": events}
+
+
+def _same_request(first: object, current: object) -> bool:
+    if _numeric_pair(first, current):
+        return not meaningful_metric_change(float(first), float(current))
+    return first == current
+
+
+class _Missing:
+    pass
+
+
+_MISSING = _Missing()
 
 
 def _misleading_step_counts(started: list[CandidateTrace]) -> list[int]:

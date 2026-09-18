@@ -30,6 +30,7 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
 )
 from ecos_agent.optimization.reflection import PlanningFeedbackEntry
+from ecos_agent.optimization.rules import meaningful_metric_change
 from ecos_agent.optimization.knowledge.cases import (
     EmpiricalCaseAudit,
     TerminalEmpiricalCase,
@@ -150,12 +151,46 @@ class OptimizationHistory:
     requested: RequestedKnobValue
     terminal_observation: TerminalObservation | None = None
     parameter_application_receipt: ParameterApplicationReceipt | None = None
+    applied_divergence: Mapping[str, object] | None = None
     rationale_summary: str | None = None
     planning_values: Mapping[str, bool | int | float] | None = None
     incumbent_decision: str | None = None
     decisive_metric: str | None = None
     recovery_transition: str | None = None
     layer_signal: str | None = None
+
+
+def applied_divergence_summary(
+    *,
+    knob: str,
+    requested: object,
+    actual: object,
+) -> Mapping[str, object] | None:
+    """Requested-vs-applied divergence marker for a planning history entry.
+
+    Numeric knobs only: a meaningful gap (protection tolerance, the same
+    threshold as the incumbent-protection rules) between the requested value
+    and the tool-observed actual value is surfaced explicitly so the planner
+    does not have to re-derive it from the receipt.  Exact applications stay
+    unannotated; requested-only contexts never attach this marker, which is
+    precisely the evidence those planners cannot perceive.
+    """
+    if (
+        actual is None
+        or isinstance(requested, bool)
+        or isinstance(actual, bool)
+        or not isinstance(requested, (int, float))
+        or not isinstance(actual, (int, float))
+    ):
+        return None
+    if not meaningful_metric_change(float(requested), float(actual)):
+        return None
+    return {
+        "knob": knob,
+        "requested": float(requested),
+        "actual": float(actual),
+        "adjusted": True,
+    }
 
 
 @dataclass(frozen=True)
