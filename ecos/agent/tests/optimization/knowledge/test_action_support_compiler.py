@@ -376,9 +376,9 @@ def test_compiler_state_matches_claim_beyond_raw_top_three() -> None:
     assert view.truncated_claim_refs == ()
 
 
-def test_compiler_exposes_only_three_state_matched_claims_with_audit() -> None:
-    catalog = _multi_claim_catalog(count=5)
-    ranked = tuple(claim.claim_ref for claim in reversed(catalog.claims[2:5]))
+def test_compiler_exposes_only_seven_state_matched_claims_with_audit() -> None:
+    catalog = _multi_claim_catalog(count=9)
+    ranked = tuple(claim.claim_ref for claim in reversed(catalog.claims[2:9]))
     state = build_state_evidence_request(
         task_id="task-1",
         retrieval_request_sha256=HASH,
@@ -397,9 +397,9 @@ def test_compiler_exposes_only_three_state_matched_claims_with_audit() -> None:
         effective_domains=(_domain(),),
     )
 
-    assert len(view.matches) == 5
+    assert len(view.matches) == 9
     assert view.exposed_claim_refs == ranked
-    assert len({action.claim_ref.entity_id for action in view.actions}) == 3
+    assert len({action.claim_ref.entity_id for action in view.actions}) == 7
     assert view.truncated_claim_refs == tuple(
         claim.claim_ref for claim in catalog.claims[:2]
     )
@@ -407,7 +407,7 @@ def test_compiler_exposes_only_three_state_matched_claims_with_audit() -> None:
     planner_json = json.dumps(planner_payload, sort_keys=True)
     assert all(ref.entity_id in planner_json for ref in view.exposed_claim_refs)
     assert all(ref.entity_id not in planner_json for ref in view.truncated_claim_refs)
-    assert planner_payload["candidate_count"] == 5
+    assert planner_payload["candidate_count"] == 9
     assert planner_payload["audit_sha256"] == view.view_sha256
     assert "candidate_refs" not in planner_payload
     assert "truncated_claim_refs" not in planner_payload

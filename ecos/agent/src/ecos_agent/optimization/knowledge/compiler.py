@@ -148,7 +148,7 @@ _APPLICABILITY_RANK = MappingProxyType(
         KnowledgeApplicability.PASS: 3,
     }
 )
-_PLANNER_CLAIM_LIMIT = 3
+_PLANNER_CLAIM_LIMIT = 7
 
 
 class StatePredicate(_Model):
