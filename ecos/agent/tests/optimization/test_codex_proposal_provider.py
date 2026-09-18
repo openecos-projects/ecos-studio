@@ -701,3 +701,70 @@ def test_objective_provider_requires_policy(
     else:
         result = provider.propose_optimization_objective("reduce wirelength")
         assert result["parameter_policy"]["geometry_mode"] == "fixed"
+
+
+def test_planner_prompt_claim_contract_is_consistent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The prompt's action key set must allow the claim fields the schema requires.
+
+    The blanket rejection of claim_id (7d76c135) contradicted the citation rule
+    and the claim-bound schema variants, structurally forcing claim_bound=0 in
+    every LLM pilot (G4 2026-09-18). The pilot gate reads claim binding, so the
+    contract must stay mutually consistent.
+    """
+    provider = _provider(tmp_path)
+    context, domain = _context(), _domain()
+    captured: dict[str, object] = {}
+
+    def request(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        provider._completed_turn = ("thread-1", "turn-1", HASH)
+        return _proposal_v2(context, domain)
+
+    monkeypatch.setattr(provider, "_request_json", request)
+    provider.propose_v2(context, domain)
+    system = captured["system"]
+
+    # The stale blanket rejection is gone; claim fields have a fill-or-null rule.
+    assert "claim_id, claim_ref, or parameter_card_ref are rejected" not in system
+    assert "set all four to null" in system
+    assert "never invent claim or binding values" in system
+
+    # Knowledge-conditioned abstention is mandatory, not a preference, and the
+    # prompt no longer grades softer than the offline gate labels.
+    assert "prefer decision continue" not in system
+    assert system.count("decision continue is mandatory") == 2
+    assert "name that reason code in rationale_summary" in system
+
+    # A supported_action_view pass action is explicit density_weight support.
+    assert "must never be enabled implicitly: a supplied" in system
+
+    # Prompt and schema agree on which claim fields a claim-bound action carries.
+    schema = _optimization_proposal_output_schema_v2(
+        domain,
+        ("increase",),
+        (
+            {
+                "claim_ref": {"entity_id": "strategy-1", "chunk_sha256": CHUNK_HASH},
+                "claim_sha256": HASH,
+                "binding_id": "binding-1",
+                "binding_sha256": HASH,
+                "knob_id": "place.target_density",
+                "direction": "increase",
+                "effective_domain_sha256": domain.snapshot_sha256,
+                "requested_value_bounds": domain.value_bounds.model_dump(mode="json"),
+            },
+        ),
+    )
+    unclaimed, supported = schema["properties"]["action"]["anyOf"][:-1]
+    claim_fields = sorted(
+        field
+        for field, spec in supported["properties"].items()
+        if spec != unclaimed["properties"].get(field)
+    )
+    assert claim_fields == [
+        "binding_id", "binding_sha256", "claim_id", "claim_sha256",
+    ]
+    for field in claim_fields:
+        assert field in system
