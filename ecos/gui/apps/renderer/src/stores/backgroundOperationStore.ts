@@ -1,6 +1,7 @@
 import type {
   EccBackgroundFinalization,
   EccBackgroundOperation,
+  EccBackgroundOperationRecovery,
   EccBackgroundWorkspaceCreation,
   EccBackgroundOperationOutcome,
   DesktopShutdownStatus,
@@ -9,7 +10,11 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getDesktopApi } from '@/platform/desktop'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { updateAuthoritativeBackendFlowState } from '@/composables/flowExecutionState'
+import {
+  setBackendFlowProjectionReady,
+  setBackendFlowProjectionUnknown,
+  updateAuthoritativeBackendFlowState,
+} from '@/composables/flowExecutionState'
 
 export function isShutdownInProgress(state: DesktopShutdownStatus['state']): boolean {
   return [
@@ -33,6 +38,7 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
   let unsubscribe: (() => void) | null = null
   let unsubscribeShutdown: (() => void) | null = null
   const seenOutcomes = new Set<string>()
+  const seenRecoveryFailures = new Set<string>()
   const seenCreationRecoveries = new Set<string>()
   const notifications = useNotificationStore()
 
@@ -50,8 +56,13 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
       operations.value = projection.operations
       finalizations.value = projection.finalizations
       creations.value = projection.creations
+      const recoveries = projection.recoveries ?? []
+      setBackendFlowProjectionUnknown(
+        recoveries.map((recovery) => recovery.workspaceDirectory),
+      )
       publishCreationRecoveries(projection.creations)
       publishOutcomes(projection.outcomes)
+      publishRecoveryFailures(recoveries)
       updateAuthoritativeBackendFlowState(
         [
           ...projection.operations.map((operation) => operation.workspaceDirectory),
@@ -62,10 +73,15 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
         ],
         projection.operations.map((operation) => operation.workspaceDirectory),
       )
-      issue.value = null
+      setBackendFlowProjectionReady(true)
+      const failedRecovery = recoveries.find((recovery) => recovery.state === 'failed')
+      issue.value = failedRecovery
+        ? `${workspaceName(failedRecovery.workspaceDirectory)}: recovery after an interrupted run failed. Reopen the Workspace to retry.`
+        : null
     } catch (error) {
       if (sequence !== requestSequence) return
       issue.value = error instanceof Error ? error.message : String(error)
+      setBackendFlowProjectionReady(false)
     } finally {
       if (sequence === requestSequence) loading.value = false
     }
@@ -100,6 +116,8 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
     unsubscribe = null
     unsubscribeShutdown?.()
     unsubscribeShutdown = null
+    setBackendFlowProjectionReady(true)
+    setBackendFlowProjectionUnknown([])
     generation.value = -1
     operations.value = []
     finalizations.value = []
@@ -196,16 +214,11 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
       while (seenOutcomes.size > 256) {
         seenOutcomes.delete(seenOutcomes.values().next().value!)
       }
-      const workspace =
-        outcome.workspaceDirectory
-          .replace(/[\\/]+$/g, '')
-          .split(/[\\/]/)
-          .pop() || outcome.workspaceDirectory
       notifications.addNotification({
         key: `runtime-outcome:${key}`,
         message:
           outcome.error?.message ??
-          `${workspace}: ${outcome.currentStep || outcome.step || 'Flow'} ${outcome.state}.`,
+          `${workspaceName(outcome.workspaceDirectory)}: ${outcome.currentStep || outcome.step || 'Flow'} ${outcome.state}.`,
         severity:
           outcome.state === 'succeeded'
             ? 'info'
@@ -220,6 +233,24 @@ export const useBackgroundOperationStore = defineStore('backgroundOperations', (
               : outcome.state === 'interrupted'
                 ? 'Flow interrupted'
                 : 'Flow failed',
+      })
+    }
+  }
+
+  function publishRecoveryFailures(recoveries: EccBackgroundOperationRecovery[]): void {
+    for (const recovery of recoveries) {
+      if (recovery.state !== 'failed') continue
+      const key = `${recovery.workspaceHandle}\0${recovery.operationId ?? ''}`
+      if (seenRecoveryFailures.has(key)) continue
+      seenRecoveryFailures.add(key)
+      while (seenRecoveryFailures.size > 256) {
+        seenRecoveryFailures.delete(seenRecoveryFailures.values().next().value!)
+      }
+      notifications.addNotification({
+        key: `runtime-recovery-failed:${key}`,
+        message: `${workspaceName(recovery.workspaceDirectory)}: recovery after an interrupted run failed. Reopen the Workspace to retry.`,
+        severity: 'error',
+        title: 'Flow recovery failed',
       })
     }
   }
@@ -275,4 +306,13 @@ function idleShutdownStatus(): DesktopShutdownStatus {
     snapshotFailures: 0,
     state: 'idle',
   }
+}
+
+function workspaceName(directory: string): string {
+  return (
+    directory
+      .replace(/[\\/]+$/g, '')
+      .split(/[\\/]/)
+      .pop() || directory
+  )
 }

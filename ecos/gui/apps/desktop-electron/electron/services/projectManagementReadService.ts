@@ -246,15 +246,29 @@ export class ProjectManagementReadService {
     try {
       const projectRoot = await canonicalizeExistingDirectory(request.projectRoot)
       const workspaceCandidate = resolve(request.workspacePath)
-      if (
-        pathsEqual(workspaceCandidate, projectRoot) ||
-        !isPathWithinRoot(workspaceCandidate, projectRoot)
-      ) {
+      if (pathsEqual(workspaceCandidate, projectRoot)) {
         return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
       }
-      const workspaceRoot = await canonicalizeExistingDirectory(workspaceCandidate)
-      if (!isPathWithinRoot(workspaceRoot, projectRoot)) {
-        return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+      let workspaceRoot: string
+      if (isPathWithinRoot(workspaceCandidate, projectRoot)) {
+        workspaceRoot = await canonicalizeExistingDirectory(workspaceCandidate)
+        if (!isPathWithinRoot(workspaceRoot, projectRoot)) {
+          return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+        }
+      } else {
+        try {
+          const project = await this.loadProject(projectRoot)
+          if (!project.manifest) {
+            return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+          }
+          workspaceRoot = await this.resolveDeclaredWorkspace(
+            project.root,
+            project.manifest.workspaces.map((workspace) => workspace.workspace_path),
+            request.workspacePath,
+          )
+        } catch {
+          return snapshotFailure('WORKSPACE_PATH_OUTSIDE_PROJECT', readBytes)
+        }
       }
 
       let snapshotPath: string
@@ -408,10 +422,7 @@ export class ProjectManagementReadService {
       )
     }
     for (const workspace of manifest.workspaces) {
-      const candidate = resolve(workspace.workspace_path)
-      if (!isPathWithinRoot(candidate, root)) {
-        throw new Error('Project manifest contains a workspace outside the project root.')
-      }
+      resolveDeclaredWorkspacePath(root, workspace.workspace_path)
     }
     return { manifest, root }
   }
@@ -421,20 +432,20 @@ export class ProjectManagementReadService {
     declaredWorkspacePaths: string[],
     workspacePath: string,
   ): Promise<string> {
-    if (!declaredWorkspacePaths.some((path) => pathsEqual(path, workspacePath))) {
-      throw new Error('Workspace is not declared by the requested project.')
-    }
-
-    const candidatePath = resolve(workspacePath)
-    if (!isPathWithinRoot(candidatePath, projectRoot)) {
-      throw new Error('Workspace is outside the requested project.')
-    }
-
+    const candidatePath = isAbsolute(workspacePath)
+      ? resolve(workspacePath)
+      : resolve(projectRoot, workspacePath)
     const canonicalPath = await canonicalizeExistingDirectory(candidatePath)
-    if (!isPathWithinRoot(canonicalPath, projectRoot)) {
-      throw new Error('Workspace resolves outside the requested project.')
+    for (const declaredPath of declaredWorkspacePaths) {
+      const declaredCandidate = resolveDeclaredWorkspacePath(projectRoot, declaredPath)
+      try {
+        const declaredCanonical = await canonicalizeExistingDirectory(declaredCandidate)
+        if (pathsEqual(declaredCanonical, canonicalPath)) return canonicalPath
+      } catch (error) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) throw error
+      }
     }
-    return canonicalPath
+    throw new Error('Workspace is not declared by the requested project.')
   }
 }
 
@@ -572,4 +583,25 @@ async function readBoundedSnapshot(
   } finally {
     await handle.close()
   }
+}
+
+function resolveDeclaredWorkspacePath(
+  projectRoot: string,
+  workspacePath: string,
+): string {
+  const absolute = isAbsolute(workspacePath)
+  const candidate = absolute
+    ? resolve(workspacePath)
+    : resolve(projectRoot, workspacePath)
+  if (!absolute && !isPathWithinRoot(candidate, projectRoot)) {
+    throw new Error('Project manifest contains a relative workspace path escape.')
+  }
+  if (
+    pathsEqual(candidate, projectRoot) ||
+    pathsEqual(candidate, join(projectRoot, 'runs')) ||
+    isPathWithinRoot(projectRoot, candidate)
+  ) {
+    throw new Error('Project manifest contains a protected workspace path.')
+  }
+  return candidate
 }

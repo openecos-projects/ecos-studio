@@ -255,6 +255,49 @@ describe('BackendProjectComparisonService', () => {
     expect(activeOperations).toHaveBeenCalledOnce()
   })
 
+  it('builds the comparison when the manifest declares a Workspace outside the Project root', async () => {
+    const fixture = serviceFixture()
+    fixture.project.workspaces.push({
+      workspace_id: 'ws_ext',
+      name: 'external',
+      workspace_path: '/external/ws_ext',
+      source_workspace_id: 'ws_1',
+      branch_from: { source_workspace_id: 'ws_1', source_step: 'Route' },
+      start_step: 'Route',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-01-03T00:00:00Z',
+      updated_at: '2026-01-03T00:00:00Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    })
+    const selected = await fixture.service.selectProject(11, {
+      projectRootLocator: '/projects/demo',
+    })
+    if (!selected.ok) throw new Error('selection failed')
+
+    const result = await fixture.service.getComparison(
+      11,
+      selected.projectComparisonContextId,
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok || !('data' in result.data.workspaceSnapshots)) {
+      throw new Error('comparison unavailable')
+    }
+    expect(Object.keys(result.data.workspaceSnapshots.data.flowStates).sort()).toEqual([
+      'ws_1',
+      'ws_2',
+      'ws_ext',
+    ])
+    expect(fixture.watchers.current.reconcile).toHaveBeenCalledWith('/projects/demo', [
+      '/projects/demo/ws_1',
+      '/projects/demo/ws_2',
+      '/external/ws_ext',
+    ])
+  })
+
   it('invalidates execution snapshots for every selected window independently', async () => {
     const fixture = serviceFixture()
     const service = new BackendProjectComparisonService(

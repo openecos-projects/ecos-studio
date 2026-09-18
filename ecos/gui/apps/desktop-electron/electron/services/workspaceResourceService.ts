@@ -10,6 +10,11 @@ import type {
   WorkspaceTechResources,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
+import {
+  locateWorkspaceParametersFile,
+  parseWorkspaceParametersText,
+  type WorkspaceParametersFileLocation,
+} from './workspaceParametersFile'
 
 type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
@@ -71,7 +76,10 @@ export class WorkspaceResourceService {
 
   async readParameters(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    return await this.readJsonOrNull(join(root, 'home', 'parameters.json'))
+    const location = await locateWorkspaceParametersFile(root)
+    const raw = await this.readTextOrNull(location.path)
+    if (raw === null) return null
+    return parseWorkspaceParametersText(raw, location.format, root)
   }
 
   async resolveStepInfo(
@@ -140,7 +148,8 @@ export class WorkspaceResourceService {
     const statErrors: string[] = []
     const homePath = join(root, 'home', 'home.json')
     const flowPath = join(root, 'home', 'flow.json')
-    const parametersPath = join(root, 'home', 'parameters.json')
+    const parametersLocation = await locateWorkspaceParametersFile(root)
+    const parametersPath = parametersLocation.path
     const checklistPath = join(root, 'home', 'checklist.json')
 
     const [homeJson, flowJson, parametersJson, checklistJson] = await Promise.all([
@@ -151,16 +160,21 @@ export class WorkspaceResourceService {
     ])
 
     const homeData = await this.readJsonForIndex(homePath, messages)
-    const parameters = await this.readJsonForIndex(parametersPath, messages)
+    const parameters = await this.readParametersForIndex(
+      root,
+      parametersLocation,
+      messages,
+    )
     const flowData = await this.readJsonForIndex(flowPath, messages)
 
     if (!parametersJson.exists)
       messages.push(`Missing workspace parameters: ${parametersPath}`)
     if (!flowJson.exists) messages.push(`Missing workspace flow: ${flowPath}`)
 
-    const design = stringValue(parameters, 'Design')
-    const topModule = stringValue(parameters, 'Top module')
-    const pdk = stringValue(parameters, 'PDK')
+    const design = stringValue(parameters, 'Design') || stringValue(parameters, 'design')
+    const topModule =
+      stringValue(parameters, 'Top module') || stringValue(parameters, 'top_module')
+    const pdk = stringValue(parameters, 'PDK') || stringValue(parameters, 'pdk')
     const steps =
       isRecord(flowData) && Array.isArray(flowData.steps)
         ? flowData.steps
@@ -441,23 +455,55 @@ export class WorkspaceResourceService {
     }
   }
 
-  private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
+  private async readParametersForIndex(
+    root: string,
+    location: WorkspaceParametersFileLocation,
+    messages: string[],
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      const raw = await this.readTextOrNull(location.path)
+      if (raw === null) return null
+      return parseWorkspaceParametersText(raw, location.format, root)
+    } catch (error) {
+      messages.push(
+        formatErrorMessage(
+          `Failed to parse workspace parameters: ${location.path}`,
+          error,
+        ),
+      )
+      return null
+    }
+  }
+
+  private async readTextOrNull(path: string): Promise<string | null> {
     try {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
       const handle = await open(canonicalPath, 'r')
-      let raw: string
       try {
         const buffer = Buffer.alloc(WORKSPACE_INDEX_JSON_MAX_BYTES + 1)
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
         if (bytesRead > WORKSPACE_INDEX_JSON_MAX_BYTES) {
           throw new Error(
-            `Workspace JSON exceeds ${WORKSPACE_INDEX_JSON_MAX_BYTES} bytes: ${path}`,
+            `Workspace config exceeds ${WORKSPACE_INDEX_JSON_MAX_BYTES} bytes: ${path}`,
           )
         }
-        raw = buffer.subarray(0, bytesRead).toString('utf8')
+        return buffer.subarray(0, bytesRead).toString('utf8')
       } finally {
         await handle.close()
       }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return null
+      }
+
+      throw error
+    }
+  }
+
+  private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
+    try {
+      const raw = await this.readTextOrNull(path)
+      if (raw === null) return null
       const parsed: unknown = JSON.parse(raw)
       return isRecord(parsed) ? parsed : {}
     } catch (error) {

@@ -1,5 +1,8 @@
 import { getDesktopApi } from '@/platform/desktop'
-import type { ProjectManifest } from '@ecos-studio/shared'
+import type {
+  DesktopProjectManagementWorkspaceImportResult,
+  ProjectManifest,
+} from '@ecos-studio/shared'
 
 function projectManagementApi() {
   const api = getDesktopApi().projectManagement
@@ -25,4 +28,10 @@ export async function listProjectManagementEntries(
   projectRoot: string,
 ): Promise<string[]> {
   return await projectManagementApi().listProjectEntries(projectRoot)
+}
+
+export async function importProjectManagementWorkspace(
+  projectRoot: string,
+): Promise<DesktopProjectManagementWorkspaceImportResult> {
+  return await projectManagementApi().importWorkspace(projectRoot)
 }

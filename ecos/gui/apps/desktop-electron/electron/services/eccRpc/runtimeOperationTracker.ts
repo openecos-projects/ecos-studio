@@ -43,6 +43,24 @@ export class RuntimeOperationTracker {
     return this.active.has(operationId) || this.terminalOperations.has(operationId)
   }
 
+  interruptActiveOperations(
+    message = 'ECC sidecar exited before the operation completed.',
+  ): EccRuntimeOperation[] {
+    const interrupted = [...this.active.values()].map((operation) => ({
+      ...operation,
+      error: { code: 'interrupted', message },
+      state: 'interrupted' as const,
+      updatedAt: Date.now(),
+    }))
+    this.active.clear()
+    for (const operation of interrupted) {
+      this.terminalOperations.set(operation.operationId, operation)
+      this.resolveWaiters(operation.operationId, operation)
+    }
+    this.trimOutcomes()
+    return interrupted
+  }
+
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
     const updatesActiveOperation =
       protocolEvent.type === 'execution.progress' ||
@@ -54,6 +72,7 @@ export class RuntimeOperationTracker {
     if (latestSequence !== undefined && protocolEvent.sequence <= latestSequence) {
       return false
     }
+    if (this.terminalOperations.has(protocolEvent.operationId)) return false
     if (updatesActiveOperation) {
       const active = this.active.get(protocolEvent.operationId)
       const workspaceRevision =
@@ -74,7 +93,6 @@ export class RuntimeOperationTracker {
     this.latestSequences.set(protocolEvent.operationId, protocolEvent.sequence)
     const state = stringPayloadValue(protocolEvent.payload, 'state')
     if (activeStates.has(state)) {
-      if (this.terminalOperations.has(protocolEvent.operationId)) return false
       this.active.set(
         protocolEvent.operationId,
         operationFrom(protocolEvent, this.active.get(protocolEvent.operationId)),
@@ -95,11 +113,12 @@ export class RuntimeOperationTracker {
   reconcile(operation: EccRuntimeOperation): boolean {
     if (terminalStates.has(operation.state)) {
       const alreadyTerminal = this.terminalOperations.has(operation.operationId)
+      if (alreadyTerminal) return false
       this.active.delete(operation.operationId)
       this.terminalOperations.set(operation.operationId, operation)
       this.trimOutcomes()
       this.resolveWaiters(operation.operationId, operation)
-      return !alreadyTerminal
+      return true
     }
     if (
       activeStates.has(operation.state) &&
@@ -136,6 +155,11 @@ export class RuntimeOperationTracker {
   reset(reason: Error): void {
     this.rejectAll(reason)
     this.terminalOperations.clear()
+    this.latestSequences.clear()
+  }
+
+  resetForClientReplacement(reason: Error): void {
+    this.rejectAll(reason)
     this.latestSequences.clear()
   }
 

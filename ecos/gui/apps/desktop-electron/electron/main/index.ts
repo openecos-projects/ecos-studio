@@ -51,6 +51,7 @@ import {
   ProjectManagementReadService,
   type ProjectWorkspaceConfiguration,
 } from '../services/projectManagementReadService'
+import { ProjectWorkspaceImportService } from '../services/projectWorkspaceImportService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import type { PdkInventoryService } from '../services/pdkInventoryService'
 import { SettingsStore } from '../services/settingsStore'
@@ -98,6 +99,7 @@ let services: {
   frontendRpcRuntimeService: FrontendRpcRuntimeService
   modelProfileService: ModelProfileService
   projectManagementReadService: ProjectManagementReadService
+  projectWorkspaceImportService: ProjectWorkspaceImportService
   projectManifestService: ProjectManifestService
   quickStartResourceService: QuickStartResourceService
   settingsStore: SettingsStore
@@ -324,6 +326,9 @@ function getDesktopServices() {
     snapshotWatcherFactory: (callbacks) => new ProjectComparisonFileWatcher(callbacks),
     workspaceRootProvider: projectScopeService,
   })
+  const projectWorkspaceImportService = new ProjectWorkspaceImportService(
+    projectManifestService,
+  )
   const shellService = new ShellPtyService({
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
@@ -375,6 +380,7 @@ function getDesktopServices() {
     eccRuntimeService,
     modelProfileService,
     projectManagementReadService,
+    projectWorkspaceImportService,
     projectManifestService,
     quickStartResourceService,
     pdkInventoryService,
@@ -461,6 +467,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
       modelProfileService: desktopServices.modelProfileService,
       projectManagementReadService: desktopServices.projectManagementReadService,
+      projectWorkspaceImportService: desktopServices.projectWorkspaceImportService,
       projectManifestService: desktopServices.projectManifestService,
       quickStartResourceService: desktopServices.quickStartResourceService,
       resourceManagerService: desktopServices.resourceManagerService,

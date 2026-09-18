@@ -330,6 +330,13 @@ export interface EccBackgroundOperationOutcome extends EccRuntimeOperation {
   workspaceHandle: string
 }
 
+export interface EccBackgroundOperationRecovery {
+  operationId?: string
+  state: 'pending' | 'failed'
+  workspaceDirectory: string
+  workspaceHandle: string
+}
+
 export interface EccBackgroundFinalization {
   issue?: string
   state: 'finalizing' | 'snapshot-failed'
@@ -365,6 +372,7 @@ export interface EccBackgroundOperationProjection {
   generation: number
   operations: EccBackgroundOperation[]
   outcomes: EccBackgroundOperationOutcome[]
+  recoveries?: EccBackgroundOperationRecovery[]
 }
 
 export interface EccBackgroundOperationInvalidatedEvent {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import {
   type BackendProjectComparison,
@@ -398,7 +398,8 @@ export class BackendProjectComparisonService {
       const workspacePath = resolve(workspace.workspace_path)
       if (
         workspacePath === projectRoot ||
-        !isPathWithinRoot(workspacePath, projectRoot)
+        workspacePath === join(projectRoot, 'runs') ||
+        isPathWithinRoot(projectRoot, workspacePath)
       ) {
         throw new Error('Project manifest contains an invalid workspace path.')
       }

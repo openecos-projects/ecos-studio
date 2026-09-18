@@ -32,6 +32,11 @@ vi.mock('@/stores/notificationStore', () => ({
 }))
 
 import { useBackgroundOperationStore } from './backgroundOperationStore'
+import {
+  isBackendFlowProjectionUnknown,
+  isFlowExecutionActiveForWorkspace,
+  resetFlowExecutionState,
+} from '@/composables/flowExecutionState'
 
 function operation(
   operationId: string,
@@ -61,6 +66,7 @@ describe('backgroundOperationStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    resetFlowExecutionState()
     runtime.onOperationProjectionInvalidated.mockReturnValue(() => undefined)
     shutdown.getStatus.mockResolvedValue({
       activeFlows: 0,
@@ -225,5 +231,118 @@ describe('backgroundOperationStore', () => {
       undefined,
       true,
     ])
+  })
+
+  it('treats a failed projection request as unknown instead of idle', async () => {
+    runtime.operationProjection.mockRejectedValueOnce(new Error('IPC down'))
+    const store = useBackgroundOperationStore()
+
+    await store.start()
+
+    expect(store.issue).toBe('IPC down')
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(true)
+
+    runtime.operationProjection.mockResolvedValueOnce({
+      creations: [],
+      finalizations: [],
+      generation: 1,
+      operations: [],
+      outcomes: [],
+    })
+    await store.refresh()
+
+    expect(store.issue).toBeNull()
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(false)
+  })
+
+  it('converges notification, background tasks, and control state on an interrupted outcome', async () => {
+    const interrupted = {
+      ...operation('operation-1', '/work/a'),
+      error: {
+        code: 'interrupted',
+        message: 'ECC sidecar exited before the operation completed.',
+      },
+      state: 'interrupted' as const,
+    }
+    runtime.operationProjection.mockResolvedValue({
+      creations: [],
+      finalizations: [],
+      generation: 1,
+      operations: [],
+      outcomes: [interrupted],
+      recoveries: [
+        {
+          operationId: 'operation-1',
+          state: 'failed',
+          workspaceDirectory: '/work/a',
+          workspaceHandle: 'handle-operation-1',
+        },
+      ],
+    })
+    const store = useBackgroundOperationStore()
+
+    await store.start()
+
+    // Notification surface shows the interruption and the failed recovery.
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', title: 'Flow interrupted' }),
+    )
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', title: 'Flow recovery failed' }),
+    )
+    // The failed recovery keeps its Workspace non-startable and visible as an issue.
+    expect(store.issue).toContain('recovery')
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(true)
+    expect(isBackendFlowProjectionUnknown('/work/b')).toBe(false)
+    // The interrupted run does not count as active anywhere.
+    expect(isFlowExecutionActiveForWorkspace('/work/a')).toBe(false)
+    expect(store.activeCount).toBe(0)
+
+    // Repeated refreshes stay idempotent.
+    await store.refresh()
+    expect(
+      addNotification.mock.calls.filter(
+        ([entry]) => entry.title === 'Flow recovery failed',
+      ),
+    ).toHaveLength(1)
+    expect(
+      addNotification.mock.calls.filter(([entry]) => entry.title === 'Flow interrupted'),
+    ).toHaveLength(1)
+  })
+
+  it('marks the workspace startable again once recovery clears', async () => {
+    runtime.operationProjection.mockResolvedValueOnce({
+      creations: [],
+      finalizations: [],
+      generation: 1,
+      operations: [],
+      outcomes: [],
+      recoveries: [
+        {
+          state: 'pending',
+          workspaceDirectory: '/work/a',
+          workspaceHandle: 'handle-a',
+        },
+      ],
+    })
+    const store = useBackgroundOperationStore()
+
+    await store.start()
+
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(true)
+    expect(store.issue).toBeNull()
+
+    runtime.operationProjection.mockResolvedValueOnce({
+      creations: [],
+      finalizations: [],
+      generation: 2,
+      operations: [],
+      outcomes: [],
+      recoveries: [],
+    })
+    await store.refresh()
+
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(false)
+    expect(store.issue).toBeNull()
   })
 })

@@ -1,9 +1,11 @@
 import { ref, shallowReactive } from 'vue'
 
 export const flowExecutionActive = ref(false)
+const backendProjectionReady = ref(true)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
 const knownBackendWorkspaces = shallowReactive(new Set<string>())
 const activeBackendWorkspaces = shallowReactive(new Set<string>())
+const unknownBackendWorkspaces = shallowReactive(new Set<string>())
 
 function normalizeWorkspacePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/')
@@ -36,7 +38,27 @@ export function resetFlowExecutionState(): void {
   activeFlowWorkspaces.clear()
   knownBackendWorkspaces.clear()
   activeBackendWorkspaces.clear()
+  unknownBackendWorkspaces.clear()
+  backendProjectionReady.value = true
   refreshGlobalFlowExecutionActive()
+}
+
+export function setBackendFlowProjectionReady(ready: boolean): void {
+  backendProjectionReady.value = ready
+}
+
+export function setBackendFlowProjectionUnknown(paths: Iterable<string>): void {
+  unknownBackendWorkspaces.clear()
+  for (const path of paths) {
+    const normalized = normalizeWorkspacePath(path)
+    if (normalized) unknownBackendWorkspaces.add(normalized)
+  }
+}
+
+export function isBackendFlowProjectionUnknown(path?: string | null): boolean {
+  if (!backendProjectionReady.value) return true
+  if (!path) return unknownBackendWorkspaces.size > 0
+  return unknownBackendWorkspaces.has(normalizeWorkspacePath(path))
 }
 
 export function isFlowExecutionActiveForWorkspace(

@@ -69,4 +69,44 @@ describe('backend Flow projection', () => {
 
     expect(projected[1]).toMatchObject({ state: 'cancelled', stepId: 'Place' })
   })
+
+  it('marks the visible running step incomplete when its operation is interrupted', () => {
+    const projected = projectBackendFlowSteps(committed, [
+      runtimeEvent('step.started', { step: 'Place' }),
+      {
+        designTool: 'backend',
+        event: {
+          eventId: 'event-interrupted',
+          kind: 'flow',
+          operationId: 'operation-1',
+          origin: 'gui',
+          payload: { state: 'interrupted', step: 'Place' },
+          sequence: 2,
+          timestamp: 2,
+          type: 'operation.changed',
+          workspaceId: 'engineering-workspace',
+        },
+        type: 'runtime.protocol',
+        workspaceHandle: 'workspace-handle',
+      },
+    ])
+
+    expect(projected[1]).toMatchObject({ state: 'failed', stepId: 'Place' })
+  })
+
+  it('marks the visible running step incomplete when the runtime exits unexpectedly', () => {
+    const projected = projectBackendFlowSteps(committed, [
+      runtimeEvent('step.started', { step: 'Place' }),
+      {
+        code: 1,
+        designTool: 'backend',
+        reason: 'unexpected',
+        signal: null,
+        type: 'runtime.exited',
+        workspaceHandle: 'workspace-handle',
+      },
+    ])
+
+    expect(projected[1]).toMatchObject({ state: 'failed', stepId: 'Place' })
+  })
 })
