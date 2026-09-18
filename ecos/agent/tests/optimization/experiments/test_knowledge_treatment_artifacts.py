@@ -366,3 +366,109 @@ root = "{pdk}"
 
     with pytest.raises(ValueError, match="workspace RTL bundle does not match"):
         runner._verify_workspace_binding(manifest, design, workspace)
+
+
+def test_phase8_runner_executes_a_declared_design_subset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_experiment_runner()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    designs = tuple(
+        module.DesignSpec(
+            design_id,
+            "top",
+            "clk",
+            tmp_path / f"{design_id}.f",
+            (),
+            tmp_path / f"{design_id}.sdc",
+        )
+        for design_id in ("gcd", "vm80")
+    )
+    manifest = module.ExperimentManifest(HASH, designs, {}, "ics55", tmp_path / "pdk")
+    calibrated: list[str] = []
+
+    def record_calibration(*args):
+        calibrated.append(args[1].design_id)
+        return _terminal_observation(), 1.0, {}
+
+    monkeypatch.setattr(
+        module, "_ensure_workspace", lambda *_args: _terminal_observation()
+    )
+    monkeypatch.setattr(module, "_calibrate", record_calibration)
+    monkeypatch.setattr(
+        module,
+        "_snapshot_case_pool",
+        lambda source, _destination: (source.resolve(), {"case_count": 1}),
+    )
+
+    def run_treatment(_design, *_args, **_kwargs):
+        return {
+            "traces": (),
+            "planning_calls": 0,
+            "elapsed_wall_time_seconds": 0.0,
+            "terminal_artifacts_complete": True,
+            "replay_chain_complete": True,
+            "selected_case_count": 0,
+            "case_selection_event_count": 0,
+            "nonempty_case_selection_event_count": 0,
+            "episode_evidence": {},
+        }
+
+    monkeypatch.setattr(module, "_run_treatment", run_treatment)
+    monkeypatch.setattr(
+        module,
+        "build_zero_shot_gate_report",
+        lambda *_args, **_kwargs: {
+            "schema_version": "ecos.optimization_zero_shot_gate.v2",
+            "decision": "fail",
+            "few_shot_authorized": False,
+        },
+    )
+
+    result = module.run_experiment(
+        manifest,
+        manifest_path,
+        tmp_path / "output",
+        tmp_path / "workspaces",
+        run_id="run",
+        model="model",
+        seed=1,
+        tool_revision="tool",
+        max_workers=1,
+        terminal_timeout_seconds=1.0,
+        provider_factory=lambda **_kwargs: None,
+        designs=("gcd",),
+    )
+
+    assert calibrated == ["gcd"]
+    assert result["run_metadata"]["executed_design_ids"] == ["gcd"]
+    assert result["run_metadata"]["frozen_cohort_design_ids"] == ["gcd", "vm80"]
+
+
+def test_phase8_runner_rejects_a_design_filter_outside_the_manifest(
+    tmp_path: Path,
+) -> None:
+    module = _load_experiment_runner()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    design = module.DesignSpec(
+        "gcd", "top", "clk", tmp_path / "gcd.f", (), tmp_path / "gcd.sdc"
+    )
+    manifest = module.ExperimentManifest(HASH, (design,), {}, "ics55", tmp_path / "pdk")
+
+    with pytest.raises(ValueError, match="subset of the manifest"):
+        module.run_experiment(
+            manifest,
+            manifest_path,
+            tmp_path / "output",
+            tmp_path / "workspaces",
+            run_id="run",
+            model="model",
+            seed=1,
+            tool_revision="tool",
+            max_workers=1,
+            terminal_timeout_seconds=1.0,
+            provider_factory=lambda **_kwargs: None,
+            designs=("nope",),
+        )

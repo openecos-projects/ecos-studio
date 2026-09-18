@@ -178,7 +178,8 @@ def build_zero_shot_gate_report(
     per_design_limit = config.candidate_limit // len(frozen_design_ids)
     budget_complete = {
         treatment: budget_complete[treatment]
-        and summaries[treatment].started_candidates == config.candidate_limit
+        and summaries[treatment].started_candidates
+        == per_design_limit * len(frozen_design_ids)
         and planning_calls[treatment] >= summaries[treatment].started_candidates
         and all(
             sum(
@@ -246,7 +247,7 @@ def build_zero_shot_gate_report(
             for treatment, summary in summaries.items()
         },
         "evidence_completeness": {
-            "frozen_ten_design_coverage": coverage_complete,
+            "frozen_design_coverage": coverage_complete,
             "rule_guided": rule_scores is not None,
             "equal_budget": _string_keys(budget_complete),
             "terminal_artifacts": _string_keys(terminal_complete),
@@ -331,7 +332,8 @@ def build_knowledge_treatment_report(
     per_design_limit = config.candidate_limit // len(frozen_design_ids)
     budget_complete = {
         treatment: budget_complete[treatment]
-        and summaries[treatment].started_candidates == config.candidate_limit
+        and summaries[treatment].started_candidates
+        == per_design_limit * len(frozen_design_ids)
         and planning_calls[treatment] >= summaries[treatment].started_candidates
         and all(
             sum(
@@ -728,7 +730,7 @@ def _go_no_go_criteria(
         "effective_intervention_improved_or_inactive_reduced": (
             improved_effectiveness
         ),
-        "frozen_ten_design_coverage_complete": coverage_complete,
+        "frozen_design_coverage_complete": coverage_complete,
         "few_shot_cases_present_only_in_full_treatment": (
             selection_events[full] == planning_calls[full]
             and nonempty_selection_events[full] == selection_events[full]

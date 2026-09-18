@@ -882,7 +882,7 @@ def write_equal_budget_report(path: Path, summaries: Iterable[EqualBudgetSummary
     path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
-def validate_design_manifest(design_ids: Iterable[str], *, expected_count: int = 10) -> tuple[str, ...]:
+def validate_design_manifest(design_ids: Iterable[str], *, expected_count: int = 8) -> tuple[str, ...]:
     """Require an explicit, unique frozen design set before a Phase 8 run."""
     values = tuple(design_ids)
     if len(values) != expected_count or len(set(values)) != expected_count or any(not value for value in values):

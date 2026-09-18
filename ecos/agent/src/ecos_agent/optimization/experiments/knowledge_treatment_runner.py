@@ -1,4 +1,4 @@
-"""Run the frozen ten-design knowledge-treatment experiment."""
+"""Run the frozen eight-design knowledge-treatment experiment."""
 
 from __future__ import annotations
 
@@ -68,6 +68,7 @@ def run_experiment(
     rule_guided_utility_by_design: Mapping[str, float | int] | None = None,
     knowledge_case_pool_root: Path | None = None,
     value_policy: str = "model",
+    designs: Sequence[str] | None = None,
 ) -> dict[str, object]:
     if not _ID.fullmatch(run_id) or type(seed) is not int or max_workers <= 0:
         raise ValueError("Phase 8 run arguments are invalid")
@@ -81,6 +82,20 @@ def run_experiment(
     if run_root.exists():
         raise ValueError("Phase 8 run id already exists")
     run_root.mkdir(parents=True)
+    frozen_design_ids = tuple(item.design_id for item in manifest.designs)
+    if designs is not None:
+        requested = tuple(designs)
+        if (
+            not requested
+            or len(set(requested)) != len(requested)
+            or any(design_id not in set(frozen_design_ids) for design_id in requested)
+        ):
+            raise ValueError(
+                "Phase 8 design filter must be a unique non-empty subset of the manifest"
+            )
+        by_id = {item.design_id: item for item in manifest.designs}
+        manifest = manifest._replace(designs=tuple(by_id[item] for item in requested))
+    executed_design_ids = tuple(item.design_id for item in manifest.designs)
     case_pool_metadata = None
     if knowledge_case_pool_root is not None:
         knowledge_case_pool_root, case_pool_metadata = _snapshot_case_pool(
@@ -151,7 +166,7 @@ def run_experiment(
         config=EqualBudgetConfig(
             reference_runtime_seconds=sum(gate_evidence["runtimes"].values())
         ),
-        design_ids=tuple(design.design_id for design in manifest.designs),
+        design_ids=frozen_design_ids,
         rule_guided_utility_by_design=rule_guided_utility_by_design,
         budget_complete_by_treatment=gate_evidence["budget_complete"],
         terminal_artifacts_complete_by_treatment=gate_evidence["terminal_complete"],
@@ -171,6 +186,8 @@ def run_experiment(
         "input_manifest_sha256": manifest.manifest_sha256,
         "design_manifest_ref": str(Path(manifest_path)),
         "design_manifest_file_sha256": file_sha256(Path(manifest_path)),
+        "frozen_cohort_design_ids": list(frozen_design_ids),
+        "executed_design_ids": list(executed_design_ids),
         "reference_runtime_seconds_by_design": gate_evidence["runtimes"],
         "rule_guided_utility_sha256": (
             canonical_sha256(rule_guided_utility_by_design)
@@ -241,7 +258,7 @@ def run_experiment(
         config=EqualBudgetConfig(
             reference_runtime_seconds=sum(evidence["runtimes"].values())
         ),
-        design_ids=tuple(design.design_id for design in manifest.designs),
+        design_ids=frozen_design_ids,
         rule_guided_utility_by_design=rule_guided_utility_by_design,
         budget_complete_by_treatment=evidence["budget_complete"],
         terminal_artifacts_complete_by_treatment=evidence["terminal_complete"],
@@ -668,6 +685,16 @@ def main(provider_factory: Callable[..., Any]) -> None:
         "'lattice' keeps the planner's (knob, direction) but rewrites values "
         "through the frozen lattice selector (direction-only cross cell)",
     )
+    parser.add_argument(
+        "--designs",
+        type=lambda value: tuple(
+            item.strip() for item in value.split(",") if item.strip()
+        ),
+        default=None,
+        help="comma-separated subset of manifest design ids to execute "
+        "(default: the full frozen cohort); the run metadata records the "
+        "executed subset against the frozen manifest",
+    )
     args = parser.parse_args()
     manifest = load_experiment_manifest(
         args.design_manifest, args.benchmark_root, args.pdk_root
@@ -693,4 +720,5 @@ def main(provider_factory: Callable[..., Any]) -> None:
         ),
         knowledge_case_pool_root=args.knowledge_case_pool_root,
         value_policy=args.value_policy,
+        designs=args.designs,
     )
