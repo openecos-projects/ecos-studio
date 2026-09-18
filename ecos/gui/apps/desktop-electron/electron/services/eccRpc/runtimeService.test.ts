@@ -303,6 +303,40 @@ describe('EccRpcRuntimeService pool', () => {
     })
   })
 
+  it('resolves Workspace step outputs by directory without a session', async () => {
+    const pool = createPool()
+    const request = pool.service.workspaceStepOutputs('/work/baseline')
+    pool.clientFor(null).responses.push({
+      design: 'gcd',
+      directory: '/work/baseline',
+      sdc: { path: '/work/baseline/origin/gcd.sdc', exists: true },
+      steps: [
+        {
+          step: 'Synthesis',
+          tool: 'yosys',
+          state: 'Success',
+          verilog: {
+            path: '/work/baseline/Synthesis_yosys/output/gcd_Synthesis.v.gz',
+            exists: true,
+          },
+          def: null,
+        },
+      ],
+    })
+
+    await expect(request).resolves.toMatchObject({
+      design: 'gcd',
+      steps: [{ step: 'Synthesis', tool: 'yosys' }],
+    })
+    expect(
+      pool.clientFor(null).calls.filter((call) => call.method === 'workspace.open'),
+    ).toEqual([])
+    expect(pool.clientFor(null).calls.at(-1)).toEqual({
+      method: 'workspace.step_outputs',
+      params: { directory: '/work/baseline' },
+    })
+  })
+
   it('releases the one-shot workspace creation sidecar after the session is registered', async () => {
     const pool = createPool()
 

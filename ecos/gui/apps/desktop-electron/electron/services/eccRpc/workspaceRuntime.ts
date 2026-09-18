@@ -36,6 +36,7 @@ import type {
   EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceStepConfigurationReadRequest,
   EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputsResult,
   EccWorkspaceRuntimeSnapshot,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
@@ -459,6 +460,17 @@ export class EccWorkspaceRuntime {
       'workspace.step_configuration.read',
       { directory, step },
     )
+  }
+
+  async workspaceStepOutputs(
+    directory: string,
+    step?: string,
+  ): Promise<EccWorkspaceStepOutputsResult> {
+    const client = await this.ensureStarted()
+    return await client.call<EccWorkspaceStepOutputsResult>('workspace.step_outputs', {
+      directory,
+      ...(step ? { step } : {}),
+    })
   }
 
   async refreshConfig(

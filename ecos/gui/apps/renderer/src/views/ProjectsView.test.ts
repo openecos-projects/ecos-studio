@@ -20,6 +20,14 @@ const testState = vi.hoisted(() => ({
   comparisonProjection: { data: null as unknown, status: 'idle' },
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
   pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
+  stepOutputs: vi.fn(
+    async (_request: unknown): Promise<EccWorkspaceStepOutputsResult> => ({
+      design: 'gcd',
+      directory: '/projects/demo/ws_0001',
+      sdc: null,
+      steps: [],
+    }),
+  ),
 }))
 
 vi.mock('vue-router', () => ({
@@ -110,6 +118,11 @@ vi.mock('@/platform/desktop', () => ({
     dialog: { pickDirectory: (options: unknown) => testState.pickDirectory(options) },
     ecc: { runtime: undefined },
     productCommands: { execute: vi.fn() },
+    runtime: {
+      workspace: {
+        stepOutputs: (request: unknown) => testState.stepOutputs(request),
+      },
+    },
     shutdown: undefined,
   }),
 }))
@@ -118,6 +131,11 @@ import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
 import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
+import {
+  consumeWorkspaceWizardRequest,
+  useWorkspaceWizardRequest,
+} from '@/utils/workspaceNavigation'
+import type { EccWorkspaceStepOutputsResult } from '@ecos-studio/shared'
 
 function historyProject(index: number) {
   return {
@@ -414,5 +432,105 @@ describe('ProjectsView background lifecycle integration', () => {
 
     expect(wrapper.findAll('.project-workspace-tree')).toHaveLength(1)
     expect(wrapper.find('.project-list-preview-toggle').exists()).toBe(false)
+  })
+
+  describe('workspace branch popover', () => {
+    function stepEntry(
+      step: string,
+      state: string,
+      artifacts: { verilog?: boolean; def?: boolean } = {},
+    ) {
+      return {
+        step,
+        state,
+        tool: 'ecc',
+        verilog: artifacts.verilog
+          ? { exists: true, path: `/projects/demo/ws_0001/output/${step}/gcd.v` }
+          : null,
+        def: artifacts.def
+          ? { exists: true, path: `/projects/demo/ws_0001/output/${step}/gcd.def` }
+          : null,
+      }
+    }
+
+    beforeEach(() => {
+      consumeWorkspaceWizardRequest()
+      testState.stepOutputs.mockReset()
+      testState.stepOutputs.mockResolvedValue({
+        design: 'gcd',
+        directory: '/projects/demo/ws_0001',
+        sdc: null,
+        steps: [
+          stepEntry('Synthesis', 'Success', { verilog: true }),
+          stepEntry('lec', 'Skipped'),
+          stepEntry('Floorplan', 'Incomplete', { verilog: true, def: true }),
+          stepEntry('place', 'Unstart', { verilog: true, def: true }),
+          stepEntry('CTS', 'Success', { def: true }),
+          stepEntry('route', 'Success', { verilog: true }),
+        ],
+      })
+    })
+
+    async function openBranchPopover() {
+      const wrapper = shallowMount(ProjectsView)
+      await flushPromises()
+      await wrapper.get('button[aria-label="More actions for ws_0001"]').trigger('click')
+      await wrapper.get('.workspace-flow-trigger').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('.workspace-flow-popover').exists()).toBe(true)
+      expect(testState.stepOutputs).toHaveBeenCalledWith({
+        designTool: 'backend',
+        directory: '/projects/demo/ws_0001',
+      })
+      return wrapper
+    }
+
+    function popoverRow(wrapper: VueWrapper, step: string) {
+      const row = wrapper
+        .findAll('.popover-step-row')
+        .find((candidate) => candidate.find('span')?.text() === step)
+      expect(row, `popover row for ${step}`).toBeDefined()
+      return row!
+    }
+
+    it('maps the persisted Incomplete state to a failed step row', async () => {
+      const wrapper = await openBranchPopover()
+
+      const row = popoverRow(wrapper, 'Floorplan')
+      expect(row.get('em').text()).toBe('!')
+      expect(row.get('em').classes()).toContain('step-failed')
+    })
+
+    it('only allows branching from completed steps with a verilog output', async () => {
+      const wrapper = await openBranchPopover()
+
+      // Unstart rows may still carry stale artifacts from an earlier run.
+      expect((popoverRow(wrapper, 'place').element as HTMLButtonElement).disabled).toBe(
+        true,
+      )
+      expect(
+        (popoverRow(wrapper, 'Floorplan').element as HTMLButtonElement).disabled,
+      ).toBe(true)
+      // A def-only row has no origin verilog for the new workspace.
+      const ctsRow = popoverRow(wrapper, 'CTS')
+      expect((ctsRow.element as HTMLButtonElement).disabled).toBe(true)
+      expect(ctsRow.find('.popover-step-add').exists()).toBe(false)
+
+      const routeRow = popoverRow(wrapper, 'route')
+      expect((routeRow.element as HTMLButtonElement).disabled).toBe(false)
+      expect(routeRow.find('.popover-step-add').exists()).toBe(true)
+    })
+
+    it('skips disabled start steps when picking the branch target start step', async () => {
+      const wrapper = await openBranchPopover()
+
+      await popoverRow(wrapper, 'Synthesis').trigger('click')
+      await flushPromises()
+      await wrapper.get('.branch-draft-dialog button.primary-button').trigger('click')
+      await flushPromises()
+
+      const request = useWorkspaceWizardRequest().value
+      expect(request?.initialConfig?.parameters?.['start_step']).toBe('Floorplan')
+    })
   })
 })

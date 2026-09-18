@@ -134,6 +134,7 @@ export type {
   DesignRuntimeWorkspaceHandleRequest,
   DesignRuntimeWorkspaceInfoRequest,
   DesignRuntimeWorkspaceOpenRequest,
+  DesignRuntimeWorkspaceStepOutputsRequest,
 } from './contracts/designRuntime.ts'
 export type {
   DesktopApi,
@@ -241,6 +242,9 @@ export type {
   EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceStepConfigurationReadRequest,
   EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputArtifact,
+  EccWorkspaceStepOutputEntry,
+  EccWorkspaceStepOutputsResult,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,

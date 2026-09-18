@@ -256,6 +256,7 @@ function registerHandlers(
       startStepOperation: vi.fn(),
       readWorkspaceStepConfiguration: vi.fn(),
       readWorkspaceStepConfigurationForDirectory: vi.fn(),
+      workspaceStepOutputs: vi.fn(),
       updateWorkspaceConfiguration: vi.fn(),
       updateWorkspaceStepConfiguration: vi.fn(),
       updateWorkspace: vi.fn(),
@@ -2372,6 +2373,63 @@ describe('registerIpc', () => {
       workspaceRevision: 1,
     })
     expect(services.workspaceResourceService.resolveStepInfo).not.toHaveBeenCalled()
+  })
+
+  it('resolves Backend Workspace step outputs by directory', async () => {
+    const { handlers, services } = registerHandlers()
+    const result = {
+      design: 'gcd',
+      directory: '/project/ws_0001',
+      sdc: { path: '/project/ws_0001/origin/gcd.sdc', exists: true },
+      steps: [
+        {
+          step: 'Synthesis',
+          tool: 'yosys',
+          state: 'Success',
+          verilog: {
+            path: '/project/ws_0001/Synthesis_yosys/output/gcd_Synthesis.v.gz',
+            exists: true,
+          },
+          def: null,
+        },
+      ],
+    }
+    services.eccRuntimeService.workspaceStepOutputs.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceStepOutputs)?.(
+        { sender: { id: 1 } },
+        { designTool: 'backend', directory: '/project/ws_0001' },
+      ),
+    ).resolves.toEqual(result)
+    expect(services.eccRuntimeService.workspaceStepOutputs).toHaveBeenCalledWith(
+      '/project/ws_0001',
+      undefined,
+    )
+  })
+
+  it('rejects Workspace step outputs without the backend runtime or a directory', async () => {
+    const { handlers, services } = registerHandlers()
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceStepOutputs)?.(
+        { sender: { id: 1 } },
+        { designTool: 'frontend', directory: '/project/ws_0001' },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace step outputs require the backend runtime.' },
+      ok: false,
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceStepOutputs)?.(
+        { sender: { id: 1 } },
+        { designTool: 'backend', directory: '' },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace step outputs require a workspace directory.' },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.workspaceStepOutputs).not.toHaveBeenCalled()
   })
 
   it('delegates Backend Workspace queries to the scenario service', async () => {

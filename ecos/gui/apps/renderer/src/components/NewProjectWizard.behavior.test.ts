@@ -820,6 +820,87 @@ describe('NewProjectWizard behavior', () => {
     })
   })
 
+  it('marks steps reported as skippable by the flow definition', async () => {
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: {
+        flowDefinitions: [
+          {
+            flowId: 'rtl2gds',
+            stepIds: [
+              'Synthesis',
+              'lec',
+              'preFloorplan',
+              'Timing optimization',
+              'Harden',
+            ],
+            skippableStepIds: ['lec', 'Timing optimization'],
+            defaultSkippedStepIds: ['lec'],
+          },
+        ],
+      },
+      parameters: [],
+      pdkInstallations: [],
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      skippableFlowStepNames: ReadonlySet<string>
+      defaultSkippedFlowStepNames: ReadonlySet<string>
+      runnableFlowSteps: string[]
+    }
+    wizard.currentStep = 3
+    await flushPromises()
+
+    expect([...wizard.skippableFlowStepNames]).toEqual(['lec', 'Timing optimization'])
+    expect([...wizard.defaultSkippedFlowStepNames]).toEqual(['lec'])
+    expect(wizard.runnableFlowSteps).toEqual([
+      'Synthesis',
+      'preFloorplan',
+      'Timing optimization',
+      'Harden',
+    ])
+    const buttons = wrapper.findAll('button')
+    const skippedCards = buttons.filter((button) => button.text().includes('Skipped'))
+    expect(skippedCards).toHaveLength(1)
+    expect(skippedCards[0].text()).toContain('lec')
+    expect(skippedCards[0].classes()).toContain('border-dashed')
+    const lecCheckbox = skippedCards[0].find('input[type="checkbox"]')
+    expect((lecCheckbox.element as HTMLInputElement).checked).toBe(false)
+    const skippableCards = buttons.filter((button) => button.text().includes('Skippable'))
+    expect(skippableCards).toHaveLength(1)
+    expect(skippableCards[0].text()).toContain('Timing optimization')
+    const skippableCheckbox = skippableCards[0].find('input[type="checkbox"]')
+    expect((skippableCheckbox.element as HTMLInputElement).checked).toBe(true)
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: {},
+      parameters: [],
+      pdkInstallations: [],
+    })
+  })
+
   it('uses the rtl2gds definition for legacy preset flowIds and resets stale boundaries', async () => {
     wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
       controls: {

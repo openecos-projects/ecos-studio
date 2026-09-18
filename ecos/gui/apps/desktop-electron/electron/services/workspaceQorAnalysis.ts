@@ -68,10 +68,19 @@ function record(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+// QoR projection groups metrics per distinct snapshot step, so it keeps the
+// raw step identity (collapsing floorplan sub-steps would trip the
+// duplicate-step guard). Flow-state cells use the shared coarse mapping.
 function flowStep(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return (FLOW_STEP_ALIASES[trimmed.toLowerCase()] ?? trimmed) || null
+}
+
+function coarseFlowStep(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return (parseProjectManifestFlowStep(trimmed) ?? trimmed) || null
 }
 
 function snapshotMetric(value: unknown, stepId: string): MetricValue | null {
@@ -276,7 +285,7 @@ export function workspaceFlowStates(flow: unknown): Record<string, ProjectStepSt
   return Object.fromEntries(
     steps.flatMap((rawStep) => {
       const stepRecord = record(rawStep)
-      const step = flowStep(stepRecord?.name ?? stepRecord?.stepId)
+      const step = coarseFlowStep(stepRecord?.name ?? stepRecord?.stepId)
       const state = flowState(stepRecord?.state ?? stepRecord?.status)
       return step && state ? [[step, state]] : []
     }),

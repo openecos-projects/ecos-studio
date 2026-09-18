@@ -8,6 +8,7 @@ import {
 import {
   buildProjectManagementProject,
   createSelectionState,
+  createWorkspaceBranchDraft,
   projectMpcOptionFromResource,
   resolveProjectQorBaselineWorkspace,
 } from './projectManagement'
@@ -314,6 +315,65 @@ describe('project management V3 model', () => {
     ).toEqual({
       workspaceId: 'ws_0004',
       source: 'selected',
+    })
+  })
+})
+
+describe('createWorkspaceBranchDraft', () => {
+  it('uses ECC-resolved artifact paths for a layout step branch', () => {
+    const model = buildProjectManagementProject(project, manifestWithWorkspace('ws_0002'))
+    const defPath =
+      '/projects/gcd/ws_0002/postFloorplan_ecc/output/gcd_postFloorplan.def.gz'
+    const verilogPath =
+      '/projects/gcd/ws_0002/postFloorplan_ecc/output/gcd_postFloorplan.v.gz'
+
+    expect(
+      createWorkspaceBranchDraft(model, 'ws_0002', {
+        step: 'postFloorplan',
+        nextStep: 'place',
+        verilogPath,
+        defPath,
+        sdcPath: '/projects/gcd/ws_0002/origin/gcd.sdc',
+      }),
+    ).toEqual({
+      sourceWorkspaceId: 'ws_0002',
+      sourceWorkspacePath: '/projects/gcd/ws_0002',
+      step: 'postFloorplan',
+      targetWorkspaceId: 'ws_0003',
+      targetWorkspacePath: '/projects/gcd/ws_0003',
+      targetStartStep: 'place',
+      targetEndStep: 'Harden',
+      sourceOutputType: 'def',
+      sourceOutputPath: defPath,
+      originDef: defPath,
+      originVerilog: verilogPath,
+      originSdc: '/projects/gcd/ws_0002/origin/gcd.sdc',
+    })
+  })
+
+  it('branches from a netlist-only step output as verilog', () => {
+    const model = buildProjectManagementProject(project, manifestWithWorkspace('ws_0002'))
+    const verilogPath = '/projects/gcd/ws_0002/Synthesis_yosys/output/gcd_Synthesis.v.gz'
+
+    expect(
+      createWorkspaceBranchDraft(model, 'ws_0002', {
+        step: 'Synthesis',
+        nextStep: 'preFloorplan',
+        verilogPath,
+        defPath: null,
+        sdcPath: null,
+      }),
+    ).toEqual({
+      sourceWorkspaceId: 'ws_0002',
+      sourceWorkspacePath: '/projects/gcd/ws_0002',
+      step: 'Synthesis',
+      targetWorkspaceId: 'ws_0003',
+      targetWorkspacePath: '/projects/gcd/ws_0003',
+      targetStartStep: 'preFloorplan',
+      targetEndStep: 'Harden',
+      sourceOutputType: 'verilog',
+      sourceOutputPath: verilogPath,
+      originVerilog: verilogPath,
     })
   })
 })

@@ -99,6 +99,26 @@ export interface EccWorkspaceHandleRequest {
   expectedWorkspaceRevision?: number
 }
 
+export interface EccWorkspaceStepOutputArtifact {
+  exists: boolean
+  path: string
+}
+
+export interface EccWorkspaceStepOutputEntry {
+  def: EccWorkspaceStepOutputArtifact | null
+  state: string
+  step: string
+  tool: string
+  verilog: EccWorkspaceStepOutputArtifact | null
+}
+
+export interface EccWorkspaceStepOutputsResult {
+  design: string
+  directory: string
+  sdc: EccWorkspaceStepOutputArtifact | null
+  steps: EccWorkspaceStepOutputEntry[]
+}
+
 export interface EccWorkspaceMutationRequest extends EccWorkspaceHandleRequest {
   expectedWorkspaceRevision: number
 }

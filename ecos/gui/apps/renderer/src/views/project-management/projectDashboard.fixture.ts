@@ -46,7 +46,6 @@ export function workspaceFixture(
     id,
     name: id,
     workspacePath: `/projects/demo/${id}`,
-    artifactDesignName: 'aes',
     status: 'success',
     description: '',
     sourceWorkspaceId: null,
