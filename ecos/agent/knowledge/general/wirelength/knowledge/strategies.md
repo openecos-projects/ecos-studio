@@ -307,3 +307,65 @@
 **Evidence sources:** source.ifp.core_geometry.
 
 **Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**, **source.ifp.core_geometry**
+
+<a id="strategy.wirelength.trial_tall_core_shape_variable_geometry.v1"></a>
+## strategy.wirelength.trial_tall_core_shape_variable_geometry.v1
+
+**Topic:** wirelength strategy.
+
+**Metric:** wirelength.
+
+**Applies to steps:** floorplan, place.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. The measured aspect-ratio offset is negative while the configured aspect ratio is positive, so the core is taller than the configured shape; increasing floorplan.aspect_ratio moves the re-derived core shape back toward square in variable-geometry mode. This is a wirelength reshape trial from a stage where the geometry stays re-derivable, not a guaranteed gain.
+
+**Diagnosis:** core shape parameter exploration.
+
+**Required evidence:** floorplan.aspect_ratio, floorplan_aspect_ratio_offset.
+
+**Action intent:** reduce tall core elongation trial (`reduce_tall_core_elongation_trial`).
+
+**Effects:** route_wirelength may_decrease; congestion may_increase; timing may_increase.
+
+**Anti-conditions:** .
+
+**ECOS analog:** increase `floorplan.aspect_ratio` (coarse analog)
+
+**Binding limits:** Try a lower or higher configured aspect ratio according to the current side of one. This direction does not constrain a proposal from crossing one and does not guarantee less elongation. Site-grid alignment affects realized dimensions. Fixed macros, IO and routing anisotropy can invalidate a QoR benefit; terminal validation remains required.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.ifp.core_geometry.
+
+**Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**, **source.ifp.core_geometry**
+
+<a id="strategy.wirelength.trial_wide_core_shape_variable_geometry.v1"></a>
+## strategy.wirelength.trial_wide_core_shape_variable_geometry.v1
+
+**Topic:** wirelength strategy.
+
+**Metric:** wirelength.
+
+**Applies to steps:** floorplan, place.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. The measured aspect-ratio offset is positive while the configured aspect ratio is positive, so the core is wider than the configured shape; decreasing floorplan.aspect_ratio moves the re-derived core shape back toward square in variable-geometry mode. This is a wirelength reshape trial from a stage where the geometry stays re-derivable, not a guaranteed gain.
+
+**Diagnosis:** core shape parameter exploration.
+
+**Required evidence:** floorplan.aspect_ratio, floorplan_aspect_ratio_offset.
+
+**Action intent:** reduce wide core elongation trial (`reduce_wide_core_elongation_trial`).
+
+**Effects:** route_wirelength may_decrease; congestion may_increase; timing may_increase.
+
+**Anti-conditions:** .
+
+**ECOS analog:** decrease `floorplan.aspect_ratio` (coarse analog)
+
+**Binding limits:** Try a lower or higher configured aspect ratio according to the current side of one. This direction does not constrain a proposal from crossing one and does not guarantee less elongation. Site-grid alignment affects realized dimensions. Fixed macros, IO and routing anisotropy can invalidate a QoR benefit; terminal validation remains required.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.ifp.core_geometry.
+
+**Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**, **source.ifp.core_geometry**

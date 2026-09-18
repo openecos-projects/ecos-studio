@@ -648,3 +648,127 @@
 **Evidence sources:** source.ifp.core_geometry.
 
 **Source evidence:** **general.statements**, **general.bindings**, **source.ifp.core_geometry**
+
+<a id="strategy.congestion.trial_tighter_target_density.v1"></a>
+## strategy.congestion.trial_tighter_target_density.v1
+
+**Topic:** congestion strategy.
+
+**Metric:** congestion.
+
+**Applies to steps:** place.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Die utilization and DRC/timing violation counters show a clean, non-saturated placement while the configured target density is positive; raising place.target_density packs cells toward a denser density target inside the placement density objective. This is a wirelength trial on the configured knob, not a fixed multiplier on final density or routing congestion.
+
+**Diagnosis:** placement wirelength parameter exploration.
+
+**Required evidence:** place.target_density, drc_count, sta_setup_violation_count, sta_hold_violation_count.
+
+**Action intent:** tighten target density trial (`tighten_target_density_trial`).
+
+**Effects:** wirelength may_decrease; placement_density_overflow may_increase; congestion may_increase.
+
+**Anti-conditions:** .
+
+**ECOS analog:** increase `place.target_density` (coarse analog)
+
+**Binding limits:** The configured target density bounds the placement density objective; hold target_overflow and routability_opt fixed during the trial and keep terminal DRC and timing guards.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.dreamplace.density_weight_initialization.
+
+**Source evidence:** **general.statements**, **general.bindings**, **source.dreamplace.density_weight_initialization**
+
+<a id="strategy.congestion.trial_reduce_placement_padding.v1"></a>
+## strategy.congestion.trial_reduce_placement_padding.v1
+
+**Topic:** congestion strategy.
+
+**Metric:** congestion.
+
+**Applies to steps:** place.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Routed local overflow and DRC are clean while a positive global placement padding is configured; reducing place.cell_padding_x removes reserved inter-cell spacing from the placement geometry. This is a wirelength trial that may re-introduce local congestion, not a guaranteed gain.
+
+**Diagnosis:** padding parameter exploration.
+
+**Required evidence:** place.cell_padding_x, route_la_total_overflow, drc_count.
+
+**Action intent:** reduce placement padding trial (`reduce_placement_padding_trial`).
+
+**Effects:** wirelength may_decrease; congestion may_increase; placement_density_overflow may_increase.
+
+**Anti-conditions:** .
+
+**ECOS analog:** decrease `place.cell_padding_x` (coarse analog)
+
+**Binding limits:** Global placement padding only pads movable cells during global placement; terminal routing, DRC, and timing validation remains required after the trial.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.dreamplace.basic_place.
+
+**Source evidence:** **general.statements**, **general.bindings**, **source.dreamplace.basic_place**
+
+<a id="strategy.congestion.trial_disable_routability_relief.v1"></a>
+## strategy.congestion.trial_disable_routability_relief.v1
+
+**Topic:** congestion strategy.
+
+**Metric:** congestion.
+
+**Applies to steps:** place.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. Routability relief is configured while routed local overflow and DRC are clean; disabling place.routability_opt stops the relief-driven node-size inflation so the placement can pack toward the configured density target. This is a wirelength trial that may re-introduce congestion, not a guaranteed gain.
+
+**Diagnosis:** routability relief parameter exploration.
+
+**Required evidence:** place.routability_opt, routability_relief_configured, route_la_total_overflow, drc_count.
+
+**Action intent:** disable routability relief trial (`disable_routability_relief_trial`).
+
+**Effects:** wirelength may_decrease; congestion may_increase; placement_runtime may_decrease.
+
+**Anti-conditions:** .
+
+**ECOS analog:** disable `place.routability_opt` (coarse analog)
+
+**Binding limits:** Routability relief reinitializes placement with inflated node sizes; disabling it removes that inflation for later placements and terminal congestion validation remains required.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.dreamplace.basic_place.
+
+**Source evidence:** **general.statements**, **general.bindings**, **source.dreamplace.basic_place**
+
+<a id="strategy.congestion.trial_core_whitespace_variable_geometry.v1"></a>
+## strategy.congestion.trial_core_whitespace_variable_geometry.v1
+
+**Topic:** congestion strategy.
+
+**Metric:** congestion.
+
+**Applies to steps:** floorplan, place.
+
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Change one legal parameter at a time; retain terminal routing, timing, DRC and budget guards. The configured core utilization is positive and measured die utilization is positive, so the die retains utilization slack; decreasing floorplan.core_util re-derives the core with more whitespace in variable-geometry mode. This is a whitespace and congestion trial from a stage where the geometry stays re-derivable, not a die-size change and not a wirelength guarantee.
+
+**Diagnosis:** core geometry parameter exploration.
+
+**Required evidence:** floorplan.core_util, die_utilization.
+
+**Action intent:** increase core whitespace trial (`increase_core_whitespace_trial`).
+
+**Effects:** congestion may_decrease; placement_density_overflow may_decrease; wirelength may_increase.
+
+**Anti-conditions:** .
+
+**ECOS analog:** decrease `floorplan.core_util` (coarse analog)
+
+**Binding limits:** Canonical controlled identity for legacy floorplan.utilitization. Active only in die-util mode, not explicit die-size mode. Core area is cell area divided by utilization before alignment; larger area may hurt wirelength and area constraints.
+
+**Review status:** source_derived_hypothesis.
+
+**Evidence sources:** source.ifp.core_geometry.
+
+**Source evidence:** **general.statements**, **general.bindings**, **source.ifp.core_geometry**
