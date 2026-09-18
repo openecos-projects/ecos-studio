@@ -671,4 +671,51 @@ describe('NewProjectWizard behavior', () => {
     expect(wrapper.get('[aria-label="Top Module Name"]').text()).toContain('gcd_top')
     wrapper.unmount()
   })
+
+  it('lets a project-managed workspace choose its flow start step', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/gcd/ws_0002',
+          lockWorkspaceDirectory: true,
+          managedWorkspaceRoot: '/projects/gcd',
+          parameters: { design: 'gcd' },
+          project_context: {
+            mode: 'select',
+            project_id: 'proj_gcd',
+            project_name: 'gcd',
+            project_root: '/projects/gcd',
+            project_json_path: '/projects/gcd/project.json',
+          },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStartStep: string
+      selectedFlowSteps: string[]
+      isFlowStepSelected(stepName: string): boolean
+    }
+    wizard.currentStep = 3
+    await flushPromises()
+
+    const startSelect = wrapper.get('select')
+    expect(wizard.flowStartStep).toBe('Synthesis')
+    await startSelect.setValue('CTS')
+    await flushPromises()
+
+    expect(wizard.flowStartStep).toBe('CTS')
+    expect(wizard.selectedFlowSteps[0]).toBe('CTS')
+    expect(wizard.isFlowStepSelected('Synthesis')).toBe(false)
+    expect(wizard.isFlowStepSelected('CTS')).toBe(true)
+    wrapper.unmount()
+  })
 })

@@ -2258,9 +2258,7 @@ const lockedFlowStepNames = computed(() => {
   if (startIndex <= 0) return []
   return hardenFlowSteps.slice(0, startIndex).map((step) => step.name)
 })
-const canChooseFlowStartStep = computed(
-  () => !sourceContext.value && !lockWorkspaceDirectory.value,
-)
+const canChooseFlowStartStep = computed(() => !sourceContext.value)
 const selectedFlowSteps = computed(() => {
   const start = Math.min(flowStartIndex.value, flowEndIndex.value)
   const end = Math.max(flowStartIndex.value, flowEndIndex.value)
