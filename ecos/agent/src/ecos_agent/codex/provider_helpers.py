@@ -556,11 +556,22 @@ def _nullable_schema(subschema: dict[str, Any]) -> dict[str, Any]:
         return {**subschema, "anyOf": [*subschema["anyOf"], {"type": "null"}]}
     declared = subschema.get("type")
     if isinstance(declared, list):
-        if "null" in declared:
-            return subschema
-        return {**subschema, "type": [*declared, "null"]}
+        branches = [
+            {**subschema, "type": kind} for kind in declared if kind != "null"
+        ]
+        branches.append({"type": "null"})
+        return {key: value for key, value in subschema.items() if key != "type"} | {
+            "anyOf": branches
+        }
     if isinstance(declared, str):
-        return {**subschema, "type": [declared, "null"]}
+        # strict structured outputs reject `type` arrays; nullability is
+        # expressed as anyOf branches, with the constraints kept inside the
+        # non-null branch (siblings next to anyOf would be rejected).
+        constraints = {key: value for key, value in subschema.items() if key != "type"}
+        return {
+            "description": subschema.get("description"),
+            "anyOf": [{**constraints, "type": declared}, {"type": "null"}],
+        }
     return subschema
 
 

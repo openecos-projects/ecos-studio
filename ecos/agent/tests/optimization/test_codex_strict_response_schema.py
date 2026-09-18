@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_strict_response_schema_requires_every_property_and_recurses() -> None:
     from ecos_agent.codex.provider import _strict_response_schema
@@ -29,14 +27,49 @@ def test_strict_response_schema_requires_every_property_and_recurses() -> None:
     strict = _strict_response_schema(schema)
 
     assert strict["required"] == ["already_null", "decision", "either", "schema_version"]
-    assert strict["properties"]["schema_version"]["type"] == ["string", "null"]
+    assert strict["properties"]["schema_version"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
     assert strict["properties"]["decision"]["type"] == "string"
     assert strict["properties"]["either"]["anyOf"][-1] == {"type": "null"}
-    assert strict["properties"]["already_null"]["type"] == ["string", "null"]
+    assert strict["properties"]["already_null"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
     assert strict["$defs"]["Effect"]["required"] == ["metric_id", "note"]
-    assert strict["$defs"]["Effect"]["properties"]["note"]["type"] == ["string", "null"]
+    assert strict["$defs"]["Effect"]["properties"]["note"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
     assert strict["additionalProperties"] is False
     assert strict["$defs"]["Effect"]["additionalProperties"] is False
+
+
+def test_strict_response_schema_keeps_constraints_inside_the_non_null_branch() -> None:
+    from ecos_agent.codex.provider import _strict_response_schema
+
+    strict = _strict_response_schema(
+        {
+            "type": "object",
+            "properties": {
+                "rationale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "description": "Explain the decision.",
+                }
+            },
+            "required": [],
+        }
+    )
+
+    branch = strict["properties"]["rationale"]["anyOf"][0]
+    assert branch["type"] == "string"
+    assert branch["minLength"] == 1
+    assert branch["maxLength"] == 512
+    assert strict["properties"]["rationale"]["anyOf"][1] == {"type": "null"}
+    assert strict["properties"]["rationale"]["description"] == "Explain the decision."
 
 
 def test_strict_response_schema_covers_the_real_proposal_envelope() -> None:
