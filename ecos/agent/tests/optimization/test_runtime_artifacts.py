@@ -39,7 +39,7 @@ from ecos_agent.optimization.runtime import (
     _wait_for_terminal_receipt,
     create_optimization_runner,
 )
-from ecos_agent.optimization.host_transport import bind_host_transport
+from ecos_agent.optimization.host_transport import bind_host_transport, open_execution_adapter
 from ecos_agent.workspace.parameters import WorkspaceParametersError
 from tests.optimization.controller.support import _eligible_terminal
 
@@ -416,6 +416,104 @@ def test_execution_context_seed_fails_closed_without_workspace_baseline(
         json.dumps({"random_seed": "3000"}), encoding="utf-8"
     )
     with pytest.raises(WorkspaceParametersError, match="DREAMPlace seed"):
+        _optimization_execution_context(tmp_path, 200, _HASH, "ecc-test-revision")
+
+
+@pytest.mark.parametrize(
+    "filelist_kind", ["direct-rtl", "legacy-f", "declared-relative", "declared-absolute"]
+)
+def test_execution_adapter_fingerprints_workspace_input_modes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, filelist_kind: str
+) -> None:
+    rtl, filelist, origin = _execution_context_workspace(tmp_path)
+    filelist.unlink()
+    if filelist_kind == "direct-rtl":
+        (rtl / "b.v").unlink()
+        (origin / "b.sdc").unlink()
+        expected_filelist_hash = canonical_sha256({"rtl_files": ["origin/a.v"]})
+        changed_input = rtl / "a.v"
+    else:
+        filelist = origin / ("filelist.f" if filelist_kind == "legacy-f" else "sources.f")
+        filelist.write_text("b.v\na.v\n", encoding="utf-8")
+        expected_filelist_hash = file_sha256(filelist)
+        changed_input = filelist
+        if filelist_kind.startswith("declared-"):
+            (origin / "filelist").write_text("a.v\n", encoding="utf-8")
+            reference = (
+                str(filelist) if filelist_kind == "declared-absolute" else "origin/sources.f"
+            )
+            params = tmp_path / "home" / "params.toml"
+            params.write_text(
+                params.read_text(encoding="utf-8")
+                + f"\n[params]\nfile_list = {json.dumps(reference)}\n",
+                encoding="utf-8",
+            )
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+        json.dumps({"random_seed": 3000}), encoding="utf-8"
+    )
+    host_calls = []
+
+    def host_call(method: str, params: dict[str, object]) -> dict[str, object]:
+        host_calls.append((method, params))
+        assert method == "rpc.hello"
+        return {"eccVersion": "ecc-test-revision"}
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.host_transport._require_host_transport", lambda: host_call
+    )
+    before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+    adapter, context = open_execution_adapter(
+        runtime=SimpleNamespace(workspace_handle="handle-1", expected_workspace_revision=3),
+        workspace=tmp_path,
+        site_width_dbu=200,
+        parent_manifest=_HASH,
+        design_id="design-a",
+    )
+    try:
+        assert host_calls == [("rpc.hello", {"version": 1})]
+        assert context["filelist_sha256"] == expected_filelist_hash
+        assert context["design_sha256"] == canonical_sha256(
+            {key: context[key] for key in ("rtl_sha256", "filelist_sha256", "sdc_sha256")}
+        )
+        assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
+        changed_input.write_text(changed_input.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        changed_context = _optimization_execution_context(tmp_path, 200, _HASH, "ecc-test-revision")
+        assert changed_context["design_sha256"] != context["design_sha256"]
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize(
+    "filelist_kind", ["missing", "escape", "outside-absolute", "symlink", "directory", "invalid"]
+)
+def test_execution_context_rejects_unavailable_declared_filelist(
+    tmp_path: Path, filelist_kind: str
+) -> None:
+    _rtl, filelist, origin = _execution_context_workspace(tmp_path)
+    reference: object = "origin/missing.f"
+    if filelist_kind == "escape":
+        reference = "../outside.f"
+    elif filelist_kind == "outside-absolute":
+        reference = str(tmp_path.parent / "outside.f")
+    elif filelist_kind == "symlink":
+        (origin / "sources.f").symlink_to(filelist)
+        reference = "origin/sources.f"
+    elif filelist_kind == "directory":
+        reference = "origin"
+    elif filelist_kind == "invalid":
+        reference = True
+    params = tmp_path / "home" / "params.toml"
+    params.write_text(
+        params.read_text(encoding="utf-8") + f"\n[params]\nfile_list = {json.dumps(reference)}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "dreamplace_ecc.json").write_text(
+        json.dumps({"random_seed": 3000}), encoding="utf-8"
+    )
+
+    with pytest.raises(OptimizationRuntimeError, match="filelist_sha256 input"):
         _optimization_execution_context(tmp_path, 200, _HASH, "ecc-test-revision")
 
 

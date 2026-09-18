@@ -20,6 +20,7 @@ vi.mock('@/composables/useWorkspace', async () => {
       currentProject: ref(null),
       workspaceSession: ref({ workspaceId: 'workspace-handle' }),
       runtimeEvents: ref([]),
+      backendRuntimeEvents: ref([]),
       openProject: vi.fn(),
       invalidateWorkspaceResources: vi.fn(),
       waitForRuntimeOperation: vi.fn(),
@@ -172,11 +173,16 @@ it('defers a delayed Quick Start answer until its owner is active and keeps that
   })
   await flushPromises()
   expect(state.sendMessage).toHaveBeenCalledWith({
+    directory: '/runs/gcd',
     providerId: 'ecos_agent',
     sessionId: 'owner',
     message: 'quick_start_result:{"workspace":"/runs/gcd","operation_id":"flow-owner"}',
   })
   expect(getAgentSessionUi('other').isQuickStartRunning).toBe(false)
+  expect(state.shell.tabs.find((tab) => tab.id === 'owner')).toMatchObject({
+    mode: 'workspace',
+    workspacePath: '/runs/gcd',
+  })
   expect(state.messages.messagesBySessionId.other ?? []).toEqual([])
   await remounted.findAll('[role="tab"]')[0]!.trigger('click')
   expect(remounted.get('.interaction-dock').attributes('open')).toBeDefined()

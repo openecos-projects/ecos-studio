@@ -206,17 +206,24 @@ export interface DesktopBridgeServices {
     setBinPath(
       pathValue: string,
     ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
-    setModelSource(
-      source: 'codex' | 'glm',
-    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
-    setGlmApiKey(
-      apiKey: string,
-    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
-    setOpenAIApiKey(
-      apiKey: string,
-    ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
+  }
+  modelProfileService?: {
+    list(): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    upsert(
+      profile: unknown,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    delete(
+      profileId: string,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    select(
+      profileId: string,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    setApiKey(
+      profileId: string,
+      apiKey: string,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
   }
   cliInstallerService?: {
     status(): Promise<import('@ecos-studio/shared').CliInstallState>
@@ -1137,6 +1144,51 @@ export function registerIpc(
       ...(typeof design?.name === 'string' && design.name
         ? { workspaceDesignId: design.name }
         : {}),
+    }
+  }
+
+  const refreshAgentSessionWorkspaceContext = async (
+    sender: IpcMainInvokeEvent['sender'],
+    request: Pick<
+      DesktopAgentSendMessageRequest,
+      'directory' | 'workspaceId' | 'workspaceRevision'
+    >,
+    subscription: ReturnType<typeof requireAgentSessionOwner>,
+  ): Promise<void> => {
+    const window = BrowserWindow.fromWebContents(sender)
+    const windowDirectory = window
+      ? workspaceWindowRegistry.getPathForWindow(window)
+      : null
+    if (
+      request.directory &&
+      (!windowDirectory ||
+        normalizeWorkspacePath(request.directory) !==
+          normalizeWorkspacePath(windowDirectory))
+    ) {
+      throw new Error('Agent Workspace must match the Workspace bound to this window.')
+    }
+    const directory = request.directory || subscription.directory || windowDirectory
+    if (directory) {
+      const context = await resolveAgentWorkspaceContext(directory)
+      request.directory = directory
+      request.workspaceId = context.workspaceHandle
+      request.workspaceRevision = context.workspaceRevision
+      subscription.directory = directory
+      subscription.workspaceId = context.workspaceHandle
+    } else if (subscription.workspaceId) {
+      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+        workspaceHandle: subscription.workspaceId,
+      })
+      const engineeringSnapshot =
+        isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
+          ? snapshot.engineeringSnapshot
+          : null
+      const revision = engineeringSnapshot?.workspaceRevision
+      if (!Number.isInteger(revision) || Number(revision) < 1) {
+        throw new Error('ECC Workspace Revision is unavailable.')
+      }
+      request.workspaceRevision = Number(revision)
+      request.workspaceId = subscription.workspaceId
     }
   }
 
@@ -2725,25 +2777,39 @@ export function registerIpc(
     return status
   })
 
-  handle(desktopApiIpcChannels.agentCodexSetModelSource, async (_event, request) => {
-    const source = readCodexModelSourceRequest(request)
-    const status = await requireCodexDependencyService(services).setModelSource(source)
-    await applyCodexBinEnv(services)
-    return status
+  handle(desktopApiIpcChannels.agentProfileList, async () => {
+    return await requireModelProfileService(services).list()
   })
 
-  handle(desktopApiIpcChannels.agentCodexSetGlmApiKey, async (_event, request) => {
-    const apiKey = readApiKeyRequest(request, 'GLM')
-    const status = await requireCodexDependencyService(services).setGlmApiKey(apiKey)
+  handle(desktopApiIpcChannels.agentProfileUpsert, async (_event, request) => {
+    const state = await requireModelProfileService(services).upsert(
+      isRecord(request) ? request.profile : undefined,
+    )
     await applyCodexBinEnv(services)
-    return status
+    return state
   })
 
-  handle(desktopApiIpcChannels.agentCodexSetOpenAIApiKey, async (_event, request) => {
-    const apiKey = readApiKeyRequest(request, 'Codex')
-    const status = await requireCodexDependencyService(services).setOpenAIApiKey(apiKey)
+  handle(desktopApiIpcChannels.agentProfileDelete, async (_event, request) => {
+    const state = await requireModelProfileService(services).delete(
+      readProfileIdRequest(request),
+    )
     await applyCodexBinEnv(services)
-    return status
+    return state
+  })
+
+  handle(desktopApiIpcChannels.agentProfileSelect, async (_event, request) => {
+    const state = await requireModelProfileService(services).select(
+      readProfileIdRequest(request),
+    )
+    await applyCodexBinEnv(services)
+    return state
+  })
+
+  handle(desktopApiIpcChannels.agentProfileSetApiKey, async (_event, request) => {
+    const { profileId, apiKey } = readProfileApiKeyRequest(request)
+    const state = await requireModelProfileService(services).setApiKey(profileId, apiKey)
+    await applyCodexBinEnv(services)
+    return state
   })
 
   handle(desktopApiIpcChannels.cliInstallerGetStatus, async () => {
@@ -2798,28 +2864,11 @@ export function registerIpc(
   handle(desktopApiIpcChannels.agentSendMessage, async (event, request) => {
     const agentRequest = readAgentSendMessageRequest(request)
     const subscription = requireAgentSessionOwner(event.sender, agentRequest)
+    if (agentRequest.confirmationToken && agentRequest.directory) {
+      throw new Error('Agent Workspace context cannot change during confirmation.')
+    }
     if (!agentRequest.confirmationToken) {
-      if (subscription.directory) {
-        // Refresh Revision, canonical parameters, and Step Options before the
-        // turn; openWorkspace reuses or reopens the runtime handle, so an
-        // idle-released handle is healed and the session rebinds to it.
-        const context = await resolveAgentWorkspaceContext(subscription.directory)
-        agentRequest.workspaceRevision = context.workspaceRevision
-        subscription.workspaceId = context.workspaceHandle
-      } else if (subscription.workspaceId) {
-        const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-          workspaceHandle: subscription.workspaceId,
-        })
-        const engineeringSnapshot =
-          isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
-            ? snapshot.engineeringSnapshot
-            : null
-        const workspaceRevision = engineeringSnapshot?.workspaceRevision
-        if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
-          throw new Error('ECC Workspace Revision is unavailable.')
-        }
-        agentRequest.workspaceRevision = Number(workspaceRevision)
-      }
+      await refreshAgentSessionWorkspaceContext(event.sender, agentRequest, subscription)
     }
     return await requireAgentRuntime(services).sendMessage(agentRequest)
   })
@@ -2856,7 +2905,8 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.agentAnswerInteraction, async (event, request) => {
     const agentRequest = readAgentInteractionAnswerRequest(request)
-    requireAgentSessionOwner(event.sender, agentRequest)
+    const subscription = requireAgentSessionOwner(event.sender, agentRequest)
+    await refreshAgentSessionWorkspaceContext(event.sender, agentRequest, subscription)
     return await requireAgentRuntime(services).answerInteraction(agentRequest)
   })
 
@@ -2948,6 +2998,15 @@ function requireCodexDependencyService(
   return services.codexDependencyService
 }
 
+function requireModelProfileService(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['modelProfileService']> {
+  if (!services.modelProfileService) {
+    throw new Error('Model profile service is unavailable.')
+  }
+  return services.modelProfileService
+}
+
 function requireCliInstallerService(
   services: DesktopBridgeServices,
 ): NonNullable<DesktopBridgeServices['cliInstallerService']> {
@@ -2979,19 +3038,24 @@ function readCodexBinPathRequest(value: unknown): string {
   throw new Error('Invalid Codex binary path request')
 }
 
-function readCodexModelSourceRequest(value: unknown): 'codex' | 'glm' {
-  const source = isRecord(value) ? value.source : value
-  if (source === 'codex' || source === 'glm') return source
-  throw new Error('Invalid Codex model source request')
+function readProfileIdRequest(value: unknown): string {
+  const profileId = isRecord(value) ? value.profileId : value
+  if (typeof profileId !== 'string' || !profileId.trim()) {
+    throw new Error('Invalid model profile request')
+  }
+  return profileId.trim()
 }
 
-function readApiKeyRequest(value: unknown, label: string): string {
-  const apiKey =
-    isRecord(value) && typeof value.apiKey === 'string' ? value.apiKey : value
-  if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 4096) {
-    throw new Error(`Invalid ${label} API key request`)
+function readProfileApiKeyRequest(value: unknown): { profileId: string; apiKey: string } {
+  if (!isRecord(value)) {
+    throw new Error('Invalid profile API key request')
   }
-  return apiKey.trim()
+  const profileId = readProfileIdRequest(value)
+  const apiKey = value.apiKey
+  if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 4096) {
+    throw new Error('Invalid profile API key request')
+  }
+  return { profileId, apiKey: apiKey.trim() }
 }
 
 function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {
@@ -3060,8 +3124,19 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
   if (record.confirmationToken !== undefined && !confirmationToken) {
     throw new Error('Agent execution confirmation token is invalid.')
   }
+  if (
+    record.directory !== undefined &&
+    (typeof record.directory !== 'string' ||
+      !record.directory.trim() ||
+      record.directory.length > 4096)
+  ) {
+    throw new Error('Agent Workspace directory is invalid.')
+  }
   return {
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(typeof record.directory === 'string'
+      ? { directory: record.directory.trim() }
+      : {}),
     message,
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),

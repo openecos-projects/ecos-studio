@@ -23,13 +23,15 @@
         <AgentCodexSetupCard
           :busy="codexSetupBusy || isAgentConnecting"
           :status="codexSetupCardStatus"
+          :profiles="profileState?.profiles"
+          :api-key-configured="profileState?.apiKeyConfigured"
           @install="installCodexCli"
           @recheck="recheckCodexCli"
           @pick-bin="pickCodexBin"
           @retry="retryAfterCodexReady"
-          @set-source="setCodexModelSource"
-          @set-glm-key="setGlmApiKey"
-          @set-openai-key="setOpenAIApiKey"
+          @select-profile="selectProfile"
+          @set-api-key="setProfileApiKey"
+          @manage="openProfileManager"
         />
       </div>
       <div
@@ -78,32 +80,40 @@
           </header>
           <div class="chat-turn__body">
             <template v-for="msg in turn.responses" :key="msg.id">
-              <div
-                v-if="isAnsweredInteraction(msg)"
-                class="interaction-receipt"
-                :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
-              >
-                <i class="ri-check-line" aria-hidden="true"></i>
-                <span class="interaction-receipt__question">{{
-                  msg.interaction?.title
-                }}</span>
-                <strong class="interaction-receipt__answer">{{
-                  msg.interactionAnswer
-                }}</strong>
-              </div>
-              <MessageItem
-                v-else-if="isVisibleResponse(msg)"
-                :message="msg"
+              <ChatStepArtifactGroup
+                v-if="isChatStepArtifactGroup(msg)"
+                :step="msg.step"
+                :messages="msg.messages"
                 @img-load="onImageLoad"
-                class="message-item w-full max-w-full min-w-0"
               />
-              <AgentSessionContractPanels
-                v-if="isContractAnchorMessage(msg.id)"
-                mode="committed"
-                :message-id="msg.id"
-                v-bind="contractPanelBind"
-                @create-workspace="createWorkspaceFromAgent"
-              />
+              <template v-else>
+                <div
+                  v-if="isAnsweredInteraction(msg)"
+                  class="interaction-receipt"
+                  :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
+                >
+                  <i class="ri-check-line" aria-hidden="true"></i>
+                  <span class="interaction-receipt__question">{{
+                    msg.interaction?.title
+                  }}</span>
+                  <strong class="interaction-receipt__answer">{{
+                    msg.interactionAnswer
+                  }}</strong>
+                </div>
+                <MessageItem
+                  v-else-if="isVisibleResponse(msg)"
+                  :message="msg"
+                  @img-load="onImageLoad"
+                  class="message-item w-full max-w-full min-w-0"
+                />
+                <AgentSessionContractPanels
+                  v-if="isContractAnchorMessage(msg.id)"
+                  mode="committed"
+                  :message-id="msg.id"
+                  v-bind="contractPanelBind"
+                  @create-workspace="createWorkspaceFromAgent"
+                />
+              </template>
             </template>
             <AgentActivityStream
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
@@ -211,10 +221,11 @@
             :busy="activeUi.modelSettingsBusy"
             :disabled="isRunning || isAgentConnecting"
             :error="activeUi.modelSettingsError"
-            :model-source="codexModelSource"
+            :profiles="profileState?.profiles"
+            :active-profile-id="profileState?.activeProfileId"
             @update="updateAgentModelSettings"
-            @set-source="setCodexModelSource"
-            @configure="openCodexSetup"
+            @select-profile="selectProfile"
+            @configure="openProfileManager"
           />
           <button
             v-if="isRunning"
@@ -242,6 +253,17 @@
         </div>
       </div>
     </div>
+    <AgentProfileManagerDialog
+      :open="profileManagerOpen"
+      :state="profileState"
+      :busy="codexSetupBusy || isAgentConnecting"
+      :error="profileManagerError"
+      @close="profileManagerOpen = false"
+      @select="selectProfile"
+      @save="upsertProfile"
+      @delete="deleteProfile"
+      @set-api-key="setProfileApiKey"
+    />
   </div>
 </template>
 
@@ -265,7 +287,8 @@ import type {
   DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
-  DesktopCodexModelSource,
+  DesktopModelProfile,
+  DesktopModelProfileState,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentModelSettingsMenu from './AgentModelSettingsMenu.vue'
@@ -273,7 +296,9 @@ import AgentActivityStream from './AgentActivityStream.vue'
 import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
+import AgentProfileManagerDialog from './AgentProfileManagerDialog.vue'
 import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
+import ChatStepArtifactGroup from './ChatStepArtifactGroup.vue'
 import {
   createAgentSessionUiState,
   getAgentSessionUi,
@@ -288,6 +313,7 @@ import { agentActivityUpdateKey } from './agentActivityPresentation'
 import {
   describeInteractionAnswer,
   groupMessagesIntoTurns,
+  isChatStepArtifactGroup,
   pendingInteractionPresentation,
   type InteractionAnswer,
 } from './chatTurns'
@@ -304,8 +330,8 @@ import {
   quickStartRunnerKey,
   type QuickStartRunner,
 } from '@/composables/quickStartUi'
-import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
 import { useFlowRunner } from '@/composables/useFlowRunner'
+import { waitForWorkspaceAgentFlowArtifacts } from '@/composables/workspaceAgentFlowCapture'
 import {
   clearAgentWorkspaceRerunHomePrepared,
   markAgentWorkspaceRerunHomePrepared,
@@ -334,7 +360,9 @@ const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
 const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
 const codexSetupBusy = ref(false)
-const codexModelSource = ref<DesktopCodexModelSource>('codex')
+const profileState = ref<DesktopModelProfileState | null>(null)
+const profileManagerOpen = ref(false)
+const profileManagerError = ref('')
 const codexSetupManageOpen = ref(false)
 let unsubscribeCodexProgress: (() => void) | null = null
 const codexSetupCardStatus = computed(() =>
@@ -366,26 +394,10 @@ const {
   invalidateWorkspaceResources,
   currentProject,
   workspaceSession,
-  backendRuntimeEvents,
   waitForRuntimeOperation,
 } = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
 const { runAllFlow } = useFlowRunner()
-const agentFlowProgress = useAgentFlowProgress(
-  (message) => {
-    const sessionId = agentSessionId.value
-    if (message.startsWith('Live flow progress is unavailable')) {
-      messageStore.addAssistantMessage(message, 'done', sessionId ?? undefined)
-      return
-    }
-    messageStore.appendToolProgress(message, sessionId ?? undefined)
-  },
-  () => {
-    // ECC terminal events are the only source of runtime-driven refreshes.
-    invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
-  },
-  backendRuntimeEvents,
-)
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const interactionDockRef = ref<HTMLElement | null>(null)
@@ -743,18 +755,25 @@ let unsubscribeAgentEvents: (() => void) | undefined
 let postCreateFlowRunning = false
 
 onMounted(() => {
+  void refreshProfiles()
   void connectAgent().then(() => {
     void maybeRunPostCreateFlow()
     void flushPendingGuiActionForActiveTab()
   })
 })
 
+watch(
+  () => agentShell.pendingPostCreateFlow,
+  (handoff) => {
+    if (handoff) void maybeRunPostCreateFlow()
+  },
+)
+
 onUnmounted(() => {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = undefined
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
-  agentFlowProgress.stop()
   scrollContentObserver?.disconnect()
   scrollContentObserver = undefined
   interactionDockObserver?.disconnect()
@@ -804,6 +823,38 @@ async function connectAgent(): Promise<void> {
   }
 
   const active = agentShell.activeTab
+  const workspacePath = currentProject.value?.path
+  if (
+    props.shell === 'workspace' &&
+    workspacePath &&
+    active &&
+    active.workspacePath !== workspacePath
+  ) {
+    // Each workspace owns a session: reactivate its tab or start a fresh one.
+    const existing = agentShell.tabs.find(
+      (tab) => tab.id !== active.id && tab.workspacePath === workspacePath,
+    )
+    if (existing) {
+      agentShell.activateTab(existing.id)
+      if (existing.started) await loadAgentModelSettings(existing.id)
+      else await startProviderSession(existing.id)
+      return
+    }
+    if (active.workspacePath) {
+      await createChatTab()
+      return
+    }
+    agentShell.bindTabToWorkspace(active.id, workspacePath)
+    const postCreate = agentShell.pendingPostCreateFlow
+    if (
+      postCreate?.ownerSessionId !== active.id ||
+      postCreate.workspacePath !== workspacePath
+    ) {
+      await startProviderSession(active.id)
+      return
+    }
+  }
+
   if (active && !active.started) {
     await startProviderSession(active.id)
   } else if (active) {
@@ -986,7 +1037,6 @@ async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null
   }
   try {
     const status = await codex.getStatus()
-    codexModelSource.value = status.modelSource ?? 'codex'
     codexSetupStatus.value = status
     return status
   } catch (error) {
@@ -1073,20 +1123,36 @@ async function recheckCodexCli(): Promise<void> {
   }
 }
 
-async function setCodexModelSource(source: { source: 'codex' | 'glm' }): Promise<void> {
+async function refreshProfiles(): Promise<DesktopModelProfileState | null> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex?.listProfiles) return null
+  try {
+    profileState.value = await codex.listProfiles()
+  } catch {
+    // Keep the last known state; the setup card surfaces status errors.
+  }
+  return profileState.value
+}
+
+async function afterProfileMutation(): Promise<void> {
+  const status = await refreshCodexStatus()
+  if (status?.state === 'ready') {
+    codexSetupManageOpen.value = false
+    const sessionId = agentSessionId.value
+    if (sessionId) await startProviderSession(sessionId)
+  }
+}
+
+async function selectProfile(profileId: string): Promise<void> {
   const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
+  profileManagerError.value = ''
   try {
-    const status = await codex.setModelSource({ source: source.source })
-    codexModelSource.value = status.modelSource ?? source.source
-    codexSetupStatus.value = status
-    if (status.state === 'ready') {
-      codexSetupManageOpen.value = false
-      const sessionId = agentSessionId.value
-      if (sessionId) await startProviderSession(sessionId)
-    }
+    profileState.value = await codex.selectProfile({ profileId })
+    await afterProfileMutation()
   } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
     codexSetupStatus.value = {
       authState: 'unknown',
       message: agentErrorMessage(error),
@@ -1098,19 +1164,16 @@ async function setCodexModelSource(source: { source: 'codex' | 'glm' }): Promise
   }
 }
 
-async function setGlmApiKey(apiKey: string): Promise<void> {
+async function setProfileApiKey(profileId: string, apiKey: string): Promise<void> {
   const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
+  profileManagerError.value = ''
   try {
-    const status = await codex.setGlmApiKey({ apiKey })
-    codexSetupStatus.value = status
-    if (status.state === 'ready') {
-      codexSetupManageOpen.value = false
-      const sessionId = agentSessionId.value
-      if (sessionId) await startProviderSession(sessionId)
-    }
+    profileState.value = await codex.setProfileApiKey({ profileId, apiKey })
+    await afterProfileMutation()
   } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
     codexSetupStatus.value = {
       ...(codexSetupStatus.value ?? {
         authState: 'unknown',
@@ -1124,19 +1187,23 @@ async function setGlmApiKey(apiKey: string): Promise<void> {
   }
 }
 
-async function setOpenAIApiKey(apiKey: string): Promise<void> {
+async function upsertProfile(
+  profile: DesktopModelProfile,
+  apiKey?: string,
+): Promise<void> {
   const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
+  profileManagerError.value = ''
   try {
-    const status = await codex.setOpenAIApiKey({ apiKey })
-    codexSetupStatus.value = status
-    if (status.state === 'ready') {
-      codexSetupManageOpen.value = false
-      const sessionId = agentSessionId.value
-      if (sessionId) await startProviderSession(sessionId)
+    let saved = await codex.upsertProfile({ profile })
+    if (apiKey) {
+      saved = await codex.setProfileApiKey({ profileId: profile.id, apiKey })
     }
+    profileState.value = saved
+    await afterProfileMutation()
   } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
     codexSetupStatus.value = {
       ...(codexSetupStatus.value ?? {
         authState: 'unknown',
@@ -1150,9 +1217,33 @@ async function setOpenAIApiKey(apiKey: string): Promise<void> {
   }
 }
 
-async function openCodexSetup(): Promise<void> {
-  codexSetupManageOpen.value = true
-  await refreshCodexStatus()
+async function deleteProfile(profileId: string): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  profileManagerError.value = ''
+  try {
+    profileState.value = await codex.deleteProfile({ profileId })
+    await afterProfileMutation()
+  } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function openProfileManager(): Promise<void> {
+  profileManagerError.value = ''
+  profileManagerOpen.value = true
+  await refreshProfiles()
 }
 
 async function pickCodexBin(): Promise<void> {
@@ -1235,13 +1326,16 @@ async function maybeRunPostCreateFlow(): Promise<void> {
   postCreateFlowRunning = true
   ownerUi.isWorkspaceCreationPending = true
   try {
-    await agentFlowProgress.start(handoff.workspacePath)
     try {
       const flowResult = await runAllFlow({ rerun: false })
       if (flowResult === null) {
         throw new Error('Flow execution did not complete successfully.')
       }
       await waitForRuntimeOperation(flowResult.operationId)
+      await waitForWorkspaceAgentFlowArtifacts(
+        handoff.workspacePath,
+        handoff.ownerSessionId,
+      )
       const flow = await readWorkspaceFlowResourceApi()
       ownerUi.workspaceCreateSetupId = undefined
       await reportWorkspaceCreationResult(
@@ -1253,7 +1347,6 @@ async function maybeRunPostCreateFlow(): Promise<void> {
         handoff.ownerSessionId,
       )
     } finally {
-      agentFlowProgress.stop()
       messageStore.finishToolProgress()
     }
   } catch (error) {
@@ -1861,11 +1954,13 @@ async function startQuickStart(sessionId: string): Promise<void> {
       await agent.sendMessage({
         providerId: AGENT_PROVIDER_ID,
         sessionId,
+        directory: result.workspacePath,
         message: `quick_start_result:${JSON.stringify({
           workspace: result.workspacePath,
           operation_id: result.operationId,
         })}`,
       })
+      agentShell.bindTabToWorkspace(sessionId, result.workspacePath)
     }
   } catch (error) {
     if (!sessionId) return
@@ -1993,6 +2088,7 @@ async function reportWorkspaceCreationResult(
   const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
+    ...(status === 'succeeded' && workspace ? { directory: workspace } : {}),
     message: `workspace_create_result:${JSON.stringify({
       setup_id: setupId,
       status,
@@ -2003,6 +2099,9 @@ async function reportWorkspaceCreationResult(
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
+  if (status === 'succeeded' && workspace) {
+    agentShell.bindTabToWorkspace(ownerSessionId, workspace)
+  }
   messageStore.finishStreamingMessages(ownerSessionId)
 }
 
@@ -2073,9 +2172,9 @@ async function executeWorkspaceRerun(
     })
     await nextTick()
     invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
-    await agentFlowProgress.start(prepared.directory)
     messageStore.appendToolProgress('Starting rerun execution.', ownerSessionId)
     await executeRerun({ token: prepared.executionToken })
+    await waitForWorkspaceAgentFlowArtifacts(prepared.directory, ownerSessionId)
     invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
     messageStore.appendToolProgress(
       `Rerun ${contract.rerun_id} completed.`,
@@ -2087,6 +2186,7 @@ async function executeWorkspaceRerun(
       '',
       contract.end_step,
       ownerSessionId,
+      prepared.directory,
     )
   } catch (error) {
     const reason = agentErrorMessage(error)
@@ -2143,7 +2243,6 @@ async function executeWorkspaceRerun(
     if (preparedDirectory) {
       clearAgentWorkspaceRerunHomePrepared(preparedDirectory)
     }
-    agentFlowProgress.stop()
     messageStore.finishToolProgress(ownerSessionId)
     ui.isWorkspaceRerunPending = false
   }
@@ -2191,10 +2290,12 @@ async function reportWorkspaceRerunResult(
   error: string,
   endStep?: string,
   ownerSessionId = agentSessionId.value ?? '',
+  workspace?: string,
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
+    ...(status === 'succeeded' && workspace ? { directory: workspace } : {}),
     message: `workspace_rerun_result:${JSON.stringify({
       rerun_id: rerunId,
       status,
@@ -2204,6 +2305,9 @@ async function reportWorkspaceRerunResult(
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
+  if (status === 'succeeded' && workspace) {
+    agentShell.bindTabToWorkspace(ownerSessionId, workspace)
+  }
   messageStore.finishStreamingMessages(ownerSessionId)
 }
 
@@ -2220,7 +2324,6 @@ async function executeWorkspaceContinue(
   ui.isWorkspaceContinuePending = true
   messageStore.setActiveSessionId(ownerSessionId)
   try {
-    await agentFlowProgress.start(contract.workspace)
     const flowResult = await runAllFlow({ rerun: false })
     if (flowResult === null) {
       throw new Error('Flow execution did not complete successfully.')
@@ -2237,6 +2340,7 @@ async function executeWorkspaceContinue(
         .catch(() => undefined)
     }
     await waitForRuntimeOperation(flowResult.operationId)
+    await waitForWorkspaceAgentFlowArtifacts(contract.workspace, ownerSessionId)
     const flow = await readWorkspaceFlowResourceApi()
     await reportWorkspaceContinueResult(
       contract.continue_id,
@@ -2264,7 +2368,6 @@ async function executeWorkspaceContinue(
       messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
   } finally {
-    agentFlowProgress.stop()
     messageStore.finishToolProgress(ownerSessionId)
     ui.isWorkspaceContinuePending = false
   }
@@ -2322,15 +2425,15 @@ async function executeWorkspaceSignoff(
       ui.workspaceSignoffReview = review
       const blocked = review.risks
         .filter((risk: { severity: string }) => risk.severity === 'blocked')
-        .map((risk: { title: string; summary: string }) => `${risk.title}: ${risk.summary}`)
+        .map(
+          (risk: { title: string; summary: string }) => `${risk.title}: ${risk.summary}`,
+        )
         .join('; ')
       await reportWorkspaceSignoffInspection(
         contract.signoff_id,
         review.status,
         blocked ||
-          review.risks
-            .map((risk: { summary: string }) => risk.summary)
-            .join('; ') ||
+          review.risks.map((risk: { summary: string }) => risk.summary).join('; ') ||
           (review.status === 'blocked' ? 'Signoff checklist is blocked.' : ''),
         ownerSessionId,
       )

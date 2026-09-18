@@ -25,56 +25,38 @@
       <span class="codex-setup__source-label">模型来源</span>
       <div class="codex-setup__source-options">
         <button
-          v-for="option in sourceOptions"
-          :key="option.value"
+          v-for="profile in profiles"
+          :key="profile.id"
           type="button"
           class="codex-setup__source-option"
           role="radio"
-          :aria-checked="currentSource === option.value"
+          :aria-checked="activeProfileId === profile.id"
           :class="{
-            'codex-setup__source-option--active': currentSource === option.value,
+            'codex-setup__source-option--active': activeProfileId === profile.id,
           }"
           :disabled="busy"
-          @click="emit('set-source', { source: option.value })"
+          @click="emit('select-profile', profile.id)"
         >
-          {{ option.label }}
+          {{ profile.name }}
         </button>
       </div>
+      <button
+        type="button"
+        class="codex-setup__manage"
+        :disabled="busy"
+        @click="emit('manage')"
+      >
+        管理…
+      </button>
     </div>
 
-    <form
-      v-if="currentSource === 'glm'"
-      class="codex-setup__key-form"
-      @submit.prevent="submitKey('glm')"
-    >
-      <label class="codex-setup__key-label" for="codex-setup-glm-key">智谱 API Key</label>
-      <input
-        id="codex-setup-glm-key"
-        v-model="glmApiKey"
-        type="password"
-        class="codex-setup__key-input"
-        autocomplete="off"
-        spellcheck="false"
-        :placeholder="
-          keyConfigured ? '已配置（输入可更换）' : '粘贴智谱 GLM Coding Plan API Key'
-        "
-      />
-      <button
-        type="submit"
-        class="codex-setup__action codex-setup__action--primary"
-        :disabled="busy || !glmApiKey.trim()"
-      >
-        保存并使用 GLM
-      </button>
-    </form>
-
-    <form v-else class="codex-setup__key-form" @submit.prevent="submitKey('codex')">
-      <label class="codex-setup__key-label" for="codex-setup-openai-key">
-        Codex API Key（OpenAI 兼容）
+    <form class="codex-setup__key-form" @submit.prevent="submitKey">
+      <label class="codex-setup__key-label" for="codex-setup-api-key">
+        {{ activeProfile?.name ?? 'Codex' }} API Key
       </label>
       <input
-        id="codex-setup-openai-key"
-        v-model="openAIApiKey"
+        id="codex-setup-api-key"
+        v-model="apiKey"
         type="password"
         class="codex-setup__key-input"
         autocomplete="off"
@@ -84,9 +66,9 @@
       <button
         type="submit"
         class="codex-setup__action codex-setup__action--primary"
-        :disabled="busy || !openAIApiKey.trim()"
+        :disabled="busy || !apiKey.trim()"
       >
-        保存并使用 Codex
+        保存并使用
       </button>
     </form>
 
@@ -126,7 +108,7 @@
         重新检测
       </button>
       <button
-        v-if="currentSource !== 'glm'"
+        v-if="activeProfile?.baseUrl === null"
         type="button"
         class="codex-setup__action"
         :disabled="busy"
@@ -151,13 +133,14 @@
 import { computed, ref } from 'vue'
 import type {
   DesktopCodexDependencyStatus,
-  DesktopCodexModelSource,
-  DesktopCodexSetModelSourceRequest,
+  DesktopModelProfile,
 } from '@ecos-studio/shared'
 
 const props = defineProps<{
   busy?: boolean
   status: DesktopCodexDependencyStatus
+  profiles?: DesktopModelProfile[]
+  apiKeyConfigured?: Record<string, boolean>
 }>()
 
 const emit = defineEmits<{
@@ -165,32 +148,33 @@ const emit = defineEmits<{
   'pick-bin': []
   recheck: []
   retry: []
-  'set-source': [request: DesktopCodexSetModelSourceRequest]
-  'set-glm-key': [apiKey: string]
-  'set-openai-key': [apiKey: string]
+  'select-profile': [profileId: string]
+  'set-api-key': [profileId: string, apiKey: string]
+  manage: []
 }>()
 
 const defaultMessage = 'ECOS Agent 依赖 Codex CLI 生成建议。请先完成安装与配置。'
 
-const glmApiKey = ref('')
-const openAIApiKey = ref('')
+const apiKey = ref('')
 
-const currentSource = computed<DesktopCodexModelSource>(
-  () => props.status.modelSource ?? 'codex',
+const activeProfileId = computed(
+  () => props.status.activeProfileId ?? props.profiles?.[0]?.id ?? 'codex',
 )
 
-const keyConfigured = computed(() => props.status.apiKeyConfigured === true)
+const activeProfile = computed(() =>
+  props.profiles?.find((profile) => profile.id === activeProfileId.value),
+)
 
-const sourceOptions: Array<{ value: DesktopCodexModelSource; label: string }> = [
-  { value: 'codex', label: 'Codex API（GPT 系列）' },
-  { value: 'glm', label: 'GLM API（智谱）' },
-]
+const keyConfigured = computed(
+  () =>
+    props.apiKeyConfigured?.[activeProfileId.value] === true ||
+    props.status.apiKeyConfigured === true,
+)
 
-function submitKey(source: DesktopCodexModelSource): void {
-  const key = (source === 'glm' ? glmApiKey.value : openAIApiKey.value).trim()
+function submitKey(): void {
+  const key = apiKey.value.trim()
   if (!key) return
-  if (source === 'glm') emit('set-glm-key', key)
-  else emit('set-openai-key', key)
+  emit('set-api-key', activeProfileId.value, key)
 }
 
 const stateLabel = computed(() => {
@@ -332,6 +316,30 @@ const showInstall = computed(
 }
 
 .codex-setup__source-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.codex-setup__manage {
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.codex-setup__manage:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  color: var(--text-primary);
+}
+
+.codex-setup__manage:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

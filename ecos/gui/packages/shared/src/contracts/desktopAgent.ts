@@ -43,11 +43,14 @@ export interface DesktopAgentStartSessionResponse {
 }
 
 export interface DesktopAgentSendMessageRequest extends DesktopAgentProviderRequest {
+  /** Explicit rebind target; Electron requires it to match the window's Workspace. */
+  directory?: string
   /** Electron-issued token returned only when the user confirms an execution card. */
   confirmationToken?: string
   message: string
   sessionId: string
   /** Electron-populated canonical context; renderer values are ignored. */
+  workspaceId?: string
   workspaceRevision?: number
 }
 
@@ -187,6 +190,10 @@ export interface DesktopAgentInteractionRequest {
 }
 
 export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest & {
+  /** Electron-populated canonical context; renderer values are ignored. */
+  directory?: string
+  workspaceId?: string
+  workspaceRevision?: number
   kind: DesktopAgentInteractionKind
   requestId: string
   sessionId: string

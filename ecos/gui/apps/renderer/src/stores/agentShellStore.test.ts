@@ -55,6 +55,28 @@ describe('agentShellStore', () => {
     expect(store.sessionId).toBeTruthy()
   })
 
+  it('rebinds and renames the original tab without changing its identity or active sibling', () => {
+    const store = useAgentShellStore()
+    const owner = store.createTab(
+      { mode: 'workspace', workspacePath: '/runs/old', step: 'Place' },
+      { id: 'owner' },
+    )
+    store.markTabStarted(owner.id)
+    const other = store.createTab({ mode: 'workspace', workspacePath: '/runs/other' })
+    store.bindTabToWorkspace(owner.id, '/runs/created')
+    expect(store.tabs.find((tab) => tab.id === owner.id)).toMatchObject({
+      id: owner.id,
+      title: 'created',
+      started: true,
+      mode: 'workspace',
+      workspacePath: '/runs/created',
+      workspaceName: 'created',
+      step: undefined,
+    })
+    expect(store.activeTabId).toBe(other.id)
+    expect(store.tabs).toHaveLength(2)
+  })
+
   it('stores post-create flow handoff for the workspace shell', () => {
     const store = useAgentShellStore()
     store.setPendingPostCreateFlow({

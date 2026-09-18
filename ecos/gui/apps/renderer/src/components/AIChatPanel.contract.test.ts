@@ -72,6 +72,16 @@ describe('AIChatPanel flow contracts', () => {
     )
   })
 
+  it('wraps long Agent error logs within the message width', () => {
+    expect(messageItemSource).toContain('class="agent-error-message"')
+    expect(messageItemSource).toMatch(
+      /\.agent-error-message\s*\{[^}]*min-width:\s*0[^}]*align-items:\s*flex-start/s,
+    )
+    expect(messageItemSource).toMatch(
+      /\.agent-error-message span\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere[^}]*white-space:\s*pre-wrap/s,
+    )
+  })
+
   it('anchors confirmed plans to their confirmation message', () => {
     expect(source).toContain('AgentSessionContractPanels')
     expect(source).toContain('mode="committed"')
@@ -202,6 +212,24 @@ describe('AIChatPanel flow contracts', () => {
   it('maps validated provider contracts to structured messages', () => {
     expect(source).toContain("event.type === 'contract'")
     expect(source).toContain('addExecutionContract(event.contract, event.sessionId)')
+  })
+
+  it('binds the workspace shell to the workspace-owned session when switching workspaces', () => {
+    const start = source.indexOf('async function connectAgent')
+    const end = source.indexOf('async function createChatTab', start)
+    const connect = source.slice(start, end)
+
+    expect(connect).toContain('active &&')
+    expect(connect).toContain('active.workspacePath !== workspacePath')
+    expect(connect).toContain('tab.workspacePath === workspacePath')
+    expect(connect).toContain('agentShell.activateTab(existing.id)')
+    expect(connect).toContain('agentShell.bindTabToWorkspace(active.id, workspacePath)')
+    expect(
+      connect.indexOf('agentShell.bindTabToWorkspace(active.id, workspacePath)'),
+    ).toBeLessThan(connect.indexOf('await startProviderSession(active.id)'))
+    expect(connect.indexOf('active.workspacePath !== workspacePath')).toBeLessThan(
+      connect.indexOf('if (active && !active.started)'),
+    )
   })
 
   it('renders frozen rerun specifications in the same key-value table as workspace setup', () => {
@@ -345,7 +373,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('workspace_rerun_result:')
     expect(source).toContain('await desktopApi.workspace.bindWindow(prepared.directory)')
     expect(source).toMatch(
-      /const opened = await openProject\([\s\S]*const projectContext = await registerAgentRerunWorkspaceInProject\([\s\S]*await router\.push\(\{[\s\S]*projectRoot: projectContext\?\.projectRoot[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['home', 'flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await agentFlowProgress\.start\(prepared\.directory\)[\s\S]*await executeRerun/,
+      /const opened = await openProject\([\s\S]*const projectContext = await registerAgentRerunWorkspaceInProject\([\s\S]*await router\.push\(\{[\s\S]*projectRoot: projectContext\?\.projectRoot[\s\S]*await nextTick\(\)[\s\S]*invalidateWorkspaceResources\(\['home', 'flow', 'step', 'maps', 'logs', 'parameters'\]\)[\s\S]*await executeRerun/,
     )
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
     expect(source).toContain('markAgentWorkspaceRerunHomePrepared(prepared.directory)')
@@ -358,9 +386,6 @@ describe('AIChatPanel flow contracts', () => {
     )
     expect(source).toContain('projectRoot: projectContext?.projectRoot')
     expect(source).toContain('projectName: projectContext?.projectName')
-    expect(source).toContain(
-      "invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])",
-    )
     expect(source).toContain(
       "invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])",
     )
@@ -377,10 +402,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('`Rerun failed: ${reason}`')
   })
 
-  it('routes live flow progress into the tool timeline instead of plain assistant text', () => {
-    expect(source).toContain('messageStore.appendToolProgress(message')
+  it('leaves live flow progress capture to the workspace shell', () => {
+    expect(source).not.toContain('useAgentFlowProgress')
     expect(source).toContain('messageStore.finishToolProgress()')
-    expect(source).toContain("message.startsWith('Live flow progress is unavailable')")
   })
 
   it('starts sessions with projectRoot and known project history', () => {

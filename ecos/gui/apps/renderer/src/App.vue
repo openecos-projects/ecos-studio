@@ -278,7 +278,10 @@ import WorkspaceStepConfigDialog from '@/components/WorkspaceStepConfigDialog.vu
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
-import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import {
+  agentWorkspaceSetupKey,
+  prepareAgentWorkspaceConfig,
+} from '@/composables/agentWorkspaceSetup'
 import {
   runQuickStartWorkflow,
   type QuickStartResourceSnapshot,
@@ -461,10 +464,32 @@ async function createWorkspaceFromAgent(
       error: 'SoC-MPC was selected, but no validated MPC template was resolved.',
     }
   }
+  config = await prepareAgentWorkspaceConfig(config)
   const agentShell = useAgentShellStore()
+  const ownerTab = agentShell.tabs.find((tab) => tab.id === ownerSessionId)
+  const targetWorkspacePath = normalizeLocalPath(config.directory)
+  const previousWorkspaceTab =
+    ownerTab?.workspacePath &&
+    normalizeLocalPath(ownerTab.workspacePath) !== targetWorkspacePath
+      ? {
+          mode: 'workspace' as const,
+          projectRoot: ownerTab.projectRoot,
+          projectName: ownerTab.projectName,
+          workspacePath: ownerTab.workspacePath,
+          workspaceName: ownerTab.workspaceName,
+          step: ownerTab.step,
+        }
+      : null
+  if (previousWorkspaceTab) {
+    agentShell.bindTabToWorkspace(ownerSessionId, targetWorkspacePath)
+    agentShell.activateTab(ownerSessionId)
+  }
   agentShell.beginPreserveForAgentWorkspaceSwitch()
   const success = await newProject(config)
   if (!success) {
+    if (previousWorkspaceTab) {
+      agentShell.bindTabToWorkspace(ownerSessionId, previousWorkspaceTab.workspacePath)
+    }
     agentShell.consumePreserveMessages()
     agentShell.consumePreserveSession()
     return { created: false, error: lastWorkspaceCreationError.value }
@@ -479,6 +504,16 @@ async function createWorkspaceFromAgent(
   )
   await syncProjectManagedWorkspace(config)
   agentShell.closeHomeAgent()
+  agentShell.bindTabToWorkspace(ownerSessionId, workspacePath)
+  if (
+    previousWorkspaceTab &&
+    !agentShell.tabs.some(
+      (tab) => tab.workspacePath === previousWorkspaceTab.workspacePath,
+    )
+  ) {
+    agentShell.createTab(previousWorkspaceTab, { activate: false })
+  }
+  agentShell.activateTab(ownerSessionId)
   agentShell.setPendingPostCreateFlow({
     setupId: contract.setup_id,
     ownerSessionId,

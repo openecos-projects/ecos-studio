@@ -68,9 +68,11 @@ import type {
 import type {
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
-  DesktopCodexSetApiKeyRequest,
   DesktopCodexSetBinPathRequest,
-  DesktopCodexSetModelSourceRequest,
+  DesktopModelProfileIdRequest,
+  DesktopModelProfileSetApiKeyRequest,
+  DesktopModelProfileState,
+  DesktopModelProfileUpsertRequest,
 } from './desktopCodex.ts'
 import type { CliInstallState, CliInstallerProgressEvent } from './cliInstaller.ts'
 
@@ -420,15 +422,20 @@ export interface DesktopApi {
       setBinPath(
         request: DesktopCodexSetBinPathRequest,
       ): Promise<DesktopCodexDependencyStatus>
-      setModelSource(
-        request: DesktopCodexSetModelSourceRequest,
-      ): Promise<DesktopCodexDependencyStatus>
-      setGlmApiKey(
-        request: DesktopCodexSetApiKeyRequest,
-      ): Promise<DesktopCodexDependencyStatus>
-      setOpenAIApiKey(
-        request: DesktopCodexSetApiKeyRequest,
-      ): Promise<DesktopCodexDependencyStatus>
+      listProfiles(): Promise<DesktopModelProfileState>
+      upsertProfile(
+        request: DesktopModelProfileUpsertRequest,
+      ): Promise<DesktopModelProfileState>
+      /** Delete a custom profile, or restore a built-in profile while keeping its key. */
+      deleteProfile(
+        request: DesktopModelProfileIdRequest,
+      ): Promise<DesktopModelProfileState>
+      selectProfile(
+        request: DesktopModelProfileIdRequest,
+      ): Promise<DesktopModelProfileState>
+      setProfileApiKey(
+        request: DesktopModelProfileSetApiKeyRequest,
+      ): Promise<DesktopModelProfileState>
       onProgress(
         listener: (event: DesktopCodexInstallProgressEvent) => void,
       ): DesktopEventUnsubscribe

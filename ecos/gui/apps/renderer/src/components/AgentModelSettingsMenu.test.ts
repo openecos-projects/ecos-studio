@@ -57,9 +57,31 @@ describe('AgentModelSettingsMenu', () => {
     expect(wrapper.emitted('update')?.[1]).toEqual([{ reasoningEffort: 'low' }])
   })
 
-  it('shows the model source switch and an API config entry when provided', async () => {
+  it('shows the profile switch and a manage entry when provided', async () => {
+    const profiles = [
+      {
+        id: 'codex',
+        name: 'Codex（GPT）',
+        baseUrl: null,
+        wireApi: 'responses' as const,
+        envKey: 'OPENAI_API_KEY',
+        models: [],
+        defaultModel: '',
+        builtIn: true,
+      },
+      {
+        id: 'glm',
+        name: 'GLM（智谱）',
+        baseUrl: 'https://open.bigmodel.cn/api/v1',
+        wireApi: 'responses' as const,
+        envKey: 'ZAI_API_KEY',
+        models: [],
+        defaultModel: 'glm-5.3-flash',
+        builtIn: true,
+      },
+    ]
     const wrapper = mount(AgentModelSettingsMenu, {
-      props: { settings, modelSource: 'glm' },
+      props: { settings, profiles, activeProfileId: 'glm' },
     })
     await wrapper.get('.model-settings__trigger').trigger('click')
 
@@ -68,7 +90,7 @@ describe('AgentModelSettingsMenu', () => {
     expect(sourceButtons[1]!.classes()).toContain('model-settings__source-option--active')
 
     await sourceButtons[0]!.trigger('click')
-    expect(wrapper.emitted('set-source')).toEqual([[{ source: 'codex' }]])
+    expect(wrapper.emitted('select-profile')).toEqual([['codex']])
 
     await wrapper.get('.model-settings__trigger').trigger('click')
     await wrapper.get('.model-settings__configure').trigger('click')
