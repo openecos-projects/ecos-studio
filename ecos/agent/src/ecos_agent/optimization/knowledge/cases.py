@@ -28,6 +28,7 @@ from ecos_agent.optimization.parameters.effective_domain import EffectiveDomainS
 from ecos_agent.hashing import canonical_sha256
 from ecos_agent.optimization.contracts import TerminalObservation
 from ecos_agent.optimization.ledger import OptimizationTerminalOutcome
+from ecos_agent.optimization.ledger_artifacts import _fsync_directory
 from ecos_agent.optimization.rules import native_receipt_is_effective
 from ecos_agent.optimization.parameters.contracts import (
     OptimizationProposalV2,
@@ -797,11 +798,3 @@ def _canonical_json(payload: object) -> bytes:
     return json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("ascii")
-
-
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)

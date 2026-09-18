@@ -180,7 +180,9 @@ async function writeTextAtomically(path: string, content: string): Promise<void>
       await chmod(temporaryPath, mode)
     }
     if ((await realpath(parent)) !== canonicalParent) {
-      throw new Error(`Refusing to write ${path}: parent directory changed during the write`)
+      throw new Error(
+        `Refusing to write ${path}: parent directory changed during the write`,
+      )
     }
     await rename(temporaryPath, path)
   } catch (error) {

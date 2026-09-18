@@ -303,7 +303,10 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
       libraryBinariesPath,
       options.platform,
     )
-    const sizerEnv = packagedSizerEnv(resolvePackagedBinariesPath(options), options.platform)
+    const sizerEnv = packagedSizerEnv(
+      resolvePackagedBinariesPath(options),
+      options.platform,
+    )
 
     if (runtimeBin) {
       const nextPath = prependPath(baseEnv, runtimeBin, options.platform)

@@ -787,7 +787,6 @@ def _propose_source_retrieval(context: dict[str, Any]) -> SourceSearchProposal:
         provider.close()
 
 
-
 from ecos_agent.gui.workspace_results import (  # noqa: E402
     _optional_text,
     _required_message,
