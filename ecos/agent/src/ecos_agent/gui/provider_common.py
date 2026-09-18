@@ -316,6 +316,45 @@ def _design_id_for_workspace(workspace: str) -> str | None:
     return dirname or None
 
 
+def _validate_interaction_budget(request: dict[str, Any]) -> None:
+    if len(str(request.get("title", ""))) > 512 or len(
+        str(request.get("description") or "")
+    ) > 512:
+        raise ValueError("Interaction text exceeds the protocol budget.")
+    interaction = request.get("interaction", {})
+    if request.get("kind") == "choice":
+        options = interaction.get("options", [])
+        if not 1 <= len(options) <= 32 or any(
+            len(str(option.get("id", ""))) > 128
+            or len(str(option.get("label", ""))) > 256
+            for option in options
+        ):
+            raise ValueError("Interaction options exceed the protocol budget.")
+    elif request.get("kind") == "confirm":
+        options = [interaction.get("confirm", {}), interaction.get("cancel", {})]
+        if any(
+            len(str(option.get("id", ""))) > 128
+            or len(str(option.get("label", ""))) > 256
+            for option in options
+        ):
+            raise ValueError("Interaction options exceed the protocol budget.")
+    elif request.get("kind") == "form":
+        fields = interaction.get("fields", [])
+        if not 1 <= len(fields) <= 16:
+            raise ValueError("Interaction fields exceed the protocol budget.")
+        for field in fields:
+            if len(str(field.get("label", ""))) > 256:
+                raise ValueError("Interaction field text exceeds the protocol budget.")
+            options = field.get("options", [])
+            if len(options) > 32 or any(
+                len(str(option.get("label", ""))) > 256 for option in options
+            ):
+                raise ValueError("Interaction select options exceed the protocol budget.")
+    payload = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+    if len(payload.encode("utf-8")) > 64 * 1024:
+        raise ValueError("Interaction payload exceeds the protocol budget.")
+
+
 _NUMERIC_FIELDS = {
     "Frequency Max (MHz)": "frequency_mhz",
     "Max Fanout": "max_fanout",

@@ -203,6 +203,11 @@ export class EccRpcSidecarProcess {
     })
     this.client = client
 
+    child.stdin?.on('error', (error) => {
+      this.captureOutput(`[sidecar] ${error.message}\n`)
+      client.rejectPending(error)
+    })
+
     child.stdout?.on('data', (chunk) => {
       try {
         client.feedStdout(chunk as Buffer)

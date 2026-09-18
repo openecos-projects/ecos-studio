@@ -95,9 +95,7 @@ class CoordinateDirection(StrEnum):
     TOGGLE = "toggle"
 
 
-def _ineligibility_decision(
-    candidate: TerminalObservation,
-) -> IncumbentDecision:
+def _ineligibility_decision(candidate: TerminalObservation) -> IncumbentDecision:
     """Missing evidence is never a physical failure (ECC-QoR draft 3, 10.3)."""
     return (
         IncumbentDecision.EVIDENCE_LIMITED

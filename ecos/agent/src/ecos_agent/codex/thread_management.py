@@ -33,6 +33,86 @@ _REPAIR_EXCERPT_LIMIT = 1200
 
 
 class CodexThreadManagementMixin:
+    def _ensure_client(self) -> _JsonLineRpcProcessClient:
+        if self._client is None:
+            self._client = _JsonLineRpcProcessClient(
+                command=self.codex_bin,
+                args=[
+                    "app-server",
+                    "-c",
+                    "mcp_servers={}",
+                    "-c",
+                    "tools.web_search=false",
+                    "--listen",
+                    "stdio://",
+                ],
+                cwd=self.cwd,
+                env=self.env,
+                timeout_seconds=self.timeout_seconds,
+                diagnostics_path=self.diagnostics_path,
+                stderr_path=(
+                    self.diagnostics_path.with_suffix(".stderr.log")
+                    if self.diagnostics_path is not None
+                    else None
+                ),
+            )
+            self._client.start()
+            self._client.request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "ecos-agent",
+                        "title": "ECOS Agent",
+                        "version": "0.1.0",
+                    },
+                    "capabilities": {
+                        "experimentalApi": True,
+                        "requestAttestation": False,
+                    },
+                },
+            )
+        return self._client
+
+    def _ensure_thread(self, client: _JsonLineRpcProcessClient) -> str:
+        if self._thread_id is None:
+            response = client.request(
+                "thread/start",
+                {
+                    "model": self._model,
+                    "modelProvider": None,
+                    "serviceTier": None,
+                    "cwd": str(self.cwd),
+                    "runtimeWorkspaceRoots": list(self.runtime_workspace_roots),
+                    **_read_only_thread_config(),
+                    "approvalsReviewer": None,
+                    "permissions": None,
+                    "config": None,
+                    "serviceName": "ecos-agent",
+                    "baseInstructions": None,
+                    "developerInstructions": None,
+                    "personality": None,
+                    "ephemeral": self.ephemeral,
+                    "sessionStartSource": None,
+                    "threadSource": None,
+                    "environments": [],
+                    "dynamicTools": None,
+                    "experimentalRawEvents": False,
+                },
+            )
+            self._thread_id = _read_nested_string(
+                response, (("thread", "id"), ("threadId",), ("id",))
+            )
+            if not self._thread_id:
+                raise CodexProviderError(
+                    "Codex thread/start response missing thread id",
+                    failure_class="tool_error",
+                )
+        return self._thread_id
+
+    def _report_progress(self, activity: str | dict[str, Any]) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(activity)
+
     def _request_json(
         self,
         *,
