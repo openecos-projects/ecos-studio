@@ -25,13 +25,12 @@ class MemorySettingsStore implements CodexDependencySettingsStore {
   }
 }
 
-const BUILTIN_IDS = ['codex', 'glm', 'kimi', 'deepseek', 'sub2api']
+const BUILTIN_IDS = ['codex', 'glm', 'kimi', 'deepseek']
 const NO_KEYS = {
   codex: false,
   glm: false,
   kimi: false,
   deepseek: false,
-  sub2api: false,
 }
 
 function customProfile(
@@ -63,33 +62,6 @@ describe('ModelProfileService', () => {
     expect(state.activeProfileId).toBe('codex')
     expect(state.profiles.map((profile) => profile.id)).toEqual(BUILTIN_IDS)
     expect(state.apiKeyConfigured).toEqual(NO_KEYS)
-  })
-
-  it('selects the Sub2API test profile with the exact provider and model ids', async () => {
-    const { configRoot, service } = await createService()
-    const state = await service.select('sub2api')
-
-    expect(state.activeProfileId).toBe('sub2api')
-    expect(state.apiKeyConfigured.sub2api).toBe(false)
-    expect(state.profiles.find((profile) => profile.id === 'sub2api')).toMatchObject({
-      baseUrl: 'https://api.wallvps.fun/v1',
-      wireApi: 'responses',
-      envKey: 'SUB2API_API_KEY',
-      defaultModel: 'kimi-for-coding',
-    })
-    const configToml = await readFile(join(configRoot, 'sub2api', 'config.toml'), 'utf8')
-    expect(configToml).toContain('model_provider = "sub2api"')
-    expect(configToml).toContain('[model_providers.sub2api]')
-    expect(configToml).toContain('model = "kimi-for-coding"')
-    expect(configToml).toContain('base_url = "https://api.wallvps.fun/v1"')
-    expect(configToml).toContain('wire_api = "responses"')
-    expect(configToml).toContain('env_key = "SUB2API_API_KEY"')
-    const catalog = JSON.parse(
-      await readFile(join(configRoot, 'sub2api', 'models.json'), 'utf8'),
-    )
-    expect(catalog.models.map((model: { slug: string }) => model.slug)).toEqual([
-      'kimi-for-coding',
-    ])
   })
 
   it('migrates legacy settings keys once and deletes them', async () => {

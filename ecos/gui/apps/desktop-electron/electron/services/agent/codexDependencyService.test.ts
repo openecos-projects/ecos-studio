@@ -418,12 +418,6 @@ describe('CodexDependencyService', () => {
       defaultModel: 'glm-5.3-flash',
       modelSlugs: ['glm-5.3', 'glm-5.3-flash'],
     },
-    {
-      profileId: 'sub2api',
-      envKey: 'SUB2API_API_KEY',
-      defaultModel: 'kimi-for-coding',
-      modelSlugs: ['kimi-for-coding'],
-    },
   ])(
     '$profileId stores the key, writes the managed config home, and reports ready',
     async ({ profileId, envKey, defaultModel, modelSlugs }) => {
@@ -493,10 +487,7 @@ describe('CodexDependencyService', () => {
     },
   )
 
-  it.each([
-    ['glm', 'ZAI_API_KEY'],
-    ['sub2api', 'SUB2API_API_KEY'],
-  ])(
+  it.each([['glm', 'ZAI_API_KEY']])(
     'switching from %s to codex clears its profile overrides',
     async (profileId, envKey) => {
       const root = await createRoot()
@@ -541,7 +532,6 @@ describe('CodexDependencyService', () => {
         ECOS_AGENT_CODEX_PROFILE_REVISION: expect.any(String),
         CODEX_HOME: undefined,
         ZAI_API_KEY: undefined,
-        SUB2API_API_KEY: undefined,
         OPENAI_API_KEY: undefined,
         PATH: binDir,
       })
