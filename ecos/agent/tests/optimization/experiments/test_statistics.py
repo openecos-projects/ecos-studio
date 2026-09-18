@@ -12,6 +12,7 @@ from ecos_agent.optimization.contracts import (
 )
 from ecos_agent.optimization.experiments.statistics import (
     baseline_design_statistics,
+    compare_observations,
     exact_paired_permutation_p_value,
     holm_adjust,
     paired_design_statistics,
@@ -170,3 +171,83 @@ def test_design_block_statistics_reports_win_tie_loss_and_holm() -> None:
     comparison = comparisons["controlled_coordinate__vs__random_action"]
     assert comparison["n_designs"] == 2
     assert comparison["holm_adjusted_p_value"] >= comparison["p_value"]
+
+
+def _terminal_with_timing(
+    wirelength: float, hold_wns: float, setup_wns: float = 8.243
+) -> TerminalObservation:
+    return TerminalObservation(
+        observation_id="terminal-Harden",
+        evidence_manifest_sha256=HASH,
+        evidence_valid=True,
+        harden_artifacts_complete=True,
+        signoff_gates=SignoffGates.all(GateResult.PASS),
+        metrics={
+            ObjectiveMetric.ROUTE_DR_TOTAL_VIOLATION_COUNT: 0.0,
+            ObjectiveMetric.ROUTE_LA_TOTAL_OVERFLOW: 1.0,
+            ObjectiveMetric.ROUTE_WIRELENGTH: wirelength,
+        },
+        timing_guardrail={
+            **{metric: 0.0 for metric in TimingMetric},
+            TimingMetric.STA_HOLD_WNS: hold_wns,
+            TimingMetric.STA_SETUP_WNS: setup_wns,
+        },
+    )
+
+
+def _reference_metrics(observation: TerminalObservation) -> dict[str, float]:
+    return {
+        "route_dr_total_violation_count": 0.0,
+        "route_la_total_overflow": 1.0,
+        "route_wirelength": 5146.1,
+        **{metric.value: 0.0 for metric in TimingMetric},
+        TimingMetric.STA_HOLD_WNS.value: 0.106,
+        TimingMetric.STA_SETUP_WNS.value: 8.243,
+    }
+
+
+ZERO_EPSILON = {
+    "route_dr_total_violation_count": 0.0,
+    "route_la_total_overflow": 0.0,
+    "route_wirelength": 0.0,
+    **{metric.value: 0.0 for metric in TimingMetric},
+}
+
+
+def test_positive_margin_erosion_is_not_a_timing_veto() -> None:
+    """The gcd TPE case: hold WNS 0.106 -> 0.102 stays signoff-clean, so a
+    real wirelength improvement must read "better" — the comparison shares
+    the episode-promotion veto (violation-based), not replay-noise epsilon."""
+    candidate = _terminal_with_timing(wirelength=4665.8, hold_wns=0.102)
+    assert (
+        compare_observations(_reference_metrics(candidate), candidate, ZERO_EPSILON)
+        == "better"
+    )
+
+
+def test_negative_slack_meaningfully_below_anchor_is_timing_regression() -> None:
+    candidate = _terminal_with_timing(wirelength=4665.8, hold_wns=-0.02)
+    assert (
+        compare_observations(_reference_metrics(candidate), candidate, ZERO_EPSILON)
+        == "timing_regression"
+    )
+
+
+def test_negative_slack_within_tolerance_of_the_anchor_is_not_a_veto() -> None:
+    # Parity with rules._timing_regression: a slack numerically identical to
+    # the anchor (closed at the 0 boundary) is not a meaningful regression;
+    # the routability keys decide.
+    candidate = _terminal_with_timing(
+        wirelength=5146.1, hold_wns=-1e-12, setup_wns=8.243
+    )
+    reference = _reference_metrics(candidate)
+    reference[TimingMetric.STA_HOLD_WNS.value] = 0.0
+    assert compare_observations(reference, candidate, ZERO_EPSILON) == "noise_tie"
+
+
+def test_positive_margin_erosion_with_worse_primary_reads_worse() -> None:
+    candidate = _terminal_with_timing(wirelength=6000.0, hold_wns=0.102)
+    assert (
+        compare_observations(_reference_metrics(candidate), candidate, ZERO_EPSILON)
+        == "worse"
+    )

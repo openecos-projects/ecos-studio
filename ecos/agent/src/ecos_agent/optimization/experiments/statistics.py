@@ -15,6 +15,7 @@ from ecos_agent.optimization.contracts import (
     TerminalObservation,
     TimingMetric,
 )
+from ecos_agent.optimization.rules import timing_guardrail_regression
 
 _MAX_EXACT_BLOCKS = 20
 _BOOTSTRAP_SAMPLES = 10_000
@@ -172,9 +173,14 @@ def compare_observations(
     }
     if set(reference) != required or set(epsilon) != required:
         raise ValueError("noise comparison metrics are incomplete")
+    # Timing guardrails share the episode-promotion veto semantics
+    # (rules.timing_guardrail_regression): only negative slack meaningfully
+    # below the anchor is a regression. Replay-noise epsilon stays reserved
+    # for the routability objectives; a zero calibrated timing epsilon must
+    # not turn positive-margin erosion into a veto.
     for metric in TIMING_GUARDRAIL_ORDER:
         key = metric.value
-        if metrics[key] < reference[key] - epsilon[key]:
+        if timing_guardrail_regression(reference[key], metrics[key]):
             return "timing_regression"
     for metric in ROUTABILITY_OBJECTIVE_ORDER:
         key = metric.value

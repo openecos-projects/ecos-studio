@@ -630,27 +630,38 @@ def _utility_change(
     ) - objective_metric_utility(metric_id, reference)
 
 
+def timing_guardrail_regression(reference_value: float, candidate_value: float) -> bool:
+    """Violation-based timing veto shared by episode promotion and the
+    statistics comparison.
+
+    Only an actually failed guardrail is a regression: the candidate's slack
+    is negative, meaningfully below the anchor's. Positive-margin erosion is
+    not a veto: it once let a sub-nanosecond hold-margin change override a
+    real primary-metric improvement (episode-48bc366d #4, drc 233->231 ruled
+    degraded on 0.106->0.093 hold WNS). Clamped WNS must never feed this
+    check: it cannot distinguish positive margins.
+    """
+    return (
+        candidate_value < 0
+        and candidate_value < reference_value
+        and _meaningful_metric_change(reference_value, candidate_value)
+    )
+
+
 def _timing_regression(
     incumbent: TerminalObservation, candidate: TerminalObservation
 ) -> IncumbentComparison | None:
     """Adjacent timing guardrail on signed worst slack.
 
-    Only an actually failed guardrail is a regression: the candidate's slack
-    is negative, meaningfully below the incumbent's. Positive-margin erosion
-    is not a veto: it let a sub-nanosecond hold-margin change override a real
-    primary-metric improvement (episode-48bc366d #4, drc 233->231 ruled
-    degraded on 0.106->0.093 hold WNS). Cross-round erosion stays bounded by
-    the frozen baseline envelope when the objective carries one, and by the
-    recovery violation counts otherwise. Clamped WNS must never feed this
-    check: it cannot distinguish positive margins.
+    Cross-round erosion stays bounded by the frozen baseline envelope when
+    the objective carries one, and by the recovery violation counts
+    otherwise; the per-comparison veto itself is
+    :func:`timing_guardrail_regression`.
     """
     for metric_id in TIMING_GUARDRAIL_ORDER:
-        incumbent_value = incumbent.timing_guardrail[metric_id]
-        candidate_value = candidate.timing_guardrail[metric_id]
-        if (
-            candidate_value < 0
-            and candidate_value < incumbent_value
-            and _meaningful_metric_change(incumbent_value, candidate_value)
+        if timing_guardrail_regression(
+            float(incumbent.timing_guardrail[metric_id]),
+            float(candidate.timing_guardrail[metric_id]),
         ):
             return IncumbentComparison(IncumbentDecision.INCUMBENT_RETAINED, metric_id)
     return None
