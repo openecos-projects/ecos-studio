@@ -526,7 +526,7 @@ class OptimizationProposal(_ContractModel):
         min_length=1, max_length=13
     )
     history_refs: tuple[HistoryReference, ...] = Field(default=(), max_length=6)
-    knowledge_refs: tuple[KnowledgeReference, ...] = Field(default=(), max_length=6)
+    knowledge_refs: tuple[KnowledgeReference, ...] = Field(default=(), max_length=13)
     task_memory_refs: tuple[OptimizationTaskMemoryReference, ...] = Field(
         default=(), max_length=6, exclude_if=lambda value: not value
     )

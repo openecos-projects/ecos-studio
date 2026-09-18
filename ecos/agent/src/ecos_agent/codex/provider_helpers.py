@@ -351,7 +351,7 @@ def _optimization_planning_payload(
         )
     if (
         len(context.history) > 6
-        or len(context.knowledge_refs) > 6
+        or len(context.knowledge_refs) > 13
         or len(context.knowledge_chunks) > 6
         or (context.task_memory is not None and len(context.task_memory.summaries) > 6)
     ):
