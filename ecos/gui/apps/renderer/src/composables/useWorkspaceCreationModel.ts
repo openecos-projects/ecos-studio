@@ -75,5 +75,5 @@ export function useWorkspaceCreationModel(options: {
     if (parameter) parameter.state = 'explicit'
   }
 
-  return { explicitValues, parameters, refresh, setValue, values }
+  return { explicitValues, model, parameters, refresh, setValue, values }
 }

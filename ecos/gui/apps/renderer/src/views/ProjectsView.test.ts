@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { flushPromises, shallowMount } from '@vue/test-utils'
+import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,6 +17,9 @@ const testState = vi.hoisted(() => ({
   route: { fullPath: '/workspace/projects', path: '/workspace/projects', query: {} },
   routerPush: vi.fn(),
   showToast: vi.fn(),
+  comparisonProjection: { data: null as unknown, status: 'idle' },
+  selectProject: vi.fn(async (_projectRoot: string) => undefined),
+  pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
 }))
 
 vi.mock('vue-router', () => ({
@@ -39,6 +42,32 @@ vi.mock('@/utils/projectHistory', () => ({
   removeProjectHistoryEntry: vi.fn(),
 }))
 vi.mock('@/utils/projectManagementRead', () => ({
+  importProjectManagementWorkspace: vi.fn(async (projectRoot: string) => ({
+    status: 'imported',
+    manifest: {
+      schema_version: 1,
+      project_id: `project-${projectRoot}`,
+      name: projectRoot.split('/').pop() ?? 'demo',
+      design_name: 'gcd',
+      description: '',
+      root_path: projectRoot,
+      created_at: '2026-09-04T00:00:00.000Z',
+      updated_at: '2026-09-04T00:00:00.000Z',
+      base_design: { parameters: {}, rtl_list: [] },
+      objectives: { primary: 'timing', directions: {} },
+      workspaces: [
+        {
+          workspace_id: 'ws_0001',
+          name: 'ws_0001',
+          workspace_path: `${projectRoot}/ws_0001`,
+          status: 'active',
+        },
+      ],
+      best_workspace: null,
+    },
+    workspaceId: 'ws_0001',
+    workspacePath: `${projectRoot}/ws_0001`,
+  })),
   listProjectManagementEntries: vi.fn(async () => []),
   readProjectManagementManifest: vi.fn(async (projectRoot: string) => ({
     schema_version: 1,
@@ -56,7 +85,7 @@ vi.mock('@/utils/projectManagementRead', () => ({
         workspace_id: 'ws_0001',
         name: 'ws_0001',
         workspace_path: `${projectRoot}/ws_0001`,
-        status: 'active',
+        status: 'not_started',
       },
     ],
     best_workspace: null,
@@ -69,13 +98,16 @@ vi.mock('@/stores/backendProjectComparisonSession', () => ({
     findings: [],
     generation: 0,
     loadStepFindings: vi.fn(),
-    projection: { data: null, status: 'idle' },
+    get projection() {
+      return testState.comparisonProjection
+    },
     refresh: vi.fn(),
-    selectProject: vi.fn(async () => undefined),
+    selectProject: (projectRoot: string) => testState.selectProject(projectRoot),
   }),
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
+    dialog: { pickDirectory: (options: unknown) => testState.pickDirectory(options) },
     ecc: { runtime: undefined },
     productCommands: { execute: vi.fn() },
     shutdown: undefined,
@@ -84,7 +116,8 @@ vi.mock('@/platform/desktop', () => ({
 
 import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
-import { loadProjectHistory } from '@/utils/projectHistory'
+import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
+import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
 
 function historyProject(index: number) {
   return {
@@ -106,6 +139,197 @@ describe('ProjectsView background lifecycle integration', () => {
     testState.showToast.mockReset()
     vi.mocked(loadProjectHistory).mockReset()
     vi.mocked(loadProjectHistory).mockResolvedValue([testState.project])
+    vi.mocked(rememberProjectHistoryEntry).mockReset()
+    vi.mocked(rememberProjectHistoryEntry).mockResolvedValue([testState.project])
+    vi.mocked(importProjectManagementWorkspace).mockClear()
+    testState.comparisonProjection = { data: null, status: 'idle' }
+    testState.selectProject.mockReset()
+    testState.selectProject.mockImplementation(async () => undefined)
+    testState.pickDirectory.mockReset()
+    testState.pickDirectory.mockResolvedValue('/projects/demo')
+  })
+
+  it('imports a workspace through the main-owned import API', async () => {
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="More actions for demo"]').trigger('click')
+    const importAction = wrapper
+      .findAll('.row-action-menu-item')
+      .find((item) => item.text().includes('Import workspace'))
+    expect(importAction).toBeDefined()
+    await importAction!.trigger('click')
+    await flushPromises()
+
+    expect(importProjectManagementWorkspace).toHaveBeenCalledWith('/projects/demo')
+    expect(testState.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'Workspace imported' }),
+    )
+    expect(testState.showToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'Workspace not imported' }),
+    )
+  })
+
+  it('notifies when the picked workspace is already registered', async () => {
+    vi.mocked(importProjectManagementWorkspace).mockResolvedValueOnce({
+      status: 'already_registered',
+      manifest: {
+        schema_version: 1,
+        project_id: 'project-/projects/demo',
+        name: 'demo',
+        design_name: 'gcd',
+        description: '',
+        root_path: '/projects/demo',
+        created_at: '2026-09-04T00:00:00.000Z',
+        updated_at: '2026-09-04T00:00:00.000Z',
+        base_design: { parameters: {}, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: [
+          {
+            workspace_id: 'ws_0001',
+            name: 'ws_0001',
+            workspace_path: '/projects/demo/ws_0001',
+            source_workspace_id: null,
+            branch_from: null,
+            start_step: 'Synth',
+            end_step: 'Synth',
+            status: 'success',
+            created_at: '2026-09-04T00:00:00.000Z',
+            updated_at: '2026-09-04T00:00:00.000Z',
+            parameter_patch: {},
+            metrics_summary: {},
+            step_metrics: {},
+          },
+        ],
+        best_workspace: null,
+        mpc: null,
+        qor_baseline: null,
+      },
+      workspaceId: 'ws_0001',
+      workspacePath: '/projects/demo/ws_0001',
+    })
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="More actions for demo"]').trigger('click')
+    const importAction = wrapper
+      .findAll('.row-action-menu-item')
+      .find((item) => item.text().includes('Import workspace'))
+    await importAction!.trigger('click')
+    await flushPromises()
+
+    expect(testState.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: 'Workspace already registered' }),
+    )
+  })
+
+  async function mountWithKnownProgress(shouldBlock: () => boolean) {
+    testState.selectProject.mockImplementation(async () => {
+      if (shouldBlock()) {
+        await new Promise<void>(() => undefined)
+      }
+      testState.comparisonProjection = {
+        data: {
+          refresh: { automatic: 'available' },
+          workspaceSnapshots: {
+            status: 'ready',
+            data: { flowStates: { ws_0001: { Synth: 'success' } }, items: [] },
+          },
+        },
+        status: 'ready',
+      }
+    })
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+    await wrapper.get('button.project-tree-row').trigger('click')
+    await flushPromises()
+    return wrapper
+  }
+
+  function knownProgressHint(wrapper: VueWrapper) {
+    return wrapper.findComponent({ name: 'ProjectResultStatus' }).props('hint')
+  }
+
+  it('keeps known workspace progress while an already-registered import reapplies the manifest', async () => {
+    let blockSelects = false
+    const wrapper = await mountWithKnownProgress(() => blockSelects)
+    expect(knownProgressHint(wrapper)).toMatchObject({
+      label: 'Success',
+      state: 'success',
+    })
+
+    blockSelects = true
+    vi.mocked(importProjectManagementWorkspace).mockResolvedValueOnce({
+      status: 'already_registered',
+      manifest: {
+        schema_version: 1,
+        project_id: 'project-/projects/demo',
+        name: 'demo',
+        design_name: 'gcd',
+        description: '',
+        root_path: '/projects/demo',
+        created_at: '2026-09-04T00:00:00.000Z',
+        updated_at: '2026-09-04T00:00:00.000Z',
+        base_design: { parameters: {}, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: [
+          {
+            workspace_id: 'ws_0001',
+            name: 'ws_0001',
+            workspace_path: '/projects/demo/ws_0001',
+            source_workspace_id: null,
+            branch_from: null,
+            start_step: 'Synth',
+            end_step: 'Synth',
+            status: 'not_started',
+            created_at: '2026-09-04T00:00:00.000Z',
+            updated_at: '2026-09-04T00:00:00.000Z',
+            parameter_patch: {},
+            metrics_summary: {},
+            step_metrics: {},
+          },
+        ],
+        best_workspace: null,
+        mpc: null,
+        qor_baseline: null,
+      },
+      workspaceId: 'ws_0001',
+      workspacePath: '/projects/demo/ws_0001',
+    })
+
+    await wrapper.get('button[aria-label="More actions for demo"]').trigger('click')
+    const importAction = wrapper
+      .findAll('.row-action-menu-item')
+      .find((item) => item.text().includes('Import workspace'))
+    await importAction!.trigger('click')
+    await flushPromises()
+
+    expect(knownProgressHint(wrapper)).toMatchObject({
+      label: 'Success',
+      state: 'success',
+    })
+  })
+
+  it('keeps known workspace progress while re-importing the selected project', async () => {
+    let blockSelects = false
+    const wrapper = await mountWithKnownProgress(() => blockSelects)
+    expect(knownProgressHint(wrapper)).toMatchObject({
+      label: 'Success',
+      state: 'success',
+    })
+
+    blockSelects = true
+    const importButton = wrapper
+      .findAll('button.project-toolbar-action')
+      .find((button) => button.text().includes('Import'))
+    await importButton!.trigger('click')
+    await flushPromises()
+
+    expect(testState.pickDirectory).toHaveBeenCalledOnce()
+    expect(knownProgressHint(wrapper)).toMatchObject({
+      label: 'Success',
+      state: 'success',
+    })
   })
 
   it('keeps opening after the Project Management route is normalized', async () => {

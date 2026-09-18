@@ -5,6 +5,9 @@ import {
   isFlowExecutionActiveForWorkspace,
   markFlowExecutionActiveForWorkspace,
   resetFlowExecutionState,
+  isBackendFlowProjectionUnknown,
+  setBackendFlowProjectionReady,
+  setBackendFlowProjectionUnknown,
   updateAuthoritativeBackendFlowState,
 } from './flowExecutionState'
 
@@ -38,5 +41,26 @@ describe('flowExecutionState compatibility projection', () => {
     updateAuthoritativeBackendFlowState(['/work/backend'], [])
 
     expect(isRunning.value).toBe(false)
+  })
+
+  it('treats an unavailable backend projection as unknown', () => {
+    setBackendFlowProjectionReady(false)
+    expect(isBackendFlowProjectionUnknown()).toBe(true)
+
+    setBackendFlowProjectionReady(true)
+    expect(isBackendFlowProjectionUnknown()).toBe(false)
+  })
+
+  it('treats a workspace with pending or failed recovery as unknown', () => {
+    setBackendFlowProjectionUnknown(['/work/a'])
+
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(true)
+    expect(isBackendFlowProjectionUnknown('/work/a/')).toBe(true)
+    expect(isBackendFlowProjectionUnknown('/work/b')).toBe(false)
+    expect(isBackendFlowProjectionUnknown()).toBe(true)
+
+    setBackendFlowProjectionUnknown([])
+    expect(isBackendFlowProjectionUnknown('/work/a')).toBe(false)
+    expect(isBackendFlowProjectionUnknown()).toBe(false)
   })
 })

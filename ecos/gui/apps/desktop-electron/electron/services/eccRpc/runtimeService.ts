@@ -364,7 +364,10 @@ export class EccRpcRuntimeService {
     this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
     if (!result.reused) {
       try {
-        await runtime.recoverInterrupted(result.workspaceHandle)
+        const recovery = await runtime.recoverInterrupted(result.workspaceHandle)
+        if (typeof recovery.workspaceRevision === 'number') {
+          result.workspaceRevision = recovery.workspaceRevision
+        }
       } catch (error) {
         electronLogger.error(
           '[runtime] failed to recover interrupted operations while opening %s: %s',
@@ -412,6 +415,9 @@ export class EccRpcRuntimeService {
   async releaseWorkspace(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceCloseResult & { retained?: boolean }> {
+    // Release is idempotent: Force quit may have torn the session down before
+    // the owning renderer's teardown runs.
+    if (!this.handleToDirectory.has(request.workspaceHandle)) return { ok: true }
     const runtime = this.runtimeForHandle(request.workspaceHandle)
     if (runtime.hasPendingRuntimeWork()) {
       this.pendingReleaseHandles.add(request.workspaceHandle)

@@ -156,4 +156,41 @@ describe('RuntimeOperationTracker active operations', () => {
     await expect(completed).resolves.toMatchObject({ state: 'succeeded' })
     expect(tracker.activeOperations()).toEqual([])
   })
+
+  it('turns an active operation into an interrupted outcome when the runtime exits', async () => {
+    const tracker = new RuntimeOperationTracker()
+    tracker.track(operationEvent('running'))
+    const completed = tracker.waitFor('operation-1')
+
+    expect(tracker.interruptActiveOperations()).toEqual([
+      expect.objectContaining({
+        error: {
+          code: 'interrupted',
+          message: 'ECC sidecar exited before the operation completed.',
+        },
+        operationId: 'operation-1',
+        state: 'interrupted',
+      }),
+    ])
+
+    await expect(completed).resolves.toMatchObject({
+      operationId: 'operation-1',
+      state: 'interrupted',
+    })
+    expect(tracker.activeOperations()).toEqual([])
+    expect(tracker.recentOutcomes()).toEqual([
+      expect.objectContaining({ operationId: 'operation-1', state: 'interrupted' }),
+    ])
+  })
+
+  it('does not downgrade an interrupted outcome from a delayed terminal event', () => {
+    const tracker = new RuntimeOperationTracker()
+    tracker.track(operationEvent('running'))
+    tracker.interruptActiveOperations()
+
+    expect(tracker.track(operationEvent('succeeded', { sequence: 2 }))).toBe(false)
+    expect(tracker.recentOutcomes()).toEqual([
+      expect.objectContaining({ operationId: 'operation-1', state: 'interrupted' }),
+    ])
+  })
 })

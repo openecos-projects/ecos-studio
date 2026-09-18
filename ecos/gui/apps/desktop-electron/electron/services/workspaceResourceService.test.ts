@@ -118,6 +118,89 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('builds the resource index from home/params.toml workspaces', async () => {
+    const root = await tempWorkspace()
+    const outputDirectory = join(root, 'place_ecc', 'output')
+    await mkdir(join(root, 'home'), { recursive: true })
+    await mkdir(outputDirectory, { recursive: true })
+    await mkdir(join(outputDirectory, 'gcd_place_db'), { recursive: true })
+    await writeFile(
+      join(root, 'home', 'params.toml'),
+      [
+        '[design]',
+        'name = "gcd"',
+        'top = "gcd"',
+        '',
+        '[pdk]',
+        'name = "ics55"',
+        'root = "/pdk/ics55"',
+        '',
+        '[params]',
+        'design = "gcd"',
+        'top_module = "gcd"',
+        'pdk = "ics55"',
+        'frequency_max = 100.0',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await writeJson(join(root, 'home', 'flow.json'), {
+      steps: [
+        { name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} },
+      ],
+    })
+    await writeJson(join(root, 'home', 'home.json'), {
+      flow: join(root, 'home', 'flow.json'),
+    })
+    await writeFile(join(outputDirectory, 'gcd_place.def.gz'), 'def', 'utf8')
+    await writeFile(join(outputDirectory, 'gcd_place.gds'), 'gds', 'utf8')
+    await writeFile(join(outputDirectory, 'gcd_place.png'), 'png', 'utf8')
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.status).toBe('available')
+    expect(index.design).toBe('gcd')
+    expect(index.topModule).toBe('gcd')
+    expect(index.pdk).toBe('ics55')
+    expect(index.parameters).toMatchObject({
+      design: 'gcd',
+      top_module: 'gcd',
+      pdk: 'ics55',
+      frequency_max: 100.0,
+    })
+    expect(index.home.parametersJson).toMatchObject({
+      path: join(root, 'home', 'params.toml'),
+      exists: true,
+      kind: 'parameters',
+    })
+    expect(index.flow.steps).toHaveLength(1)
+    expect(index.flow.steps[0].directory).toBe(join(root, 'place_ecc'))
+    expect(index.flow.steps[0].resources.output.gds).toMatchObject({
+      path: join(outputDirectory, 'gcd_place.gds'),
+      exists: true,
+    })
+
+    const layout = await service.resolveStepInfo({ id: 'layout', step: 'place' })
+    expect(layout.response).toBe('available')
+
+    const parameters = await service.readParameters()
+    expect(parameters).toMatchObject({ design: 'gcd', top_module: 'gcd', pdk: 'ics55' })
+  })
+
+  it('marks the index error when home/params.toml is malformed', async () => {
+    const root = await tempWorkspace()
+    await mkdir(join(root, 'home'), { recursive: true })
+    await writeFile(join(root, 'home', 'params.toml'), '[design\n', 'utf8')
+    await writeJson(join(root, 'home', 'flow.json'), { steps: [] })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.status).toBe('error')
+    expect(index.messages.join('\n')).toContain('Failed to parse')
+  })
+
   it('discovers every file below a step report directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'sta', tool: 'ecc' }])

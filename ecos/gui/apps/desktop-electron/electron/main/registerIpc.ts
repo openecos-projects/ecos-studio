@@ -137,6 +137,7 @@ import {
 } from '../services/workspacePdkBindings'
 import { registerBackgroundLifecycleIpc } from './registerBackgroundLifecycleIpc'
 import type { QuickStartBuiltinResources } from '../services/quickStartResourceService'
+import { projectWorkspaceImportFailure } from '../services/projectWorkspaceImportService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -319,6 +320,14 @@ export interface DesktopBridgeServices {
         event: import('@ecos-studio/shared').BackendProjectExecutionInvalidatedEvent,
       ) => void,
     ): () => void
+  }
+  projectWorkspaceImportService?: {
+    importWorkspace(
+      projectRoot: string,
+      workspacePath: string,
+    ): Promise<
+      import('@ecos-studio/shared').DesktopProjectManagementWorkspaceImportResult
+    >
   }
   workspaceService: {
     approvePendingExternalReadRoots?(
@@ -629,6 +638,17 @@ function serializeError(error: unknown): {
 }
 
 function shouldSilenceIpcError(channel: string, error: unknown): boolean {
+  // Force quit deliberately rejects in-flight sidecar operations.
+  if (isNodeErrorWithCode(error, 'ECC_SIDECAR_FORCE_QUIT')) return true
+  // Window teardown can clear the project root while the renderer still has a
+  // refresh in flight.
+  if (
+    (channel === desktopApiIpcChannels.backendWorkspaceGetOverview ||
+      channel === desktopApiIpcChannels.backendWorkspaceRefreshOverview) &&
+    isNodeErrorWithCode(error, 'PROJECT_ROOT_NOT_REGISTERED')
+  ) {
+    return true
+  }
   if (
     channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile &&
     isNodeErrorWithCode(error, 'ENOENT')
@@ -1370,7 +1390,12 @@ export function registerIpc(
     }
 
     const onDestroyed = (): void => {
-      void detachTrackedWorkspaceHandle(workspaceHandle)
+      void detachTrackedWorkspaceHandle(workspaceHandle).catch((error: unknown) => {
+        electronLogger.warn(
+          `[ipc] Failed to release workspace handle during window teardown: ${workspaceHandle}`,
+          error,
+        )
+      })
     }
     const directories = previous?.directories ?? new Set<string>()
     directories.add(normalizedDirectory)
@@ -1866,8 +1891,21 @@ export function registerIpc(
       if (typeof directory !== 'string') {
         throw new Error('Project management directory must be a string.')
       }
-      const authorizedDirectory =
-        await services.workspaceService.requestProjectPathAccess(directory)
+      let authorizedDirectory: string
+      try {
+        authorizedDirectory =
+          await services.workspaceService.requestProjectPathAccess(directory)
+      } catch (error) {
+        // Discovery is a probe: a path outside the granted scope (or one probed
+        // before any project root is registered) simply has no visible project.
+        if (
+          isNodeErrorWithCode(error, 'PROJECT_PATH_ACCESS_DENIED') ||
+          isNodeErrorWithCode(error, 'PROJECT_ROOT_NOT_REGISTERED')
+        ) {
+          return null
+        }
+        throw error
+      }
       return await services.projectManagementReadService.discoverProject(
         authorizedDirectory,
       )
@@ -1917,6 +1955,40 @@ export function registerIpc(
       return await services.projectManagementReadService.readWorkspaceStepConfiguration(
         request as unknown as DesktopProjectManagementWorkspaceStepConfigurationRequest,
       )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.projectManagementImportWorkspace,
+    async (event, projectRoot) => {
+      if (!services.projectWorkspaceImportService) {
+        return {
+          status: 'failed',
+          code: 'project_invalid',
+          message: 'Project workspace import is unavailable.',
+        }
+      }
+      if (typeof projectRoot !== 'string' || !projectRoot.trim()) {
+        return {
+          status: 'failed',
+          code: 'project_invalid',
+          message: 'Project workspace import requires a project root.',
+        }
+      }
+      requireBackendMutationAllowed(event)
+      const workspacePath = await pickDirectory({ title: 'Select Workspace Folder' })
+      if (!workspacePath) return { status: 'cancelled' }
+      try {
+        const result = await services.projectWorkspaceImportService.importWorkspace(
+          projectRoot,
+          workspacePath,
+        )
+        invalidateBackendWorkspaceForSender(event.sender)
+        services.backendProjectComparisonService.invalidateProject(projectRoot)
+        return result
+      } catch (error) {
+        return projectWorkspaceImportFailure(error)
+      }
     },
   )
 

@@ -32,7 +32,6 @@ import {
 import {
   clearFlowExecutionActiveForWorkspace,
   isFlowExecutionActiveForWorkspace,
-  markFlowExecutionActiveForWorkspace,
 } from './flowExecutionState'
 import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
@@ -59,7 +58,10 @@ import {
   rewriteWorkspaceConfigPathsForReplacement,
   workspaceParentPath,
 } from './workspaceReplacement'
-import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
+import {
+  resolveProjectRouteContextForWorkspace,
+  type ProjectRouteContext,
+} from '@/utils/projectManifestRegistration'
 import { recentProjectFreshness, recentProjectSnapshot } from './recentProjectSnapshot'
 
 interface SerializedProject {
@@ -430,10 +432,15 @@ export function useWorkspace() {
       }
     })
 
-  const registerProjectManagedReadScope = (workspacePath: string): Promise<void> =>
+  const registerProjectManagedReadScope = (
+    workspacePath: string,
+    explicitProjectContext?: ProjectRouteContext | null,
+  ): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+        const projectContext =
+          explicitProjectContext ??
+          (await resolveProjectRouteContextForWorkspace(workspacePath))
         if (!projectContext) return
 
         const desktopApi = getDesktopApi()
@@ -609,7 +616,11 @@ export function useWorkspace() {
             await router.replace('/')
             return
           }
-          await registerProjectManagedReadScope(canonicalProjectRoot)
+          const routeProjectRoot = asString(router.currentRoute.value.query.projectRoot)
+          await registerProjectManagedReadScope(
+            canonicalProjectRoot,
+            routeProjectRoot ? { projectRoot: routeProjectRoot } : undefined,
+          )
           if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           currentProject.value = {
             ...restored,
@@ -685,6 +696,7 @@ export function useWorkspace() {
     project?: Project,
     options: {
       designTool?: DesignTool
+      projectContext?: ProjectRouteContext | null
       quiet?: boolean
       shouldActivate?: () => boolean
     } = {},
@@ -835,7 +847,10 @@ export function useWorkspace() {
           }
           return false
         }
-        await registerProjectManagedReadScope(canonicalProjectRoot)
+        await registerProjectManagedReadScope(
+          canonicalProjectRoot,
+          options.projectContext,
+        )
         if (!isLatestOpenProjectRequest()) return false
         if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
           return false
@@ -903,37 +918,6 @@ export function useWorkspace() {
         })
         candidateWorkspaceCommitted = true
         connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
-
-        // 恢复运行状态：检查ECC runtime中是否有正在运行的operations
-        if (!isFlowExecutionActiveForWorkspace(canonicalProjectRoot)) {
-          try {
-            const desktopApi = getDesktopApi()
-            if (desktopApi.ecc.runtime?.snapshot) {
-              const snapshot = await desktopApi.ecc.runtime.snapshot({
-                workspaceHandle: workspaceId,
-              })
-
-              // 检查是否有活跃的 operations。
-              const hasActiveOperations = snapshot.operations?.some(
-                (op: import('@ecos-studio/shared').EccRuntimeOperation) =>
-                  op.state === 'running' || op.state === 'queued',
-              )
-
-              if (hasActiveOperations) {
-                markFlowExecutionActiveForWorkspace(canonicalProjectRoot)
-                console.log(
-                  `[useWorkspace] Restored running state for workspace: ${canonicalProjectRoot}`,
-                )
-              }
-            }
-          } catch (error) {
-            // 静默失败，不影响workspace打开流程
-            console.warn(
-              `[useWorkspace] Failed to check runtime operations for ${canonicalProjectRoot}:`,
-              error,
-            )
-          }
-        }
 
         if (previousWorkspaceHandle !== workspaceId) {
           releaseWorkspaceHandleAfterFlow(previousWorkspaceHandle, previousDesignTool)

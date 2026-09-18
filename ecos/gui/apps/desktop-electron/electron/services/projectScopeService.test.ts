@@ -164,6 +164,36 @@ describe('ProjectScopeService', () => {
     })
   })
 
+  it('registers an external active workspace by exact manifest membership', async () => {
+    const projectRoot = await createTempDir('ecos-managed-project-root-')
+    const workspaceRoot = await createTempDir('ecos-external-workspace-root-')
+    const siblingRoot = await createTempDir('ecos-external-sibling-root-')
+    const workspaceFlow = join(workspaceRoot, 'home', 'flow.json')
+    const siblingFlow = join(siblingRoot, 'home', 'flow.json')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await mkdir(join(siblingRoot, 'home'), { recursive: true })
+    await writeFile(workspaceFlow, '{"steps":[]}')
+    await writeFile(siblingFlow, '{"steps":[]}')
+    await writeProjectManifest(projectRoot, [workspaceRoot, siblingRoot])
+
+    const service = projectScopeWithManifest()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await expect(service.registerProjectReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+      await expect(service.requestProjectPathAccess(siblingFlow)).resolves.toBe(
+        siblingFlow,
+      )
+      await expect(
+        service.requestProjectPathAccess(join(siblingRoot, '..', 'not-declared.txt')),
+      ).rejects.toThrow('outside current project root')
+      await expect(service.requestWritableProjectPathAccess(siblingFlow)).rejects.toThrow(
+        'outside current project root',
+      )
+    })
+  })
+
   it('allows a declared workspace whose directory name begins with two dots', async () => {
     const projectRoot = await createTempDir('ecos-parent-project-root-')
     const workspaceRoot = join(projectRoot, '.ws_0004')
@@ -206,15 +236,16 @@ describe('ProjectScopeService', () => {
     })
   })
 
-  it('rejects a read root that is not the active workspace parent', async () => {
+  it('rejects an unrelated read root whose manifest does not declare the active workspace', async () => {
     const workspaceRoot = await createTempDir('ecos-active-project-root-')
     const unrelatedRoot = await createTempDir('ecos-unrelated-project-root-')
-    const service = new ProjectScopeService()
+    await writeProjectManifest(unrelatedRoot, [])
+    const service = projectScopeWithManifest()
 
     await runWithWindowScope(1, async () => {
       await service.registerProjectRoot(workspaceRoot)
       await expect(service.registerProjectReadRoot(unrelatedRoot)).rejects.toThrow(
-        'Project read root must contain the active workspace root',
+        'does not declare the active workspace',
       )
     })
   })

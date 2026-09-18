@@ -1525,6 +1525,205 @@ describe('EccWorkspaceRuntime', () => {
     ])
   })
 
+  it('does not serve a cached active snapshot while recovering an interrupted operation', async () => {
+    const { client, service, sidecarEvent, sidecarNotification } = createService()
+    client.responses.push(
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      {
+        directory: '/work/demo',
+        flow: {
+          steps: [
+            {
+              name: 'Route',
+              peakMemory: 0,
+              runtime: '',
+              state: 'Ongoing',
+              tool: 'openroad',
+            },
+          ],
+        },
+        home: {},
+        lastEventId: 'workspace-1:running',
+        operations: [
+          {
+            createdAt: 1,
+            currentStep: 'Route',
+            currentTool: 'openroad',
+            error: null,
+            kind: 'flow',
+            operationId: 'operation-route',
+            origin: 'gui',
+            rerun: false,
+            result: null,
+            state: 'running',
+            step: 'Route',
+            updatedAt: 1,
+            workspaceId: 'workspace-1',
+          },
+        ],
+        parameters: {},
+      },
+      { directory: '/work/demo', workspaceId: 'workspace-2' },
+      {
+        recovered: [
+          {
+            logFile: '/work/demo/route_openroad/log/route.log',
+            operationId: 'operation-route',
+            step: 'Route',
+            tool: 'openroad',
+          },
+        ],
+      },
+      {
+        directory: '/work/demo',
+        flow: {
+          steps: [
+            {
+              name: 'Route',
+              peakMemory: 0,
+              runtime: '',
+              state: 'Incomplete',
+              tool: 'openroad',
+            },
+          ],
+        },
+        home: {},
+        lastEventId: 'workspace-2:interrupted',
+        operations: [],
+        parameters: {},
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
+
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:operation-route:1',
+        kind: 'flow',
+        operationId: 'operation-route',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'workspace-1',
+      },
+    })
+    sidecarEvent({ code: 1, reason: 'unexpected', signal: null, type: 'runtime.exited' })
+
+    await expect(
+      service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle }),
+    ).resolves.toMatchObject({ operations: [] })
+    expect(service.recentOperationOutcomes()).toEqual([
+      expect.objectContaining({ operationId: 'operation-route', state: 'interrupted' }),
+    ])
+  })
+
+  it('waits for in-flight crash recovery before starting a new run', async () => {
+    const { client, service, sidecarEvent, sidecarNotification } = createService()
+    const recovery = deferred<{ recovered: unknown[] }>()
+    client.responses.push(
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { directory: '/work/demo', workspaceId: 'workspace-2' },
+      recovery.promise,
+      { createdAt: 2, operationId: 'operation-flow-2', state: 'queued' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:operation-route:1',
+        kind: 'flow',
+        operationId: 'operation-route',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'workspace-1',
+      },
+    })
+    sidecarEvent({ code: 1, reason: 'unexpected', signal: null, type: 'runtime.exited' })
+    await vi.waitFor(() => {
+      expect(
+        client.calls.some((call) => call.method === 'workspace.recover_interrupted'),
+      ).toBe(true)
+    })
+
+    const start = service.startFlowOperation({
+      expectedWorkspaceRevision: 1,
+      idempotencyKey: 'flow-2',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+    expect(client.calls.some((call) => call.method === 'operation.start_flow')).toBe(
+      false,
+    )
+
+    recovery.resolve({ recovered: [] })
+    await expect(start).resolves.toMatchObject({ operationId: 'operation-flow-2' })
+    expect(client.calls.at(-1)).toMatchObject({
+      method: 'operation.start_flow',
+      params: { workspaceId: 'workspace-2' },
+    })
+  })
+
+  it('rejects a new run while crash recovery is failed and proceeds after retry', async () => {
+    const { client, service, sidecarEvent, sidecarNotification } = createService()
+    client.responses.push(
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { directory: '/work/demo', workspaceId: 'workspace-2' },
+      new Error('temporary recovery failure'),
+      new Error('temporary recovery failure'),
+      { recovered: [] },
+      { createdAt: 2, operationId: 'operation-flow-2', state: 'queued' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    sidecarNotification({
+      jsonrpc: '2.0',
+      method: 'runtime.event',
+      params: {
+        eventId: 'workspace-1:operation-route:1',
+        kind: 'flow',
+        operationId: 'operation-route',
+        origin: 'gui',
+        payload: { state: 'running', step: 'Route' },
+        sequence: 1,
+        timestamp: 1,
+        type: 'operation.changed',
+        workspaceId: 'workspace-1',
+      },
+    })
+    sidecarEvent({ code: 1, reason: 'unexpected', signal: null, type: 'runtime.exited' })
+    await vi.waitFor(() => {
+      expect(
+        client.calls.filter((call) => call.method === 'workspace.recover_interrupted'),
+      ).toHaveLength(1)
+    })
+
+    await expect(
+      service.startFlowOperation({
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'flow-1',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).rejects.toThrow(/recovery/)
+    expect(client.calls.some((call) => call.method === 'operation.start_flow')).toBe(
+      false,
+    )
+
+    await expect(
+      service.startFlowOperation({
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'flow-2',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toMatchObject({ operationId: 'operation-flow-2' })
+  })
+
   it('recovers a persisted interruption when the start notification was lost', async () => {
     const { client, service, sidecarEvent } = createService()
     client.responses.push(
@@ -1769,6 +1968,42 @@ describe('EccWorkspaceRuntime', () => {
     expect(snapshot.flow.steps).toEqual([
       expect.objectContaining({ name: 'place', state: 'Incomplete' }),
     ])
+  })
+
+  it('publishes the recovered workspace revision', async () => {
+    const { client, events, service } = createService()
+    client.responses.push(
+      { directory: '/work/demo', workspaceId: 'workspace-1', workspaceRevision: 11 },
+      {
+        recovered: [
+          {
+            logFile: '/work/demo/place_dreamplace/log/place.log',
+            operationId: 'operation-place',
+            step: 'place',
+            tool: 'dreamplace',
+          },
+        ],
+        workspaceRevision: 12,
+      },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+
+    const recovery = await service.recoverInterrupted(
+      workspace.workspaceHandle,
+      'operation-place',
+    )
+
+    expect(recovery.workspaceRevision).toBe(12)
+    expect(service.workspaceSession(workspace.workspaceHandle).workspaceRevision).toBe(12)
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: { workspaceRevision: 12 },
+        method: 'workspace.recover_interrupted',
+        phase: 'recovered',
+        type: 'operation.progress',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    )
   })
 
   it('reopens retained sessions when the sidecar returns a new client', async () => {

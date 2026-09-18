@@ -698,10 +698,18 @@
           checked by default.
         </p>
         <label class="workspace-delete-option">
-          <input v-model="keepWorkspaceDataOnDelete" type="checkbox" />
+          <input
+            v-model="keepWorkspaceDataOnDelete"
+            type="checkbox"
+            :disabled="pendingDeleteWorkspaceIsExternal"
+          />
           <span>
             <strong>Keep workspace data</strong>
-            <small v-if="keepWorkspaceDataOnDelete">
+            <small v-if="pendingDeleteWorkspaceIsExternal">
+              External workspace data cannot be deleted from Project Management. The
+              manifest entry only will be removed.
+            </small>
+            <small v-else-if="keepWorkspaceDataOnDelete">
               Workspace folder will remain at
               {{ pendingDeleteWorkspace?.workspacePath || '-' }}.
             </small>
@@ -835,6 +843,7 @@ import {
   type MpcSpecDesign,
 } from '@/utils/mpcSpec'
 import {
+  importProjectManagementWorkspace,
   listProjectManagementEntries,
   readProjectManagementManifest,
 } from '@/utils/projectManagementRead'
@@ -1100,6 +1109,16 @@ const pendingDeleteWorkspace = computed<ProjectWorkspace | null>(() => {
     selectedProject.value.workspaces.find(
       (workspace) => workspace.id === pendingDeleteWorkspaceId.value,
     ) ?? null
+  )
+})
+const pendingDeleteWorkspaceIsExternal = computed(() => {
+  const workspacePath = normalizePath(pendingDeleteWorkspace.value?.workspacePath ?? '')
+  const projectRoot = normalizePath(selectedProject.value.path)
+  return Boolean(
+    workspacePath &&
+    projectRoot &&
+    workspacePath !== projectRoot &&
+    !workspacePath.startsWith(`${projectRoot}/`),
   )
 })
 
@@ -1567,6 +1586,10 @@ async function openWorkspace(workspace: ProjectWorkspace) {
       lastOpened: new Date(),
     },
     {
+      projectContext: {
+        projectRoot: selectedProject.value.path,
+        projectName: selectedProject.value.name,
+      },
       shouldActivate: () =>
         normalizeProjectManagementLocation(route.fullPath) === originFullPath &&
         normalizePath(currentProject.value?.path ?? '') ===
@@ -1693,10 +1716,6 @@ async function importProject() {
       ...projectManifests.value,
       [project.path]: manifest,
     }
-    workspaceFlowStates.value = {
-      ...workspaceFlowStates.value,
-      [project.path]: {},
-    }
     const wasSelected = selectedProjectId.value === project.id
     selectedProjectId.value = project.id
     if (wasSelected) void loadSelectedProjectWorkspaceData()
@@ -1714,24 +1733,28 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
   closeRowActionMenus()
   if (!project.path) return
   try {
-    const desktopApi = getDesktopApi()
-    const directory = await desktopApi.dialog.pickDirectory({
-      title: 'Select Workspace Folder',
-    })
-    if (!directory) return
-
     const projectRoot = project.path
-
-    const updated = await mutateProjectManifest(projectRoot, {
-      type: 'register-workspace',
-      input: {
-        projectRoot,
-        projectName: project.name,
-        workspacePath: directory,
-      },
-    })
-    await applyProjectManifestForProject(updated, projectRoot)
+    const result = await importProjectManagementWorkspace(projectRoot)
+    if (result.status === 'cancelled') return
+    if (result.status === 'failed') {
+      throw new Error(`${result.code}: ${result.message}`)
+    }
+    await applyProjectManifestForProject(result.manifest, projectRoot)
     selectedProjectId.value = project.id
+    selectedWorkspaceId.value = result.workspaceId
+    showToast(
+      result.status === 'already_registered'
+        ? {
+            severity: 'info',
+            summary: 'Workspace already registered',
+            detail: `${result.workspaceId} is already part of this project.`,
+          }
+        : {
+            severity: 'success',
+            summary: 'Workspace imported',
+            detail: `${result.workspaceId} was imported into this project.`,
+          },
+    )
   } catch (error) {
     console.warn('Failed to import workspace into project.', error)
     showToast({
@@ -1782,7 +1805,8 @@ async function confirmDeleteWorkspace() {
   const workspaceId = pendingDeleteWorkspaceId.value
   deleteWorkspaceError.value = ''
   const deleted = await deleteWorkspace(workspaceId ?? undefined, {
-    keepWorkspaceData: keepWorkspaceDataOnDelete.value,
+    keepWorkspaceData:
+      pendingDeleteWorkspaceIsExternal.value || keepWorkspaceDataOnDelete.value,
   })
   if (deleted) closeDeleteWorkspaceDialog()
 }
@@ -2081,11 +2105,6 @@ async function applyProjectManifestForProject(
     ...projectManifests.value,
     [projectRoot]: manifest,
     [normalizedRoot]: manifest,
-  }
-  workspaceFlowStates.value = {
-    ...workspaceFlowStates.value,
-    [projectRoot]: {},
-    [normalizedRoot]: {},
   }
   projectHistory.value = await rememberProjectHistoryEntry(
     projectFromManifest(manifest, normalizedRoot),

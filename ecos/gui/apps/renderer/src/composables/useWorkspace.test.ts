@@ -364,6 +364,35 @@ describe('useWorkspace openProject', () => {
     return workspace
   }
 
+  it('does not recreate a local run lock from a Workspace snapshot', async () => {
+    const workspace = useWorkspace()
+    const snapshot = vi.fn(async () => ({
+      operations: [{ operationId: 'operation-stale', state: 'running' }],
+    }))
+    desktopApi.ecc!.runtime!.snapshot = snapshot as unknown as NonNullable<
+      DesktopApi['ecc']['runtime']
+    >['snapshot']
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_handle: 'workspace-demo',
+      },
+    })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/demo',
+        name: 'demo',
+        path: '/work/demo',
+        lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true)
+
+    expect(snapshot).not.toHaveBeenCalled()
+    expect(markFlowExecutionActiveForWorkspaceMock).not.toHaveBeenCalled()
+  })
+
   it('re-enters the active workspace without reloading it through ECC RPC', async () => {
     const workspace = useWorkspace()
     const activeProject: Project = {
@@ -601,6 +630,32 @@ describe('useWorkspace openProject', () => {
 
     expect(resolveProjectRouteContextForWorkspaceMock).toHaveBeenCalledWith('/work/demo')
     expect(desktopApi.workspace.registerProjectReadRoot).toHaveBeenCalledWith('/work')
+  })
+
+  it('uses an explicit project context when opening an external workspace', async () => {
+    const workspace = useWorkspace()
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/external/recovered',
+        workspace_handle: 'workspace-recovered',
+      },
+    })
+
+    await expect(
+      workspace.openProject(
+        {
+          id: '/external/recovered',
+          name: 'gcd/recovered',
+          path: '/external/recovered',
+          lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        { projectContext: { projectRoot: '/work/gcd', projectName: 'gcd' } },
+      ),
+    ).resolves.toBe(true)
+
+    expect(resolveProjectRouteContextForWorkspaceMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.registerProjectReadRoot).toHaveBeenCalledWith('/work/gcd')
   })
 
   it('stops before loading when the selected directory is not an ECOS workspace', async () => {

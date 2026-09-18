@@ -142,6 +142,9 @@ function registerHandlers(
       onInvalidated: vi.fn(),
       onExecutionInvalidated: vi.fn(),
     },
+    projectWorkspaceImportService: {
+      importWorkspace: vi.fn(),
+    },
     workspaceService: {
       approvePendingExternalReadRoots: vi.fn(),
       clearProjectRoot: vi.fn(),
@@ -667,6 +670,56 @@ describe('registerIpc', () => {
       ok: false,
       error: { message: 'Backend project Findings query is invalid.' },
     })
+  })
+
+  it('imports only the workspace selected by the main-process directory picker', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: {} }
+    showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/tmp/external-workspace'],
+    })
+    statMock.mockResolvedValueOnce({ isDirectory: () => true, isFile: () => false })
+    services.projectWorkspaceImportService.importWorkspace.mockResolvedValueOnce({
+      status: 'imported',
+      manifest: { workspaces: [] },
+      workspaceId: 'external-workspace',
+      workspacePath: '/tmp/external-workspace',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementImportWorkspace)?.(
+        event,
+        '/tmp/project',
+        '/tmp/renderer-forged-path',
+      ),
+    ).resolves.toMatchObject({ status: 'imported' })
+    expect(showOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: ['openDirectory'],
+        title: 'Select Workspace Folder',
+      }),
+    )
+    expect(services.projectWorkspaceImportService.importWorkspace).toHaveBeenCalledWith(
+      '/tmp/project',
+      '/tmp/external-workspace',
+    )
+    expect(
+      services.projectWorkspaceImportService.importWorkspace,
+    ).not.toHaveBeenCalledWith('/tmp/project', '/tmp/renderer-forged-path')
+  })
+
+  it('treats a cancelled workspace import picker as a no-op', async () => {
+    const { handlers, services } = registerHandlers()
+    showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementImportWorkspace)?.(
+        { sender: {} },
+        '/tmp/project',
+      ),
+    ).resolves.toEqual({ status: 'cancelled' })
+    expect(services.projectWorkspaceImportService.importWorkspace).not.toHaveBeenCalled()
   })
 
   it('requires native confirmation before approving external frontend roots', async () => {
@@ -2840,6 +2893,7 @@ describe('registerIpc', () => {
       generation: 4,
       operations: [{ operationId: 'operation-a', workspaceHandle: 'workspace-handle-a' }],
       outcomes: [],
+      recoveries: [],
     })
     await handlers.get(desktopApiIpcChannels.eccRuntimeOperationProjection)?.({
       sender: otherSender,
@@ -4012,6 +4066,95 @@ describe('registerIpc', () => {
       error: {
         code: 'ENOENT',
         message: `ENOENT: no such file or directory, open '${path}'`,
+        name: 'Error',
+      },
+      ok: false,
+    })
+
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('resolves project discovery outside the granted scope as null without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.workspaceService.requestProjectPathAccess.mockRejectedValue(
+      Object.assign(
+        new Error('Refusing to grant access outside current project root: /tmp/other'),
+        { code: 'PROJECT_PATH_ACCESS_DENIED' },
+      ),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementDiscoverProject)?.(
+        event,
+        '/tmp/other/ws_0001',
+      ),
+    ).resolves.toBeNull()
+
+    expect(services.projectManagementReadService.discoverProject).not.toHaveBeenCalled()
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('resolves project discovery without a registered root as null without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.workspaceService.requestProjectPathAccess.mockRejectedValue(
+      Object.assign(new Error('Project root is not registered'), {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+      }),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManagementDiscoverProject)?.(
+        event,
+        '/tmp/other/ws_0001',
+      ),
+    ).resolves.toBeNull()
+
+    expect(services.projectManagementReadService.discoverProject).not.toHaveBeenCalled()
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('returns an overview refresh racing root teardown as an IPC error without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.backendWorkspaceService.refreshOverview.mockRejectedValue(
+      Object.assign(new Error('Project root is not registered'), {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+      }),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.backendWorkspaceRefreshOverview)?.(event),
+    ).resolves.toEqual({
+      error: {
+        code: 'PROJECT_ROOT_NOT_REGISTERED',
+        message: 'Project root is not registered',
+        name: 'Error',
+      },
+      ok: false,
+    })
+
+    expect(electronLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it('returns a Force quit operation rejection as an IPC error without warning', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.eccRuntimeService.waitForOperation.mockRejectedValue(
+      Object.assign(new Error('ECC sidecar was terminated during Force quit.'), {
+        code: 'ECC_SIDECAR_FORCE_QUIT',
+      }),
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRuntimeWaitForOperation)?.(event, {
+        operationId: 'operation-1',
+      }),
+    ).resolves.toEqual({
+      error: {
+        code: 'ECC_SIDECAR_FORCE_QUIT',
+        message: 'ECC sidecar was terminated during Force quit.',
         name: 'Error',
       },
       ok: false,
