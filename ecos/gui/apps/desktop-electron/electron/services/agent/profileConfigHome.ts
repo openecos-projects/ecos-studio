@@ -92,23 +92,6 @@ export const BUILTIN_MODEL_PROFILES: DesktopModelProfile[] = [
     defaultModel: 'deepseek-flash',
     builtIn: true,
   },
-  {
-    id: 'sub2api',
-    name: 'Sub2API（测试）',
-    baseUrl: 'https://api.wallvps.fun/v1',
-    wireApi: 'responses',
-    envKey: 'SUB2API_API_KEY',
-    models: [
-      {
-        slug: 'kimi-for-coding',
-        displayName: 'kimi-for-coding',
-        // ponytail: conservative test window; use gateway metadata if a larger window is needed.
-        contextWindow: 200_000,
-      },
-    ],
-    defaultModel: 'kimi-for-coding',
-    builtIn: true,
-  },
 ]
 
 interface CatalogModelEntry {
@@ -206,10 +189,7 @@ export function buildProfileConfigToml(
   configHome: string,
 ): string {
   const catalogPath = join(configHome, 'models.json')
-  const providerKey =
-    profile.id === 'sub2api'
-      ? 'sub2api'
-      : profile.id.toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+  const providerKey = profile.id.toUpperCase().replace(/[^A-Z0-9_]/g, '_')
   return [
     `# Managed by ECOS Studio. Regenerated when the "${tomlString(profile.name)}" profile is selected.`,
     `model = "${tomlString(profile.defaultModel)}"`,
