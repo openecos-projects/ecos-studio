@@ -19,12 +19,11 @@ from ecos_agent.optimization.experiments.knowledge_protocol import (
 from ecos_agent.optimization.experiments.knowledge_metrics import build_feedback_ledger
 
 
-def test_protocol_is_limited_to_gcd() -> None:
+def test_protocol_is_limited_to_the_pilot_cohort() -> None:
     assert validate_design_ids(["gcd"]) == ("gcd",)
+    assert validate_design_ids(["vm80", "gcd"]) == ("gcd", "vm80")
     with pytest.raises(ValueError):
         validate_design_ids(["gcd", "cia"])
-    with pytest.raises(ValueError):
-        validate_design_ids(["vm80"])
 
 
 def test_protocol_hash_binds_manifest() -> None:

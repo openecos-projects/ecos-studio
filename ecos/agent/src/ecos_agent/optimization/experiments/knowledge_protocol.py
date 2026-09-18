@@ -6,7 +6,7 @@ from typing import Mapping, Sequence
 
 from ecos_agent.hashing import canonical_sha256
 
-PILOT_DESIGNS = ("gcd",)
+PILOT_DESIGNS = ("gcd", "vm80")
 
 
 def context_fingerprint(payload: Mapping[str, object]) -> str:
@@ -17,7 +17,9 @@ def context_fingerprint(payload: Mapping[str, object]) -> str:
 def validate_design_ids(design_ids: Sequence[str]) -> tuple[str, ...]:
     values = tuple(sorted(set(design_ids)))
     if not values or any(item not in PILOT_DESIGNS for item in values):
-        raise ValueError("knowledge pilot only supports gcd")
+        raise ValueError(
+            f"knowledge pilot is limited to the pilot cohort: {PILOT_DESIGNS}"
+        )
     return values
 
 
