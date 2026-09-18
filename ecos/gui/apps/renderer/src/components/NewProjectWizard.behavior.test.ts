@@ -718,4 +718,194 @@ describe('NewProjectWizard behavior', () => {
     expect(wizard.isFlowStepSelected('CTS')).toBe(true)
     wrapper.unmount()
   })
+
+  it('falls back to the canonical ECC chain when discovery has no flow definitions', async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStepOptions: Array<{ name: string; description: string }>
+    }
+    wizard.currentStep = 3
+    await flushPromises()
+
+    expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
+      'Synthesis',
+      'lec',
+      'preFloorplan',
+      'macroPlacement',
+      'postFloorplan',
+      'place',
+      'CTS',
+      'legalization',
+      'Timing optimization',
+      'route',
+      'filler',
+      'RCX',
+      'sta',
+      'lvs',
+      'postRouteLec',
+      'drc',
+      'Harden',
+    ])
+    expect(wrapper.text()).toContain('preFloorplan')
+    expect(wrapper.text()).toContain('macroPlacement')
+    wrapper.unmount()
+  })
+
+  it('prefers the flow definition matching the current flowId', async () => {
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: {
+        flowDefinitions: [
+          {
+            flowId: 'rtl2gds',
+            stepIds: ['Synthesis', 'preFloorplan', 'macroPlacement', 'Harden'],
+          },
+          { flowId: 'harden', stepIds: ['Synthesis', 'customStep', 'Harden'] },
+        ],
+      },
+      parameters: [],
+      pdkInstallations: [],
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStepOptions: Array<{ name: string; description: string }>
+    }
+    wizard.currentStep = 3
+    await flushPromises()
+
+    expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
+      'Synthesis',
+      'customStep',
+      'Harden',
+    ])
+    expect(wrapper.text()).toContain('customStep step.')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: {},
+      parameters: [],
+      pdkInstallations: [],
+    })
+  })
+
+  it('uses the rtl2gds definition for legacy preset flowIds and resets stale boundaries', async () => {
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: {
+        flowDefinitions: [
+          { flowId: 'rtl2gds', stepIds: ['Synthesis', 'preFloorplan', 'place', 'sta'] },
+        ],
+      },
+      parameters: [],
+      pdkInstallations: [],
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { standaloneWorkspace: true } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowEndStep: string
+      flowStepOptions: Array<{ name: string; description: string }>
+    }
+    wizard.currentStep = 3
+    await flushPromises()
+
+    // Default end step 'Harden' is absent from the discovered chain, so the
+    // boundary resets to the last discovered step.
+    expect(wizard.flowStepOptions.map((step) => step.name)).toEqual([
+      'Synthesis',
+      'preFloorplan',
+      'place',
+      'sta',
+    ])
+    expect(wizard.flowEndStep).toBe('sta')
+    expect(wrapper.text()).toContain('preFloorplan')
+    wrapper.unmount()
+    wizardMocks.getWorkspaceCreationModel.mockResolvedValue({
+      controls: {
+        flowBoundaries: true,
+        manualPdkFiles: true,
+        mpc: true,
+        pdkVersion: true,
+      },
+      discovery: {},
+      parameters: [],
+      pdkInstallations: [],
+    })
+  })
+
+  it("maps a persisted 'Floorplan' start step to preFloorplan", async () => {
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          standaloneWorkspace: true,
+          flow_config: { start_step: 'Floorplan', end_step: 'Harden', steps: [] },
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      flowStartStep: string
+      selectedFlowSteps: string[]
+    }
+    wizard.currentStep = 3
+    await flushPromises()
+
+    expect(wizard.flowStartStep).toBe('preFloorplan')
+    expect(wizard.selectedFlowSteps[0]).toBe('preFloorplan')
+    wrapper.unmount()
+  })
 })

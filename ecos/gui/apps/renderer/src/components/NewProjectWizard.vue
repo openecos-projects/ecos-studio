@@ -451,7 +451,7 @@
                         @change="selectFlowStartStep"
                       >
                         <option
-                          v-for="step in hardenFlowSteps"
+                          v-for="step in flowStepOptions"
                           :key="step.name"
                           :value="step.name"
                           :disabled="isFlowStepStartDisabled(step.name)"
@@ -495,7 +495,7 @@
 
                   <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <div
-                      v-for="(step, index) in hardenFlowSteps"
+                      v-for="(step, index) in flowStepOptions"
                       :key="step.name"
                       class="relative"
                     >
@@ -546,7 +546,7 @@
                         </span>
                       </button>
                       <span
-                        v-if="index < hardenFlowSteps.length - 1 && (index + 1) % 4 !== 0"
+                        v-if="index < flowStepOptions.length - 1 && (index + 1) % 4 !== 0"
                         class="flow-step-connector"
                         aria-hidden="true"
                       >
@@ -1596,6 +1596,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
+import { getStepMetadata } from '@/api/type'
 import {
   isHdlFilePath,
   projectIdFromName,
@@ -1637,21 +1638,40 @@ interface Props {
   title?: string
 }
 type ProjectMode = 'select' | 'create'
-type FlowStepName =
-  | 'Synthesis'
-  | 'Floorplan'
-  | 'place'
-  | 'CTS'
-  | 'legalization'
-  | 'Timing optimization'
-  | 'route'
-  | 'drc'
-  | 'lvs'
-  | 'filler'
-  | 'postRouteLec'
-  | 'RCX'
-  | 'sta'
-  | 'Harden'
+/** Canonical ECC flow step id. The live list is discovered from ECC, so this
+ * stays `string`; persisted values are validated via normalizeFlowStepName. */
+type FlowStepName = string
+
+/**
+ * Static copy of the ECC canonical rtl2gds chain
+ * (ecc/chipcompiler/rtl2gds/builder.py build_rtl2gds_flow), used until the
+ * workspace creation model reports the live flow definition.
+ */
+const FALLBACK_FLOW_STEPS: Array<{ name: FlowStepName; description: string }> = [
+  { name: 'Synthesis', description: 'RTL synthesis entry.' },
+  { name: 'lec', description: 'Post-synthesis logic equivalence check.' },
+  { name: 'preFloorplan', description: 'Initial floorplan and die setup.' },
+  { name: 'macroPlacement', description: 'Macro placement.' },
+  { name: 'postFloorplan', description: 'Floorplan finalization after macro placement.' },
+  { name: 'place', description: 'Standard cell placement.' },
+  { name: 'CTS', description: 'Clock tree synthesis.' },
+  { name: 'legalization', description: 'Placement legalization.' },
+  { name: 'Timing optimization', description: 'Cell sizing after legalization.' },
+  { name: 'route', description: 'Detailed routing.' },
+  { name: 'filler', description: 'Filler insertion.' },
+  { name: 'RCX', description: 'Parasitic extraction.' },
+  { name: 'sta', description: 'Static timing analysis.' },
+  { name: 'lvs', description: 'Layout versus netlist connectivity.' },
+  { name: 'postRouteLec', description: 'Post-route logic equivalence check.' },
+  { name: 'drc', description: 'Design rule checking.' },
+  { name: 'Harden', description: 'Final harden output.' },
+]
+const KNOWN_FLOW_STEP_NAMES: ReadonlySet<string> = new Set(
+  FALLBACK_FLOW_STEPS.map((step) => step.name),
+)
+const FLOW_STEP_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
+  FALLBACK_FLOW_STEPS.map((step) => [step.name, step.description]),
+)
 type DesignInputKey = 'rtl' | 'filelist' | 'def' | 'verilog' | 'sdc'
 type PdkResourceKey = 'tech_lef' | 'cell_lef' | 'liberty'
 type DieAreaMode = 'width_height' | 'utilitization_margin'
@@ -1739,18 +1759,14 @@ const initialDesignInputFingerprint = designInputFingerprint({
 })
 const {
   explicitValues: explicitCatalogParameterValues,
+  model: workspaceCreationModel,
   parameters: extraCreationParameters,
   refresh: refreshWorkspaceCreationModel,
   setValue: setCatalogParameterValue,
   values: catalogParameterValues,
 } = useWorkspaceCreationModel({
   designTool: () => props.initialConfig?.designTool,
-  flowId: () =>
-    flowEndStep.value === 'Harden'
-      ? 'harden'
-      : flowEndStep.value === 'sta' || flowEndStep.value === 'RCX'
-        ? 'rcx'
-        : 'rtl2gds',
+  flowId: wizardFlowId,
   inputMode: () => (startsFromSynthesis.value ? 'rtl' : 'postSynthesis'),
   mpc: () => projectMpc.value as Record<string, unknown> | null,
   pdk: () =>
@@ -1790,11 +1806,22 @@ const designNameTouched = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim() !== '',
 )
 /**
- * LEC compares the golden netlist against the final one; starting a fresh
+ * LEC compares the golden netlist against a later one; starting a fresh
  * workspace at it would let ECC self-compare the origin netlist.
  * Declared before the flowStartStep initializer below (const TDZ).
  */
-const FLOW_START_DISABLED_STEPS: ReadonlySet<FlowStepName> = new Set(['postRouteLec'])
+const FLOW_START_DISABLED_STEPS: ReadonlySet<FlowStepName> = new Set([
+  'lec',
+  'postRouteLec',
+])
+
+function wizardFlowId(): string {
+  return flowEndStep.value === 'Harden'
+    ? 'harden'
+    : flowEndStep.value === 'sta' || flowEndStep.value === 'RCX'
+      ? 'rcx'
+      : 'rtl2gds'
+}
 
 function isFlowStepStartDisabled(stepName: FlowStepName) {
   return isFlowStepLocked(stepName) || FLOW_START_DISABLED_STEPS.has(stepName)
@@ -1849,22 +1876,34 @@ const steps = [
   { id: 6, title: 'Spec Setting' },
 ]
 
-const hardenFlowSteps: Array<{ name: FlowStepName; description: string }> = [
-  { name: 'Synthesis', description: 'RTL synthesis entry.' },
-  { name: 'Floorplan', description: 'Initial floorplan and die setup.' },
-  { name: 'place', description: 'Standard cell placement.' },
-  { name: 'CTS', description: 'Clock tree synthesis.' },
-  { name: 'legalization', description: 'Placement legalization.' },
-  { name: 'Timing optimization', description: 'Cell sizing after legalization.' },
-  { name: 'route', description: 'Detailed routing.' },
-  { name: 'drc', description: 'Design rule checking.' },
-  { name: 'lvs', description: 'Layout versus netlist connectivity.' },
-  { name: 'filler', description: 'Filler insertion.' },
-  { name: 'postRouteLec', description: 'Post-route logic equivalence check.' },
-  { name: 'RCX', description: 'Parasitic extraction.' },
-  { name: 'sta', description: 'Static timing analysis.' },
-  { name: 'Harden', description: 'Final harden output.' },
-]
+const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
+  const definitions = workspaceCreationModel.value?.discovery.flowDefinitions
+  if (!Array.isArray(definitions)) return null
+  // Legacy presets (harden/rcx) are ranges of the canonical rtl2gds chain, so
+  // fall back to the rtl2gds definition when no exact flowId match exists.
+  const definition =
+    definitions.find((entry) => isRecord(entry) && entry.flowId === wizardFlowId()) ??
+    definitions.find((entry) => isRecord(entry) && entry.flowId === 'rtl2gds')
+  if (!isRecord(definition) || !Array.isArray(definition.stepIds)) return null
+  const stepIds = definition.stepIds.filter(
+    (id): id is string => typeof id === 'string' && id.trim() !== '',
+  )
+  return stepIds.length > 0 ? stepIds : null
+})
+
+const flowStepOptions = computed<Array<{ name: FlowStepName; description: string }>>(
+  () => {
+    const stepIds = discoveredFlowStepIds.value
+    if (!stepIds) return FALLBACK_FLOW_STEPS
+    return stepIds.map((id) => ({ name: id, description: flowStepDescription(id) }))
+  },
+)
+
+function flowStepDescription(stepId: string): string {
+  return (
+    FLOW_STEP_DESCRIPTIONS[stepId] ?? `${getStepMetadata(stepId)?.label ?? stepId} step.`
+  )
+}
 
 const pdkWizardSteps: PdkWizardStep[] = [
   {
@@ -2003,7 +2042,7 @@ function createInitialConfig(
       ...initialConfig?.parameters,
     },
     origin_def:
-      startStep === 'Synthesis' || startStep === 'Floorplan'
+      startStep === 'Synthesis' || startStep === 'preFloorplan'
         ? ''
         : (initialConfig?.origin_def ?? source_config?.origin_def ?? ''),
     origin_verilog: initialConfig?.origin_verilog ?? source_config?.origin_verilog ?? '',
@@ -2123,7 +2162,7 @@ const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
 }
 
 function initialDesignInputType(startStep: FlowStepName): DesignInputKey {
-  if (startStep === 'Floorplan') return 'verilog'
+  if (startStep === 'preFloorplan') return 'verilog'
   if (startStep !== 'Synthesis') return 'def'
   return initialRtlFiles.length > 0 || !initialFilelistPath ? 'rtl' : 'filelist'
 }
@@ -2145,8 +2184,16 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
   const aliases: Record<string, FlowStepName> = {
     synth: 'Synthesis',
     synthesis: 'Synthesis',
-    floor: 'Floorplan',
-    floorplan: 'Floorplan',
+    lec: 'lec',
+    // Legacy configs persist 'Floorplan' for the whole floorplan phase; its
+    // entry point in the canonical chain is preFloorplan.
+    floor: 'preFloorplan',
+    floorplan: 'preFloorplan',
+    prefloorplan: 'preFloorplan',
+    macro: 'macroPlacement',
+    macroplace: 'macroPlacement',
+    macroplacement: 'macroPlacement',
+    postfloorplan: 'postFloorplan',
     place: 'place',
     placement: 'place',
     cts: 'CTS',
@@ -2155,6 +2202,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     timingopt: 'Timing optimization',
     timingoptimization: 'Timing optimization',
     route: 'route',
+    routing: 'route',
     drc: 'drc',
     lvs: 'lvs',
     filler: 'filler',
@@ -2166,25 +2214,7 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
   }
   const alias = aliases[candidate.toLowerCase().replace(/[_\-\s]+/g, '')]
   if (alias) return alias
-  const validSteps: FlowStepName[] = [
-    'Synthesis',
-    'Floorplan',
-    'place',
-    'CTS',
-    'legalization',
-    'Timing optimization',
-    'route',
-    'drc',
-    'lvs',
-    'filler',
-    'postRouteLec',
-    'RCX',
-    'sta',
-    'Harden',
-  ]
-  return validSteps.includes(candidate as FlowStepName)
-    ? (candidate as FlowStepName)
-    : fallback
+  return KNOWN_FLOW_STEP_NAMES.has(candidate) ? candidate : fallback
 }
 
 function normalizeDieAreaMode(value: unknown): DieAreaMode {
@@ -2196,11 +2226,12 @@ function normalizePdkConfigMode(value: unknown): 'default' | 'manual' {
 }
 
 function flowStepsBetween(startStep: FlowStepName, endStep: FlowStepName) {
-  const startIndex = hardenFlowSteps.findIndex((step) => step.name === startStep)
-  const endIndex = hardenFlowSteps.findIndex((step) => step.name === endStep)
+  const options = flowStepOptions.value
+  const startIndex = options.findIndex((step) => step.name === startStep)
+  const endIndex = options.findIndex((step) => step.name === endStep)
   const start = Math.min(startIndex, endIndex)
   const end = Math.max(startIndex, endIndex)
-  return hardenFlowSteps.slice(start, end + 1).map((step) => step.name)
+  return options.slice(start, end + 1).map((step) => step.name)
 }
 
 function deriveManagedWorkspacePath(workspaceName: string) {
@@ -2243,10 +2274,10 @@ const workspaceLocationError = computed(() => {
 })
 
 const flowStartIndex = computed(() =>
-  hardenFlowSteps.findIndex((step) => step.name === flowStartStep.value),
+  flowStepOptions.value.findIndex((step) => step.name === flowStartStep.value),
 )
 const flowEndIndex = computed(() =>
-  hardenFlowSteps.findIndex((step) => step.name === flowEndStep.value),
+  flowStepOptions.value.findIndex((step) => step.name === flowEndStep.value),
 )
 const lockedFlowStepNames = computed(() => {
   if (!sourceContext.value?.startStep) return []
@@ -2254,18 +2285,18 @@ const lockedFlowStepNames = computed(() => {
     sourceContext.value.startStep,
     flowStartStep.value,
   )
-  const startIndex = hardenFlowSteps.findIndex((step) => step.name === startStep)
+  const startIndex = flowStepOptions.value.findIndex((step) => step.name === startStep)
   if (startIndex <= 0) return []
-  return hardenFlowSteps.slice(0, startIndex).map((step) => step.name)
+  return flowStepOptions.value.slice(0, startIndex).map((step) => step.name)
 })
 const canChooseFlowStartStep = computed(() => !sourceContext.value)
 const selectedFlowSteps = computed(() => {
   const start = Math.min(flowStartIndex.value, flowEndIndex.value)
   const end = Math.max(flowStartIndex.value, flowEndIndex.value)
-  return hardenFlowSteps.slice(start, end + 1).map((step) => step.name)
+  return flowStepOptions.value.slice(start, end + 1).map((step) => step.name)
 })
 const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
-const startsFromFloorplan = computed(() => flowStartStep.value === 'Floorplan')
+const startsFromPreFloorplan = computed(() => flowStartStep.value === 'preFloorplan')
 const hasSelectedPdkConfig = computed(
   () =>
     isPdkEligible(selectedPdk.value) &&
@@ -2299,7 +2330,7 @@ const designInputTypes = computed<DesignInputType[]>(() => {
     ]
   }
 
-  if (startsFromFloorplan.value) {
+  if (startsFromPreFloorplan.value) {
     return [
       {
         key: 'verilog',
@@ -2483,6 +2514,26 @@ watch(workspaceName, (nextName) => {
   syncWorkspaceConfig()
 })
 
+// The ECC-discovered step list arrives asynchronously; keep the selected
+// boundaries inside whichever list is currently active.
+watch(flowStepOptions, (options) => {
+  const names = options.map((step) => step.name)
+  if (names.length === 0) return
+  if (!names.includes(flowStartStep.value)) {
+    const firstAvailable = names.find(
+      (name) => !FLOW_START_DISABLED_STEPS.has(name) && !isFlowStepLocked(name),
+    )
+    if (firstAvailable) flowStartStep.value = firstAvailable
+  }
+  if (!names.includes(flowEndStep.value)) {
+    flowEndStep.value = names[names.length - 1]
+  }
+  if (flowStartIndex.value >= 0 && flowEndIndex.value < flowStartIndex.value) {
+    flowEndStep.value = flowStartStep.value
+  }
+  syncWorkspaceConfig()
+})
+
 watch([flowStartStep, flowEndStep], () => {
   if (!designInputTypes.value.some((item) => item.key === activeDesignInputType.value)) {
     activeDesignInputType.value = designInputTypes.value[0]?.key ?? 'rtl'
@@ -2495,7 +2546,7 @@ watch([flowStartStep, flowEndStep], () => {
     manuallyAddedFiles.value = []
     directorySelectedFiles.value = []
     filelistPath.value = ''
-    if (startsFromFloorplan.value) {
+    if (startsFromPreFloorplan.value) {
       config.value.origin_def = ''
     }
   }
@@ -2718,7 +2769,7 @@ function applyProjectDesignFileDefaults(
   }
   if (
     !startsFromSynthesis.value &&
-    !startsFromFloorplan.value &&
+    !startsFromPreFloorplan.value &&
     !config.value.origin_def &&
     baseDesign.origin_def &&
     !hasInitialConfigValue('origin_def')
@@ -2948,7 +2999,7 @@ function isFlowStepSelected(stepName: FlowStepName) {
 
 function setFlowBoundary(stepName: FlowStepName) {
   if (isFlowStepLocked(stepName)) return
-  const index = hardenFlowSteps.findIndex((step) => step.name === stepName)
+  const index = flowStepOptions.value.findIndex((step) => step.name === stepName)
   if (index < 0) return
 
   const start = flowStartIndex.value
@@ -2959,7 +3010,7 @@ function setFlowBoundary(stepName: FlowStepName) {
   }
   const nextEndIndex = index === end && end > start ? end - 1 : index
   const boundedEndIndex = Math.max(start, nextEndIndex)
-  flowEndStep.value = hardenFlowSteps[boundedEndIndex].name
+  flowEndStep.value = flowStepOptions.value[boundedEndIndex].name
 }
 
 function selectFlowStartStep(event: Event) {
@@ -2975,7 +3026,7 @@ function selectFlowStartStep(event: Event) {
 
 function applyFlowStartStep(stepName: FlowStepName) {
   if (FLOW_START_DISABLED_STEPS.has(stepName)) return
-  const index = hardenFlowSteps.findIndex((step) => step.name === stepName)
+  const index = flowStepOptions.value.findIndex((step) => step.name === stepName)
   if (index < 0) return
 
   flowStartStep.value = stepName
@@ -3049,7 +3100,7 @@ function applySourceWorkspaceDefaults(initialConfig?: WorkspaceWizardInitialConf
 
   if (
     !startsFromSynthesis.value &&
-    !startsFromFloorplan.value &&
+    !startsFromPreFloorplan.value &&
     !config.value.origin_def &&
     source_config.origin_def
   ) {
@@ -3336,7 +3387,7 @@ function designFilesReady() {
   if (startsFromSynthesis.value) {
     return exclusiveDesignFilesReady(config.value.rtl_list, filelistPath.value)
   }
-  if (startsFromFloorplan.value) {
+  if (startsFromPreFloorplan.value) {
     return config.value.origin_verilog.trim() !== ''
   }
   return (
