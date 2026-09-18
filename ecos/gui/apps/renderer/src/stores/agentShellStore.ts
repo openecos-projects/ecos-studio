@@ -8,7 +8,11 @@ import {
   readStoredAgentPanelWidth,
   readStoredWorkspaceAgentCollapsed,
 } from '@/composables/agentPanelWidth'
-import { resolveAgentTabTitle, type AgentTabContextInput } from './agentTabContext'
+import {
+  resolveAgentTabContext,
+  resolveAgentTabTitle,
+  type AgentTabContextInput,
+} from './agentTabContext'
 
 export type AgentShellMode = 'home' | 'workspace'
 
@@ -111,6 +115,26 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     tabs.value = tabs.value.map((tab) =>
       tab.id === id ? { ...tab, started: true } : tab,
     )
+  }
+
+  function bindTabToWorkspace(id: string, workspacePath: string): void {
+    const tab = tabs.value.find((candidate) => candidate.id === id)
+    if (!tab || !workspacePath.trim()) return
+    const context = resolveAgentTabContext({
+      shell: 'workspace',
+      currentWorkspacePath: workspacePath,
+      currentProjectRoot: tab.projectRoot,
+      currentProjectName: tab.projectName,
+    })
+    Object.assign(tab, context, {
+      step: undefined,
+      title: resolveAgentTabTitle({
+        ...context,
+        existingTitles: tabs.value
+          .filter((candidate) => candidate.id !== id)
+          .map((candidate) => candidate.title),
+      }),
+    })
   }
 
   function removeTab(id: string): AgentChatTab | null {
@@ -220,6 +244,7 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     activateTab,
     createTab,
     markTabStarted,
+    bindTabToWorkspace,
     removeTab,
     clearTabs,
     beginPreserveForAgentWorkspaceSwitch,

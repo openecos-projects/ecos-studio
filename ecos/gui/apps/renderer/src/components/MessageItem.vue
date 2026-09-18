@@ -384,9 +384,10 @@
         <!-- 错误状态 -->
         <div
           v-else-if="message.status === 'error'"
-          class="flex items-center gap-2 text-(--danger-color)"
+          class="agent-error-message"
+          role="alert"
         >
-          <i class="ri-error-warning-line"></i>
+          <i class="ri-error-warning-line" aria-hidden="true"></i>
           <span>{{ message.content || 'Failed to send message' }}</span>
         </div>
 
@@ -678,6 +679,26 @@ function csvRows(content: string): string[][] {
   font-weight: 400;
   line-height: 1.65;
   letter-spacing: 0;
+}
+
+.agent-error-message {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--danger-color);
+}
+
+.agent-error-message i {
+  flex: 0 0 auto;
+  margin-top: 0.2em;
+}
+
+.agent-error-message span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .quick-start-preflight-error {

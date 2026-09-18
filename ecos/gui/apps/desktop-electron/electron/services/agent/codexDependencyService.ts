@@ -1,4 +1,5 @@
 import { spawn as spawnChild, type SpawnOptions } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import {
   access,
@@ -17,21 +18,18 @@ import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import {
   DESKTOP_CODEX_BIN_SETTING_KEY,
-  DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY,
-  DESKTOP_GLM_API_KEY_SETTING_KEY,
-  DESKTOP_OPENAI_API_KEY_SETTING_KEY,
   type DesktopCodexAuthState,
   type DesktopCodexDependencyStatus,
   type DesktopCodexInstallProgressEvent,
-  type DesktopCodexModelSource,
   type DesktopSettingsValue,
 } from '@ecos-studio/shared'
-import { writeGlmConfigHome } from './glmConfigHome'
+import type { ModelProfileService } from './modelProfileService'
 
 type SpawnLike = typeof spawnChild
 type FetchLike = typeof fetch
 
 export interface CodexDependencySettingsStore {
+  delete(key: string): Promise<void>
   get<T extends DesktopSettingsValue = DesktopSettingsValue>(
     key: string,
   ): Promise<T | null>
@@ -42,9 +40,9 @@ export interface CodexDependencyServiceOptions {
   env?: NodeJS.ProcessEnv
   fetchImpl?: FetchLike
   installRoot?: string
-  glmConfigRoot?: string
   platform?: NodeJS.Platform
   arch?: string
+  profileService: ModelProfileService
   settingsStore: CodexDependencySettingsStore
   spawn?: SpawnLike
   homedir?: () => string
@@ -58,14 +56,13 @@ export class CodexDependencyService {
   private readonly env: NodeJS.ProcessEnv
   private readonly fetchImpl: FetchLike
   private readonly installRoot: string
-  private readonly glmConfigRoot: string
   private readonly platform: NodeJS.Platform
   private readonly arch: string
+  private readonly profileService: ModelProfileService
   private readonly settingsStore: CodexDependencySettingsStore
   private readonly spawnImpl: SpawnLike
   private readonly resolveHomedir: () => string
   private installPromise: Promise<DesktopCodexDependencyStatus> | null = null
-  private glmHomeWritePromise: Promise<void> | null = null
   private progressListeners = new Set<(event: DesktopCodexInstallProgressEvent) => void>()
   private lastProgress: DesktopCodexInstallProgressEvent | null = null
 
@@ -75,11 +72,9 @@ export class CodexDependencyService {
     this.installRoot =
       options.installRoot ??
       join(homedir(), '.local', 'share', 'ecos-studio', 'codex-cli')
-    this.glmConfigRoot =
-      options.glmConfigRoot ??
-      join(homedir(), '.local', 'share', 'ecos-studio', 'codex-glm')
     this.platform = options.platform ?? process.platform
     this.arch = options.arch ?? process.arch
+    this.profileService = options.profileService
     this.settingsStore = options.settingsStore
     this.spawnImpl = options.spawn ?? spawnChild
     this.resolveHomedir = options.homedir ?? homedir
@@ -112,15 +107,15 @@ export class CodexDependencyService {
   }
 
   private async probeStatus(): Promise<DesktopCodexDependencyStatus> {
-    const modelSource = await this.readModelSource()
+    const profile = await this.profileService.activeProfile()
     const resolved = await this.resolveBinPath()
     if (!resolved) {
       return {
         authState: 'unknown',
+        activeProfileId: profile.id,
         message: this.platformSupportsInstall()
           ? '未检测到 Codex CLI。可一键安装到 Studio 托管目录，或选择本机已有二进制。'
           : '未检测到 Codex CLI。请先安装 Codex CLI，再选择本机二进制路径。',
-        modelSource,
         platformSupportsInstall: this.platformSupportsInstall(),
         state: 'missing',
       }
@@ -130,30 +125,24 @@ export class CodexDependencyService {
     if (!version) {
       return {
         authState: 'unknown',
+        activeProfileId: profile.id,
         binPath: resolved,
         message: '已找到 Codex 路径，但无法执行。请重新安装或选择其他二进制。',
-        modelSource,
         platformSupportsInstall: this.platformSupportsInstall(),
         state: 'error',
       }
     }
 
-    // Both sources share the same configuration model: paste an API key.
-    const apiKey =
-      modelSource === 'glm' ? await this.readGlmApiKey() : await this.readOpenAIApiKey()
+    const apiKey = await this.profileService.getApiKey(profile.id)
     const authState: DesktopCodexAuthState = apiKey ? 'authenticated' : 'unauthenticated'
     return {
+      activeProfileId: profile.id,
       apiKeyConfigured: Boolean(apiKey),
       authState,
       binPath: resolved,
       message: apiKey
-        ? modelSource === 'glm'
-          ? 'GLM API Key 已配置，Codex CLI 已就绪。'
-          : 'Codex API Key 已配置，Codex CLI 已就绪。'
-        : modelSource === 'glm'
-          ? '已选择 GLM 模型来源。请填入智谱 API Key 后使用 Agent。'
-          : 'Codex CLI 已就绪。请填入 API Key 后使用 Agent。',
-      modelSource,
+        ? `${profile.name} API Key 已配置，Codex CLI 已就绪。`
+        : `已选择 ${profile.name}。请填入 API Key 后使用 Agent。`,
       platformSupportsInstall: this.platformSupportsInstall(),
       state: authState === 'authenticated' ? 'ready' : 'needs_api_key',
       version,
@@ -179,64 +168,31 @@ export class CodexDependencyService {
     return await this.getStatus()
   }
 
-  async setModelSource(
-    source: DesktopCodexModelSource,
-  ): Promise<DesktopCodexDependencyStatus> {
-    if (source === 'glm') {
-      await this.ensureGlmConfigHome()
+  async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
+    const binPath = await this.resolveBinPath()
+    if (!binPath) return {}
+    const profile = await this.profileService.activeProfile()
+    const apiKey = await this.profileService.getApiKey(profile.id)
+    // Managed Codex config contains no key; saved keys live in Studio settings
+    // and reach the process through the environment.
+    const overrides: Record<string, string | undefined> = {
+      ECOS_AGENT_CODEX_BIN: binPath,
+      // Reload the provider when a profile changes but CODEX_HOME stays the same.
+      ECOS_AGENT_CODEX_PROFILE_REVISION: createHash('sha256')
+        .update(JSON.stringify(profile))
+        .digest('hex'),
+      CODEX_HOME: profile.baseUrl
+        ? this.profileService.configHomeFor(profile.id)
+        : undefined,
+      PATH: prependPath(dirname(binPath), this.env.PATH),
     }
-    await this.settingsStore.set(DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY, source)
-    return await this.getStatus()
-  }
-
-  async setGlmApiKey(apiKey: string): Promise<DesktopCodexDependencyStatus> {
-    const trimmed = apiKey.trim()
-    if (!trimmed) {
-      throw new Error('GLM API Key 不能为空')
+    // Clear stale keys from other profiles; leave the active key untouched when
+    // unconfigured so a shell-provided value still works.
+    for (const envKey of await this.profileService.knownEnvKeys()) {
+      if (envKey !== profile.envKey) overrides[envKey] = undefined
     }
-    await this.ensureGlmConfigHome()
-    // Saving a key implies the GLM source — this is the “保存并使用 GLM” action.
-    await this.settingsStore.set(DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY, 'glm')
-    await this.settingsStore.set(DESKTOP_GLM_API_KEY_SETTING_KEY, trimmed)
-    return await this.getStatus()
-  }
-
-  async setOpenAIApiKey(apiKey: string): Promise<DesktopCodexDependencyStatus> {
-    const trimmed = apiKey.trim()
-    if (!trimmed) {
-      throw new Error('Codex API Key 不能为空')
-    }
-    // Saving a key implies the Codex source — this is the “保存并使用 Codex” action.
-    await this.settingsStore.set(DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY, 'codex')
-    await this.settingsStore.set(DESKTOP_OPENAI_API_KEY_SETTING_KEY, trimmed)
-    return await this.getStatus()
-  }
-
-  private async readModelSource(): Promise<DesktopCodexModelSource> {
-    const stored = await this.settingsStore.get<string>(
-      DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY,
-    )
-    return stored === 'glm' ? 'glm' : 'codex'
-  }
-
-  private async readGlmApiKey(): Promise<string | null> {
-    return await this.readTrimmedSetting(DESKTOP_GLM_API_KEY_SETTING_KEY)
-  }
-
-  private async readOpenAIApiKey(): Promise<string | null> {
-    return await this.readTrimmedSetting(DESKTOP_OPENAI_API_KEY_SETTING_KEY)
-  }
-
-  private async readTrimmedSetting(key: string): Promise<string | null> {
-    const stored = await this.settingsStore.get<string>(key)
-    return typeof stored === 'string' && stored.trim() ? stored.trim() : null
-  }
-
-  private async ensureGlmConfigHome(): Promise<void> {
-    this.glmHomeWritePromise ??= writeGlmConfigHome(this.glmConfigRoot).finally(() => {
-      this.glmHomeWritePromise = null
-    })
-    await this.glmHomeWritePromise
+    if (apiKey) overrides[profile.envKey] = apiKey
+    return overrides
   }
 
   async install(): Promise<DesktopCodexDependencyStatus> {
@@ -267,33 +223,6 @@ export class CodexDependencyService {
     // Detached spawn returns immediately; give auth files a brief chance to appear
     // only if the user already completed login in another session.
     return await this.getStatus()
-  }
-
-  async resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>> {
-    const binPath = await this.resolveBinPath()
-    if (!binPath) return {}
-    if ((await this.readModelSource()) === 'glm') {
-      // GLM mode: point codex at the managed config home and pass the API key
-      // through the environment only — it is never written to the config dir.
-      return {
-        ECOS_AGENT_CODEX_BIN: binPath,
-        CODEX_HOME: this.glmConfigRoot,
-        ZAI_API_KEY: (await this.readGlmApiKey()) ?? undefined,
-        OPENAI_API_KEY: undefined,
-        PATH: prependPath(dirname(binPath), this.env.PATH),
-      }
-    }
-    // Codex mode: clear stale GLM overrides so switching sources is clean, and
-    // pass the configured API key when present. When no key is configured the
-    // variable is left untouched so a shell-provided key still works.
-    const openAIApiKey = await this.readOpenAIApiKey()
-    return {
-      ECOS_AGENT_CODEX_BIN: binPath,
-      CODEX_HOME: undefined,
-      ZAI_API_KEY: undefined,
-      ...(openAIApiKey ? { OPENAI_API_KEY: openAIApiKey } : {}),
-      PATH: prependPath(dirname(binPath), this.env.PATH),
-    }
   }
 
   private async runInstall(): Promise<DesktopCodexDependencyStatus> {
@@ -402,10 +331,11 @@ export class CodexDependencyService {
   }
 
   private async resolveBinPath(): Promise<string | null> {
-    // GLM mode injects a managed CODEX_HOME; a user-selected codex wrapper
-    // that exports its own CODEX_HOME would silently defeat it, so the
-    // settings-level binary override only applies in codex mode.
-    if ((await this.readModelSource()) !== 'glm') {
+    // Profiles with a managed CODEX_HOME must not run a user-selected codex
+    // wrapper that exports its own CODEX_HOME — that would silently defeat the
+    // managed config — so the settings-level binary override only applies to
+    // the built-in codex profile (no managed config home).
+    if ((await this.profileService.activeProfile()).baseUrl === null) {
       const fromSettings = await this.settingsStore.get<string>(
         DESKTOP_CODEX_BIN_SETTING_KEY,
       )

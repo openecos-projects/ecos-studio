@@ -70,6 +70,7 @@ from ecos_agent.optimization.runtime_waiting import (
 )
 from ecos_agent.workspace.parameters import (
     WorkspaceParametersError,
+    _safe_file as _safe_workspace_file,
     read_workspace_dreamplace_seed,
     read_workspace_parameters,
 )
@@ -515,6 +516,7 @@ def _optimization_execution_context(
     if not isinstance(ecc_revision, str) or not ecc_revision.strip():
         raise OptimizationRuntimeError("ECC revision is invalid")
     design_id = design_id or _design_id(workspace)
+    parameters = _runtime_parameters(workspace)[1]
     origin = workspace / "origin"
     input_hashes: dict[str, str] = {}
     rtl_files = sorted(
@@ -525,12 +527,8 @@ def _optimization_execution_context(
             (".v", ".sv", ".vh", ".svh", ".vhd", ".vhdl")
         )
     )
-    filelists = [
-        path for path in (origin / "filelist", origin / "filelist.f") if path.is_file()
-    ]
     for key, files in (
         ("rtl_sha256", rtl_files),
-        ("filelist_sha256", filelists[:1]),
         ("sdc_sha256", sorted(origin.glob("*.sdc"))),
     ):
         if not files:
@@ -539,8 +537,33 @@ def _optimization_execution_context(
         input_hashes[key] = (
             hashes[0] if len(hashes) == 1 else canonical_sha256({"files": hashes})
         )
+    filelist_ref = parameters.get("file_list")
+    if filelist_ref in (None, ""):
+        filelist_ref = next(
+            (
+                str(path.relative_to(workspace))
+                for path in (origin / "filelist", origin / "filelist.f")
+                if path.exists() or path.is_symlink()
+            ),
+            None,
+        )
     try:
-        parameters = _runtime_parameters(workspace)[1]
+        if filelist_ref is None:
+            # Direct RTL input has no filelist; bind its workspace-relative source list.
+            input_hashes["filelist_sha256"] = canonical_sha256(
+                {"rtl_files": [path.relative_to(workspace).as_posix() for path in rtl_files]}
+            )
+        else:
+            if not isinstance(filelist_ref, str):
+                raise ValueError("filelist path must be a string")
+            path = Path(filelist_ref)
+            relative = str(path.relative_to(workspace.resolve())) if path.is_absolute() else filelist_ref
+            input_hashes["filelist_sha256"] = file_sha256(_safe_workspace_file(workspace, relative))
+    except (OSError, ValueError) as exc:
+        raise OptimizationRuntimeError(
+            "optimization filelist_sha256 input is unsafe or unavailable"
+        ) from exc
+    try:
         pdk_root = Path(parameters["pdk_root"])
         tech_lef = pdk_root / "prtech" / "techLEF" / "N551P6M_ecos.lef"
         pdk_sha256 = file_sha256(tech_lef)

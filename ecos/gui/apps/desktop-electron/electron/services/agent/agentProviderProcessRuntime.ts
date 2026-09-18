@@ -123,6 +123,10 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     string,
     {
       approved: boolean
+      interaction?: {
+        confirmOptionId: string
+        requestId: string
+      }
       parameter?: {
         patch: DesktopAgentWorkspaceRerunContract['parameter_patch']
         updateId: string
@@ -242,6 +246,21 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   async answerInteraction(
     request: DesktopAgentInteractionAnswerRequest,
   ): Promise<DesktopAgentInteractionAnswerResponse> {
+    const pending = this.pendingExecutionConfirmations.get(request.sessionId)
+    if (
+      pending?.interaction?.requestId === request.requestId &&
+      request.kind === 'confirm' &&
+      'optionId' in request
+    ) {
+      if (request.optionId === pending.interaction.confirmOptionId) {
+        pending.approved = true
+      } else {
+        this.pendingExecutionConfirmations.delete(request.sessionId)
+      }
+    }
+    if (request.workspaceRevision !== undefined) {
+      this.workspaceRevisions.set(request.sessionId, request.workspaceRevision)
+    }
     return (await this.sendRequest(
       'answerInteraction',
       request,
@@ -426,7 +445,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       return
     }
 
-    if (typeof record.method === 'string' && record.method && typeof record.id === 'string') {
+    if (
+      typeof record.method === 'string' &&
+      record.method &&
+      typeof record.id === 'string'
+    ) {
       void this.handleHostRequest(record)
       return
     }
@@ -599,6 +622,20 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         }
       }
       if (contract.presentation === 'workspace_rerun') return null
+    }
+    if (
+      event.type === 'interaction' &&
+      event.interaction?.interaction.kind === 'confirm' &&
+      event.interaction.purpose === 'execution'
+    ) {
+      const pending = this.pendingExecutionConfirmations.get(sessionId)
+      if (pending) {
+        pending.interaction = {
+          confirmOptionId: event.interaction.interaction.confirm.id,
+          requestId: event.interaction.requestId,
+        }
+      }
+      return event
     }
     if (event.type !== 'workspace_parameter_update' && event.type !== 'workspace_rerun') {
       return event
@@ -1849,9 +1886,7 @@ function readWorkspaceParameterUpdateContract(
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
   const derivedUpdates = patch ? deriveAgentWorkspaceParameterUpdates(patch) : null
   const writes =
-    record.writes === undefined
-      ? []
-      : readWorkspaceParameterWrites(record.writes)
+    record.writes === undefined ? [] : readWorkspaceParameterWrites(record.writes)
   if (
     (record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v2' &&
       record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v3') ||

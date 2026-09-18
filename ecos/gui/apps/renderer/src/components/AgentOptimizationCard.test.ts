@@ -66,6 +66,39 @@ const turnTwo: DesktopAgentOptimizationPayload = {
 }
 
 describe('AgentOptimizationCard', () => {
+  it('shows a failed optimization and its reason even when collapsed', async () => {
+    const failure: DesktopAgentOptimizationPayload = {
+      ...turnOne,
+      schema_version: 'ecos.optimization_status.v1',
+      state: 'escalated',
+      rejection_reason: 'proposal_repair_failed',
+      rationale_summary:
+        'Optimization stopped: model proposal validation and repair failed. Reason: proposal_repair_failed.',
+      turn: undefined,
+    }
+    const wrapper = mount(AgentOptimizationCard, {
+      props: { optimization: failure, timeline: [failure] },
+    })
+
+    expect(wrapper.attributes('data-state')).toBe('error')
+    expect(wrapper.text()).toContain('Needs attention')
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'proposal validation and repair failed',
+    )
+    expect(wrapper.text()).toContain('proposal_repair_failed')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.get('[role="alert"]').isVisible()).toBe(true)
+  })
+
+  it('renders rejected proposal reasons as text, not HTML', () => {
+    const rejected = { ...turnOne, rejection_reason: '<img src=x onerror=alert(1)>' }
+    const wrapper = mount(AgentOptimizationCard, {
+      props: { optimization: rejected, timeline: [rejected] },
+    })
+    expect(wrapper.text()).toContain(rejected.rejection_reason)
+    expect(wrapper.find('img').exists()).toBe(false)
+  })
+
   it('renders the episode trend summary and per-turn rows', () => {
     const wrapper = mount(AgentOptimizationCard, {
       props: {

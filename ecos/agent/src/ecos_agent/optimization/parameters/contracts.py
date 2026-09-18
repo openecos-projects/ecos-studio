@@ -705,7 +705,7 @@ class OptimizationProposalV2(_Model):
     context_ref: ProposalContextRef
     decision: Literal["continue", "propose", "stop", "escalate"]
     reason_code: str
-    rationale_summary: str
+    rationale_summary: str = Field(min_length=1, max_length=512)
     observation_refs: tuple[ObservationReference, ...] = Field(
         min_length=1, max_length=13
     )
@@ -716,6 +716,14 @@ class OptimizationProposalV2(_Model):
     strategy: OptimizationStrategyV4 | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+
+    @field_validator("rationale_summary")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("proposal rationale is invalid")
+        return value
 
     @model_validator(mode="after")
     def action_consistency(self) -> "OptimizationProposalV2":

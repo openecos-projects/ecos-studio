@@ -1,7 +1,7 @@
 <template>
   <section
     class="optimization-card"
-    :data-state="liveState ? 'running' : 'done'"
+    :data-state="failureState ? 'error' : liveState ? 'running' : 'done'"
     aria-label="Optimization episode"
   >
     <button
@@ -20,10 +20,21 @@
         Optimization · {{ optimization.active_primary_metric || 'episode' }}
       </span>
       <span
+        v-if="statusLabel"
+        class="optimization-card__badge"
+        :class="
+          failureState
+            ? 'optimization-card__badge--error'
+            : 'optimization-card__badge--muted'
+        "
+      >
+        {{ statusLabel }}
+      </span>
+      <span
         v-if="optimization.recovery_stage && optimization.recovery_stage !== 'original'"
         class="optimization-card__badge optimization-card__badge--recovery"
       >
-        recovering {{ optimization.recovery_stage }}
+        {{ failureState ? 'recovery' : 'recovering' }} {{ optimization.recovery_stage }}
       </span>
       <span
         v-for="(metric, index) in latestCounts"
@@ -38,6 +49,17 @@
         aria-hidden="true"
       ></i>
     </button>
+
+    <div v-if="failureState" class="optimization-card__error" role="alert">
+      <i class="ri-error-warning-line" aria-hidden="true"></i>
+      <span>
+        {{
+          optimization.rationale_summary ||
+          optimization.rejection_reason ||
+          'Optimization stopped and needs attention.'
+        }}
+      </span>
+    </div>
 
     <div v-show="expanded" class="optimization-card__body">
       <div v-if="summary" class="optimization-card__row optimization-card__summary">
@@ -112,6 +134,9 @@
         <span v-if="entry.rationale" class="optimization-card__rationale">
           {{ entry.rationale }}
         </span>
+        <span v-if="entry.rejectionReason" class="optimization-card__rejection">
+          Rejected: {{ entry.rejectionReason }}
+        </span>
       </div>
     </div>
   </section>
@@ -141,6 +166,24 @@ const LIVE_STATES = new Set(['created', 'planning', 'awaiting_execution', 'execu
 const liveState = computed(() => {
   const state = props.optimization.state
   return typeof state === 'string' && LIVE_STATES.has(state)
+})
+
+const failureState = computed(() =>
+  ['error', 'escalated', 'quarantined', 'unavailable'].includes(
+    props.optimization.state ?? '',
+  ),
+)
+
+const statusLabel = computed(() => {
+  const labels: Record<string, string> = {
+    error: 'Failed',
+    escalated: 'Needs attention',
+    quarantined: 'Quarantined',
+    unavailable: 'Unavailable',
+    stopped: 'Stopped',
+    completed: 'Completed',
+  }
+  return labels[props.optimization.state ?? ''] ?? null
 })
 
 const latestCounts = computed(() => {
@@ -184,6 +227,7 @@ interface OptimizationRow {
   label: string
   kind?: string | null
   rationale?: string | null
+  rejectionReason?: string | null
   outcome?: string | null
   action?: { knob_id: string } | null
   direction?: string | null
@@ -203,31 +247,35 @@ const KIND_LABELS: Record<string, string> = {
 }
 
 const rows = computed<OptimizationRow[]>(() =>
-  props.timeline.map((entry) => {
-    const isAuthorization = entry.schema_version === 'ecos.optimization_authorization.v2'
-    const incumbentDecision = entry.incumbent_decision ?? null
-    return {
-      label: entry.kind
-        ? (KIND_LABELS[entry.kind] ?? entry.kind)
-        : isAuthorization
-          ? 'Authorized'
-          : typeof entry.turn === 'number'
-            ? `Turn ${entry.turn}`
-            : 'Episode',
-      kind: entry.kind ?? null,
-      rationale: entry.rationale_summary ?? null,
-      outcome: entry.outcome ?? null,
-      action: entry.action ?? null,
-      direction: entry.action?.direction ?? null,
-      requested: entry.requested ?? null,
-      proposalDecision: entry.proposal_decision ?? null,
-      proposalReason: entry.proposal_reason ?? null,
-      incumbentDecision,
-      promoted: incumbentDecision ? PROMOTING_DECISIONS.has(incumbentDecision) : false,
-      recoveryTransition: entry.recovery_transition ?? null,
-      counts: entry.violation_counts,
-    }
-  }),
+  props.timeline
+    .filter((entry) => entry.schema_version !== 'ecos.optimization_status.v1')
+    .map((entry) => {
+      const isAuthorization =
+        entry.schema_version === 'ecos.optimization_authorization.v2'
+      const incumbentDecision = entry.incumbent_decision ?? null
+      return {
+        label: entry.kind
+          ? (KIND_LABELS[entry.kind] ?? entry.kind)
+          : isAuthorization
+            ? 'Authorized'
+            : typeof entry.turn === 'number'
+              ? `Turn ${entry.turn}`
+              : 'Episode',
+        kind: entry.kind ?? null,
+        rationale: entry.rationale_summary ?? null,
+        rejectionReason: entry.rejection_reason ?? null,
+        outcome: entry.outcome ?? null,
+        action: entry.action ?? null,
+        direction: entry.action?.direction ?? null,
+        requested: entry.requested ?? null,
+        proposalDecision: entry.proposal_decision ?? null,
+        proposalReason: entry.proposal_reason ?? null,
+        incumbentDecision,
+        promoted: incumbentDecision ? PROMOTING_DECISIONS.has(incumbentDecision) : false,
+        recoveryTransition: entry.recovery_transition ?? null,
+        counts: entry.violation_counts,
+      }
+    }),
 )
 
 const BAD_OUTCOMES = new Set([
@@ -279,6 +327,7 @@ function directionIcon(direction: string | null | undefined): string {
 
 .optimization-card__toggle {
   display: flex;
+  flex-wrap: wrap;
   width: 100%;
   align-items: center;
   gap: 0.5rem;
@@ -308,7 +357,40 @@ function directionIcon(direction: string | null | undefined): string {
 
 .optimization-card__title {
   font-weight: 600;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.optimization-card__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--danger-bg);
+  color: var(--danger-color);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.optimization-card__error > i {
+  flex-shrink: 0;
+}
+
+.optimization-card__error > span {
+  min-width: 0;
+}
+
+.optimization-card__rejection {
+  flex-basis: 100%;
+  color: var(--danger-color);
+  overflow-wrap: anywhere;
+}
+
+.optimization-card__badge--error {
+  background: var(--danger-bg);
+  color: var(--danger-color);
 }
 
 .optimization-card__metric {

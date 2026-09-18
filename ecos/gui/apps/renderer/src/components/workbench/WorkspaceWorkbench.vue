@@ -324,12 +324,12 @@ defineSlots<{
 
 .workspace-workbench-left > *,
 .workspace-workbench-right > * {
-  min-height: 0;
   min-width: 0;
 }
 
 .workspace-workbench-left > * {
   flex: 1 1 auto;
+  min-height: 0;
 }
 
 .workspace-workbench-flow-status {
@@ -340,7 +340,7 @@ defineSlots<{
 
 .workspace-workbench-right > .workspace-workbench-inspector {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0px;
   height: auto !important;
   min-height: clamp(184px, 30vh, 280px);
   min-width: 0;

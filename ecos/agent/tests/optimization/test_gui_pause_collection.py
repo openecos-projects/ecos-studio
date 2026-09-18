@@ -49,7 +49,9 @@ class _PauseCollectRunner(_CompletedRunner):
                     requested=None,
                     rejection_reason=None,
                 ),
-                execution=SimpleNamespace(state=OptimizationEpisodeState.EXECUTING),
+                execution=SimpleNamespace(
+                    state=OptimizationEpisodeState.EXECUTING, rejection_reason=None,
+                ),
                 incumbent_comparison=None,
             )
             # Hold turn 1 until the test has paused, so turn 2 is dispatched
@@ -111,4 +113,4 @@ def test_gui_pause_still_collects_in_flight_terminals(tmp_path: Path) -> None:
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
         time.sleep(0.01)
     assert runner.paused_flags == [False, True, False]
-    assert session.optimization_phase == "completed"
+    assert session.optimization_phase == "stopped"

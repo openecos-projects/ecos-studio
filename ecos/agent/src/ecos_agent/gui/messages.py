@@ -160,6 +160,23 @@ def optimization_noise_calibration_message(language: str) -> str:
     )
 
 
+def optimization_error_message(language: str, state: str, reason: str | None) -> str:
+    detail = reason or state
+    repair = reason == "proposal_repair_failed"
+    return _prompt(
+        language,
+        "优化已停止，需要人工处理。"
+        + ("模型提案未通过校验，自动修复也失败。" if repair else "")
+        + f"状态：{state}；原因：{detail}。"
+        "请检查模型设置和审计记录，再重新发起优化；不会自动开始其他重跑。",
+        "Optimization stopped and needs attention. "
+        + ("Model proposal validation and automatic repair failed. " if repair else "")
+        + f"State: {state}; reason: {detail}. "
+        "Review the model settings and audit records, then start a new optimization. "
+        "No other rerun will start automatically.",
+    )
+
+
 def project_mode_choice(language: str, prompt_id: str) -> dict[str, Any]:
     choice = _choice(
         prompt_id,

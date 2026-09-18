@@ -313,16 +313,19 @@ export type {
   DesktopCodexDependencyState,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
-  DesktopCodexModelSource,
-  DesktopCodexSetApiKeyRequest,
   DesktopCodexSetBinPathRequest,
-  DesktopCodexSetModelSourceRequest,
+  DesktopModelProfile,
+  DesktopModelProfileIdRequest,
+  DesktopModelProfileModel,
+  DesktopModelProfileSetApiKeyRequest,
+  DesktopModelProfileState,
+  DesktopModelProfileUpsertRequest,
+  DesktopModelProfileWireApi,
 } from './contracts/desktopCodex.ts'
 export {
+  DESKTOP_ACTIVE_MODEL_PROFILE_SETTING_KEY,
   DESKTOP_CODEX_BIN_SETTING_KEY,
-  DESKTOP_CODEX_MODEL_SOURCE_SETTING_KEY,
-  DESKTOP_GLM_API_KEY_SETTING_KEY,
-  DESKTOP_OPENAI_API_KEY_SETTING_KEY,
+  DESKTOP_MODEL_PROFILES_SETTING_KEY,
 } from './contracts/desktopCodex.ts'
 export type {
   CliInstallSelfCheck,

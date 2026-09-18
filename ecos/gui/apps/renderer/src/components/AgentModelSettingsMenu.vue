@@ -44,7 +44,7 @@
       <p v-if="error" class="model-settings__error" role="status">{{ error }}</p>
 
       <div
-        v-if="modelSource"
+        v-if="profiles?.length"
         class="model-settings__source"
         role="radiogroup"
         aria-label="模型来源"
@@ -52,23 +52,23 @@
         <p class="model-settings__source-label">模型来源</p>
         <div class="model-settings__source-options">
           <button
-            v-for="option in modelSourceOptions"
-            :key="option.value"
+            v-for="profile in profiles"
+            :key="profile.id"
             type="button"
             class="model-settings__source-option"
             role="radio"
-            :aria-checked="modelSource === option.value"
+            :aria-checked="activeProfileId === profile.id"
             :class="{
-              'model-settings__source-option--active': modelSource === option.value,
+              'model-settings__source-option--active': activeProfileId === profile.id,
             }"
             :disabled="busy"
-            @click="selectSource(option.value)"
+            @click="selectSource(profile.id)"
           >
-            {{ option.label }}
+            {{ profile.name }}
           </button>
         </div>
         <button type="button" class="model-settings__configure" @click="openApiConfig()">
-          API 配置…
+          管理模型配置…
         </button>
       </div>
     </div>
@@ -111,8 +111,7 @@ import type {
   DesktopAgentModelSettings,
   DesktopAgentReasoningEffort,
   DesktopAgentSetModelSettingsRequest,
-  DesktopCodexModelSource,
-  DesktopCodexSetModelSourceRequest,
+  DesktopModelProfile,
 } from '@ecos-studio/shared'
 
 const props = defineProps<{
@@ -120,20 +119,16 @@ const props = defineProps<{
   disabled?: boolean
   error?: string
   settings?: DesktopAgentModelSettings
-  modelSource?: DesktopCodexModelSource
+  profiles?: DesktopModelProfile[]
+  activeProfileId?: string
 }>()
 const emit = defineEmits<{
   update: [
     settings: Pick<DesktopAgentSetModelSettingsRequest, 'model' | 'reasoningEffort'>,
   ]
-  'set-source': [request: DesktopCodexSetModelSourceRequest]
+  'select-profile': [profileId: string]
   configure: []
 }>()
-
-const modelSourceOptions: Array<{ value: DesktopCodexModelSource; label: string }> = [
-  { value: 'codex', label: 'Codex（GPT）' },
-  { value: 'glm', label: 'GLM（智谱）' },
-]
 
 const rootRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
@@ -233,8 +228,8 @@ function select(value: string): void {
   close()
 }
 
-function selectSource(source: DesktopCodexModelSource): void {
-  emit('set-source', { source })
+function selectSource(profileId: string): void {
+  emit('select-profile', profileId)
   close()
 }
 

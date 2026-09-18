@@ -18,6 +18,19 @@ describe('agent workspace creation', () => {
     expect(source).toContain('created: false')
   })
 
+  it('awaits PDK preparation before preserving the Agent session and creating the workspace', () => {
+    const start = source.indexOf('async function createWorkspaceFromAgent')
+    const end = source.indexOf('provide(agentWorkspaceSetupKey', start)
+    const createSource = source.slice(start, end)
+    const preparation = createSource.indexOf('await prepareAgentWorkspaceConfig(config)')
+
+    expect(preparation).toBeGreaterThan(-1)
+    expect(preparation).toBeLessThan(
+      createSource.indexOf('beginPreserveForAgentWorkspaceSwitch'),
+    )
+    expect(preparation).toBeLessThan(createSource.indexOf('newProject(config)'))
+  })
+
   it('fails closed when SoC-MPC was selected without a validated snapshot', () => {
     expect(source).toContain('contract.mpc_enabled && !config.mpc')
     expect(source).toContain('no validated MPC template was resolved')
@@ -27,6 +40,36 @@ describe('agent workspace creation', () => {
     expect(source).toContain("path: '/workspace/home'")
     expect(source).toContain('projectRoot: contract.project_context.project_root')
     expect(source).toContain('projectName: contract.project_context.project_name')
+  })
+
+  it('keeps creation ownership on the original session while retaining the old workspace tab', () => {
+    const start = source.indexOf('async function createWorkspaceFromAgent')
+    const end = source.indexOf('provide(agentWorkspaceSetupKey', start)
+    const createSource = source.slice(start, end)
+
+    expect(createSource).toContain(
+      'agentShell.bindTabToWorkspace(ownerSessionId, workspacePath)',
+    )
+    expect(createSource).toContain('workspacePath: ownerTab.workspacePath')
+    expect(createSource).toContain('agentShell.createTab(')
+    expect(createSource).toContain('{ activate: false }')
+    expect(createSource).not.toContain('flowSessionId')
+    expect(
+      createSource.indexOf(
+        'agentShell.bindTabToWorkspace(ownerSessionId, workspacePath)',
+      ),
+    ).toBeLessThan(createSource.indexOf('agentShell.setPendingPostCreateFlow({'))
+    expect(
+      createSource.indexOf(
+        'agentShell.bindTabToWorkspace(ownerSessionId, targetWorkspacePath)',
+      ),
+    ).toBeLessThan(createSource.indexOf('newProject(config)'))
+    const handoffStart = createSource.indexOf('agentShell.setPendingPostCreateFlow({')
+    const handoffEnd = createSource.indexOf('})', handoffStart)
+    expect(createSource.slice(handoffStart, handoffEnd)).toContain('ownerSessionId,')
+    expect(createSource.indexOf('agentShell.setPendingPostCreateFlow({')).toBeLessThan(
+      createSource.indexOf('router.push({'),
+    )
   })
 
   it('hosts the flow-scoped step configuration editor in a top-level dialog', () => {

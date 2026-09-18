@@ -15,6 +15,7 @@ import { createShutdownCoordinator } from './createShutdownCoordinator'
 import { handleSecondInstance } from '../services/appSecondInstance'
 import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { CodexDependencyService } from '../services/agent/codexDependencyService'
+import { ModelProfileService } from '../services/agent/modelProfileService'
 import { AppInfoService } from '../services/appInfoService'
 import { BackendWorkspaceService } from '../services/backendWorkspaceService'
 import { ProjectComparisonFileWatcher } from '../services/projectComparisonFileWatcher'
@@ -95,6 +96,7 @@ let services: {
   codexDependencyService: CodexDependencyService
   eccRuntimeService: EccRpcRuntimeService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
+  modelProfileService: ModelProfileService
   projectManagementReadService: ProjectManagementReadService
   projectManifestService: ProjectManifestService
   quickStartResourceService: QuickStartResourceService
@@ -350,11 +352,15 @@ function getDesktopServices() {
     workspaceResourceService,
   })
 
+  const modelProfileService = new ModelProfileService({
+    settingsStore,
+  })
   const codexDependencyService = new CodexDependencyService({
     env: process.env,
     installRoot: join(app.getPath('userData'), 'codex-cli'),
     platform: process.platform,
     arch: process.arch,
+    profileService: modelProfileService,
     settingsStore,
   })
 
@@ -367,6 +373,7 @@ function getDesktopServices() {
     chipViewerService,
     codexDependencyService,
     eccRuntimeService,
+    modelProfileService,
     projectManagementReadService,
     projectManifestService,
     quickStartResourceService,
@@ -452,6 +459,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       },
       eccRuntimeService: desktopServices.eccRuntimeService,
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
+      modelProfileService: desktopServices.modelProfileService,
       projectManagementReadService: desktopServices.projectManagementReadService,
       projectManifestService: desktopServices.projectManifestService,
       quickStartResourceService: desktopServices.quickStartResourceService,

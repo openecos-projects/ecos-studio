@@ -15,6 +15,7 @@ from ecos_agent.codex.provider_helpers import (
     ToolPolicy,
 )
 from ecos_agent.codex.rpc import CodexProviderError, _read_nested_string, _JsonLineRpcProcessClient
+from ecos_agent.codex.output_schema import normalize_output_schema
 from ecos_agent.context_status import StatusSnapshots
 from ecos_agent.runtime_status import RequestTelemetry
 from ecos_agent.hashing import canonical_sha256
@@ -105,6 +106,21 @@ class CodexThreadManagementMixin:
         failure = None
         turn_id = None
         try:
+            if params.get("outputSchema") is not None:
+                try:
+                    schema = normalize_output_schema(params["outputSchema"])
+                except ValueError as exc:
+                    raise CodexProviderError(
+                        f"Codex output schema cannot be normalized: {exc}", failure_class="missing_input"
+                    ) from exc
+                params = {**params, "outputSchema": schema}
+                with self._state_lock:
+                    if self._planning_envelope is not None:
+                        envelope = self._planning_envelope.model_dump(mode="json", exclude={"envelope_sha256"})
+                        envelope["output_schema"] = schema
+                        self._planning_envelope = PlanningProviderEnvelope(
+                            **envelope, envelope_sha256=canonical_sha256(envelope)
+                        )
             response = client.request(method, params)
             turn_id = _read_nested_string(response, (("turn", "id"), ("turnId",), ("id",)))
             return self._wait_for_turn(client, thread_id, response, tool_policy=tool_policy)

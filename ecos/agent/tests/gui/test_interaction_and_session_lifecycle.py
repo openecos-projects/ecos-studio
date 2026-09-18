@@ -89,6 +89,23 @@ def test_interaction_choice_accepts_a_typed_answer() -> None:
     assert provider.sessions[session_id].pending_interaction is not None
 
 
+def test_interaction_answer_refreshes_workspace_context_without_restarting_session(tmp_path: Path) -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    request = session.pending_interaction["request"]
+    provider.answer_interaction({
+        "sessionId": session_id, "requestId": request["requestId"],
+        "kind": "choice", "text": "2", "directory": str(tmp_path),
+        "workspaceId": "handle-current", "workspaceRevision": 7,
+    })
+    assert provider.sessions[session_id] is session
+    assert session.rerun_workspace_path == str(tmp_path)
+    assert session.workspace_handle == "handle-current"
+    assert session.workspace_revision == 7
+    assert session.phase == "workspace_project_mode"
+
+
 def test_interaction_undo_restores_the_previous_choice_in_the_same_session() -> None:
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)

@@ -427,6 +427,35 @@ def test_workspace_creation_harden_result_starts_signoff_inspection(tmp_path: Pa
     assert _last_event(events, "workspace_signoff")["workspaceSignoff"]["action"] == "inspect"
 
 
+def test_workspace_creation_binds_runtime_context_to_the_original_home_session(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    session = provider.sessions[session_id]
+    session.workspace_setup_id = "setup-1"
+    session.workspace_contract = {"directory": str(workspace)}
+    session.phase = "workspace_creation_pending"
+    session.pending_interaction = None
+
+    provider.send_message({
+        "sessionId": session_id,
+        "directory": str(workspace),
+        "workspaceId": "handle-created",
+        "workspaceRevision": 9,
+        "message": "workspace_create_result:" + json.dumps({
+            "setup_id": "setup-1", "status": "succeeded", "error": "",
+            "end_step": "Harden", "workspace": str(workspace),
+        }),
+    })
+
+    assert provider.sessions[session_id] is session
+    assert session.rerun_workspace_path == str(workspace)
+    assert session.workspace_handle == "handle-created"
+    assert session.workspace_revision == 9
+    assert session.phase == "workspace_signoff_inspection_pending"
+
+
 def test_workspace_parameter_update_lists_concrete_knob_values(tmp_path: Path) -> None:
     workspace = _workspace_with_timing_opt_and_place(tmp_path)
     events: list[dict[str, object]] = []

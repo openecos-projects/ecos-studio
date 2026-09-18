@@ -465,6 +465,8 @@ def test_planner_schema_keeps_strategy_optional() -> None:
     domain = _domain()
     schema = _optimization_proposal_output_schema_v2(domain, ("increase", "decrease"))
 
+    assert schema["properties"]["rationale_summary"]["minLength"] == 1
+    assert schema["properties"]["rationale_summary"]["maxLength"] == 512
     assert "strategy" in schema["properties"]
     assert "strategy" not in schema["required"]
     step = schema["$defs"]["StrategyStepV4"]

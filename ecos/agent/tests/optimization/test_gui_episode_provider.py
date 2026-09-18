@@ -203,7 +203,8 @@ class _InFlightRunner(_CompletedRunner):
                     rejection_reason=None,
                 ),
                 execution=SimpleNamespace(
-                    state=OptimizationEpisodeState.EXECUTING
+                    state=OptimizationEpisodeState.EXECUTING,
+                    rejection_reason=None,
                 ),
                 incumbent_comparison=None,
             )
@@ -281,7 +282,10 @@ def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
     assert factory_calls[1]["context"]["workspace"] == str(workspace)
     assert isinstance(factory_calls[1]["context"]["workspace"], str)
     assert factory_calls[1]["context"]["objective"]["primary_metric"] == "route_wirelength"
-    assert any(event["type"] == "optimization" for event in events) is False
+    terminal = next(event for event in events if event["type"] == "optimization")["optimization"]
+    assert terminal["schema_version"] == "ecos.optimization_status.v1"
+    assert terminal["state"] == "error"
+    assert terminal["rejection_reason"] == "test stop"
     assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)
 
 
@@ -381,7 +385,7 @@ def test_gui_reports_in_flight_and_waits_for_remaining_candidates(
     ][-1]
     assert progress["in_flight"] == 1
     assert progress["state"] == "executing"
-    assert provider.sessions[session_id].optimization_phase == "completed"
+    assert provider.sessions[session_id].optimization_phase == "stopped"
 
 
 def test_gui_stop_does_not_hide_a_terminal_closure_failure(tmp_path: Path) -> None:

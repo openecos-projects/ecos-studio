@@ -21,9 +21,10 @@ import type {
   DesktopShellSessionOptions,
   DesktopAgentEvent,
   DesktopCodexInstallProgressEvent,
-  DesktopCodexSetApiKeyRequest,
   DesktopCodexSetBinPathRequest,
-  DesktopCodexSetModelSourceRequest,
+  DesktopModelProfileIdRequest,
+  DesktopModelProfileSetApiKeyRequest,
+  DesktopModelProfileUpsertRequest,
   CliInstallerProgressEvent,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
@@ -478,12 +479,15 @@ const desktopApi: DesktopApi = {
       recheck: () => invokeDesktop(desktopApiIpcChannels.agentCodexRecheck),
       setBinPath: (request: DesktopCodexSetBinPathRequest) =>
         invokeDesktop(desktopApiIpcChannels.agentCodexSetBinPath, request),
-      setModelSource: (request: DesktopCodexSetModelSourceRequest) =>
-        invokeDesktop(desktopApiIpcChannels.agentCodexSetModelSource, request),
-      setGlmApiKey: (request: DesktopCodexSetApiKeyRequest) =>
-        invokeDesktop(desktopApiIpcChannels.agentCodexSetGlmApiKey, request),
-      setOpenAIApiKey: (request: DesktopCodexSetApiKeyRequest) =>
-        invokeDesktop(desktopApiIpcChannels.agentCodexSetOpenAIApiKey, request),
+      listProfiles: () => invokeDesktop(desktopApiIpcChannels.agentProfileList),
+      upsertProfile: (request: DesktopModelProfileUpsertRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileUpsert, request),
+      deleteProfile: (request: DesktopModelProfileIdRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileDelete, request),
+      selectProfile: (request: DesktopModelProfileIdRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileSelect, request),
+      setProfileApiKey: (request: DesktopModelProfileSetApiKeyRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileSetApiKey, request),
       onProgress: (listener) =>
         subscribeToDesktopEvent(
           desktopApiEventChannels.agentCodexProgress,

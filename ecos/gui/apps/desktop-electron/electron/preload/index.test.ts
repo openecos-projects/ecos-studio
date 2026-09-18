@@ -479,12 +479,12 @@ describe('preload desktop bridge contract', () => {
       bridge.agent.start({ providerId: session.providerId }),
     ).resolves.toBeUndefined()
     await expect(bridge.agent.startSession(session)).resolves.toEqual(session)
-    await expect(bridge.agent.sendMessage({ ...session, message: '1' })).resolves.toEqual(
-      {
-        messageId: 'message-1',
-        sessionId: session.sessionId,
-      },
-    )
+    await expect(
+      bridge.agent.sendMessage({ ...session, directory: '/work/demo', message: '1' }),
+    ).resolves.toEqual({
+      messageId: 'message-1',
+      sessionId: session.sessionId,
+    })
     await expect(bridge.agent.getModelSettings(session)).resolves.toEqual({
       model: 'gpt-test',
     })
@@ -510,7 +510,7 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       3,
       desktopApiIpcChannels.agentSendMessage,
-      { ...session, message: '1' },
+      { ...session, directory: '/work/demo', message: '1' },
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       4,

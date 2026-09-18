@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from ecos_agent.optimization.contracts import OptimizationKnob, RequestedKnobValue
+from ecos_agent.optimization.contracts import OptimizationKnob, OptimizationProposal, RequestedKnobValue
+from ecos_agent.optimization.planning import v2_to_v1
 from ecos_agent.optimization.parameters.contracts import (
     NumericProposalActionV2,
     OptimizationProposalV2,
@@ -18,6 +19,25 @@ from tests.optimization.parameters.effectiveness_support import (
     HASH,
     domain_context,
 )
+
+
+def test_model_facing_rationale_matches_execution_summary_constraints() -> None:
+    schema = OptimizationProposalV2.model_json_schema()["properties"]["rationale_summary"]
+    execution_schema = OptimizationProposal.model_json_schema()["properties"]["rationale_summary"]
+    assert schema == execution_schema
+    payload = {
+        "context_ref": {
+            "episode_id": "episode-1", "checkpoint_id": "place", "input_sha256": HASH,
+        },
+        "decision": "continue",
+        "reason_code": "observation",
+        "rationale_summary": "x" * 512,
+        "observation_refs": [{"observation_id": "obs-1", "sha256": HASH}],
+    }
+    assert v2_to_v1(OptimizationProposalV2.model_validate(payload)).rationale_summary == "x" * 512
+    for invalid in ("", " ", "x" * 513):
+        with pytest.raises(ValueError):
+            OptimizationProposalV2.model_validate({**payload, "rationale_summary": invalid})
 
 
 def test_proposal_accepts_llm_probe_without_threshold_authority() -> None:

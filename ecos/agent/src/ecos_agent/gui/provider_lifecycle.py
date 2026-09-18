@@ -207,18 +207,22 @@ from ecos_agent.gui.provider_turn import ProviderTurnMixin
 
 
 class ProviderLifecycleMixin(ProviderTurnMixin):
-    def start_session(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        session_id = _optional_text(request.get("sessionId")) or uuid.uuid4().hex
-        session = self.sessions.setdefault(session_id, _Session(session_id=session_id))
+    def _sync_workspace_context(self, session: _Session, request: Mapping[str, Any]) -> None:
         directory = _optional_text(request.get("directory"))
+        workspace_handle = _optional_text(request.get("workspaceId"))
         if directory:
             session.rerun_workspace_path = directory
-        workspace_handle = _optional_text(request.get("workspaceId"))
         if workspace_handle:
             session.workspace_handle = workspace_handle
         workspace_revision = request.get("workspaceRevision")
         if type(workspace_revision) is int and workspace_revision >= 1:
             session.workspace_revision = workspace_revision
+
+    def start_session(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        session_id = _optional_text(request.get("sessionId")) or uuid.uuid4().hex
+        session = self.sessions.setdefault(session_id, _Session(session_id=session_id))
+        directory = _optional_text(request.get("directory"))
+        self._sync_workspace_context(session, request)
         project_root = _optional_text(request.get("projectRoot"))
         if project_root:
             session.project_root = project_root
@@ -252,9 +256,7 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
 
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
-        workspace_revision = request.get("workspaceRevision")
-        if type(workspace_revision) is int and workspace_revision >= 1:
-            session.workspace_revision = workspace_revision
+        self._sync_workspace_context(session, request)
         message = _required_message(request.get("message"))
         quick_start_result = message.startswith("quick_start_result:")
         with session.state_lock:
@@ -314,6 +316,7 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
         self, request: Mapping[str, Any], *, defer: bool = False
     ) -> dict[str, Any]:
         session = self._session(request)
+        self._sync_workspace_context(session, request)
         pending = session.pending_interaction
         if pending is None:
             if request.get("undo") is True:
