@@ -198,7 +198,10 @@ def _tpe_selection(
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(
         sampler=optuna.samplers.TPESampler(
-            seed=zlib.crc32(f"{random_seed}:{design_id}:{turn_index}".encode())
+            seed=zlib.crc32(f"{random_seed}:{design_id}:{turn_index}".encode()),
+            # default 10 startup trials would leave only 10 guided turns in
+            # the 20-candidate equal budget
+            n_startup_trials=5,
         ),
         direction="maximize",
     )
