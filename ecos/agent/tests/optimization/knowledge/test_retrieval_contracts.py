@@ -128,9 +128,12 @@ def test_full_agent_candidates_scan_catalog_while_raw_retrieval_stays_top_three(
     )
 
     assert [len(channel.knowledge_refs) for channel in result.channels] == [3, 3]
-    assert result.candidate_refs == (base.claims[0].claim_ref,)
+    assert result.candidate_refs == (
+        floorplan_claim.claim_ref,
+        base.claims[0].claim_ref,
+    )
     assert result.contract["schema_version"] == "ecos.optimization_knowledge_retrieval.v2"
-    assert result.contract["candidate_count"] == 1
+    assert result.contract["candidate_count"] == 2
 
 
 def test_disabled_general_channel_has_no_structured_candidates() -> None:

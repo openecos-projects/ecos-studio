@@ -129,13 +129,17 @@ class OptimizationRetrievalResult:
             for channel in self.channels
         ):
             return ()
-        stage = self.request.current_stage.value.casefold()
+        # The frozen action stages bound the candidate set; per-checkpoint
+        # stage compatibility (checkpoint stage plus the supplied cross-stage
+        # evidence stages) is enforced by the view compiler, not here.
+        stages = {self.request.current_stage.value.casefold()}
+        stages.update(item.casefold() for item in self.request.action_stages)
         return tuple(
             sorted(
                 (
                     claim.claim_ref
                     for claim in self.support_catalog.claims
-                    if stage in {item.casefold() for item in claim.stages}
+                    if stages & {item.casefold() for item in claim.stages}
                 ),
                 key=lambda ref: (ref.entity_id, ref.chunk_sha256),
             )
@@ -159,7 +163,7 @@ class OptimizationRetrievalResult:
                 for item in self.channels
             ],
             "knowledge_refs": [ref.model_dump() for ref in self.knowledge_refs],
-            "candidate_policy": "current_stage_compatible_support_catalog.v1",
+            "candidate_policy": "action_stage_compatible_support_catalog.v2",
             "candidate_count": len(self.candidate_refs),
             "candidate_refs": [ref.model_dump() for ref in self.candidate_refs],
             "support_catalog_sha256": self.support_catalog.catalog_sha256,
