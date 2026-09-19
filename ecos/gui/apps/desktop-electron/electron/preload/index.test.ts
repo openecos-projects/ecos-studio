@@ -72,6 +72,7 @@ async function loadDesktopBridge() {
       }
     }
     agent: {
+      acknowledgeOptimizationEpisodeNotification(request: unknown): Promise<void>
       controlOptimizationEpisode(request: unknown): Promise<void>
       getModelSettings(request: unknown): Promise<unknown>
       interrupt(request: unknown): Promise<void>
@@ -580,6 +581,14 @@ describe('preload desktop bridge contract', () => {
     await expect(
       bridge.agent.controlOptimizationEpisode(request),
     ).resolves.toBeUndefined()
+    await expect(
+      bridge.agent.acknowledgeOptimizationEpisodeNotification({
+        episodeId: 'episode-1',
+        providerId: 'ecos_agent',
+        sessionId: 'session-1',
+        state: 'completed',
+      }),
+    ).resolves.toBeUndefined()
     const unsubscribe = bridge.agent.onOptimizationProjectionInvalidated(listener)
     const eventListener = ipcRenderer.on.mock.calls.find(
       ([channel]) =>
@@ -596,6 +605,11 @@ describe('preload desktop bridge contract', () => {
       2,
       desktopApiIpcChannels.agentOptimizationControl,
       request,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.agentOptimizationNotificationAck,
+      expect.objectContaining({ episodeId: 'episode-1', state: 'completed' }),
     )
     expect(listener).toHaveBeenCalledWith({ generation: 5 })
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(

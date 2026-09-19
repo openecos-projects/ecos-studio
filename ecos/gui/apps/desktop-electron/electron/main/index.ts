@@ -452,7 +452,8 @@ async function ensureDesktopBridgeReady(): Promise<void> {
     )
     if (agentRuntimeService) {
       desktopServices.shutdownCoordinator.setOptimizationLifecycle({
-        beginDrain: () => agentRuntimeService.beginOptimizationShutdownDrain(),
+        beginDrain: (workspaceHandles) =>
+          agentRuntimeService.beginOptimizationShutdownDrain(workspaceHandles),
         cancelDrain: () => agentRuntimeService.cancelOptimizationShutdownDrain(),
         episodes: () => agentRuntimeService.optimizationProjection().episodes,
       })

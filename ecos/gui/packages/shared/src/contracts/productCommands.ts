@@ -100,6 +100,7 @@ export type ProductCommandRequest =
         episodeId: string
         executionWorkspaceDirectories: string[]
         parentWorkspaceDirectory: string
+        workspaceHandle: string
       }
     }
 

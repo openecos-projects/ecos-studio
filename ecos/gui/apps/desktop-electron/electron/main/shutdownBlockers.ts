@@ -79,15 +79,17 @@ export function buildShutdownBlockers(options: {
       total + (scope.kind === 'application' || scope.windowId === windowId ? count : 0),
     0,
   )
-  const activeOptimizations = (options.optimizationEpisodes ?? []).filter((episode) =>
-    [
-      'awaiting_confirmation',
-      'starting',
-      'calibrating',
-      'running',
-      'paused',
-      'stopping',
-    ].includes(episode.state),
+  const activeOptimizations = (options.optimizationEpisodes ?? []).filter(
+    (episode) =>
+      inScope(episode.parentWorkspaceId ?? '') &&
+      [
+        'awaiting_confirmation',
+        'starting',
+        'calibrating',
+        'running',
+        'paused',
+        'stopping',
+      ].includes(episode.state),
   )
   return {
     activeFlows: operations.length,

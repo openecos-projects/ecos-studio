@@ -27,7 +27,7 @@ import type {
   DesktopAgentOptimizationEpisodeSummary,
 } from '@ecos-studio/shared'
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
 
@@ -259,10 +259,15 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     return await this.providerForRequest(request).cancelOptimizationShutdown(request)
   }
 
-  async beginOptimizationShutdownDrain(): Promise<void> {
+  async beginOptimizationShutdownDrain(
+    workspaceHandles?: readonly string[],
+  ): Promise<void> {
     if (this.optimizationShutdownStates.size > 0) return
-    const episodes = [...this.optimizationEpisodes.values()].filter((episode) =>
-      DRAINABLE_OPTIMIZATION_STATES.has(episode.state),
+    const handles = workspaceHandles ? new Set(workspaceHandles) : undefined
+    const episodes = [...this.optimizationEpisodes.values()].filter(
+      (episode) =>
+        DRAINABLE_OPTIMIZATION_STATES.has(episode.state) &&
+        (!handles || handles.has(episode.parentWorkspaceId ?? '')),
     )
     for (const episode of episodes) {
       this.optimizationShutdownStates.set(episode.episodeId, episode.state)
@@ -347,6 +352,32 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
         episode.parentWorkspaceId === workspaceId &&
         !TERMINAL_OPTIMIZATION_STATES.has(episode.state),
     )
+  }
+
+  isOptimizationParentDirectoryGuarded(directory: string): boolean {
+    const target = resolve(directory)
+    return [...this.optimizationEpisodes.values()].some(
+      (episode) =>
+        resolve(episode.parentWorkspaceDirectory) === target &&
+        !TERMINAL_OPTIMIZATION_STATES.has(episode.state),
+    )
+  }
+
+  rebindOptimizationEpisode(
+    episodeId: string,
+    workspaceId: string,
+    workspaceRevision: number,
+    directory: string,
+  ): void {
+    const episode = this.optimizationEpisodes.get(episodeId)
+    if (!episode || TERMINAL_OPTIMIZATION_STATES.has(episode.state)) return
+    this.publishOptimizationEpisode({
+      ...episode,
+      parentWorkspaceDirectory: directory,
+      parentWorkspaceId: workspaceId,
+      parentWorkspaceRevision: workspaceRevision,
+      updatedAt: Date.now(),
+    })
   }
 
   async controlOptimizationEpisode(

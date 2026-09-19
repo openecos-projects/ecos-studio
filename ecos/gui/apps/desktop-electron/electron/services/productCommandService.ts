@@ -148,13 +148,6 @@ export async function executeProductCommand(
   if (request.command === 'workspace.open') {
     return await context.runtime.openWorkspace(request.payload)
   }
-  if (request.command === 'optimization.cleanup') {
-    if (!context.cleanupOptimizationEpisode) {
-      throw new Error('Optimization Episode cleanup is unavailable.')
-    }
-    return await context.cleanupOptimizationEpisode(request.payload)
-  }
-
   const workspaceHandle = request.payload.workspaceHandle
   if (!context.ownsWorkspaceHandle(workspaceHandle)) {
     throw new Error('Product Command does not own this Workspace handle')
@@ -208,6 +201,11 @@ export async function executeProductCommand(
         throw new Error('Optimization Parent Adoption is unavailable.')
       }
       return await context.adoptOptimizationCandidate(request.payload)
+    case 'optimization.cleanup':
+      if (!context.cleanupOptimizationEpisode) {
+        throw new Error('Optimization Episode cleanup is unavailable.')
+      }
+      return await context.cleanupOptimizationEpisode(request.payload)
   }
 }
 
@@ -369,6 +367,7 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
     case 'optimization.cleanup':
       requireString(payload, 'episodeId')
       requireString(payload, 'parentWorkspaceDirectory')
+      requireString(payload, 'workspaceHandle')
       if (payload.confirmation !== true) {
         throw new Error('Product Command cleanup requires confirmation')
       }

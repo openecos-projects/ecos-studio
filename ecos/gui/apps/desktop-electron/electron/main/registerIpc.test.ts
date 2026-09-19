@@ -588,6 +588,34 @@ describe('registerIpc', () => {
     )
   })
 
+  it('rejects Parent manifest deletion while an Optimization Episode guards the window Workspace', async () => {
+    const agentRuntimeService = {
+      isOptimizationParentDirectoryGuarded: vi.fn(() => true),
+      onEvent: vi.fn(() => () => undefined),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const sender = { id: 7, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/parent', window)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.projectManifestMutate)?.(
+        { sender },
+        {
+          mutation: { type: 'delete-workspace', workspaceId: 'workspace-1' },
+          projectRoot: '/runs/parent',
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
+      },
+      ok: false,
+    })
+    expect(services.projectManifestService.mutate).not.toHaveBeenCalled()
+  })
+
   it('matches Renderer cleanup acknowledgements to the sending window', async () => {
     const { handlers, services } = registerHandlers()
 
@@ -1010,7 +1038,9 @@ describe('registerIpc', () => {
 
   it('filters Optimization Episodes by window-owned Agent Session and rejects cross-window control', async () => {
     const controlOptimizationEpisode = vi.fn(async () => undefined)
+    const acknowledgeOptimizationEpisodeNotification = vi.fn()
     const agentRuntimeService = {
+      acknowledgeOptimizationEpisodeNotification,
       controlOptimizationEpisode,
       interrupt: vi.fn(),
       onEvent: vi.fn(() => () => undefined),
@@ -1056,7 +1086,7 @@ describe('registerIpc', () => {
       start: vi.fn(),
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers } = registerHandlers(agentRuntimeService)
+    const { handlers, services } = registerHandlers(agentRuntimeService)
     const senderA = { id: 41, isDestroyed: vi.fn(() => false), once: vi.fn() }
     const senderB = { id: 42, isDestroyed: vi.fn(() => false), once: vi.fn() }
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
@@ -1104,6 +1134,21 @@ describe('registerIpc', () => {
       providerId: 'ecos_agent',
       sessionId: 'session-a',
     })
+    await handlers.get(desktopApiIpcChannels.agentOptimizationNotificationAck)?.(
+      { sender: senderA },
+      {
+        episodeId: 'episode-a',
+        providerId: 'ecos_agent',
+        sessionId: 'session-a',
+        state: 'completed',
+      },
+    )
+    expect(acknowledgeOptimizationEpisodeNotification).toHaveBeenCalledWith({
+      episodeId: 'episode-a',
+      providerId: 'ecos_agent',
+      sessionId: 'session-a',
+      state: 'completed',
+    })
   })
 
   it('discovers and claims a persisted Episode from the window Parent Workspace', async () => {
@@ -1134,7 +1179,7 @@ describe('registerIpc', () => {
         generation: 1,
       })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers } = registerHandlers(agentRuntimeService)
+    const { handlers, services } = registerHandlers(agentRuntimeService)
     const sender = {
       id: 42,
       isDestroyed: vi.fn(() => false),
@@ -1144,6 +1189,15 @@ describe('registerIpc', () => {
     const window = createWindowDouble()
     fromWebContents.mockReturnValue(window)
     workspaceWindowRegistry.register('/runs/current', window)
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/runs/current',
+      workspaceHandle: 'workspace-restored',
+    })
+    services.eccRuntimeService.workspaceSnapshot.mockResolvedValue({
+      configuration: { workspaceSpec: {} },
+      directory: '/runs/current',
+      engineeringSnapshot: { workspaceRevision: 9 },
+    })
 
     await expect(
       handlers.get(desktopApiIpcChannels.agentOptimizationProjection)?.({ sender }),
