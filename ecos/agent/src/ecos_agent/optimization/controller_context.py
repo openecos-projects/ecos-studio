@@ -275,7 +275,17 @@ class ControllerContextMixin:
                     stage_observation.stage.value,
                 )
                 metrics_ref = f"{stage_dir}/analysis/qor_metrics.json"
-                extra_features.extend(stage_observation.state_evidence)
+                # The observation contracts use their own feature model; the
+                # knowledge request expects the compiler-side one.
+                extra_features.extend(
+                    StateEvidenceFeature(
+                        feature_id=item.feature_id,
+                        value=item.value,
+                        evidence_ref=item.evidence_ref,
+                        evidence_sha256=item.evidence_sha256,
+                    )
+                    for item in stage_observation.state_evidence
+                )
                 extra_features.extend(
                     StateEvidenceFeature(
                         feature_id=metric_id,

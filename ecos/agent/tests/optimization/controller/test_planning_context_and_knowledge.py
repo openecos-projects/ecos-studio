@@ -731,7 +731,20 @@ def test_cross_stage_observations_feed_predicate_features(tmp_path: Path) -> Non
     retrieval = _retrieval()
     codex = _FakeCodex(_proposal)
     controller = _controller(tmp_path, codex, _FakeEcc())
-    place_observation = _observation()
+    from ecos_agent.optimization.contracts import StageEvidenceFeature
+
+    place_observation = _observation().model_copy(
+        update={
+            "state_evidence": (
+                StageEvidenceFeature(
+                    feature_id="egr_or_rudy_map",
+                    value=True,
+                    evidence_ref="place_dreamplace/feature/RUDY_map/place_rudy_union.csv",
+                    evidence_sha256=HASH,
+                ),
+            ),
+        },
+    )
 
     controller.plan(
         _observation().model_copy(
