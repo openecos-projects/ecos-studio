@@ -7,8 +7,8 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -67,7 +67,6 @@ import {
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
   type DesktopAgentOptimizationEpisodeControlRequest,
-  type DesktopAgentOptimizationEpisodeNotificationAckRequest,
   type DesktopAgentOptimizationEpisodeProjection,
   type DesktopAgentInteractionAnswerRequest,
   type DesktopAgentInterruptRequest,
@@ -139,6 +138,7 @@ import {
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
 import { registerBackgroundLifecycleIpc } from './registerBackgroundLifecycleIpc'
+import { registerOptimizationEpisodeIpc } from './registerOptimizationEpisodeIpc'
 import type { QuickStartBuiltinResources } from '../services/quickStartResourceService'
 import { projectWorkspaceImportFailure } from '../services/projectWorkspaceImportService'
 
@@ -1118,7 +1118,7 @@ export function registerIpc(
 
   const requireAgentSessionOwner = (
     sender: IpcMainInvokeEvent['sender'],
-    request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
+    request: { providerId?: string; sessionId: string },
   ) => {
     const providerId = readAgentProviderId(request)
     const subscription = agentSessionSubscriptions.get(
@@ -1362,18 +1362,6 @@ export function registerIpc(
       workspaceRerunToken: token,
     })
   })
-  services.agentRuntimeService?.onOptimizationProjectionInvalidated?.((generation) => {
-    const senders = new Set(
-      [...agentSessionSubscriptions.values()].map((subscription) => subscription.sender),
-    )
-    for (const sender of senders) {
-      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) continue
-      sender.send(desktopApiEventChannels.agentOptimizationProjectionInvalidated, {
-        generation,
-      })
-    }
-  })
-
   const killShellSession = async (sessionId: string): Promise<void> => {
     const session = shellSessions.get(sessionId)
 
@@ -1515,6 +1503,24 @@ export function registerIpc(
         subscription.directories.has(normalizedDirectory),
     )
   }
+
+  const optimizationEpisodeCommands = registerOptimizationEpisodeIpc({
+    handle,
+    runtime: services.agentRuntimeService,
+    updateWorkspaceStepConfiguration: (request) =>
+      services.eccRuntimeService.updateWorkspaceStepConfiguration(request),
+    getWindowDirectory: (sender) => {
+      const window = BrowserWindow.fromWebContents(sender)
+      return window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    },
+    getSessionOwner: (providerId, sessionId) =>
+      agentSessionSubscriptions.get(agentSessionKey(providerId, sessionId))?.sender,
+    getSessionSenders: () =>
+      [...agentSessionSubscriptions.values()].map((subscription) => subscription.sender),
+    trackAgentSession,
+    requireAgentSessionOwner,
+    resolveAgentWorkspaceContext,
+  })
 
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
@@ -2557,63 +2563,7 @@ export function registerIpc(
           code: 'OPTIMIZATION_PARENT_GUARDED',
         })
       },
-      adoptOptimizationCandidate: async (payload) => {
-        const projection = services.agentRuntimeService?.optimizationProjection?.()
-        const episode = projection?.episodes.find(
-          (candidate) => candidate.episodeId === payload.episodeId,
-        )
-        if (!episode || !['completed', 'stopped', 'failed'].includes(episode.state)) {
-          throw new Error('Parent Adoption requires a terminal Optimization Episode.')
-        }
-        if (
-          episode.parentWorkspaceId !== payload.workspaceHandle ||
-          episode.parentWorkspaceRevision !== payload.expectedWorkspaceRevision
-        ) {
-          throw new Error('Parent Adoption authorization is stale.')
-        }
-        if (
-          episode.optimization.incumbent_candidate_root_ref !== payload.candidateRootRef
-        ) {
-          throw new Error('Parent Adoption candidate is not the Episode incumbent.')
-        }
-        const byStep = new Map<string, Record<string, unknown>>()
-        for (const step of payload.affectedFlowSteps) {
-          const parameters = Object.fromEntries(
-            payload.parameterPatch
-              .filter(({ knob_id }) =>
-                knob_id.toLowerCase().startsWith(`${step.toLowerCase()}.`),
-              )
-              .map(({ knob_id, value }) => [knob_id, value]),
-          )
-          if (Object.keys(parameters).length > 0) byStep.set(step, parameters)
-        }
-        if (byStep.size === 0)
-          throw new Error('Parent Adoption patch does not affect a Flow Step.')
-        let workspaceRevision = payload.expectedWorkspaceRevision
-        for (const [stepId, parameters] of byStep) {
-          const result =
-            await services.eccRuntimeService.updateWorkspaceStepConfiguration({
-              commandId: `${payload.idempotencyKey}:${stepId}`,
-              expectedWorkspaceRevision: workspaceRevision,
-              parameters,
-              stepId,
-              workspaceHandle: payload.workspaceHandle,
-            })
-          workspaceRevision = result.workspaceRevision
-        }
-        const marker = optimizationEpisodeMarkerPath(
-          episode.parentWorkspaceDirectory,
-          episode.episodeId,
-          'parent-adoption.v1.json',
-        )
-        await mkdir(dirname(marker), { recursive: true })
-        await writeFile(
-          marker,
-          `${JSON.stringify({ ...payload, workspaceRevision, adoptedAt: Date.now() })}\n`,
-          'utf8',
-        )
-        return { adopted: true, workspaceRevision }
-      },
+      adoptOptimizationCandidate: optimizationEpisodeCommands.adoptOptimizationCandidate,
       beginCreate: services.workspaceCreationJournal
         ? (createRequest) =>
             services.workspaceCreationJournal!.begin(ownerWindowId, createRequest)
@@ -2633,63 +2583,7 @@ export function registerIpc(
               ownerWindowId,
             )
         : undefined,
-      cleanupOptimizationEpisode: async (payload) => {
-        const projection = services.agentRuntimeService?.optimizationProjection?.()
-        const episode = projection?.episodes.find(
-          (candidate) => candidate.episodeId === payload.episodeId,
-        )
-        if (!episode || !['completed', 'stopped', 'failed'].includes(episode.state)) {
-          throw new Error('Optimization cleanup requires a terminal Episode.')
-        }
-        if (
-          normalizeWorkspacePath(episode.parentWorkspaceDirectory) !==
-          normalizeWorkspacePath(payload.parentWorkspaceDirectory)
-        ) {
-          throw new Error(
-            'Optimization cleanup Parent Workspace does not match the Episode.',
-          )
-        }
-        if (episode.parentWorkspaceId !== payload.workspaceHandle) {
-          throw new Error(
-            'Optimization cleanup Workspace ownership does not match the Episode.',
-          )
-        }
-        const adoptionMarker = optimizationEpisodeMarkerPath(
-          payload.parentWorkspaceDirectory,
-          payload.episodeId,
-          'parent-adoption.v1.json',
-        )
-        await stat(adoptionMarker).catch(() => {
-          throw new Error('Optimization cleanup requires Parent Adoption first.')
-        })
-        const episodeRoot = resolve(
-          optimizationEpisodeMarkerPath(
-            payload.parentWorkspaceDirectory,
-            payload.episodeId,
-            '',
-          ),
-        )
-        for (const directory of payload.executionWorkspaceDirectories) {
-          const target = resolve(directory)
-          const rel = relative(episodeRoot, target)
-          if (!rel || rel.startsWith('..') || resolve(episodeRoot, rel) !== target) {
-            throw new Error('Optimization cleanup path is outside the Episode.')
-          }
-          await rm(target, { force: true, recursive: true })
-        }
-        const marker = optimizationEpisodeMarkerPath(
-          payload.parentWorkspaceDirectory,
-          payload.episodeId,
-          'cleanup.v1.json',
-        )
-        await writeFile(
-          marker,
-          `${JSON.stringify({ cleanedAt: Date.now(), directories: payload.executionWorkspaceDirectories })}\n`,
-          'utf8',
-        )
-        services.agentRuntimeService?.markOptimizationEpisodeCleaned?.(episode.episodeId)
-        return { cleaned: true }
-      },
+      cleanupOptimizationEpisode: optimizationEpisodeCommands.cleanupOptimizationEpisode,
       failCreate: services.workspaceCreationJournal
         ? (creationId, error) =>
             services.workspaceCreationJournal!.markUnfinished(
@@ -3129,82 +3023,6 @@ export function registerIpc(
       await refreshAgentSessionWorkspaceContext(event.sender, agentRequest, subscription)
     }
     return await requireAgentRuntime(services).sendMessage(agentRequest)
-  })
-
-  handle(desktopApiIpcChannels.agentOptimizationProjection, async (event) => {
-    const runtime = requireAgentRuntime(services)
-    if (!runtime.optimizationProjection) {
-      return { episodes: [], generation: 0 }
-    }
-    const projection = runtime.optimizationProjection()
-    const window = BrowserWindow.fromWebContents(event.sender)
-    const windowDirectory = window
-      ? workspaceWindowRegistry.getPathForWindow(window)
-      : null
-    const episodes: typeof projection.episodes = []
-    for (const episode of projection.episodes) {
-      const key = agentSessionKey(episode.providerId, episode.agentSessionId)
-      const subscription = agentSessionSubscriptions.get(key)
-      if (subscription) {
-        if (subscription.sender === event.sender) episodes.push(episode)
-        continue
-      }
-      if (
-        !windowDirectory ||
-        normalizeWorkspacePath(windowDirectory) !==
-          normalizeWorkspacePath(episode.parentWorkspaceDirectory)
-      ) {
-        continue
-      }
-      try {
-        const context = await resolveAgentWorkspaceContext(
-          episode.parentWorkspaceDirectory,
-        )
-        trackAgentSession(event.sender, {
-          directory: episode.parentWorkspaceDirectory,
-          providerId: episode.providerId,
-          sessionId: episode.agentSessionId,
-          workspaceId: context.workspaceHandle,
-          workspaceRevision: context.workspaceRevision,
-        })
-        runtime.rebindOptimizationEpisode?.(
-          episode.episodeId,
-          context.workspaceHandle,
-          context.workspaceRevision,
-          episode.parentWorkspaceDirectory,
-        )
-        episodes.push({
-          ...episode,
-          parentWorkspaceId: context.workspaceHandle,
-          parentWorkspaceRevision: context.workspaceRevision,
-        })
-      } catch {
-        // A closed or invalid Workspace is not safe to claim for control.
-      }
-    }
-    return { ...projection, episodes }
-  })
-
-  handle(desktopApiIpcChannels.agentOptimizationControl, async (event, value) => {
-    const request = readAgentOptimizationEpisodeControlRequest(value)
-    requireAgentSessionOwner(event.sender, request)
-    const runtime = requireAgentRuntime(services)
-    if (!runtime.controlOptimizationEpisode) {
-      throw new Error('Agent Optimization Episode control is unavailable.')
-    }
-    await runtime.controlOptimizationEpisode(request)
-  })
-
-  handle(desktopApiIpcChannels.agentOptimizationNotificationAck, async (event, value) => {
-    const request = readAgentOptimizationEpisodeNotificationAckRequest(value)
-    requireAgentSessionOwner(event.sender, request)
-    const runtime = requireAgentRuntime(services)
-    if (!runtime.acknowledgeOptimizationEpisodeNotification) {
-      throw new Error(
-        'Agent Optimization Episode notification acknowledgement is unavailable.',
-      )
-    }
-    runtime.acknowledgeOptimizationEpisodeNotification(request)
   })
 
   handle(
@@ -3648,63 +3466,6 @@ function readAgentInterruptRequest(value: unknown): DesktopAgentInterruptRequest
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
   }
-}
-
-function readAgentOptimizationEpisodeControlRequest(
-  value: unknown,
-): DesktopAgentOptimizationEpisodeControlRequest {
-  const record = readAgentRecord(value)
-  if (
-    record.action !== 'pause' &&
-    record.action !== 'resume' &&
-    record.action !== 'retry' &&
-    record.action !== 'stop'
-  ) {
-    throw new Error('Agent Optimization Episode action is invalid.')
-  }
-  const episodeId = readAgentSessionId(record.episodeId)
-  return {
-    action: record.action,
-    episodeId,
-    providerId: readAgentProviderId(record),
-    sessionId: readAgentSessionId(record.sessionId),
-  }
-}
-
-function readAgentOptimizationEpisodeNotificationAckRequest(
-  value: unknown,
-): DesktopAgentOptimizationEpisodeNotificationAckRequest {
-  const record = readAgentRecord(value)
-  if (
-    record.state !== 'completed' &&
-    record.state !== 'needs_attention' &&
-    record.state !== 'interrupted' &&
-    record.state !== 'stopped'
-  ) {
-    throw new Error('Agent Optimization Episode notification state is invalid.')
-  }
-  return {
-    episodeId: readAgentSessionId(record.episodeId),
-    providerId: readAgentProviderId(record),
-    sessionId: readAgentSessionId(record.sessionId),
-    state: record.state,
-  }
-}
-
-function optimizationEpisodeMarkerPath(
-  parentWorkspaceDirectory: string,
-  episodeId: string,
-  filename: string,
-): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(episodeId)) {
-    throw new Error('Optimization Episode identity is invalid.')
-  }
-  const parent = resolve(parentWorkspaceDirectory)
-  const episodeRoot = resolve(join(parent, '.agent', 'optimization', episodeId))
-  if (relative(parent, episodeRoot).startsWith('..')) {
-    throw new Error('Optimization Episode path is outside the Parent Workspace.')
-  }
-  return resolve(join(episodeRoot, filename))
 }
 
 function readWorkspaceRerunToken(value: unknown): string {
