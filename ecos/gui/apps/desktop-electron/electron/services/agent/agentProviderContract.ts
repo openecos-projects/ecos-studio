@@ -2,10 +2,13 @@ import type {
   DesktopAgentEvent,
   DesktopAgentInteractionAnswerRequest,
   DesktopAgentInteractionAnswerResponse,
+  DesktopAgentInterruptRequest,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
   DesktopAgentModelSettings,
   DesktopAgentModelSettingsRequest,
+  DesktopAgentOptimizationEpisodeResumeRequest,
+  DesktopAgentOptimizationEpisodeNotificationAckRequest,
   DesktopAgentProviderRequest,
   DesktopAgentResumeSessionRequest,
   DesktopAgentResumeSessionResponse,
@@ -45,6 +48,17 @@ export interface AgentProviderRuntime {
   resumeSession(
     request: DesktopAgentResumeSessionRequest,
   ): Promise<DesktopAgentResumeSessionResponse>
+  resumeOptimizationEpisode(
+    request: DesktopAgentOptimizationEpisodeResumeRequest,
+  ): Promise<void>
+  stopOptimizationEpisode(
+    request: DesktopAgentOptimizationEpisodeResumeRequest,
+  ): Promise<void>
+  acknowledgeOptimizationEpisodeNotification?(
+    request: DesktopAgentOptimizationEpisodeNotificationAckRequest,
+  ): void
+  prepareOptimizationShutdown(request: DesktopAgentInterruptRequest): Promise<void>
+  cancelOptimizationShutdown(request: DesktopAgentInterruptRequest): Promise<void>
   stop(request?: DesktopAgentProviderRequest): Promise<void>
   onEvent(listener: (event: DesktopAgentEvent) => void): () => void
 }

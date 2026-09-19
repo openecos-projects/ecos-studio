@@ -125,7 +125,6 @@ from ecos_agent.optimization.parameters.semantics import (
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
-
 from ecos_agent.optimization.controller_models import (
     ExecutionBinding,
     OptimizationAgentMode,
@@ -133,7 +132,6 @@ from ecos_agent.optimization.controller_models import (
     OptimizationEpisodeControllerError,
     PendingExecutionRecord,
 )
-
 
 class ControllerExecutionMixin:
     def execute(self) -> OptimizationControlResult:
@@ -313,7 +311,6 @@ class ControllerExecutionMixin:
         self._approved_planning_entry_sha256 = None
         self._approved_parent_incumbent_sha256 = None
         self._approved_parent_config_sha256 = None
-
     def _register_started_candidate(
         self,
         *,
@@ -347,7 +344,6 @@ class ControllerExecutionMixin:
         )
         self._clear_approved_proposal()
         return record
-
     def timeout(self, execution_id: str | None = None) -> OptimizationControlResult:
         record = self._select_pending_execution(execution_id)
         if record is None:
@@ -398,6 +394,19 @@ class ControllerExecutionMixin:
         )
         self._persist()
         return self._result("stop_requested_before_execution")
+
+    def stop(self) -> OptimizationControlResult:
+        if self._pending_executions:
+            raise OptimizationEpisodeControllerError(
+                "episode still has pending executions"
+            )
+        if self._state == OptimizationEpisodeState.STOPPED:
+            return self._result("stop_already_recorded")
+        if self._state == OptimizationEpisodeState.AWAITING_EXECUTION:
+            self._clear_approved_proposal()
+        self._state = OptimizationEpisodeState.STOPPED
+        self._persist()
+        return self._result("stop_requested")
 
     def complete_terminal(
         self,
@@ -764,7 +773,6 @@ class ControllerExecutionMixin:
             self._state = OptimizationEpisodeState.PLANNING
         self._persist()
         return self._result()
-
     def _quarantine_indeterminate(
         self, execution_id: str | None = None
     ) -> OptimizationControlResult:

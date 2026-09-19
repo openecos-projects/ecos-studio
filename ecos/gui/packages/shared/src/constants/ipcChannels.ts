@@ -134,6 +134,9 @@ export const desktopApiIpcChannels = {
   agentStart: 'agent:start',
   agentStartSession: 'agent:start-session',
   agentSendMessage: 'agent:send-message',
+  agentOptimizationProjection: 'agent:optimization-projection',
+  agentOptimizationControl: 'agent:optimization-control',
+  agentOptimizationNotificationAck: 'agent:optimization-notification-ack',
   agentRegisterOperationAssociation: 'agent:register-operation-association',
   agentGetModelSettings: 'agent:get-model-settings',
   agentSetModelSettings: 'agent:set-model-settings',
@@ -170,6 +173,7 @@ export const desktopApiEventChannels = {
   eccRuntimeOperationProjectionInvalidated:
     'ecc:runtime-operation-projection-invalidated',
   agentEvent: 'agent:event',
+  agentOptimizationProjectionInvalidated: 'agent:optimization-projection-invalidated',
   agentCodexProgress: 'agent:codex-progress',
   cliInstallerProgress: 'cli-installer:progress',
   shellData: 'shell:data',

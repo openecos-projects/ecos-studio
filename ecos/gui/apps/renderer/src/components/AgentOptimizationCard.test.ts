@@ -99,25 +99,71 @@ describe('AgentOptimizationCard', () => {
     expect(wrapper.find('img').exists()).toBe(false)
   })
 
-  it('renders the episode trend summary and per-turn rows', () => {
+  it('renders a compact episode summary without duplicating Operation detail', () => {
     const wrapper = mount(AgentOptimizationCard, {
       props: {
-        optimization: turnTwo,
+        optimization: {
+          ...turnTwo,
+          in_flight: 2,
+          phase: 'running',
+          turn_count: 2,
+        },
         timeline: [authorization, turnOne, proposal, turnTwo],
       },
     })
 
     const text = wrapper.text()
-    expect(text).toContain('2 turns')
-    expect(text).toContain('DRC 14 → 6')
-    expect(text).toContain('Setup 3 → 1')
-    expect(text).toContain('2 promoted')
-    expect(text).toContain('Authorized')
-    expect(text).toContain('Turn 1')
     expect(text).toContain('Turn 2')
-    expect(text).toContain('place.cell_padding_x')
+    expect(text).toContain('2 in flight')
+    expect(text).toContain('DRC 6')
     expect(text).toContain('candidate_better')
     expect(text).toContain('drc_to_original')
+    expect(text).not.toContain('Authorized')
+    expect(text).not.toContain('place.cell_padding_x')
+  })
+
+  it('emits explicit episode controls for running and paused states', async () => {
+    const running = mount(AgentOptimizationCard, {
+      props: {
+        optimization: { ...turnOne, phase: 'running', state: 'running' },
+        timeline: [turnOne],
+      },
+    })
+    await running.get('[aria-label="Pause optimization"]').trigger('click')
+    await running.get('[aria-label="Stop optimization"]').trigger('click')
+    expect(running.emitted('control')).toEqual([['pause'], ['stop']])
+
+    const paused = mount(AgentOptimizationCard, {
+      props: {
+        optimization: { ...turnOne, phase: 'paused', state: 'paused' },
+        timeline: [turnOne],
+      },
+    })
+    await paused.get('[aria-label="Resume optimization"]').trigger('click')
+    expect(paused.emitted('control')).toEqual([['resume']])
+
+    const interrupted = mount(AgentOptimizationCard, {
+      props: {
+        optimization: { ...turnOne, phase: 'interrupted', state: 'interrupted' },
+        timeline: [turnOne],
+      },
+    })
+    await interrupted.get('[aria-label="Resume optimization"]').trigger('click')
+    await interrupted.get('[aria-label="Stop optimization"]').trigger('click')
+    expect(interrupted.emitted('control')).toEqual([['resume'], ['stop']])
+
+    const needsAttention = mount(AgentOptimizationCard, {
+      props: {
+        optimization: {
+          ...turnOne,
+          phase: 'needs_attention',
+          state: 'needs_attention',
+        },
+        timeline: [turnOne],
+      },
+    })
+    await needsAttention.get('[aria-label="Retry optimization"]').trigger('click')
+    expect(needsAttention.emitted('control')).toEqual([['retry']])
   })
 
   it('renders the proposal rationale as plain text', () => {
@@ -126,6 +172,7 @@ describe('AgentOptimizationCard', () => {
     })
 
     expect(wrapper.text()).toContain('Increase padding to absorb DRC hotspots.')
-    expect(wrapper.find('.optimization-card__summary').exists()).toBe(false)
+    expect(wrapper.find('.optimization-card__summary').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('place.cell_padding_x')
   })
 })

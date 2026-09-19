@@ -290,11 +290,11 @@ def _run_replay(
                     "operationId": operation_id,
                 },
             )
-            if heartbeat is not None:
-                heartbeat(status)
             if status.get("state") in _TERMINAL_STATES:
                 terminal = status
                 break
+            if heartbeat is not None:
+                heartbeat(status)
         if terminal is None:
             raise OptimizationRuntimeError(
                 f"default replay {index} timed out after {timeout_seconds}s"
@@ -317,6 +317,7 @@ def calibrate(
     *,
     should_stop: Callable[[], bool] | None = None,
     progress: Callable[[str], None] | None = None,
+    replay_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, object]:
     workspace = workspace.resolve()
     if not workspace.is_dir():
@@ -344,6 +345,8 @@ def calibrate(
                 f"preparing replay {index}/{replays}: copying the workspace and "
                 "rerunning the default-parameter flow"
             )
+        if replay_progress is not None:
+            replay_progress(index - 1, replays, "running")
         observations.append(
             _run_replay(
                 workspace,
@@ -360,6 +363,8 @@ def calibrate(
         )
         if progress is not None:
             progress(f"replay {index}/{replays} finished")
+        if replay_progress is not None:
+            replay_progress(index, replays, "completed")
     payload = write_noise_epsilon_artifact(
         tuple(observations),
         optimization_root / "noise-epsilon.v1.json",

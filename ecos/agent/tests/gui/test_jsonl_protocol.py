@@ -66,3 +66,45 @@ def test_protocol_processes_interrupt_while_send_message_is_running() -> None:
     assert next(response for response in responses if response["id"] == "send-1")[
         "result"
     ] == {"messageId": "message-1", "sessionId": "session-1"}
+
+
+class _RecordingProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def __getattr__(self, name: str):
+        def record(request: dict[str, object], **_kwargs):
+            self.calls.append((name, request))
+            return {"sessionId": request.get("sessionId")}
+
+        return record
+
+
+def test_protocol_dispatches_optimization_episode_lifecycle_methods() -> None:
+    server = EcosAgentProtocolServer()
+    provider = _RecordingProvider()
+    server.provider = provider
+    params = {
+        "directory": "/work/demo",
+        "episodeId": "episode-1",
+        "sessionId": "session-1",
+        "workspaceId": "workspace-1",
+        "workspaceRevision": 7,
+    }
+
+    for method in (
+        "resumeOptimizationEpisode",
+        "stopOptimizationEpisode",
+        "prepareOptimizationShutdown",
+        "cancelOptimizationShutdown",
+    ):
+        assert server._dispatch({"method": method, "params": params}) == {
+            "sessionId": "session-1"
+        }
+
+    assert provider.calls == [
+        ("resume_optimization_episode", params),
+        ("stop_optimization_episode", params),
+        ("prepare_optimization_shutdown", params),
+        ("cancel_optimization_shutdown", params),
+    ]

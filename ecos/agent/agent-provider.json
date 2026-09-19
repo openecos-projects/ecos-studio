@@ -3,5 +3,5 @@
   "displayName": "ECOS Agent",
   "command": "uv",
   "args": ["run", "--locked", "python", "-m", "ecos_agent.gui"],
-  "protocolVersion": 1
+  "protocolVersion": 2
 }

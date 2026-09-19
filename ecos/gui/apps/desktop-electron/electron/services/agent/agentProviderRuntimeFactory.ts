@@ -11,6 +11,7 @@ export async function createAgentRuntimeFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   builtInProviderRoot?: string,
   host?: AgentProviderHost,
+  optimizationProjectionPath?: string,
 ): Promise<AgentRuntimeManager | null> {
   const roots = configuredProviderRoots(
     env.ECOS_AGENT_PROVIDER_ROOTS,
@@ -30,6 +31,7 @@ export async function createAgentRuntimeFromEnvironment(
     defaultProviderId:
       env.ECOS_AGENT_DEFAULT_PROVIDER ??
       providers.find(({ providerId }) => providerId === 'ecos_agent')?.providerId,
+    optimizationProjectionPath,
     providers: providers.map((manifest) => ({
       providerId: manifest.providerId,
       runtime: new AgentProviderProcessRuntime({ env, host, manifest }),

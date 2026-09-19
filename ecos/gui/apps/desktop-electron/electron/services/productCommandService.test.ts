@@ -2,6 +2,80 @@ import { describe, expect, it, vi } from 'vitest'
 import { executeProductCommand } from './productCommandService'
 
 describe('executeProductCommand Workspace creation', () => {
+  it('validates and routes explicit Optimization Parent Adoption', async () => {
+    const adoptOptimizationCandidate = vi.fn().mockResolvedValue({
+      adopted: true,
+      workspaceRevision: 8,
+    })
+    const payload = {
+      affectedFlowSteps: ['Place', 'Route'],
+      candidateId: 'candidate-1',
+      candidateRootRef: '.agent/candidates/candidate-1',
+      evidence: { manifestSha256: 'sha256:test' },
+      episodeId: 'episode-1',
+      expectedWorkspaceRevision: 7,
+      idempotencyKey: 'adopt-1',
+      parameterPatch: [{ knob_id: 'place.target_density', value: 0.6 }],
+      workspaceHandle: 'handle-parent',
+    }
+    await expect(
+      executeProductCommand({ command: 'optimization.adoptCandidate', payload }, {
+        adoptOptimizationCandidate,
+        ownsWorkspaceHandle: () => true,
+      } as never),
+    ).resolves.toEqual({ adopted: true, workspaceRevision: 8 })
+    expect(adoptOptimizationCandidate).toHaveBeenCalledWith(payload)
+  })
+
+  it('routes confirmed Optimization cleanup without a workspace handle', async () => {
+    const cleanupOptimizationEpisode = vi.fn().mockResolvedValue({ cleaned: true })
+    const payload = {
+      confirmation: true as const,
+      episodeId: 'episode-1',
+      executionWorkspaceDirectories: ['/runs/episode-1/candidate-1'],
+      parentWorkspaceDirectory: '/runs/parent',
+    }
+    await expect(
+      executeProductCommand({ command: 'optimization.cleanup', payload }, {
+        cleanupOptimizationEpisode,
+      } as never),
+    ).resolves.toEqual({ cleaned: true })
+    expect(cleanupOptimizationEpisode).toHaveBeenCalledWith(payload)
+  })
+
+  it('rejects a guarded Parent Flow start before invoking the Runtime', async () => {
+    const startFlowOperation = vi.fn()
+    const error = Object.assign(new Error('Optimization is running in the background.'), {
+      code: 'OPTIMIZATION_PARENT_GUARDED',
+    })
+    const authorizeWorkspaceMutation = vi.fn(() => {
+      throw error
+    })
+
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.run',
+          payload: {
+            expectedWorkspaceRevision: 7,
+            idempotencyKey: 'run-1',
+            workspaceHandle: 'handle-parent',
+          },
+        },
+        {
+          authorizeWorkspaceMutation,
+          ownsWorkspaceHandle: () => true,
+          runtime: { startFlowOperation } as never,
+        } as never,
+      ),
+    ).rejects.toMatchObject({ code: 'OPTIMIZATION_PARENT_GUARDED' })
+    expect(authorizeWorkspaceMutation).toHaveBeenCalledWith(
+      'workspace.run',
+      'handle-parent',
+    )
+    expect(startFlowOperation).not.toHaveBeenCalled()
+  })
+
   it('routes an owned canonical configuration update to the Runtime', async () => {
     const updateWorkspaceConfiguration = vi.fn().mockResolvedValue({
       workspaceRevision: 2,

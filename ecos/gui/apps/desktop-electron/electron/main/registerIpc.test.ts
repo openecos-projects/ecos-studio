@@ -1008,6 +1008,160 @@ describe('registerIpc', () => {
     expect(agentRuntimeService?.startSession).toHaveBeenCalledTimes(2)
   })
 
+  it('filters Optimization Episodes by window-owned Agent Session and rejects cross-window control', async () => {
+    const controlOptimizationEpisode = vi.fn(async () => undefined)
+    const agentRuntimeService = {
+      controlOptimizationEpisode,
+      interrupt: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+      onOptimizationProjectionInvalidated: vi.fn(() => () => undefined),
+      optimizationProjection: vi.fn(() => ({
+        episodes: [
+          {
+            agentSessionId: 'session-a',
+            episodeId: 'episode-a',
+            inFlightCount: 1,
+            optimization: {
+              episode_id: 'episode-a',
+              schema_version: 'ecos.optimization_status.v2',
+              state: 'running',
+            },
+            parentWorkspaceDirectory: '/runs/a',
+            providerId: 'ecos_agent',
+            startedAt: 1,
+            state: 'running',
+            turnCount: 1,
+            updatedAt: 2,
+          },
+          {
+            agentSessionId: 'session-b',
+            episodeId: 'episode-b',
+            inFlightCount: 0,
+            optimization: {
+              episode_id: 'episode-b',
+              schema_version: 'ecos.optimization_status.v2',
+              state: 'paused',
+            },
+            parentWorkspaceDirectory: '/runs/b',
+            providerId: 'ecos_agent',
+            startedAt: 3,
+            state: 'paused',
+            turnCount: 2,
+            updatedAt: 4,
+          },
+        ],
+        generation: 4,
+      })),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers } = registerHandlers(agentRuntimeService)
+    const senderA = { id: 41, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    const senderB = { id: 42, isDestroyed: vi.fn(() => false), once: vi.fn() }
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: senderA },
+      { mode: 'home', providerId: 'ecos_agent', sessionId: 'session-a' },
+    )
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: senderB },
+      { mode: 'home', providerId: 'ecos_agent', sessionId: 'session-b' },
+    )
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentOptimizationProjection)?.({
+        sender: senderA,
+      }),
+    ).resolves.toMatchObject({
+      episodes: [expect.objectContaining({ episodeId: 'episode-a' })],
+      generation: 4,
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
+        { sender: senderB },
+        {
+          action: 'stop',
+          episodeId: 'episode-a',
+          providerId: 'ecos_agent',
+          sessionId: 'session-a',
+        },
+      ),
+    ).resolves.toMatchObject({ ok: false })
+    expect(controlOptimizationEpisode).not.toHaveBeenCalled()
+
+    await handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
+      { sender: senderA },
+      {
+        action: 'retry',
+        episodeId: 'episode-a',
+        providerId: 'ecos_agent',
+        sessionId: 'session-a',
+      },
+    )
+    expect(controlOptimizationEpisode).toHaveBeenCalledWith({
+      action: 'retry',
+      episodeId: 'episode-a',
+      providerId: 'ecos_agent',
+      sessionId: 'session-a',
+    })
+  })
+
+  it('discovers and claims a persisted Episode from the window Parent Workspace', async () => {
+    const controlOptimizationEpisode = vi.fn(async () => undefined)
+    const agentRuntimeService = {
+      controlOptimizationEpisode,
+      onEvent: vi.fn(() => () => undefined),
+      onOptimizationProjectionInvalidated: vi.fn(() => () => undefined),
+      optimizationProjection: vi.fn(() => ({
+        episodes: [
+          {
+            agentSessionId: 'session-restored',
+            episodeId: 'episode-restored',
+            inFlightCount: 0,
+            optimization: {
+              episode_id: 'episode-restored',
+              schema_version: 'ecos.optimization_status.v2',
+              state: 'interrupted',
+            },
+            parentWorkspaceDirectory: '/runs/current',
+            providerId: 'ecos_agent',
+            startedAt: 1,
+            state: 'interrupted',
+            turnCount: 2,
+            updatedAt: 2,
+          },
+        ],
+        generation: 1,
+      })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers } = registerHandlers(agentRuntimeService)
+    const sender = {
+      id: 42,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+      send: vi.fn(),
+    }
+    const window = createWindowDouble()
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/current', window)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentOptimizationProjection)?.({ sender }),
+    ).resolves.toMatchObject({
+      episodes: [expect.objectContaining({ episodeId: 'episode-restored' })],
+    })
+    await handlers.get(desktopApiIpcChannels.agentOptimizationControl)?.(
+      { sender },
+      {
+        action: 'stop',
+        episodeId: 'episode-restored',
+        providerId: 'ecos_agent',
+        sessionId: 'session-restored',
+      },
+    )
+    expect(controlOptimizationEpisode).toHaveBeenCalledOnce()
+  })
+
   it('rejects workspace rebinding outside the directory owned by the window', async () => {
     const agentRuntimeService = {
       interrupt: vi.fn(),
@@ -2815,6 +2969,39 @@ describe('registerIpc', () => {
     ).resolves.toEqual({
       error: {
         message: 'Product Command does not own this Workspace handle',
+        name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.startFlowOperation).not.toHaveBeenCalled()
+  })
+
+  it('preserves the Optimization Parent Guard domain error across IPC', async () => {
+    const agentRuntimeService = {
+      isOptimizationParentGuarded: vi.fn(() => true),
+      onEvent: vi.fn(() => () => undefined),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const event = { sender: { id: 'owner' } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.run',
+        payload: {
+          expectedWorkspaceRevision: 1,
+          idempotencyKey: 'command-1',
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    ).resolves.toEqual({
+      error: {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
+        message: 'Optimization is running in the background.',
         name: 'Error',
       },
       ok: false,

@@ -49,6 +49,10 @@ import type {
 } from './desktopShell.ts'
 import type {
   DesktopAgentEvent,
+  DesktopAgentOptimizationEpisodeControlRequest,
+  DesktopAgentOptimizationEpisodeNotificationAckRequest,
+  DesktopAgentOptimizationEpisodeInvalidatedEvent,
+  DesktopAgentOptimizationEpisodeProjection,
   DesktopAgentInterruptRequest,
   DesktopAgentInteractionAnswerRequest,
   DesktopAgentInteractionAnswerResponse,
@@ -416,6 +420,12 @@ export interface DesktopApi {
   ecc: EccRuntimeApi
   shutdown?: DesktopShutdownApi
   agent?: {
+    controlOptimizationEpisode(
+      request: DesktopAgentOptimizationEpisodeControlRequest,
+    ): Promise<void>
+    acknowledgeOptimizationEpisodeNotification(
+      request: DesktopAgentOptimizationEpisodeNotificationAckRequest,
+    ): Promise<void>
     interrupt(request: DesktopAgentInterruptRequest): Promise<void>
     start(request: DesktopAgentStartRequest): Promise<void>
     startSession(
@@ -437,6 +447,10 @@ export interface DesktopApi {
       request: DesktopAgentInteractionAnswerRequest,
     ): Promise<DesktopAgentInteractionAnswerResponse>
     onEvent(listener: (event: DesktopAgentEvent) => void): DesktopEventUnsubscribe
+    onOptimizationProjectionInvalidated(
+      listener: (event: DesktopAgentOptimizationEpisodeInvalidatedEvent) => void,
+    ): DesktopEventUnsubscribe
+    optimizationProjection(): Promise<DesktopAgentOptimizationEpisodeProjection>
     codex?: {
       getStatus(): Promise<DesktopCodexDependencyStatus>
       install(): Promise<DesktopCodexDependencyStatus>

@@ -50,6 +50,7 @@ export const useAgentShellStore = defineStore('agentShell', () => {
   const panelWidthPx = ref(readStoredAgentPanelWidth())
   const workspaceAgentCollapsed = ref(readStoredWorkspaceAgentCollapsed())
   const codexStatus = ref<DesktopCodexDependencyStatus | null>(null)
+  const hiddenOptimizationSessionIds = new Set<string>()
 
   const activeTab = computed(
     () => tabs.value.find((tab) => tab.id === activeTabId.value) ?? null,
@@ -149,6 +150,18 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     return removed ?? null
   }
 
+  function hideOptimizationSession(id: string): void {
+    hiddenOptimizationSessionIds.add(id)
+  }
+
+  function revealOptimizationSession(id: string): void {
+    hiddenOptimizationSessionIds.delete(id)
+  }
+
+  function isOptimizationSessionHidden(id: string): boolean {
+    return hiddenOptimizationSessionIds.has(id)
+  }
+
   function beginPreserveForAgentWorkspaceSwitch(): void {
     preserveMessagesOnWorkspaceSwitch.value = true
     preserveSessionOnWorkspaceSwitch.value = true
@@ -246,6 +259,9 @@ export const useAgentShellStore = defineStore('agentShell', () => {
     markTabStarted,
     bindTabToWorkspace,
     removeTab,
+    hideOptimizationSession,
+    revealOptimizationSession,
+    isOptimizationSessionHidden,
     clearTabs,
     beginPreserveForAgentWorkspaceSwitch,
     consumePreserveMessages,

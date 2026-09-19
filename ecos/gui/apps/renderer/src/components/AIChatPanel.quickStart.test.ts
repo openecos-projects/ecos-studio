@@ -200,3 +200,23 @@ it('does not launch Quick Start when its owner closes before the answer returns'
   expect(state.sendMessage).not.toHaveBeenCalled()
   expect(getAgentSessionUi('other').isRequestPending).toBe(false)
 })
+
+it('keeps an active Optimization Episode running when its Agent tab is closed', async () => {
+  const state = await setup({ activeOptimization: true })
+  const ownerMessages = state.messages.messagesBySessionId.owner
+
+  await state.wrapper.findAll('[aria-label="Close chat"]')[0]!.trigger('click')
+  await flushPromises()
+
+  expect(state.wrapper.get('.agent-close-dialog').text()).toContain('Keep Running')
+  expect(state.wrapper.get('.agent-close-dialog').text()).toContain('Stop and Close')
+  expect(state.wrapper.get('.agent-close-dialog').text()).toContain('Cancel')
+  expect(state.interrupt).not.toHaveBeenCalled()
+
+  await state.wrapper.get('.agent-close-keep').trigger('click')
+  await flushPromises()
+
+  expect(state.shell.tabs.map((tab) => tab.id)).toEqual(['other'])
+  expect(state.messages.messagesBySessionId.owner).toBe(ownerMessages)
+  expect(state.interrupt).not.toHaveBeenCalled()
+})

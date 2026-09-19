@@ -1,4 +1,7 @@
-import type { EccBackgroundOperationProjection } from '@ecos-studio/shared'
+import type {
+  DesktopAgentOptimizationEpisodeSummary,
+  EccBackgroundOperationProjection,
+} from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShutdownCoordinator } from './shutdownCoordinator'
 
@@ -159,6 +162,58 @@ describe('ShutdownCoordinator', () => {
       expect(state.coordinator.status().state).toBe('cleaning-renderers'),
     )
     expect(state.requestRendererCleanup).toHaveBeenCalledOnce()
+  })
+
+  it('drains an active Optimization Episode before Renderer cleanup', async () => {
+    const episode: DesktopAgentOptimizationEpisodeSummary = {
+      agentSessionId: 'session-1',
+      episodeId: 'episode-1',
+      inFlightCount: 0,
+      optimization: {
+        episode_id: 'episode-1',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'paused',
+      },
+      parentWorkspaceDirectory: '/work/demo',
+      providerId: 'ecos_agent',
+      startedAt: 1,
+      state: 'paused',
+      turnCount: 2,
+      updatedAt: 2,
+    }
+    const beginOptimizationDrain = vi.fn(async () => undefined)
+    const cancelOptimizationDrain = vi.fn(async () => undefined)
+    const requestRendererCleanup = vi.fn()
+    const coordinator = new ShutdownCoordinator({
+      approve: vi.fn(),
+      beginOptimizationDrain,
+      cancelOperation: vi.fn(async () => undefined),
+      cancelOptimizationDrain,
+      forceTerminate: vi.fn(async () => undefined),
+      listWindowIds: () => [7],
+      markCreationsUnfinished: vi.fn(async () => undefined),
+      operationProjection: projection,
+      optimizationEpisodes: () => [episode],
+      promptForce: vi.fn(async () => 'keep-waiting' as const),
+      promptInitial: vi.fn(async () => 'wait' as const),
+      requestRendererCleanup,
+    })
+
+    await coordinator.requestApplicationQuit()
+
+    expect(beginOptimizationDrain).toHaveBeenCalledOnce()
+    expect(coordinator.status()).toMatchObject({
+      activeOptimizations: 1,
+      state: 'draining',
+    })
+    expect(requestRendererCleanup).not.toHaveBeenCalled()
+
+    episode.state = 'interrupted'
+    await coordinator.notifyBlockersChanged()
+    expect(requestRendererCleanup).toHaveBeenCalledWith(expect.any(String), [7])
+
+    await coordinator.cancelShutdown()
+    expect(cancelOptimizationDrain).toHaveBeenCalledOnce()
   })
 
   it('persists unfinished creation evidence before cancelling or terminating', async () => {

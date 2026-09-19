@@ -98,6 +98,72 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('sends Optimization Episode lifecycle requests through the provider protocol', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const childRequest = async (
+      method: string,
+      invoke: () => Promise<void>,
+      params: Record<string, unknown>,
+    ) => {
+      const callIndex = child.stdin.write.mock.calls.length
+      const response = invoke()
+      const request = readProtocolRequest(child, callIndex)
+      expect(request).toMatchObject({ method, params })
+      child.stdout.emit(
+        'data',
+        `${JSON.stringify({ id: request.id, result: { sessionId: 'session-1' } })}\n`,
+      )
+      await response
+    }
+    const recovery = {
+      directory: '/work/demo',
+      episodeId: 'episode-1',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 7,
+    }
+    const session = { providerId: 'codex', sessionId: 'session-1' }
+
+    const first = runtime.resumeOptimizationEpisode(recovery)
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+    expect(request).toMatchObject({
+      method: 'resumeOptimizationEpisode',
+      params: recovery,
+    })
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: request.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await first
+    await childRequest(
+      'stopOptimizationEpisode',
+      () => runtime.stopOptimizationEpisode(recovery),
+      recovery,
+    )
+    await childRequest(
+      'prepareOptimizationShutdown',
+      () => runtime.prepareOptimizationShutdown(session),
+      session,
+    )
+    await childRequest(
+      'cancelOptimizationShutdown',
+      () => runtime.cancelOptimizationShutdown(session),
+      session,
+    )
+  })
+
   it('answers inbound host Product Commands from the agent child', async () => {
     const harness = createSpawnHarness()
     const host = {

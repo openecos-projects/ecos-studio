@@ -32,6 +32,31 @@
         </header>
         <div v-if="taskCount || attentionCount" class="background-tasks-list">
           <article
+            v-for="episode in episodeTasks"
+            :key="`optimization:${episode.episodeId}`"
+            class="background-task-row"
+          >
+            <button
+              type="button"
+              class="background-task-main background-task-optimization"
+              :title="taskTitle(episode.parentWorkspaceDirectory)"
+              @click="openAgentProgress(episode)"
+            >
+              <span class="background-task-icon" aria-hidden="true">
+                <i class="ri-sparkling-2-line"></i>
+              </span>
+              <span class="background-task-copy">
+                <strong>{{ taskLabel(episode.parentWorkspaceDirectory) }}</strong>
+                <span>Agent optimization · {{ episodeProgress(episode) }}</span>
+              </span>
+              <span class="background-task-meta">
+                <span>{{ episodeStateLabel(episode.state) }}</span>
+                <time>{{ elapsedLabel(episode.startedAt) }}</time>
+              </span>
+            </button>
+          </article>
+
+          <article
             v-for="operation in operations"
             :key="`${operation.workspaceId}:${operation.operationId}`"
             class="background-task-row"
@@ -160,6 +185,8 @@
 
 <script setup lang="ts">
 import type {
+  DesktopAgentOptimizationEpisodeState,
+  DesktopAgentOptimizationEpisodeSummary,
   EccBackgroundOperation,
   EccBackgroundWorkspaceCreation,
   EccRuntimeOperationState,
@@ -170,6 +197,10 @@ import { useRouter } from 'vue-router'
 import { backgroundTaskIdentityLabel } from '@/components/backgroundTaskIdentity'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
+import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useMessageStore } from '@/stores/messageStore'
+import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { useNotificationStore } from '@/stores/notificationStore'
 import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
 import {
@@ -180,9 +211,13 @@ import { useWorkspaceCreation } from '@/utils/workspaceNavigation'
 
 const router = useRouter()
 const store = useBackgroundOperationStore()
+const optimizationEpisodes = useOptimizationEpisodeStore()
+const agentShell = useAgentShellStore()
+const messageStore = useMessageStore()
 const notifications = useNotificationStore()
 const { currentProject, openProject, showToast } = useWorkspace()
 const { creations, finalizations, operations } = storeToRefs(store)
+const { episodes } = storeToRefs(optimizationEpisodes)
 const workspaceCreation = useWorkspaceCreation()
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -191,6 +226,7 @@ const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | null = null
 const retryingHandle = ref('')
 const topbarOverlayEvent = 'ecos-topbar-overlay-open'
+const openAgentProgressEvent = 'ecos-open-agent-progress'
 const designOwners = ref<Record<string, string>>({})
 
 type PresentedCreation = EccBackgroundWorkspaceCreation & {
@@ -225,14 +261,25 @@ const creationTasks = computed<PresentedCreation[]>(() => {
     },
   ]
 })
+const episodeTasks = computed(() =>
+  episodes.value.filter(
+    (episode) => !['completed', 'failed', 'stopped'].includes(episode.state),
+  ),
+)
 const taskCount = computed(
   () =>
     operations.value.length +
+    episodeTasks.value.filter(
+      (episode) => !['interrupted', 'needs_attention'].includes(episode.state),
+    ).length +
     creationTasks.value.filter((creation) => creation.status === 'active').length,
 )
 const attentionCount = computed(
   () =>
     finalizations.value.length +
+    episodeTasks.value.filter((episode) =>
+      ['interrupted', 'needs_attention'].includes(episode.state),
+    ).length +
     creationTasks.value.filter((creation) => creation.status !== 'active').length,
 )
 const taskButtonLabel = computed(() => {
@@ -245,6 +292,7 @@ const identityDirectories = computed(() => [
       ...operations.value.map((operation) => operation.workspaceDirectory),
       ...creationTasks.value.map((creation) => creation.targetDirectory),
       ...finalizations.value.map((finalization) => finalization.workspaceDirectory),
+      ...episodeTasks.value.map((episode) => episode.parentWorkspaceDirectory),
     ]
       .map(normalizePath)
       .filter(Boolean),
@@ -284,6 +332,44 @@ function handleOverlay(event: Event): void {
 function inspect(operation: EccBackgroundOperation): void {
   open.value = false
   void openWorkspace(operation.workspaceDirectory)
+}
+
+function openAgentProgress(episode: DesktopAgentOptimizationEpisodeSummary): void {
+  agentShell.revealOptimizationSession(episode.agentSessionId)
+  if (!agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)) {
+    agentShell.createTab(
+      resolveAgentTabContext({
+        shell: 'workspace',
+        currentWorkspacePath: episode.parentWorkspaceDirectory,
+      }),
+      { id: episode.agentSessionId },
+    )
+  } else {
+    agentShell.activateTab(episode.agentSessionId)
+  }
+  messageStore.upsertOptimizationProjection(episode.agentSessionId, episode.optimization)
+  agentShell.openHomeAgent()
+  agentShell.setWorkspaceAgentCollapsed(false)
+  open.value = false
+}
+
+function openAgentProgressFromNotification(event: Event): void {
+  const sessionId = (event as CustomEvent<string>).detail
+  const episode = episodes.value.find((item) => item.agentSessionId === sessionId)
+  if (episode) openAgentProgress(episode)
+}
+
+function episodeProgress(episode: DesktopAgentOptimizationEpisodeSummary): string {
+  const completed = episode.optimization.calibration_completed
+  const required = episode.optimization.calibration_required
+  if (required && completed !== undefined) return `Replay ${completed}/${required}`
+  if (episode.turnCount) return `Turn ${episode.turnCount}`
+  return (episode.optimization.phase ?? episode.state).replace(/_/g, ' ')
+}
+
+function episodeStateLabel(state: DesktopAgentOptimizationEpisodeState): string {
+  if (state === 'needs_attention') return 'Needs attention'
+  return `${state.charAt(0).toUpperCase()}${state.slice(1).replace(/_/g, ' ')}`
 }
 
 async function openWorkspace(workspacePath: string): Promise<void> {
@@ -436,9 +522,16 @@ function closeFromKeyboard(event: KeyboardEvent): void {
 }
 
 onMounted(() => {
+  try {
+    void store.start()
+  } catch {
+    // Browser-only component tests and degraded shells have no desktop bridge.
+  }
+  void optimizationEpisodes.start()
   document.addEventListener('click', closeFromDocument)
   document.addEventListener('keydown', closeFromKeyboard)
   document.addEventListener(topbarOverlayEvent, handleOverlay)
+  document.addEventListener(openAgentProgressEvent, openAgentProgressFromNotification)
 })
 
 onUnmounted(() => {
@@ -446,6 +539,7 @@ onUnmounted(() => {
   document.removeEventListener('click', closeFromDocument)
   document.removeEventListener('keydown', closeFromKeyboard)
   document.removeEventListener(topbarOverlayEvent, handleOverlay)
+  document.removeEventListener(openAgentProgressEvent, openAgentProgressFromNotification)
 })
 </script>
 

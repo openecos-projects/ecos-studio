@@ -64,6 +64,7 @@ const visible = computed(() => isShutdownInProgress(shutdownStatus.value.state))
 const blockerCount = computed(
   () =>
     shutdownStatus.value.activeFlows +
+    (shutdownStatus.value.activeOptimizations ?? 0) +
     shutdownStatus.value.finalizations +
     shutdownStatus.value.pendingCreations +
     (shutdownStatus.value.pendingCommands ?? 0) +
@@ -79,6 +80,7 @@ const blockerLabel = computed(() => {
   const status = shutdownStatus.value
   const parts = [
     countLabel(status.activeFlows, 'Flow'),
+    countLabel(status.activeOptimizations ?? 0, 'optimization'),
     countLabel(status.finalizations, 'snapshot'),
     countLabel(status.pendingCreations, 'creation'),
     countLabel(status.pendingCommands ?? 0, 'command'),

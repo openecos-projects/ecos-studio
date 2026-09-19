@@ -75,7 +75,6 @@ from ecos_agent.workspace.parameters import (
     read_workspace_parameters,
 )
 
-
 class OptimizationRuntimeError(ValueError):
     """The workspace cannot be assembled into a trusted production episode."""
 
@@ -111,6 +110,7 @@ class OptimizationRuntimeContext(BaseModel):
     trend_noise_epsilon: dict[str, float] | None = None
     workspace_handle: str | None = None
     expected_workspace_revision: StrictInt | None = None
+    expected_ecc_revision: str | None = None
 
     @field_validator("session_id", "episode_id", "workspace")
     @classmethod
@@ -214,6 +214,13 @@ def create_optimization_runner(
         parent_manifest=parent_manifest,
         design_id=design_id,
     )
+    if runtime.expected_ecc_revision is not None and execution_context.get(
+        "ecc_revision"
+    ) != runtime.expected_ecc_revision:
+        executor.close()
+        raise OptimizationRuntimeError(
+            "optimization ECC revision does not match the recovered episode"
+        )
     if objective.parameter_policy.geometry_mode == "fixed":
         execution_context["geometry_baseline_sha256"] = canonical_sha256(
             terminal_observation.geometry.model_dump(mode="json")
@@ -358,8 +365,6 @@ def _recover_controller(
             "optimization treatment does not match the recovered episode"
         )
     return controller
-
-
 def _require_objective_metrics(
     observation: TerminalObservation, objective: OptimizationObjectiveContract
 ) -> None:
@@ -370,7 +375,6 @@ def _require_objective_metrics(
         raise OptimizationRuntimeError(
             f"baseline objective metric is unavailable: {', '.join(missing)}"
         )
-
 
 def _assemble_runner(
     *,
@@ -794,5 +798,3 @@ def _runtime_parameters(workspace: Path) -> tuple[str, dict[str, Any]]:
         return read_workspace_parameters(workspace)
     except WorkspaceParametersError as exc:
         raise OptimizationRuntimeError("workspace parameters are unavailable") from exc
-
-

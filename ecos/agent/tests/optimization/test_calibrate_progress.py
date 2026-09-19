@@ -56,3 +56,43 @@ def test_wait_for_terminal_reports_poll_status() -> None:
 
     assert terminal is not None and terminal["state"] == "succeeded"
     assert seen == [{"state": "running"}, {"state": "succeeded"}]
+
+
+def test_calibrate_never_reports_a_terminal_wait_as_running(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "source.txt").write_text("source", encoding="utf-8")
+    observation = _terminal_observation()
+    messages: list[str] = []
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.calibrate_workspace._environment_fingerprint",
+        lambda _workspace: {"parser_sha256": "p1"},
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization.calibrate_workspace._terminal_observation",
+        lambda _workspace: observation,
+    )
+    monkeypatch.setattr(
+        "ecos_agent.optimization.calibrate_workspace._store_replay_cache",
+        lambda *_args: None,
+    )
+
+    def host_call(method, _params):
+        if method == "workspace.open":
+            return {"workspaceHandle": "handle-1", "workspaceRevision": 1}
+        if method == "workspace.run":
+            return {"operationId": "operation-1", "state": "running"}
+        assert method == "operation.wait"
+        return {"operationId": "operation-1", "state": "succeeded"}
+
+    monkeypatch.setattr(
+        "ecos_agent.optimization.calibrate_workspace._host_call", host_call
+    )
+
+    calibrate(workspace, replays=2, timeout_seconds=60.0, progress=messages.append)
+
+    assert not any(
+        "flow running" in message and "ECC state: succeeded" in message
+        for message in messages
+    )

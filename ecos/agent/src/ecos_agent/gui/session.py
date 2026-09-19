@@ -81,6 +81,8 @@ class OptimizationUiPhase(StrEnum):
     COMPLETED = "completed"
     STOPPED = "stopped"
     ERROR = "error"
+    NEEDS_ATTENTION = "needs_attention"
+    INTERRUPTED = "interrupted"
     QUARANTINED = "quarantined"
     UNAVAILABLE = "unavailable"
 
@@ -133,9 +135,15 @@ class ProviderSession:
     optimization_thread: threading.Thread | None = None
     optimization_stop: threading.Event = field(default_factory=threading.Event)
     optimization_pause: threading.Event = field(default_factory=threading.Event)
+    optimization_shutdown: threading.Event = field(default_factory=threading.Event)
+    optimization_shutdown_was_paused: bool = False
     optimization_turn_count: int = 0
+    optimization_calibration_completed: int = 0
+    optimization_calibration_required: int = 0
     optimization_objective: dict[str, Any] | None = None
     optimization_objective_sha256: str | None = None
+    optimization_parameter_policy_sha256: str | None = None
+    optimization_ecc_revision: str | None = None
     optimization_primary_metric: str | None = None
     optimization_objective_alignment: dict[str, Any] | None = None
     optimization_active_objective: dict[str, Any] | None = None

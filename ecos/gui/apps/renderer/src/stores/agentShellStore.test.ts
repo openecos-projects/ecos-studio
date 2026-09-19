@@ -92,6 +92,16 @@ describe('agentShellStore', () => {
     expect(store.takePendingPostCreateFlow()).toBeNull()
   })
 
+  it('keeps a background Optimization Session hidden until explicitly reopened', () => {
+    const store = useAgentShellStore()
+    const tab = store.createTab({ mode: 'workspace' }, { id: 'episode-session' })
+    store.hideOptimizationSession(tab.id)
+    store.removeTab(tab.id)
+    expect(store.isOptimizationSessionHidden(tab.id)).toBe(true)
+    store.revealOptimizationSession(tab.id)
+    expect(store.isOptimizationSessionHidden(tab.id)).toBe(false)
+  })
+
   it('persists agent panel width for home and workspace shells', () => {
     localStorage.clear()
     const store = useAgentShellStore()

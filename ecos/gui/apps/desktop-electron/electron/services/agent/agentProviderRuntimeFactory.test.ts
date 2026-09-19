@@ -17,7 +17,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'uv',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )
@@ -39,7 +39,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'uv',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )
@@ -74,7 +74,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'uv',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )
@@ -93,7 +93,7 @@ describe('ECOS Agent provider runtime factory', () => {
     try {
       const manifest = JSON.stringify({
         command: 'uv',
-        protocolVersion: 1,
+        protocolVersion: 2,
         providerId: 'ecos_agent',
       })
       await writeFile(path.join(root, 'agent-provider.json'), manifest)
@@ -115,7 +115,7 @@ describe('ECOS Agent provider runtime factory', () => {
         path.join(root, 'agent-provider.json'),
         JSON.stringify({
           command: 'ecos-agent',
-          protocolVersion: 1,
+          protocolVersion: 2,
           providerId: 'ecos_agent',
         }),
       )
