@@ -25,6 +25,8 @@ import {
   type EccLayoutEditSaveRequest,
   type EccLayoutEditSaveResult,
   type EccWorkspaceOpenResult,
+  type EccWorkspaceStepConfigurationUpdateRequest,
+  type EccWorkspaceUpdateResult,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
@@ -35,6 +37,7 @@ import {
   type ReadBinaryFile,
   serializeMacroStagingManifest,
 } from './chipViewerMacroStaging'
+import { parseMacroLocationTcl } from './chipViewerMacroLocationTcl'
 
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
@@ -133,6 +136,9 @@ interface LayoutEditRuntime {
   ): Promise<EccLayoutEditDiscardResult>
   layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult>
   openWorkspace(request: { directory: string }): Promise<EccWorkspaceOpenResult>
+  updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult>
 }
 
 interface LayoutEditContext {
@@ -1136,6 +1142,38 @@ export class ChipViewerService {
   }
 
   /**
+   * Re-records a just-exported macro_location.tcl as the workspace
+   * `macro.placements` parameter, keeping parameters the single source of
+   * truth: the next refresh renders the Tcl from them and macroPlacement
+   * skips DreamPlace. The layout save is already published at this point, so
+   * a writeback failure is reported as a save warning instead of failing the
+   * save; the next macro-placement save realigns parameters and Tcl.
+   */
+  private async writeMacroPlacementParams(
+    layoutEdit: LayoutEditContext,
+    macroLocationPath: string,
+    commandId: string,
+  ): Promise<string> {
+    try {
+      const entries = parseMacroLocationTcl(await this.readTextFile(macroLocationPath))
+      const updated = await this.layoutEditRuntime!.updateWorkspaceStepConfiguration({
+        commandId,
+        expectedWorkspaceRevision: layoutEdit.workspaceRevision,
+        parameters: { 'macro.placements': entries },
+        stepId: 'macroPlacement',
+        workspaceHandle: layoutEdit.workspaceHandle,
+      })
+      if (typeof updated.workspaceRevision === 'number') {
+        layoutEdit.workspaceRevision = updated.workspaceRevision
+      }
+      return `; macro_location.tcl exported and macro.placements recorded (${entries.length} macros)`
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return `; WARNING: macro.placements writeback failed: ${reason} — macro_location.tcl may be overwritten by the next parameter refresh or DreamPlace run`
+    }
+  }
+
+  /**
    * Saves a layout edit session, requesting the macro_location.tcl export for
    * macro-placement sessions. Older ECC runtimes reject the unknown field
    * before mutating anything, so the request is retried once without it.
@@ -1288,6 +1326,18 @@ export class ChipViewerService {
         if (skippedMacroLocation) {
           message += '; macro_location.tcl export skipped (ECC runtime too old)'
         }
+        if (layoutEdit.macroPlacement && saved.macroLocationPath) {
+          await this.writeSessionActionProgress(progressPath, command, {
+            message: 'Recording macro placements in workspace parameters',
+            percent: 65,
+            phase: 'recording_macro_placements',
+          })
+          message += await this.writeMacroPlacementParams(
+            layoutEdit,
+            saved.macroLocationPath,
+            `${layoutEdit.bridgeId}:${command.command_id}:macro-params`,
+          )
+        }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Refreshing layout image',
           percent: 75,
@@ -1377,6 +1427,7 @@ export class ChipViewerService {
         | 'saving'
         | 'discarding'
         | 'verifying_artifacts'
+        | 'recording_macro_placements'
         | 'refreshing_layout_image'
         | 'published'
         | 'failed'
