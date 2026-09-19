@@ -9,6 +9,7 @@ import {
   type EccWorkspaceStepConfigurationReadRequest,
   type EccWorkspaceStepConfigurationReadResult,
   type EccWorkspaceStepConfigurationUpdateRequest,
+  type EccWorkspaceStepOutputsResult,
   type ProjectManifestMpc,
   type WorkspaceConfig,
 } from '@ecos-studio/shared'
@@ -127,6 +128,19 @@ export function backendWorkspaceOptions(
   const selectedSteps = new Set([...flowSteps, startStep, endStep].filter(Boolean))
   const flowId =
     selectedSteps.size === 1 && selectedSteps.has('Synthesis') ? 'syn_sta' : 'rtl2gds'
+  // Mirrors ECC's applicability aliases (ecc/chipcompiler/engine/workspace_spec.py
+  // _parameter_applies_to_flow); an empty step set means the full flow.
+  const normalizedSteps = new Set([...selectedSteps].map((step) => step.toLowerCase()))
+  const parameterApplies = (aliases: string[]) =>
+    normalizedSteps.size === 0 || aliases.some((alias) => normalizedSteps.has(alias))
+  const synthesisApplies = parameterApplies(['synthesis'])
+  const floorplanApplies = parameterApplies([
+    'prefloorplan',
+    'macroplacement',
+    'postfloorplan',
+  ])
+  const ctsApplies = parameterApplies(['cts'])
+  const placementApplies = parameterApplies(['placement', 'place', 'macroplacement'])
   const mpc = config.mpc as ProjectManifestMpc | null | undefined
   const projectContext = config.project_context
 
@@ -177,32 +191,44 @@ export function backendWorkspaceOptions(
           }
         : {}),
       parameters: {
-        'design.frequency_mhz': numberValue(parameters.frequency_max, 100),
-        'floorplan.core_util': numberValue(
-          parameters.utilitization ?? parameters.core_utilization,
-          fixedDie ? 0.5 : 0.6,
-        ),
-        'floorplan.die_builder.mode': fixedDie ? 'die_size' : 'die_util',
-        ...(fixedDie
+        ...(synthesisApplies
+          ? { 'design.frequency_mhz': numberValue(parameters.frequency_max, 100) }
+          : {}),
+        ...(floorplanApplies
           ? {
-              'floorplan.die_builder.die_size.width_micron': numberValue(
-                parameters.die_width,
-                100,
+              'floorplan.core_util': numberValue(
+                parameters.utilitization ?? parameters.core_utilization,
+                fixedDie ? 0.5 : 0.6,
               ),
-              'floorplan.die_builder.die_size.height_micron': numberValue(
-                parameters.die_height,
-                100,
-              ),
+              'floorplan.die_builder.mode': fixedDie ? 'die_size' : 'die_util',
+              ...(fixedDie
+                ? {
+                    'floorplan.die_builder.die_size.width_micron': numberValue(
+                      parameters.die_width,
+                      100,
+                    ),
+                    'floorplan.die_builder.die_size.height_micron': numberValue(
+                      parameters.die_height,
+                      100,
+                    ),
+                  }
+                : {
+                    'floorplan.core_margin': [
+                      numberValue(parameters.margin, 0),
+                      numberValue(parameters.margin, 0),
+                    ],
+                  }),
             }
-          : {
-              'floorplan.core_margin': [
-                numberValue(parameters.margin, 0),
-                numberValue(parameters.margin, 0),
-              ],
-            }),
-        'cts.max_fanout': numberValue(parameters.max_fanout, 20),
-        'place.target_density': numberValue(parameters.target_density, 0.2),
-        'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
+          : {}),
+        ...(ctsApplies
+          ? { 'cts.max_fanout': numberValue(parameters.max_fanout, 20) }
+          : {}),
+        ...(placementApplies
+          ? {
+              'place.target_density': numberValue(parameters.target_density, 0.2),
+              'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
+            }
+          : {}),
       },
     },
     workspaceBindings: {
@@ -389,5 +415,18 @@ export function readWorkspaceStepConfigurationApi(
   return getDesktopApi().runtime.workspace.stepConfiguration({
     ...request,
     designTool: 'backend',
+  })
+}
+
+/**
+ * Resolve a workspace's committed flow-step output artifacts through the ECC
+ * runtime, which owns the real step directory and filename conventions.
+ */
+export function readWorkspaceStepOutputsApi(
+  directory: string,
+): Promise<EccWorkspaceStepOutputsResult> {
+  return getDesktopApi().runtime.workspace.stepOutputs({
+    designTool: 'backend',
+    directory,
   })
 }

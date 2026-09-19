@@ -145,16 +145,29 @@ export async function registerProjectManagedWorkspace(
         })
       }
     }
+    const sourceContext = input.config?.source_context
     await mutateProjectManifest(registeredProjectRoot, {
       type: 'register-workspace',
       input: {
         projectRoot: registeredProjectRoot,
         projectName,
         workspacePath,
-        sourceWorkspaceId: queryString(input.routeQuery?.sourceWorkspace) || undefined,
-        sourceStep: canonicalManifestStep(queryString(input.routeQuery?.sourceStep)),
-        sourceOutputPath: queryString(input.routeQuery?.sourceOutputPath) || undefined,
-        sourceOutputType: queryString(input.routeQuery?.sourceOutputType) || undefined,
+        sourceWorkspaceId:
+          optionalString(sourceContext?.workspaceId) ||
+          queryString(input.routeQuery?.sourceWorkspace) ||
+          undefined,
+        sourceStep: canonicalManifestStep(
+          optionalString(sourceContext?.step) ||
+            queryString(input.routeQuery?.sourceStep),
+        ),
+        sourceOutputPath:
+          optionalString(sourceContext?.outputPath) ||
+          queryString(input.routeQuery?.sourceOutputPath) ||
+          undefined,
+        sourceOutputType:
+          optionalString(sourceContext?.outputType) ||
+          queryString(input.routeQuery?.sourceOutputType) ||
+          undefined,
         startStep: canonicalManifestStep(
           queryString(input.routeQuery?.startStep) ||
             optionalString(input.config?.flow_config?.start_step),

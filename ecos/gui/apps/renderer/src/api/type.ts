@@ -61,6 +61,16 @@ export enum StepEnum {
   ABSTRACT_LEF = 'Abstract lef',
 }
 
+/**
+ * Steps that cannot start a flow: LEC compares the golden netlist against a
+ * later one, so starting a workspace at it would let ECC self-compare the
+ * origin netlist.
+ */
+export const FLOW_START_DISABLED_STEPS: ReadonlySet<string> = new Set([
+  StepEnum.LEC,
+  StepEnum.POST_ROUTE_LEC,
+])
+
 /** 步骤元数据配置 */
 export interface StepMetadata {
   /** 显示标签 */

@@ -162,6 +162,49 @@ describe('projectManifestRegistration', () => {
     )
   })
 
+  it('registers branch lineage from the wizard source context', async () => {
+    await registerProjectManagedWorkspace({
+      workspacePath: '/projects/gcd/ws_0003',
+      config: {
+        directory: '/projects/gcd/ws_0003',
+        pdk: 'ics55',
+        pdk_root: '',
+        parameters: {},
+        origin_def: '/projects/gcd/ws_0002/CTS_ecc/output/gcd_CTS.def.gz',
+        origin_verilog: '/projects/gcd/ws_0002/CTS_ecc/output/gcd_CTS.v.gz',
+        rtl_list: [],
+        flow_config: {
+          start_step: 'legalization',
+          end_step: 'Harden',
+          steps: ['legalization', 'Harden'],
+        },
+        source_context: {
+          workspaceId: 'ws_0002',
+          workspacePath: '/projects/gcd/ws_0002',
+          step: 'CTS',
+          outputPath: '/projects/gcd/ws_0002/CTS_ecc/output/gcd_CTS.def.gz',
+          outputType: 'def',
+        },
+      },
+      projectContext: { projectRoot: '/projects/gcd', projectName: 'gcd' },
+    })
+
+    expect(mutateProjectManifest).toHaveBeenCalledWith(
+      '/projects/gcd',
+      expect.objectContaining({
+        type: 'register-workspace',
+        input: expect.objectContaining({
+          sourceWorkspaceId: 'ws_0002',
+          sourceStep: 'CTS',
+          sourceOutputPath: '/projects/gcd/ws_0002/CTS_ecc/output/gcd_CTS.def.gz',
+          sourceOutputType: 'def',
+          startStep: 'Legal',
+          endStep: 'Harden',
+        }),
+      }),
+    )
+  })
+
   it('reports the real project.json failure after workspace creation', async () => {
     const warnings: Array<{ summary: string; detail: string }> = []
     mutateProjectManifest.mockRejectedValueOnce(

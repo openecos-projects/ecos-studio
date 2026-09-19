@@ -70,7 +70,25 @@ describe('workspace desktop bridge', () => {
       flow_config: {
         start_step: 'Synthesis',
         end_step: 'Harden',
-        steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+        steps: [
+          'Synthesis',
+          'lec',
+          'preFloorplan',
+          'macroPlacement',
+          'postFloorplan',
+          'place',
+          'CTS',
+          'legalization',
+          'Timing optimization',
+          'route',
+          'filler',
+          'RCX',
+          'sta',
+          'lvs',
+          'postRouteLec',
+          'drc',
+          'Harden',
+        ],
       },
     })
 
@@ -140,6 +158,63 @@ describe('workspace desktop bridge', () => {
       filelist: '/design/sources.f',
       sdc: '/constraints/top.sdc',
     })
+  })
+
+  it('omits parameters inapplicable to a branched flow range', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/branch',
+        design_input_mode: 'post_synthesis',
+        flow_config: {
+          start_step: 'legalization',
+          end_step: 'Harden',
+          steps: [
+            'legalization',
+            'Timing optimization',
+            'route',
+            'filler',
+            'RCX',
+            'sta',
+            'lvs',
+            'postRouteLec',
+            'drc',
+            'Harden',
+          ],
+        },
+        origin_def: '/source/CTS_ecc/output/gcd_CTS.def.gz',
+        origin_verilog: '/source/CTS_ecc/output/gcd_CTS.v.gz',
+        parameters: {
+          design: 'gcd',
+          frequency_max: 50,
+          max_fanout: 32,
+          target_density: 0.2,
+          target_overflow: 0.1,
+          top_module: 'gcd',
+          utilitization: 0.3,
+        },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: [],
+        sdc: '/source/origin/gcd.sdc',
+      },
+      '/workspace/branch',
+    )
+
+    expect(options.workspaceSpec).toMatchObject({
+      inputMode: 'postSynthesis',
+      inputs: [
+        { inputId: 'netlist', role: 'netlist' },
+        { inputId: 'def', role: 'def' },
+        { inputId: 'sdc', role: 'sdc' },
+      ],
+      flow: {
+        flowId: 'rtl2gds',
+        fromStepId: 'legalization',
+        throughStepId: 'Harden',
+      },
+    })
+    expect(options.workspaceSpec.parameters).toEqual({})
   })
 
   it('keeps a synthesis-only Flow range when endpoints are inferred', async () => {

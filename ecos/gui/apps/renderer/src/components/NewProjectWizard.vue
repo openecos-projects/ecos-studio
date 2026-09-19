@@ -479,7 +479,7 @@
                         >Selected Steps</span
                       >
                       <p class="mt-1 font-semibold text-(--text-primary)">
-                        {{ selectedFlowSteps.length }}
+                        {{ runnableFlowSteps.length }}
                       </p>
                     </div>
                   </div>
@@ -502,41 +502,46 @@
                     >
                       <button
                         type="button"
-                        class="flex min-h-[104px] w-full cursor-pointer flex-col rounded-xl border p-4 text-left transition-colors duration-200"
+                        class="flex h-full min-h-[104px] w-full cursor-pointer flex-col rounded-xl border p-4 text-left transition-colors duration-200"
                         :class="[
                           isFlowStepLocked(step.name)
                             ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
-                            : isFlowStepSelected(step.name)
+                            : isFlowStepRunnable(step.name)
                               ? 'border-(--accent-color) bg-(--accent-color)/10'
                               : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
+                          !isFlowStepLocked(step.name) &&
+                          defaultSkippedFlowStepNames.has(step.name)
+                            ? 'border-dashed'
+                            : '',
                         ]"
                         :disabled="isFlowStepLocked(step.name)"
                         @click="setFlowBoundary(step.name)"
                       >
                         <span class="mb-3 flex items-center justify-between gap-3">
-                          <span class="flex items-center gap-2">
+                          <span class="flex min-w-0 items-center gap-2">
                             <span
-                              class="flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold"
+                              class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-xs font-bold"
                               :class="
-                                isFlowStepSelected(step.name)
+                                isFlowStepRunnable(step.name)
                                   ? 'border-(--accent-color) bg-(--accent-color) text-white'
                                   : 'border-(--border-color) text-(--text-secondary)'
                               "
                             >
                               <span>{{ index + 1 }}</span>
                             </span>
-                            <span class="font-semibold text-(--text-primary)">{{
-                              step.name
-                            }}</span>
+                            <span
+                              class="min-w-0 font-semibold break-words text-(--text-primary)"
+                              >{{ step.name }}</span
+                            >
                           </span>
                           <input
                             type="checkbox"
-                            class="h-4 w-4 accent-(--accent-color)"
-                            :checked="isFlowStepSelected(step.name)"
+                            class="h-4 w-4 shrink-0 accent-(--accent-color)"
+                            :checked="isFlowStepRunnable(step.name)"
                             readonly
                           />
                         </span>
-                        <span class="text-xs leading-5 text-(--text-secondary)">{{
+                        <span class="flex-1 text-xs leading-5 text-(--text-secondary)">{{
                           step.description
                         }}</span>
                         <span
@@ -544,6 +549,18 @@
                           class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
                         >
                           Reused from source
+                        </span>
+                        <span
+                          v-else-if="defaultSkippedFlowStepNames.has(step.name)"
+                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                        >
+                          Skipped by default
+                        </span>
+                        <span
+                          v-else-if="skippableFlowStepNames.has(step.name)"
+                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                        >
+                          Skippable
                         </span>
                       </button>
                       <span
@@ -1597,7 +1614,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { validateMpcDieArea } from '@/utils/mpcWorkspace'
-import { getStepMetadata } from '@/api/type'
+import { FLOW_START_DISABLED_STEPS, getStepMetadata } from '@/api/type'
 import {
   isHdlFilePath,
   projectIdFromName,
@@ -1672,6 +1689,22 @@ const KNOWN_FLOW_STEP_NAMES: ReadonlySet<string> = new Set(
 const FLOW_STEP_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
   FALLBACK_FLOW_STEPS.map((step) => [step.name, step.description]),
 )
+/**
+ * Static copy of the ECC skippable steps
+ * (ecc/chipcompiler/data/types.py SkippableStepEnum), used until the workspace
+ * creation model reports `skippableStepIds` on the live flow definition.
+ */
+const FALLBACK_SKIPPABLE_STEPS: ReadonlySet<string> = new Set([
+  'lec',
+  'postRouteLec',
+  'Timing optimization',
+])
+/**
+ * Static copy of the ECC default skip policy
+ * (ecc/chipcompiler/data/types.py DEFAULT_SKIP_STEPS), used until the workspace
+ * creation model reports `defaultSkippedStepIds` on the live flow definition.
+ */
+const FALLBACK_DEFAULT_SKIPPED_STEPS: ReadonlySet<string> = new Set(['lec'])
 type DesignInputKey = 'rtl' | 'filelist' | 'def' | 'verilog' | 'sdc'
 type PdkResourceKey = 'tech_lef' | 'cell_lef' | 'liberty'
 type DieAreaMode = 'width_height' | 'utilitization_margin'
@@ -1805,15 +1838,6 @@ const projectParentPath = ref(parentPath(initialProjectRoot(props.initialConfig)
 const designNameTouched = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim() !== '',
 )
-/**
- * LEC compares the golden netlist against a later one; starting a fresh
- * workspace at it would let ECC self-compare the origin netlist.
- * Declared before the flowStartStep initializer below (const TDZ).
- */
-const FLOW_START_DISABLED_STEPS: ReadonlySet<FlowStepName> = new Set([
-  'lec',
-  'postRouteLec',
-])
 
 function wizardFlowId(): string {
   return flowEndStep.value === 'Harden'
@@ -1876,7 +1900,7 @@ const steps = [
   { id: 6, title: 'Spec Setting' },
 ]
 
-const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
+const discoveredFlowDefinition = computed<Record<string, unknown> | null>(() => {
   const definitions = workspaceCreationModel.value?.discovery.flowDefinitions
   if (!Array.isArray(definitions)) return null
   // Legacy presets (harden/rcx) are ranges of the canonical rtl2gds chain, so
@@ -1884,11 +1908,28 @@ const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
   const definition =
     definitions.find((entry) => isRecord(entry) && entry.flowId === wizardFlowId()) ??
     definitions.find((entry) => isRecord(entry) && entry.flowId === 'rtl2gds')
-  if (!isRecord(definition) || !Array.isArray(definition.stepIds)) return null
+  return isRecord(definition) ? definition : null
+})
+
+const discoveredFlowStepIds = computed<FlowStepName[] | null>(() => {
+  const definition = discoveredFlowDefinition.value
+  if (!definition || !Array.isArray(definition.stepIds)) return null
   const stepIds = definition.stepIds.filter(
     (id): id is string => typeof id === 'string' && id.trim() !== '',
   )
   return stepIds.length > 0 ? stepIds : null
+})
+
+const skippableFlowStepNames = computed<ReadonlySet<string>>(() => {
+  const ids = discoveredFlowDefinition.value?.skippableStepIds
+  if (!Array.isArray(ids)) return FALLBACK_SKIPPABLE_STEPS
+  return new Set(ids.filter((id): id is string => typeof id === 'string'))
+})
+
+const defaultSkippedFlowStepNames = computed<ReadonlySet<string>>(() => {
+  const ids = discoveredFlowDefinition.value?.defaultSkippedStepIds
+  if (!Array.isArray(ids)) return FALLBACK_DEFAULT_SKIPPED_STEPS
+  return new Set(ids.filter((id): id is string => typeof id === 'string'))
 })
 
 const flowStepOptions = computed<Array<{ name: FlowStepName; description: string }>>(
@@ -2295,6 +2336,12 @@ const selectedFlowSteps = computed(() => {
   const end = Math.max(flowStartIndex.value, flowEndIndex.value)
   return flowStepOptions.value.slice(start, end + 1).map((step) => step.name)
 })
+// Steps ECC will actually run for this range: the default skip policy still
+// applies (GUI submits no skip_steps), so default-skipped steps are in the
+// range but never execute.
+const runnableFlowSteps = computed(() =>
+  selectedFlowSteps.value.filter((name) => !defaultSkippedFlowStepNames.value.has(name)),
+)
 const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
 const startsFromPreFloorplan = computed(() => flowStartStep.value === 'preFloorplan')
 const hasSelectedPdkConfig = computed(
@@ -2995,6 +3042,10 @@ async function selectProjectParentPath() {
 
 function isFlowStepSelected(stepName: FlowStepName) {
   return selectedFlowSteps.value.includes(stepName)
+}
+
+function isFlowStepRunnable(stepName: FlowStepName) {
+  return isFlowStepSelected(stepName) && !defaultSkippedFlowStepNames.value.has(stepName)
 }
 
 function setFlowBoundary(stepName: FlowStepName) {

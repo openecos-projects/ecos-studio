@@ -55,7 +55,7 @@ import {
   type PdkInstallationSnapshot,
 } from '@ecos-studio/shared'
 
-const DEFAULT_REGISTRY_URL = 'https://emin017.github.io/ecos-registry/tool-registry.json'
+const DEFAULT_REGISTRY_URL = 'https://release.openecos.com/tools/registry.json'
 const ALL_PLATFORM = 'all-platform'
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
 const SURFER_RELEASE_ASSET_URL =
