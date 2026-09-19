@@ -44,9 +44,12 @@ export interface WorkspaceParameters {
   core_utilization: number
   target_density: number
   max_fanout: number
-  die_area_mode?: 'width_height' | 'utilitization_margin'
+  // 'utilitization' / 'utilitization_margin' are the legacy misspelled forms;
+  // keep reading them for at least one release cycle.
+  die_area_mode?: 'width_height' | 'utilization_margin' | 'utilitization_margin'
   die_width?: number
   die_height?: number
+  utilization?: number
   utilitization?: number
   margin?: number
 }

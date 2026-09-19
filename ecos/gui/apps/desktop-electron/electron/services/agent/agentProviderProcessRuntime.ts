@@ -774,18 +774,26 @@ function readWorkspaceSetupParameters(
   const topModule = readWorkspaceSetupText(record.top_module)
   const clock = readWorkspaceSetupText(record.clock)
   const description = readWorkspaceSetupDescription(record.description)
-  const dieAreaMode = record.die_area_mode
   const frequency = readFiniteNumber(record.frequency_max, 1, 10_000)
   const margin = readFiniteNumber(record.margin, 0, 1_000_000)
   const maxFanout = readFiniteNumber(record.max_fanout, 1, 1_000_000)
   const density = readFiniteNumber(record.target_density, 0.01, 1)
   const overflow = readFiniteNumber(record.target_overflow, 0, 1)
+  // Accept the legacy misspelled forms ('utilitization', 'utilitization_margin')
+  // for at least one release cycle; normalize to the canonical spelling.
+  const dieAreaMode =
+    record.die_area_mode === 'width_height'
+      ? 'width_height'
+      : record.die_area_mode === 'utilitization_margin' ||
+          record.die_area_mode === 'utilization_margin'
+        ? 'utilization_margin'
+        : null
   if (
     design === null ||
     topModule === null ||
     clock === null ||
     description === null ||
-    (dieAreaMode !== 'utilitization_margin' && dieAreaMode !== 'width_height') ||
+    dieAreaMode === null ||
     frequency === null ||
     margin === null ||
     maxFanout === null ||
@@ -814,7 +822,9 @@ function readWorkspaceSetupParameters(
           top_module: topModule,
         }
   }
-  const utilization = readFiniteNumber(record.utilitization, 0.01, 1)
+  const utilizationValue =
+    record.utilization !== undefined ? record.utilization : record.utilitization
+  const utilization = readFiniteNumber(utilizationValue, 0.01, 1)
   return utilization === null
     ? null
     : {
@@ -828,7 +838,7 @@ function readWorkspaceSetupParameters(
         target_density: density,
         target_overflow: overflow,
         top_module: topModule,
-        utilitization: utilization,
+        utilization,
       }
 }
 

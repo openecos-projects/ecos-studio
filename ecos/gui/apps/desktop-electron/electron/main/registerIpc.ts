@@ -118,6 +118,7 @@ import {
 } from '../services/eccRpc/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
+import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
@@ -2266,6 +2267,7 @@ export function registerIpc(
       services.eccRuntimeService.describeWorkspaceSpec(),
       services.pdkInventoryService.listInstallations(),
     ])
+    rememberWorkspaceParameterCatalog(discovery)
     return buildWorkspaceCreationModel(
       discovery as Record<string, unknown>,
       pdkInstallations,

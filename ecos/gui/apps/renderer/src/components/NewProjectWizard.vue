@@ -1433,11 +1433,11 @@
                           type="button"
                           class="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors duration-200"
                           :class="
-                            dieAreaMode === 'utilitization_margin'
+                            dieAreaMode === 'utilization_margin'
                               ? 'bg-(--accent-color) text-white'
                               : 'text-(--text-secondary) hover:text-(--text-primary)'
                           "
-                          @click="dieAreaMode = 'utilitization_margin'"
+                          @click="dieAreaMode = 'utilization_margin'"
                         >
                           Core Utilization
                         </button>
@@ -1509,7 +1509,7 @@
                           >Origin Core Utilization</label
                         >
                         <input
-                          v-model.number="config.parameters.utilitization"
+                          v-model.number="config.parameters.utilization"
                           type="number"
                           min="0.01"
                           max="1"
@@ -1519,7 +1519,7 @@
                       </div>
                     </div>
                     <p
-                      v-if="dieAreaMode === 'utilitization_margin' && projectMpc"
+                      v-if="dieAreaMode === 'utilization_margin' && projectMpc"
                       class="mt-4 text-xs text-(--text-secondary)"
                     >
                       MPC die-area bounds are checked after the flow runs for this mode.
@@ -1722,7 +1722,9 @@ const FALLBACK_SKIPPABLE_STEPS: ReadonlySet<string> = new Set([
 const FALLBACK_DEFAULT_SKIPPED_STEPS: ReadonlySet<string> = new Set(['lec'])
 type DesignInputKey = 'rtl' | 'filelist' | 'def' | 'verilog' | 'sdc'
 type PdkResourceKey = 'tech_lef' | 'cell_lef' | 'liberty'
-type DieAreaMode = 'width_height' | 'utilitization_margin'
+// Canonical mode is 'utilization_margin'; the misspelled 'utilitization_margin'
+// is a legacy persisted value that normalizeDieAreaMode still accepts.
+type DieAreaMode = 'width_height' | 'utilization_margin'
 
 interface ProjectContext {
   mode: ProjectMode
@@ -2083,7 +2085,7 @@ function createInitialConfig(
     pdk_installation_id:
       initialConfig?.pdk_installation_id ?? source_config?.pdk_installation_id ?? '',
     pdk_requirement: initialConfig?.pdk_requirement ?? source_config?.pdk_requirement,
-    parameters: {
+    parameters: normalizeInitialParameters({
       design: '',
       description: '',
       top_module: '',
@@ -2093,13 +2095,13 @@ function createInitialConfig(
       die_area_mode: dieAreaMode.value,
       die_width: 100,
       die_height: 100,
-      utilitization: 0.3,
+      utilization: 0.3,
       margin: 2,
       target_density: 0.2,
       target_overflow: 0.1,
       ...source_config?.parameters,
       ...initialConfig?.parameters,
-    },
+    }),
     origin_def:
       startStep === 'Synthesis' || startStep === 'preFloorplan'
         ? ''
@@ -2216,7 +2218,7 @@ const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
   max_fanout: 32,
   die_width: 100,
   die_height: 100,
-  utilitization: 0.6,
+  utilization: 0.6,
   margin: 0,
 }
 
@@ -2277,7 +2279,25 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
 }
 
 function normalizeDieAreaMode(value: unknown): DieAreaMode {
-  return value === 'width_height' ? 'width_height' : 'utilitization_margin'
+  return value === 'width_height' ? 'width_height' : 'utilization_margin'
+}
+
+/**
+ * Canonicalize the legacy misspelled parameter keys that project presets,
+ * reconfigure payloads, and stored wizard configs may still carry:
+ * 'utilitization' -> 'utilization' and 'utilitization_margin' ->
+ * 'utilization_margin'. Old spellings keep loading for at least one release
+ * cycle; new payloads only carry the canonical keys.
+ */
+function normalizeInitialParameters(parameters: Record<string, unknown>) {
+  if (parameters.utilization === undefined && parameters.utilitization !== undefined) {
+    parameters.utilization = parameters.utilitization
+  }
+  delete parameters.utilitization
+  if (parameters.die_area_mode !== undefined) {
+    parameters.die_area_mode = normalizeDieAreaMode(parameters.die_area_mode)
+  }
+  return parameters
 }
 
 function normalizePdkConfigMode(value: unknown): 'default' | 'manual' {
@@ -2903,8 +2923,9 @@ function applyProjectParameterDefaults(
     firstNumber(parameters.die_height, parameters['Die Height']),
   )
   setNumberParameterDefault(
-    'utilitization',
+    'utilization',
     firstNumber(
+      parameters.utilization,
       parameters.utilitization,
       parameters.core_utilization,
       parameters['Core Utilization'],
@@ -2915,10 +2936,11 @@ function applyProjectParameterDefaults(
   const projectDieAreaMode = firstString(parameters.die_area_mode)
   if (
     (projectDieAreaMode === 'width_height' ||
+      projectDieAreaMode === 'utilization_margin' ||
       projectDieAreaMode === 'utilitization_margin') &&
     !hasInitialParameterValue('die_area_mode')
   ) {
-    dieAreaMode.value = projectDieAreaMode
+    dieAreaMode.value = normalizeDieAreaMode(projectDieAreaMode)
   }
 }
 
@@ -3606,7 +3628,7 @@ function specReady() {
       !mpcDieAreaValidation.value.error
     )
   }
-  return Number(params.utilitization) > 0
+  return Number(params.utilization ?? params.utilitization) > 0
 }
 
 function syncWorkspaceConfig() {

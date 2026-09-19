@@ -16,6 +16,7 @@ import {
   createWorkspaceApi,
   updateWorkspaceApi,
 } from '../api'
+import { loadWorkspaceParameterDisplayIndex } from '../api/workspaceParameterCatalog'
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type {
   FrontendRuntimeEventClient,
@@ -1113,8 +1114,9 @@ export function useWorkspace() {
           throw new Error('The current Workspace revision is unavailable.')
         }
         const currentWorkspaceHandle = workspaceLifecycle.session.value.workspaceId
+        const parameterDisplayIndex = await loadWorkspaceParameterDisplayIndex()
         const updated = await updateWorkspaceApi(
-          backendWorkspaceOptions(config!, selectedPath),
+          backendWorkspaceOptions(config!, selectedPath, parameterDisplayIndex),
           currentWorkspaceHandle,
           expectedWorkspaceRevision!,
         )
@@ -1282,8 +1284,9 @@ export function useWorkspace() {
           ),
         })
       } else {
+        const parameterDisplayIndex = await loadWorkspaceParameterDisplayIndex()
         response = await createWorkspaceApi(
-          backendWorkspaceOptions(creationConfig!, selectedPath),
+          backendWorkspaceOptions(creationConfig!, selectedPath, parameterDisplayIndex),
         )
       }
       if (response.response === 'success') {
@@ -1592,9 +1595,14 @@ export function useWorkspace() {
           const dieArea = params['Die Area'] ?? params.die_area
           const core = params.Core ?? params.core
           const coreUtilization =
-            (isRecord(dieArea) ? asNumber(dieArea.utilitization) : undefined) ??
+            (isRecord(dieArea)
+              ? (asNumber(dieArea.utilization) ?? asNumber(dieArea.utilitization))
+              : undefined) ??
             (isRecord(core)
-              ? (asNumber(core.Utilitization) ?? asNumber(core.utilitization))
+              ? (asNumber(core.Utilization) ??
+                asNumber(core.utilization) ??
+                asNumber(core.Utilitization) ??
+                asNumber(core.utilitization))
               : undefined)
           if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
         }

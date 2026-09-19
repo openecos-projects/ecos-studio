@@ -1,6 +1,8 @@
 import type { ProjectManifestMpc } from '@ecos-studio/shared'
 
-export type MpcDieAreaMode = 'width_height' | 'utilitization_margin'
+// 'utilitization_margin' is the legacy misspelled mode kept readable from
+// stored presets; the wizard canonicalizes it on load.
+export type MpcDieAreaMode = 'width_height' | 'utilization_margin'
 
 export interface MpcDieAreaConstraint {
   minimumArea: number | null
