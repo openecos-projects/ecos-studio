@@ -213,6 +213,11 @@ function createService(options: {
       workspaceHandle: 'workspace-handle-1',
       workspaceRevision: 1,
     })),
+    updateWorkspaceStepConfiguration: vi.fn(async () => ({
+      directory: PROJECT_ROOT,
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 2,
+    })),
   }
   const service = new ChipViewerService({
     appPath: options.appPath ?? join(REPO_ROOT, 'ecos/gui/apps/desktop-electron'),
@@ -355,6 +360,11 @@ describe('ChipViewerService', () => {
           workspaceHandle: 'workspace-handle-1',
           workspaceRevision: 1,
         })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 2,
+        })),
       },
     })
 
@@ -408,6 +418,11 @@ describe('ChipViewerService', () => {
           directory: PROJECT_ROOT,
           workspaceHandle: 'workspace-handle-1',
           workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 2,
         })),
       },
     })
@@ -1071,6 +1086,11 @@ describe('ChipViewerService', () => {
             workspaceHandle: 'workspace-handle-1',
             workspaceRevision: 1,
           })),
+          updateWorkspaceStepConfiguration: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceId: 'workspace-handle-1',
+            workspaceRevision: 2,
+          })),
         },
       })
 
@@ -1136,6 +1156,11 @@ describe('ChipViewerService', () => {
           directory: PROJECT_ROOT,
           workspaceHandle: 'workspace-handle-1',
           workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 2,
         })),
       },
     })
@@ -1621,6 +1646,11 @@ describe('ChipViewerService', () => {
           workspaceHandle: 'workspace-handle-1',
           workspaceRevision: 1,
         })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 2,
+        })),
       },
     })
 
@@ -1647,6 +1677,203 @@ describe('ChipViewerService', () => {
     )?.[1]
     expect(saveResultText).toContain(
       'macro_location.tcl export skipped (ECC runtime too old)',
+    )
+  })
+
+  it('records an exported macro_location.tcl as the macro.placements parameter', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const macroLocationPath = join(PROJECT_ROOT, 'config', 'macro_location.tcl')
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-13.json')
+    const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
+      createService({
+        execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.viewer,
+          ...DEFAULT_MANIFEST_FILE_PATHS,
+          DB_PATH,
+          GDS_PATH,
+        ],
+        files: {
+          [GEOMETRY_MANIFEST]: geometryManifest({
+            masters: 'epochs/1/geometry.masters.txt',
+          }),
+          [geometryMasters]:
+            'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n' +
+            'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+          [DEF_PATH]: 'COMPONENTS 1 ; - u_sram01 SRAM_64x32 ;\nEND COMPONENTS\n',
+          [macroLocationPath]:
+            '# macro location\n' +
+            'placeInstance u_sram01 10.000000 20.500000 R0\n' +
+            'setInstancePlacementStatus -status fixed -name u_sram01\n',
+          [commandPath]: JSON.stringify({ action: 'save', command_id: 13 }),
+        },
+        layoutEditRuntime: {
+          layoutEditApply: vi.fn(),
+          layoutEditBegin: vi.fn(async () => ({
+            dirty: false,
+            editSessionId: EDIT_SESSION_ID,
+            geometryManifestPath: GEOMETRY_MANIFEST,
+            geometryRevision: 0,
+            revision: 0,
+            sourceFingerprint: 'source-1',
+          })),
+          layoutEditDiscard: vi.fn(),
+          layoutEditSave: vi.fn(async () => ({
+            artifacts: {
+              dbPath: DB_PATH,
+              defPath: DEF_PATH,
+              gdsPath: GDS_PATH,
+              geometryManifestPath: GEOMETRY_MANIFEST,
+            },
+            dirty: false,
+            editSessionId: EDIT_SESSION_ID,
+            geometryRevision: 1,
+            macroLocationPath,
+            revision: 1,
+            saved: true,
+            workspaceRevision: 4,
+          })),
+          openWorkspace: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceHandle: 'workspace-handle-1',
+            workspaceRevision: 1,
+          })),
+          updateWorkspaceStepConfiguration: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceId: 'workspace-handle-1',
+            workspaceRevision: 5,
+          })),
+        },
+      })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'preFloorplan',
+    })
+    const controlListener = watchDirectory.mock.calls[0]?.[1]
+
+    controlListener?.('control-save-13.json')
+
+    await vi.waitFor(() => {
+      expect(renameFile).toHaveBeenCalledWith(
+        join(EDIT_SESSION_RESULT_DIR, 'control-result-save-13.json.tmp'),
+        join(EDIT_SESSION_RESULT_DIR, 'control-result-save-13.json'),
+      )
+    })
+    expect(layoutEditRuntime.updateWorkspaceStepConfiguration).toHaveBeenCalledWith({
+      commandId: `${EDIT_BRIDGE_ID}:13:macro-params`,
+      expectedWorkspaceRevision: 4,
+      parameters: {
+        'macro.placements': [{ instance: 'u_sram01', orientation: 'R0', x: 10, y: 20.5 }],
+      },
+      stepId: 'macroPlacement',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    const progressPhases = writeTextFile.mock.calls
+      .filter(
+        ([path]) =>
+          path === join(EDIT_SESSION_RESULT_DIR, 'control-progress-save-13.json.tmp'),
+      )
+      .map(([, content]) => content)
+    expect(
+      progressPhases.some((text) => text.includes('recording_macro_placements')),
+    ).toBe(true)
+    const saveResultText = writeTextFile.mock.calls.find(
+      ([path]) =>
+        path === join(EDIT_SESSION_RESULT_DIR, 'control-result-save-13.json.tmp'),
+    )?.[1]
+    expect(saveResultText).toContain(
+      'macro_location.tcl exported and macro.placements recorded (1 macros)',
+    )
+  })
+
+  it('keeps the save successful when the macro.placements writeback fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
+    const macroLocationPath = join(PROJECT_ROOT, 'config', 'macro_location.tcl')
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-14.json')
+    const { renameFile, service, watchDirectory, writeTextFile } = createService({
+      execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+        DB_PATH,
+        GDS_PATH,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          masters: 'epochs/1/geometry.masters.txt',
+        }),
+        [geometryMasters]:
+          'name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n' +
+          'SRAM_64x32\tBLOCK\tsite9\tX,Y\t0\t0\t40000\t30000\t120\t0',
+        [DEF_PATH]: 'COMPONENTS 1 ; - u_sram01 SRAM_64x32 ;\nEND COMPONENTS\n',
+        [macroLocationPath]: 'placeInstance u_sram01 1 2 R90\n',
+        [commandPath]: JSON.stringify({ action: 'save', command_id: 14 }),
+      },
+      layoutEditRuntime: {
+        layoutEditApply: vi.fn(),
+        layoutEditBegin: vi.fn(async () => ({
+          dirty: false,
+          editSessionId: EDIT_SESSION_ID,
+          geometryManifestPath: GEOMETRY_MANIFEST,
+          geometryRevision: 0,
+          revision: 0,
+          sourceFingerprint: 'source-1',
+        })),
+        layoutEditDiscard: vi.fn(),
+        layoutEditSave: vi.fn(async () => ({
+          artifacts: {
+            dbPath: DB_PATH,
+            defPath: DEF_PATH,
+            gdsPath: GDS_PATH,
+            geometryManifestPath: GEOMETRY_MANIFEST,
+          },
+          dirty: false,
+          editSessionId: EDIT_SESSION_ID,
+          geometryRevision: 1,
+          macroLocationPath,
+          revision: 1,
+          saved: true,
+          workspaceRevision: 4,
+        })),
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+          workspaceRevision: 1,
+        })),
+        updateWorkspaceStepConfiguration: vi.fn(async () => {
+          throw new Error('revision_conflict')
+        }),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'preFloorplan',
+    })
+    const controlListener = watchDirectory.mock.calls[0]?.[1]
+
+    controlListener?.('control-save-14.json')
+
+    await vi.waitFor(() => {
+      expect(renameFile).toHaveBeenCalledWith(
+        join(EDIT_SESSION_RESULT_DIR, 'control-result-save-14.json.tmp'),
+        join(EDIT_SESSION_RESULT_DIR, 'control-result-save-14.json'),
+      )
+    })
+    const saveResultText = writeTextFile.mock.calls.find(
+      ([path]) =>
+        path === join(EDIT_SESSION_RESULT_DIR, 'control-result-save-14.json.tmp'),
+    )?.[1]
+    expect(saveResultText).toContain('"accepted": true')
+    expect(saveResultText).toContain(
+      'WARNING: macro.placements writeback failed: revision_conflict',
     )
   })
 })
