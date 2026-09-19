@@ -20,8 +20,13 @@ import type {
   DesktopShellExitEvent,
   DesktopShellSessionOptions,
   DesktopAgentEvent,
+  DesktopAgentOptimizationEpisodeInvalidatedEvent,
+  DesktopAgentOptimizationEpisodeNotificationAckRequest,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
+  DesktopModelProfileIdRequest,
+  DesktopModelProfileSetApiKeyRequest,
+  DesktopModelProfileUpsertRequest,
   CliInstallerProgressEvent,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
@@ -76,6 +81,11 @@ function subscribeToDesktopEvent(
 const desktopApi: DesktopApi = {
   app: {
     getVersions: () => invokeDesktop(desktopApiIpcChannels.appGetVersions),
+    getQuickStartResources: () =>
+      invokeDesktop(desktopApiIpcChannels.appGetQuickStartResources),
+    getQuickStartRoot: () => invokeDesktop(desktopApiIpcChannels.appGetQuickStartRoot),
+    prepareQuickStartProject: (name) =>
+      invokeDesktop(desktopApiIpcChannels.appPrepareQuickStartProject, name),
   },
   productCommands: {
     execute: (request) =>
@@ -447,12 +457,25 @@ const desktopApi: DesktopApi = {
     },
   },
   agent: {
+    controlOptimizationEpisode: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentOptimizationControl, request),
+    acknowledgeOptimizationEpisodeNotification: (
+      request: DesktopAgentOptimizationEpisodeNotificationAckRequest,
+    ) => invokeDesktop(desktopApiIpcChannels.agentOptimizationNotificationAck, request),
     interrupt: (request) => invokeDesktop(desktopApiIpcChannels.agentInterrupt, request),
     start: (request) => invokeDesktop(desktopApiIpcChannels.agentStart, request),
     startSession: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentStartSession, request),
     sendMessage: (request) =>
       invokeDesktop(desktopApiIpcChannels.agentSendMessage, request),
+    registerOperationAssociation: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentRegisterOperationAssociation, request),
+    getModelSettings: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentGetModelSettings, request),
+    setModelSettings: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentSetModelSettings, request),
+    answerInteraction: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentAnswerInteraction, request),
     onEvent: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.agentEvent,
@@ -460,6 +483,15 @@ const desktopApi: DesktopApi = {
           listener(payload as DesktopAgentEvent)
         },
       ),
+    onOptimizationProjectionInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.agentOptimizationProjectionInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as DesktopAgentOptimizationEpisodeInvalidatedEvent)
+        },
+      ),
+    optimizationProjection: () =>
+      invokeDesktop(desktopApiIpcChannels.agentOptimizationProjection),
     codex: {
       getStatus: () => invokeDesktop(desktopApiIpcChannels.agentCodexGetStatus),
       install: () => invokeDesktop(desktopApiIpcChannels.agentCodexInstall),
@@ -467,6 +499,15 @@ const desktopApi: DesktopApi = {
       recheck: () => invokeDesktop(desktopApiIpcChannels.agentCodexRecheck),
       setBinPath: (request: DesktopCodexSetBinPathRequest) =>
         invokeDesktop(desktopApiIpcChannels.agentCodexSetBinPath, request),
+      listProfiles: () => invokeDesktop(desktopApiIpcChannels.agentProfileList),
+      upsertProfile: (request: DesktopModelProfileUpsertRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileUpsert, request),
+      deleteProfile: (request: DesktopModelProfileIdRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileDelete, request),
+      selectProfile: (request: DesktopModelProfileIdRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileSelect, request),
+      setProfileApiKey: (request: DesktopModelProfileSetApiKeyRequest) =>
+        invokeDesktop(desktopApiIpcChannels.agentProfileSetApiKey, request),
       onProgress: (listener) =>
         subscribeToDesktopEvent(
           desktopApiEventChannels.agentCodexProgress,

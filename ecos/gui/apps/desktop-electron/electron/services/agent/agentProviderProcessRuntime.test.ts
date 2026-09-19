@@ -7,6 +7,10 @@ import {
   type AgentProviderProtocolRequest,
 } from './agentProviderProcessRuntime'
 import { supportedAgentProviderProtocolVersion } from './agentProviderPlugin'
+import {
+  getAgentOperationAssociation,
+  resetAgentOperationAssociations,
+} from './agentOperationAssociations'
 
 class FakeStdin extends EventEmitter {
   readonly write = vi.fn()
@@ -94,6 +98,375 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('sends Optimization Episode lifecycle requests through the provider protocol', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const childRequest = async (
+      method: string,
+      invoke: () => Promise<void>,
+      params: Record<string, unknown>,
+    ) => {
+      const callIndex = child.stdin.write.mock.calls.length
+      const response = invoke()
+      const request = readProtocolRequest(child, callIndex)
+      expect(request).toMatchObject({ method, params })
+      child.stdout.emit(
+        'data',
+        `${JSON.stringify({ id: request.id, result: { sessionId: 'session-1' } })}\n`,
+      )
+      await response
+    }
+    const recovery = {
+      directory: '/work/demo',
+      episodeId: 'episode-1',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      workspaceRevision: 7,
+    }
+    const session = { providerId: 'codex', sessionId: 'session-1' }
+
+    const first = runtime.resumeOptimizationEpisode(recovery)
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+    expect(request).toMatchObject({
+      method: 'resumeOptimizationEpisode',
+      params: recovery,
+    })
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: request.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await first
+    await childRequest(
+      'stopOptimizationEpisode',
+      () => runtime.stopOptimizationEpisode(recovery),
+      recovery,
+    )
+    await childRequest(
+      'prepareOptimizationShutdown',
+      () => runtime.prepareOptimizationShutdown(session),
+      session,
+    )
+    await childRequest(
+      'cancelOptimizationShutdown',
+      () => runtime.cancelOptimizationShutdown(session),
+      session,
+    )
+  })
+
+  it('answers inbound host Product Commands from the agent child', async () => {
+    const harness = createSpawnHarness()
+    const host = {
+      candidateCapabilities: vi.fn().mockResolvedValue({
+        schema: 'ecc.candidate_capabilities.v1',
+        schemaVersion: 1,
+        targets: [],
+      }),
+      candidateRerun: vi.fn(),
+      candidateResume: vi.fn(),
+      cancelOperation: vi.fn(),
+      openWorkspace: vi.fn(),
+      operationStatus: vi.fn(),
+      startFlowOperation: vi.fn(),
+      waitForOperation: vi.fn(),
+      workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
+    }
+    const runtime = new AgentProviderProcessRuntime({
+      host,
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const started = runtime.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'handle-1',
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: 'host-1',
+        method: 'candidate.capabilities',
+        params: { workspaceHandle: 'handle-1' },
+      })}\n`,
+    )
+    await vi.waitFor(() => {
+      expect(host.candidateCapabilities).toHaveBeenCalledWith({
+        workspaceHandle: 'handle-1',
+      })
+    })
+    const reply = JSON.parse(String(child.stdin.write.mock.calls.at(-1)?.[0]).trim()) as {
+      id: string
+      result: unknown
+    }
+    expect(reply).toEqual({
+      id: 'host-1',
+      result: {
+        schema: 'ecc.candidate_capabilities.v1',
+        schemaVersion: 1,
+        targets: [],
+      },
+    })
+  })
+
+  it('opens a calibration replay Workspace through the Product Command host', async () => {
+    const harness = createSpawnHarness()
+    const host = {
+      candidateCapabilities: vi.fn(),
+      candidateRerun: vi.fn(),
+      candidateResume: vi.fn(),
+      cancelOperation: vi.fn(),
+      openWorkspace: vi.fn().mockResolvedValue({
+        directory:
+          '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+        workspaceHandle: 'handle-replay',
+        workspaceRevision: 1,
+      }),
+      operationStatus: vi.fn(),
+      startFlowOperation: vi.fn(),
+      waitForOperation: vi.fn(),
+    }
+    const runtime = new AgentProviderProcessRuntime({
+      host,
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const started = runtime.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: 'host-open',
+        method: 'workspace.open',
+        params: {
+          directory:
+            '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+        },
+      })}\n`,
+    )
+    await vi.waitFor(() => {
+      expect(host.openWorkspace).toHaveBeenCalledWith({
+        directory:
+          '/work/demo/.agent/optimization/noise-calibration/default-replay-1/workspace',
+      })
+    })
+  })
+
+  it('passes canonical workspace context through sendMessage so the provider refreshes its session', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const started = runtime.startSession({
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceRevision: 4,
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    const response = runtime.sendMessage({
+      directory: '/work/created',
+      workspaceId: 'handle-created',
+      message: 'lower target density',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceRevision: 5,
+    })
+    const messageRequest = readProtocolRequest(child, 1)
+    expect(messageRequest).toEqual({
+      id: expect.any(String),
+      method: 'sendMessage',
+      params: expect.objectContaining({
+        directory: '/work/created',
+        workspaceId: 'handle-created',
+        workspaceRevision: 5,
+      }),
+    })
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: messageRequest.id,
+        result: { messageId: 'message-1', sessionId: 'session-1', turnId: 'turn-1' },
+      })}\n`,
+    )
+    await expect(response).resolves.toEqual({
+      messageId: 'message-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+    })
+  })
+
+  it('records operation associations for host execution commands', async () => {
+    resetAgentOperationAssociations()
+    const harness = createSpawnHarness()
+    const host = {
+      candidateCapabilities: vi.fn(),
+      candidateRerun: vi.fn().mockResolvedValue({ operationId: 'op-rerun' }),
+      candidateResume: vi.fn().mockResolvedValue({ operationId: 'op-resume' }),
+      cancelOperation: vi.fn(),
+      openWorkspace: vi.fn(),
+      operationStatus: vi.fn(),
+      startFlowOperation: vi.fn().mockResolvedValue({ operationId: 'op-run' }),
+      waitForOperation: vi.fn(),
+      workspaceSession: vi.fn().mockResolvedValue({ workspaceHandle: 'handle-1' }),
+    }
+    const runtime = new AgentProviderProcessRuntime({
+      host,
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const started = runtime.startSession({
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    const child = harness.children[0]
+    const startRequest = readProtocolRequest(child)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({ id: startRequest.id, result: { sessionId: 'session-1' } })}\n`,
+    )
+    await started
+
+    for (const [id, method] of [
+      ['host-run', 'workspace.run'],
+      ['host-rerun', 'candidate.rerun'],
+      ['host-resume', 'candidate.resume'],
+    ] as const) {
+      child.stdout.emit(
+        'data',
+        `${JSON.stringify({
+          id,
+          method,
+          params: { workspaceHandle: 'handle-1' },
+        })}\n`,
+      )
+    }
+
+    await vi.waitFor(() => {
+      expect(getAgentOperationAssociation('codex', 'op-run')).toMatchObject({
+        command: 'workspace.run',
+      })
+      expect(getAgentOperationAssociation('codex', 'op-rerun')).toMatchObject({
+        command: 'candidate.rerun',
+      })
+      expect(getAgentOperationAssociation('codex', 'op-resume')).toMatchObject({
+        command: 'candidate.resume',
+      })
+    })
+  })
+
+  it('round-trips validated session model settings', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const response = runtime.setModelSettings({
+      providerId: 'codex',
+      reasoningEffort: 'high',
+      sessionId: 'session-1',
+    })
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+    expect(request).toMatchObject({
+      method: 'setModelSettings',
+      params: { reasoningEffort: 'high', sessionId: 'session-1' },
+    })
+
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: request.id,
+        result: {
+          displayName: 'GPT Test',
+          model: 'gpt-test',
+          models: [
+            {
+              defaultReasoningEffort: 'medium',
+              displayName: 'GPT Test',
+              model: 'gpt-test',
+              supportedReasoningEfforts: ['low', 'medium', 'high'],
+            },
+          ],
+          reasoningEffort: 'high',
+        },
+      })}\n`,
+    )
+
+    await expect(response).resolves.toMatchObject({
+      model: 'gpt-test',
+      reasoningEffort: 'high',
+    })
+  })
+
   it('passes trusted manifest environment to the provider process', () => {
     const harness = createSpawnHarness()
     const env = { HOME: '/home/tester', PATH: '/tools/bin' }
@@ -147,6 +520,48 @@ describe('AgentProviderProcessRuntime', () => {
     expect(harness.spawn).toHaveBeenLastCalledWith('ecos-agent-provider', [], {
       cwd: '/plugins/ecos-agent',
       env: { ...env, ECOS_AGENT_CODEX_BIN: '/managed/bin/codex' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  })
+
+  it('reloads the provider child when the model-source environment changes', async () => {
+    const harness = createSpawnHarness()
+    const env = { HOME: '/home/tester', PATH: '/tools/bin' }
+    const runtime = new AgentProviderProcessRuntime({
+      env,
+      manifest: {
+        command: 'ecos-agent-provider',
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const stale = runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.children).toHaveLength(1)
+
+    // GLM -> codex source switch: same binary, different CODEX_HOME/API keys.
+    runtime.syncEnvironmentOverrides({
+      ECOS_AGENT_CODEX_BIN: '/usr/bin/codex',
+      CODEX_HOME: undefined,
+      ZAI_API_KEY: undefined,
+      OPENAI_API_KEY: 'sk-test',
+      PATH: '/tools/bin:/usr/bin',
+    })
+    await expect(stale).rejects.toThrow('restarted')
+    expect(harness.children[0].kill).toHaveBeenCalled()
+
+    void runtime.getStatus({ providerId: 'ecos_agent' })
+    expect(harness.spawn).toHaveBeenLastCalledWith('ecos-agent-provider', [], {
+      cwd: '/plugins/ecos-agent',
+      env: {
+        ...env,
+        ECOS_AGENT_CODEX_BIN: '/usr/bin/codex',
+        OPENAI_API_KEY: 'sk-test',
+        PATH: '/tools/bin:/usr/bin',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
   })
@@ -210,7 +625,7 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
-  it('forwards structured choice, status, and streaming fields', () => {
+  it('forwards optimization decision and incumbent evidence fields', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
       manifest: {
@@ -230,38 +645,310 @@ describe('AgentProviderProcessRuntime', () => {
       'data',
       `${JSON.stringify({
         event: {
-          choice: {
-            promptId: 'confirm-1',
-            title: 'Confirm execution',
-            options: [
-              { id: 'confirm-yes', label: 'Confirm', value: '1' },
-              { id: 'confirm-no', label: 'Cancel', value: '2' },
+          optimization: {
+            action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+            episode_id: 'episode-1',
+            in_flight: 1,
+            incumbent_candidate_root_ref: '.agent/candidates/winner',
+            objective_sha256: `sha256:${'a'.repeat(64)}`,
+            primary_metric: 'route_wirelength',
+            proposal_decision: 'propose',
+            proposal_reason: 'observation',
+            rejection_reason: null,
+            requested: { knob_id: 'place.cell_padding_x', value: 3 },
+            schema_version: 'ecos.optimization_progress.v1',
+          },
+          type: 'optimization',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optimization: expect.objectContaining({
+          action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+          in_flight: 1,
+          incumbent_candidate_root_ref: '.agent/candidates/winner',
+          objective_sha256: `sha256:${'a'.repeat(64)}`,
+          primary_metric: 'route_wirelength',
+          proposal_decision: 'propose',
+          proposal_reason: 'observation',
+          rejection_reason: null,
+          requested: { knob_id: 'place.cell_padding_x', value: 3 },
+        }),
+      }),
+    )
+  })
+
+  it('forwards terminal optimization errors without losing their reason', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    void runtime.getStatus({ providerId: 'local' })
+    const optimization = {
+      schema_version: 'ecos.optimization_status.v1',
+      episode_id: 'episode-1',
+      state: 'escalated',
+      rejection_reason: 'proposal_repair_failed',
+      rationale_summary:
+        'Optimization stopped: model proposal validation and repair failed.',
+      active_primary_metric: 'sta_hold_violation_count',
+      recovery_stage: 'hold',
+      violation_counts: {
+        drc_count: 0,
+        sta_setup_violation_count: 0,
+        sta_hold_violation_count: 442,
+      },
+    }
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({ event: { type: 'optimization', optimization }, type: 'event' })}\n`,
+    )
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ optimization }))
+  })
+
+  it('forwards validated objective-alignment progress', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    const objectiveHash = `sha256:${'a'.repeat(64)}`
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          optimization: {
+            active_preserve_metrics: [
+              'sta_setup_violation_count',
+              'sta_hold_violation_count',
             ],
-            variant: 'buttons',
+            active_primary_metric: 'drc_count',
+            alignment_sha256: `sha256:${'b'.repeat(64)}`,
+            episode_id: 'episode-1',
+            objective_sha256: objectiveHash,
+            original_objective: { contract_sha256: objectiveHash },
+            original_primary_metric: 'route_wirelength',
+            recovery_incomplete: true,
+            recovery_stage: 'drc',
+            recovery_transition: null,
+            schema_version: 'ecos.optimization_progress.v2',
+            violation_counts: {
+              drc_count: 4,
+              sta_hold_violation_count: 0,
+              sta_setup_violation_count: 2,
+            },
+          },
+          type: 'optimization',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optimization: expect.objectContaining({
+          active_primary_metric: 'drc_count',
+          alignment_sha256: `sha256:${'b'.repeat(64)}`,
+          recovery_incomplete: true,
+          recovery_stage: 'drc',
+          violation_counts: {
+            drc_count: 4,
+            sta_hold_violation_count: 0,
+            sta_setup_violation_count: 2,
+          },
+        }),
+      }),
+    )
+  })
+
+  it.each([
+    { active_preserve_metrics: ['drc_count', 'setup', 'hold'] },
+    {
+      violation_counts: {
+        drc_count: -1,
+        sta_hold_violation_count: 0,
+        sta_setup_violation_count: 0,
+      },
+    },
+  ])('drops malformed objective-alignment progress', (override) => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    const objectiveHash = `sha256:${'a'.repeat(64)}`
+    const payload = {
+      active_preserve_metrics: ['sta_setup_violation_count', 'sta_hold_violation_count'],
+      active_primary_metric: 'drc_count',
+      alignment_sha256: `sha256:${'b'.repeat(64)}`,
+      episode_id: 'episode-1',
+      objective_sha256: objectiveHash,
+      original_objective: { contract_sha256: objectiveHash },
+      original_primary_metric: 'route_wirelength',
+      recovery_stage: 'drc',
+      schema_version: 'ecos.optimization_progress.v2',
+      violation_counts: {
+        drc_count: 4,
+        sta_hold_violation_count: 0,
+        sta_setup_violation_count: 2,
+      },
+      ...override,
+    }
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({ event: { optimization: payload, type: 'optimization' }, type: 'event' })}\n`,
+    )
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('forwards optimization turn events with proposal rationale', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          optimization: {
+            active_primary_metric: 'drc_count',
+            episode_id: 'episode-1',
+            kind: 'proposal',
+            proposal_decision: 'propose',
+            proposal_reason: 'observation',
+            rationale_summary: 'Increase padding to absorb DRC hotspots.',
+            action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+            requested: { knob_id: 'place.cell_padding_x', value: 3 },
+            recovery_stage: 'drc',
+            schema_version: 'ecos.optimization_turn_event.v1',
+          },
+          type: 'optimization',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        optimization: expect.objectContaining({
+          kind: 'proposal',
+          proposal_decision: 'propose',
+          proposal_reason: 'observation',
+          rationale_summary: 'Increase padding to absorb DRC hotspots.',
+          action: { direction: 'increase', knob_id: 'place.cell_padding_x' },
+          requested: { knob_id: 'place.cell_padding_x', value: 3 },
+        }),
+      }),
+    )
+  })
+
+  it('forwards structured interactions, status, and streaming fields', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          interaction: {
+            interaction: {
+              kind: 'choice',
+              options: [
+                { id: 'confirm-yes', label: 'Confirm' },
+                { id: 'confirm-no', label: 'Cancel' },
+              ],
+              variant: 'buttons',
+            },
+            kind: 'choice',
+            purpose: 'execution',
+            requestId: 'confirm-1',
+            schema_version: 'flow-agent.interaction_request.v1',
+            status: 'pending',
+            title: 'Confirm execution',
           },
           delta: 'working',
           messageId: 'message-1',
           sessionId: 'session-1',
-          status: 'awaiting_choice',
-          type: 'choice',
+          status: 'awaiting_interaction',
+          type: 'interaction',
         },
         type: 'event',
       })}\n`,
     )
 
     expect(listener).toHaveBeenCalledWith({
-      choice: expect.objectContaining({
-        options: expect.arrayContaining([
-          { id: 'confirm-yes', label: 'Confirm', value: '1' },
-        ]),
-        variant: 'buttons',
+      interaction: expect.objectContaining({
+        interaction: expect.objectContaining({
+          options: expect.arrayContaining([{ id: 'confirm-yes', label: 'Confirm' }]),
+          variant: 'buttons',
+        }),
+        kind: 'choice',
+        purpose: 'execution',
+        requestId: 'confirm-1',
+        status: 'pending',
       }),
       delta: 'working',
       messageId: 'message-1',
       providerId: 'local',
       sessionId: 'session-1',
-      status: 'awaiting_choice',
-      type: 'choice',
+      status: 'awaiting_interaction',
+      type: 'interaction',
     })
   })
 
@@ -293,6 +980,222 @@ describe('AgentProviderProcessRuntime', () => {
     )
 
     expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('validates structured Agent activity before forwarding it', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          activity: {
+            itemId: 'reasoning-1',
+            kind: 'reasoning_summary',
+            schema_version: 'flow-agent.activity.v1',
+            startedAt: 1000,
+            status: 'running',
+            summary: ['Inspecting the flow inputs.'],
+            turnId: 'turn-1',
+            turnStartedAt: 900,
+          },
+          sessionId: 'session-1',
+          type: 'activity',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      activity: expect.objectContaining({
+        itemId: 'reasoning-1',
+        kind: 'reasoning_summary',
+        summary: ['Inspecting the flow inputs.'],
+        turnId: 'turn-1',
+      }),
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'activity',
+    })
+  })
+
+  it('accepts ECOS local activity identifiers at the process boundary', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          activity: {
+            arguments: '{"candidate_stages":["cts"]}',
+            itemId: 'local-knowledge-search',
+            kind: 'tool_call',
+            result: '{"match_count":3}',
+            schema_version: 'flow-agent.activity.v1',
+            startedAt: 1000,
+            status: 'completed',
+            tool: 'Searched ECOS knowledge',
+            turnId: 'turn-1',
+            turnStartedAt: 900,
+          },
+          sessionId: 'session-1',
+          type: 'activity',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      activity: expect.objectContaining({
+        itemId: 'local-knowledge-search',
+        kind: 'tool_call',
+        tool: 'Searched ECOS knowledge',
+        turnId: 'turn-1',
+      }),
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'activity',
+    })
+  })
+
+  it('replaces malformed activity with a non-blocking notice', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          activity: {
+            itemId: 'reasoning-1',
+            kind: 'reasoning_summary',
+            schema_version: 'flow-agent.activity.v1',
+            status: 'running',
+            summary: [],
+            turnId: 'turn-1',
+          },
+          sessionId: 'session-1',
+          type: 'activity',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      activityNotice: {
+        message: 'Some activity details are unavailable.',
+        schema_version: 'flow-agent.activity_notice.v1',
+        turnId: 'turn-1',
+      },
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'activity',
+    })
+  })
+
+  it('preserves select defaults and required state in interaction forms', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    const child = harness.children[0]
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          interaction: {
+            interaction: {
+              fields: [
+                {
+                  defaultValue: 'project-b',
+                  id: 'project',
+                  kind: 'select',
+                  label: 'Project',
+                  options: [
+                    { id: 'project-a', label: 'Project A' },
+                    { id: 'project-b', label: 'Project B' },
+                  ],
+                  required: true,
+                },
+              ],
+              kind: 'form',
+            },
+            kind: 'form',
+            purpose: 'execution',
+            requestId: 'form-1',
+            schema_version: 'flow-agent.interaction_request.v1',
+            status: 'pending',
+            title: 'Choose a project',
+          },
+          type: 'interaction',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: expect.objectContaining({
+          interaction: expect.objectContaining({
+            fields: [
+              expect.objectContaining({
+                defaultValue: 'project-b',
+                required: true,
+              }),
+            ],
+          }),
+        }),
+      }),
+    )
   })
 
   it('rebuilds rerun confirmation fields from the frozen execution payload', () => {
@@ -413,18 +1316,21 @@ describe('AgentProviderProcessRuntime', () => {
               end_step: 'Harden',
               steps: [
                 'Synthesis',
-                'Floorplan',
+                'lec',
+                'preFloorplan',
+                'macroPlacement',
+                'postFloorplan',
                 'place',
                 'CTS',
                 'legalization',
                 'Timing optimization',
                 'route',
-                'drc',
-                'lvs',
                 'filler',
-                'postRouteLec',
                 'RCX',
                 'sta',
+                'lvs',
+                'postRouteLec',
+                'drc',
                 'Harden',
               ],
             },
@@ -441,6 +1347,132 @@ describe('AgentProviderProcessRuntime', () => {
         workspaceSetup: expect.objectContaining({ pdk: 'ics55' }),
       }),
     )
+  })
+
+  it('forwards only validated workspace signoff contracts', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_signoff',
+          workspaceSignoff: {
+            action: 'inspect',
+            schema_version: 'flow-agent.workspace_signoff_contract.v1',
+            signoff_id: 'signoff-1',
+            workspace: '/runs/gcd',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      type: 'workspace_signoff',
+      workspaceSignoff: {
+        action: 'inspect',
+        schema_version: 'flow-agent.workspace_signoff_contract.v1',
+        signoff_id: 'signoff-1',
+        workspace: '/runs/gcd',
+      },
+    })
+
+    listener.mockClear()
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_signoff',
+          workspaceSignoff: {
+            action: 'export',
+            schema_version: 'flow-agent.workspace_signoff_contract.v1',
+            signoff_id: 'signoff-2',
+            workspace: 'relative/path',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('drops workspace setup contracts with an invalid MPC snapshot', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_setup',
+          workspaceSetup: {
+            schema_version: 'flow-agent.workspace_setup_contract.v2',
+            setup_id: 'setup-invalid-mpc',
+            title: 'Workspace run plan',
+            directory: '/runs/gcd_trial',
+            pdk: 'ics55',
+            pdk_root: '/pdk/ics55',
+            rtl_list: ['/rtl/gcd.v'],
+            design_input_mode: 'rtl',
+            pdk_config_mode: 'default',
+            pdk_config: { mode: 'default', tech_lef: [], cell_lef: [], liberty: [] },
+            project_context: {
+              mode: 'create',
+              project_name: 'runs',
+              project_root: '/runs',
+              project_json_path: '/runs/project.json',
+            },
+            parameters: {
+              design: 'gcd',
+              top_module: 'gcd',
+              clock: 'clk',
+              description: '',
+              frequency_max: 50,
+              die_area_mode: 'utilitization_margin',
+              utilitization: 0.4,
+              margin: 0,
+              max_fanout: 32,
+              target_density: 0.2,
+              target_overflow: 0,
+            },
+            flow_config: {
+              start_step: 'Synthesis',
+              end_step: 'Harden',
+              steps: ['Synthesis', 'Harden'],
+            },
+            requires_gui_review: true,
+            mpc: { resource_id: 'mpc:bad', path: 'relative/path' },
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).not.toHaveBeenCalled()
   })
 
   it('forwards a validated workspace rerun only after the user confirms it', () => {
@@ -523,6 +1555,105 @@ describe('AgentProviderProcessRuntime', () => {
         workspace_parameters: { 'place.target_density': 0.55 },
         step_configurations: [],
       }),
+    })
+  })
+
+  it('forwards a workspace rerun confirmed through the interaction API', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.startSession({ providerId: 'local', sessionId: 'session-1' })
+    const workspaceRerun = {
+      design_id: 'gcd',
+      end_step: 'place',
+      execution_scope: 'single_step',
+      parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+      requires_gui_review: true,
+      rerun_id: 'gcd_rerun_place',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1',
+      source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+      source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
+      source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
+      source_workspace: '/runs/gcd',
+      target_step: 'place',
+      target_workspace: '/runs/gcd_rerun_place',
+    }
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: {
+            fields: [{ label: 'ignored', value: 'ignored' }],
+            presentation: 'workspace_rerun',
+            schema_version: 'flow-agent.resolved_execution_contract.v1',
+            title: 'Workspace rerun plan',
+            workspace_rerun: workspaceRerun,
+          },
+          sessionId: 'session-1',
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+    listener.mockClear()
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          interaction: {
+            interaction: {
+              cancel: { id: 'cancel', label: 'Cancel' },
+              confirm: { id: 'confirm', label: 'Confirm and start' },
+              kind: 'confirm',
+            },
+            kind: 'confirm',
+            purpose: 'execution',
+            requestId: 'confirm-1',
+            schema_version: 'flow-agent.interaction_request.v1',
+            status: 'pending',
+            title: 'Confirm execution',
+          },
+          sessionId: 'session-1',
+          type: 'interaction',
+        },
+        type: 'event',
+      })}\n`,
+    )
+    void runtime.answerInteraction({
+      kind: 'confirm',
+      optionId: 'confirm',
+      providerId: 'local',
+      requestId: 'confirm-1',
+      sessionId: 'session-1',
+    })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          sessionId: 'session-1',
+          type: 'workspace_rerun',
+          workspaceRerun: workspaceRerun,
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      sessionId: 'session-1',
+      type: 'workspace_rerun',
+      workspaceRerun: expect.objectContaining({ rerun_id: 'gcd_rerun_place' }),
     })
   })
 
@@ -664,19 +1795,6 @@ describe('AgentProviderProcessRuntime', () => {
     expect(
       emitParameterUpdate({
         parameter_patch: [{ knob_id: 'Core.Utilitization', value: 0.7 }],
-      }),
-    ).not.toHaveBeenCalled()
-  })
-
-  it('drops unknown Step identities and unsafe Step Options', () => {
-    expect(
-      emitParameterUpdate({
-        parameter_patch: [{ knob_id: 'fixfanout.enabled', value: true }],
-      }),
-    ).not.toHaveBeenCalled()
-    expect(
-      emitParameterUpdate({
-        parameter_patch: [{ knob_id: 'cts.buffer_type', value: ['BUF; rm'] }],
       }),
     ).not.toHaveBeenCalled()
   })

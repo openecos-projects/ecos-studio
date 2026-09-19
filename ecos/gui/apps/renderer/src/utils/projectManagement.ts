@@ -40,6 +40,8 @@ export type ProjectMetricId =
   | 'frequency'
 export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
+export type { ProjectManifestMpc } from '@ecos-studio/shared'
+
 export interface ProjectManifestMpcCandidate {
   resource_id: string
   display_name: string

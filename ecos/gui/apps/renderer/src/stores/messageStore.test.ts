@@ -4,6 +4,32 @@ import { nextTick } from 'vue'
 import { useMessageStore } from './messageStore'
 
 describe('messageStore', () => {
+  it('hydrates one stable Optimization Episode card without appending event history', () => {
+    const store = useMessageStore()
+    const optimization = {
+      episode_id: 'episode-1',
+      schema_version: 'ecos.optimization_status.v2',
+      state: 'running',
+      turn_count: 2,
+    }
+
+    store.upsertOptimizationProjection('session-1', optimization)
+    store.upsertOptimizationProjection('session-1', {
+      ...optimization,
+      state: 'paused',
+    })
+
+    const messages = store.messagesBySessionId['session-1'] ?? []
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      id: 'optimization-episode-1',
+      optimization: { state: 'paused' },
+    })
+    expect(messages[0]?.optimizationTimeline).toEqual([
+      expect.objectContaining({ state: 'paused' }),
+    ])
+  })
+
   beforeEach(() => {
     setActivePinia(createPinia())
     useMessageStore().setActiveSessionId('session-test')
@@ -162,70 +188,117 @@ describe('messageStore', () => {
     ])
   })
 
-  it('records one answer for the matching choice prompt', () => {
+  it('upserts one pending interaction by request id and consumes it once', () => {
     const store = useMessageStore()
-    const choice = {
-      promptId: 'prompt-1',
-      title: 'Choose a stage',
-      options: [
-        { id: 'prompt-1-1', label: 'place', value: '1' },
-        { id: 'prompt-1-2', label: 'route', value: '2' },
-      ],
-      variant: 'list' as const,
+    const interaction = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'option-1', label: 'Run' }],
+        variant: 'buttons' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'request-1',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
+      title: 'Choose an operation',
     }
 
-    store.addChoice(choice, 'choice-message')
+    store.addInteraction(interaction, 'interaction-1')
+    store.addInteraction(interaction, 'interaction-duplicate')
 
-    expect(store.answerChoice(choice.promptId, choice.options[0])).toBe(true)
-    expect(store.answerChoice(choice.promptId, choice.options[1])).toBe(false)
+    expect(store.messages).toHaveLength(1)
+    expect(store.answerInteraction('request-1', 'Run')).toBe(true)
+    expect(store.answerInteraction('request-1', 'Run')).toBe(false)
     expect(store.messages[0]).toMatchObject({
-      answeredOptionId: 'prompt-1-1',
-      id: 'choice-message',
-      type: 'choice',
+      interactionAnswer: 'Run',
+      interaction: { requestId: 'request-1', status: 'answered' },
+      interactionAnswered: true,
     })
   })
 
-  it('dismisses prior open choices when a new choice arrives or free-text advances', () => {
+  it('binds only an explicitly matching interaction description to its preceding prompt', () => {
     const store = useMessageStore()
-    const first = {
-      promptId: 'prompt-1',
-      title: 'Choose an operation',
-      options: [{ id: 'prompt-1-1', label: 'Create', value: '1' }],
-      variant: 'list' as const,
-    }
-    const second = {
-      promptId: 'prompt-2',
-      title: 'Choose an operation',
-      options: [{ id: 'prompt-2-1', label: 'Create', value: '1' }],
-      variant: 'list' as const,
-    }
+    const promptId = store.addAssistantMessage('Choose a run mode.', 'done')
+    store.addInteraction(
+      {
+        interaction: {
+          kind: 'choice',
+          options: [{ id: 'quick', label: 'Quick run' }],
+          variant: 'list',
+        },
+        kind: 'choice',
+        description: 'Choose a run mode.',
+        purpose: 'execution',
+        requestId: 'mode',
+        schema_version: 'flow-agent.interaction_request.v1',
+        status: 'pending',
+        title: 'Run mode',
+      },
+      'mode-interaction',
+    )
 
-    store.addChoice(first, 'choice-1')
-    store.addChoice(second, 'choice-2')
+    expect(store.messages[1]).toMatchObject({ interactionCompanionId: promptId })
 
+    store.addAssistantMessage('Persistent workspace context.', 'done')
+    store.addInteraction(
+      {
+        ...store.messages[1]!.interaction!,
+        description: 'Choose another operation.',
+        requestId: 'operation',
+        status: 'pending',
+      },
+      'operation-interaction',
+    )
+    expect(
+      store.messages[store.messages.length - 1]?.interactionCompanionId,
+    ).toBeUndefined()
+  })
+
+  it('rewinds messages to the restored interaction after undo', () => {
+    const store = useMessageStore()
+    const interaction = {
+      interaction: {
+        kind: 'choice' as const,
+        options: [{ id: 'option-1', label: 'Run' }],
+        variant: 'list' as const,
+      },
+      kind: 'choice' as const,
+      purpose: 'execution' as const,
+      requestId: 'request-1',
+      schema_version: 'flow-agent.interaction_request.v1' as const,
+      status: 'pending' as const,
+      title: 'Choose',
+    }
+    store.addInteraction(interaction, 'interaction-1')
+    store.addAssistantMessage('Welcome shown before the selection.', 'done')
+    store.answerInteraction('request-1', 'Run')
+    store.addAssistantMessage('Prompt created by the wrong selection.', 'done')
+    store.addInteraction(
+      { ...interaction, canUndo: true, requestId: 'request-2' },
+      'interaction-2',
+    )
+
+    expect(store.rewindToInteraction('request-1')).toBe(true)
+    expect(store.messages).toHaveLength(2)
     expect(store.messages[0]).toMatchObject({
-      answeredOptionId: '__dismissed__',
-      id: 'choice-1',
+      interaction: { canUndo: false, requestId: 'request-1', status: 'pending' },
+      interactionAnswered: false,
+      interactionAnswer: undefined,
     })
-    expect(store.messages[1].answeredOptionId).toBeUndefined()
-
-    store.dismissOpenChoices()
-    expect(store.messages[1]).toMatchObject({
-      answeredOptionId: '__dismissed__',
-      id: 'choice-2',
-    })
+    expect(store.messages[1]?.content).toBe('Welcome shown before the selection.')
   })
 
   it('merges tool deltas with the same provider message id', () => {
     const store = useMessageStore()
 
     store.upsertAgentEvent({
-      delta: 'Thinking…\n',
+      delta: '**Thinking…**\n',
       messageId: 'turn-1-tool',
       type: 'tool',
     })
     store.upsertAgentEvent({
-      delta: 'Searching workspace…\n',
+      delta: '**Searching workspace…**\n',
       messageId: 'turn-1-tool',
       type: 'tool',
     })
@@ -264,5 +337,134 @@ describe('messageStore', () => {
     expect(store.messages).toHaveLength(1)
     expect(store.messages[0]?.status).toBe('done')
     expect(store.messages[0]?.content).toContain('Running place.')
+  })
+
+  it('upserts structured activity by turn and item identity', () => {
+    const store = useMessageStore()
+    const activity = {
+      itemId: 'reasoning-1',
+      kind: 'reasoning_summary' as const,
+      schema_version: 'flow-agent.activity.v1' as const,
+      startedAt: 1000,
+      status: 'running' as const,
+      summary: ['Inspecting'],
+      turnId: 'turn-1',
+      turnStartedAt: 900,
+    }
+
+    store.upsertAgentEvent({ activity, sessionId: 'session-test', type: 'activity' })
+    store.upsertAgentEvent({
+      activity: {
+        ...activity,
+        status: 'completed',
+        summary: ['Inspecting the flow.'],
+      },
+      sessionId: 'session-test',
+      type: 'activity',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      activity: {
+        items: [
+          {
+            itemId: 'reasoning-1',
+            status: 'completed',
+            summary: ['Inspecting the flow.'],
+          },
+        ],
+        turnId: 'turn-1',
+      },
+      status: 'loading',
+      type: 'activity',
+    })
+
+    store.finishStreamingMessages()
+    expect(store.messages[0]).toMatchObject({
+      activity: { completedAt: expect.any(Number) },
+      status: 'done',
+    })
+  })
+
+  it('keeps background-tab activity isolated by session', () => {
+    const store = useMessageStore()
+    store.upsertAgentEvent({
+      activity: {
+        itemId: 'search-1',
+        kind: 'web_search',
+        schema_version: 'flow-agent.activity.v1',
+        startedAt: 1000,
+        status: 'running',
+        actions: [],
+        query: 'CTS',
+        turnId: 'turn-b',
+        turnStartedAt: 900,
+      },
+      sessionId: 'session-b',
+      type: 'activity',
+    })
+
+    expect(store.messages).toEqual([])
+    store.setActiveSessionId('session-b')
+    expect(store.messages).toMatchObject([
+      { activity: { turnId: 'turn-b' }, type: 'activity' },
+    ])
+  })
+
+  it('aggregates optimization events into one per-episode card message', () => {
+    const store = useMessageStore()
+    const basePayload = {
+      schema_version: 'ecos.optimization_progress.v2' as const,
+      episode_id: 'episode-1',
+      active_primary_metric: 'drc_count',
+      original_primary_metric: 'drc_count',
+      recovery_stage: 'drc',
+      violation_counts: {
+        drc_count: 12,
+        sta_setup_violation_count: 3,
+        sta_hold_violation_count: 0,
+      },
+    }
+    const turnOne = {
+      ...basePayload,
+      turn: 1,
+      state: 'executing',
+      action: { knob_id: 'place_density', direction: 'increase' },
+      requested: { knob_id: 'place_density', value: 0.75 },
+      proposal_decision: 'propose',
+      incumbent_decision: 'candidate_better',
+      decisive_metric: 'drc_count',
+    }
+    const turnTwo = {
+      ...basePayload,
+      turn: 2,
+      state: 'awaiting_execution',
+      violation_counts: {
+        drc_count: 9,
+        sta_setup_violation_count: 3,
+        sta_hold_violation_count: 0,
+      },
+    }
+
+    store.setActiveSessionId('session-test')
+    store.upsertAgentEvent({
+      optimization: turnOne,
+      sessionId: 'session-test',
+      type: 'optimization',
+    })
+    store.upsertAgentEvent({
+      optimization: turnTwo,
+      sessionId: 'session-test',
+      type: 'optimization',
+    })
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      id: 'optimization-episode-1',
+      optimization: turnTwo,
+      optimizationTimeline: [turnOne, turnTwo],
+      status: 'done',
+      type: 'optimization',
+    })
   })
 })

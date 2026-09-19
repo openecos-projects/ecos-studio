@@ -322,6 +322,7 @@ const closeWizard = () => {
 }
 
 const prefillWorkspaceDirectory = async () => {
+  if (queryString(route.query.quickStart) === '1') return
   const workspacePath = queryString(route.query.workspacePath)
   if (!workspacePath) return
 

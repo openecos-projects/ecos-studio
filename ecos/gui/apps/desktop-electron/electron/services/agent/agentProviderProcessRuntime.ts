@@ -4,29 +4,55 @@ import { isDeepStrictEqual } from 'node:util'
 import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
-  DesktopAgentChoice,
+  DesktopAgentInteractionRequest,
+  DesktopAgentInteractionField,
+  DesktopAgentInteractionAnswerRequest,
+  DesktopAgentInteractionAnswerResponse,
+  DesktopAgentInterruptRequest,
   DesktopAgentExecutionContract,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
+  DesktopAgentWorkspaceParameterWrite,
   DesktopAgentWorkspaceRerunContract,
+  DesktopAgentWorkspaceSignoffContract,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
+  DesktopAgentModelSettings,
+  DesktopAgentModelSettingsRequest,
+  DesktopAgentOptimizationEpisodeResumeRequest,
+  DesktopAgentReasoningEffort,
   DesktopAgentProviderRequest,
   DesktopAgentResumeSessionRequest,
   DesktopAgentResumeSessionResponse,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
+  DesktopAgentSetModelSettingsRequest,
   DesktopAgentSetModeRequest,
   DesktopAgentStartRequest,
   DesktopAgentStartSessionRequest,
   DesktopAgentStartSessionResponse,
   DesktopAgentStatus,
 } from '@ecos-studio/shared'
+import {
+  desktopAgentParameterWriteFiles,
+  ECC_FLOW_STEPS,
+  hasSafeJsonPath,
+  parameterWritesMatchPatch,
+} from '@ecos-studio/shared'
+import type {
+  EccCandidateCapabilitiesRequest,
+  EccCandidateResumeRequest,
+  EccCandidateRerunRequest,
+  EccRuntimeOperationRequest,
+  EccRuntimeStartFlowRequest,
+  EccWorkspaceOpenRequest,
+} from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import type { ResolvedAgentProviderManifest } from './agentProviderPlugin'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
 import { deriveAgentWorkspaceParameterUpdates } from './agentWorkspaceParameterUpdates'
+import { recordAgentOperationAssociation } from './agentOperationAssociations'
 
 type SpawnLike = typeof spawnChild
 type AgentProviderMethod =
@@ -34,7 +60,14 @@ type AgentProviderMethod =
   | 'interrupt'
   | 'listSessions'
   | 'resumeSession'
+  | 'resumeOptimizationEpisode'
+  | 'stopOptimizationEpisode'
+  | 'prepareOptimizationShutdown'
+  | 'cancelOptimizationShutdown'
   | 'sendMessage'
+  | 'getModelSettings'
+  | 'setModelSettings'
+  | 'answerInteraction'
   | 'setMode'
   | 'start'
   | 'startSession'
@@ -47,13 +80,29 @@ export interface AgentProviderProtocolRequest {
 }
 
 interface AgentProviderProtocolResponse {
-  error?: string | { message?: string }
+  error?: string | { code?: string; message?: string }
   id?: string
   result?: unknown
 }
 
+export interface AgentProviderHost {
+  candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
+  candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
+  candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
+  cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+  hello?(): Promise<unknown>
+  openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
+  operationStatus(request: EccRuntimeOperationRequest): Promise<unknown>
+  startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<unknown>
+  waitForOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+  workspaceSession?(
+    workspaceHandle: string,
+  ): Promise<{ workspaceHandle: string } | null> | { workspaceHandle: string } | null
+}
+
 interface AgentProviderProcessRuntimeOptions {
   env?: NodeJS.ProcessEnv
+  host?: AgentProviderHost
   manifest: ResolvedAgentProviderManifest
   spawn?: SpawnLike
 }
@@ -73,12 +122,17 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private readonly baseEnv: NodeJS.ProcessEnv
   private env: NodeJS.ProcessEnv
   private readonly eventFanout = new RuntimeEventFanout<DesktopAgentEvent>()
+  private readonly host: AgentProviderHost | undefined
   private readonly manifest: ResolvedAgentProviderManifest
   private readonly pendingRequests = new Map<string, PendingRequest>()
   private readonly pendingExecutionConfirmations = new Map<
     string,
     {
       approved: boolean
+      interaction?: {
+        confirmOptionId: string
+        requestId: string
+      }
       parameter?: {
         patch: DesktopAgentWorkspaceRerunContract['parameter_patch']
         updateId: string
@@ -98,14 +152,17 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   constructor(options: AgentProviderProcessRuntimeOptions) {
     this.baseEnv = { ...(options.env ?? process.env) }
     this.env = { ...this.baseEnv, ...options.manifest.environment }
+    this.host = options.host
     this.manifest = options.manifest
     this.spawnImpl = options.spawn ?? spawnChild
   }
 
   /**
    * Merge runtime overrides (e.g. settings-backed ECOS_AGENT_CODEX_BIN).
-   * Restarts the provider child when an override value changes so the next
-   * request spawns with the updated environment.
+   * Restarts the provider child whenever the effective environment changes so
+   * the next request spawns with the updated environment — model-source
+   * switches change CODEX_HOME/API-key vars while the codex binary stays the
+   * same, and the child must not keep serving from the stale environment.
    */
   syncEnvironmentOverrides(overrides: AgentProviderEnvOverrides): void {
     const next: NodeJS.ProcessEnv = {
@@ -119,10 +176,9 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         next[key] = value
       }
     }
-    const previousCodex = this.env.ECOS_AGENT_CODEX_BIN
-    const nextCodex = next.ECOS_AGENT_CODEX_BIN
+    const previous = this.env
     this.env = next
-    if (previousCodex !== nextCodex && this.child) {
+    if (this.child && stableEnvKey(previous) !== stableEnvKey(next)) {
       this.disposeChildForEnvReload()
     }
   }
@@ -137,7 +193,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     if (request.workspaceRevision !== undefined) {
       this.workspaceRevisions.set(request.sessionId ?? '', request.workspaceRevision)
     }
-    const { workspaceRevision: _workspaceRevision, ...providerRequest } = request
+    const {
+      workspaceDesignId: _workspaceDesignId,
+      workspaceParameterValues: _workspaceParameterValues,
+      ...providerRequest
+    } = request
     return (await this.sendRequest(
       'startSession',
       providerRequest,
@@ -163,11 +223,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         this.workspaceRevisions.set(request.sessionId, request.workspaceRevision)
       }
     }
-    const {
-      confirmationToken: _confirmationToken,
-      workspaceRevision: _workspaceRevision,
-      ...providerRequest
-    } = request
+    const { confirmationToken: _confirmationToken, ...providerRequest } = request
     try {
       return (await this.sendRequest(
         'sendMessage',
@@ -179,6 +235,42 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       }
       throw error
     }
+  }
+
+  async getModelSettings(
+    request: DesktopAgentModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings> {
+    return readAgentModelSettings(await this.sendRequest('getModelSettings', request))
+  }
+
+  async setModelSettings(
+    request: DesktopAgentSetModelSettingsRequest,
+  ): Promise<DesktopAgentModelSettings> {
+    return readAgentModelSettings(await this.sendRequest('setModelSettings', request))
+  }
+
+  async answerInteraction(
+    request: DesktopAgentInteractionAnswerRequest,
+  ): Promise<DesktopAgentInteractionAnswerResponse> {
+    const pending = this.pendingExecutionConfirmations.get(request.sessionId)
+    if (
+      pending?.interaction?.requestId === request.requestId &&
+      request.kind === 'confirm' &&
+      'optionId' in request
+    ) {
+      if (request.optionId === pending.interaction.confirmOptionId) {
+        pending.approved = true
+      } else {
+        this.pendingExecutionConfirmations.delete(request.sessionId)
+      }
+    }
+    if (request.workspaceRevision !== undefined) {
+      this.workspaceRevisions.set(request.sessionId, request.workspaceRevision)
+    }
+    return (await this.sendRequest(
+      'answerInteraction',
+      request,
+    )) as DesktopAgentInteractionAnswerResponse
   }
 
   async interrupt(request?: DesktopAgentProviderRequest): Promise<void> {
@@ -209,6 +301,28 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       'resumeSession',
       request,
     )) as DesktopAgentResumeSessionResponse
+  }
+
+  async resumeOptimizationEpisode(
+    request: DesktopAgentOptimizationEpisodeResumeRequest,
+  ): Promise<void> {
+    await this.sendRequest('resumeOptimizationEpisode', request)
+  }
+
+  async stopOptimizationEpisode(
+    request: DesktopAgentOptimizationEpisodeResumeRequest,
+  ): Promise<void> {
+    await this.sendRequest('stopOptimizationEpisode', request)
+  }
+
+  async prepareOptimizationShutdown(
+    request: DesktopAgentInterruptRequest,
+  ): Promise<void> {
+    await this.sendRequest('prepareOptimizationShutdown', request)
+  }
+
+  async cancelOptimizationShutdown(request: DesktopAgentInterruptRequest): Promise<void> {
+    await this.sendRequest('cancelOptimizationShutdown', request)
   }
 
   async stop(request?: DesktopAgentProviderRequest): Promise<void> {
@@ -359,6 +473,15 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       return
     }
 
+    if (
+      typeof record.method === 'string' &&
+      record.method &&
+      typeof record.id === 'string'
+    ) {
+      void this.handleHostRequest(record)
+      return
+    }
+
     const response = record as AgentProviderProtocolResponse
     if (!response.id) return
     const pending = this.pendingRequests.get(response.id)
@@ -366,10 +489,121 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.pendingRequests.delete(response.id)
 
     if (response.error) {
-      pending.reject(new Error(errorMessage(response.error)))
+      const error = new Error(errorMessage(response.error))
+      if (typeof response.error === 'object' && response.error.code) {
+        Object.assign(error, { code: response.error.code })
+      }
+      pending.reject(error)
       return
     }
     pending.resolve(response.result)
+  }
+
+  private async handleHostRequest(record: Record<string, unknown>): Promise<void> {
+    const id = String(record.id)
+    const method = String(record.method)
+    const params = isRecord(record.params) ? record.params : {}
+    try {
+      const result = await this.dispatchHostRequest(method, params)
+      this.writeHostReply({ id, result })
+    } catch (error) {
+      this.writeHostReply({
+        id,
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+  }
+
+  private async dispatchHostRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.host) {
+      throw new Error('Agent Product Command host is unavailable.')
+    }
+    if (method === 'rpc.hello') {
+      if (!this.host.hello) {
+        throw new Error('Agent Product Command host is unavailable.')
+      }
+      return await this.host.hello()
+    }
+    if (method === 'workspace.open') {
+      return await this.host.openWorkspace({
+        directory: readRequiredString(params, 'directory'),
+      })
+    }
+    const workspaceHandle = readRequiredString(params, 'workspaceHandle')
+    if (this.host.workspaceSession) {
+      const session = await this.host.workspaceSession(workspaceHandle)
+      if (!session) {
+        throw new Error('Product Command does not own this Workspace handle')
+      }
+    }
+    switch (method) {
+      case 'candidate.capabilities':
+        return await this.host.candidateCapabilities({ workspaceHandle })
+      case 'candidate.rerun': {
+        const result = await this.host.candidateRerun(
+          params as unknown as EccCandidateRerunRequest,
+        )
+        this.recordHostOperationAssociation('candidate.rerun', result)
+        return result
+      }
+      case 'candidate.resume': {
+        const result = await this.host.candidateResume(
+          params as unknown as EccCandidateResumeRequest,
+        )
+        this.recordHostOperationAssociation('candidate.resume', result)
+        return result
+      }
+      case 'workspace.run': {
+        const result = await this.host.startFlowOperation(
+          params as unknown as EccRuntimeStartFlowRequest,
+        )
+        this.recordHostOperationAssociation('workspace.run', result)
+        return result
+      }
+      case 'operation.cancel':
+        return await this.host.cancelOperation({
+          workspaceHandle,
+          operationId: readRequiredString(params, 'operationId'),
+        })
+      case 'operation.status':
+        return await this.host.operationStatus({
+          workspaceHandle,
+          operationId: readRequiredString(params, 'operationId'),
+        })
+      case 'operation.wait':
+        return await this.host.waitForOperation({
+          workspaceHandle,
+          operationId: readRequiredString(params, 'operationId'),
+        })
+      default:
+        throw new Error(`Unsupported host method: ${method}`)
+    }
+  }
+
+  private recordHostOperationAssociation(command: string, result: unknown): void {
+    // Host requests carry no per-session identity; key by providerId.
+    const operationId =
+      isRecord(result) && typeof result.operationId === 'string'
+        ? result.operationId
+        : null
+    if (!operationId) return
+    recordAgentOperationAssociation(this.manifest.providerId, {
+      command,
+      operationId,
+    })
+  }
+
+  private writeHostReply(payload: Record<string, unknown>): void {
+    const stdin = this.child?.stdin
+    if (!stdin || stdin.destroyed || stdin.writableEnded) {
+      throw new Error(`Agent provider ${this.manifest.providerId} stdin is closed`)
+    }
+    stdin.write(`${JSON.stringify(payload)}\n`)
   }
 
   private acceptConfirmedWorkspaceAction(
@@ -416,6 +650,20 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
         }
       }
       if (contract.presentation === 'workspace_rerun') return null
+    }
+    if (
+      event.type === 'interaction' &&
+      event.interaction?.interaction.kind === 'confirm' &&
+      event.interaction.purpose === 'execution'
+    ) {
+      const pending = this.pendingExecutionConfirmations.get(sessionId)
+      if (pending) {
+        pending.interaction = {
+          confirmOptionId: event.interaction.interaction.confirm.id,
+          requestId: event.interaction.requestId,
+        }
+      }
+      return event
     }
     if (event.type !== 'workspace_parameter_update' && event.type !== 'workspace_rerun') {
       return event
@@ -503,18 +751,34 @@ function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readRequiredString(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Host request requires ${key}`)
+  }
+  return value
+}
+
 const agentEventTypes = new Set<DesktopAgentEventType>([
   'status',
   'session',
   'message',
   'tool',
-  'choice',
+  'activity',
+  'interaction',
+  'unsupported_interaction',
   'contract',
   'workspace_setup',
   'workspace_create',
   'workspace_rerun',
   'workspace_continue',
   'workspace_parameter_update',
+  'workspace_signoff',
+  'optimization',
   'error',
 ])
 
@@ -525,7 +789,9 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     return null
   }
   const contract = readExecutionContract(record.contract)
-  const choice = readAgentChoice(record.choice)
+  const optimization = readOptimizationPayload(record.optimization)
+  const interaction = readAgentInteraction(record.interaction)
+  const activity = readAgentActivity(record.activity)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   const workspaceRerun = readWorkspaceRerunContract(record.workspaceRerun)
@@ -533,10 +799,36 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const workspaceParameterUpdate = readWorkspaceParameterUpdateContract(
     record.workspaceParameterUpdate,
   )
+  const workspaceSignoff = readWorkspaceSignoffContract(record.workspaceSignoff)
   const status = readAgentRunStatus(record.status)
   const delta = readEventText(record.delta)
   const messageId = readOptionalIdentifier(record.messageId)
-  if (type === 'choice' && !choice) return null
+  if (type === 'interaction' && !interaction) {
+    const providerId = readEventText(record.providerId)
+    const sessionId = readEventText(record.sessionId)
+    return {
+      ...(providerId ? { providerId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      messageId: messageId ?? randomUUID(),
+      text: 'This interaction is unavailable in the current GUI.',
+      type: 'unsupported_interaction',
+    }
+  }
+  if (type === 'activity' && !activity) {
+    const providerId = readEventText(record.providerId)
+    const sessionId = readEventText(record.sessionId)
+    const turnId = readOptionalIdentifier(readRecord(record.activity).turnId)
+    return {
+      activityNotice: {
+        message: 'Some activity details are unavailable.',
+        schema_version: 'flow-agent.activity_notice.v1',
+        ...(turnId ? { turnId } : {}),
+      },
+      ...(providerId ? { providerId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      type: 'activity',
+    }
+  }
   if (type === 'status' && !status) return null
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
@@ -544,15 +836,19 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   if (type === 'workspace_rerun' && !workspaceRerun) return null
   if (type === 'workspace_continue' && !workspaceContinue) return null
   if (type === 'workspace_parameter_update' && !workspaceParameterUpdate) return null
+  if (type === 'workspace_signoff' && !workspaceSignoff) return null
+  if (type === 'optimization' && !optimization) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
   const text = readEventText(record.text)
 
   return {
-    ...(choice ? { choice } : {}),
+    ...(activity ? { activity } : {}),
+    ...(interaction ? { interaction } : {}),
     ...(contract ? { contract } : {}),
     ...(delta ? { delta } : {}),
     ...(messageId ? { messageId } : {}),
+    ...(optimization ? { optimization } : {}),
     ...(providerId ? { providerId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(status ? { status } : {}),
@@ -562,74 +858,643 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(workspaceRerun ? { workspaceRerun } : {}),
     ...(workspaceContinue ? { workspaceContinue } : {}),
     ...(workspaceParameterUpdate ? { workspaceParameterUpdate } : {}),
+    ...(workspaceSignoff ? { workspaceSignoff } : {}),
     type: type as DesktopAgentEventType,
   }
 }
 
-function readAgentChoice(value: unknown): DesktopAgentChoice | null {
+const agentReasoningEfforts = new Set<DesktopAgentReasoningEffort>([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+])
+
+function readAgentModelSettings(value: unknown): DesktopAgentModelSettings {
   const record = readRecord(value)
-  const promptId = readOptionalIdentifier(record.promptId)
-  const title = readEventText(record.title)
-  const allowFreeText =
-    record.allowFreeText === undefined
-      ? undefined
-      : typeof record.allowFreeText === 'boolean'
-        ? record.allowFreeText
-        : null
+  const model = readActivityText(record.model, 128)
+  const displayName = readActivityText(record.displayName, 128)
+  const reasoningEffort = record.reasoningEffort as DesktopAgentReasoningEffort
   if (
-    !promptId ||
-    !title ||
-    (record.variant !== 'buttons' && record.variant !== 'list') ||
-    !Array.isArray(record.options) ||
-    record.options.length < 1 ||
-    record.options.length > 32 ||
-    allowFreeText === null
+    !model ||
+    !displayName ||
+    !agentReasoningEfforts.has(reasoningEffort) ||
+    !Array.isArray(record.models) ||
+    record.models.length < 1 ||
+    record.models.length > 32
+  ) {
+    throw new Error('Agent provider returned invalid model settings.')
+  }
+  const models = record.models.map((value) => {
+    const option = readRecord(value)
+    const optionModel = readActivityText(option.model, 128)
+    const optionName = readActivityText(option.displayName, 128)
+    const defaultEffort = option.defaultReasoningEffort as DesktopAgentReasoningEffort
+    const efforts = option.supportedReasoningEfforts
+    if (
+      !optionModel ||
+      !optionName ||
+      !agentReasoningEfforts.has(defaultEffort) ||
+      !Array.isArray(efforts) ||
+      efforts.length < 1 ||
+      efforts.length > agentReasoningEfforts.size ||
+      !efforts.every((effort) =>
+        agentReasoningEfforts.has(effort as DesktopAgentReasoningEffort),
+      )
+    ) {
+      throw new Error('Agent provider returned invalid model settings.')
+    }
+    return {
+      defaultReasoningEffort: defaultEffort,
+      displayName: optionName,
+      model: optionModel,
+      supportedReasoningEfforts: efforts as DesktopAgentReasoningEffort[],
+    }
+  })
+  if (!models.some((option) => option.model === model)) {
+    throw new Error('Agent provider returned an unavailable selected model.')
+  }
+  return { displayName, model, models, reasoningEffort }
+}
+
+function readAgentActivity(value: unknown): DesktopAgentEvent['activity'] | null {
+  const serialized = JSON.stringify(value)
+  if (!serialized || Buffer.byteLength(serialized, 'utf8') > 64 * 1024) return null
+  const record = readRecord(value)
+  const itemId = readOptionalIdentifier(record.itemId)
+  const turnId = readOptionalIdentifier(record.turnId)
+  const status = readAgentActivityStatus(record.status)
+  const startedAt = readActivityNumber(record.startedAt)
+  const turnStartedAt = readActivityNumber(record.turnStartedAt)
+  const durationMs =
+    record.durationMs === undefined ? undefined : readActivityNumber(record.durationMs)
+  if (
+    record.schema_version !== 'flow-agent.activity.v1' ||
+    !itemId ||
+    !turnId ||
+    !status ||
+    startedAt === null ||
+    turnStartedAt === null ||
+    durationMs === null
+  )
+    return null
+  const base = {
+    itemId,
+    schema_version: 'flow-agent.activity.v1' as const,
+    startedAt,
+    status,
+    turnId,
+    turnStartedAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
+  }
+
+  if (record.kind === 'reasoning_summary') {
+    if (
+      !Array.isArray(record.summary) ||
+      record.summary.length < 1 ||
+      record.summary.length > 32 ||
+      !record.summary.every(
+        (part) => typeof part === 'string' && part.length > 0 && part.length <= 8192,
+      )
+    )
+      return null
+    return { ...base, kind: record.kind, summary: record.summary }
+  }
+
+  if (record.kind === 'web_search') {
+    const query = readActivityText(record.query, 1024)
+    if (record.query !== undefined && query === null) return null
+    if (!Array.isArray(record.actions) || record.actions.length > 32) return null
+    const actions = record.actions.map(readWebSearchAction)
+    if (actions.some((action) => action === null)) return null
+    return {
+      ...base,
+      actions: actions as NonNullable<
+        Extract<DesktopAgentEvent['activity'], { kind: 'web_search' }>
+      >['actions'],
+      kind: record.kind,
+      ...(query ? { query } : {}),
+    }
+  }
+
+  if (record.kind === 'command_execution') {
+    const command = readActivityText(record.command, 8192)
+    const label = readActivityText(record.label, 512)
+    const cwd = readActivityText(record.cwd, 4096)
+    const output = readActivityText(record.output, 32 * 1024)
+    const exitCode =
+      record.exitCode === undefined ||
+      (typeof record.exitCode === 'number' && Number.isInteger(record.exitCode))
+        ? (record.exitCode as number | undefined)
+        : null
+    if (
+      command === null ||
+      label === null ||
+      (record.cwd !== undefined && cwd === null) ||
+      (record.output !== undefined && output === null) ||
+      exitCode === null ||
+      (record.truncated !== undefined && typeof record.truncated !== 'boolean')
+    )
+      return null
+    return {
+      ...base,
+      command,
+      kind: record.kind,
+      label,
+      ...(cwd ? { cwd } : {}),
+      ...(output ? { output } : {}),
+      ...(exitCode === undefined ? {} : { exitCode }),
+      ...(record.truncated === true ? { truncated: true } : {}),
+    }
+  }
+
+  if (record.kind !== 'tool_call') return null
+  const tool = readActivityText(record.tool, 256)
+  const server = readActivityText(record.server, 256)
+  const argumentsText = readActivityText(record.arguments, 8192)
+  const progress = readActivityText(record.progress, 4096)
+  const result = readActivityText(record.result, 32 * 1024)
+  const error = readActivityText(record.error, 4096)
+  if (
+    tool === null ||
+    (record.server !== undefined && server === null) ||
+    (record.arguments !== undefined && argumentsText === null) ||
+    (record.progress !== undefined && progress === null) ||
+    (record.result !== undefined && result === null) ||
+    (record.error !== undefined && error === null) ||
+    (record.truncated !== undefined && typeof record.truncated !== 'boolean')
+  )
+    return null
+  return {
+    ...base,
+    kind: record.kind,
+    tool,
+    ...(server ? { server } : {}),
+    ...(argumentsText ? { arguments: argumentsText } : {}),
+    ...(progress ? { progress } : {}),
+    ...(result ? { result } : {}),
+    ...(error ? { error } : {}),
+    ...(record.truncated === true ? { truncated: true } : {}),
+  }
+}
+
+function readAgentActivityStatus(
+  value: unknown,
+): NonNullable<DesktopAgentEvent['activity']>['status'] | null {
+  return value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'declined' ||
+    value === 'interrupted'
+    ? value
+    : null
+}
+
+function readActivityNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function readActivityText(value: unknown, maxLength: number): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength
+    ? value
+    : null
+}
+
+function readWebSearchAction(
+  value: unknown,
+):
+  | Extract<
+      NonNullable<DesktopAgentEvent['activity']>,
+      { kind: 'web_search' }
+    >['actions'][number]
+  | null {
+  const record = readRecord(value)
+  if (
+    record.kind !== 'search' &&
+    record.kind !== 'open_page' &&
+    record.kind !== 'find_in_page'
+  )
+    return null
+  const query = readActivityText(record.query, 1024)
+  const title = readActivityText(record.title, 512)
+  const url = readHttpUrl(record.url)
+  if (
+    (record.query !== undefined && query === null) ||
+    (record.title !== undefined && title === null) ||
+    (record.url !== undefined && url === null)
+  )
+    return null
+  return {
+    kind: record.kind,
+    ...(query ? { query } : {}),
+    ...(title ? { title } : {}),
+    ...(url ? { url } : {}),
+  }
+}
+
+function readHttpUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 4096) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+function readOptimizationPayload(
+  value: unknown,
+): DesktopAgentEvent['optimization'] | null {
+  const record = readRecord(value)
+  if (
+    typeof record.schema_version !== 'string' ||
+    typeof record.episode_id !== 'string'
   ) {
     return null
   }
-  const options = record.options.map((value) => {
-    const option = readRecord(value)
-    const id = readOptionalIdentifier(option.id)
-    const label = readEventText(option.label)
-    const optionValue = readEventText(option.value)
-    return id && label && optionValue ? { id, label, value: optionValue } : null
-  })
-  if (options.some((option) => option === null)) return null
+  const action = readOptimizationAction(record.action)
+  const requested = readOptimizationRequested(record.requested)
+  const originalObjective =
+    record.original_objective &&
+    typeof record.original_objective === 'object' &&
+    !Array.isArray(record.original_objective)
+      ? (record.original_objective as Record<string, unknown>)
+      : null
+  const activePreserveMetrics =
+    Array.isArray(record.active_preserve_metrics) &&
+    record.active_preserve_metrics.length <= 2 &&
+    record.active_preserve_metrics.every(
+      (item) => typeof item === 'string' && item.length > 0 && item.length <= 128,
+    ) &&
+    new Set(record.active_preserve_metrics).size === record.active_preserve_metrics.length
+      ? (record.active_preserve_metrics as string[])
+      : null
+  const counts = readRecord(record.violation_counts)
+  const violationCounts =
+    counts &&
+    typeof counts.drc_count === 'number' &&
+    Number.isSafeInteger(counts.drc_count) &&
+    counts.drc_count >= 0 &&
+    typeof counts.sta_setup_violation_count === 'number' &&
+    Number.isSafeInteger(counts.sta_setup_violation_count) &&
+    counts.sta_setup_violation_count >= 0 &&
+    typeof counts.sta_hold_violation_count === 'number' &&
+    Number.isSafeInteger(counts.sta_hold_violation_count) &&
+    counts.sta_hold_violation_count >= 0
+      ? {
+          drc_count: counts.drc_count,
+          sta_setup_violation_count: counts.sta_setup_violation_count,
+          sta_hold_violation_count: counts.sta_hold_violation_count,
+        }
+      : null
+  const isV2 =
+    record.schema_version === 'ecos.optimization_authorization.v2' ||
+    record.schema_version === 'ecos.optimization_progress.v2'
+  const hashPattern = /^sha256:[a-f0-9]{64}$/
+  const recoveryStages = new Set(['drc', 'setup', 'hold', 'original'])
+  if (
+    isV2 &&
+    (!hashPattern.test(String(record.objective_sha256)) ||
+      !hashPattern.test(String(record.alignment_sha256)) ||
+      !originalObjective ||
+      originalObjective.contract_sha256 !== record.objective_sha256 ||
+      typeof record.original_primary_metric !== 'string' ||
+      typeof record.active_primary_metric !== 'string' ||
+      !activePreserveMetrics ||
+      !violationCounts ||
+      !recoveryStages.has(String(record.recovery_stage)))
+  ) {
+    return null
+  }
   return {
-    ...(allowFreeText === undefined ? {} : { allowFreeText }),
-    options: options as DesktopAgentChoice['options'],
-    promptId,
+    schema_version: record.schema_version,
+    episode_id: record.episode_id,
+    ...(typeof record.workspace === 'string' ? { workspace: record.workspace } : {}),
+    ...(typeof record.state === 'string' ? { state: record.state } : {}),
+    ...(typeof record.objective_sha256 === 'string'
+      ? { objective_sha256: record.objective_sha256 }
+      : {}),
+    ...(typeof record.alignment_sha256 === 'string'
+      ? { alignment_sha256: record.alignment_sha256 }
+      : {}),
+    ...(originalObjective ? { original_objective: originalObjective } : {}),
+    ...(typeof record.original_primary_metric === 'string'
+      ? { original_primary_metric: record.original_primary_metric }
+      : {}),
+    ...(typeof record.active_primary_metric === 'string'
+      ? { active_primary_metric: record.active_primary_metric }
+      : {}),
+    ...(activePreserveMetrics ? { active_preserve_metrics: activePreserveMetrics } : {}),
+    ...(violationCounts ? { violation_counts: violationCounts } : {}),
+    ...(typeof record.recovery_stage === 'string'
+      ? { recovery_stage: record.recovery_stage }
+      : {}),
+    ...(typeof record.recovery_transition === 'string' ||
+    record.recovery_transition === null
+      ? { recovery_transition: record.recovery_transition as string | null }
+      : {}),
+    ...(typeof record.recovery_incomplete === 'boolean'
+      ? { recovery_incomplete: record.recovery_incomplete }
+      : {}),
+    ...(typeof record.primary_metric === 'string'
+      ? { primary_metric: record.primary_metric }
+      : {}),
+    ...(typeof record.turn === 'number' ? { turn: record.turn } : {}),
+    ...(typeof record.turn_count === 'number' ? { turn_count: record.turn_count } : {}),
+    ...(typeof record.in_flight === 'number' &&
+    Number.isSafeInteger(record.in_flight) &&
+    record.in_flight >= 0
+      ? { in_flight: record.in_flight }
+      : {}),
+    ...(typeof record.planning_state === 'string'
+      ? { planning_state: record.planning_state }
+      : {}),
+    ...(typeof record.execution_state === 'string'
+      ? { execution_state: record.execution_state }
+      : {}),
+    ...(typeof record.incumbent_decision === 'string' ||
+    record.incumbent_decision === null
+      ? { incumbent_decision: record.incumbent_decision as string | null }
+      : {}),
+    ...(typeof record.decisive_metric === 'string' || record.decisive_metric === null
+      ? { decisive_metric: record.decisive_metric as string | null }
+      : {}),
+    ...(typeof record.proposal_decision === 'string' || record.proposal_decision === null
+      ? { proposal_decision: record.proposal_decision as string | null }
+      : {}),
+    ...(typeof record.proposal_reason === 'string' || record.proposal_reason === null
+      ? { proposal_reason: record.proposal_reason as string | null }
+      : {}),
+    ...(typeof record.rejection_reason === 'string' || record.rejection_reason === null
+      ? { rejection_reason: record.rejection_reason as string | null }
+      : {}),
+    ...(action || record.action === null ? { action } : {}),
+    ...(requested || record.requested === null ? { requested } : {}),
+    ...(typeof record.incumbent_candidate_root_ref === 'string' ||
+    record.incumbent_candidate_root_ref === null
+      ? {
+          incumbent_candidate_root_ref: record.incumbent_candidate_root_ref as
+            | string
+            | null,
+        }
+      : {}),
+    ...(typeof record.kind === 'string' ? { kind: record.kind } : {}),
+    ...(typeof record.rationale_summary === 'string'
+      ? { rationale_summary: record.rationale_summary }
+      : {}),
+    ...(typeof record.outcome === 'string' || record.outcome === null
+      ? { outcome: record.outcome as string | null }
+      : {}),
+    ...(typeof record.phase === 'string' ? { phase: record.phase } : {}),
+    ...(typeof record.calibration_completed === 'number' &&
+    Number.isSafeInteger(record.calibration_completed) &&
+    record.calibration_completed >= 0
+      ? { calibration_completed: record.calibration_completed }
+      : {}),
+    ...(typeof record.calibration_required === 'number' &&
+    Number.isSafeInteger(record.calibration_required) &&
+    record.calibration_required >= 0
+      ? { calibration_required: record.calibration_required }
+      : {}),
+  }
+}
+
+function readOptimizationAction(
+  value: unknown,
+): { direction: string; knob_id: string } | null {
+  const record = readRecord(value)
+  if (typeof record.direction !== 'string' || typeof record.knob_id !== 'string') {
+    return null
+  }
+  return { direction: record.direction, knob_id: record.knob_id }
+}
+
+function readOptimizationRequested(
+  value: unknown,
+): { knob_id: string; value: boolean | number } | null {
+  const record = readRecord(value)
+  if (
+    typeof record.knob_id !== 'string' ||
+    (typeof record.value !== 'boolean' && typeof record.value !== 'number')
+  ) {
+    return null
+  }
+  return { knob_id: record.knob_id, value: record.value }
+}
+
+function readWorkspaceSignoffContract(
+  value: unknown,
+): DesktopAgentWorkspaceSignoffContract | null {
+  const record = readRecord(value)
+  const signoffId = readOptionalIdentifier(record.signoff_id)
+  const workspace = readWorkspaceRerunPath(record.workspace)
+  if (
+    record.schema_version !== 'flow-agent.workspace_signoff_contract.v1' ||
+    !signoffId ||
+    !workspace ||
+    (record.action !== 'inspect' && record.action !== 'export')
+  ) {
+    return null
+  }
+  return {
+    action: record.action,
+    schema_version: 'flow-agent.workspace_signoff_contract.v1',
+    signoff_id: signoffId,
+    workspace,
+  }
+}
+
+function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | null {
+  const serialized = JSON.stringify(value)
+  if (!serialized || Buffer.byteLength(serialized, 'utf8') > 64 * 1024) return null
+  const record = readRecord(value)
+  const requestId = readOptionalIdentifier(record.requestId)
+  const title = readEventText(record.title)
+  const kind = record.kind
+  const purpose = record.purpose
+  const status = record.status
+  const interaction = readRecord(record.interaction)
+  const description = readEventText(record.description)
+  const canUndo = record.canUndo === true
+  if (
+    record.schema_version !== 'flow-agent.interaction_request.v1' ||
+    !requestId ||
+    !title ||
+    (kind !== 'choice' && kind !== 'confirm' && kind !== 'form') ||
+    (purpose !== 'execution' && purpose !== 'clarification') ||
+    (status !== 'pending' &&
+      status !== 'answered' &&
+      status !== 'cancelled' &&
+      status !== 'expired' &&
+      status !== 'superseded') ||
+    interaction.kind !== kind
+  )
+    return null
+
+  if (kind === 'choice') {
+    if (
+      (interaction.variant !== 'buttons' && interaction.variant !== 'list') ||
+      !Array.isArray(interaction.options) ||
+      interaction.options.length < 1 ||
+      interaction.options.length > 32
+    )
+      return null
+    const options = interaction.options.map((item) => {
+      const option = readRecord(item)
+      const id = readOptionalIdentifier(option.id)
+      const label = readEventText(option.label)
+      return id && label && !('value' in option) ? { id, label } : null
+    })
+    if (options.some((option) => option === null)) return null
+    return {
+      interaction: {
+        kind,
+        options: options as { id: string; label: string }[],
+        variant: interaction.variant,
+      },
+      kind,
+      purpose,
+      requestId,
+      schema_version: 'flow-agent.interaction_request.v1',
+      status,
+      ...(canUndo ? { canUndo } : {}),
+      ...(description ? { description } : {}),
+      title,
+    }
+  }
+
+  if (kind === 'confirm') {
+    const confirm = readInteractionOption(interaction.confirm)
+    const cancel = readInteractionOption(interaction.cancel)
+    if (!confirm || !cancel) return null
+    return {
+      interaction: { cancel, confirm, kind },
+      kind,
+      purpose,
+      requestId,
+      schema_version: 'flow-agent.interaction_request.v1',
+      status,
+      ...(canUndo ? { canUndo } : {}),
+      ...(description ? { description } : {}),
+      title,
+    }
+  }
+
+  if (
+    !Array.isArray(interaction.fields) ||
+    interaction.fields.length < 1 ||
+    interaction.fields.length > 16
+  )
+    return null
+  const fields = interaction.fields.map(readInteractionField)
+  if (fields.some((field) => field === null)) return null
+  return {
+    interaction: {
+      fields: fields as NonNullable<ReturnType<typeof readInteractionField>>[],
+      kind,
+    },
+    kind,
+    purpose,
+    requestId,
+    schema_version: 'flow-agent.interaction_request.v1',
+    status,
+    ...(canUndo ? { canUndo } : {}),
+    ...(description ? { description } : {}),
     title,
-    variant: record.variant,
+  }
+}
+
+function readInteractionOption(value: unknown): { id: string; label: string } | null {
+  const option = readRecord(value)
+  const id = readOptionalIdentifier(option.id)
+  const label = readEventText(option.label)
+  return id && label && !('value' in option) ? { id, label } : null
+}
+
+function readInteractionField(value: unknown): DesktopAgentInteractionField | null {
+  const field = readRecord(value)
+  const id = readOptionalIdentifier(field.id)
+  const label = readEventText(field.label)
+  const kind = field.kind
+  if (!id || !label || !['text', 'number', 'path', 'select'].includes(String(kind)))
+    return null
+  const fieldKind = kind as 'text' | 'number' | 'path' | 'select'
+  if (
+    field.defaultValue !== undefined &&
+    !['string', 'number'].includes(typeof field.defaultValue)
+  )
+    return null
+  if (fieldKind === 'select') {
+    if (
+      !Array.isArray(field.options) ||
+      field.options.length < 1 ||
+      field.options.length > 32
+    )
+      return null
+    const options = field.options.map(readInteractionOption)
+    if (options.some((option) => option === null)) return null
+    return {
+      id,
+      kind: fieldKind,
+      label,
+      ...(typeof field.defaultValue === 'string'
+        ? { defaultValue: field.defaultValue }
+        : {}),
+      options: options as { id: string; label: string }[],
+      ...(typeof field.required === 'boolean' ? { required: field.required } : {}),
+    }
+  }
+  const common = {
+    id,
+    label,
+    ...(typeof field.required === 'boolean' ? { required: field.required } : {}),
+  }
+  if (fieldKind === 'number') {
+    return {
+      ...common,
+      kind: fieldKind,
+      ...(typeof field.defaultValue === 'number'
+        ? { defaultValue: field.defaultValue }
+        : {}),
+      ...(typeof field.min === 'number' ? { min: field.min } : {}),
+      ...(typeof field.max === 'number' ? { max: field.max } : {}),
+    }
+  }
+  if (fieldKind === 'path') {
+    return {
+      ...common,
+      kind: fieldKind,
+      ...(typeof field.defaultValue === 'string'
+        ? { defaultValue: field.defaultValue }
+        : {}),
+      ...(Array.isArray(field.extensions) &&
+      field.extensions.every((item) => typeof item === 'string')
+        ? { extensions: field.extensions }
+        : {}),
+    }
+  }
+  return {
+    ...common,
+    kind: fieldKind,
+    ...(typeof field.defaultValue === 'string'
+      ? { defaultValue: field.defaultValue }
+      : {}),
   }
 }
 
 function readAgentRunStatus(value: unknown): DesktopAgentEvent['status'] | null {
   return value === 'idle' ||
     value === 'running' ||
-    value === 'awaiting_choice' ||
+    value === 'awaiting_interaction' ||
     value === 'interrupted' ||
     value === 'error'
     ? value
     : null
 }
 
-const workspaceSetupFlowSteps = [
-  'Synthesis',
-  'Floorplan',
-  'place',
-  'CTS',
-  'legalization',
-  'Timing optimization',
-  'route',
-  'drc',
-  'lvs',
-  'filler',
-  'postRouteLec',
-  'RCX',
-  'sta',
-  'Harden',
-]
+// The shared ECC flow step catalog (@ecos-studio/shared, contracts/eccFlowSteps).
+const workspaceSetupFlowSteps: readonly string[] = ECC_FLOW_STEPS
 
 function readWorkspaceRerunContract(
   value: unknown,
@@ -644,6 +1509,11 @@ function readWorkspaceRerunContract(
   const executionScope = record.execution_scope
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
   const derivedUpdates = patch ? deriveAgentWorkspaceParameterUpdates(patch) : null
+  const writes =
+    record.writes === undefined ||
+    (Array.isArray(record.writes) && record.writes.length === 0)
+      ? []
+      : readWorkspaceParameterWrites(record.writes)
   const sourceStageArtifact = readWorkspaceRerunArtifactReference(
     record.source_stage_artifact,
   )
@@ -666,6 +1536,8 @@ function readWorkspaceRerunContract(
       workspaceSetupFlowSteps.indexOf(targetStep) ||
     !patch ||
     !derivedUpdates ||
+    writes === null ||
+    (writes.length > 0 && !parameterWritesMatchPatch(patch, writes)) ||
     'workspace_parameters' in record ||
     'step_configurations' in record ||
     !sourceStageArtifact ||
@@ -679,6 +1551,7 @@ function readWorkspaceRerunContract(
     end_step: endStep,
     execution_scope: executionScope,
     parameter_patch: patch,
+    ...(writes && writes.length > 0 ? { writes } : {}),
     step_configurations: derivedUpdates.step_configurations,
     workspace_parameters: derivedUpdates.workspace_parameters,
     requires_gui_review: true,
@@ -715,6 +1588,9 @@ function readWorkspaceSetupContract(
   const sdc = readOptionalWorkspaceSetupPath(record.sdc)
   const pdkConfig = readWorkspaceSetupPdkConfig(record.pdk_config)
   const projectContext = readWorkspaceSetupProjectContext(record.project_context)
+  const mpc = readWorkspaceSetupMpc(record.mpc)
+  const mpcEnabled =
+    typeof record.mpc_enabled === 'boolean' ? record.mpc_enabled : Boolean(mpc)
   if (
     !parameters ||
     !flowConfig ||
@@ -726,6 +1602,7 @@ function readWorkspaceSetupContract(
     sdc === null ||
     !pdkConfig ||
     !projectContext ||
+    (record.mpc !== undefined && record.mpc !== null && !mpc) ||
     record.design_input_mode !== 'rtl' ||
     record.pdk_config_mode !== 'default'
   )
@@ -747,6 +1624,50 @@ function readWorkspaceSetupContract(
     setup_id: setupId,
     ...(sdc ? { sdc } : {}),
     title: readEventText(record.title) as string,
+    mpc_enabled: mpcEnabled,
+    mpc,
+  }
+}
+
+function readWorkspaceSetupMpc(
+  value: unknown,
+): DesktopAgentWorkspaceSetupContract['mpc'] {
+  if (value === undefined || value === null) return null
+  const record = readRecord(value)
+  const resourceId = typeof record.resource_id === 'string' ? record.resource_id : ''
+  const displayName = typeof record.display_name === 'string' ? record.display_name : ''
+  const installedVersion =
+    typeof record.installed_version === 'string' ? record.installed_version : ''
+  const path = typeof record.path === 'string' ? record.path : ''
+  const specPath = typeof record.spec_path === 'string' ? record.spec_path : ''
+  const design = readRecord(record.design)
+  const coreTemplate = readRecord(record.core_template)
+  if (
+    !/^mpc:[^/]+$/.test(resourceId) ||
+    !displayName ||
+    !installedVersion ||
+    !path.startsWith('/') ||
+    specPath !== `${path}/spec/spec.json.in` ||
+    !Number.isInteger(design.index) ||
+    (design.index as number) < 0 ||
+    typeof design.design_name !== 'string' ||
+    !design.design_name
+  )
+    return null
+  return {
+    resource_id: resourceId,
+    display_name: displayName,
+    installed_version: installedVersion,
+    path,
+    spec_path: specPath,
+    design: {
+      index: design.index as number,
+      design_name: design.design_name,
+      ...(typeof design.directory === 'string' && design.directory
+        ? { directory: design.directory }
+        : {}),
+    },
+    core_template: coreTemplate,
   }
 }
 
@@ -1003,12 +1924,17 @@ function readWorkspaceParameterUpdateContract(
   const updateId = readOptionalIdentifier(record.update_id)
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
   const derivedUpdates = patch ? deriveAgentWorkspaceParameterUpdates(patch) : null
+  const writes =
+    record.writes === undefined ? [] : readWorkspaceParameterWrites(record.writes)
   if (
-    record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v3' ||
+    (record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v2' &&
+      record.schema_version !== 'flow-agent.workspace_parameter_update_contract.v3') ||
     !workspace ||
     !updateId ||
     !patch ||
     !derivedUpdates ||
+    writes === null ||
+    (writes.length > 0 && !parameterWritesMatchPatch(patch, writes)) ||
     'workspace_parameters' in record ||
     'step_configurations' in record
   ) {
@@ -1016,12 +1942,58 @@ function readWorkspaceParameterUpdateContract(
   }
   return {
     parameter_patch: patch,
-    schema_version: 'flow-agent.workspace_parameter_update_contract.v3',
+    schema_version:
+      record.schema_version === 'flow-agent.workspace_parameter_update_contract.v2'
+        ? 'flow-agent.workspace_parameter_update_contract.v2'
+        : 'flow-agent.workspace_parameter_update_contract.v3',
     step_configurations: derivedUpdates.step_configurations,
     update_id: updateId,
     workspace,
     workspace_parameters: derivedUpdates.workspace_parameters,
+    ...(writes.length > 0 ? { writes } : {}),
   }
+}
+
+/**
+ * Confines Agent-proposed writes to known parameter files. The Agent resolves
+ * the target, but the main process decides which targets are legal at all, so a
+ * malformed or hostile proposal cannot reach arbitrary project files.
+ */
+function readWorkspaceParameterWrites(
+  value: unknown,
+): DesktopAgentWorkspaceParameterWrite[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) return null
+  const writes = value.map((item) => {
+    const record = readRecord(item)
+    const knobId = record.knob_id
+    const file = record.file
+    const surface = record.surface
+    const jsonPath = record.json_path
+    if (
+      typeof knobId !== 'string' ||
+      !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(knobId) ||
+      typeof file !== 'string' ||
+      !(desktopAgentParameterWriteFiles as readonly string[]).includes(file) ||
+      (surface !== 'parameters' && surface !== 'step_config') ||
+      !isWorkspaceRerunParameterValue(record.value) ||
+      !Array.isArray(jsonPath) ||
+      !hasSafeJsonPath(jsonPath as (string | number)[])
+    ) {
+      return null
+    }
+    return {
+      file: file as DesktopAgentWorkspaceParameterWrite['file'],
+      json_path: jsonPath as (string | number)[],
+      knob_id: knobId,
+      surface,
+      value: record.value,
+    }
+  })
+  if (writes.some((item) => item === null)) return null
+  const normalized = writes as DesktopAgentWorkspaceParameterWrite[]
+  return new Set(normalized.map((item) => item.knob_id)).size === normalized.length
+    ? normalized
+    : null
 }
 
 function readExecutionContract(value: unknown): DesktopAgentExecutionContract | null {
@@ -1103,13 +2075,13 @@ function readExecutionContract(value: unknown): DesktopAgentExecutionContract | 
 
   return {
     fields: fields as DesktopAgentExecutionContract['fields'],
+    ...(parameterPatch ? { parameter_patch: parameterPatch } : {}),
     ...(presentation ? { presentation } : {}),
-    ...(parameterPatch
-      ? { parameter_patch: parameterPatch, update_id: updateId!, workspace: workspace! }
-      : {}),
-    ...(workspaceRerun ? { workspace_rerun: workspaceRerun } : {}),
     schema_version: 'flow-agent.resolved_execution_contract.v1',
     title: readEventText(record.title) as string,
+    ...(updateId ? { update_id: updateId } : {}),
+    ...(workspace ? { workspace } : {}),
+    ...(workspaceRerun ? { workspace_rerun: workspaceRerun } : {}),
   }
 }
 
@@ -1117,4 +2089,12 @@ function readEventText(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= 4096
     ? value
     : null
+}
+
+function stableEnvKey(env: NodeJS.ProcessEnv): string {
+  return JSON.stringify(
+    Object.keys(env)
+      .sort()
+      .map((key) => [key, env[key]]),
+  )
 }

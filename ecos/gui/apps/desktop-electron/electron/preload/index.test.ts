@@ -32,6 +32,7 @@ async function loadDesktopBridge() {
   return contextBridgeExposeInMainWorld.mock.calls.at(-1)?.[1] as {
     app: {
       getVersions(): Promise<unknown>
+      getQuickStartResources(): Promise<unknown>
     }
     shutdown: {
       cancel(): Promise<void>
@@ -71,9 +72,16 @@ async function loadDesktopBridge() {
       }
     }
     agent: {
+      acknowledgeOptimizationEpisodeNotification(request: unknown): Promise<void>
+      controlOptimizationEpisode(request: unknown): Promise<void>
+      getModelSettings(request: unknown): Promise<unknown>
       interrupt(request: unknown): Promise<void>
       onEvent(listener: (event: unknown) => void): () => void
+      onOptimizationProjectionInvalidated(listener: (event: unknown) => void): () => void
+      optimizationProjection(): Promise<unknown>
+      registerOperationAssociation(request: unknown): Promise<void>
       sendMessage(request: unknown): Promise<unknown>
+      setModelSettings(request: unknown): Promise<unknown>
       start(request: unknown): Promise<void>
       startSession(request: unknown): Promise<unknown>
       codex: {
@@ -123,6 +131,7 @@ describe('preload desktop bridge contract', () => {
       expect.objectContaining({
         app: expect.objectContaining({
           getVersions: expect.any(Function),
+          getQuickStartResources: expect.any(Function),
         }),
         backendProjectComparison: expect.objectContaining({
           closeProject: expect.any(Function),
@@ -202,6 +211,11 @@ describe('preload desktop bridge contract', () => {
   it('routes bridge calls through shared IPC channel constants', async () => {
     const bridge = await loadDesktopBridge()
     ipcRenderer.invoke.mockResolvedValueOnce({ gui: '0.1.0-test' })
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      design: null,
+      diagnostics: [],
+      pdk: null,
+    })
     ipcRenderer.invoke.mockResolvedValueOnce('module top; endmodule')
     ipcRenderer.invoke.mockResolvedValueOnce([
       { name: 'top.v', path: '/work/demo/origin/top.v', type: 'file' },
@@ -215,6 +229,11 @@ describe('preload desktop bridge contract', () => {
     ipcRenderer.invoke.mockResolvedValueOnce(undefined)
 
     await expect(bridge.app.getVersions()).resolves.toEqual({ gui: '0.1.0-test' })
+    await expect(bridge.app.getQuickStartResources()).resolves.toEqual({
+      design: null,
+      diagnostics: [],
+      pdk: null,
+    })
     await expect(bridge.workspace.readProjectTextFile('rtl/top.sv')).resolves.toBe(
       'module top; endmodule',
     )
@@ -245,31 +264,35 @@ describe('preload desktop bridge contract', () => {
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       2,
+      desktopApiIpcChannels.appGetQuickStartResources,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
       desktopApiIpcChannels.workspaceReadProjectTextFile,
       'rtl/top.sv',
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      3,
+      4,
       desktopApiIpcChannels.workspaceListProjectDirectory,
       '/work/demo/origin',
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      4,
+      5,
       desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
       '/work/demo',
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      5,
+      6,
       desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
       replacement.id,
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      6,
+      7,
       desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
       replacement.id,
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
-      7,
+      8,
       desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
       replacement.id,
     )
@@ -465,18 +488,29 @@ describe('preload desktop bridge contract', () => {
       messageId: 'message-1',
       sessionId: session.sessionId,
     })
+    ipcRenderer.invoke.mockResolvedValueOnce({ model: 'gpt-test' })
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      model: 'gpt-test',
+      reasoningEffort: 'high',
+    })
     ipcRenderer.invoke.mockResolvedValueOnce(undefined)
 
     await expect(
       bridge.agent.start({ providerId: session.providerId }),
     ).resolves.toBeUndefined()
     await expect(bridge.agent.startSession(session)).resolves.toEqual(session)
-    await expect(bridge.agent.sendMessage({ ...session, message: '1' })).resolves.toEqual(
-      {
-        messageId: 'message-1',
-        sessionId: session.sessionId,
-      },
-    )
+    await expect(
+      bridge.agent.sendMessage({ ...session, directory: '/work/demo', message: '1' }),
+    ).resolves.toEqual({
+      messageId: 'message-1',
+      sessionId: session.sessionId,
+    })
+    await expect(bridge.agent.getModelSettings(session)).resolves.toEqual({
+      model: 'gpt-test',
+    })
+    await expect(
+      bridge.agent.setModelSettings({ ...session, reasoningEffort: 'high' }),
+    ).resolves.toMatchObject({ reasoningEffort: 'high' })
     await expect(bridge.agent.interrupt(session)).resolves.toBeUndefined()
     const unsubscribe = bridge.agent.onEvent(listener)
     const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
@@ -496,10 +530,20 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       3,
       desktopApiIpcChannels.agentSendMessage,
-      { ...session, message: '1' },
+      { ...session, directory: '/work/demo', message: '1' },
     )
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       4,
+      desktopApiIpcChannels.agentGetModelSettings,
+      session,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      5,
+      desktopApiIpcChannels.agentSetModelSettings,
+      { ...session, reasoningEffort: 'high' },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      6,
       desktopApiIpcChannels.agentInterrupt,
       session,
     )
@@ -518,6 +562,81 @@ describe('preload desktop bridge contract', () => {
     )
   })
 
+  it('exposes the recoverable Agent Optimization Episode projection', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+    const request = {
+      action: 'pause',
+      episodeId: 'episode-1',
+      providerId: 'ecos_agent',
+      sessionId: 'session-1',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({ episodes: [], generation: 4 })
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(bridge.agent.optimizationProjection()).resolves.toEqual({
+      episodes: [],
+      generation: 4,
+    })
+    await expect(
+      bridge.agent.controlOptimizationEpisode(request),
+    ).resolves.toBeUndefined()
+    await expect(
+      bridge.agent.acknowledgeOptimizationEpisodeNotification({
+        episodeId: 'episode-1',
+        providerId: 'ecos_agent',
+        sessionId: 'session-1',
+        state: 'completed',
+      }),
+    ).resolves.toBeUndefined()
+    const unsubscribe = bridge.agent.onOptimizationProjectionInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.find(
+      ([channel]) =>
+        channel === desktopApiEventChannels.agentOptimizationProjectionInvalidated,
+    )?.[1]
+    eventListener?.({}, { generation: 5 })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.agentOptimizationProjection,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.agentOptimizationControl,
+      request,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.agentOptimizationNotificationAck,
+      expect.objectContaining({ episodeId: 'episode-1', state: 'completed' }),
+    )
+    expect(listener).toHaveBeenCalledWith({ generation: 5 })
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentOptimizationProjectionInvalidated,
+      eventListener,
+    )
+  })
+
+  it('routes agent operation association registration through its IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      command: 'workspace.run',
+      operationId: 'operation-1',
+      providerId: 'ecos_agent',
+      sessionId: 'gui-session-1',
+    }
+    ipcRenderer.invoke.mockResolvedValue(undefined)
+
+    await expect(
+      bridge.agent.registerOperationAssociation(request),
+    ).resolves.toBeUndefined()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.agentRegisterOperationAssociation,
+      request,
+    )
+  })
+
   it('routes Codex dependency helpers through shared IPC channels', async () => {
     const bridge = await loadDesktopBridge()
     const status = {
@@ -530,7 +649,6 @@ describe('preload desktop bridge contract', () => {
 
     await expect(bridge.agent.codex.getStatus()).resolves.toEqual(status)
     await expect(bridge.agent.codex.install()).resolves.toEqual(status)
-    await expect(bridge.agent.codex.login()).resolves.toEqual(status)
     await expect(bridge.agent.codex.recheck()).resolves.toEqual(status)
     await expect(bridge.agent.codex.setBinPath({ path: '/bin/codex' })).resolves.toEqual(
       status,
@@ -546,7 +664,6 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.agentCodexInstall,
     )
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopApiIpcChannels.agentCodexLogin)
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.agentCodexRecheck,
     )

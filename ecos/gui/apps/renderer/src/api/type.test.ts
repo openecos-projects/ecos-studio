@@ -9,11 +9,11 @@ import {
 } from './type'
 
 describe('sameFlowStepName', () => {
-  it('treats Timing Opt display labels as the Timing optimization flow step', () => {
-    expect(getStepMetadata('Timing Opt')?.path).toBe(StepEnum.TIMING_OPT)
-    expect(sameFlowStepName('Timing Opt', 'Timing optimization')).toBe(true)
+  it('treats Sizer display labels as the Timing optimization flow step', () => {
+    expect(getStepMetadata('Sizer')?.path).toBe(StepEnum.TIMING_OPT)
+    expect(sameFlowStepName('Sizer', 'Timing optimization')).toBe(true)
     expect(sameFlowStepName('timing optimization', StepEnum.TIMING_OPT)).toBe(true)
-    expect(sameFlowStepName('Timing Opt', 'CTS')).toBe(false)
+    expect(sameFlowStepName('Sizer', 'CTS')).toBe(false)
   })
 
   it('treats LEC display labels as their flow steps without cross-matching', () => {

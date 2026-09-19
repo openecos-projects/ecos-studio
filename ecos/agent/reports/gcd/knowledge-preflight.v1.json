@@ -1,0 +1,18 @@
+{
+  "cohort_role": "pilot_only",
+  "design_checks": {
+    "gcd": {
+      "clock_name": "clk",
+      "filelist": "/home/yhqiu1/iagent-survey/ecos-studio/ecos/agent/experiments/designs/gcd/filelist.f",
+      "rtl_count": 1,
+      "sdc": "/home/yhqiu1/iagent-survey/ecos-studio/ecos/agent/experiments/designs/gcd/gcd.sdc",
+      "top_module": "gcd"
+    }
+  },
+  "design_ids": [
+    "gcd"
+  ],
+  "schema_version": "ecos.knowledge_pilot_preflight.v1",
+  "state_rule_manifest_sha256": "sha256:65e62cc73f90fb9ed228423c52e4c0da3dfea6c3bea6f6cd9785068bc1ee3c8b",
+  "trend_noise_tolerance": 0.0
+}

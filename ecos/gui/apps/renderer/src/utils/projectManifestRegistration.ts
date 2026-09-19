@@ -3,6 +3,7 @@ import type { WorkspaceConfig } from '@/types'
 import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 
 export interface ProjectRouteContext {
   projectRoot: string
@@ -132,6 +133,18 @@ export async function registerProjectManagedWorkspace(
       queryString(input.routeQuery?.projectName) ||
       basenamePath(registeredProjectRoot) ||
       'project'
+    if (input.config?.project_context?.mode === 'create') {
+      const manifest = await readOptionalProjectTextFile('project.json', {
+        projectPath: registeredProjectRoot,
+      })
+      if (!manifest) {
+        await mutateProjectManifest(registeredProjectRoot, {
+          type: 'create',
+          name: projectName,
+          designName: optionalString(input.config.parameters?.design) || projectName,
+        })
+      }
+    }
     const sourceContext = input.config?.source_context
     await mutateProjectManifest(registeredProjectRoot, {
       type: 'register-workspace',

@@ -1,9 +1,0 @@
-{"entity_id": "algorithm.cts.execution", "id": "cts-execution", "question": "How does the CTS stage execute?", "required_text": "Execution path:"}
-{"entity_id": "algorithm.cts.flow_pipeline", "id": "cts-flow_pipeline", "question": "icts synthesis optimization instantiation evaluation", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.cts.clock_domain_synthesis", "id": "cts-clock_domain_synthesis", "question": "cts clock domain synthesis", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.cts.htree_topology_search", "id": "cts-htree_topology_search", "question": "cts depth candidate search", "required_text": "Source evidence:"}
-{"entity_id": "algorithm.cts.rc_tree_sizing_optimization", "id": "cts-rc_tree_sizing_optimization", "question": "cts post synthesis buffer sizing", "required_text": "Source evidence:"}
-{"entity_id": "parameter.cts.buffer_type", "id": "cts-parameter", "question": "cts buffer_type", "required_text": "**Role:**"}
-{"entity_id": "metric.clock_path_max_buffer", "id": "cts-metric", "question": "clock path max buffer", "required_text": "**Calculation:**"}
-{"entity_id": "artifact.cts.outputs", "id": "cts-artifact", "question": "cts artifacts", "required_text": "**Meaning:**"}
-{"entity_id": "failure.cts.preconditions", "id": "cts-failure", "question": "cts failed", "required_text": "**Failure mode:**"}

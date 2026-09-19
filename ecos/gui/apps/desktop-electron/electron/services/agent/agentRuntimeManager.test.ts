@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type {
   DesktopAgentEvent,
   DesktopAgentProviderRequest,
@@ -17,6 +20,23 @@ function createProvider(providerId = 'codex'): AgentProviderRuntime {
 
   return {
     getStatus: vi.fn(async () => status),
+    getModelSettings: vi.fn(async () => ({
+      displayName: 'GPT Test',
+      model: 'gpt-test',
+      models: [
+        {
+          defaultReasoningEffort: 'medium' as const,
+          displayName: 'GPT Test',
+          model: 'gpt-test',
+          supportedReasoningEfforts: ['low', 'medium', 'high'] as (
+            | 'low'
+            | 'medium'
+            | 'high'
+          )[],
+        },
+      ],
+      reasoningEffort: 'medium' as const,
+    })),
     interrupt: vi.fn(async () => {}),
     listSessions: vi.fn(async () => ({ sessions: [] })),
     onEvent: vi.fn((nextListener) => {
@@ -28,14 +48,40 @@ function createProvider(providerId = 'codex'): AgentProviderRuntime {
     resumeSession: vi.fn(async (request) => ({
       sessionId: request.sessionId,
     })),
+    resumeOptimizationEpisode: vi.fn(async () => {}),
+    stopOptimizationEpisode: vi.fn(async () => {}),
+    prepareOptimizationShutdown: vi.fn(async () => {}),
+    cancelOptimizationShutdown: vi.fn(async () => {}),
     sendMessage: vi.fn(async (request) => ({
       messageId: 'message-1',
       sessionId: request.sessionId,
     })),
+    answerInteraction: vi.fn(async (request) => ({
+      accepted: true,
+      requestId: request.requestId,
+      sessionId: request.sessionId,
+    })),
     setMode: vi.fn(async () => status),
+    setModelSettings: vi.fn(async () => ({
+      displayName: 'GPT Test',
+      model: 'gpt-test',
+      models: [
+        {
+          defaultReasoningEffort: 'medium' as const,
+          displayName: 'GPT Test',
+          model: 'gpt-test',
+          supportedReasoningEfforts: ['low', 'medium', 'high'] as (
+            | 'low'
+            | 'medium'
+            | 'high'
+          )[],
+        },
+      ],
+      reasoningEffort: 'high' as const,
+    })),
     start: vi.fn(async () => {}),
-    startSession: vi.fn(async () => ({
-      sessionId: 'session-1',
+    startSession: vi.fn(async (request) => ({
+      sessionId: request.sessionId ?? 'session-1',
     })),
     stop: vi.fn(async () => {}),
     emitForTest: (event: DesktopAgentEvent) => listener?.(event),
@@ -43,6 +89,352 @@ function createProvider(providerId = 'codex'): AgentProviderRuntime {
 }
 
 describe('AgentRuntimeManager', () => {
+  it('recovers a persisted live episode as interrupted after restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-agent-episodes-'))
+    const projectionPath = join(root, 'episodes.json')
+    try {
+      const provider = createProvider() as AgentProviderRuntime & {
+        emitForTest(event: DesktopAgentEvent): void
+      }
+      const manager = new AgentRuntimeManager({
+        defaultProviderId: 'codex',
+        optimizationProjectionPath: projectionPath,
+        providers: [{ providerId: 'codex', runtime: provider }],
+      })
+      await manager.startSession({
+        directory: '/work/demo',
+        providerId: 'codex',
+        sessionId: 'session-1',
+        workspaceId: 'workspace-handle-1',
+        workspaceRevision: 7,
+      })
+      provider.emitForTest({
+        sessionId: 'session-1',
+        type: 'optimization',
+        optimization: {
+          episode_id: 'episode-1',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'running',
+          workspace: '/work/demo',
+        },
+      })
+
+      const restoredProvider = createProvider() as AgentProviderRuntime & {
+        emitForTest(event: DesktopAgentEvent): void
+      }
+      const restored = new AgentRuntimeManager({
+        defaultProviderId: 'codex',
+        optimizationProjectionPath: projectionPath,
+        providers: [{ providerId: 'codex', runtime: restoredProvider }],
+      })
+
+      expect(restored.optimizationProjection().episodes).toEqual([
+        expect.objectContaining({
+          episodeId: 'episode-1',
+          parentWorkspaceDirectory: '/work/demo',
+          state: 'interrupted',
+        }),
+      ])
+      expect(restored.isOptimizationParentGuarded('workspace-handle-1')).toBe(true)
+
+      await restored.startSession({
+        directory: '/work/demo',
+        providerId: 'codex',
+        sessionId: 'session-1',
+        workspaceId: 'workspace-handle-2',
+        workspaceRevision: 7,
+      })
+      expect(restored.isOptimizationParentGuarded('workspace-handle-1')).toBe(false)
+      expect(restored.isOptimizationParentGuarded('workspace-handle-2')).toBe(true)
+
+      await restored.controlOptimizationEpisode({
+        action: 'resume',
+        episodeId: 'episode-1',
+        providerId: 'codex',
+        sessionId: 'session-1',
+      })
+      expect(restoredProvider.resumeOptimizationEpisode).toHaveBeenCalledWith({
+        directory: '/work/demo',
+        episodeId: 'episode-1',
+        providerId: 'codex',
+        sessionId: 'session-1',
+        workspaceId: 'workspace-handle-2',
+        workspaceRevision: 7,
+      })
+      expect(restoredProvider.sendMessage).not.toHaveBeenCalled()
+
+      await restored.controlOptimizationEpisode({
+        action: 'stop',
+        episodeId: 'episode-1',
+        providerId: 'codex',
+        sessionId: 'session-1',
+      })
+      expect(restoredProvider.stopOptimizationEpisode).toHaveBeenCalledWith({
+        directory: '/work/demo',
+        episodeId: 'episode-1',
+        providerId: 'codex',
+        sessionId: 'session-1',
+        workspaceId: 'workspace-handle-2',
+        workspaceRevision: 7,
+      })
+      expect(restored.optimizationProjection().episodes[0]?.state).toBe('interrupted')
+      restoredProvider.emitForTest({
+        sessionId: 'session-1',
+        type: 'optimization',
+        optimization: {
+          episode_id: 'episode-1',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'stopped',
+          workspace: '/work/demo',
+        },
+      })
+      expect(restored.optimizationProjection().episodes[0]?.state).toBe('stopped')
+      expect(restored.isOptimizationParentGuarded('workspace-handle-2')).toBe(false)
+      expect(restoredProvider.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('projects a provider optimization episode independently of the active Agent tab', async () => {
+    const provider = createProvider() as AgentProviderRuntime & {
+      emitForTest(event: DesktopAgentEvent): void
+    }
+    const manager = new AgentRuntimeManager(provider)
+    const invalidated = vi.fn()
+    manager.onOptimizationProjectionInvalidated(invalidated)
+    await manager.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 7,
+    })
+
+    provider.emitForTest({
+      sessionId: 'session-1',
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-1',
+        in_flight: 1,
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'running',
+        turn_count: 2,
+        workspace: '/work/demo',
+      },
+    })
+
+    expect(manager.optimizationProjection()).toEqual({
+      episodes: [
+        expect.objectContaining({
+          agentSessionId: 'session-1',
+          episodeId: 'episode-1',
+          inFlightCount: 1,
+          parentWorkspaceDirectory: '/work/demo',
+          parentWorkspaceId: 'workspace-handle-1',
+          parentWorkspaceRevision: 7,
+          providerId: 'codex',
+          state: 'running',
+          turnCount: 2,
+        }),
+      ],
+      generation: 1,
+    })
+    expect(invalidated).toHaveBeenCalledWith(1)
+    expect(manager.isOptimizationParentGuarded('workspace-handle-1')).toBe(true)
+
+    await manager.controlOptimizationEpisode({
+      action: 'pause',
+      episodeId: 'episode-1',
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    expect(provider.sendMessage).toHaveBeenCalledWith({
+      message: 'pause',
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+  })
+
+  it('persists terminal notification acknowledgement across projection reloads', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ecos-agent-notifications-'))
+    const projectionPath = join(root, 'episodes.json')
+    try {
+      const provider = createProvider() as AgentProviderRuntime & {
+        emitForTest(event: DesktopAgentEvent): void
+      }
+      const manager = new AgentRuntimeManager({
+        defaultProviderId: 'codex',
+        optimizationProjectionPath: projectionPath,
+        providers: [{ providerId: 'codex', runtime: provider }],
+      })
+      await manager.startSession({
+        directory: '/work/demo',
+        providerId: 'codex',
+        sessionId: 'session-1',
+        workspaceId: 'workspace-handle-1',
+        workspaceRevision: 7,
+      })
+      provider.emitForTest({
+        sessionId: 'session-1',
+        type: 'optimization',
+        optimization: {
+          episode_id: 'episode-1',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'completed',
+          workspace: '/work/demo',
+        },
+      })
+      expect(manager.optimizationProjection().episodes[0]?.notificationStates).toEqual([
+        'completed',
+      ])
+      manager.acknowledgeOptimizationEpisodeNotification({
+        episodeId: 'episode-1',
+        providerId: 'codex',
+        sessionId: 'session-1',
+        state: 'completed',
+      })
+      const restored = new AgentRuntimeManager({
+        defaultProviderId: 'codex',
+        optimizationProjectionPath: projectionPath,
+        providers: [{ providerId: 'codex', runtime: createProvider() }],
+      })
+      expect(restored.optimizationProjection().episodes[0]?.notificationStates).toEqual(
+        [],
+      )
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('drains and restores running episodes for Safe Shutdown', async () => {
+    const provider = createProvider() as AgentProviderRuntime & {
+      emitForTest(event: DesktopAgentEvent): void
+    }
+    const manager = new AgentRuntimeManager(provider)
+    await manager.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 7,
+    })
+    provider.emitForTest({
+      sessionId: 'session-1',
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-1',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'running',
+        workspace: '/work/demo',
+      },
+    })
+
+    await manager.beginOptimizationShutdownDrain()
+    expect(provider.prepareOptimizationShutdown).toHaveBeenCalledWith({
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    provider.emitForTest({
+      sessionId: 'session-1',
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-1',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'interrupted',
+        workspace: '/work/demo',
+      },
+    })
+
+    await manager.cancelOptimizationShutdownDrain()
+    expect(provider.resumeOptimizationEpisode).toHaveBeenCalledWith({
+      directory: '/work/demo',
+      episodeId: 'episode-1',
+      providerId: 'codex',
+      sessionId: 'session-1',
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 7,
+    })
+  })
+
+  it('rejects a second active Episode for the same Parent Workspace', async () => {
+    const provider = createProvider() as AgentProviderRuntime & {
+      emitForTest(event: DesktopAgentEvent): void
+    }
+    const manager = new AgentRuntimeManager(provider)
+    const events: DesktopAgentEvent[] = []
+    manager.onEvent((event) => events.push(event))
+    for (const sessionId of ['session-1', 'session-2']) {
+      await manager.startSession({
+        directory: '/work/demo',
+        providerId: 'codex',
+        sessionId,
+        workspaceId: 'workspace-handle-1',
+        workspaceRevision: 7,
+      })
+    }
+    provider.emitForTest({
+      sessionId: 'session-1',
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-1',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'running',
+        workspace: '/work/demo',
+      },
+    })
+    provider.emitForTest({
+      sessionId: 'session-2',
+      type: 'optimization',
+      optimization: {
+        episode_id: 'episode-2',
+        schema_version: 'ecos.optimization_status.v2',
+        state: 'awaiting_confirmation',
+        workspace: '/work/demo',
+      },
+    })
+    provider.emitForTest({
+      interaction: {
+        interaction: {
+          kind: 'choice',
+          options: [
+            { id: 'confirm', label: 'Confirm and start' },
+            { id: 'cancel', label: 'Cancel' },
+          ],
+          variant: 'buttons',
+        },
+        kind: 'choice',
+        purpose: 'execution',
+        requestId: 'request-2',
+        schema_version: 'flow-agent.interaction_request.v1',
+        status: 'pending',
+        title: 'Confirm execution',
+      },
+      sessionId: 'session-2',
+      type: 'interaction',
+    })
+
+    expect(
+      manager.optimizationProjection().episodes.map((item) => item.episodeId),
+    ).toEqual(['episode-1'])
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        sessionId: 'session-2',
+        text: expect.stringContaining('episode-1'),
+        type: 'error',
+      }),
+    )
+    await vi.waitFor(() =>
+      expect(provider.answerInteraction).toHaveBeenCalledWith({
+        kind: 'choice',
+        optionId: 'cancel',
+        providerId: 'codex',
+        requestId: 'request-2',
+        sessionId: 'session-2',
+      }),
+    )
+  })
+
   it('exposes the provider runtime contract without replacing the provider implementation', async () => {
     const provider = createProvider()
     const manager = new AgentRuntimeManager(provider)

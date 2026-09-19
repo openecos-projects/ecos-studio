@@ -23,7 +23,7 @@ dry_run_output="$(
     --appimage /tmp/ECOS-Studio.AppImage \
     --out /tmp/chip-viewer-appimage-smoke-test
 )"
-for expected in "/tmp/ECOS-Studio.AppImage --appimage-offset" "unsquashfs -ll" "resources/binaries/chip-viewer-native" "/tmp/chip-viewer-appimage-smoke-test/appimage-files.txt"; do
+for expected in "/tmp/ECOS-Studio.AppImage --appimage-offset" "unsquashfs -ll" "resources/binaries/chip-viewer-native" "resources/binaries/sizer/bin/Sizer" "resources/binaries/sizer/libexec/Sizer" "resources/binaries/sizer/lib/ld-linux-x86-64.so.2" "resources/binaries/sizer/src/sizer_os.tcl" "/tmp/chip-viewer-appimage-smoke-test/appimage-files.txt"; do
   if [[ "$dry_run_output" != *"$expected"* ]]; then
     echo "missing dry-run command fragment: $expected" >&2
     exit 1

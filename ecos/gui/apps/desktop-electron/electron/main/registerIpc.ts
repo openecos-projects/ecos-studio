@@ -8,7 +8,7 @@ import {
 } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, realpath, stat, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -33,10 +33,15 @@ import {
   type EccRuntimeEvent,
   type EccRuntimeOperation,
   type EccRuntimeOperationRequest,
+  type EccCandidateCapabilitiesRequest,
+  type EccCandidateResumeRequest,
+  type EccCandidateRerunRequest,
   type EccRuntimeStartFlowRequest,
   type EccRuntimeStartStepRequest,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
+  type EccWorkspaceDeriveRequest,
+  type EccWorkspaceDeriveResult,
   type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
   type EccWorkspaceInfoRequest,
@@ -63,9 +68,17 @@ import {
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
+  type DesktopAgentOptimizationEpisodeControlRequest,
+  type DesktopAgentOptimizationEpisodeProjection,
+  type DesktopAgentInteractionAnswerRequest,
   type DesktopAgentInterruptRequest,
+  type DesktopAgentModelSettingsRequest,
+  type DesktopAgentReasoningEffort,
+  type DesktopAgentSetModelSettingsRequest,
   type DesktopAgentWorkspaceRerunContract,
+  type DesktopAgentWorkspaceRerunParameterValue,
   type DesktopAgentSendMessageRequest,
+  type DesktopAgentOperationAssociationRequest,
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
   type DesktopCodexInstallProgressEvent,
@@ -96,7 +109,11 @@ import {
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
-import { readAgentWorkspaceParameterValues } from '../services/agent/agentWorkspaceParameterUpdates'
+import {
+  AGENT_STEP_OPTION_STEPS,
+  readAgentWorkspaceParameterValues,
+} from '../services/agent/agentWorkspaceParameterUpdates'
+import { recordAgentOperationAssociation } from '../services/agent/agentOperationAssociations'
 import {
   closeWindow,
   isWindowMaximized,
@@ -114,7 +131,7 @@ import {
 } from '../services/workspaceWindowRegistry'
 import {
   executeWorkspaceRerun,
-  prepareWorkspaceRerun,
+  verifyWorkspaceRerunContract,
 } from '../services/eccRpc/workspaceRerun'
 import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
@@ -123,6 +140,8 @@ import {
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
 import { registerBackgroundLifecycleIpc } from './registerBackgroundLifecycleIpc'
+import { registerOptimizationEpisodeIpc } from './registerOptimizationEpisodeIpc'
+import type { QuickStartBuiltinResources } from '../services/quickStartResourceService'
 import { projectWorkspaceImportFailure } from '../services/projectWorkspaceImportService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
@@ -155,6 +174,10 @@ function isShutdownBlockedProductCommand(value: unknown): boolean {
     'workspace.exportSignoff',
     'workspace.continueCreation',
     'workspace.abandonCreation',
+    'candidate.rerun',
+    'candidate.resume',
+    'optimization.adoptCandidate',
+    'optimization.cleanup',
   ].includes(value.command)
 }
 
@@ -173,11 +196,31 @@ const acceptedWorkChannels = new Set<string>([
 ])
 
 export interface DesktopBridgeServices {
+  agentQuickRunRoot?: string
   agentRuntimeService?: AgentProviderRuntime & {
+    controlOptimizationEpisode?(
+      request: DesktopAgentOptimizationEpisodeControlRequest,
+    ): Promise<void>
+    onOptimizationProjectionInvalidated?(
+      listener: (generation: number) => void,
+    ): () => void
+    optimizationProjection?(): DesktopAgentOptimizationEpisodeProjection
+    isOptimizationParentGuarded?(workspaceId: string): boolean
+    isOptimizationParentDirectoryGuarded?(directory: string): boolean
+    rebindOptimizationEpisode?(
+      episodeId: string,
+      workspaceId: string,
+      workspaceRevision: number,
+      directory: string,
+    ): void
+    markOptimizationEpisodeCleaned?(episodeId: string): void
     syncEnvironmentOverrides?(
       overrides: Record<string, string | undefined>,
       request?: DesktopAgentStartRequest,
     ): void
+  }
+  quickStartResourceService?: {
+    getResources(): QuickStartBuiltinResources
   }
   codexDependencyService?: {
     getStatus(): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
@@ -189,6 +232,22 @@ export interface DesktopBridgeServices {
     ): Promise<import('@ecos-studio/shared').DesktopCodexDependencyStatus>
     resolveEnvironmentForAgent(): Promise<Record<string, string | undefined>>
     onProgress(listener: (event: DesktopCodexInstallProgressEvent) => void): () => void
+  }
+  modelProfileService?: {
+    list(): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    upsert(
+      profile: unknown,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    delete(
+      profileId: string,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    select(
+      profileId: string,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
+    setApiKey(
+      profileId: string,
+      apiKey: string,
+    ): Promise<import('@ecos-studio/shared').DesktopModelProfileState>
   }
   cliInstallerService?: {
     status(): Promise<import('@ecos-studio/shared').CliInstallState>
@@ -428,12 +487,18 @@ export interface DesktopBridgeServices {
       options?: { timeoutMs?: number },
     ): Promise<T>
     cancelOperation(request: EccRuntimeOperationRequest): Promise<unknown>
+    candidateCapabilities(request: EccCandidateCapabilitiesRequest): Promise<unknown>
+    candidateRerun(request: EccCandidateRerunRequest): Promise<unknown>
+    candidateResume(request: EccCandidateResumeRequest): Promise<unknown>
     cancelOperationLegacy(
       operationId?: string,
     ): Promise<{ cancelled: boolean; operationId?: string }>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     describeWorkspaceSpec(): Promise<unknown>
+    deriveWorkspace(
+      request: EccWorkspaceDeriveRequest & { workspaceHandle: string },
+    ): Promise<EccWorkspaceDeriveResult>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     engineeringSnapshot(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
@@ -514,7 +579,7 @@ export interface DesktopBridgeServices {
   }
   shutdownCoordinator?: {
     beginAcceptedWork?(windowId: number): () => void
-    cancelShutdown(): void
+    cancelShutdown(): void | Promise<void>
     completeRendererCleanup(
       attemptId: string,
       windowId: number,
@@ -891,6 +956,7 @@ export function registerIpc(
       sender: IpcMainInvokeEvent['sender']
       onDestroyed: () => void
       workspaceId?: string
+      directory?: string
     }
   >()
   const pendingWorkspaceReruns = new Map<
@@ -961,6 +1027,23 @@ export function registerIpc(
     })
   }
 
+  const requireOptimizationParentDirectoryAllowed = (
+    _event: IpcMainInvokeEvent,
+    directory: string,
+  ): void => {
+    if (services.agentRuntimeService?.isOptimizationParentDirectoryGuarded?.(directory)) {
+      throw Object.assign(new Error('Optimization is running in the background.'), {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
+      })
+    }
+  }
+
+  const requireOptimizationWindowWorkspaceAllowed = (event: IpcMainInvokeEvent): void => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const directory = window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    if (directory) requireOptimizationParentDirectoryAllowed(event, directory)
+  }
+
   const requireCreationCleanupAllowed = async (
     event: IpcMainInvokeEvent,
     projectRoot: string,
@@ -1018,7 +1101,13 @@ export function registerIpc(
     if (previous && previous.sender !== sender) {
       throw new Error('Agent session belongs to another window.')
     }
-    if (previous) return
+    if (previous) {
+      // Rebind: the same window refreshes its Workspace context, e.g. after
+      // the runtime released an idle handle under the previous one.
+      if (request.workspaceId) previous.workspaceId = request.workspaceId
+      if (request.directory) previous.directory = request.directory
+      return
+    }
 
     const onDestroyed = (): void => {
       agentSessionSubscriptions.delete(key)
@@ -1027,6 +1116,7 @@ export function registerIpc(
       sender,
       onDestroyed,
       ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+      ...(request.directory ? { directory: request.directory } : {}),
     })
     if (typeof sender.once === 'function') sender.once('destroyed', onDestroyed)
     if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) onDestroyed()
@@ -1034,7 +1124,7 @@ export function registerIpc(
 
   const requireAgentSessionOwner = (
     sender: IpcMainInvokeEvent['sender'],
-    request: DesktopAgentInterruptRequest | DesktopAgentSendMessageRequest,
+    request: { providerId?: string; sessionId: string },
   ) => {
     const providerId = readAgentProviderId(request)
     const subscription = agentSessionSubscriptions.get(
@@ -1044,6 +1134,126 @@ export function registerIpc(
       throw new Error('Unknown agent session for this window.')
     }
     return subscription
+  }
+
+  interface AgentWorkspaceContext {
+    workspaceHandle: string
+    workspaceRevision: number
+    workspaceParameterValues: Record<string, DesktopAgentWorkspaceRerunParameterValue>
+    workspaceDesignId?: string
+  }
+
+  /**
+   * Resolves the current canonical Workspace context for an Agent session.
+   * openWorkspace reuses the live runtime handle or reopens it, so a handle
+   * released by idle cleanup is healed by re-resolution.
+   * ponytail: canonical parameter values are still read from files by the
+   * Python provider when generating contracts, so an external config sync or a
+   * partially applied save can leave Python's displayed values briefly stale;
+   * the upgrade path is a host `workspace.parameters` query command.
+   */
+  const resolveAgentWorkspaceContext = async (
+    directory: string,
+  ): Promise<AgentWorkspaceContext> => {
+    const opened = await services.eccRuntimeService.openWorkspace({ directory })
+    const workspaceHandle = workspaceHandleFromResult(opened)
+    if (!workspaceHandle) throw new Error('ECC Workspace handle is unavailable.')
+    const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+      workspaceHandle,
+    })
+    if (
+      !isRecord(snapshot) ||
+      typeof snapshot.directory !== 'string' ||
+      normalizeWorkspacePath(snapshot.directory) !== normalizeWorkspacePath(directory)
+    ) {
+      throw new Error('Agent Workspace context does not match its ECC session.')
+    }
+    const configuration = isRecord(snapshot.configuration) ? snapshot.configuration : null
+    const workspaceSpec = isRecord(configuration?.workspaceSpec)
+      ? configuration.workspaceSpec
+      : null
+    if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
+    const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
+      ? snapshot.engineeringSnapshot
+      : null
+    const workspaceRevision = engineeringSnapshot?.workspaceRevision
+    if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
+      throw new Error('ECC Workspace Revision is unavailable.')
+    }
+    const stepConfigurations: Record<string, Record<string, unknown>> = {}
+    await Promise.all(
+      AGENT_STEP_OPTION_STEPS.map(async (step) => {
+        try {
+          const result = await services.eccRuntimeService.readWorkspaceStepConfiguration({
+            step,
+            workspaceHandle,
+          })
+          if (result.status !== 'available') return
+          stepConfigurations[step] = Object.fromEntries(
+            result.parameters.map((parameter) => [parameter.param, parameter.value]),
+          )
+        } catch {
+          // The step is not part of this Workspace flow; it contributes no options.
+        }
+      }),
+    )
+    const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
+    return {
+      workspaceHandle,
+      workspaceRevision: Number(workspaceRevision),
+      workspaceParameterValues: readAgentWorkspaceParameterValues(
+        workspaceSpec,
+        stepConfigurations,
+      ),
+      ...(typeof design?.name === 'string' && design.name
+        ? { workspaceDesignId: design.name }
+        : {}),
+    }
+  }
+
+  const refreshAgentSessionWorkspaceContext = async (
+    sender: IpcMainInvokeEvent['sender'],
+    request: Pick<
+      DesktopAgentSendMessageRequest,
+      'directory' | 'workspaceId' | 'workspaceRevision'
+    >,
+    subscription: ReturnType<typeof requireAgentSessionOwner>,
+  ): Promise<void> => {
+    const window = BrowserWindow.fromWebContents(sender)
+    const windowDirectory = window
+      ? workspaceWindowRegistry.getPathForWindow(window)
+      : null
+    if (
+      request.directory &&
+      (!windowDirectory ||
+        normalizeWorkspacePath(request.directory) !==
+          normalizeWorkspacePath(windowDirectory))
+    ) {
+      throw new Error('Agent Workspace must match the Workspace bound to this window.')
+    }
+    const directory = request.directory || subscription.directory || windowDirectory
+    if (directory) {
+      const context = await resolveAgentWorkspaceContext(directory)
+      request.directory = directory
+      request.workspaceId = context.workspaceHandle
+      request.workspaceRevision = context.workspaceRevision
+      subscription.directory = directory
+      subscription.workspaceId = context.workspaceHandle
+    } else if (subscription.workspaceId) {
+      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
+        workspaceHandle: subscription.workspaceId,
+      })
+      const engineeringSnapshot =
+        isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
+          ? snapshot.engineeringSnapshot
+          : null
+      const revision = engineeringSnapshot?.workspaceRevision
+      if (!Number.isInteger(revision) || Number(revision) < 1) {
+        throw new Error('ECC Workspace Revision is unavailable.')
+      }
+      request.workspaceRevision = Number(revision)
+      request.workspaceId = subscription.workspaceId
+    }
   }
 
   const deliverDirectoryScopedEvent = (
@@ -1158,7 +1368,6 @@ export function registerIpc(
       workspaceRerunToken: token,
     })
   })
-
   const killShellSession = async (sessionId: string): Promise<void> => {
     const session = shellSessions.get(sessionId)
 
@@ -1301,8 +1510,53 @@ export function registerIpc(
     )
   }
 
+  const optimizationEpisodeCommands = registerOptimizationEpisodeIpc({
+    handle,
+    runtime: services.agentRuntimeService,
+    updateWorkspaceStepConfiguration: (request) =>
+      services.eccRuntimeService.updateWorkspaceStepConfiguration(request),
+    getWindowDirectory: (sender) => {
+      const window = BrowserWindow.fromWebContents(sender)
+      return window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    },
+    getSessionOwner: (providerId, sessionId) =>
+      agentSessionSubscriptions.get(agentSessionKey(providerId, sessionId))?.sender,
+    getSessionSenders: () =>
+      [...agentSessionSubscriptions.values()].map((subscription) => subscription.sender),
+    trackAgentSession,
+    requireAgentSessionOwner,
+    resolveAgentWorkspaceContext,
+  })
+
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
+  })
+
+  handle(desktopApiIpcChannels.appGetQuickStartRoot, async () => {
+    if (!services.agentQuickRunRoot)
+      throw new Error('Quick Start storage is unavailable.')
+    await mkdir(services.agentQuickRunRoot, { recursive: true })
+    return services.agentQuickRunRoot
+  })
+
+  handle(desktopApiIpcChannels.appGetQuickStartResources, async () => {
+    if (!services.quickStartResourceService) {
+      throw new Error('Quick Start resources are unavailable.')
+    }
+    return services.quickStartResourceService.getResources()
+  })
+
+  handle(desktopApiIpcChannels.appPrepareQuickStartProject, async (_event, name) => {
+    if (
+      !services.agentQuickRunRoot ||
+      typeof name !== 'string' ||
+      !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)
+    ) {
+      throw new Error('Invalid Quick Start project name.')
+    }
+    const projectRoot = join(services.agentQuickRunRoot, name)
+    await mkdir(projectRoot, { recursive: true })
+    return projectRoot
   })
 
   handle(desktopApiIpcChannels.windowMinimize, (event) => {
@@ -1399,10 +1653,48 @@ export function registerIpc(
       throw new Error('Workspace rerun source is not bound to this window.')
     }
     pendingWorkspaceReruns.delete(token)
-    const prepared = await prepareWorkspaceRerun(pending.contract)
+    // Isolated rerun preparation is delegated to the ECC workspace.derive
+    // domain command; Electron only verifies the frozen contract evidence.
+    const verified = await verifyWorkspaceRerunContract(pending.contract)
+    // openWorkspace reuses the live handle or reopens one released by idle
+    // cleanup, so a stale source binding self-heals before ownership checks.
+    const openedSource = await services.eccRuntimeService.openWorkspace({
+      directory: verified.sourceWorkspace,
+    })
+    const sourceWorkspaceHandle = workspaceHandleFromResult(openedSource)
+    const openedSourceDirectory = workspaceDirectoryFromResult(openedSource)
+    if (!sourceWorkspaceHandle || !openedSourceDirectory) {
+      throw new Error('Workspace rerun source is not active in this window.')
+    }
+    trackWorkspaceHandle(event.sender, sourceWorkspaceHandle, openedSourceDirectory)
+    const derived = (await executeProductCommand(
+      {
+        command: 'workspace.derive',
+        payload: {
+          workspaceHandle: sourceWorkspaceHandle,
+          directory: verified.sourceWorkspace,
+          targetDirectory: verified.targetWorkspace,
+          resetFromStep: pending.contract.target_step,
+        },
+      },
+      {
+        ownsWorkspaceHandle: (workspaceHandle) =>
+          workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
+        prepareCreate: async (createRequest) => createRequest,
+        runtime: services.eccRuntimeService,
+        trackCreateResult: () => undefined,
+      },
+    )) as { directory?: unknown }
+    if (
+      typeof derived.directory !== 'string' ||
+      normalizeWorkspacePath(derived.directory) !==
+        normalizeWorkspacePath(verified.targetWorkspace)
+    ) {
+      throw new Error('Workspace derive returned an unexpected target directory.')
+    }
     const executionToken = randomUUID()
     pendingWorkspaceRerunExecutions.set(executionToken, pending)
-    return { ...prepared, executionToken }
+    return { directory: derived.directory, executionToken }
   })
 
   handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
@@ -1531,6 +1823,13 @@ export function registerIpc(
     }
     let acceptedCreationRegistration = false
     const mutationInput = isRecord(request.mutation.input) ? request.mutation.input : {}
+    if (
+      request.mutation.type === 'delete-workspace' ||
+      request.mutation.type === 'archive-workspace' ||
+      request.mutation.type === 'record-replacement-backup'
+    ) {
+      requireOptimizationWindowWorkspaceAllowed(event)
+    }
     const mutationBlocked =
       services.shutdownCoordinator?.isMutationBlocked(event.sender.id) ?? false
     if (mutationBlocked && request.mutation.type === 'register-workspace') {
@@ -1945,7 +2244,11 @@ export function registerIpc(
     async (event, path) => {
       requireBackendMutationAllowed(event)
       return await services.workspaceService.prepareProjectDirectoryReplacement(
-        path as string,
+        (() => {
+          if (typeof path !== 'string') throw new Error('Workspace path must be a string')
+          requireOptimizationParentDirectoryAllowed(event, path)
+          return path
+        })(),
       )
     },
   )
@@ -1958,6 +2261,7 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      requireOptimizationParentDirectoryAllowed(event, replacement.targetPath)
       await requireCreationCleanupAllowed(
         event,
         replacement.projectRoot,
@@ -1977,6 +2281,7 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      requireOptimizationParentDirectoryAllowed(event, replacement.targetPath)
       await requireCreationCleanupAllowed(
         event,
         replacement.projectRoot,
@@ -2254,6 +2559,17 @@ export function registerIpc(
     }
     const ownerWindowId = typeof event.sender.id === 'number' ? event.sender.id : 0
     return await executeProductCommand(request, {
+      authorizeWorkspaceMutation: (_command, workspaceHandle) => {
+        if (
+          !services.agentRuntimeService?.isOptimizationParentGuarded?.(workspaceHandle)
+        ) {
+          return
+        }
+        throw Object.assign(new Error('Optimization is running in the background.'), {
+          code: 'OPTIMIZATION_PARENT_GUARDED',
+        })
+      },
+      adoptOptimizationCandidate: optimizationEpisodeCommands.adoptOptimizationCandidate,
       beginCreate: services.workspaceCreationJournal
         ? (createRequest) =>
             services.workspaceCreationJournal!.begin(ownerWindowId, createRequest)
@@ -2273,6 +2589,7 @@ export function registerIpc(
               ownerWindowId,
             )
         : undefined,
+      cleanupOptimizationEpisode: optimizationEpisodeCommands.cleanupOptimizationEpisode,
       failCreate: services.workspaceCreationJournal
         ? (creationId, error) =>
             services.workspaceCreationJournal!.markUnfinished(
@@ -2636,6 +2953,41 @@ export function registerIpc(
     return status
   })
 
+  handle(desktopApiIpcChannels.agentProfileList, async () => {
+    return await requireModelProfileService(services).list()
+  })
+
+  handle(desktopApiIpcChannels.agentProfileUpsert, async (_event, request) => {
+    const state = await requireModelProfileService(services).upsert(
+      isRecord(request) ? request.profile : undefined,
+    )
+    await applyCodexBinEnv(services)
+    return state
+  })
+
+  handle(desktopApiIpcChannels.agentProfileDelete, async (_event, request) => {
+    const state = await requireModelProfileService(services).delete(
+      readProfileIdRequest(request),
+    )
+    await applyCodexBinEnv(services)
+    return state
+  })
+
+  handle(desktopApiIpcChannels.agentProfileSelect, async (_event, request) => {
+    const state = await requireModelProfileService(services).select(
+      readProfileIdRequest(request),
+    )
+    await applyCodexBinEnv(services)
+    return state
+  })
+
+  handle(desktopApiIpcChannels.agentProfileSetApiKey, async (_event, request) => {
+    const { profileId, apiKey } = readProfileApiKeyRequest(request)
+    const state = await requireModelProfileService(services).setApiKey(profileId, apiKey)
+    await applyCodexBinEnv(services)
+    return state
+  })
+
   handle(desktopApiIpcChannels.cliInstallerGetStatus, async () => {
     return await requireCliInstallerService(services).status()
   })
@@ -2670,40 +3022,15 @@ export function registerIpc(
     if (!agentRequest.directory && windowDirectory) {
       agentRequest.directory = windowDirectory
     }
-    if (agentRequest.workspaceId && agentRequest.directory) {
-      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-        workspaceHandle: agentRequest.workspaceId,
-      })
-      if (
-        !isRecord(snapshot) ||
-        typeof snapshot.directory !== 'string' ||
-        normalizeWorkspacePath(snapshot.directory) !==
-          normalizeWorkspacePath(agentRequest.directory)
-      ) {
-        throw new Error('Agent Workspace context does not match its ECC session.')
-      }
-      const configuration = isRecord(snapshot.configuration)
-        ? snapshot.configuration
-        : null
-      const workspaceSpec = isRecord(configuration?.workspaceSpec)
-        ? configuration.workspaceSpec
-        : null
-      if (!workspaceSpec) throw new Error('ECC Workspace configuration is unavailable.')
-      const engineeringSnapshot = isRecord(snapshot.engineeringSnapshot)
-        ? snapshot.engineeringSnapshot
-        : null
-      const workspaceRevision = engineeringSnapshot?.workspaceRevision
-      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
-        throw new Error('ECC Workspace Revision is unavailable.')
-      }
-      agentRequest.workspaceRevision = Number(workspaceRevision)
-      agentRequest.workspaceParameterValues = readAgentWorkspaceParameterValues(
-        workspaceSpec,
-        {},
-      )
-      const design = isRecord(workspaceSpec.design) ? workspaceSpec.design : null
-      if (typeof design?.name === 'string' && design.name) {
-        agentRequest.workspaceDesignId = design.name
+    if (agentRequest.directory) {
+      // The renderer only sends a directory, so main process resolves the
+      // current handle, revision, canonical parameters, and Step Options.
+      const context = await resolveAgentWorkspaceContext(agentRequest.directory)
+      agentRequest.workspaceId = context.workspaceHandle
+      agentRequest.workspaceRevision = context.workspaceRevision
+      agentRequest.workspaceParameterValues = context.workspaceParameterValues
+      if (context.workspaceDesignId) {
+        agentRequest.workspaceDesignId = context.workspaceDesignId
       }
     }
     trackAgentSession(event.sender, agentRequest)
@@ -2713,21 +3040,50 @@ export function registerIpc(
   handle(desktopApiIpcChannels.agentSendMessage, async (event, request) => {
     const agentRequest = readAgentSendMessageRequest(request)
     const subscription = requireAgentSessionOwner(event.sender, agentRequest)
-    if (!agentRequest.confirmationToken && subscription.workspaceId) {
-      const snapshot = await services.eccRuntimeService.workspaceSnapshot({
-        workspaceHandle: subscription.workspaceId,
-      })
-      const engineeringSnapshot =
-        isRecord(snapshot) && isRecord(snapshot.engineeringSnapshot)
-          ? snapshot.engineeringSnapshot
-          : null
-      const workspaceRevision = engineeringSnapshot?.workspaceRevision
-      if (!Number.isInteger(workspaceRevision) || Number(workspaceRevision) < 1) {
-        throw new Error('ECC Workspace Revision is unavailable.')
-      }
-      agentRequest.workspaceRevision = Number(workspaceRevision)
+    if (agentRequest.confirmationToken && agentRequest.directory) {
+      throw new Error('Agent Workspace context cannot change during confirmation.')
+    }
+    if (!agentRequest.confirmationToken) {
+      await refreshAgentSessionWorkspaceContext(event.sender, agentRequest, subscription)
     }
     return await requireAgentRuntime(services).sendMessage(agentRequest)
+  })
+
+  handle(
+    desktopApiIpcChannels.agentRegisterOperationAssociation,
+    async (event, request) => {
+      const association = readAgentOperationAssociationRequest(request)
+      requireAgentSessionOwner(event.sender, association)
+      recordAgentOperationAssociation(
+        agentSessionKey(readAgentProviderId(association), association.sessionId),
+        {
+          command: association.command,
+          operationId: association.operationId,
+          ...(association.workspaceHandle
+            ? { workspaceHandle: association.workspaceHandle }
+            : {}),
+        },
+      )
+    },
+  )
+
+  handle(desktopApiIpcChannels.agentGetModelSettings, async (event, request) => {
+    const agentRequest = readAgentModelSettingsRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).getModelSettings(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentSetModelSettings, async (event, request) => {
+    const agentRequest = readAgentSetModelSettingsRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).setModelSettings(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentAnswerInteraction, async (event, request) => {
+    const agentRequest = readAgentInteractionAnswerRequest(request)
+    const subscription = requireAgentSessionOwner(event.sender, agentRequest)
+    await refreshAgentSessionWorkspaceContext(event.sender, agentRequest, subscription)
+    return await requireAgentRuntime(services).answerInteraction(agentRequest)
   })
 
   handle(desktopApiIpcChannels.agentInterrupt, async (event, request) => {
@@ -2800,7 +3156,9 @@ export function registerIpc(
   })
 }
 
-function requireAgentRuntime(services: DesktopBridgeServices): AgentProviderRuntime {
+function requireAgentRuntime(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['agentRuntimeService']> {
   if (!services.agentRuntimeService) {
     throw new Error(
       'No ECOS Agent provider is available. Check the in-tree agent or ECOS_AGENT_PROVIDER_ROOTS.',
@@ -2816,6 +3174,15 @@ function requireCodexDependencyService(
     throw new Error('Codex dependency service is unavailable.')
   }
   return services.codexDependencyService
+}
+
+function requireModelProfileService(
+  services: DesktopBridgeServices,
+): NonNullable<DesktopBridgeServices['modelProfileService']> {
+  if (!services.modelProfileService) {
+    throw new Error('Model profile service is unavailable.')
+  }
+  return services.modelProfileService
 }
 
 function requireCliInstallerService(
@@ -2847,6 +3214,26 @@ function readCodexBinPathRequest(value: unknown): string {
     return value.path
   }
   throw new Error('Invalid Codex binary path request')
+}
+
+function readProfileIdRequest(value: unknown): string {
+  const profileId = isRecord(value) ? value.profileId : value
+  if (typeof profileId !== 'string' || !profileId.trim()) {
+    throw new Error('Invalid model profile request')
+  }
+  return profileId.trim()
+}
+
+function readProfileApiKeyRequest(value: unknown): { profileId: string; apiKey: string } {
+  if (!isRecord(value)) {
+    throw new Error('Invalid profile API key request')
+  }
+  const profileId = readProfileIdRequest(value)
+  const apiKey = value.apiKey
+  if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 4096) {
+    throw new Error('Invalid profile API key request')
+  }
+  return { profileId, apiKey: apiKey.trim() }
 }
 
 function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {
@@ -2915,10 +3302,184 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
   if (record.confirmationToken !== undefined && !confirmationToken) {
     throw new Error('Agent execution confirmation token is invalid.')
   }
+  if (
+    record.directory !== undefined &&
+    (typeof record.directory !== 'string' ||
+      !record.directory.trim() ||
+      record.directory.length > 4096)
+  ) {
+    throw new Error('Agent Workspace directory is invalid.')
+  }
   return {
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(typeof record.directory === 'string'
+      ? { directory: record.directory.trim() }
+      : {}),
     message,
     providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+const agentOperationAssociationCommands = new Set([
+  'workspace.run',
+  'workspace.runStep',
+  'candidate.rerun',
+  'candidate.resume',
+])
+
+function readAgentOperationAssociationRequest(
+  value: unknown,
+): DesktopAgentOperationAssociationRequest {
+  const record = readAgentRecord(value)
+  const command = record.command
+  const operationId = record.operationId
+  const workspaceHandle =
+    typeof record.workspaceHandle === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(record.workspaceHandle)
+      ? record.workspaceHandle
+      : undefined
+  if (
+    typeof command !== 'string' ||
+    !agentOperationAssociationCommands.has(command) ||
+    typeof operationId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(operationId)
+  ) {
+    throw new Error('Agent operation association is invalid.')
+  }
+  return {
+    command: command as DesktopAgentOperationAssociationRequest['command'],
+    operationId,
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+    ...(workspaceHandle ? { workspaceHandle } : {}),
+  }
+}
+
+const agentReasoningEfforts = new Set<DesktopAgentReasoningEffort>([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+])
+
+function readAgentModelSettingsRequest(value: unknown): DesktopAgentModelSettingsRequest {
+  const record = readAgentRecord(value)
+  return {
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentSetModelSettingsRequest(
+  value: unknown,
+): DesktopAgentSetModelSettingsRequest {
+  const record = readAgentRecord(value)
+  const request = readAgentModelSettingsRequest(record)
+  const model =
+    typeof record.model === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(record.model)
+      ? record.model
+      : undefined
+  const reasoningEffort = agentReasoningEfforts.has(
+    record.reasoningEffort as DesktopAgentReasoningEffort,
+  )
+    ? (record.reasoningEffort as DesktopAgentReasoningEffort)
+    : undefined
+  if (
+    (record.model !== undefined && model === undefined) ||
+    (record.reasoningEffort !== undefined && reasoningEffort === undefined) ||
+    (!model && !reasoningEffort)
+  ) {
+    throw new Error('Invalid Agent model settings request.')
+  }
+  return {
+    ...request,
+    ...(model ? { model } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  }
+}
+
+function readAgentInteractionAnswerRequest(
+  value: unknown,
+): DesktopAgentInteractionAnswerRequest {
+  const record = readAgentRecord(value)
+  const kind = record.kind
+  const requestId = record.requestId
+  if (
+    (kind !== 'choice' && kind !== 'confirm' && kind !== 'form') ||
+    typeof requestId !== 'string' ||
+    !requestId.trim()
+  ) {
+    throw new Error('Invalid agent interaction answer request.')
+  }
+  if (record.undo === true) {
+    if (
+      record.optionId !== undefined ||
+      record.text !== undefined ||
+      record.values !== undefined
+    ) {
+      throw new Error('Undo interaction cannot include an answer.')
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      undo: true,
+    }
+  }
+  if (kind === 'form') {
+    if (!isRecord(record.values))
+      throw new Error('Form interaction values must be an object.')
+    const entries = Object.entries(record.values)
+    if (entries.length > 16) throw new Error('Form interaction has too many fields.')
+    for (const [fieldId, fieldValue] of entries) {
+      if (
+        !fieldId.trim() ||
+        (typeof fieldValue !== 'string' &&
+          typeof fieldValue !== 'number' &&
+          fieldValue !== null) ||
+        (typeof fieldValue === 'string' && fieldValue.length > 4096) ||
+        (typeof fieldValue === 'number' && !Number.isFinite(fieldValue))
+      ) {
+        throw new Error('Invalid form interaction value.')
+      }
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      values: record.values as Record<string, string | number | null>,
+    }
+  }
+  if (record.text !== undefined) {
+    if (
+      typeof record.text !== 'string' ||
+      !record.text.trim() ||
+      record.text.length > 4096 ||
+      record.optionId !== undefined
+    ) {
+      throw new Error('Invalid typed interaction answer.')
+    }
+    return {
+      kind,
+      providerId: readAgentProviderId(record),
+      requestId: requestId.trim(),
+      sessionId: readAgentSessionId(record.sessionId),
+      text: record.text.trim(),
+    }
+  }
+  if (typeof record.optionId !== 'string' || !record.optionId.trim()) {
+    throw new Error('Agent interaction optionId is required.')
+  }
+  return {
+    kind,
+    optionId: record.optionId.trim(),
+    providerId: readAgentProviderId(record),
+    requestId: requestId.trim(),
     sessionId: readAgentSessionId(record.sessionId),
   }
 }

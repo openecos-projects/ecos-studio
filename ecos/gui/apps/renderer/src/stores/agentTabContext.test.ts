@@ -35,10 +35,10 @@ describe('resolveAgentTabTitle', () => {
         mode: 'workspace',
         workspaceName: 'ws_0029',
         workspacePath: '/tmp/ws_0029',
-        step: 'place',
-        existingTitles: ['ws_0029 · place'],
+        step: 'Timing optimization',
+        existingTitles: ['ws_0029 · Timing optimization'],
       }),
-    ).toBe('ws_0029 · place (2)')
+    ).toBe('ws_0029 · Timing optimization (2)')
   })
 })
 

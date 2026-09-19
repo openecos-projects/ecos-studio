@@ -4,7 +4,7 @@
       type="button"
       class="flow-run-icon-button flow-run-start-button"
       :aria-busy="flowRunControlBusy"
-      :disabled="flowRunControlBusy"
+      :disabled="flowRunControlDisabled"
       :title="runButtonLabel"
       @click="handleRunRequest"
     >
@@ -54,6 +54,7 @@ import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
+import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 import { flowNodeStatus } from './flowStatus'
 
 const rerunConfirmationVisible = ref(false)
@@ -67,13 +68,24 @@ const {
   setRunStepOngoingByPath,
 } = useBackendFlowStages()
 const { overallStatus } = useSubflow()
-const { currentProject, ensureApiReady, showToast } = useWorkspace()
+const { currentProject, ensureApiReady, showToast, workspaceSession } = useWorkspace()
+const optimizationEpisodes = useOptimizationEpisodeStore()
 
 const flowRunControlBusy = computed(() => preparingRerun.value || isRunning.value)
+const parentRunGuarded = computed(() =>
+  Boolean(optimizationEpisodes.episodeForParent(workspaceSession.value.workspaceId)),
+)
+const flowRunControlDisabled = computed(
+  () => flowRunControlBusy.value || parentRunGuarded.value,
+)
 const isHomeStage = computed(() => currentStage.value === 'home')
 const runTargetLabel = computed(() => (isHomeStage.value ? 'the full flow' : 'this step'))
 const runButtonLabel = computed(() =>
-  isHomeStage.value ? 'Run full flow' : 'Run current step',
+  parentRunGuarded.value
+    ? 'Optimization is running in the background.'
+    : isHomeStage.value
+      ? 'Run full flow'
+      : 'Run current step',
 )
 const hasFinishedFlow = computed(
   () =>
@@ -96,7 +108,7 @@ const needsRerunConfirmation = computed(() =>
 )
 
 async function handleRunRequest(): Promise<void> {
-  if (flowRunControlBusy.value) return
+  if (flowRunControlDisabled.value) return
   if (needsRerunConfirmation.value) {
     rerunConfirmationVisible.value = true
     return
@@ -110,7 +122,7 @@ async function confirmRerun(): Promise<void> {
 }
 
 async function executeRun(rerun: boolean): Promise<void> {
-  if (flowRunControlBusy.value) return
+  if (flowRunControlDisabled.value) return
 
   if (!(await ensureApiReady())) {
     await refreshFlowStages()
@@ -128,7 +140,7 @@ async function executeRun(rerun: boolean): Promise<void> {
         severity: 'error',
         summary: 'Unable to Prepare Rerun',
         detail: error instanceof Error ? error.message : String(error),
-        life: 5000,
+        life: 15000,
       })
       return
     } finally {
@@ -160,7 +172,7 @@ async function canRerunCurrentStep(): Promise<boolean> {
     severity: 'warn',
     summary: 'Close Chip Viewer First',
     detail: 'Close the rendered layout for this step before rerunning it.',
-    life: 6000,
+    life: 15000,
   })
   return false
 }

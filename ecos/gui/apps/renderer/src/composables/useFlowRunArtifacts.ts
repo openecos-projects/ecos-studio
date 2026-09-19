@@ -316,7 +316,7 @@ export function useFlowRunArtifacts() {
     let unregisterWorkspaceRerunPrepared: (() => void) | null = null
     const capture: FlowRunArtifactCapture = {
       inspect(stepNames?: Iterable<string>): Promise<void> {
-        return enqueueInspection(stepNames)
+        return stepNames ? enqueueInspection(stepNames) : inspectExistingCompletedSteps()
       },
       async settle(settleOptions: FlowRunArtifactSettleOptions = {}): Promise<void> {
         for (const stepName of settleOptions.forceStepNames ?? []) {

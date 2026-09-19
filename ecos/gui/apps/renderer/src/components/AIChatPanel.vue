@@ -15,20 +15,23 @@
       ref="scrollContainerRef"
       class="custom-scrollbar agent-chat__scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3"
       @scroll.passive="onScrollContainerScroll"
-      @click="onScrollContainerClick"
     >
       <div
-        v-if="codexSetupStatus && codexSetupStatus.state !== 'ready'"
+        v-if="codexSetupCardStatus"
         class="flex h-full flex-col items-center justify-center px-4 py-10"
       >
         <AgentCodexSetupCard
           :busy="codexSetupBusy || isAgentConnecting"
-          :status="codexSetupStatus"
+          :status="codexSetupCardStatus"
+          :profiles="profileState?.profiles"
+          :api-key-configured="profileState?.apiKeyConfigured"
           @install="installCodexCli"
-          @login="loginCodexCli"
           @recheck="recheckCodexCli"
           @pick-bin="pickCodexBin"
           @retry="retryAfterCodexReady"
+          @select-profile="selectProfile"
+          @set-api-key="setProfileApiKey"
+          @manage="openProfileManager"
         />
       </div>
       <div
@@ -56,6 +59,15 @@
         </div>
       </div>
       <div v-else class="messages-container w-full max-w-full min-w-0 py-2">
+        <button
+          v-if="quickStartRunning"
+          type="button"
+          class="quick-start-stop"
+          @click="stopQuickStart"
+        >
+          <i class="ri-stop-fill" aria-hidden="true"></i>
+          <span>Stop Quick Start</span>
+        </button>
         <section
           v-for="(turn, turnIndex) in conversationTurns"
           :key="turn.id"
@@ -67,60 +79,56 @@
             </div>
           </header>
           <div class="chat-turn__body">
-            <!-- Confirmed plans stay above the run progress they produced -->
-            <AgentSessionContractPanels
-              mode="committed"
-              :choice-disabled="isRunning"
-              :is-last-turn="turnIndex === conversationTurns.length - 1"
-              :turn-id="turn.id"
-              v-bind="contractPanelBind"
-              @create-workspace="createWorkspaceFromAgent"
-              @setup-select="handleWorkspaceSetupChoice"
-              @rerun-select="handleWorkspaceRerunChoice"
-              @continue-select="handleWorkspaceContinueChoice"
-              @parameter-select="handleWorkspaceParameterChoice"
-            />
-            <template v-for="item in turn.responses" :key="item.id">
+            <template v-for="msg in turn.responses" :key="msg.id">
               <ChatStepArtifactGroup
-                v-if="isChatStepArtifactGroup(item)"
-                :step="item.step"
-                :messages="item.messages"
+                v-if="isChatStepArtifactGroup(msg)"
+                :step="msg.step"
+                :messages="msg.messages"
                 @img-load="onImageLoad"
               />
-              <MessageItem
-                v-else
-                :message="item"
-                :choice-interactive="item.choice?.promptId === activeChoicePromptId"
-                :choice-disabled="isRunning"
-                @img-load="onImageLoad"
-                @choice="handleMessageChoice"
-                class="message-item w-full max-w-full min-w-0"
-              />
+              <template v-else>
+                <div
+                  v-if="isAnsweredInteraction(msg)"
+                  class="interaction-receipt"
+                  :aria-label="`${msg.interaction?.title}: ${msg.interactionAnswer}`"
+                >
+                  <i class="ri-check-line" aria-hidden="true"></i>
+                  <span class="interaction-receipt__question">{{
+                    msg.interaction?.title
+                  }}</span>
+                  <strong class="interaction-receipt__answer">{{
+                    msg.interactionAnswer
+                  }}</strong>
+                </div>
+                <MessageItem
+                  v-else-if="isVisibleResponse(msg)"
+                  :message="msg"
+                  @img-load="onImageLoad"
+                  @optimization-control="handleOptimizationControl"
+                  class="message-item w-full max-w-full min-w-0"
+                />
+                <AgentSessionContractPanels
+                  v-if="isContractAnchorMessage(msg.id)"
+                  mode="committed"
+                  :message-id="msg.id"
+                  v-bind="contractPanelBind"
+                  @create-workspace="createWorkspaceFromAgent"
+                />
+              </template>
             </template>
-            <div
+            <AgentActivityStream
               v-if="turnIndex === conversationTurns.length - 1 && showPendingPlaceholder"
               class="agent-pending"
-              role="status"
-              aria-live="polite"
-              :aria-label="isInterruptPending ? 'Stopping' : 'Waiting for reply'"
-            >
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-              <span class="agent-pending__dot" aria-hidden="true"></span>
-            </div>
+              :activity="pendingActivity"
+              status="loading"
+            />
             <!-- Awaiting confirmation stays after Q&A, at the end of the latest turn -->
             <AgentSessionContractPanels
               v-if="turnIndex === conversationTurns.length - 1"
               mode="awaiting"
-              :choice-disabled="isRunning"
               :is-last-turn="true"
-              :turn-id="turn.id"
               v-bind="contractPanelBind"
               @create-workspace="createWorkspaceFromAgent"
-              @setup-select="handleWorkspaceSetupChoice"
-              @rerun-select="handleWorkspaceRerunChoice"
-              @continue-select="handleWorkspaceContinueChoice"
-              @parameter-select="handleWorkspaceParameterChoice"
             />
           </div>
         </section>
@@ -128,6 +136,60 @@
     </div>
 
     <div class="composer-footer">
+      <details
+        v-if="pendingInteraction"
+        ref="interactionDockRef"
+        class="interaction-dock"
+        :open="interactionExpanded"
+        @toggle="syncInteractionExpanded"
+      >
+        <summary class="interaction-dock__summary">
+          <i
+            class="ri-question-line interaction-dock__summary-icon"
+            aria-hidden="true"
+          ></i>
+          <span class="interaction-dock__summary-copy">
+            <strong>{{ pendingInteraction.title }}</strong>
+            <span>Waiting for your input</span>
+          </span>
+          <i
+            class="ri-arrow-down-s-line interaction-dock__summary-chevron"
+            aria-hidden="true"
+          ></i>
+        </summary>
+        <div class="interaction-dock__content custom-scrollbar">
+          <AgentInteractionCard
+            ref="interactionCardRef"
+            :interaction="pendingInteraction"
+            :disabled="isRunning"
+            @browse-rtl="browseInteractionRtl"
+            @undo="undoLastInteraction"
+            @answer="
+              handleInteraction(
+                pendingInteraction.requestId,
+                pendingInteraction.kind,
+                $event,
+              )
+            "
+          />
+        </div>
+      </details>
+      <div
+        v-else-if="undoInteraction && !isRunning"
+        ref="interactionDockRef"
+        class="interaction-dock custom-scrollbar"
+      >
+        <button
+          type="button"
+          class="interaction-undo"
+          aria-label="Undo last selection"
+          :disabled="isRunning"
+          @click="undoLastInteraction"
+        >
+          <i class="ri-arrow-go-back-line" aria-hidden="true"></i>
+          <span>Undo selection</span>
+        </button>
+      </div>
       <p class="composer-sr-status" role="status" aria-live="polite">
         {{ statusLabel }}
       </p>
@@ -150,10 +212,22 @@
           :placeholder="composerPlaceholder"
           aria-label="Message"
           class="composer-input"
+          @input="resetInputHistory"
           @keydown="handleKeyDown"
         ></textarea>
 
         <div class="composer-actions">
+          <AgentModelSettingsMenu
+            :settings="activeUi.modelSettings"
+            :busy="activeUi.modelSettingsBusy"
+            :disabled="isRunning || isAgentConnecting"
+            :error="activeUi.modelSettingsError"
+            :profiles="profileState?.profiles"
+            :active-profile-id="profileState?.activeProfileId"
+            @update="updateAgentModelSettings"
+            @select-profile="selectProfile"
+            @configure="openProfileManager"
+          />
           <button
             v-if="isRunning"
             type="button"
@@ -180,6 +254,62 @@
         </div>
       </div>
     </div>
+    <AgentProfileManagerDialog
+      :open="profileManagerOpen"
+      :state="profileState"
+      :busy="codexSetupBusy || isAgentConnecting"
+      :error="profileManagerError"
+      @close="profileManagerOpen = false"
+      @select="selectProfile"
+      @save="upsertProfile"
+      @delete="deleteProfile"
+      @set-api-key="setProfileApiKey"
+    />
+    <Dialog
+      :visible="Boolean(pendingTabCloseId)"
+      modal
+      header="Optimization is still running"
+      :closable="!tabCloseStopping"
+      :draggable="false"
+      :style="{ width: 'min(460px, calc(100vw - 32px))' }"
+      @update:visible="handleTabCloseDialogVisibility"
+    >
+      <div class="agent-close-dialog">
+        <p>
+          This Agent tab owns an Optimization Episode that can continue in the background.
+        </p>
+        <p v-if="tabCloseIssue" class="agent-close-dialog__issue" role="alert">
+          {{ tabCloseIssue }}
+        </p>
+        <div class="agent-close-dialog__actions">
+          <button type="button" :disabled="tabCloseStopping" @click="cancelTabClose">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="is-danger"
+            :disabled="tabCloseStopping"
+            @click="stopAndCloseChatTab"
+          >
+            <i
+              v-if="tabCloseStopping"
+              class="ri-loader-4-line animate-spin"
+              aria-hidden="true"
+            ></i>
+            <span>{{ tabCloseStopping ? 'Stopping' : 'Stop and Close' }}</span>
+          </button>
+          <button
+            type="button"
+            class="agent-close-keep is-primary"
+            :disabled="tabCloseStopping"
+            autofocus
+            @click="keepRunningAndCloseChatTab"
+          >
+            Keep Running
+          </button>
+        </div>
+      </div>
+    </Dialog>
   </div>
 </template>
 
@@ -196,40 +326,60 @@ import {
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
+import Dialog from 'primevue/dialog'
 import type {
-  DesktopAgentChoice,
-  DesktopAgentChoiceOption,
   DesktopAgentEvent,
+  DesktopAgentInteractionRequest,
+  DesktopAgentSetModelSettingsRequest,
+  DesktopAgentWorkspaceSignoffContract,
   DesktopCodexDependencyStatus,
   DesktopCodexInstallProgressEvent,
+  DesktopModelProfile,
+  DesktopModelProfileState,
 } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
-import ChatStepArtifactGroup from './ChatStepArtifactGroup.vue'
+import AgentModelSettingsMenu from './AgentModelSettingsMenu.vue'
+import AgentActivityStream from './AgentActivityStream.vue'
+import AgentInteractionCard from './AgentInteractionCard.vue'
 import AgentChatTabStrip from './AgentChatTabStrip.vue'
 import AgentCodexSetupCard from './AgentCodexSetupCard.vue'
+import AgentProfileManagerDialog from './AgentProfileManagerDialog.vue'
 import AgentSessionContractPanels from './AgentSessionContractPanels.vue'
+import ChatStepArtifactGroup from './ChatStepArtifactGroup.vue'
 import {
   createAgentSessionUiState,
   getAgentSessionUi,
   GUI_SWITCH_PROMPT,
+  navigateInputHistory,
   removeAgentSessionUi,
-  type AgentContractSurface,
+  resetInputHistoryNavigation,
   type PendingGuiAction,
 } from './agentSessionUi'
-import { choiceSelectionText } from './agentChoiceDisplay'
 import { displayAgentContractTitle } from './agentContractDisplay'
-import { groupMessagesIntoTurns, isChatStepArtifactGroup } from './chatTurns'
+import { agentActivityUpdateKey } from './agentActivityPresentation'
 import {
-  confirmedExecutionToken,
-  executeConfirmedWorkspaceParameterUpdate,
-} from './workspaceParameterUpdateExecution'
+  describeInteractionAnswer,
+  groupMessagesIntoTurns,
+  isChatStepArtifactGroup,
+  pendingInteractionPresentation,
+  type InteractionAnswer,
+} from './chatTurns'
+import { executeConfirmedWorkspaceParameterUpdate } from './workspaceParameterUpdateExecution'
+import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
-import { existingTabIdForMode, resolveAgentTabContext } from '@/stores/agentTabContext'
-import { getDesktopApi } from '@/platform/desktop'
+import { resolveAgentTabContext } from '@/stores/agentTabContext'
+import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
-import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
+import { useOptimizationEpisodeTabs } from '@/composables/useOptimizationEpisodeTabs'
+import {
+  isQuickStartChoice,
+  isQuickStartNextChoice,
+  quickStartRunnerKey,
+  type QuickStartRunner,
+} from '@/composables/quickStartUi'
 import { useFlowRunner } from '@/composables/useFlowRunner'
+import { waitForWorkspaceAgentFlowArtifacts } from '@/composables/workspaceAgentFlowCapture'
 import {
   clearAgentWorkspaceRerunHomePrepared,
   markAgentWorkspaceRerunHomePrepared,
@@ -237,6 +387,8 @@ import {
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { updateWorkspaceConfigurationApi } from '@/api/workspace'
+import { readWorkspaceFlowResourceApi } from '@/api/workspaceResources'
+import { canExportSignoffPackage } from '@/composables/useSignoffPackageExport'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import {
   registerProjectManagedWorkspace,
@@ -256,47 +408,75 @@ const agentShell = useAgentShellStore()
 const { messages } = storeToRefs(messageStore)
 const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
 const codexSetupBusy = ref(false)
+const profileState = ref<DesktopModelProfileState | null>(null)
+const profileManagerOpen = ref(false)
+const profileManagerError = ref('')
+const codexSetupManageOpen = ref(false)
 let unsubscribeCodexProgress: (() => void) | null = null
+const codexSetupCardStatus = computed(() =>
+  codexSetupStatus.value &&
+  (codexSetupStatus.value.state !== 'ready' || codexSetupManageOpen.value)
+    ? codexSetupStatus.value
+    : null,
+)
 const { tabs: chatTabs, sessionId: sharedSessionId, activeTab } = storeToRefs(agentShell)
 const conversationTurns = computed(() => groupMessagesIntoTurns(messages.value))
+const interactionPresentation = computed(() =>
+  pendingInteractionPresentation(messages.value),
+)
+const interactionCompanionIds = computed(
+  () =>
+    new Set(
+      messages.value
+        .map((message) => message.interactionCompanionId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+)
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
+const quickStartRunner = inject<QuickStartRunner>(quickStartRunnerKey)
+const quickStartRunning = computed(() => activeUi.value.isQuickStartRunning)
 const router = useRouter()
 const route = useRoute()
 const {
   openProject,
   invalidateWorkspaceResources,
   currentProject,
-  backendRuntimeEvents,
+  workspaceSession,
   waitForRuntimeOperation,
 } = useWorkspace()
 const workspaceLifecycle = useWorkspaceLifecycle()
 const { runAllFlow } = useFlowRunner()
-const liveAgentFlowProgress = useAgentFlowProgress(
-  (message) => {
-    const sessionId = agentSessionId.value
-    if (message.startsWith('Live flow progress is unavailable')) {
-      messageStore.addAssistantMessage(message, 'done', sessionId ?? undefined)
-      return
-    }
-    messageStore.appendToolProgress(message, sessionId ?? undefined)
-  },
-  () => {
-    invalidateWorkspaceResources(['flow', 'step', 'maps', 'logs'])
-  },
-  backendRuntimeEvents,
-)
-const agentFlowProgress =
-  props.shell === 'home'
-    ? liveAgentFlowProgress
-    : {
-        start: async () => undefined,
-        stop: () => undefined,
-      }
 
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
+const interactionDockRef = ref<HTMLElement | null>(null)
 const agentSessionId = computed({
   get: () => sharedSessionId.value,
   set: (value: string | null) => agentShell.setSessionId(value),
+})
+const {
+  activeOptimizationEpisode,
+  cancelTabClose,
+  closeChatTab,
+  handleOptimizationControl,
+  handleTabCloseDialogVisibility,
+  keepRunningAndCloseChatTab,
+  pendingTabCloseId,
+  start: startOptimizationEpisodes,
+  stopAndCloseChatTab,
+  tabCloseIssue,
+  tabCloseStopping,
+} = useOptimizationEpisodeTabs({
+  formatError: agentErrorMessage,
+  removeTab: removeChatTab,
+  createTab: (directory, sessionId, activate) =>
+    agentShell.createTab(
+      resolveAgentTabContext({
+        shell: 'workspace',
+        currentWorkspacePath: directory,
+      }),
+      { activate, id: sessionId },
+    ),
+  sessionId: agentSessionId,
 })
 
 function sessionUi(sessionId: string | null | undefined) {
@@ -311,6 +491,11 @@ const inputValue = computed({
     activeUi.value.inputValue = value
   },
 })
+const userInputHistory = computed(() =>
+  messages.value
+    .filter((message) => message.role === 'user' && message.type === 'text')
+    .map((message) => message.content),
+)
 const queuedMessage = computed({
   get: () => activeUi.value.queuedMessage,
   set: (value: string) => {
@@ -365,9 +550,14 @@ const isWorkspaceParameterPending = computed({
     activeUi.value.isWorkspaceParameterPending = value
   },
 })
+const isWorkspaceSignoffPending = computed({
+  get: () => activeUi.value.isWorkspaceSignoffPending,
+  set: (value: boolean) => {
+    activeUi.value.isWorkspaceSignoffPending = value
+  },
+})
 const workspaceSetupContract = computed(() => activeUi.value.workspaceSetupContract)
 const workspaceSetupMessage = computed(() => activeUi.value.workspaceSetupMessage)
-const workspaceSetupChoice = computed(() => activeUi.value.workspaceSetupChoice)
 const workspaceSetupAnsweredOptionId = computed(
   () => activeUi.value.workspaceSetupAnsweredOptionId,
 )
@@ -379,13 +569,11 @@ const workspaceCreateSetupId = computed({
 })
 const workspaceRerunContract = computed(() => activeUi.value.workspaceRerunContract)
 const workspaceRerunMessage = computed(() => activeUi.value.workspaceRerunMessage)
-const workspaceRerunChoice = computed(() => activeUi.value.workspaceRerunChoice)
 const workspaceRerunAnsweredOptionId = computed(
   () => activeUi.value.workspaceRerunAnsweredOptionId,
 )
 const workspaceContinueContract = computed(() => activeUi.value.workspaceContinueContract)
 const workspaceContinueMessage = computed(() => activeUi.value.workspaceContinueMessage)
-const workspaceContinueChoice = computed(() => activeUi.value.workspaceContinueChoice)
 const workspaceContinueAnsweredOptionId = computed(
   () => activeUi.value.workspaceContinueAnsweredOptionId,
 )
@@ -393,11 +581,15 @@ const workspaceParameterContract = computed(
   () => activeUi.value.workspaceParameterContract,
 )
 const workspaceParameterMessage = computed(() => activeUi.value.workspaceParameterMessage)
-const workspaceParameterChoice = computed(() => activeUi.value.workspaceParameterChoice)
 const workspaceParameterAnsweredOptionId = computed(
   () => activeUi.value.workspaceParameterAnsweredOptionId,
 )
-const lastContractSurface = computed(() => activeUi.value.lastContractSurface)
+const workspaceSignoffAnsweredOptionId = computed(
+  () => activeUi.value.workspaceSignoffAnsweredOptionId,
+)
+const workspaceSignoffOutputPath = computed(
+  () => activeUi.value.workspaceSignoffOutputPath,
+)
 const workspaceRerunRows = computed<[string, string][]>(
   () =>
     workspaceRerunContract.value?.fields.map(({ label, value }) => [label, value]) ?? [],
@@ -412,50 +604,54 @@ const workspaceParameterRows = computed<[string, string][]>(
     workspaceParameterContract.value?.fields.map(({ label, value }) => [label, value]) ??
     [],
 )
+const workspaceSignoffRows = computed<[string, string][]>(() => {
+  const review = activeUi.value.workspaceSignoffReview
+  if (!review) return []
+  return [
+    ['Overall', review.status],
+    ...review.groups.map((group): [string, string] => [
+      group.label,
+      `${group.available}/${group.expected} · ${group.summary}`,
+    ]),
+    ...review.risks.map((risk): [string, string] => [
+      `${risk.severity === 'blocked' ? 'Blocked' : 'Warning'}: ${risk.title}`,
+      risk.summary,
+    ]),
+  ]
+})
 const workspaceRerunExecutionState = computed(() =>
   isWorkspaceRerunPending.value
     ? 'Running'
     : workspaceRerunAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceRerunChoice.value,
-          workspaceRerunAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceContinueExecutionState = computed(() =>
   isWorkspaceContinuePending.value
     ? 'Running'
     : workspaceContinueAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceContinueChoice.value,
-          workspaceContinueAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
 const workspaceParameterExecutionState = computed(() =>
   isWorkspaceParameterPending.value
     ? 'Saving'
     : workspaceParameterAnsweredOptionId.value
-      ? contractAnswerState(
-          workspaceParameterChoice.value,
-          workspaceParameterAnsweredOptionId.value,
-        )
+      ? 'Confirmed'
       : 'Review',
 )
-
-function contractAnswerState(
-  choice: DesktopAgentChoice | undefined,
-  answeredOptionId: string,
-): string {
-  const option = choice?.options.find((candidate) => candidate.id === answeredOptionId)
-  if (option?.value === '2' || /cancel/i.test(option?.label ?? '')) return 'Cancelled'
-  return 'Confirmed'
-}
+const workspaceSignoffExecutionState = computed(() => {
+  if (isWorkspaceSignoffPending.value) {
+    return activeUi.value.workspaceSignoffReview ? 'Exporting' : 'Checking'
+  }
+  if (workspaceSignoffAnsweredOptionId.value) return 'Confirmed'
+  const status = activeUi.value.workspaceSignoffReview?.status
+  return status ? `${status[0]?.toUpperCase()}${status.slice(1)}` : 'Review'
+})
 
 const contractPanelBind = computed(() => ({
   workspaceContinueAnsweredOptionId: workspaceContinueAnsweredOptionId.value,
-  workspaceContinueAnchorTurnId: activeUi.value.workspaceContinueAnchorTurnId,
-  workspaceContinueChoice: workspaceContinueChoice.value,
+  workspaceContinueAnchorMessageId: activeUi.value.workspaceContinueAnchorMessageId,
   workspaceContinueExecutionState: workspaceContinueExecutionState.value,
   workspaceContinueMessage: workspaceContinueMessage.value,
   workspaceContinueRows: workspaceContinueRows.value,
@@ -464,8 +660,7 @@ const contractPanelBind = computed(() => ({
   ),
   workspaceCreateSetupId: workspaceCreateSetupId.value,
   workspaceParameterAnsweredOptionId: workspaceParameterAnsweredOptionId.value,
-  workspaceParameterAnchorTurnId: activeUi.value.workspaceParameterAnchorTurnId,
-  workspaceParameterChoice: workspaceParameterChoice.value,
+  workspaceParameterAnchorMessageId: activeUi.value.workspaceParameterAnchorMessageId,
   workspaceParameterExecutionState: workspaceParameterExecutionState.value,
   workspaceParameterMessage: workspaceParameterMessage.value,
   workspaceParameterRows: workspaceParameterRows.value,
@@ -473,17 +668,22 @@ const contractPanelBind = computed(() => ({
     workspaceParameterContract.value?.title ?? '',
   ),
   workspaceRerunAnsweredOptionId: workspaceRerunAnsweredOptionId.value,
-  workspaceRerunAnchorTurnId: activeUi.value.workspaceRerunAnchorTurnId,
-  workspaceRerunChoice: workspaceRerunChoice.value,
+  workspaceRerunAnchorMessageId: activeUi.value.workspaceRerunAnchorMessageId,
   workspaceRerunExecutionState: workspaceRerunExecutionState.value,
   workspaceRerunMessage: workspaceRerunMessage.value,
   workspaceRerunRows: workspaceRerunRows.value,
   workspaceRerunTitle: displayAgentContractTitle(
     workspaceRerunContract.value?.title ?? '',
   ),
+  workspaceSignoffAnsweredOptionId: workspaceSignoffAnsweredOptionId.value,
+  workspaceSignoffAnchorMessageId: activeUi.value.workspaceSignoffAnchorMessageId,
+  workspaceSignoffExecutionState: workspaceSignoffExecutionState.value,
+  workspaceSignoffOutputPath: workspaceSignoffOutputPath.value,
+  workspaceSignoffRows: workspaceSignoffRows.value,
+  workspaceSignoffTitle:
+    activeUi.value.lastContractSurface === 'signoff' ? 'Signoff package export' : '',
   workspaceSetupAnsweredOptionId: workspaceSetupAnsweredOptionId.value,
-  workspaceSetupAnchorTurnId: activeUi.value.workspaceSetupAnchorTurnId,
-  workspaceSetupChoice: workspaceSetupChoice.value,
+  workspaceSetupAnchorMessageId: activeUi.value.workspaceSetupAnchorMessageId,
   workspaceSetupContract: workspaceSetupContract.value,
   workspaceSetupMessage: workspaceSetupMessage.value,
 }))
@@ -491,60 +691,96 @@ const contractPanelBind = computed(() => ({
 const isRunning = computed(
   () =>
     isAgentRequestPending.value ||
+    quickStartRunning.value ||
     isWorkspaceCreationPending.value ||
     isWorkspaceRerunPending.value ||
     isWorkspaceContinuePending.value ||
     isWorkspaceParameterPending.value ||
-    agentRunStatus.value === 'running',
+    isWorkspaceSignoffPending.value ||
+    agentRunStatus.value === 'running' ||
+    Boolean(activeOptimizationEpisode.value),
 )
-const pendingMessageChoice = computed(
+const pendingInteraction = computed(() => interactionPresentation.value.interaction)
+const undoInteraction = computed(() => activeUi.value.undoInteraction)
+const interactionCardRef = ref<{
+  setFieldValue(fieldId: string, value: string): void
+} | null>(null)
+const interactionExpanded = ref(false)
+
+watch(
+  () => agentSessionId.value,
+  (sessionId, previousSessionId) => {
+    if (sessionId !== previousSessionId) interactionExpanded.value = false
+  },
+)
+
+watch(
+  () => pendingInteraction.value?.requestId,
+  () => {
+    const interaction = pendingInteraction.value
+    if (interaction && isQuickStartNextChoice(interaction))
+      interactionExpanded.value = true
+  },
+  { immediate: true },
+)
+
+function syncInteractionExpanded(event: Event): void {
+  interactionExpanded.value = (event.currentTarget as HTMLDetailsElement).open
+  void nextTick(bindInteractionDockObserver)
+}
+
+function isVisibleResponse(message: Message): boolean {
+  return message.type !== 'interaction' && !interactionCompanionIds.value.has(message.id)
+}
+
+function isAnsweredInteraction(message: Message): boolean {
+  return (
+    message.type === 'interaction' &&
+    message.interaction?.status === 'answered' &&
+    Boolean(message.interactionAnswer)
+  )
+}
+
+function isContractAnchorMessage(messageId: string): boolean {
+  const ui = activeUi.value
+  return [
+    ui.workspaceSetupAnchorMessageId,
+    ui.workspaceRerunAnchorMessageId,
+    ui.workspaceContinueAnchorMessageId,
+    ui.workspaceParameterAnchorMessageId,
+    ui.workspaceSignoffAnchorMessageId,
+  ].includes(messageId)
+}
+const pendingInteractionAcceptsText = computed(() => {
+  const interaction = pendingInteraction.value
+  if (!interaction) return false
+  return interaction.kind !== 'form'
+})
+const composerLocked = computed(
   () =>
-    [...messages.value]
-      .reverse()
-      .find((message) => message.choice && !message.answeredOptionId)?.choice,
+    isInterruptPending.value ||
+    !agentSessionId.value ||
+    (Boolean(pendingInteraction.value) && !pendingInteractionAcceptsText.value),
 )
-const activeChoicePromptId = computed(() => pendingMessageChoice.value?.promptId)
-const activeChoice = computed(
-  () =>
-    (lastContractSurface.value === 'setup' && !workspaceSetupAnsweredOptionId.value
-      ? workspaceSetupChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'rerun' && !workspaceRerunAnsweredOptionId.value
-      ? workspaceRerunChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'continue' && !workspaceContinueAnsweredOptionId.value
-      ? workspaceContinueChoice.value
-      : undefined) ??
-    (lastContractSurface.value === 'parameter' &&
-    !workspaceParameterAnsweredOptionId.value
-      ? workspaceParameterChoice.value
-      : undefined) ??
-    pendingMessageChoice.value,
-)
-const composerLocked = computed(() => isInterruptPending.value || !agentSessionId.value)
 const canSubmit = computed(
   () =>
     Boolean(agentSessionId.value) &&
     !isAgentConnecting.value &&
     !composerLocked.value &&
-    (Boolean(inputValue.value.trim()) ||
-      (!isRunning.value && Boolean(activeChoice.value?.allowFreeText))),
+    Boolean(inputValue.value.trim()),
 )
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
+  if (pendingInteraction.value) return 'Ask anything or reply…'
   if (isRunning.value) return 'Add a follow-up…'
-  if (activeChoice.value?.allowFreeText && activeChoice.value.variant === 'buttons') {
-    return 'Enter a value, or choose above'
-  }
-  if (activeChoice.value) return 'Ask anything, or choose above'
   return 'Ask anything…'
 })
 const statusLabel = computed(() => {
   if (isAgentConnecting.value) return 'Connecting'
   if (queuedMessage.value) return 'Agent is working, 1 message queued'
   if (isRunning.value) return isInterruptPending.value ? 'Stopping' : 'Agent is working'
-  if (agentRunStatus.value === 'awaiting_choice') return 'Waiting for your choice'
+  if (agentRunStatus.value === 'awaiting_interaction') return 'Waiting for your input'
   if (agentRunStatus.value === 'interrupted') return 'Interrupted'
   if (!agentSessionId.value) return 'Agent unavailable'
   return 'Ready'
@@ -557,26 +793,34 @@ const showPendingPlaceholder = computed(() => {
   if (!last?.user) return false
   return last.responses.length === 0
 })
+const pendingActivity = computed(() => ({
+  items: [],
+  startedAt: activeUi.value.runStartedAt ?? Date.now(),
+  turnId: agentSessionId.value ?? 'pending',
+}))
 const emptyStateSuggestions = computed(() => {
   const tabMode = activeTab.value?.mode ?? (props.shell === 'home' ? 'home' : 'workspace')
   if (tabMode === 'home') {
     return [
       {
-        label: 'Start creating a Workspace and run a full RTL-to-GDS flow',
-        value: '1',
+        label: 'Run your own RTL-to-GDS flow',
+        value: '2',
+      },
+      {
+        label: 'Optimize a completed design',
+        value: '3',
       },
     ]
   }
   const suggestions = [
-    { label: 'Update workspace parameters', value: '1' },
-    { label: 'Rerun a completed stage', value: '2' },
-    { label: 'Continue unfinished flow', value: '3' },
+    { label: 'Rerun a completed stage', value: '1' },
+    { label: 'Continue unfinished flow', value: '2' },
   ]
   const projectRoot = activeTab.value?.projectRoot || queryString(route.query.projectRoot)
   if (projectRoot) {
     suggestions.push({
       label: 'Create another workspace in this project',
-      value: '4',
+      value: '3',
     })
   }
   return suggestions
@@ -585,20 +829,29 @@ let unsubscribeAgentEvents: (() => void) | undefined
 let postCreateFlowRunning = false
 
 onMounted(() => {
+  void refreshProfiles()
   void connectAgent().then(() => {
     void maybeRunPostCreateFlow()
     void flushPendingGuiActionForActiveTab()
   })
 })
 
+watch(
+  () => agentShell.pendingPostCreateFlow,
+  (handoff) => {
+    if (handoff) void maybeRunPostCreateFlow()
+  },
+)
+
 onUnmounted(() => {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = undefined
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
-  agentFlowProgress.stop()
   scrollContentObserver?.disconnect()
   scrollContentObserver = undefined
+  interactionDockObserver?.disconnect()
+  interactionDockObserver = undefined
 })
 
 watch(
@@ -611,21 +864,14 @@ watch(
 )
 
 function currentTabContext() {
-  const isHome = props.shell === 'home'
-  const workspacePath = isHome ? undefined : currentProject.value?.path
+  const workspacePath = currentProject.value?.path
   return resolveAgentTabContext({
-    shell: isHome ? 'home' : 'workspace',
+    shell: props.shell === 'home' ? 'home' : 'workspace',
     currentWorkspacePath: workspacePath,
-    currentWorkspaceName: isHome
-      ? undefined
-      : (currentProject.value?.name ?? baseName(workspacePath)),
+    currentWorkspaceName: currentProject.value?.name ?? baseName(workspacePath),
     currentProjectRoot: queryString(route.query.projectRoot) || undefined,
     routeProjectRoot: queryString(route.query.projectRoot) || undefined,
-    step: isHome
-      ? undefined
-      : typeof route.params.step === 'string'
-        ? route.params.step
-        : undefined,
+    step: typeof route.params.step === 'string' ? route.params.step : undefined,
   })
 }
 
@@ -637,29 +883,58 @@ function baseName(path: string | undefined): string | undefined {
 }
 
 async function connectAgent(): Promise<void> {
-  const desktopApi = getDesktopApi()
-  const agent = desktopApi.agent
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
   if (!agent) return
 
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
   agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
-  await ensureShellTab()
-}
+  await startOptimizationEpisodes()
 
-async function ensureShellTab(): Promise<void> {
-  const mode = props.shell === 'home' ? 'home' : 'workspace'
-  const tabId = existingTabIdForMode(agentShell.tabs, mode, agentShell.activeTabId)
-  if (!tabId) {
+  if (agentShell.tabs.length === 0) {
     await createChatTab()
     return
   }
-  if (agentShell.activeTabId !== tabId) {
-    agentShell.activateTab(tabId)
-    messageStore.setActiveSessionId(tabId)
+
+  const active = agentShell.activeTab
+  const workspacePath = currentProject.value?.path
+  if (
+    props.shell === 'workspace' &&
+    workspacePath &&
+    active &&
+    active.workspacePath !== workspacePath
+  ) {
+    // Each workspace owns a session: reactivate its tab or start a fresh one.
+    const existing = agentShell.tabs.find(
+      (tab) => tab.id !== active.id && tab.workspacePath === workspacePath,
+    )
+    if (existing) {
+      agentShell.activateTab(existing.id)
+      if (existing.started) await loadAgentModelSettings(existing.id)
+      else await startProviderSession(existing.id)
+      return
+    }
+    if (active.workspacePath) {
+      await createChatTab()
+      return
+    }
+    agentShell.bindTabToWorkspace(active.id, workspacePath)
+    const postCreate = agentShell.pendingPostCreateFlow
+    if (
+      postCreate?.ownerSessionId !== active.id ||
+      postCreate.workspacePath !== workspacePath
+    ) {
+      await startProviderSession(active.id)
+      return
+    }
   }
-  const tab = agentShell.tabs.find((candidate) => candidate.id === tabId)
-  if (tab && !tab.started) await startProviderSession(tab.id)
+
+  if (active && !active.started) {
+    await startProviderSession(active.id)
+  } else if (active) {
+    await loadAgentModelSettings(active.id)
+  }
 }
 
 async function createChatTab(): Promise<void> {
@@ -672,11 +947,15 @@ async function createChatTab(): Promise<void> {
 function selectChatTab(id: string): void {
   if (!agentShell.activateTab(id)) return
   messageStore.setActiveSessionId(id)
+  void loadAgentModelSettings(id)
 }
 
-async function closeChatTab(id: string): Promise<void> {
-  const agent = getDesktopApi().agent
-  if (agent) {
+async function removeChatTab(
+  id: string,
+  options: { interrupt: boolean; preserveSession: boolean },
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  if (agent && options.interrupt) {
     try {
       await agent.interrupt({ providerId: AGENT_PROVIDER_ID, sessionId: id })
     } catch {
@@ -684,8 +963,10 @@ async function closeChatTab(id: string): Promise<void> {
     }
   }
   agentShell.removeTab(id)
-  messageStore.clearSessionMessages(id)
-  removeAgentSessionUi(id)
+  if (!options.preserveSession) {
+    messageStore.clearSessionMessages(id)
+    removeAgentSessionUi(id)
+  }
   if (agentShell.tabs.length === 0) {
     await createChatTab()
     return
@@ -698,9 +979,42 @@ async function closeChatTab(id: string): Promise<void> {
   }
 }
 
+async function undoLastInteraction(): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  const interaction = pendingInteraction.value ?? undoInteraction.value
+  if (
+    !agent ||
+    !sessionId ||
+    !interaction ||
+    (pendingInteraction.value && !pendingInteraction.value.canUndo) ||
+    isAgentRequestPending.value
+  )
+    return
+  isAgentRequestPending.value = true
+  try {
+    const result = await agent.answerInteraction({
+      kind: interaction.kind,
+      providerId: AGENT_PROVIDER_ID,
+      requestId: interaction.requestId,
+      sessionId,
+      undo: true,
+    })
+    if (result.undoneRequestId) {
+      messageStore.rewindToInteraction(result.undoneRequestId, sessionId)
+      activeUi.value.undoInteraction = undefined
+    }
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+  } finally {
+    isAgentRequestPending.value = false
+    messageStore.finishStreamingMessages(sessionId)
+  }
+}
+
 async function startProviderSession(sessionId: string): Promise<void> {
-  const desktopApi = getDesktopApi()
-  const agent = desktopApi.agent
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
   const tab = agentShell.tabs.find((candidate) => candidate.id === sessionId)
   if (!agent || !tab) return
 
@@ -717,21 +1031,19 @@ async function startProviderSession(sessionId: string): Promise<void> {
       name: project.name,
       path: project.path,
     }))
-    await agent.startSession({
+    const response = await agent.startSession({
       providerId: AGENT_PROVIDER_ID,
       sessionId,
       mode: tab.mode,
       ...(tab.projectRoot ? { projectRoot: tab.projectRoot } : {}),
       ...(tab.workspacePath ? { directory: tab.workspacePath } : {}),
-      ...(tab.workspacePath &&
-      normalizeWorkspaceRoot(currentProject.value?.path ?? '') ===
-        normalizeWorkspaceRoot(tab.workspacePath) &&
-      workspaceLifecycle.session.value.workspaceId
-        ? { workspaceId: workspaceLifecycle.session.value.workspaceId }
-        : {}),
       ...(knownProjects.length > 0 ? { knownProjects } : {}),
     })
+    if (response.pendingInteraction) {
+      messageStore.addInteraction(response.pendingInteraction, undefined, sessionId)
+    }
     agentShell.markTabStarted(sessionId)
+    await loadAgentModelSettings(sessionId)
     codexSetupStatus.value = null
   } catch (error) {
     ui.runStatus = 'error'
@@ -747,6 +1059,46 @@ async function startProviderSession(sessionId: string): Promise<void> {
   }
 }
 
+async function loadAgentModelSettings(sessionId: string): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const ui = sessionUi(sessionId)
+  if (!agent || ui.modelSettingsBusy) return
+  ui.modelSettingsBusy = true
+  ui.modelSettingsError = ''
+  try {
+    ui.modelSettings = await agent.getModelSettings({
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    ui.modelSettingsError = agentErrorMessage(error)
+  } finally {
+    ui.modelSettingsBusy = false
+  }
+}
+
+async function updateAgentModelSettings(
+  patch: Pick<DesktopAgentSetModelSettingsRequest, 'model' | 'reasoningEffort'>,
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId || isRunning.value || activeUi.value.modelSettingsBusy) return
+  const ui = sessionUi(sessionId)
+  ui.modelSettingsBusy = true
+  ui.modelSettingsError = ''
+  try {
+    ui.modelSettings = await agent.setModelSettings({
+      ...patch,
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    ui.modelSettingsError = agentErrorMessage(error)
+  } finally {
+    ui.modelSettingsBusy = false
+  }
+}
+
 function isCodexMissingError(message: string): boolean {
   return /codex cli is required/i.test(message)
 }
@@ -758,129 +1110,226 @@ async function ensureCodexReady(): Promise<boolean> {
 }
 
 async function refreshCodexStatus(): Promise<DesktopCodexDependencyStatus | null> {
-  const codex = getDesktopApi().agent?.codex
+  const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) {
-    setCodexSetupStatus(null)
+    codexSetupStatus.value = null
     return null
   }
   try {
     const status = await codex.getStatus()
-    setCodexSetupStatus(status)
+    codexSetupStatus.value = status
     return status
   } catch (error) {
-    const status: DesktopCodexDependencyStatus = {
+    codexSetupStatus.value = {
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: false,
       state: 'error',
     }
-    setCodexSetupStatus(status)
-    return status
+    return codexSetupStatus.value
   }
-}
-
-function setCodexSetupStatus(status: DesktopCodexDependencyStatus | null): void {
-  codexSetupStatus.value = status?.state === 'ready' ? null : status
-  agentShell.setCodexStatus(status)
 }
 
 function bindCodexProgress(): void {
   unsubscribeCodexProgress?.()
   unsubscribeCodexProgress = null
-  const codex = getDesktopApi().agent?.codex
+  const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex?.onProgress) return
   unsubscribeCodexProgress = codex.onProgress(
     (event: DesktopCodexInstallProgressEvent) => {
       if (!codexSetupStatus.value) {
-        setCodexSetupStatus({
+        codexSetupStatus.value = {
           authState: 'unknown',
           platformSupportsInstall: true,
           state: 'installing',
-        })
+        }
       }
-      setCodexSetupStatus({
+      codexSetupStatus.value = {
         ...codexSetupStatus.value,
         progressMessage: event.message,
         progressRatio: event.progress,
         state: event.phase === 'error' ? 'error' : 'installing',
-      } as DesktopCodexDependencyStatus)
+      }
     },
   )
 }
 
 async function installCodexCli(): Promise<void> {
-  const codex = getDesktopApi().agent?.codex
+  const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   bindCodexProgress()
   try {
     const status = await codex.install()
-    setCodexSetupStatus(status)
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    setCodexSetupStatus({
+    codexSetupStatus.value = {
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: true,
       state: 'error',
-    })
-  } finally {
-    codexSetupBusy.value = false
-  }
-}
-
-async function loginCodexCli(): Promise<void> {
-  const codex = getDesktopApi().agent?.codex
-  if (!codex) return
-  codexSetupBusy.value = true
-  try {
-    const status = await codex.login()
-    setCodexSetupStatus(status)
-  } catch (error) {
-    setCodexSetupStatus({
-      ...(codexSetupStatus.value ?? {
-        authState: 'unknown',
-        platformSupportsInstall: false,
-        state: 'error',
-      }),
-      message: agentErrorMessage(error),
-      state: 'error',
-    } as DesktopCodexDependencyStatus)
+    }
   } finally {
     codexSetupBusy.value = false
   }
 }
 
 async function recheckCodexCli(): Promise<void> {
-  const codex = getDesktopApi().agent?.codex
+  const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) return
   codexSetupBusy.value = true
   try {
     const status = await codex.recheck()
-    setCodexSetupStatus(status)
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    setCodexSetupStatus({
+    codexSetupStatus.value = {
       authState: 'unknown',
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
-    })
+    }
   } finally {
     codexSetupBusy.value = false
   }
 }
 
-async function pickCodexBin(): Promise<void> {
-  const desktopApi = getDesktopApi()
-  const codex = desktopApi.agent?.codex
+async function refreshProfiles(): Promise<DesktopModelProfileState | null> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex?.listProfiles) return null
+  try {
+    profileState.value = await codex.listProfiles()
+  } catch {
+    // Keep the last known state; the setup card surfaces status errors.
+  }
+  return profileState.value
+}
+
+async function afterProfileMutation(): Promise<void> {
+  const status = await refreshCodexStatus()
+  if (status?.state === 'ready') {
+    codexSetupManageOpen.value = false
+    const sessionId = agentSessionId.value
+    if (sessionId) await startProviderSession(sessionId)
+  }
+}
+
+async function selectProfile(profileId: string): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
   if (!codex) return
+  codexSetupBusy.value = true
+  profileManagerError.value = ''
+  try {
+    profileState.value = await codex.selectProfile({ profileId })
+    await afterProfileMutation()
+  } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
+    codexSetupStatus.value = {
+      authState: 'unknown',
+      message: agentErrorMessage(error),
+      platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
+      state: 'error',
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function setProfileApiKey(profileId: string, apiKey: string): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  profileManagerError.value = ''
+  try {
+    profileState.value = await codex.setProfileApiKey({ profileId, apiKey })
+    await afterProfileMutation()
+  } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function upsertProfile(
+  profile: DesktopModelProfile,
+  apiKey?: string,
+): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  profileManagerError.value = ''
+  try {
+    let saved = await codex.upsertProfile({ profile })
+    if (apiKey) {
+      saved = await codex.setProfileApiKey({ profileId: profile.id, apiKey })
+    }
+    profileState.value = saved
+    await afterProfileMutation()
+  } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function deleteProfile(profileId: string): Promise<void> {
+  const codex = getOptionalDesktopApi()?.agent?.codex
+  if (!codex) return
+  codexSetupBusy.value = true
+  profileManagerError.value = ''
+  try {
+    profileState.value = await codex.deleteProfile({ profileId })
+    await afterProfileMutation()
+  } catch (error) {
+    profileManagerError.value = agentErrorMessage(error)
+    codexSetupStatus.value = {
+      ...(codexSetupStatus.value ?? {
+        authState: 'unknown',
+        platformSupportsInstall: false,
+        state: 'error',
+      }),
+      message: agentErrorMessage(error),
+    }
+  } finally {
+    codexSetupBusy.value = false
+  }
+}
+
+async function openProfileManager(): Promise<void> {
+  profileManagerError.value = ''
+  profileManagerOpen.value = true
+  await refreshProfiles()
+}
+
+async function pickCodexBin(): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const codex = desktopApi?.agent?.codex
+  if (!desktopApi || !codex) return
   const files = await desktopApi.dialog.pickFiles({
     title: '选择 Codex CLI 可执行文件',
   })
@@ -889,19 +1338,20 @@ async function pickCodexBin(): Promise<void> {
   codexSetupBusy.value = true
   try {
     const status = await codex.setBinPath({ path: selected })
-    setCodexSetupStatus(status)
+    codexSetupStatus.value = status
     if (status.state === 'ready') {
+      codexSetupManageOpen.value = false
       const sessionId = agentSessionId.value
       if (sessionId) await startProviderSession(sessionId)
     }
   } catch (error) {
-    setCodexSetupStatus({
+    codexSetupStatus.value = {
       authState: 'unknown',
       binPath: selected,
       message: agentErrorMessage(error),
       platformSupportsInstall: codexSetupStatus.value?.platformSupportsInstall ?? false,
       state: 'error',
-    })
+    }
   } finally {
     codexSetupBusy.value = false
   }
@@ -929,12 +1379,20 @@ async function flushPendingGuiActionForActiveTab(): Promise<void> {
   const pending = ui.pendingGuiAction
   if (!pending) return
   ui.pendingGuiAction = undefined
+  if (pending.type === 'quick_start') {
+    await startQuickStart(sessionId)
+    return
+  }
   if (pending.type === 'rerun') {
     await executeWorkspaceRerun(pending.contract, pending.token, sessionId)
     return
   }
   if (pending.type === 'continue') {
     await executeWorkspaceContinue(pending.payload, sessionId)
+    return
+  }
+  if (pending.type === 'signoff') {
+    await executeWorkspaceSignoff(pending.contract, sessionId)
     return
   }
   await executeWorkspaceParameterUpdate(pending.payload, sessionId)
@@ -948,30 +1406,39 @@ async function maybeRunPostCreateFlow(): Promise<void> {
   postCreateFlowRunning = true
   ownerUi.isWorkspaceCreationPending = true
   try {
-    await agentFlowProgress.start(handoff.workspacePath)
     try {
       const flowResult = await runAllFlow({ rerun: false })
       if (flowResult === null) {
         throw new Error('Flow execution did not complete successfully.')
       }
       await waitForRuntimeOperation(flowResult.operationId)
+      await waitForWorkspaceAgentFlowArtifacts(
+        handoff.workspacePath,
+        handoff.ownerSessionId,
+      )
+      const flow = await readWorkspaceFlowResourceApi()
+      ownerUi.workspaceCreateSetupId = undefined
       await reportWorkspaceCreationResult(
         handoff.setupId,
         'succeeded',
         '',
+        canExportSignoffPackage(flow) ? 'Harden' : undefined,
+        handoff.workspacePath,
         handoff.ownerSessionId,
       )
     } finally {
-      agentFlowProgress.stop()
       messageStore.finishToolProgress()
     }
   } catch (error) {
     const reason = agentErrorMessage(error)
+    ownerUi.workspaceCreateSetupId = undefined
     try {
       await reportWorkspaceCreationResult(
         handoff.setupId,
         'failed',
         reason,
+        undefined,
+        undefined,
         handoff.ownerSessionId,
       )
     } catch {
@@ -1002,9 +1469,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_rerun') {
       ui.workspaceRerunContract = event.contract
       ui.workspaceRerunMessage = event.text ?? ''
-      ui.workspaceRerunChoice = undefined
       ui.workspaceRerunAnsweredOptionId = ''
-      ui.workspaceRerunAnchorTurnId = undefined
+      ui.workspaceRerunAnchorMessageId = undefined
       ui.lastContractSurface = 'rerun'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1012,9 +1478,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_continue') {
       ui.workspaceContinueContract = event.contract
       ui.workspaceContinueMessage = event.text ?? ''
-      ui.workspaceContinueChoice = undefined
       ui.workspaceContinueAnsweredOptionId = ''
-      ui.workspaceContinueAnchorTurnId = undefined
+      ui.workspaceContinueAnchorMessageId = undefined
       ui.lastContractSurface = 'continue'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1022,9 +1487,8 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_parameter_update') {
       ui.workspaceParameterContract = event.contract
       ui.workspaceParameterMessage = event.text ?? ''
-      ui.workspaceParameterChoice = undefined
       ui.workspaceParameterAnsweredOptionId = ''
-      ui.workspaceParameterAnchorTurnId = undefined
+      ui.workspaceParameterAnchorMessageId = undefined
       ui.lastContractSurface = 'parameter'
       if (isActive) scrollWorkspaceSetupIntoView()
       return
@@ -1035,47 +1499,24 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
     ui.workspaceSetupContract = event.workspaceSetup
     ui.workspaceSetupMessage = event.text ?? ''
-    ui.workspaceSetupChoice = undefined
     ui.workspaceSetupAnsweredOptionId = ''
-    ui.workspaceSetupAnchorTurnId = undefined
+    ui.workspaceSetupAnchorMessageId = undefined
     ui.workspaceSetupStartedId = undefined
     ui.lastContractSurface = 'setup'
     if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
-  if (event.type === 'choice' && event.choice) {
-    if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'setup') {
-      ui.workspaceSetupChoice = event.choice
-      ui.workspaceSetupAnsweredOptionId = ''
-    } else if (event.choice.variant === 'buttons' && ui.lastContractSurface === 'rerun') {
-      ui.workspaceRerunChoice = event.choice
-      ui.workspaceRerunAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'continue'
-    ) {
-      ui.workspaceContinueChoice = event.choice
-      ui.workspaceContinueAnsweredOptionId = ''
-    } else if (
-      event.choice.variant === 'buttons' &&
-      ui.lastContractSurface === 'parameter'
-    ) {
-      ui.workspaceParameterChoice = event.choice
-      ui.workspaceParameterAnsweredOptionId = ''
-    } else {
-      if (event.choice.variant === 'list') {
-        ui.lastContractSurface = undefined
-        ui.workspaceSetupChoice = undefined
-        ui.workspaceRerunChoice = undefined
-        ui.workspaceContinueChoice = undefined
-        ui.workspaceParameterChoice = undefined
-      }
-      messageStore.addChoice(event.choice, event.messageId, event.sessionId)
-    }
+  if (event.type === 'interaction' && event.interaction) {
+    messageStore.upsertAgentEvent(event)
     if (isActive) scrollWorkspaceSetupIntoView()
     return
   }
+  if (event.type === 'unsupported_interaction') {
+    messageStore.upsertAgentEvent(event)
+    return
+  }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
+    ui.undoInteraction = undefined
     ui.workspaceCreateSetupId = event.workspaceCreateSetupId
     return
   }
@@ -1084,6 +1525,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     event.workspaceRerun &&
     event.workspaceRerunToken
   ) {
+    ui.undoInteraction = undefined
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`,
@@ -1106,6 +1548,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_continue' && event.workspaceContinue) {
+    ui.undoInteraction = undefined
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? 'Continuing unfinished flow.',
@@ -1123,6 +1566,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_parameter_update' && event.workspaceParameterUpdate) {
+    ui.undoInteraction = undefined
     ui.pendingParameterUpdate = event.workspaceParameterUpdate
     if (isActive) scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
@@ -1140,11 +1584,46 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     void executeWorkspaceParameterUpdate(event.workspaceParameterUpdate, event.sessionId)
     return
   }
+  if (event.type === 'workspace_signoff' && event.workspaceSignoff) {
+    ui.undoInteraction = undefined
+    ui.lastContractSurface = 'signoff'
+    if (event.workspaceSignoff.action === 'inspect') {
+      ui.workspaceSignoffAnsweredOptionId = ''
+      ui.workspaceSignoffAnchorMessageId = undefined
+      ui.workspaceSignoffReview = undefined
+    }
+    if (isActive) scrollWorkspaceSetupIntoView()
+    messageStore.addAssistantMessage(
+      event.text ?? 'Preparing the signoff package workflow.',
+      'done',
+      event.sessionId,
+    )
+    if (!isActive) {
+      deferGuiAction(event.sessionId, {
+        type: 'signoff',
+        contract: event.workspaceSignoff,
+      })
+      return
+    }
+    void executeWorkspaceSignoff(event.workspaceSignoff, event.sessionId)
+    return
+  }
   if (event.type === 'error') {
     messageStore.upsertAgentEvent(event)
     return
   }
-  if (event.type === 'message' || event.type === 'tool') {
+  if (event.type === 'optimization') {
+    messageStore.upsertAgentEvent(event)
+    return
+  }
+  if (event.type === 'message' || event.type === 'tool' || event.type === 'activity') {
+    if (
+      event.type === 'message' &&
+      ui.isQuickStartRunning &&
+      event.text?.startsWith('ECOS Agent is bound to the open workspace.')
+    ) {
+      return
+    }
     messageStore.upsertAgentEvent(event)
   }
 }
@@ -1168,6 +1647,26 @@ const NEAR_BOTTOM_THRESHOLD = 80
 /** Whether the viewport was pinned to the latest output before content grew. */
 const stickToBottom = ref(true)
 let scrollContentObserver: ResizeObserver | undefined
+let interactionDockObserver: ResizeObserver | undefined
+
+function bindInteractionDockObserver(): void {
+  interactionDockObserver?.disconnect()
+  const scroll = scrollContainerRef.value
+  const dock = interactionDockRef.value
+  const update = () => {
+    scroll?.style.setProperty(
+      '--interaction-overlay-height',
+      dock ? `${Math.ceil(dock.getBoundingClientRect().height + 8)}px` : '0px',
+    )
+    if (stickToBottom.value) scrollToBottom(false)
+  }
+  update()
+  if (!dock || typeof ResizeObserver === 'undefined') return
+  interactionDockObserver = new ResizeObserver(update)
+  interactionDockObserver.observe(dock)
+}
+
+watch(interactionDockRef, () => nextTick(bindInteractionDockObserver), { flush: 'post' })
 
 /**
  * 判断当前滚动位置是否接近底部
@@ -1180,12 +1679,6 @@ const isNearBottom = (): boolean => {
 
 function onScrollContainerScroll(): void {
   stickToBottom.value = isNearBottom()
-}
-
-function onScrollContainerClick(event: MouseEvent): void {
-  const target = event.target
-  if (!(target instanceof Element) || !target.closest('[aria-expanded]')) return
-  stickToBottom.value = false
 }
 
 /**
@@ -1258,6 +1751,7 @@ watch(
       last?.content.length ?? 0,
       last?.status ?? '',
       last?.type ?? '',
+      last?.activity?.items.map(agentActivityUpdateKey).join('|') ?? '',
     ].join(':')
   },
   (signature, previous) => {
@@ -1278,32 +1772,35 @@ watch(
 const handleSubmit = async (): Promise<void> => {
   if (!canSubmit.value) return
   const message = inputValue.value.trim()
+  if (pendingInteraction.value) {
+    const interaction = pendingInteraction.value
+    inputValue.value = ''
+    resetInputHistory()
+    await handleInteractionText(interaction, message)
+    return
+  }
   if (isRunning.value) {
     if (message) queuedMessage.value = message
     inputValue.value = ''
+    resetInputHistory()
     return
   }
   await sendAgentMessage(message)
 }
 
-async function sendAgentMessage(
-  message: string,
-  addToHistory = true,
-  confirmationToken?: string,
-): Promise<void> {
-  const desktopApi = getDesktopApi()
-  const agent = desktopApi.agent
+async function sendAgentMessage(message: string, addToHistory = true): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isAgentRequestPending.value) return
 
-  // Any outbound user turn closes leftover choice cards so history cannot be replayed.
-  messageStore.dismissOpenChoices()
   if (addToHistory && message) messageStore.addMessage(message)
+  activeUi.value.undoInteraction = undefined
   inputValue.value = ''
+  resetInputHistory()
   isAgentRequestPending.value = true
   try {
     await agent.sendMessage({
-      ...(confirmationToken ? { confirmationToken } : {}),
       message,
       providerId: AGENT_PROVIDER_ID,
       sessionId,
@@ -1316,85 +1813,262 @@ async function sendAgentMessage(
   }
 }
 
-function handleMessageChoice(promptId: string, option: DesktopAgentChoiceOption): void {
-  if (isRunning.value) return
-  if (activeChoicePromptId.value && activeChoicePromptId.value !== promptId) return
-  const message = messages.value.find(
-    (candidate) => candidate.choice?.promptId === promptId,
-  )
-  if (!message?.choice || !messageStore.answerChoice(message.choice.promptId, option))
-    return
-  void submitChoice(option)
-}
-
-function handleWorkspaceSetupChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceSetupAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceSetupAnsweredOptionId = option.id
-  void submitChoice(option, 'setup')
-}
-
-function handleWorkspaceRerunChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceRerunAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceRerunAnsweredOptionId = option.id
-  void submitChoice(option, 'rerun')
-}
-
-function handleWorkspaceContinueChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceContinueAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceContinueAnsweredOptionId = option.id
-  void submitChoice(option, 'continue')
-}
-
-function handleWorkspaceParameterChoice(option: DesktopAgentChoiceOption): void {
-  if (activeUi.value.workspaceParameterAnsweredOptionId) return
-  if (!isActiveGuiOwner(agentSessionId.value ?? '')) {
-    messageStore.addAssistantMessage(GUI_SWITCH_PROMPT, 'done')
-    return
-  }
-  activeUi.value.workspaceParameterAnsweredOptionId = option.id
-  void submitChoice(option, 'parameter')
-}
-
-async function submitChoice(
-  option: DesktopAgentChoiceOption,
-  contractSurface?: AgentContractSurface,
+async function handleInteraction(
+  requestId: string,
+  kind: 'choice' | 'confirm' | 'form',
+  answer: InteractionAnswer,
+  displayAsMessage = false,
 ): Promise<void> {
-  messageStore.addMessage(choiceSelectionText(option))
-  const turns = conversationTurns.value
-  const turnId = turns[turns.length - 1]?.id
-  if (contractSurface && turnId) {
-    if (contractSurface === 'setup') activeUi.value.workspaceSetupAnchorTurnId = turnId
-    if (contractSurface === 'rerun') activeUi.value.workspaceRerunAnchorTurnId = turnId
-    if (contractSurface === 'continue')
-      activeUi.value.workspaceContinueAnchorTurnId = turnId
-    if (contractSurface === 'parameter')
-      activeUi.value.workspaceParameterAnchorTurnId = turnId
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  const sessionId = agentSessionId.value
+  if (
+    !agent ||
+    !sessionId ||
+    isAgentRequestPending.value ||
+    quickStartRunning.value ||
+    !isActiveGuiOwner(sessionId)
+  )
+    return
+  const ownerUi = sessionUi(sessionId)
+  const interaction = messages.value.find(
+    (message) => message.interaction?.requestId === requestId,
+  )?.interaction
+  const textMessage = displayAsMessage && 'text' in answer ? answer.text.trim() : ''
+  const startsQuickStart =
+    props.shell === 'home' &&
+    Boolean(quickStartRunner) &&
+    kind === 'choice' &&
+    'optionId' in answer &&
+    interaction !== undefined &&
+    isQuickStartChoice(interaction, answer.optionId)
+  if (
+    !interaction ||
+    !messageStore.answerInteraction(
+      requestId,
+      textMessage ? '' : describeInteractionAnswer(interaction, answer),
+    )
+  )
+    return
+  if (textMessage) messageStore.addMessage(textMessage)
+  ownerUi.isRequestPending = true
+  let accepted = false
+  try {
+    const request =
+      kind === 'form'
+        ? {
+            kind,
+            values: 'values' in answer ? answer.values : {},
+            providerId: AGENT_PROVIDER_ID,
+            requestId,
+            sessionId,
+          }
+        : {
+            kind,
+            ...('text' in answer
+              ? { text: answer.text }
+              : { optionId: 'optionId' in answer ? answer.optionId : '' }),
+            providerId: AGENT_PROVIDER_ID,
+            requestId,
+            sessionId,
+          }
+    const result = await agent.answerInteraction(request)
+    ownerUi.undoInteraction =
+      result.canUndo && !startsQuickStart ? { kind, requestId } : undefined
+    markContractInteractionAnswered(sessionId, requestId)
+    accepted = true
+  } catch (error) {
+    messageStore.restoreInteraction(requestId)
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+  } finally {
+    ownerUi.isRequestPending = false
+    messageStore.finishStreamingMessages(sessionId)
   }
-  const executionContract =
-    contractSurface === 'rerun'
-      ? activeUi.value.workspaceRerunContract
-      : contractSurface === 'parameter'
-        ? activeUi.value.workspaceParameterContract
-        : undefined
-  const confirmationToken = confirmedExecutionToken(option.value, executionContract)
-  await sendAgentMessage(option.value, false, confirmationToken)
+  if (
+    startsQuickStart &&
+    accepted &&
+    agentShell.tabs.some((tab) => tab.id === sessionId)
+  ) {
+    if (isActiveGuiOwner(sessionId)) await startQuickStart(sessionId)
+    else deferGuiAction(sessionId, { type: 'quick_start' })
+  }
+}
+
+async function browseInteractionRtl(fieldId: string): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  if (!desktopApi) return
+  try {
+    const picked = await desktopApi.dialog.pickRtlSources({
+      multiple: false,
+      title: 'Choose RTL file',
+    })
+    const path = picked?.files[0]
+    if (path) interactionCardRef.value?.setFieldValue(fieldId, path)
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  }
+}
+
+async function handleInteractionText(
+  interaction: DesktopAgentInteractionRequest,
+  message: string,
+): Promise<void> {
+  if (!message || !pendingInteractionAcceptsText.value) return
+  if (interaction.kind === 'form' && interaction.interaction.kind === 'form') {
+    const field = interaction.interaction.fields[0]
+    if (!field || interaction.interaction.fields.length !== 1) return
+    await handleInteraction(interaction.requestId, interaction.kind, {
+      values: { [field.id]: message },
+    })
+    return
+  }
+  await handleInteraction(
+    interaction.requestId,
+    interaction.kind,
+    { text: message },
+    true,
+  )
+}
+
+function markContractInteractionAnswered(sessionId: string, requestId: string): void {
+  const ui = sessionUi(sessionId)
+  const anchorMessageId = messages.value.find(
+    (message) => message.interaction?.requestId === requestId,
+  )?.id
+  if (ui.lastContractSurface === 'setup') {
+    ui.workspaceSetupAnsweredOptionId = requestId
+    ui.workspaceSetupAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'rerun') {
+    ui.workspaceRerunAnsweredOptionId = requestId
+    ui.workspaceRerunAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'continue') {
+    ui.workspaceContinueAnsweredOptionId = requestId
+    ui.workspaceContinueAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'parameter') {
+    ui.workspaceParameterAnsweredOptionId = requestId
+    ui.workspaceParameterAnchorMessageId = anchorMessageId
+  }
+  if (ui.lastContractSurface === 'signoff') {
+    ui.workspaceSignoffAnsweredOptionId = requestId
+    ui.workspaceSignoffAnchorMessageId = anchorMessageId
+  }
 }
 
 function sendSuggestion(suggestion: { label: string; value: string }): void {
   messageStore.addMessage(suggestion.label)
   void sendAgentMessage(suggestion.value, false)
+}
+
+async function startQuickStart(sessionId: string): Promise<void> {
+  if (!quickStartRunner || !isActiveGuiOwner(sessionId)) return
+  const ownerUi = sessionUi(sessionId)
+  if (ownerUi.isQuickStartRunning) return
+  ownerUi.isQuickStartRunning = true
+  const quickStartAbortController = new AbortController()
+  ownerUi.quickStartAbortController = quickStartAbortController
+  if (sessionId) messageStore.addMessage('Quick Start · GCD 示例流程')
+  const narrationMessageId = sessionId
+    ? messageStore.addAssistantMessage(
+        '我会一步一步带你完成 Quick Start。\n\n',
+        'loading',
+        sessionId,
+      )
+    : null
+  const appendNarration = (message: string): void => {
+    if (!narrationMessageId) return
+    messageStore.appendToMessage(narrationMessageId, `${message}\n\n`)
+  }
+  const startedAtByStep = new Map<string, number>()
+  const turnId = `quick-start-${Date.now()}`
+  try {
+    const result = await quickStartRunner(
+      (event) => {
+        if (!sessionId) return
+        if (event.status === 'running' && event.stepId === 'preflight') {
+          appendNarration('我先检查 GCD 示例、ICS55 PDK 和 MPC 资源。')
+        }
+        const now = Date.now()
+        const output = event.output as { state?: string } | undefined
+        const status =
+          event.stepId === 'run-flow' &&
+          event.status === 'completed' &&
+          (output?.state === 'failed' || output?.state === 'cancelled')
+            ? 'failed'
+            : event.status
+        const startedAt = startedAtByStep.get(event.stepId) ?? now
+        if (event.status === 'running') startedAtByStep.set(event.stepId, startedAt)
+        messageStore.upsertAgentEvent({
+          activity: {
+            arguments: JSON.stringify({
+              capability: event.capability,
+              surface: event.surface,
+            }),
+            durationMs:
+              event.status === 'running' ? undefined : Math.max(0, now - startedAt),
+            itemId: `quick-start-${event.stepId}`,
+            kind: 'tool_call',
+            progress: event.status === 'running' ? event.labelKey : undefined,
+            result: event.status === 'completed' ? event.detailKey : undefined,
+            schema_version: 'flow-agent.activity.v1',
+            startedAt,
+            status,
+            tool: event.labelKey,
+            turnId,
+            turnStartedAt: startedAt,
+          },
+          messageId: `quick-start-${event.stepId}`,
+          providerId: AGENT_PROVIDER_ID,
+          sessionId,
+          type: 'activity',
+        })
+      },
+      quickStartAbortController.signal,
+      appendNarration,
+    )
+    appendNarration(
+      result.state === 'succeeded'
+        ? 'Quick Start 的完整 RTL 到 GDS 流程已执行完成。检查结果与时序指标请以实际报告为准。'
+        : result.state === 'cancelled'
+          ? 'Quick Start 流程已取消。'
+          : `Quick Start 流程未完成：${result.error ?? '请查看失败阶段的日志。'}`,
+    )
+    if (sessionId && agentShell.tabs.some((tab) => tab.id === sessionId)) {
+      const agent = getOptionalDesktopApi()?.agent
+      if (!agent) throw new Error('ECOS Agent is unavailable for the next-step guide.')
+      await agent.sendMessage({
+        providerId: AGENT_PROVIDER_ID,
+        sessionId,
+        directory: result.workspacePath,
+        message: `quick_start_result:${JSON.stringify({
+          workspace: result.workspacePath,
+          operation_id: result.operationId,
+        })}`,
+      })
+      agentShell.bindTabToWorkspace(sessionId, result.workspacePath)
+    }
+  } catch (error) {
+    if (!sessionId) return
+    if (quickStartAbortController.signal.aborted || isQuickStartAbort(error)) {
+      appendNarration('Quick Start 已停止。')
+    } else {
+      messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+    }
+  } finally {
+    messageStore.finishStreamingMessages(sessionId ?? undefined)
+    ownerUi.isQuickStartRunning = false
+    ownerUi.quickStartAbortController = undefined
+  }
+}
+
+function stopQuickStart(): void {
+  activeUi.value.quickStartAbortController?.abort()
+}
+
+function isQuickStartAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function cancelQueuedMessage(): void {
@@ -1409,7 +2083,7 @@ async function flushQueuedMessage(): Promise<void> {
 }
 
 async function interruptAgent(): Promise<void> {
-  const agent = getDesktopApi().agent
+  const agent = getOptionalDesktopApi()?.agent
   const sessionId = agentSessionId.value
   if (!agent || !sessionId || isInterruptPending.value) return
   isInterruptPending.value = true
@@ -1423,7 +2097,12 @@ async function interruptAgent(): Promise<void> {
 }
 
 watch(isRunning, (running) => {
-  if (!running) void flushQueuedMessage()
+  if (running) {
+    activeUi.value.runStartedAt ??= Date.now()
+    return
+  }
+  activeUi.value.runStartedAt = undefined
+  void flushQueuedMessage()
 })
 
 async function createWorkspaceFromAgent(
@@ -1459,6 +2138,8 @@ async function createWorkspaceFromAgent(
         contract.setup_id,
         'failed',
         result.error || 'The workspace could not be created.',
+        undefined,
+        undefined,
         ownerSessionId,
       )
     }
@@ -1471,6 +2152,8 @@ async function createWorkspaceFromAgent(
         contract.setup_id,
         'failed',
         reason,
+        undefined,
+        undefined,
         ownerSessionId,
       )
     } catch {
@@ -1485,15 +2168,27 @@ async function reportWorkspaceCreationResult(
   setupId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  endStep?: string,
+  workspace?: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getDesktopApi().agent
+  const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
-    message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
+    ...(status === 'succeeded' && workspace ? { directory: workspace } : {}),
+    message: `workspace_create_result:${JSON.stringify({
+      setup_id: setupId,
+      status,
+      error,
+      ...(endStep ? { end_step: endStep } : {}),
+      ...(workspace ? { workspace } : {}),
+    })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
+  if (status === 'succeeded' && workspace) {
+    agentShell.bindTabToWorkspace(ownerSessionId, workspace)
+  }
   messageStore.finishStreamingMessages(ownerSessionId)
 }
 
@@ -1503,10 +2198,10 @@ async function executeWorkspaceRerun(
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
   const ui = sessionUi(ownerSessionId)
-  const desktopApi = getDesktopApi()
-  const prepareRerun = desktopApi.workspace.prepareFlowAgentRerun
-  const executeRerun = desktopApi.workspace.executeFlowAgentRerun
-  if (!prepareRerun || !executeRerun) {
+  const desktopApi = getOptionalDesktopApi()
+  const prepareRerun = desktopApi?.workspace.prepareFlowAgentRerun
+  const executeRerun = desktopApi?.workspace.executeFlowAgentRerun
+  if (!desktopApi || !prepareRerun || !executeRerun) {
     messageStore.addAssistantMessage(
       'Rerun is unavailable in this desktop session.',
       'error',
@@ -1564,15 +2259,22 @@ async function executeWorkspaceRerun(
     })
     await nextTick()
     invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
-    await agentFlowProgress.start(prepared.directory)
     messageStore.appendToolProgress('Starting rerun execution.', ownerSessionId)
     await executeRerun({ token: prepared.executionToken })
+    await waitForWorkspaceAgentFlowArtifacts(prepared.directory, ownerSessionId)
     invalidateWorkspaceResources(['home', 'flow', 'step', 'maps', 'logs', 'parameters'])
     messageStore.appendToolProgress(
       `Rerun ${contract.rerun_id} completed.`,
       ownerSessionId,
     )
-    await reportWorkspaceRerunResult(contract.rerun_id, 'succeeded', '', ownerSessionId)
+    await reportWorkspaceRerunResult(
+      contract.rerun_id,
+      'succeeded',
+      '',
+      contract.end_step,
+      ownerSessionId,
+      prepared.directory,
+    )
   } catch (error) {
     const reason = agentErrorMessage(error)
     messageStore.addAssistantMessage(`Rerun failed: ${reason}`, 'error', ownerSessionId)
@@ -1581,6 +2283,7 @@ async function executeWorkspaceRerun(
         contract.rerun_id,
         'failed',
         reason,
+        undefined,
         ownerSessionId,
       )
     } catch {
@@ -1627,7 +2330,6 @@ async function executeWorkspaceRerun(
     if (preparedDirectory) {
       clearAgentWorkspaceRerunHomePrepared(preparedDirectory)
     }
-    agentFlowProgress.stop()
     messageStore.finishToolProgress(ownerSessionId)
     ui.isWorkspaceRerunPending = false
   }
@@ -1673,15 +2375,26 @@ async function reportWorkspaceRerunResult(
   rerunId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  endStep?: string,
   ownerSessionId = agentSessionId.value ?? '',
+  workspace?: string,
 ): Promise<void> {
-  const agent = getDesktopApi().agent
+  const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
-    message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
+    ...(status === 'succeeded' && workspace ? { directory: workspace } : {}),
+    message: `workspace_rerun_result:${JSON.stringify({
+      rerun_id: rerunId,
+      status,
+      error,
+      ...(endStep ? { end_step: endStep } : {}),
+    })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
+  if (status === 'succeeded' && workspace) {
+    agentShell.bindTabToWorkspace(ownerSessionId, workspace)
+  }
   messageStore.finishStreamingMessages(ownerSessionId)
 }
 
@@ -1698,16 +2411,29 @@ async function executeWorkspaceContinue(
   ui.isWorkspaceContinuePending = true
   messageStore.setActiveSessionId(ownerSessionId)
   try {
-    await agentFlowProgress.start(contract.workspace)
     const flowResult = await runAllFlow({ rerun: false })
     if (flowResult === null) {
       throw new Error('Flow execution did not complete successfully.')
     }
+    const desktopAgent = getOptionalDesktopApi()?.agent
+    if (typeof desktopAgent?.registerOperationAssociation === 'function') {
+      void desktopAgent
+        .registerOperationAssociation({
+          command: 'workspace.run',
+          operationId: flowResult.operationId,
+          providerId: AGENT_PROVIDER_ID,
+          sessionId: ownerSessionId,
+        })
+        .catch(() => undefined)
+    }
     await waitForRuntimeOperation(flowResult.operationId)
+    await waitForWorkspaceAgentFlowArtifacts(contract.workspace, ownerSessionId)
+    const flow = await readWorkspaceFlowResourceApi()
     await reportWorkspaceContinueResult(
       contract.continue_id,
       'succeeded',
       '',
+      canExportSignoffPackage(flow) ? 'Harden' : undefined,
       ownerSessionId,
     )
   } catch (error) {
@@ -1722,13 +2448,13 @@ async function executeWorkspaceContinue(
         contract.continue_id,
         'failed',
         reason,
+        undefined,
         ownerSessionId,
       )
     } catch {
       messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
     }
   } finally {
-    agentFlowProgress.stop()
     messageStore.finishToolProgress(ownerSessionId)
     ui.isWorkspaceContinuePending = false
   }
@@ -1738,12 +2464,158 @@ async function reportWorkspaceContinueResult(
   continueId: string,
   status: 'succeeded' | 'failed',
   error: string,
+  endStep?: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getDesktopApi().agent
+  const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
-    message: `workspace_continue_result:${JSON.stringify({ continue_id: continueId, status, error })}`,
+    message: `workspace_continue_result:${JSON.stringify({
+      continue_id: continueId,
+      status,
+      error,
+      ...(endStep ? { end_step: endStep } : {}),
+    })}`,
+    providerId: AGENT_PROVIDER_ID,
+    sessionId: ownerSessionId,
+  })
+  messageStore.finishStreamingMessages(ownerSessionId)
+}
+
+async function executeWorkspaceSignoff(
+  contract: DesktopAgentWorkspaceSignoffContract,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const ui = sessionUi(ownerSessionId)
+  if (!isActiveGuiOwner(ownerSessionId)) {
+    deferGuiAction(ownerSessionId, { type: 'signoff', contract })
+    return
+  }
+  if (ui.isWorkspaceSignoffPending) return
+  ui.isWorkspaceSignoffPending = true
+  messageStore.setActiveSessionId(ownerSessionId)
+  try {
+    const desktopApi = getOptionalDesktopApi()
+    const workspaceHandle = workspaceSession.value.workspaceId
+    const workspacePath = normalizeWorkspaceRoot(currentProject.value?.path ?? '')
+    if (!desktopApi || !workspaceHandle || !workspacePath) {
+      throw new Error('The active workspace is unavailable for signoff.')
+    }
+    if (normalizeWorkspaceRoot(contract.workspace) !== workspacePath) {
+      throw new Error('The signoff contract targets a workspace that is not open.')
+    }
+    if (contract.action === 'inspect') {
+      const runtime = desktopApi.ecc.runtime
+      if (!runtime) throw new Error('ECC Engineering Snapshot API is unavailable.')
+      const snapshot = await runtime.engineeringSnapshot({ workspaceHandle })
+      const review = snapshot.signoffAssessment
+      ui.workspaceSignoffReview = review
+      const blocked = review.risks
+        .filter((risk: { severity: string }) => risk.severity === 'blocked')
+        .map(
+          (risk: { title: string; summary: string }) => `${risk.title}: ${risk.summary}`,
+        )
+        .join('; ')
+      await reportWorkspaceSignoffInspection(
+        contract.signoff_id,
+        review.status,
+        blocked ||
+          review.risks.map((risk: { summary: string }) => risk.summary).join('; ') ||
+          (review.status === 'blocked' ? 'Signoff checklist is blocked.' : ''),
+        ownerSessionId,
+      )
+      return
+    }
+    const outputPath =
+      ui.workspaceSignoffOutputPath.trim() ||
+      `${normalizeWorkspaceRoot(currentProject.value?.path ?? '')}/signoff/signoff_package.tar.gz`
+    if (!outputPath) throw new Error('Enter a signoff package output path.')
+    const result = await desktopApi.productCommands.execute({
+      command: 'workspace.exportSignoff',
+      payload: {
+        outputPath,
+        workspaceHandle,
+      },
+    })
+    if (!('outputPath' in result) || typeof result.outputPath !== 'string') {
+      throw new Error('Signoff export did not return an output path.')
+    }
+    messageStore.addAssistantMessage(
+      `Signoff package saved to ${result.outputPath}.`,
+      'done',
+      ownerSessionId,
+    )
+    await reportWorkspaceSignoffResult(
+      contract.signoff_id,
+      'succeeded',
+      '',
+      ownerSessionId,
+    )
+  } catch (error) {
+    const reason = agentErrorMessage(error)
+    messageStore.addAssistantMessage(
+      `Signoff export failed: ${reason}`,
+      'error',
+      ownerSessionId,
+    )
+    try {
+      if (contract.action === 'inspect') {
+        await reportWorkspaceSignoffInspection(
+          contract.signoff_id,
+          'blocked',
+          reason,
+          ownerSessionId,
+        )
+      } else {
+        await reportWorkspaceSignoffResult(
+          contract.signoff_id,
+          'failed',
+          reason,
+          ownerSessionId,
+        )
+      }
+    } catch {
+      messageStore.addAssistantMessage(reason, 'error', ownerSessionId)
+    }
+  } finally {
+    ui.isWorkspaceSignoffPending = false
+  }
+}
+
+async function reportWorkspaceSignoffInspection(
+  signoffId: string,
+  status: 'blocked' | 'ready' | 'attention',
+  error: string,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
+  await agent.sendMessage({
+    message: `workspace_signoff_inspection:${JSON.stringify({
+      signoff_id: signoffId,
+      status,
+      error,
+    })}`,
+    providerId: AGENT_PROVIDER_ID,
+    sessionId: ownerSessionId,
+  })
+  messageStore.finishStreamingMessages(ownerSessionId)
+}
+
+async function reportWorkspaceSignoffResult(
+  signoffId: string,
+  status: 'succeeded' | 'failed' | 'cancelled' | 'blocked',
+  error: string,
+  ownerSessionId = agentSessionId.value ?? '',
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
+  await agent.sendMessage({
+    message: `workspace_signoff_result:${JSON.stringify({
+      signoff_id: signoffId,
+      status,
+      error,
+    })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId: ownerSessionId,
   })
@@ -1801,7 +2673,7 @@ async function reportWorkspaceParameterUpdateResult(
   error: string,
   ownerSessionId = agentSessionId.value ?? '',
 ): Promise<void> {
-  const agent = getDesktopApi().agent
+  const agent = getOptionalDesktopApi()?.agent
   if (!agent || !ownerSessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_parameter_update_result:${JSON.stringify({ update_id: updateId, status, error })}`,
@@ -1815,8 +2687,19 @@ function normalizeWorkspaceRoot(value: string): string {
   return value.replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
+function resetInputHistory(): void {
+  resetInputHistoryNavigation(activeUi.value)
+}
+
 const handleKeyDown = (e: KeyboardEvent) => {
   if (e.isComposing) return
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    const direction = e.key === 'ArrowUp' ? -1 : 1
+    if (navigateInputHistory(activeUi.value, userInputHistory.value, direction)) {
+      e.preventDefault()
+    }
+    return
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSubmit()
@@ -1848,12 +2731,9 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 /* 消息容器约束 - 防止内容撑开父容器；勿设 overflow:hidden / contain，否则 sticky 用户节点失效 */
-/* Cursor light: centered conversation column; user is not a right-side bubble */
 .messages-container {
   box-sizing: border-box;
   width: 100%;
-  max-width: 44rem;
-  margin-inline: auto;
   padding-inline: 0.875rem;
 }
 
@@ -1865,23 +2745,24 @@ const handleKeyDown = (e: KeyboardEvent) => {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: block;
+  display: flex;
+  justify-content: flex-end;
   margin: 0;
   padding: 0.625rem 0 0.375rem;
   background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
   backdrop-filter: blur(8px);
 }
 
-/* Cursor light: white card, centered in the column, text left-aligned */
 .chat-turn__user-inner {
   position: relative;
-  width: 100%;
+  width: fit-content;
+  max-width: min(82%, 52rem);
   min-width: 0;
-  padding: 0.75rem 0.875rem;
-  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-  border-radius: 0.75rem;
-  background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+  padding: 0.625rem 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
+  border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent-color) 8%, transparent);
 }
 
 .chat-turn__user-text {
@@ -1891,68 +2772,73 @@ const handleKeyDown = (e: KeyboardEvent) => {
   line-height: 1.5;
   text-align: left;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* Cursor light: agent reply is plain text in the centered column — no gray card */
+/* Keep each Agent response visually distinct from the surrounding transcript. */
 .chat-turn__body {
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0.5rem;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  margin: 0.125rem 0 0.875rem;
-  padding: 0.25rem 0.125rem 0.5rem;
+  margin: 0.25rem 0 1rem;
+  padding: 0.375rem 0.125rem 0.625rem;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text-primary);
 }
 
+.interaction-receipt {
+  display: grid;
+  grid-template-columns: 1rem minmax(8rem, 0.7fr) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+  min-height: 2rem;
+  padding: 0.375rem 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 52%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.interaction-receipt > i {
+  color: var(--accent-color);
+}
+
+.interaction-receipt__question,
+.interaction-receipt__answer {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.interaction-receipt__question {
+  font-weight: 500;
+}
+
+.interaction-receipt__answer {
+  color: var(--text-primary);
+  font-weight: 550;
+}
+
+@media (max-width: 640px) {
+  .chat-turn__user-inner {
+    max-width: 92%;
+  }
+
+  .interaction-receipt {
+    grid-template-columns: 1rem minmax(0, 1fr);
+  }
+
+  .interaction-receipt__answer {
+    grid-column: 2;
+  }
+}
+
 .agent-pending {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
   margin: 0.25rem 0 0.35rem;
-  min-height: 1.25rem;
-  padding-left: 0.125rem;
-}
-
-.agent-pending__dot {
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-secondary) 70%, transparent);
-  animation: agent-pending-dot 1.05s ease-in-out infinite;
-}
-
-.agent-pending__dot:nth-child(2) {
-  animation-delay: 0.14s;
-}
-
-.agent-pending__dot:nth-child(3) {
-  animation-delay: 0.28s;
-}
-
-@keyframes agent-pending-dot {
-  0%,
-  80%,
-  100% {
-    opacity: 0.28;
-    transform: translateY(0);
-  }
-  40% {
-    opacity: 0.95;
-    transform: translateY(-0.12rem);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-pending__dot {
-    animation: none;
-    opacity: 0.55;
-  }
 }
 
 .message-item {
@@ -1991,6 +2877,26 @@ const handleKeyDown = (e: KeyboardEvent) => {
   opacity: 0.55;
 }
 
+.quick-start-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.quick-start-stop:hover,
+.quick-start-stop:focus-visible {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
 .empty-suggestion:focus-visible,
 .stop-btn:focus-visible,
 .queue-row button:focus-visible,
@@ -2000,12 +2906,15 @@ const handleKeyDown = (e: KeyboardEvent) => {
 }
 
 .agent-chat {
+  position: relative;
   min-height: 0;
   background: var(--bg-primary);
 }
 
 .agent-chat__scroll {
   flex: 1 1 auto;
+  padding-bottom: var(--interaction-overlay-height, 0px);
+  scroll-padding-bottom: var(--interaction-overlay-height, 0px);
 }
 
 .composer-footer {
@@ -2015,6 +2924,143 @@ const handleKeyDown = (e: KeyboardEvent) => {
   padding: 0.75rem 0.875rem 0.875rem;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary));
+}
+
+.interaction-dock {
+  --interaction-dock-max-height: min(42vh, 28rem);
+
+  position: absolute;
+  right: 0.875rem;
+  bottom: 100%;
+  left: 0.875rem;
+  z-index: 8;
+  max-height: var(--interaction-dock-max-height);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--bg-secondary) 52%, var(--bg-primary));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.interaction-dock[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.interaction-dock__summary {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  list-style: none;
+  flex: 0 0 auto;
+}
+
+.interaction-dock__summary::-webkit-details-marker {
+  display: none;
+}
+
+.interaction-dock__summary:hover {
+  background: color-mix(in srgb, var(--accent-color) 5%, transparent);
+}
+
+.interaction-dock__summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 50%, transparent);
+  outline-offset: -2px;
+}
+
+.interaction-dock__summary-icon {
+  color: var(--accent-color);
+  font-size: 1rem;
+}
+
+.interaction-dock__summary-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.125rem;
+}
+
+.interaction-dock__summary-copy strong,
+.interaction-dock__summary-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interaction-dock__summary-copy strong {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.interaction-dock__summary-copy span {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+.interaction-dock__summary-chevron {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  transition: transform 160ms ease-out;
+}
+
+.interaction-dock[open] .interaction-dock__summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+}
+
+.interaction-dock[open] .interaction-dock__summary-chevron {
+  transform: rotate(180deg);
+}
+
+.interaction-dock__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(var(--interaction-dock-max-height) - 3rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0.875rem;
+}
+
+.interaction-undo {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.interaction-dock > .interaction-undo {
+  margin: 0.25rem;
+}
+
+.interaction-undo:hover:not(:disabled),
+.interaction-undo:focus-visible {
+  border-color: color-mix(in srgb, var(--border-color) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 80%, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.interaction-undo:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.interaction-undo:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .composer-sr-status {
@@ -2074,6 +3120,8 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 .composer-actions {
   display: flex;
+  align-items: center;
+  gap: 0.25rem;
   justify-content: flex-end;
   padding: 0 0.625rem 0.625rem;
 }
@@ -2188,9 +3236,61 @@ const handleKeyDown = (e: KeyboardEvent) => {
   transform: scale(0.96);
 }
 
+.agent-close-dialog > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.agent-close-dialog__issue {
+  margin-top: 0.75rem !important;
+  color: var(--danger-color) !important;
+}
+
+.agent-close-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.agent-close-dialog__actions button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-close-dialog__actions button.is-danger {
+  border-color: color-mix(in srgb, var(--danger-color) 45%, var(--border-color));
+  color: var(--danger-color);
+}
+
+.agent-close-dialog__actions button.is-primary {
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+  color: var(--accent-text);
+}
+
+.agent-close-dialog__actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .composer-shell,
   .empty-suggestion,
+  .quick-start-stop,
   .stop-btn,
   .send-btn {
     transition: none;

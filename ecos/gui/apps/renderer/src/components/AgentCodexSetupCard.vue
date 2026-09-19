@@ -21,6 +21,57 @@
       </div>
     </dl>
 
+    <div class="codex-setup__source" role="radiogroup" aria-label="模型来源">
+      <span class="codex-setup__source-label">模型来源</span>
+      <div class="codex-setup__source-options">
+        <button
+          v-for="profile in profiles"
+          :key="profile.id"
+          type="button"
+          class="codex-setup__source-option"
+          role="radio"
+          :aria-checked="activeProfileId === profile.id"
+          :class="{
+            'codex-setup__source-option--active': activeProfileId === profile.id,
+          }"
+          :disabled="busy"
+          @click="emit('select-profile', profile.id)"
+        >
+          {{ profile.name }}
+        </button>
+      </div>
+      <button
+        type="button"
+        class="codex-setup__manage"
+        :disabled="busy"
+        @click="emit('manage')"
+      >
+        管理…
+      </button>
+    </div>
+
+    <form class="codex-setup__key-form" @submit.prevent="submitKey">
+      <label class="codex-setup__key-label" for="codex-setup-api-key">
+        {{ activeProfile?.name ?? 'Codex' }} API Key
+      </label>
+      <input
+        id="codex-setup-api-key"
+        v-model="apiKey"
+        type="password"
+        class="codex-setup__key-input"
+        autocomplete="off"
+        spellcheck="false"
+        :placeholder="keyConfigured ? '已配置（输入可更换）' : '粘贴 API Key'"
+      />
+      <button
+        type="submit"
+        class="codex-setup__action codex-setup__action--primary"
+        :disabled="busy || !apiKey.trim()"
+      >
+        保存并使用
+      </button>
+    </form>
+
     <div
       v-if="status.state === 'installing' || status.progressMessage"
       class="codex-setup__progress"
@@ -49,23 +100,15 @@
         一键安装
       </button>
       <button
-        v-if="showLogin"
-        type="button"
-        class="codex-setup__action codex-setup__action--primary"
-        :disabled="busy"
-        @click="emit('login')"
-      >
-        打开登录
-      </button>
-      <button
         type="button"
         class="codex-setup__action"
         :disabled="busy"
         @click="emit('recheck')"
       >
-        {{ status.state === 'installed_needs_login' ? '我已完成登录' : '重新检测' }}
+        重新检测
       </button>
       <button
+        v-if="activeProfile?.baseUrl === null"
         type="button"
         class="codex-setup__action"
         :disabled="busy"
@@ -87,23 +130,52 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { DesktopCodexDependencyStatus } from '@ecos-studio/shared'
+import { computed, ref } from 'vue'
+import type {
+  DesktopCodexDependencyStatus,
+  DesktopModelProfile,
+} from '@ecos-studio/shared'
 
 const props = defineProps<{
   busy?: boolean
   status: DesktopCodexDependencyStatus
+  profiles?: DesktopModelProfile[]
+  apiKeyConfigured?: Record<string, boolean>
 }>()
 
 const emit = defineEmits<{
   install: []
-  login: []
   'pick-bin': []
   recheck: []
   retry: []
+  'select-profile': [profileId: string]
+  'set-api-key': [profileId: string, apiKey: string]
+  manage: []
 }>()
 
-const defaultMessage = 'ECOS Agent 依赖 Codex CLI 生成建议。请先完成安装与登录。'
+const defaultMessage = 'ECOS Agent 依赖 Codex CLI 生成建议。请先完成安装与配置。'
+
+const apiKey = ref('')
+
+const activeProfileId = computed(
+  () => props.status.activeProfileId ?? props.profiles?.[0]?.id ?? 'codex',
+)
+
+const activeProfile = computed(() =>
+  props.profiles?.find((profile) => profile.id === activeProfileId.value),
+)
+
+const keyConfigured = computed(
+  () =>
+    props.apiKeyConfigured?.[activeProfileId.value] === true ||
+    props.status.apiKeyConfigured === true,
+)
+
+function submitKey(): void {
+  const key = apiKey.value.trim()
+  if (!key) return
+  emit('set-api-key', activeProfileId.value, key)
+}
 
 const stateLabel = computed(() => {
   switch (props.status.state) {
@@ -111,8 +183,8 @@ const stateLabel = computed(() => {
       return '未安装'
     case 'installing':
       return '安装中'
-    case 'installed_needs_login':
-      return '待登录'
+    case 'needs_api_key':
+      return '待配置'
     case 'ready':
       return '已就绪'
     case 'error':
@@ -128,15 +200,6 @@ const showInstall = computed(
     (props.status.state === 'missing' ||
       props.status.state === 'error' ||
       props.status.state === 'installing'),
-)
-
-const showLogin = computed(
-  () =>
-    props.status.state === 'installed_needs_login' ||
-    (Boolean(props.status.binPath) &&
-      props.status.authState !== 'authenticated' &&
-      props.status.state !== 'missing' &&
-      props.status.state !== 'installing'),
 )
 </script>
 
@@ -208,6 +271,105 @@ const showLogin = computed(
 .codex-setup__meta-row dd {
   margin: 0;
   color: var(--text-primary);
+}
+
+.codex-setup__source {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.codex-setup__source-label {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.codex-setup__source-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  flex: 1;
+  padding: 0.125rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: var(--bg-primary);
+}
+
+.codex-setup__source-option {
+  padding: 0.3rem 0.4rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.codex-setup__source-option--active {
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--bg-primary));
+  color: var(--text-primary);
+}
+
+.codex-setup__source-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.codex-setup__manage {
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.codex-setup__manage:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  color: var(--text-primary);
+}
+
+.codex-setup__manage:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.codex-setup__key-form {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.codex-setup__key-label {
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.codex-setup__key-input {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.codex-setup__key-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent-color) 45%, var(--border-color));
 }
 
 .codex-setup__progress {

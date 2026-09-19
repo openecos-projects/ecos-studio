@@ -106,6 +106,10 @@ const STAGE_CANONICAL_NAMES: Record<string, string> = {
   legalization: 'Legal',
   legal: 'Legal',
   legalization_dreamplace: 'Legal',
+  'timing optimization': 'Sizer',
+  timing_optimization: 'Sizer',
+  timing_optimization_sizer: 'Sizer',
+  sizer: 'Sizer',
   routing: 'Route',
   route: 'Route',
   route_ecc: 'Route',
@@ -760,7 +764,7 @@ export function extractDesignReportData(
   const instCountRes = queryMetric(
     'Physical',
     'Total Instances',
-    ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Floor', 'Synth'],
+    ['Harden', 'Route', 'Sizer', 'Legal', 'CTS', 'Place', 'Floor', 'Synth'],
     [
       'Design Statis.num_instances',
       'Instances.total.num',
@@ -827,7 +831,7 @@ export function extractDesignReportData(
   const netCountRes = queryMetric(
     'Physical',
     'Total Nets',
-    ['Harden', 'Route', 'Legal', 'Place', 'CTS', 'Floor', 'Synth'],
+    ['Harden', 'Route', 'Sizer', 'Legal', 'CTS', 'Place', 'Floor', 'Synth'],
     [
       'Design Statis.num_nets',
       'design.num_wires',
@@ -1251,7 +1255,7 @@ export function extractDesignReportData(
   const fanoutViolRes = queryMetric(
     'Timing',
     'Max Fanout Violations',
-    ['STA', 'Route', 'CTS', 'Synth'],
+    ['STA', 'Route', 'Sizer', 'CTS', 'Synth'],
     [
       'fanout_violations',
       'max_fanout_violations',

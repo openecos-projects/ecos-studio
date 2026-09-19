@@ -1,3 +1,10 @@
+/**
+ * Step-dashboard QoR parsing. The report-file contract (qor_metrics.json /
+ * qor_summary.json / qor_hotspots) is specified in `ecos/agent/docs/ecc-agent-rpc.md`;
+ * the agent's Python reader for the same files is
+ * `ecos_agent/optimization/observations.py` — keep both aligned with the
+ * contract until a structured-QoR RPC replaces file parsing.
+ */
 import type { DashboardPieSlice } from '@/components/home/dashboardData'
 import type { FlowStep } from '@/utils/projectManagement'
 import {
@@ -392,6 +399,7 @@ function stepSection(
     rcx: 'rcx',
     harden: 'harden',
     filler: 'filler',
+    'timing optimization': 'Timing optimization',
   }
   const directKey = keyByStep[canonical]
   if (directKey) return record(value[directKey])
@@ -1476,9 +1484,7 @@ export function stepFeatureInsights(
   const metrics =
     normalizedStep === 'place'
       ? placeMetrics(mapValue)
-      : normalizedStep === 'legalization' ||
-          normalizedStep === 'filler' ||
-          normalizedStep === 'timing optimization'
+      : normalizedStep === 'legalization' || normalizedStep === 'filler'
         ? floorplanMetrics(databaseValue)
         : stepFeatureMetrics(stepValue)
   const snapshots = floorplanSnapshots(databaseValue)

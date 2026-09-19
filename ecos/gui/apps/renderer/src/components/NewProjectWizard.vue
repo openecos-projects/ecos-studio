@@ -5,6 +5,7 @@
   >
     <div
       class="new-workspace-wizard-panel relative flex h-[88vh] max-h-[900px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-(--border-color) bg-(--bg-primary) shadow-[0_28px_70px_-24px_rgba(0,0,0,0.55)]"
+      :data-current-step="currentStep"
     >
       <button
         @click="closeWizard"
@@ -1647,7 +1648,6 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
   standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
 }
 
 interface Props {
@@ -2152,10 +2152,7 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   if (initialConfig?.directory) {
     return getFileName(initialConfig.directory)
   }
-  return (
-    initialConfig?.suggestedWorkspaceName ??
-    String(initialConfig?.parameters?.design ?? '').trim()
-  )
+  return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
 function defaultWorkspaceName() {
@@ -2240,6 +2237,9 @@ function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStep
     cts: 'CTS',
     legal: 'legalization',
     legalization: 'legalization',
+    sizer: 'Timing optimization',
+    timing_optimization: 'Timing optimization',
+    'timing optimization': 'Timing optimization',
     timingopt: 'Timing optimization',
     timingoptimization: 'Timing optimization',
     route: 'route',
@@ -3188,7 +3188,7 @@ function showDirectoryUploadFailurePrompt() {
     severity: 'warn',
     summary: 'Folder Upload Failed',
     detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
-    life: 5000,
+    life: 15000,
   })
 }
 
@@ -3536,7 +3536,7 @@ async function scanManualPdkResources() {
       summary: 'PDK Scan Failed',
       detail:
         error instanceof Error ? error.message : 'Failed to scan the current PDK folder.',
-      life: 5000,
+      life: 15000,
     })
   }
 }

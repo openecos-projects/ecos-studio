@@ -1,0 +1,21 @@
+<a id="metric.sizer.database_summary"></a>
+## metric.sizer.database_summary
+
+**Meaning:** The saved ECC database summary available to shared QoR analysis.
+
+**Calculation:** After stage persistence, the shared metric builder may read `Design Layout` and `Design Statis` facts from the feature database to publish generic structural records.
+
+**Boundary:** Timing optimization currently publishes no stage-specific numeric comparison metric; shared database facts are context, not proof of stage success or timing improvement.
+
+**Source evidence:** **sizer.runner**, **sizer.builder**, **sizer.subflow**, **sizer.metrics**, **dreamplace.runner**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
+
+<a id="metric.sizer.qor_availability"></a>
+## metric.sizer.qor_availability
+
+**Meaning:** Whether this stage has publishable structured QoR records for the GUI.
+
+**Calculation:** ECC writes `qor_metrics.json` only from finite numeric records with valid `feature/` sources, and the GUI accepts schema-v3 records with valid source metadata.
+
+**Boundary:** An available QoR artifact proves only that its records passed the publication contract. Missing artifacts or filtered records must not be interpreted as zero-valued metrics or stage success.
+
+**Source evidence:** **sizer.runner**, **sizer.builder**, **sizer.subflow**, **sizer.metrics**, **dreamplace.runner**, **ecc.runner**, **ecc.metrics**, **gui.step_metrics**, **gui.qor_trend**, **gui.qor_data**
