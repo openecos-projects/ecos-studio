@@ -253,3 +253,134 @@ _Avoid_: runtime snapshot steps, executed-step prefix
 **Current Execution**:
 The latest runtime operation for a Workspace whose events may contribute to recovering the visible execution state.
 _Avoid_: historical operation, mixed execution events
+
+**Optimization Episode**:
+A bounded Agent-controlled optimization run anchored to one Parent Workspace and one Agent Session. It may contain calibration replays and candidate execution workspaces, and it remains independently observable until terminal.
+_Avoid_: current Flow, one candidate run, chat turn
+
+**Parent Workspace**:
+The Workspace selected when an Optimization Episode is authorized. It owns the episode's objective and context, but it is not necessarily the Workspace currently shown in the foreground.
+_Avoid_: current Workspace, execution workspace, replay workspace
+
+**Optimization Execution Workspace**:
+A replay or candidate Workspace used to execute one operation within an Optimization Episode. It is a background execution target and does not become the foreground Workspace merely because its operation is active.
+_Avoid_: foreground Workspace, current execution, temporary UI tab
+
+**Agent Session Ownership**:
+The stable association between an Optimization Episode and the Agent Session that started it. Workspace navigation and active-tab changes do not transfer that ownership.
+_Avoid_: current-tab ownership, route ownership, event arrival ownership
+
+**Optimization Episode Continuity**:
+An Optimization Episode continues across Agent tab changes, Workspace navigation, and temporary Agent-panel unmounts. Only an explicit user Stop/Cancel requests episode cancellation; provider or application failure follows interruption and recovery semantics instead.
+_Avoid_: UI visibility lifetime, implicit cancellation, completed chat turn
+
+**Optimization Agent Tab Closure**:
+Closing an Agent tab with an active Optimization Episode either retains its
+Agent Session and keeps the episode running in the background, explicitly stops
+the episode before closing, or cancels the close. It never silently deletes the
+owning session; retained episodes remain reachable from Background Operations.
+_Avoid_: tab close as cancellation, hidden session deletion, orphan episode
+
+**Optimization Episode Projection**:
+The compact Agent UI projection of one Optimization Episode. It reuses the
+existing Optimization card to show aggregate lifecycle, phase, replay or turn
+count, in-flight count, elapsed time, latest outcome and aggregate metrics;
+individual Runtime Operations and logs remain in Background Tasks.
+_Avoid_: one chat message per workspace, operation browser, foreground Flow projection
+
+**Optimization Episode Notification**:
+One Notification Center entry emitted when a background Optimization Episode
+transitions to completed, needs attention, interrupted or stopped. It is
+deduplicated by Episode identity and state transition and links back to Agent
+progress; individual replay and candidate transitions do not notify.
+_Avoid_: per-operation toast, operating-system notification, notification as state
+
+**Optimization Projection Authority**:
+The composition of Runtime Operation state with persisted optimization ledger/controller state, joined by Execution Workspace and Operation identity in Electron and queried by the Renderer as one recoverable Optimization Episode Projection. Runtime events invalidate this projection but do not replace it.
+_Avoid_: chat-text parsing, Renderer episode state machine, events as durable history
+
+**Optimization Projection Identity**:
+Episode identity is the stable key of an Optimization Episode Projection. It is
+bound to Agent Session, Parent Workspace and Parent Revision; a monotonically
+increasing projection generation lets Renderer consumers reject stale complete
+snapshots while Electron privately correlates underlying Runtime Operations.
+_Avoid_: chat-message identity, active-tab identity, event-derived state
+
+**Optimization Episode Stop**:
+An explicit user Stop/Cancel prevents new optimization turns, requests cancellation for in-flight execution operations, waits for their terminal receipts, and ends the episode as stopped while retaining completed operation results.
+_Avoid_: immediate process kill, successful completion, silent background drain
+
+**Optimization Episode Pause**:
+A controller scheduling state that immediately prevents new replay or candidate
+dispatch while allowing in-flight operations to reach terminal state and have
+their receipts recorded. Resume re-enables scheduling; Pause neither suspends
+ECC processes nor follows from hiding the Agent UI.
+_Avoid_: tab hiding as pause, process suspension, cancellation
+
+**Optimization Operation Failure**:
+A failed replay or candidate operation is recorded at operation scope and does not fail-fast its Optimization Episode when the controller can still make progress. The episode becomes terminally failed only for controller-level, budget, evidence, or quarantine conditions.
+_Avoid_: one tool failure equals episode failure, hidden candidate loss, success despite failed evidence
+
+**Optimization Calibration Recovery**:
+A required calibration replay failure prevents candidate scheduling and places
+the Optimization Episode in recoverable needs-attention state. An explicit
+Retry may reuse fingerprint-matching completed replay evidence and reruns only
+failed or missing replays; incompatible Parent Workspace, parameter-policy or
+ECC revisions require a new episode.
+_Avoid_: automatic replay retry, candidates without calibration, stale replay reuse
+
+**Optimization Episode Recovery**:
+Renderer or Agent-panel reconnect preserves a live Optimization Episode. A provider crash or application restart interrupts the episode and requires explicit Resume before new turns are scheduled; interrupted execution operations follow Runtime recovery semantics.
+_Avoid_: automatic post-crash continuation, interruption as user cancellation, replaying chat history as state
+
+**Optimization Safe Shutdown**:
+The existing Safe Shutdown treatment of an active Optimization Episode. Safe
+draining stops new dispatch, lets in-flight operations become terminal, flushes
+the ledger and persists the episode as interrupted before close; cancelling
+shutdown restores its preceding Running or Paused state, while Force Quit uses
+best-effort flush and restart recovery.
+_Avoid_: post-exit background execution, shutdown as Episode Stop, new dispatch while draining
+
+**Optimization Episode Resume**:
+An explicit continuation request that restores a persisted Optimization Episode only after validating its Parent Workspace revision, objective and parameter-policy hashes, and ECC revision; terminal operations are never scheduled again.
+_Avoid_: replaying the last chat turn, blind retry, implicit resume on reconnect
+
+**Optimization Operation Cancellation**:
+An operation-level cancellation stops one replay or candidate and leaves the Optimization Episode eligible to continue. Episode Stop cancels all cancellable in-flight operations and prevents new turns; both paths use the Runtime cancellation contract and preserve terminal results already collected.
+_Avoid_: one candidate cancellation fails the episode, process kill, hidden cancellation state
+
+**Episode Promotion**:
+The optimization controller's decision that a candidate becomes the incumbent for later comparisons within the same Optimization Episode. It does not modify the Parent Workspace.
+_Avoid_: Parent Workspace adoption, committed result, user-approved configuration change
+
+**Parent Adoption**:
+An explicit, separately validated action that applies a selected candidate's approved change to the Parent Workspace through the normal Workspace command and Revision contract. It is not implied by Episode Promotion or episode completion.
+_Avoid_: automatic promotion writeback, candidate directory swap, implicit rerun
+
+**Parent Adoption Authorization**:
+The explicit confirmation that names the selected candidate, Parent Workspace, expected Workspace Revision, parameter patch, evidence and affected Flow Steps before Parent Adoption can execute. A Revision mismatch invalidates the authorization.
+_Avoid_: episode completion as consent, stale confirmation, hidden writeback
+
+**Optimization Parent Guard**:
+The temporary exclusion on Parent Workspace mutations and ordinary Flow starts while its Optimization Episode is active, including interrupted and needs-attention states. Read-only inspection and work in other Workspaces remain available; the Parent run control is disabled with a background-optimization explanation rather than shown as Running. Resume/Retry preserves the guarded Revision, while Episode Stop makes the episode terminal and releases the guard.
+_Avoid_: application-wide lock, queued mutation, false Parent Flow state
+
+**Optimization Parent Exclusivity**:
+A Parent Workspace owns at most one active Optimization Episode. A repeated
+start resolves to the existing episode rather than creating, queuing, merging
+or silently replacing another episode; different Parent Workspaces remain
+independent.
+_Avoid_: competing incumbents, per-parent optimization queue, implicit replacement
+
+**Optimization Workspace Cleanup**:
+An explicit irreversible action available only after an Optimization Episode is
+terminal. It preserves the ledger, approved parameter-patch summary, normalized
+metrics, outcomes, errors and Artifact hashes, then removes execution logs,
+Artifacts and Workspaces and marks the episode cleaned. Cleanup disables later
+Workspace opening, complete evidence revalidation and Parent Adoption, which
+must happen first.
+_Avoid_: automatic retention expiry, Artifact archive, adoption after cleanup
+
+**Optimization Execution Concurrency**:
+The execution policy in which calibration replays run serially and one Optimization Episode may have at most two in-flight candidate operations. Different Parent Workspaces retain the normal cross-Workspace concurrency model without a separate global optimization scheduler.
+_Avoid_: unlimited candidate fan-out, parallel calibration replay, application-wide Flow queue

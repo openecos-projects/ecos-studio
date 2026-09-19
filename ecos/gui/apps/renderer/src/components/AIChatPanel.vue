@@ -1617,6 +1617,13 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'message' || event.type === 'tool' || event.type === 'activity') {
+    if (
+      event.type === 'message' &&
+      ui.isQuickStartRunning &&
+      event.text?.startsWith('ECOS Agent is bound to the open workspace.')
+    ) {
+      return
+    }
     messageStore.upsertAgentEvent(event)
   }
 }

@@ -78,7 +78,7 @@ afterEach(() => {
   delete window.ecosDesktop
 })
 
-async function setup() {
+async function setup(options: { activeOptimization?: boolean } = {}) {
   const pinia = createPinia()
   const shell = useAgentShellStore(pinia)
   const messages = useMessageStore(pinia)
@@ -93,10 +93,20 @@ async function setup() {
   const flow = deferred<QuickStartFlowResult>()
   const listeners = new Set<(event: DesktopAgentEvent) => void>()
   const sendMessage = vi.fn(async () => {
+    for (const listener of listeners) {
+      listener({
+        providerId: 'ecos_agent',
+        sessionId: 'owner',
+        messageId: 'workspace-welcome',
+        type: 'message',
+        text: 'ECOS Agent is bound to the open workspace. Project: /runs/gcd.',
+      })
+    }
     for (const listener of listeners) listener(guide(true))
     return { sessionId: 'owner' }
   })
   const answerInteraction = vi.fn(() => answer.promise)
+  const interrupt = vi.fn(async () => ({}))
   window.ecosDesktop = {
     agent: {
       onEvent: (listener: (event: DesktopAgentEvent) => void) => {
@@ -106,7 +116,35 @@ async function setup() {
       getModelSettings: async () => ({ model: 'test', models: [] }),
       answerInteraction,
       sendMessage,
-      interrupt: vi.fn(async () => ({})),
+      interrupt,
+      optimizationProjection: vi.fn(async () => ({
+        episodes: options.activeOptimization
+          ? [
+              {
+                agentSessionId: 'owner',
+                episodeId: 'episode-1',
+                inFlightCount: 1,
+                optimization: {
+                  episode_id: 'episode-1',
+                  schema_version: 'ecos.optimization_status.v2',
+                  state: 'running',
+                  workspace: '/runs/gcd',
+                },
+                parentWorkspaceDirectory: '/runs/gcd',
+                parentWorkspaceId: 'workspace-handle',
+                parentWorkspaceRevision: 1,
+                providerId: 'ecos_agent',
+                startedAt: 1,
+                state: 'running',
+                turnCount: 1,
+                updatedAt: 2,
+              },
+            ]
+          : [],
+        generation: 1,
+      })),
+      onOptimizationProjectionInvalidated: vi.fn(() => () => undefined),
+      controlOptimizationEpisode: vi.fn(async () => undefined),
     },
   } as unknown as DesktopApi
   const runner = vi.fn<QuickStartRunner>(async (_event, _signal, narrate) => {
@@ -131,6 +169,10 @@ async function setup() {
           AgentActivityStream: true,
           AgentSessionContractPanels: true,
           AgentCodexSetupCard: true,
+          Dialog: {
+            props: ['visible'],
+            template: '<div v-if="visible" class="dialog-stub"><slot /></div>',
+          },
         },
       },
     })
@@ -139,15 +181,27 @@ async function setup() {
   }
   const wrapper = mountPanel()
   await flushPromises()
-  await wrapper.get('.interaction-card__option').trigger('click')
-  expect(answerInteraction).toHaveBeenCalledWith(
-    expect.objectContaining({
-      sessionId: 'owner',
-      optionId: 'quick_start',
-      requestId: 'home-request',
-    }),
-  )
-  return { wrapper, mountPanel, shell, messages, runner, answer, flow, sendMessage }
+  if (!options.activeOptimization) {
+    await wrapper.get('.interaction-card__option').trigger('click')
+    expect(answerInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'owner',
+        optionId: 'quick_start',
+        requestId: 'home-request',
+      }),
+    )
+  }
+  return {
+    wrapper,
+    mountPanel,
+    shell,
+    messages,
+    runner,
+    answer,
+    flow,
+    interrupt,
+    sendMessage,
+  }
 }
 
 it('defers a delayed Quick Start answer until its owner is active and keeps that owner across remounts', async () => {
@@ -184,6 +238,11 @@ it('defers a delayed Quick Start answer until its owner is active and keeps that
     workspacePath: '/runs/gcd',
   })
   expect(state.messages.messagesBySessionId.other ?? []).toEqual([])
+  expect(
+    state.messages.messagesBySessionId.owner?.some((message) =>
+      message.content.startsWith('ECOS Agent is bound to the open workspace.'),
+    ),
+  ).toBe(false)
   await remounted.findAll('[role="tab"]')[0]!.trigger('click')
   expect(remounted.get('.interaction-dock').attributes('open')).toBeDefined()
   expect(remounted.text()).toContain('Optimize the current design')

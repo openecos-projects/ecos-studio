@@ -3,6 +3,12 @@ import { ECC_FLOW_STEPS } from '@ecos-studio/shared'
 import source from './App.vue?raw'
 
 describe('agent workspace creation', () => {
+  it('consumes workspace wizard requests from project management', () => {
+    expect(source).toContain('useWorkspaceWizardRequest()')
+    expect(source).toContain('consumeWorkspaceWizardRequest()')
+    expect(source).toContain('showNewProjectWizard.value = true')
+  })
+
   it('persists the frozen contract and returns its workspace for execution tracking', () => {
     expect(source).toContain('workspace_setup_contract.v2.json')
     expect(source).toContain('api.workspace.writeProjectTextFile')

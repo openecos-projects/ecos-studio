@@ -1,4 +1,7 @@
 import type { EccRuntimeEvent } from '@ecos-studio/shared'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -199,6 +202,70 @@ function createPool() {
 }
 
 describe('EccRpcRuntimeService pool', () => {
+  it('reconciles a terminal Quick Start receipt before waitForOperation resolves', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ecos-quick-start-wait-'))
+    try {
+      const pool = createPool()
+      const workspace = await pool.service.openWorkspace({ directory })
+      pool.clientFor(directory).responses.push({
+        createdAt: 1,
+        currentStep: 'Harden',
+        currentTool: 'ecc',
+        error: null,
+        kind: 'flow',
+        operationId: 'quick-start-operation',
+        origin: 'gui',
+        rerun: false,
+        result: null,
+        state: 'running',
+        step: '',
+        updatedAt: 1700000000,
+        workspaceId: `id-${directory}`,
+      })
+      await pool.service.startFlowOperation({
+        expectedWorkspaceRevision: 1,
+        idempotencyKey: 'quick-start',
+        workspaceHandle: workspace.workspaceHandle,
+      })
+      pool.sidecarNotification(directory, {
+        jsonrpc: '2.0',
+        method: 'runtime.event',
+        params: {
+          eventId: 'quick-start-terminal',
+          kind: 'flow',
+          operationId: 'quick-start-operation',
+          origin: 'gui',
+          payload: { state: 'succeeded' },
+          sequence: 2,
+          timestamp: 1700000001,
+          type: 'operation.changed',
+          workspaceId: `id-${directory}`,
+        },
+      })
+      const receiptPath = join(directory, 'quick_start_run.json')
+      await writeFile(
+        receiptPath,
+        JSON.stringify({
+          flow: { operation_id: 'quick-start-operation' },
+          status: 'flow_running',
+        }),
+      )
+
+      await pool.service.waitForOperation({
+        operationId: 'quick-start-operation',
+        workspaceHandle: workspace.workspaceHandle,
+      })
+
+      expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+        flow: { operation_id: 'quick-start-operation' },
+        status: 'flow_completed',
+        completed_at: '2023-11-14T22:13:21.000Z',
+      })
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('routes frontend-specific workspace payloads through the workspace pool', async () => {
     const pool = createPool()
     const workspace = await pool.service.createWorkspacePayload({

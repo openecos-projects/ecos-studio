@@ -55,6 +55,7 @@ import { electronLogger } from '../logger'
 
 import { normalizeWorkspacePath } from '../workspacePath'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
+import { reconcileQuickStartOperationReceipt } from './quickStartRunReceipt'
 import {
   EccWorkspaceRuntime,
   type EccRpcRuntimeClient,
@@ -549,8 +550,16 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).operationStatus(request)
   }
 
-  waitForOperation(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).waitForOperation(request)
+  async waitForOperation(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccRuntimeOperation> {
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    const operation = await runtime.waitForOperation(request)
+    await reconcileQuickStartOperationReceipt(
+      operation,
+      this.requireDirectory(request.workspaceHandle),
+    )
+    return operation
   }
 
   async operationLog(
