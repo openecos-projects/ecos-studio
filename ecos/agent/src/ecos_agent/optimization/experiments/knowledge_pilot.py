@@ -550,6 +550,7 @@ def run_offline_pilot(
     repeats: int = 1,
     planning_call_limit: int = 60,
     protocol: Mapping[str, object] | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, object]:
     """Run every zero-shot treatment over the bank and mediate the proposals."""
     validate_context_bank(contexts, design_id=design_id)
@@ -560,6 +561,14 @@ def run_offline_pilot(
     provider = provider_factory()
     if model is not None:
         provider.select_model(model)
+    if reasoning_effort is not None and hasattr(provider, "set_model_settings"):
+        provider.set_model_settings(reasoning_effort=reasoning_effort)
+    model_settings = None
+    if hasattr(provider, "get_model_settings"):
+        try:
+            model_settings = provider.get_model_settings()
+        except Exception:  # noqa: BLE001 - registration is best-effort
+            model_settings = None
     ordered = sorted(contexts, key=lambda item: str(item["context_fingerprint"]))
     cells = [
         (context, config.treatment.value, repeat, variant)
@@ -621,6 +630,7 @@ def run_offline_pilot(
         contexts=contexts,
         rows=rows,
         protocol_hash=(protocol or {}).get("protocol_hash"),
+        model_settings=model_settings,
     )
 
 
@@ -735,6 +745,7 @@ def _offline_payload(
     contexts: Sequence[Mapping[str, object]],
     rows: list[dict[str, object]],
     protocol_hash: str | None = None,
+    model_settings: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     summary = summarize_offline_rows(rows)
     payload = {
@@ -747,6 +758,8 @@ def _offline_payload(
     }
     if protocol_hash is not None:
         payload["protocol_hash"] = protocol_hash
+    if model_settings is not None:
+        payload["model_settings"] = dict(model_settings)
     return payload
 
 

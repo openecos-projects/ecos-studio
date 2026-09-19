@@ -8,6 +8,19 @@ from ecos_agent.hashing import canonical_sha256
 
 PILOT_DESIGNS = ("gcd", "vm80")
 
+# Registered ahead of the formal matrix: the three prewritten answers to the
+# LLM-randomness review question.  Frozen into every protocol manifest so
+# the threats section cannot drift from the frozen protocol.
+THREATS_REGISTRATION = (
+    "Offline disagreement=0 evidence covers frozen same-context repeats only; "
+    "it does not bound online trajectory drift across a 20-candidate episode.",
+    "Online LLM variance is estimated with repeats=2 episodes plus "
+    "shadow-duplicate deterministic replays; it is measured, not eliminated.",
+    "Provider sampling is not seed-controllable; the planner_seed field is a "
+    "registration placeholder, and paired frozen-context design plus "
+    "decision-level endpoints replace seed control.",
+)
+
 
 def context_fingerprint(payload: Mapping[str, object]) -> str:
     """Hash the frozen context without allowing caller ordering to drift."""
@@ -34,6 +47,8 @@ def build_protocol_manifest(
     model: Mapping[str, object],
     budget: Mapping[str, object],
     noise_rule: Mapping[str, object],
+    bank: Mapping[str, object] | None = None,
+    prompt_skeleton: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     payload = {
         "schema_version": "ecos.knowledge_pilot_protocol.v1",
@@ -46,8 +61,13 @@ def build_protocol_manifest(
         "model": dict(model),
         "budget": dict(budget),
         "noise_rule": dict(noise_rule),
+        "threats_registration": list(THREATS_REGISTRATION),
         "cohort_role": "pilot_only",
     }
+    if bank is not None:
+        payload["bank"] = dict(bank)
+    if prompt_skeleton is not None:
+        payload["prompt_skeleton"] = dict(prompt_skeleton)
     payload["protocol_hash"] = canonical_sha256(payload)
     return payload
 

@@ -7,8 +7,11 @@ import json
 import os
 import sys
 import threading
+from collections import Counter
 from pathlib import Path
 
+import ecos_agent.optimization.experiments.knowledge_pilot as _pilot_module
+import ecos_agent.optimization.experiments.knowledge_treatments as _treatments_module
 from ecos_agent.codex.provider import CodexAppServerProposalProvider
 from ecos_agent.hashing import file_sha256
 from ecos_agent.optimization.experiments.knowledge_pilot import run_offline_pilot
@@ -31,7 +34,10 @@ def main() -> int:
     parser.add_argument("--bank", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="glm-5.3-flash")
-    parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--reasoning-effort", default=None)
+    # A2: five repeats give the divergence rate a usefully narrow Wilson
+    # interval (15 observations per arm was too wide to claim from).
+    parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--planning-call-limit", type=int, default=60)
     parser.add_argument("--watchdog-minutes", type=float, default=30.0)
     parser.add_argument(
@@ -53,6 +59,7 @@ def main() -> int:
     objective_contract_sha256 = contexts[0]["objective_contract_sha256"]
     knowledge_bundle_sha256 = contexts[0]["knowledge_bundle_sha256"]
     ecc_bin = args.ecc_bin.resolve()
+    strata_counts = Counter(str(ctx.get("stratum")) for ctx in contexts)
     manifest = build_protocol_manifest(
         design_ids=[design_id],
         # Same enumeration the pilot loop scores, so the protocol hash can
@@ -62,11 +69,38 @@ def main() -> int:
         state_rule_manifest_sha256=load_state_rule_manifest().manifest_sha256,
         objective_contract_sha256=objective_contract_sha256,
         toolchain={"ecc_executable_sha256": file_sha256(ecc_bin)},
-        model={"name": args.model, "planner_seed": 0},
+        # A1 registration: the provider's sampling is not seed-controllable,
+        # so planner_seed is a placeholder and the resolved model/effort are
+        # recorded as facts rather than controls.
+        model={
+            "name": args.model,
+            "reasoning_effort": args.reasoning_effort or "provider_default",
+            "planner_seed": 0,
+            "planner_seed_note": (
+                "registration only; provider sampling cannot be seeded"
+            ),
+        },
         budget={
             "candidate_limit": 0,
             "planning_call_limit": args.planning_call_limit,
             "repeats": args.repeats,
+        },
+        bank={
+            "context_count": len(contexts),
+            "strata_counts": dict(sorted(strata_counts.items())),
+            "design_id": design_id,
+        },
+        prompt_skeleton={
+            "builder": (
+                "ecos_agent.optimization.experiments.knowledge_pilot."
+                "freeze_planning_context+apply_treatment"
+            ),
+            "knowledge_pilot_module_sha256": file_sha256(
+                Path(_pilot_module.__file__)
+            ),
+            "knowledge_treatments_module_sha256": file_sha256(
+                Path(_treatments_module.__file__)
+            ),
         },
         noise_rule={
             "schema_version": "ecos.offline_pilot_noise.v1",
@@ -112,6 +146,7 @@ def main() -> int:
         repeats=args.repeats,
         planning_call_limit=args.planning_call_limit,
         protocol=manifest,
+        reasoning_effort=args.reasoning_effort,
     )
     args.output.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"

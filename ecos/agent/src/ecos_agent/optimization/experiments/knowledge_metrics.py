@@ -2,12 +2,39 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Iterable, Mapping, Sequence
 
 _PROMOTING_DECISIONS = frozenset(
     {"initialized", "candidate_better", "recovery_progress", "parity_objective_improved"}
 )
+
+_WILSON_Z = 1.959963984540054
+
+
+def wilson_score_interval(
+    successes: int, total: int, *, z: float = _WILSON_Z
+) -> dict[str, float | int | None]:
+    """Wilson score interval for a binomial proportion (no normality claim)."""
+    if total < 1:
+        return {"successes": successes, "total": total, "rate": None, "lo": None, "hi": None}
+    rate = successes / total
+    z2 = z * z
+    denominator = 1.0 + z2 / total
+    center = (rate + z2 / (2 * total)) / denominator
+    half = (
+        z
+        * math.sqrt(rate * (1.0 - rate) / total + z2 / (4 * total * total))
+        / denominator
+    )
+    return {
+        "successes": successes,
+        "total": total,
+        "rate": rate,
+        "lo": max(0.0, center - half),
+        "hi": min(1.0, center + half),
+    }
 
 
 def expected_effect_realization(
@@ -227,6 +254,48 @@ def action_divergence(rows: Iterable[Mapping[str, object]]) -> dict[str, object]
     return {"observed": len(observed), "unique_actions": len(set(observed)), "divergent": len(set(observed)) > 1}
 
 
+def paired_action_divergence(
+    rows: Iterable[Mapping[str, object]],
+    *,
+    base_treatment: str,
+    target_treatment: str,
+) -> dict[str, object]:
+    """Primary RQ2 judgment: cross-arm divergence on matched frozen cells.
+
+    Cells are ``(context_fingerprint, repeat)`` pairs proposed by both arms;
+    a cell diverges when the two arms pick different exact actions.  The
+    Wilson interval turns the rate into the predeclared judgment "the
+    divergence CI must not contain zero", while the gate itself keeps the
+    stricter divergence > disagreement comparison.
+    """
+    by_cell: dict[tuple[str, str], dict[str, tuple[object, object, object] | None]] = {
+        base_treatment: {},
+        target_treatment: {},
+    }
+    for row in rows:
+        treatment = str(row.get("treatment"))
+        if treatment not in by_cell:
+            continue
+        if row.get("decision") != "propose":
+            continue
+        cell = (str(row.get("context_fingerprint")), str(row.get("repeat")))
+        by_cell[treatment][cell] = exact_action(row)
+    matched = sorted(set(by_cell[base_treatment]) & set(by_cell[target_treatment]))
+    divergent = sum(
+        by_cell[base_treatment][cell] != by_cell[target_treatment][cell]
+        for cell in matched
+    )
+    interval = wilson_score_interval(divergent, len(matched))
+    return {
+        "schema_version": "ecos.knowledge_paired_divergence.v1",
+        "base_treatment": base_treatment,
+        "target_treatment": target_treatment,
+        "matched_cells": len(matched),
+        "divergent_cells": divergent,
+        **interval,
+    }
+
+
 SUPPORT_COVERED_STATUSES = frozenset({"pass", "weak"})
 
 
@@ -327,6 +396,41 @@ def state_match_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, objec
     }
 
 
+def decision_level_endpoints(
+    mediation_rows: Sequence[Mapping[str, object]],
+    proposal_rows: Sequence[Mapping[str, object]] = (),
+    *,
+    objective_metric: str,
+) -> dict[str, object]:
+    """Co-primary decision-level endpoints over one episode's planning calls.
+
+    Registered ahead of the formal matrix so LLM-randomness comparisons do
+    not hinge on a single terminal QoR draw: claim-bound rate and
+    non-proposal (abstention) rate score every planning call, while the
+    expected-effect realization / CONTRADICTED join reuses
+    :func:`expected_effect_realization` on the promoted subset.  Terminal
+    QoR stays the secondary endpoint under the frozen noise-tie rule.
+    """
+    values = list(mediation_rows)
+    proposals = [row for row in values if exact_action(row) is not None]
+    claim_bound = sum(bool(row.get("claim_bound")) for row in proposals)
+    effects = expected_effect_realization(
+        proposal_rows, values, objective_metric=objective_metric
+    )
+    return {
+        "schema_version": "ecos.knowledge_decision_endpoints.v1",
+        "objective_metric": objective_metric,
+        "planning_rows": len(values),
+        "proposals": len(proposals),
+        "non_proposal_rate": (
+            (len(values) - len(proposals)) / len(values) if values else None
+        ),
+        "claim_bound_proposals": claim_bound,
+        "claim_bound_rate": claim_bound / len(proposals) if proposals else None,
+        "expected_effect_realization": effects,
+    }
+
+
 def offline_gate(
     summary: Mapping[str, object],
     rows: Sequence[Mapping[str, object]],
@@ -364,6 +468,17 @@ def offline_gate(
         for key, count in dual_layer.get("decision_counts", {}).items()
         if str(key).endswith("_error")
     )
+    # A2 primary judgment: the predeclared divergence-rate CI against every
+    # comparator arm.  The pass rule stays divergence > disagreement; the CI
+    # is the reported effect size, not an extra veto.
+    paired = [
+        paired_action_divergence(
+            rows, base_treatment="state-conditioned-dual-layer-zero-shot",
+            target_treatment=treatment,
+        )
+        for treatment in sorted(summary["treatments"])
+        if treatment != "state-conditioned-dual-layer-zero-shot"
+    ]
     return {
         "schema_version": "ecos.knowledge_offline_gate.v1",
         "context_bank_replayable": bool(contexts),
@@ -373,6 +488,7 @@ def offline_gate(
         "divergence_without_repair": errors == 0,
         "knowledge_opportunity_contexts": opportunity_contexts,
         "min_opportunity_contexts": min_opportunity_contexts,
+        "paired_divergence": paired,
         "offline_gate_pass": bool(
             contexts
             and controls_rejected

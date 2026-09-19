@@ -380,6 +380,35 @@ def _finite_values(values: Sequence[float | int]) -> list[float]:
     return [_finite(value) for value in values]
 
 
+def repeat_sensitivity(
+    values: Sequence[float | int], *, epsilon: float | None = None
+) -> dict[str, object]:
+    """C1 sensitivity analysis over per-repeat episode best-delta values.
+
+    Reports the full spread and the spread after dropping the best and worst
+    repeat; a small middle range is the "not driven by one lucky episode"
+    check.  ``epsilon`` is the frozen (design, target_step, metric) noise
+    tie threshold; stability is reported, never silently enforced.
+    """
+    data = sorted(_finite(value) for value in values)
+    if len(data) < 3:
+        raise ValueError("repeat sensitivity needs at least three repeats")
+    middle = data[1:-1]
+    middle_range = middle[-1] - middle[0]
+    return {
+        "schema_version": "ecos.repeat_sensitivity.v1",
+        "repeats": len(data),
+        "sorted_values": data,
+        "full_range": data[-1] - data[0],
+        "middle_values": middle,
+        "middle_range": middle_range,
+        "epsilon": epsilon,
+        "middle_stable_within_epsilon": (
+            middle_range <= epsilon if epsilon is not None else None
+        ),
+    }
+
+
 def _finite(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("statistics values must be numeric")
