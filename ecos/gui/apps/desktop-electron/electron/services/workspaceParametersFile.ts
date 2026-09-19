@@ -14,15 +14,17 @@ export interface WorkspaceParametersFileLocation {
 }
 
 // Mirrors of the section mapping in ecc chipcompiler/data/workspace_config.py
-// (_DESIGN_SECTION_KEYS / _PDK_SECTION_KEYS). Keep aligned with ecc.
-const DESIGN_SECTION_KEYS: Readonly<Record<string, string>> = {
+// (_DESIGN_SECTION_KEYS / _PDK_SECTION_KEYS). Keep aligned with ecc. The
+// workspaceParametersFile tests pin these tables against a params.toml sample
+// so any drift from the ECC classification fails in CI.
+export const DESIGN_SECTION_KEYS: Readonly<Record<string, string>> = {
   design: 'name',
   top_module: 'top',
   clock: 'clock_port',
   frequency_max: 'frequency_mhz',
 }
 
-const PDK_SECTION_KEYS: Readonly<Record<string, string>> = {
+export const PDK_SECTION_KEYS: Readonly<Record<string, string>> = {
   pdk: 'name',
   pdk_root: 'root',
   pdk_config: 'config',

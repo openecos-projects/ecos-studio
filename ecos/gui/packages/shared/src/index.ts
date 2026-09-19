@@ -21,6 +21,12 @@ export type {
   WorkspaceCreationModelRequest,
   WorkspaceCreationParameter,
 } from './contracts/workspaceCreationModel.ts'
+export type { WorkspaceParameterCatalogEntry } from './contracts/parameterCatalog.ts'
+export {
+  buildWorkspaceDisplayKeyIndex,
+  buildWorkspaceKnobIndex,
+  workspaceParameterCatalogEntries,
+} from './contracts/parameterCatalog.ts'
 export type {
   BackendWorkspaceApi,
   BackendWorkspaceArtifactContent,

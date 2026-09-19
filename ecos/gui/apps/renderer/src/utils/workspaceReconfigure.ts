@@ -80,11 +80,11 @@ export function workspaceReconfigureInitialConfig(
       top_module: text(design.topModule),
       clock: text(design.clockPort),
       die_area_mode:
-        dieWidth > 0 && dieHeight > 0 ? 'width_height' : 'utilitization_margin',
+        dieWidth > 0 && dieHeight > 0 ? 'width_height' : 'utilization_margin',
       die_width: dieWidth,
       die_height: dieHeight,
       frequency_max: number(parameters['design.frequency_mhz']),
-      utilitization: number(parameters['floorplan.core_util']),
+      utilization: number(parameters['floorplan.core_util']),
       margin: coreMargin[0],
       max_fanout: number(parameters['cts.max_fanout']),
       target_density: number(parameters['place.target_density']),

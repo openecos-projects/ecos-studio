@@ -80,8 +80,17 @@ interface FrontendWorkspaceCreateOptions {
 export function backendWorkspaceOptions(
   config: WorkspaceConfig,
   targetDirectory: string,
+  parameterDisplayIndex?: Record<string, string> | null,
 ): BackendWorkspaceCreateOptions {
   const parameters = config.parameters ?? {}
+  // Display keys come from the ECC parameter catalog when it carries
+  // display_key fields; each maps to its ECC spec key. Old ECC (or an
+  // unavailable catalog) yields a null/empty index, in which case the
+  // built-in fallback spec keys below are used unchanged.
+  const specKey = (displayKey: string, fallback: string): string => {
+    const mapped = parameterDisplayIndex?.[displayKey]
+    return mapped && mapped.trim() ? mapped : fallback
+  }
   const inputs: Array<{ inputId: string; role: string }> = []
   const inputBindings: Record<string, string> = {}
   const addInput = (inputId: string, role: string, path: string) => {
@@ -192,28 +201,37 @@ export function backendWorkspaceOptions(
         : {}),
       parameters: {
         ...(synthesisApplies
-          ? { 'design.frequency_mhz': numberValue(parameters.frequency_max, 100) }
+          ? {
+              [specKey('frequency_max', 'design.frequency_mhz')]: numberValue(
+                parameters.frequency_max,
+                100,
+              ),
+            }
           : {}),
         ...(floorplanApplies
           ? {
-              'floorplan.core_util': numberValue(
-                parameters.utilitization ?? parameters.core_utilization,
+              [specKey('utilization', 'floorplan.core_util')]: numberValue(
+                parameters.utilization ??
+                  parameters.utilitization ??
+                  parameters.core_utilization,
                 fixedDie ? 0.5 : 0.6,
               ),
-              'floorplan.die_builder.mode': fixedDie ? 'die_size' : 'die_util',
+              [specKey('die_area_mode', 'floorplan.die_builder.mode')]: fixedDie
+                ? 'die_size'
+                : 'die_util',
               ...(fixedDie
                 ? {
-                    'floorplan.die_builder.die_size.width_micron': numberValue(
-                      parameters.die_width,
-                      100,
-                    ),
-                    'floorplan.die_builder.die_size.height_micron': numberValue(
-                      parameters.die_height,
-                      100,
-                    ),
+                    [specKey(
+                      'die_width',
+                      'floorplan.die_builder.die_size.width_micron',
+                    )]: numberValue(parameters.die_width, 100),
+                    [specKey(
+                      'die_height',
+                      'floorplan.die_builder.die_size.height_micron',
+                    )]: numberValue(parameters.die_height, 100),
                   }
                 : {
-                    'floorplan.core_margin': [
+                    [specKey('margin', 'floorplan.core_margin')]: [
                       numberValue(parameters.margin, 0),
                       numberValue(parameters.margin, 0),
                     ],
@@ -221,12 +239,23 @@ export function backendWorkspaceOptions(
             }
           : {}),
         ...(ctsApplies
-          ? { 'cts.max_fanout': numberValue(parameters.max_fanout, 20) }
+          ? {
+              [specKey('max_fanout', 'cts.max_fanout')]: numberValue(
+                parameters.max_fanout,
+                20,
+              ),
+            }
           : {}),
         ...(placementApplies
           ? {
-              'place.target_density': numberValue(parameters.target_density, 0.2),
-              'place.target_overflow': numberValue(parameters.target_overflow, 0.1),
+              [specKey('target_density', 'place.target_density')]: numberValue(
+                parameters.target_density,
+                0.2,
+              ),
+              [specKey('target_overflow', 'place.target_overflow')]: numberValue(
+                parameters.target_overflow,
+                0.1,
+              ),
             }
           : {}),
       },
