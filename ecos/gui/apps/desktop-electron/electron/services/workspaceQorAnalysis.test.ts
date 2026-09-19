@@ -6,7 +6,11 @@ import {
 } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import { buildProjectQorTrendSummary } from './qorAnalysis'
-import { analyzeWorkspaceQor, projectQorInputForWorkspace } from './workspaceQorAnalysis'
+import {
+  analyzeWorkspaceQor,
+  projectQorInputForWorkspace,
+  workspaceFlowStates,
+} from './workspaceQorAnalysis'
 
 function metricText(value: number): string {
   return JSON.stringify({
@@ -125,6 +129,32 @@ function workspace(id: string, name: string) {
     workspace_path: `/project/${id}`,
   }
 }
+
+describe('workspaceFlowStates', () => {
+  it('maps fine-grained ECC step names onto the coarse project flow steps', () => {
+    expect(
+      workspaceFlowStates({
+        steps: [
+          { name: 'Synthesis', state: 'Success' },
+          { name: 'preFloorplan', state: 'Success' },
+          { name: 'macroPlacement', state: 'Success' },
+          { name: 'postFloorplan', state: 'Failed' },
+          { name: 'Timing optimization', state: 'Ongoing' },
+        ],
+      }),
+    ).toEqual({
+      Synth: 'success',
+      Floor: 'failed',
+      'Timing Opt': 'running',
+    })
+  })
+
+  it('keeps unknown step names as-is', () => {
+    expect(
+      workspaceFlowStates({ steps: [{ name: 'customSignoff', state: 'Success' }] }),
+    ).toEqual({ customSignoff: 'success' })
+  })
+})
 
 describe('analyzeWorkspaceQor', () => {
   it('does not use non-archived Manifest status as committed Flow state', () => {

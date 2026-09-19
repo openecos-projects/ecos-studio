@@ -11,6 +11,7 @@ import type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputsResult,
 } from './eccRuntime.ts'
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
 import type { DesignTool } from '../types/workspace.ts'
@@ -64,6 +65,11 @@ export interface DesignRuntimeWorkspaceInfoRequest extends DesignRuntimeWorkspac
   step: string
 }
 
+export interface DesignRuntimeWorkspaceStepOutputsRequest extends DesignRuntimeTargetRequest {
+  directory: string
+  step?: string
+}
+
 export interface DesignRuntimeFlowRunRequest extends DesignRuntimeWorkspaceHandleRequest {
   rerun?: boolean
 }
@@ -110,6 +116,9 @@ export interface DesignRuntimeApi {
     stepConfiguration(
       request: DesignRuntimeWorkspaceHandleRequest & { step: string },
     ): Promise<EccWorkspaceStepConfigurationReadResult>
+    stepOutputs(
+      request: DesignRuntimeWorkspaceStepOutputsRequest,
+    ): Promise<EccWorkspaceStepOutputsResult>
     open(request: DesignRuntimeWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult>
     refreshConfig(
       request: DesignRuntimeWorkspaceHandleRequest,

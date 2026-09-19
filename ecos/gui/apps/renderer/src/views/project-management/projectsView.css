@@ -852,6 +852,12 @@
   text-align: left;
 }
 
+.popover-step-empty {
+  margin: 4px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .popover-step-row:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-color) 8%, transparent);
 }

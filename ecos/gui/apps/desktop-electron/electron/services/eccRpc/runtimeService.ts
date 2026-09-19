@@ -44,6 +44,7 @@ import type {
   EccWorkspaceStepConfigurationUpdateRequest,
   EccWorkspaceStepConfigurationReadRequest,
   EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputsResult,
   EccWorkspaceSpecValidationRequest,
   EccWorkspaceSpecValidationResult,
   EccWorkspaceUpdateRequest,
@@ -456,6 +457,13 @@ export class EccRpcRuntimeService {
         step,
       )
     return mapStepConfigurationReadResult(result)
+  }
+
+  async workspaceStepOutputs(
+    directory: string,
+    step?: string,
+  ): Promise<EccWorkspaceStepOutputsResult> {
+    return await this.getOrCreateControlRuntime().workspaceStepOutputs(directory, step)
   }
 
   async refreshConfig(

@@ -4,7 +4,6 @@ import {
   type BackendProjectComparison,
   type ProjectAnalysisSnapshot,
   type ProjectManifest,
-  type ProjectManifestBaseDesign,
   type ProjectManifestFlowStep,
   type ProjectManifestWorkspace,
   type ProjectManifestWorkspaceStatus,
@@ -71,7 +70,6 @@ export interface ProjectWorkspace {
   id: string
   name: string
   workspacePath: string
-  artifactDesignName: string
   status: ProjectWorkspaceStatus
   description: string
   sourceWorkspaceId: string | null
@@ -249,49 +247,27 @@ export interface ProjectSelectionState {
   selectedStep: FlowStep
 }
 
+export interface WorkspaceBranchSourceStep {
+  step: string
+  nextStep: string
+  verilogPath: string | null
+  defPath: string | null
+  sdcPath: string | null
+}
+
 export interface WorkspaceBranchDraft {
   sourceWorkspaceId: string
   sourceWorkspacePath: string
-  step: FlowStep
+  step: string
   targetWorkspaceId: string
   targetWorkspacePath: string
-  targetStartStep: FlowStep
-  targetEndStep: FlowStep
+  targetStartStep: string
+  targetEndStep: string
   sourceOutputType: 'verilog' | 'def'
   sourceOutputPath: string
   originVerilog?: string
   originDef?: string
   originSdc?: string
-}
-
-const RUNTIME_STEP_ARTIFACTS: Record<
-  FlowStep,
-  {
-    directory: string
-    outputName: string
-  }
-> = {
-  Synth: { directory: 'Synthesis_yosys', outputName: 'Synthesis' },
-  LEC: { directory: 'lec_yosys_lec', outputName: 'lec' },
-  Floor: { directory: 'Floorplan_ecc', outputName: 'Floorplan' },
-  Place: { directory: 'place_dreamplace', outputName: 'place' },
-  CTS: { directory: 'CTS_ecc', outputName: 'CTS' },
-  Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
-  'Timing Opt': {
-    directory: 'timing_optimization_sizer',
-    outputName: 'timing_optimization',
-  },
-  Route: { directory: 'route_ecc', outputName: 'route' },
-  DRC: { directory: 'drc_ecc', outputName: 'drc' },
-  LVS: { directory: 'lvs_ecc', outputName: 'lvs' },
-  Filler: { directory: 'filler_ecc', outputName: 'filler' },
-  'Post-route LEC': {
-    directory: 'postRouteLec_yosys_lec',
-    outputName: 'postRouteLec',
-  },
-  RCX: { directory: 'RCX_ecc', outputName: 'RCX' },
-  STA: { directory: 'sta_ecc', outputName: 'sta' },
-  Harden: { directory: 'Harden_ecc', outputName: 'Harden' },
 }
 
 /**
@@ -355,11 +331,6 @@ export function buildProjectManagementProject(
       },
       flowStates,
       depth,
-      workspaceArtifactDesignName(
-        workspace,
-        manifest?.base_design,
-        designName || projectArtifactDesignName(project?.name ?? name, topModule),
-      ),
     )
   })
   const qorTrendSummary = sectionData(comparison?.trend) ?? emptyProjectQorTrendSummary()
@@ -817,44 +788,33 @@ export function nextWorkspaceId(
 export function createWorkspaceBranchDraft(
   project: ProjectManagementProject,
   sourceWorkspaceId: string,
-  step: FlowStep,
+  source: WorkspaceBranchSourceStep,
   targetWorkspaceId = nextWorkspaceId(project),
 ): WorkspaceBranchDraft {
   const sourceWorkspace = project.workspaces.find(
     (workspace) => workspace.id === sourceWorkspaceId,
   )
-  const sourceOutputType = step === 'Synth' ? 'verilog' : 'def'
   const sourceWorkspacePath =
     sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId)
-  const designName =
-    sourceWorkspace?.artifactDesignName ||
-    projectArtifactDesignName(project.name, project.topModule)
-  const sourceOutputPath = sourceStepOutputPath(sourceWorkspacePath, step, designName)
-  const originSdc = sourceWorkspaceSdcPath(sourceWorkspacePath, designName)
-  const artifactOrigin =
-    sourceOutputType === 'verilog'
-      ? { originVerilog: sourceOutputPath }
-      : {
-          originDef: sourceOutputPath,
-          originVerilog: sourceStepOutputVerilogPath(
-            sourceWorkspacePath,
-            step,
-            designName,
-          ),
-        }
+  const sourceOutputType = source.defPath ? 'def' : 'verilog'
+  const sourceOutputPath =
+    (sourceOutputType === 'def' ? source.defPath : source.verilogPath) ?? ''
 
   return {
     sourceWorkspaceId,
     sourceWorkspacePath,
-    step,
+    step: source.step,
     targetWorkspaceId,
     targetWorkspacePath: joinPath(project.path, targetWorkspaceId),
-    targetStartStep: nextFlowStep(step),
+    targetStartStep: source.nextStep,
     targetEndStep: 'Harden',
     sourceOutputType,
     sourceOutputPath,
-    originSdc,
-    ...artifactOrigin,
+    ...(source.sdcPath ? { originSdc: source.sdcPath } : {}),
+    ...(source.verilogPath ? { originVerilog: source.verilogPath } : {}),
+    ...(sourceOutputType === 'def' && source.defPath
+      ? { originDef: source.defPath }
+      : {}),
   }
 }
 
@@ -872,7 +832,6 @@ function buildProjectWorkspace(
   workspace: ProjectWorkspaceManifest,
   flowStateMap: ProjectWorkspaceFlowStateMap,
   depth = 0,
-  artifactDesignName = '',
 ): ProjectWorkspace {
   const startStep = normalizeProjectManifestFlowStep(workspace.start_step)
   const endStep = normalizeProjectManifestFlowStep(workspace.end_step)
@@ -888,7 +847,6 @@ function buildProjectWorkspace(
     id: workspace.workspace_id,
     name: workspaceDisplayName(workspace),
     workspacePath: workspace.workspace_path,
-    artifactDesignName,
     status: workspace.status,
     description: workspace.branch_from
       ? `from ${workspace.branch_from.source_workspace_id}/${branchStep}`
@@ -1299,92 +1257,8 @@ function diffValueLabel(value: unknown): string | undefined {
   return String(value)
 }
 
-function sourceStepOutputPath(
-  workspacePath: string,
-  step: FlowStep,
-  designName: string,
-): string {
-  return sourceStepArtifactPath(
-    workspacePath,
-    step,
-    defaultSourceOutputType(step),
-    designName,
-  )
-}
-
-function sourceStepOutputVerilogPath(
-  workspacePath: string,
-  step: FlowStep,
-  designName: string,
-): string {
-  return sourceStepArtifactPath(workspacePath, step, 'verilog', designName)
-}
-
-function sourceWorkspaceSdcPath(workspacePath: string, designName: string): string {
-  return joinPath(workspacePath, 'origin', `${designName || 'design'}.sdc`)
-}
-
-function sourceStepArtifactPath(
-  workspacePath: string,
-  step: FlowStep,
-  artifactType: 'verilog' | 'def',
-  designName: string,
-): string {
-  const artifact = RUNTIME_STEP_ARTIFACTS[step]
-  if (!artifact || !designName) {
-    const fileName = artifactType === 'verilog' ? 'design.v' : 'design.def'
-    return joinPath(workspacePath, step, 'output', fileName)
-  }
-
-  const suffix =
-    artifactType === 'verilog' ? (step === 'Synth' ? '_fixed.v.gz' : '.v.gz') : '.def.gz'
-  return joinPath(
-    workspacePath,
-    artifact.directory,
-    'output',
-    `${designName}_${artifact.outputName}${suffix}`,
-  )
-}
-
-function projectArtifactDesignName(name: string, topModule?: string): string {
-  return normalizeArtifactDesignName(topModule) || normalizeArtifactDesignName(name)
-}
-
-function workspaceArtifactDesignName(
-  workspace: ProjectWorkspaceManifest,
-  baseDesign: ProjectManifestBaseDesign | undefined,
-  fallback: string,
-): string {
-  return (
-    normalizeArtifactDesignName(
-      parameterPatchValues((workspace.parameter_patch ?? {}).design).to,
-    ) ||
-    (workspace.branch_from || workspace.source_workspace_id
-      ? normalizeArtifactDesignName(workspace.name)
-      : '') ||
-    normalizeArtifactDesignName(baseDesign?.parameters?.design) ||
-    fallback ||
-    normalizeArtifactDesignName(workspace.workspace_id)
-  )
-}
-
-function normalizeArtifactDesignName(value: unknown): string {
-  return typeof value === 'string'
-    ? value.trim().replace(/[\\/]/g, '_').replace(/\s+/g, '_')
-    : ''
-}
-
-function defaultSourceOutputType(step: FlowStep): 'verilog' | 'def' {
-  return step === 'Synth' ? 'verilog' : 'def'
-}
-
-function isCompletedStepStatus(status: ProjectStepStatus): boolean {
+export function isCompletedStepStatus(status: ProjectStepStatus): boolean {
   return status === 'success' || status === 'warning' || status === 'reused'
-}
-
-function nextFlowStep(step: FlowStep): FlowStep {
-  const index = FLOW_STEPS.indexOf(step)
-  return FLOW_STEPS[Math.min(index + 1, FLOW_STEPS.length - 1)]
 }
 
 function formatRuntimeLabel(seconds: number): string {

@@ -23,6 +23,7 @@ import {
   type DesignRuntimeWorkspaceHandleRequest,
   type DesignRuntimeWorkspaceInfoRequest,
   type DesignRuntimeWorkspaceOpenRequest,
+  type DesignRuntimeWorkspaceStepOutputsRequest,
   type DesignTool,
   type DesktopDirectoryDialogOptions,
   type EccFlowRunRequest,
@@ -47,6 +48,7 @@ import {
   type EccWorkspaceOpenRequest,
   type EccWorkspaceOpenResult,
   type EccWorkspaceStepConfigurationReadResult,
+  type EccWorkspaceStepOutputsResult,
   type EccWorkspaceStepConfigurationUpdateRequest,
   type EccWorkspaceSpecValidationRequest,
   type EccWorkspaceUpdateRequest,
@@ -533,6 +535,10 @@ export interface DesktopBridgeServices {
       directory: string,
       step: string,
     ): Promise<EccWorkspaceStepConfigurationReadResult>
+    workspaceStepOutputs(
+      directory: string,
+      step?: string,
+    ): Promise<EccWorkspaceStepOutputsResult>
     updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<unknown>
     validateWorkspaceSpec(request: EccWorkspaceSpecValidationRequest): Promise<unknown>
     workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -2814,6 +2820,24 @@ export function registerIpc(
         step: runtimeRequest.step,
         workspaceHandle: runtimeRequest.workspaceHandle,
       })
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.designRuntimeWorkspaceStepOutputs,
+    async (_event, request) => {
+      const runtimeRequest = request as DesignRuntimeWorkspaceStepOutputsRequest
+      if (requireDesignTool(runtimeRequest.designTool) !== 'backend') {
+        throw new Error('Workspace step outputs require the backend runtime.')
+      }
+      const directory = normalizeWorkspacePath(runtimeRequest.directory)
+      if (!directory) {
+        throw new Error('Workspace step outputs require a workspace directory.')
+      }
+      return await services.eccRuntimeService.workspaceStepOutputs(
+        directory,
+        runtimeRequest.step,
+      )
     },
   )
 
