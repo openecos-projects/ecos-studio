@@ -307,6 +307,10 @@ import {
   resolveProjectRouteContextForWorkspace,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
+import {
+  consumeWorkspaceWizardRequest,
+  useWorkspaceWizardRequest,
+} from '@/utils/workspaceNavigation'
 
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
@@ -429,6 +433,19 @@ const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
+
+watch(
+  pendingWorkspaceWizardRequest,
+  (request) => {
+    if (!request) return
+    consumeWorkspaceWizardRequest()
+    workspaceWizardInitialConfig.value = request.initialConfig
+    reconfigureWorkspacePath.value = ''
+    showNewProjectWizard.value = true
+  },
+  { flush: 'sync' },
+)
 
 function closeStepConfigDialog(): void {
   if (
