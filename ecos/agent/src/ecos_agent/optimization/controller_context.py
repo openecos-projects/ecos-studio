@@ -39,10 +39,13 @@ from ecos_agent.optimization.contracts import (
     ProposalReason,
     RequestedKnobValue,
     SelectionMetric,
+    StageEvidenceFeature,
     StageObservation,
     StrategyDirection,
     TerminalObservation,
 )
+from ecos_agent.optimization.observations import _STAGE_DIRECTORIES
+from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.optimization.decision_audit import (
     DecisionValidationResult,
     OptimizationDecisionAudit,
@@ -60,6 +63,7 @@ from ecos_agent.optimization.execution import (
     knob_has_stage_evidence,
 )
 from ecos_agent.optimization.knowledge.compiler import (
+    StateEvidenceFeature,
     build_state_evidence_request,
     compile_supported_action_view,
     load_state_rule_manifest,
@@ -257,6 +261,32 @@ class ControllerContextMixin:
             supported_action_view = None
         else:
             state_rule_manifest = load_state_rule_manifest()
+            # Cross-stage observations carry the stage evidence their own
+            # stage produced (place maps at a postFloorplan checkpoint, ...);
+            # without the merge every predicate over those features evaluates
+            # unknown and the compiled view collapses to an empty pass set.
+            extra_features: list[StateEvidenceFeature] = []
+            for stage_observation in (stage_observations or {}).values():
+                stage_sha256 = canonical_sha256(
+                    stage_observation.model_dump(mode="json")
+                )
+                stage_dir = _STAGE_DIRECTORIES.get(
+                    ECCStepName(stage_observation.stage),
+                    stage_observation.stage.value,
+                )
+                metrics_ref = f"{stage_dir}/analysis/qor_metrics.json"
+                extra_features.extend(stage_observation.state_evidence)
+                extra_features.extend(
+                    StateEvidenceFeature(
+                        feature_id=metric_id,
+                        value=value,
+                        evidence_ref=metrics_ref,
+                        evidence_sha256=stage_sha256,
+                    )
+                    for metric_id, value in sorted(
+                        stage_observation.metrics.items()
+                    )
+                )
             supported_action_view = compile_supported_action_view(
                 state=build_state_evidence_request(
                     task_id=retrieval.request.task_id,
@@ -294,6 +324,8 @@ class ControllerContextMixin:
                         if self._trend_noise_epsilon is not None
                         else state_rule_manifest.trend_noise_tolerance
                     ),
+                    extra_features=extra_features,
+                    evidence_stages=tuple(stage_observations or {}),
                 ),
                 catalog=retrieval.support_catalog,
                 candidate_refs=retrieval.candidate_refs,

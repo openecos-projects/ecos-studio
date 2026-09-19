@@ -415,6 +415,11 @@ class OptimizationStateEvidenceRequest(_Model):
     retrieval_request_sha256: str
     observation_ref: ObservationReference
     current_stage: ECCStepName
+    # Stages whose observations were merged into the features: claims of any
+    # of these stages are stage-compatible at this checkpoint even when the
+    # checkpoint itself anchors elsewhere (place claims at a postFloorplan
+    # checkpoint that carries the place-stage evidence).
+    evidence_stages: tuple[str, ...] = ()
     primary_metric: ObjectiveMetric | None = None
     preserve_metrics: tuple[ObjectiveMetric, ...] = ()
     objective_contract_sha256: str | None = None

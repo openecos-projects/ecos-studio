@@ -76,6 +76,7 @@ def build_state_evidence_request(
     history_sha256: tuple[str, ...] = (),
     trend_epsilon: float | Mapping[str, float] = 0.0,
     extra_features: tuple[StateEvidenceFeature, ...] = (),
+    evidence_stages: tuple[str, ...] = (),
 ) -> OptimizationStateEvidenceRequest:
     observation_ref = ObservationReference(
         observation_id=observation.observation_id,
@@ -191,14 +192,21 @@ def build_state_evidence_request(
         features, observation, historical_metrics, observation_ref.sha256, trend_epsilon
     )
     for feature in extra_features:
+        # Cross-stage extras fill evidence gaps: the primary observation and
+        # the derived features always win on id collisions.
         if feature.feature_id in features:
-            raise ValueError("extra state evidence duplicates a derived feature")
+            continue
         features[feature.feature_id] = feature
     return OptimizationStateEvidenceRequest(
         task_id=task_id,
         retrieval_request_sha256=retrieval_request_sha256,
         observation_ref=observation_ref,
         current_stage=observation.stage,
+        evidence_stages=tuple(
+            dict.fromkeys(
+                stage for stage in evidence_stages if stage != observation.stage.value
+            )
+        ),
         primary_metric=primary_metric,
         preserve_metrics=preserve_metrics,
         objective_contract_sha256=objective_contract_sha256,
@@ -442,7 +450,9 @@ def _match_claim(
             return KnowledgeApplicability.BLOCKED, ("objective_mismatch",)
     if state.current_stage.value.casefold() not in {
         stage.casefold() for stage in claim.stages
-    }:
+    } and not {
+        stage.casefold() for stage in state.evidence_stages
+    } & {stage.casefold() for stage in claim.stages}:
         return KnowledgeApplicability.BLOCKED, ("incompatible_stage",)
     if binding is None:
         return KnowledgeApplicability.BLOCKED, ("unsupported_action",)

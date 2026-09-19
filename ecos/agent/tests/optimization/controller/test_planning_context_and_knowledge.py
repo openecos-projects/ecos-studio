@@ -720,3 +720,39 @@ def test_planning_rejects_external_case_pool_change_during_episode(
     ):
         controller.plan(_observation(), _retrieval(), CURRENT_VALUES)
     assert codex.contexts == []
+
+
+def test_cross_stage_observations_feed_predicate_features(tmp_path: Path) -> None:
+    """A postFloorplan checkpoint must see the place-stage evidence carried
+    by the supplied cross-stage observations; without the merge every
+    place-gated predicate evaluates unknown and the view collapses."""
+    from ecos_agent.optimization.contracts import StageObservation
+
+    retrieval = _retrieval()
+    codex = _FakeCodex(_proposal)
+    controller = _controller(tmp_path, codex, _FakeEcc())
+    place_observation = _observation()
+
+    controller.plan(
+        _observation().model_copy(
+            update={
+                "observation_id": "observation-postFloorplan",
+                "stage": ECCStepName.POST_FLOORPLAN,
+                "metrics": {"die_area": 83467.8},
+            }
+        ),
+        retrieval,
+        CURRENT_VALUES,
+        stage_observations={"place": place_observation},
+    )
+
+    view = codex.contexts[0].supported_action_view
+    assert view is not None
+    match = next(
+        item
+        for item in view.matches
+        if item.claim_ref.entity_id == "strategy.congestion.padding.v1"
+    )
+    assert match.applicability.value in {"pass", "weak"}, match.reason_codes
+    assert "incompatible_stage" not in match.reason_codes
+    assert "missing_observation" not in match.reason_codes
