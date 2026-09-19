@@ -4,6 +4,7 @@ import type {
   DesktopAgentEvent,
   DesktopAgentExecutionContract,
   DesktopAgentInteractionRequest,
+  DesktopAgentOptimizationPayload,
 } from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
 import { sameCapturedFlowStep } from '@/composables/flowRunArtifacts'
@@ -382,6 +383,30 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
+  const upsertOptimizationProjection = (
+    sessionId: string,
+    optimization: DesktopAgentOptimizationPayload,
+  ): string => {
+    const id = `optimization-${optimization.episode_id}`
+    const bucket = sessionMessages(sessionId)
+    const existing = bucket.find((message) => message.id === id)
+    if (existing) {
+      existing.optimization = optimization
+      existing.optimizationTimeline = [optimization]
+      return id
+    }
+    bucket.push({
+      id,
+      role: 'assistant',
+      content: '',
+      type: 'optimization',
+      status: 'done',
+      optimization,
+      optimizationTimeline: [optimization],
+    })
+    return id
+  }
+
   const finishStreamingMessages = (sessionId?: string): void => {
     const resolvedId = sessionId ?? activeSessionId.value
     const bucket = sessionId ? sessionMessages(sessionId) : tryActiveMessages()
@@ -561,6 +586,7 @@ export const useMessageStore = defineStore('messages', () => {
     restoreInteraction,
     rewindToInteraction,
     upsertAgentEvent,
+    upsertOptimizationProjection,
     finishStreamingMessages,
     appendToolProgress,
     finishToolProgress,

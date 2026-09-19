@@ -9,6 +9,7 @@
       v-else-if="message.type === 'optimization' && message.optimization"
       :optimization="message.optimization"
       :timeline="message.optimizationTimeline ?? [message.optimization]"
+      @control="$emit('optimization-control', $event)"
     />
     <AgentToolCard
       v-else-if="message.type === 'tool'"
@@ -425,6 +426,7 @@ const props = defineProps<{ message: Message }>()
 
 const emit = defineEmits<{
   (e: 'img-load'): void
+  (e: 'optimization-control', action: 'pause' | 'resume' | 'retry' | 'stop'): void
 }>()
 
 const md = new MarkdownIt({

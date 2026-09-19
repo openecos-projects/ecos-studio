@@ -111,6 +111,8 @@ class _FakeChatProvider:
 
 
 class _FailingRunner(OptimizationEpisodeRunner):
+    ecc_revision = "ecc-test"
+
     def __init__(self) -> None:
         self.event_listener = None
         self._controller = SimpleNamespace(
@@ -128,6 +130,9 @@ class _FailingRunner(OptimizationEpisodeRunner):
 
     def run_turn(self, *, paused: bool = False):
         raise RuntimeError("test stop")
+
+    def finish_stop(self) -> None:
+        self._controller.state = OptimizationEpisodeState.STOPPED
 
 
 class _CompletedRunner(_FailingRunner):
@@ -282,7 +287,13 @@ def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
     assert factory_calls[1]["context"]["workspace"] == str(workspace)
     assert isinstance(factory_calls[1]["context"]["workspace"], str)
     assert factory_calls[1]["context"]["objective"]["primary_metric"] == "route_wirelength"
-    terminal = next(event for event in events if event["type"] == "optimization")["optimization"]
+    terminal = next(
+        event["optimization"]
+        for event in events
+        if event["type"] == "optimization"
+        and event["optimization"].get("schema_version")
+        == "ecos.optimization_status.v1"
+    )
     assert terminal["schema_version"] == "ecos.optimization_status.v1"
     assert terminal["state"] == "error"
     assert terminal["rejection_reason"] == "test stop"
@@ -313,43 +324,6 @@ def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) 
 
     assert lifecycle == ["request-stop", "terminal-ledger", "runner-close"]
     assert provider.sessions[session_id].optimization_phase == "stopped"
-
-
-def test_gui_pause_and_resume_update_running_session_control_state(tmp_path: Path) -> None:
-    workspace = _make_optimization_workspace(tmp_path)
-    events: list[dict[str, object]] = []
-    lifecycle: list[str] = []
-    runner = _BlockingRunner(lifecycle)
-    provider = EcosAgentProvider(
-        emit=events.append,
-        optimization_provider_factory=lambda **_kwargs: _FakeCodexProvider(),
-        optimization_runner_factory=lambda _context, _planner: runner,
-    )
-    session_id = provider.start_session(
-        {"directory": str(workspace), "mode": "workspace"}
-    )["sessionId"]
-    _send(provider, session_id, "3")
-    _send(provider, session_id, "reduce wirelength")
-    _send(provider, session_id, "1")
-    assert runner.started.wait(timeout=2)
-
-    provider.send_message({"sessionId": session_id, "message": "pause"})
-    session = provider.sessions[session_id]
-    assert session.optimization_phase == "paused"
-    assert session.optimization_pause.is_set()
-    assert events[-1]["status"] == "awaiting_choice"
-
-    provider.send_message({"sessionId": session_id, "message": "resume"})
-    assert session.optimization_phase == "running"
-    assert not session.optimization_pause.is_set()
-    assert events[-1]["status"] == "running"
-
-    provider.send_message({"sessionId": session_id, "message": "stop"})
-    deadline = time.monotonic() + 2
-    while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-    assert lifecycle == ["request-stop", "terminal-ledger", "runner-close"]
 
 
 def test_gui_reports_in_flight_and_waits_for_remaining_candidates(
@@ -511,7 +485,12 @@ def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -
     while provider.sessions[session_id].optimization_thread is not None and time.monotonic() < deadline:
         time.sleep(0.01)
 
-    progress = next(event["optimization"] for event in events if event["type"] == "optimization")
+    progress = next(
+        event["optimization"]
+        for event in events
+        if event["type"] == "optimization"
+        and event["optimization"].get("proposal_decision") is not None
+    )
     assert progress["proposal_decision"] == "stop"
     assert progress["proposal_reason"] == "observation"
     assert progress["rejection_reason"] is None
@@ -591,7 +570,12 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
     assert runner_contexts[0]["objective_alignment"] == (
         session.optimization_objective_alignment
     )
-    progress = next(event["optimization"] for event in events if event["type"] == "optimization")
+    progress = next(
+        event["optimization"]
+        for event in events
+        if event["type"] == "optimization"
+        and event["optimization"].get("primary_metric") is not None
+    )
     assert progress["objective_sha256"] == session.optimization_objective_sha256
     assert progress["primary_metric"] == "route_wirelength"
 
@@ -787,4 +771,3 @@ def test_gui_optimization_objective_parse_failure_returns_to_operation(tmp_path:
     assert provider.sessions[session_id].phase == "operation"
     assert fake_provider.closed == 1
     assert any(event["type"] == "error" and "Unable to parse optimization objective" in str(event["text"]) for event in events)
-

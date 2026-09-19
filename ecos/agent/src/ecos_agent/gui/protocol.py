@@ -111,6 +111,10 @@ class EcosAgentProtocolServer:
             "setMode": self.provider.set_mode,
             "listSessions": self.provider.list_sessions,
             "resumeSession": self.provider.resume_session,
+            "resumeOptimizationEpisode": self.provider.resume_optimization_episode,
+            "stopOptimizationEpisode": self.provider.stop_optimization_episode,
+            "prepareOptimizationShutdown": self.provider.prepare_optimization_shutdown,
+            "cancelOptimizationShutdown": self.provider.cancel_optimization_shutdown,
             "stop": self.provider.stop,
         }
         handler = handlers.get(request["method"])

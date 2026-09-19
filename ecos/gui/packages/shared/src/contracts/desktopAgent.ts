@@ -483,6 +483,8 @@ export interface DesktopAgentOptimizationPayload {
   active_primary_metric?: string
   action?: { direction: string; knob_id: string } | null
   alignment_sha256?: string
+  calibration_completed?: number
+  calibration_required?: number
   decisive_metric?: string | null
   episode_id: string
   execution_state?: string | null
@@ -494,6 +496,7 @@ export interface DesktopAgentOptimizationPayload {
   original_objective?: Record<string, unknown>
   original_primary_metric?: string
   outcome?: string | null
+  phase?: string
   planning_state?: string | null
   primary_metric?: string
   proposal_decision?: string | null
@@ -514,6 +517,71 @@ export interface DesktopAgentOptimizationPayload {
     sta_hold_violation_count: number
     sta_setup_violation_count: number
   }
+}
+
+export type DesktopAgentOptimizationEpisodeState =
+  | 'awaiting_confirmation'
+  | 'starting'
+  | 'calibrating'
+  | 'running'
+  | 'paused'
+  | 'stopping'
+  | 'needs_attention'
+  | 'interrupted'
+  | 'completed'
+  | 'stopped'
+  | 'failed'
+
+export interface DesktopAgentOptimizationEpisodeSummary {
+  agentSessionId: string
+  episodeId: string
+  inFlightCount: number
+  optimization: DesktopAgentOptimizationPayload
+  parentWorkspaceDirectory: string
+  parentWorkspaceId?: string
+  parentWorkspaceRevision?: number
+  providerId: string
+  startedAt: number
+  state: DesktopAgentOptimizationEpisodeState
+  turnCount: number
+  updatedAt: number
+  notificationStates?: DesktopAgentOptimizationEpisodeNotificationState[]
+  cleanupState?: 'available' | 'completed'
+}
+
+export type DesktopAgentOptimizationEpisodeNotificationState =
+  | 'completed'
+  | 'needs_attention'
+  | 'interrupted'
+  | 'stopped'
+
+export interface DesktopAgentOptimizationEpisodeProjection {
+  episodes: DesktopAgentOptimizationEpisodeSummary[]
+  generation: number
+}
+
+export interface DesktopAgentOptimizationEpisodeInvalidatedEvent {
+  generation: number
+}
+
+export interface DesktopAgentOptimizationEpisodeControlRequest extends DesktopAgentProviderRequest {
+  action: 'pause' | 'resume' | 'retry' | 'stop'
+  episodeId: string
+  sessionId: string
+}
+
+export interface DesktopAgentOptimizationEpisodeNotificationAckRequest extends DesktopAgentProviderRequest {
+  episodeId: string
+  state: DesktopAgentOptimizationEpisodeNotificationState
+  sessionId: string
+}
+
+export interface DesktopAgentOptimizationEpisodeResumeRequest extends DesktopAgentProviderRequest {
+  directory: string
+  episodeId: string
+  sessionId: string
+  workspaceId: string
+  workspaceRevision: number
 }
 
 export type DesktopAgentActivityStatus =

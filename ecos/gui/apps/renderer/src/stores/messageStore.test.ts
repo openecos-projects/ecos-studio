@@ -4,6 +4,32 @@ import { nextTick } from 'vue'
 import { useMessageStore } from './messageStore'
 
 describe('messageStore', () => {
+  it('hydrates one stable Optimization Episode card without appending event history', () => {
+    const store = useMessageStore()
+    const optimization = {
+      episode_id: 'episode-1',
+      schema_version: 'ecos.optimization_status.v2',
+      state: 'running',
+      turn_count: 2,
+    }
+
+    store.upsertOptimizationProjection('session-1', optimization)
+    store.upsertOptimizationProjection('session-1', {
+      ...optimization,
+      state: 'paused',
+    })
+
+    const messages = store.messagesBySessionId['session-1'] ?? []
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      id: 'optimization-episode-1',
+      optimization: { state: 'paused' },
+    })
+    expect(messages[0]?.optimizationTimeline).toEqual([
+      expect.objectContaining({ state: 'paused' }),
+    ])
+  })
+
   beforeEach(() => {
     setActivePinia(createPinia())
     useMessageStore().setActiveSessionId('session-test')

@@ -72,9 +72,12 @@ async function loadDesktopBridge() {
       }
     }
     agent: {
+      controlOptimizationEpisode(request: unknown): Promise<void>
       getModelSettings(request: unknown): Promise<unknown>
       interrupt(request: unknown): Promise<void>
       onEvent(listener: (event: unknown) => void): () => void
+      onOptimizationProjectionInvalidated(listener: (event: unknown) => void): () => void
+      optimizationProjection(): Promise<unknown>
       registerOperationAssociation(request: unknown): Promise<void>
       sendMessage(request: unknown): Promise<unknown>
       setModelSettings(request: unknown): Promise<unknown>
@@ -554,6 +557,49 @@ describe('preload desktop bridge contract', () => {
     })
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       desktopApiEventChannels.agentEvent,
+      eventListener,
+    )
+  })
+
+  it('exposes the recoverable Agent Optimization Episode projection', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+    const request = {
+      action: 'pause',
+      episodeId: 'episode-1',
+      providerId: 'ecos_agent',
+      sessionId: 'session-1',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({ episodes: [], generation: 4 })
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(bridge.agent.optimizationProjection()).resolves.toEqual({
+      episodes: [],
+      generation: 4,
+    })
+    await expect(
+      bridge.agent.controlOptimizationEpisode(request),
+    ).resolves.toBeUndefined()
+    const unsubscribe = bridge.agent.onOptimizationProjectionInvalidated(listener)
+    const eventListener = ipcRenderer.on.mock.calls.find(
+      ([channel]) =>
+        channel === desktopApiEventChannels.agentOptimizationProjectionInvalidated,
+    )?.[1]
+    eventListener?.({}, { generation: 5 })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.agentOptimizationProjection,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.agentOptimizationControl,
+      request,
+    )
+    expect(listener).toHaveBeenCalledWith({ generation: 5 })
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentOptimizationProjectionInvalidated,
       eventListener,
     )
   })

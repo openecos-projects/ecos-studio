@@ -11,6 +11,7 @@ export type DesktopShutdownState =
 
 export interface DesktopShutdownStatus {
   activeFlows: number
+  activeOptimizations?: number
   attemptId: string | null
   finalizations: number
   forceEligible: boolean

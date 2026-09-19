@@ -67,4 +67,25 @@ describe('NotificationCenter', () => {
     expect(wrapper.get('time').text()).toBe(expected)
     wrapper.unmount()
   })
+
+  it('opens the owning Agent progress from an Optimization notification', async () => {
+    const openProgress = vi.fn()
+    document.addEventListener('ecos-open-agent-progress', openProgress, { once: true })
+    useNotificationStore().addNotification({
+      agentSessionId: 'session-1',
+      key: 'optimization:episode-1:completed',
+      message: 'The background Optimization Episode completed.',
+      severity: 'info',
+      title: 'Optimization completed',
+    })
+    const wrapper = mount(NotificationCenter)
+    await wrapper.get('.notification-trigger').trigger('click')
+
+    await wrapper.get('.notification-agent-action').trigger('click')
+
+    expect(openProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: 'session-1' }),
+    )
+    wrapper.unmount()
+  })
 })

@@ -104,6 +104,7 @@
                   v-else-if="isVisibleResponse(msg)"
                   :message="msg"
                   @img-load="onImageLoad"
+                  @optimization-control="handleOptimizationControl"
                   class="message-item w-full max-w-full min-w-0"
                 />
                 <AgentSessionContractPanels
@@ -264,6 +265,51 @@
       @delete="deleteProfile"
       @set-api-key="setProfileApiKey"
     />
+    <Dialog
+      :visible="Boolean(pendingTabCloseId)"
+      modal
+      header="Optimization is still running"
+      :closable="!tabCloseStopping"
+      :draggable="false"
+      :style="{ width: 'min(460px, calc(100vw - 32px))' }"
+      @update:visible="handleTabCloseDialogVisibility"
+    >
+      <div class="agent-close-dialog">
+        <p>
+          This Agent tab owns an Optimization Episode that can continue in the background.
+        </p>
+        <p v-if="tabCloseIssue" class="agent-close-dialog__issue" role="alert">
+          {{ tabCloseIssue }}
+        </p>
+        <div class="agent-close-dialog__actions">
+          <button type="button" :disabled="tabCloseStopping" @click="cancelTabClose">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="is-danger"
+            :disabled="tabCloseStopping"
+            @click="stopAndCloseChatTab"
+          >
+            <i
+              v-if="tabCloseStopping"
+              class="ri-loader-4-line animate-spin"
+              aria-hidden="true"
+            ></i>
+            <span>{{ tabCloseStopping ? 'Stopping' : 'Stop and Close' }}</span>
+          </button>
+          <button
+            type="button"
+            class="agent-close-keep is-primary"
+            :disabled="tabCloseStopping"
+            autofocus
+            @click="keepRunningAndCloseChatTab"
+          >
+            Keep Running
+          </button>
+        </div>
+      </div>
+    </Dialog>
   </div>
 </template>
 
@@ -280,6 +326,7 @@ import {
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
+import Dialog from 'primevue/dialog'
 import type {
   DesktopAgentEvent,
   DesktopAgentInteractionRequest,
@@ -321,6 +368,7 @@ import { executeConfirmedWorkspaceParameterUpdate } from './workspaceParameterUp
 import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
@@ -357,13 +405,18 @@ const props = withDefaults(
 const AGENT_PROVIDER_ID = 'ecos_agent'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
+const optimizationEpisodes = useOptimizationEpisodeStore()
 const { messages } = storeToRefs(messageStore)
+const { episodes: optimizationEpisodeSnapshots } = storeToRefs(optimizationEpisodes)
 const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
 const codexSetupBusy = ref(false)
 const profileState = ref<DesktopModelProfileState | null>(null)
 const profileManagerOpen = ref(false)
 const profileManagerError = ref('')
 const codexSetupManageOpen = ref(false)
+const pendingTabCloseId = ref<string | null>(null)
+const tabCloseStopping = ref(false)
+const tabCloseIssue = ref('')
 let unsubscribeCodexProgress: (() => void) | null = null
 const codexSetupCardStatus = computed(() =>
   codexSetupStatus.value &&
@@ -624,8 +677,15 @@ const isRunning = computed(
     isWorkspaceContinuePending.value ||
     isWorkspaceParameterPending.value ||
     isWorkspaceSignoffPending.value ||
-    agentRunStatus.value === 'running',
+    agentRunStatus.value === 'running' ||
+    Boolean(activeOptimizationEpisode.value),
 )
+const activeOptimizationEpisode = computed(() => {
+  const episode = optimizationEpisodes.episodeForSession(agentSessionId.value)
+  return episode && !['completed', 'failed', 'stopped'].includes(episode.state)
+    ? episode
+    : null
+})
 const pendingInteraction = computed(() => interactionPresentation.value.interaction)
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
 const interactionCardRef = ref<{
@@ -784,10 +844,13 @@ watch(
   () => agentSessionId.value,
   (sessionId) => {
     messageStore.setActiveSessionId(sessionId)
+    hydrateOptimizationEpisodes()
     if (sessionId) void flushPendingGuiActionForActiveTab()
   },
   { immediate: true },
 )
+
+watch(optimizationEpisodeSnapshots, hydrateOptimizationEpisodes)
 
 function currentTabContext() {
   const workspacePath = currentProject.value?.path
@@ -816,6 +879,8 @@ async function connectAgent(): Promise<void> {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
   agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
+  await optimizationEpisodes.start()
+  restoreOptimizationTabs()
 
   if (agentShell.tabs.length === 0) {
     await createChatTab()
@@ -862,6 +927,51 @@ async function connectAgent(): Promise<void> {
   }
 }
 
+function restoreOptimizationTabs(): void {
+  for (const episode of optimizationEpisodeSnapshots.value) {
+    if (
+      ['completed', 'failed', 'stopped'].includes(episode.state) ||
+      agentShell.isOptimizationSessionHidden(episode.agentSessionId) ||
+      agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)
+    ) {
+      continue
+    }
+    agentShell.createTab(
+      resolveAgentTabContext({
+        shell: 'workspace',
+        currentWorkspacePath: episode.parentWorkspaceDirectory,
+      }),
+      {
+        activate: agentShell.tabs.length === 0,
+        id: episode.agentSessionId,
+      },
+    )
+  }
+  hydrateOptimizationEpisodes()
+}
+
+function hydrateOptimizationEpisodes(): void {
+  for (const episode of optimizationEpisodeSnapshots.value) {
+    if (!agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)) continue
+    messageStore.upsertOptimizationProjection(
+      episode.agentSessionId,
+      episode.optimization,
+    )
+  }
+}
+
+async function handleOptimizationControl(
+  action: 'pause' | 'resume' | 'retry' | 'stop',
+): Promise<void> {
+  const sessionId = agentSessionId.value
+  if (!sessionId) return
+  try {
+    await optimizationEpisodes.control(sessionId, action)
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
+  }
+}
+
 async function createChatTab(): Promise<void> {
   const tab = agentShell.createTab(currentTabContext())
   messageStore.setActiveSessionId(tab.id)
@@ -876,8 +986,56 @@ function selectChatTab(id: string): void {
 }
 
 async function closeChatTab(id: string): Promise<void> {
+  const episode = optimizationEpisodes.episodeForSession(id)
+  if (episode && !['completed', 'failed', 'stopped'].includes(episode.state)) {
+    pendingTabCloseId.value = id
+    tabCloseIssue.value = ''
+    return
+  }
+  await removeChatTab(id, { interrupt: true, preserveSession: false })
+}
+
+async function keepRunningAndCloseChatTab(): Promise<void> {
+  const id = pendingTabCloseId.value
+  if (!id) return
+  pendingTabCloseId.value = null
+  agentShell.hideOptimizationSession(id)
+  await removeChatTab(id, { interrupt: false, preserveSession: true })
+}
+
+async function stopAndCloseChatTab(): Promise<void> {
+  const id = pendingTabCloseId.value
+  if (!id || tabCloseStopping.value) return
+  tabCloseStopping.value = true
+  tabCloseIssue.value = ''
+  try {
+    await optimizationEpisodes.control(id, 'stop')
+    await optimizationEpisodes.waitForTerminal(id)
+    pendingTabCloseId.value = null
+    await removeChatTab(id, { interrupt: false, preserveSession: false })
+  } catch (error) {
+    tabCloseIssue.value = agentErrorMessage(error)
+  } finally {
+    tabCloseStopping.value = false
+  }
+}
+
+function cancelTabClose(): void {
+  if (tabCloseStopping.value) return
+  pendingTabCloseId.value = null
+  tabCloseIssue.value = ''
+}
+
+function handleTabCloseDialogVisibility(visible: boolean): void {
+  if (!visible) cancelTabClose()
+}
+
+async function removeChatTab(
+  id: string,
+  options: { interrupt: boolean; preserveSession: boolean },
+): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
-  if (agent) {
+  if (agent && options.interrupt) {
     try {
       await agent.interrupt({ providerId: AGENT_PROVIDER_ID, sessionId: id })
     } catch {
@@ -885,8 +1043,10 @@ async function closeChatTab(id: string): Promise<void> {
     }
   }
   agentShell.removeTab(id)
-  messageStore.clearSessionMessages(id)
-  removeAgentSessionUi(id)
+  if (!options.preserveSession) {
+    messageStore.clearSessionMessages(id)
+    removeAgentSessionUi(id)
+  }
   if (agentShell.tabs.length === 0) {
     await createChatTab()
     return
@@ -3147,6 +3307,57 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 .send-btn-active:active {
   transform: scale(0.96);
+}
+
+.agent-close-dialog > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.agent-close-dialog__issue {
+  margin-top: 0.75rem !important;
+  color: var(--danger-color) !important;
+}
+
+.agent-close-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.agent-close-dialog__actions button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-close-dialog__actions button.is-danger {
+  border-color: color-mix(in srgb, var(--danger-color) 45%, var(--border-color));
+  color: var(--danger-color);
+}
+
+.agent-close-dialog__actions button.is-primary {
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+  color: var(--accent-text);
+}
+
+.agent-close-dialog__actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 @media (prefers-reduced-motion: reduce) {

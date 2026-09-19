@@ -8,6 +8,7 @@ import type {
   DesktopAgentInteractionField,
   DesktopAgentInteractionAnswerRequest,
   DesktopAgentInteractionAnswerResponse,
+  DesktopAgentInterruptRequest,
   DesktopAgentExecutionContract,
   DesktopAgentWorkspaceContinueContract,
   DesktopAgentWorkspaceParameterUpdateContract,
@@ -19,6 +20,7 @@ import type {
   DesktopAgentListSessionsResponse,
   DesktopAgentModelSettings,
   DesktopAgentModelSettingsRequest,
+  DesktopAgentOptimizationEpisodeResumeRequest,
   DesktopAgentReasoningEffort,
   DesktopAgentProviderRequest,
   DesktopAgentResumeSessionRequest,
@@ -58,6 +60,10 @@ type AgentProviderMethod =
   | 'interrupt'
   | 'listSessions'
   | 'resumeSession'
+  | 'resumeOptimizationEpisode'
+  | 'stopOptimizationEpisode'
+  | 'prepareOptimizationShutdown'
+  | 'cancelOptimizationShutdown'
   | 'sendMessage'
   | 'getModelSettings'
   | 'setModelSettings'
@@ -295,6 +301,28 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       'resumeSession',
       request,
     )) as DesktopAgentResumeSessionResponse
+  }
+
+  async resumeOptimizationEpisode(
+    request: DesktopAgentOptimizationEpisodeResumeRequest,
+  ): Promise<void> {
+    await this.sendRequest('resumeOptimizationEpisode', request)
+  }
+
+  async stopOptimizationEpisode(
+    request: DesktopAgentOptimizationEpisodeResumeRequest,
+  ): Promise<void> {
+    await this.sendRequest('stopOptimizationEpisode', request)
+  }
+
+  async prepareOptimizationShutdown(
+    request: DesktopAgentInterruptRequest,
+  ): Promise<void> {
+    await this.sendRequest('prepareOptimizationShutdown', request)
+  }
+
+  async cancelOptimizationShutdown(request: DesktopAgentInterruptRequest): Promise<void> {
+    await this.sendRequest('cancelOptimizationShutdown', request)
   }
 
   async stop(request?: DesktopAgentProviderRequest): Promise<void> {
@@ -1217,6 +1245,17 @@ function readOptimizationPayload(
       : {}),
     ...(typeof record.outcome === 'string' || record.outcome === null
       ? { outcome: record.outcome as string | null }
+      : {}),
+    ...(typeof record.phase === 'string' ? { phase: record.phase } : {}),
+    ...(typeof record.calibration_completed === 'number' &&
+    Number.isSafeInteger(record.calibration_completed) &&
+    record.calibration_completed >= 0
+      ? { calibration_completed: record.calibration_completed }
+      : {}),
+    ...(typeof record.calibration_required === 'number' &&
+    Number.isSafeInteger(record.calibration_required) &&
+    record.calibration_required >= 0
+      ? { calibration_required: record.calibration_required }
       : {}),
   }
 }

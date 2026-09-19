@@ -234,6 +234,21 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
         session.known_projects = _known_projects(request.get("knownProjects"))
         if directory:
             session.inherited_design_name = _design_id_for_workspace(directory)
+        if self._optimization_thread_active(session):
+            status = (
+                "awaiting_choice"
+                if str(session.optimization_phase) == "paused"
+                else "interrupted"
+                if str(session.optimization_phase) == "stopping"
+                else "running"
+            )
+            self._emit_status(session, status)
+            self._emit_optimization_status(session)
+            return {
+                "sessionId": session_id,
+                "pendingInteraction": session.pending_interaction
+                and session.pending_interaction["request"],
+            }
         # Directory alone is only a rerun default; GUI must pass mode explicitly.
         session.phase = "operation" if session.mode == "workspace" else "home_ready"
         self._emit_status(session, "idle")

@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
-import os
-import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +11,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ecos_agent.gui.provider_optimization_episode import ProviderOptimizationEpisodeMixin
+from ecos_agent.gui.provider_optimization_recovery import (
+    ProviderOptimizationRecoveryMixin,
+    write_optimization_resume_context,
+)
 from ecos_agent.codex.provider import (
     CodexAppServerProposalProvider,
     CodexProviderError,
@@ -173,8 +174,7 @@ from ecos_agent.optimization.objective_alignment import (
 )
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.gui.session import ProviderSession
-
-
+from ecos_agent.hashing import canonical_sha256
 
 from ecos_agent.gui.provider_common import (
     PROVIDER_ID,
@@ -227,8 +227,47 @@ def _optimization_turn_event_payload(
         **detail,
     }
 
+class ProviderOptimizationMixin(
+    ProviderOptimizationRecoveryMixin, ProviderOptimizationEpisodeMixin
+):
+    def _emit_optimization_status(
+        self, session: _Session, state: str | None = None
+    ) -> None:
+        episode_id = session.optimization_episode_id
+        if episode_id is None:
+            return
+        active = session.optimization_active_objective or {}
+        runner = session.optimization_runner
+        pending = getattr(runner, "pending_execution_ids", ()) if runner is not None else ()
+        self._emit(
+            session,
+            "optimization",
+            f"Optimization episode {state or session.optimization_phase}.",
+            optimization={
+                "schema_version": "ecos.optimization_status.v2",
+                "episode_id": episode_id,
+                "workspace": session.rerun_workspace_path,
+                "state": state or str(session.optimization_phase),
+                "phase": str(session.optimization_phase),
+                "turn_count": session.optimization_turn_count,
+                "in_flight": len(pending),
+                "calibration_completed": session.optimization_calibration_completed,
+                "calibration_required": session.optimization_calibration_required,
+                "objective_sha256": session.optimization_objective_sha256,
+                "active_primary_metric": active.get("active_primary_metric"),
+                "recovery_stage": active.get("recovery_stage"),
+                "violation_counts": {
+                    key: active.get(key)
+                    for key in (
+                        "drc_count",
+                        "sta_setup_violation_count",
+                        "sta_hold_violation_count",
+                    )
+                    if active.get(key) is not None
+                },
+            },
+        )
 
-class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
     def _begin_optimization_objective(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
         if not workspace or not Path(workspace).is_dir():
@@ -243,7 +282,6 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
         session.optimization_objective_alignment = None
         session.optimization_active_objective = None
         self._emit(session, "message", optimization_objective_prompt(session.language))
-
     def _begin_optimization_authorization(self, session: _Session) -> None:
         workspace = session.rerun_workspace_path
         if not workspace or not Path(workspace).is_dir():
@@ -296,8 +334,8 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
                 "execution": "fixed candidate.rerun only",
             },
         )
+        self._emit_optimization_status(session, "awaiting_confirmation")
         self._emit_phase_choice(session)
-
     def _select_optimization_workspace(self, session: _Session, message: str) -> None:
         try:
             workspace = normalize_path(
@@ -313,7 +351,6 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
             return
         session.rerun_workspace_path = workspace
         self._begin_optimization_objective(session)
-
     @staticmethod
     def _inherit_chat_model_settings(session: _Session, provider: Any) -> None:
         """Copy the GUI-selected model/effort from the chat provider.
@@ -383,6 +420,9 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
             session.optimization_provider = provider
             session.optimization_objective = contract
             session.optimization_objective_sha256 = _objective_sha256(contract)
+            session.optimization_parameter_policy_sha256 = canonical_sha256(
+                contract["parameter_policy"]
+            )
             session.optimization_primary_metric = _objective_primary_metric(contract)
             try:
                 objective = OptimizationObjectiveContract.model_validate(contract)
@@ -446,6 +486,16 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
         if not workspace or session.optimization_episode_id is None:
             raise ValueError("Optimization authorization is incomplete.")
         workspace_path = Path(workspace)
+        try:
+            write_optimization_resume_context(session)
+        except Exception as exc:
+            self._close_idle_optimization_provider(session)
+            session.optimization_phase = "needs_attention"
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
+            self._emit(session, "error", f"Unable to persist optimization recovery context: {exc}")
+            self._emit_optimization_status(session, "needs_attention")
+            self._emit_phase_choice(session)
+            return
         if not epsilon_artifact_path(workspace_path).is_file():
             self._calibrate_then_start_optimization(session, workspace_path)
             return
@@ -460,13 +510,22 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
             optimization_noise_calibration_message(session.language),
         )
         session.optimization_phase = "calibrating"
+        session.optimization_calibration_completed = 0
+        session.optimization_calibration_required = 3
         session.phase = "optimization_preparing"
         session.optimization_stop.clear()
         session.optimization_pause.clear()
+        session.optimization_shutdown.clear()
         self._emit_status(session, "calibrating")
+        self._emit_optimization_status(session, "calibrating")
         session.active_tool_message_id = (
             f"optimization-progress-{session.session_id}"
         )
+
+        def replay_progress(completed: int, required: int, _state: str) -> None:
+            session.optimization_calibration_completed = completed
+            session.optimization_calibration_required = required
+            self._emit_optimization_status(session, "calibrating")
 
         def run() -> None:
             try:
@@ -474,10 +533,11 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
                     workspace_path,
                     should_stop=session.optimization_stop.is_set,
                     progress=lambda text: self._progress(session, text),
+                    replay_progress=replay_progress,
                 )
             except Exception as exc:
                 cancelled = session.optimization_stop.is_set()
-                session.optimization_phase = "idle" if cancelled else "unavailable"
+                session.optimization_phase = "stopped" if cancelled else "needs_attention"
                 session.phase = (
                     "operation" if session.mode == "workspace" else "home_ready"
                 )
@@ -490,6 +550,20 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
                         "error",
                         f"Unable to calibrate noise epsilon: {exc}",
                     )
+                self._emit_optimization_status(
+                    session, "stopped" if cancelled else "needs_attention"
+                )
+                self._emit_phase_choice(session)
+                session.optimization_thread = None
+                return
+            if session.optimization_shutdown.is_set():
+                self._close_idle_optimization_provider(session)
+                session.optimization_phase = "interrupted"
+                session.phase = "operation" if session.mode == "workspace" else "home_ready"
+                session.active_tool_message_id = None
+                session.optimization_thread = None
+                self._emit_optimization_status(session, "interrupted")
+                self._emit_status(session, "interrupted")
                 self._emit_phase_choice(session)
                 return
             self._launch_optimization_episode(session, str(workspace_path))
@@ -502,13 +576,18 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
         session.optimization_thread.start()
 
     def _launch_optimization_episode(
-        self, session: _Session, workspace: str | Path
+        self,
+        session: _Session,
+        workspace: str | Path,
+        *,
+        stop_before_dispatch: bool = False,
     ) -> None:
         workspace = str(workspace)
         session.optimization_phase = "starting"
         session.phase = "optimization_preparing"
         provider = session.optimization_provider
         try:
+            write_optimization_resume_context(session)
             if provider is None:
                 provider = self.optimization_provider_factory(
                     cwd=Path(workspace),
@@ -534,6 +613,8 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
                 runner_context["workspace_handle"] = session.workspace_handle
             if session.workspace_revision is not None:
                 runner_context["expected_workspace_revision"] = session.workspace_revision
+            if session.optimization_ecc_revision is not None:
+                runner_context["expected_ecc_revision"] = session.optimization_ecc_revision
             runner = self.optimization_runner_factory(runner_context, provider)
             if not isinstance(runner, OptimizationEpisodeRunner):
                 raise ValueError("Optimization runner factory returned an invalid runner.")
@@ -547,16 +628,40 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
             self._emit_phase_choice(session)
             return
         assert provider is not None
+        controller = getattr(runner, "_controller", None)
+        execution_context = getattr(controller, "_execution_context", {})
+        ecc_revision = (
+            execution_context.get("ecc_revision")
+            if isinstance(execution_context, dict)
+            else None
+        ) or getattr(runner, "ecc_revision", None)
+        if isinstance(ecc_revision, str) and ecc_revision:
+            session.optimization_ecc_revision = ecc_revision
+        if session.optimization_ecc_revision is None:
+            raise ValueError("Optimization Episode ECC revision is unavailable.")
+        write_optimization_resume_context(session)
         session.optimization_provider = provider
         session.optimization_runner = runner
-        session.optimization_stop.clear()
+        active_objective = getattr(runner, "active_objective", None)
+        if active_objective is not None:
+            session.optimization_active_objective = active_objective.model_dump(mode="json")
+        if stop_before_dispatch:
+            session.optimization_stop.set()
+            runner.request_stop()
+        else:
+            session.optimization_stop.clear()
         session.optimization_pause.clear()
+        session.optimization_shutdown.clear()
         session.optimization_turn_count = 0
-        session.optimization_phase = "running"
+        session.optimization_phase = "stopping" if stop_before_dispatch else "running"
         session.phase = "optimization_running"
         session.active_interrupt = provider.interrupt
-        self._emit(session, "message", optimization_started_message(session.language))
-        self._emit_status(session, "running")
+        if not stop_before_dispatch:
+            self._emit(session, "message", optimization_started_message(session.language))
+        self._emit_status(session, "interrupted" if stop_before_dispatch else "running")
+        self._emit_optimization_status(
+            session, "stopping" if stop_before_dispatch else "running"
+        )
         # Collapse planner progress lines into one tool message; per-turn
         # status lives on the optimization card, not in chat text.
         session.active_tool_message_id = (
@@ -658,16 +763,19 @@ class ProviderOptimizationMixin(ProviderOptimizationEpisodeMixin):
             session.optimization_pause.set()
             session.optimization_phase = "paused"
             self._emit_status(session, "awaiting_choice")
+            self._emit_optimization_status(session, "paused")
             return
         if command in {"resume", "继续"}:
             session.optimization_pause.clear()
             session.optimization_phase = "running"
             self._emit_status(session, "running")
+            self._emit_optimization_status(session, "running")
             return
         if command in {"stop", "停止", "cancel", "取消"}:
             self._request_optimization_stop(session)
             session.optimization_phase = "stopping"
             self._emit_status(session, "interrupted")
+            self._emit_optimization_status(session, "stopping")
             return
         self._emit(
             session,

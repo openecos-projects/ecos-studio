@@ -20,6 +20,8 @@ import type {
   DesktopShellExitEvent,
   DesktopShellSessionOptions,
   DesktopAgentEvent,
+  DesktopAgentOptimizationEpisodeInvalidatedEvent,
+  DesktopAgentOptimizationEpisodeNotificationAckRequest,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
   DesktopModelProfileIdRequest,
@@ -453,6 +455,11 @@ const desktopApi: DesktopApi = {
     },
   },
   agent: {
+    controlOptimizationEpisode: (request) =>
+      invokeDesktop(desktopApiIpcChannels.agentOptimizationControl, request),
+    acknowledgeOptimizationEpisodeNotification: (
+      request: DesktopAgentOptimizationEpisodeNotificationAckRequest,
+    ) => invokeDesktop(desktopApiIpcChannels.agentOptimizationNotificationAck, request),
     interrupt: (request) => invokeDesktop(desktopApiIpcChannels.agentInterrupt, request),
     start: (request) => invokeDesktop(desktopApiIpcChannels.agentStart, request),
     startSession: (request) =>
@@ -474,6 +481,15 @@ const desktopApi: DesktopApi = {
           listener(payload as DesktopAgentEvent)
         },
       ),
+    onOptimizationProjectionInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.agentOptimizationProjectionInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as DesktopAgentOptimizationEpisodeInvalidatedEvent)
+        },
+      ),
+    optimizationProjection: () =>
+      invokeDesktop(desktopApiIpcChannels.agentOptimizationProjection),
     codex: {
       getStatus: () => invokeDesktop(desktopApiIpcChannels.agentCodexGetStatus),
       install: () => invokeDesktop(desktopApiIpcChannels.agentCodexInstall),

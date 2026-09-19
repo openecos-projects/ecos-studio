@@ -62,81 +62,69 @@
     </div>
 
     <div v-show="expanded" class="optimization-card__body">
-      <div v-if="summary" class="optimization-card__row optimization-card__summary">
-        <i class="ri-line-chart-line" aria-hidden="true"></i>
-        <span>{{ summary.turns }} turns</span>
-        <span
-          v-for="(delta, index) in summary.deltas"
-          :key="index"
-          class="optimization-card__delta"
-          :class="{
-            'optimization-card__delta--better': delta.change < 0,
-            'optimization-card__delta--worse': delta.change > 0,
-          }"
-        >
-          {{ delta.label }} {{ delta.from }} → {{ delta.to }}
-        </span>
-        <span v-if="summary.promotions">{{ summary.promotions }} promoted</span>
-      </div>
-      <div v-for="(entry, index) in rows" :key="index" class="optimization-card__row">
-        <span class="optimization-card__turn">{{ entry.label }}</span>
-        <span
-          v-if="entry.action"
-          class="optimization-card__action"
-          :title="entry.direction ?? ''"
-        >
-          <i class="ri-settings-3-line" aria-hidden="true"></i>
-          {{ entry.action.knob_id }}
-          <i :class="directionIcon(entry.direction)" aria-hidden="true"></i>
-          <template v-if="entry.requested"> → {{ entry.requested.value }}</template>
+      <div class="optimization-card__row optimization-card__summary">
+        <i class="ri-pulse-line" aria-hidden="true"></i>
+        <span>{{ progressLabel }}</span>
+        <span v-if="optimization.in_flight" class="optimization-card__badge">
+          {{ optimization.in_flight }} in flight
         </span>
         <span
-          v-if="entry.proposalDecision"
+          v-if="latestOutcome"
           class="optimization-card__badge"
-          :class="
-            entry.proposalDecision === 'reject'
-              ? 'optimization-card__badge--muted'
-              : 'optimization-card__badge--info'
-          "
+          :class="outcomeBadgeClass(latestOutcome)"
         >
-          {{ entry.proposalDecision
-          }}{{ entry.proposalReason ? ` · ${entry.proposalReason}` : '' }}
+          {{ latestOutcome }}
         </span>
         <span
-          v-if="entry.incumbentDecision"
-          class="optimization-card__badge"
-          :class="
-            entry.promoted
-              ? 'optimization-card__badge--good'
-              : 'optimization-card__badge--muted'
-          "
-        >
-          {{ entry.incumbentDecision }}
-        </span>
-        <span
-          v-if="entry.outcome"
-          class="optimization-card__badge"
-          :class="outcomeBadgeClass(entry.outcome)"
-        >
-          {{ entry.outcome }}
-        </span>
-        <span
-          v-if="entry.recoveryTransition"
+          v-if="optimization.recovery_transition"
           class="optimization-card__badge optimization-card__badge--recovery"
         >
-          {{ entry.recoveryTransition }}
+          {{ optimization.recovery_transition }}
         </span>
-        <span v-if="entry.counts" class="optimization-card__counts">
-          DRC {{ entry.counts.drc_count }} · setup
-          {{ entry.counts.sta_setup_violation_count }} · hold
-          {{ entry.counts.sta_hold_violation_count }}
-        </span>
-        <span v-if="entry.rationale" class="optimization-card__rationale">
-          {{ entry.rationale }}
-        </span>
-        <span v-if="entry.rejectionReason" class="optimization-card__rejection">
-          Rejected: {{ entry.rejectionReason }}
-        </span>
+      </div>
+      <p v-if="optimization.rationale_summary" class="optimization-card__rationale">
+        {{ optimization.rationale_summary }}
+      </p>
+      <p v-if="optimization.rejection_reason" class="optimization-card__rejection">
+        Rejected: {{ optimization.rejection_reason }}
+      </p>
+      <div v-if="controllableEpisode" class="optimization-card__controls">
+        <button
+          v-if="optimization.state === 'paused' || optimization.state === 'interrupted'"
+          type="button"
+          aria-label="Resume optimization"
+          title="Resume optimization"
+          @click="$emit('control', 'resume')"
+        >
+          <i class="ri-play-fill" aria-hidden="true"></i>
+        </button>
+        <button
+          v-else-if="optimization.state === 'needs_attention'"
+          type="button"
+          aria-label="Retry optimization"
+          title="Retry optimization"
+          @click="$emit('control', 'retry')"
+        >
+          <i class="ri-restart-line" aria-hidden="true"></i>
+        </button>
+        <button
+          v-else-if="optimization.state !== 'stopping'"
+          type="button"
+          aria-label="Pause optimization"
+          title="Pause optimization"
+          @click="$emit('control', 'pause')"
+        >
+          <i class="ri-pause-fill" aria-hidden="true"></i>
+        </button>
+        <button
+          type="button"
+          aria-label="Stop optimization"
+          title="Stop optimization"
+          :disabled="optimization.state === 'stopping'"
+          @click="$emit('control', 'stop')"
+        >
+          <i class="ri-stop-fill" aria-hidden="true"></i>
+        </button>
       </div>
     </div>
   </section>
@@ -151,17 +139,23 @@ const props = defineProps<{
   timeline: DesktopAgentOptimizationPayload[]
 }>()
 
+defineEmits<{
+  control: [action: 'pause' | 'resume' | 'retry' | 'stop']
+}>()
+
 const expanded = ref(true)
 
-/** Mirrors backend PROMOTING_DECISIONS (rules.py). */
-const PROMOTING_DECISIONS = new Set([
-  'initialized',
-  'candidate_better',
-  'recovery_progress',
-  'parity_objective_improved',
+const LIVE_STATES = new Set([
+  'created',
+  'starting',
+  'calibrating',
+  'planning',
+  'awaiting_execution',
+  'executing',
+  'running',
+  'paused',
+  'stopping',
 ])
-
-const LIVE_STATES = new Set(['created', 'planning', 'awaiting_execution', 'executing'])
 
 const liveState = computed(() => {
   const state = props.optimization.state
@@ -169,7 +163,7 @@ const liveState = computed(() => {
 })
 
 const failureState = computed(() =>
-  ['error', 'escalated', 'quarantined', 'unavailable'].includes(
+  ['error', 'escalated', 'quarantined', 'unavailable', 'needs_attention'].includes(
     props.optimization.state ?? '',
   ),
 )
@@ -180,6 +174,12 @@ const statusLabel = computed(() => {
     escalated: 'Needs attention',
     quarantined: 'Quarantined',
     unavailable: 'Unavailable',
+    needs_attention: 'Needs attention',
+    running: 'Running',
+    calibrating: 'Calibrating',
+    paused: 'Paused',
+    interrupted: 'Interrupted',
+    stopping: 'Stopping',
     stopped: 'Stopped',
     completed: 'Completed',
   }
@@ -196,87 +196,36 @@ const latestCounts = computed(() => {
   ]
 })
 
-/** Episode-level trend across per-turn entries (first finished vs latest). */
-const summary = computed(() => {
-  const turns = props.timeline.filter((entry) => typeof entry.turn === 'number')
-  if (turns.length === 0) return null
-  const first = turns[0].violation_counts
-  const latest = turns[turns.length - 1].violation_counts
-  if (!first || !latest) return null
-  const deltas = (
-    [
-      ['DRC', 'drc_count'],
-      ['Setup', 'sta_setup_violation_count'],
-      ['Hold', 'sta_hold_violation_count'],
-    ] as const
-  ).map(([label, key]) => ({
-    label,
-    from: first[key],
-    to: latest[key],
-    change: latest[key] - first[key],
-  }))
-  const promotions = turns.filter(
-    (entry) =>
-      entry.incumbent_decision != null &&
-      PROMOTING_DECISIONS.has(entry.incumbent_decision),
-  ).length
-  return { turns: turns.length, deltas, promotions }
+const controllableEpisode = computed(() =>
+  [...LIVE_STATES, 'interrupted', 'needs_attention'].includes(
+    props.optimization.state ?? '',
+  ),
+)
+
+const progressLabel = computed(() => {
+  const completed = props.optimization.calibration_completed
+  const required = props.optimization.calibration_required
+  if (required && completed !== undefined) return `Replay ${completed}/${required}`
+  const turn = props.optimization.turn_count ?? props.optimization.turn
+  if (turn) return `Turn ${turn}`
+  const phase = props.optimization.phase ?? props.optimization.state
+  return phase ? phase.replace(/_/g, ' ') : 'Preparing'
 })
 
-interface OptimizationRow {
-  label: string
-  kind?: string | null
-  rationale?: string | null
-  rejectionReason?: string | null
-  outcome?: string | null
-  action?: { knob_id: string } | null
-  direction?: string | null
-  requested?: { knob_id: string; value: boolean | number } | null
-  proposalDecision?: string | null
-  proposalReason?: string | null
-  incumbentDecision?: string | null
-  promoted?: boolean
-  recoveryTransition?: string | null
-  counts?: DesktopAgentOptimizationPayload['violation_counts']
-}
-
-const KIND_LABELS: Record<string, string> = {
-  proposal: 'Plan',
-  dispatched: 'Dispatch',
-  terminal: 'Result',
-}
-
-const rows = computed<OptimizationRow[]>(() =>
-  props.timeline
-    .filter((entry) => entry.schema_version !== 'ecos.optimization_status.v1')
-    .map((entry) => {
-      const isAuthorization =
-        entry.schema_version === 'ecos.optimization_authorization.v2'
-      const incumbentDecision = entry.incumbent_decision ?? null
-      return {
-        label: entry.kind
-          ? (KIND_LABELS[entry.kind] ?? entry.kind)
-          : isAuthorization
-            ? 'Authorized'
-            : typeof entry.turn === 'number'
-              ? `Turn ${entry.turn}`
-              : 'Episode',
-        kind: entry.kind ?? null,
-        rationale: entry.rationale_summary ?? null,
-        rejectionReason: entry.rejection_reason ?? null,
-        outcome: entry.outcome ?? null,
-        action: entry.action ?? null,
-        direction: entry.action?.direction ?? null,
-        requested: entry.requested ?? null,
-        proposalDecision: entry.proposal_decision ?? null,
-        proposalReason: entry.proposal_reason ?? null,
-        incumbentDecision,
-        promoted: incumbentDecision ? PROMOTING_DECISIONS.has(incumbentDecision) : false,
-        recoveryTransition: entry.recovery_transition ?? null,
-        counts: entry.violation_counts,
-      }
-    }),
-)
+const latestOutcome = computed(() => {
+  const latest = [...props.timeline]
+    .reverse()
+    .find(
+      (entry) => entry.outcome || entry.incumbent_decision || entry.recovery_transition,
+    )
+  return (
+    props.optimization.outcome ??
+    props.optimization.incumbent_decision ??
+    latest?.outcome ??
+    latest?.incumbent_decision ??
+    null
+  )
+})
 
 const BAD_OUTCOMES = new Set([
   'degraded',
@@ -295,21 +244,6 @@ function outcomeBadgeClass(outcome: string | null | undefined): string {
   return BAD_OUTCOMES.has(outcome)
     ? 'optimization-card__badge--recovery'
     : 'optimization-card__badge--muted'
-}
-
-function directionIcon(direction: string | null | undefined): string {
-  switch (direction) {
-    case 'increase':
-      return 'ri-arrow-up-line'
-    case 'decrease':
-      return 'ri-arrow-down-line'
-    case 'enable':
-      return 'ri-toggle-left-line'
-    case 'disable':
-      return 'ri-toggle-right-line'
-    default:
-      return 'ri-arrow-right-line'
-  }
 }
 </script>
 
@@ -499,10 +433,39 @@ function directionIcon(direction: string | null | undefined): string {
 }
 
 .optimization-card__rationale {
-  flex-basis: 100%;
-  padding-left: 5.9rem;
+  margin: 0;
   color: var(--text-secondary);
+  font-size: 0.6875rem;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.optimization-card__controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.optimization-card__controls button {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.optimization-card__controls button:hover:not(:disabled) {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.optimization-card__controls button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 </style>

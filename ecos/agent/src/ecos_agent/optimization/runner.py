@@ -183,6 +183,9 @@ class OptimizationEpisodeRunner:
     def request_stop(self) -> None:
         self._stop_event.set()
 
+    def finish_stop(self) -> None:
+        self._controller.stop()
+
     def run_turn(self, *, paused: bool = False) -> OptimizationEpisodeTurn:
         if self._controller.state not in _PLANNABLE_STATES:
             raise OptimizationEpisodeRunnerError(

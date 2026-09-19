@@ -48,8 +48,11 @@ def test_gui_start_auto_calibrates_missing_noise_epsilon(
     calibration_calls: list[Path] = []
     runner_calls: list[object] = []
 
-    def fake_calibrate(workspace_path: Path, **_kwargs: object) -> dict[str, object]:
+    def fake_calibrate(workspace_path: Path, **kwargs: object) -> dict[str, object]:
         calibration_calls.append(workspace_path)
+        replay_progress = kwargs.get("replay_progress")
+        assert callable(replay_progress)
+        replay_progress(1, 3, "completed")
         epsilon_path.parent.mkdir(parents=True, exist_ok=True)
         epsilon_path.write_text(
             '{"schema_version": "ecos.noise_epsilon.v1", "epsilon": {}}',
@@ -78,6 +81,13 @@ def test_gui_start_auto_calibrates_missing_noise_epsilon(
     assert len(runner_calls) == 1
     assert any(
         event["type"] == "message" and "noise epsilon" in str(event["text"]).lower()
+        for event in events
+    )
+    assert any(
+        event["type"] == "optimization"
+        and event["optimization"].get("state") == "calibrating"
+        and event["optimization"].get("calibration_completed") == 1
+        and event["optimization"].get("calibration_required") == 3
         for event in events
     )
     assert any(
@@ -124,11 +134,16 @@ def test_gui_stop_during_noise_calibration_cancels_without_episode(
     while session.optimization_thread is not None and time.monotonic() < deadline:
         time.sleep(0.01)
 
-    assert session.optimization_phase == "idle"
+    assert session.optimization_phase == "stopped"
     assert session.phase == "operation"
     assert runner_calls == []
     assert any(
         event["type"] == "message" and "Cancelled" in str(event["text"])
+        for event in events
+    )
+    assert any(
+        event["type"] == "optimization"
+        and event["optimization"].get("state") == "stopped"
         for event in events
     )
 

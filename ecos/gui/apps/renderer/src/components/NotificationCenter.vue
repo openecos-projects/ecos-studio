@@ -73,6 +73,17 @@
               </time>
             </div>
             <p>{{ notification.message }}</p>
+            <button
+              v-if="notification.agentSessionId"
+              type="button"
+              class="notification-agent-action"
+              @click.stop="
+                openAgentProgress(notification.id, notification.agentSessionId)
+              "
+            >
+              <i class="ri-sparkling-2-line" aria-hidden="true" />
+              <span>Open Agent Progress</span>
+            </button>
             <details
               v-if="notification.detail || notification.logFile"
               class="notification-detail"
@@ -123,6 +134,14 @@ function toggle(): void {
 
 function closeForOverlay(event: Event): void {
   if ((event as CustomEvent<string>).detail !== 'notifications') open.value = false
+}
+
+function openAgentProgress(notificationId: string, sessionId: string): void {
+  markRead(notificationId)
+  open.value = false
+  document.dispatchEvent(
+    new CustomEvent('ecos-open-agent-progress', { detail: sessionId }),
+  )
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -343,6 +362,23 @@ function formatTime(timestamp: number): string {
   font-size: 0.74rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.notification-agent-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-color);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.notification-agent-action:hover {
+  text-decoration: underline;
 }
 
 .notification-detail {

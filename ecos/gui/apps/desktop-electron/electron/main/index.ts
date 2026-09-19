@@ -448,7 +448,18 @@ async function ensureDesktopBridgeReady(): Promise<void> {
           }
         },
       },
+      join(app.getPath('userData'), 'agent', 'optimization-episodes.v1.json'),
     )
+    if (agentRuntimeService) {
+      desktopServices.shutdownCoordinator.setOptimizationLifecycle({
+        beginDrain: () => agentRuntimeService.beginOptimizationShutdownDrain(),
+        cancelDrain: () => agentRuntimeService.cancelOptimizationShutdownDrain(),
+        episodes: () => agentRuntimeService.optimizationProjection().episodes,
+      })
+      agentRuntimeService.onOptimizationProjectionInvalidated(() => {
+        void desktopServices.shutdownCoordinator.notifyBlockersChanged()
+      })
+    }
     registerIpc(undefined, {
       agentQuickRunRoot: join(app.getPath('userData'), 'quick-runs'),
       agentRuntimeService: agentRuntimeService ?? undefined,

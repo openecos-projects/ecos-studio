@@ -44,6 +44,8 @@ vi.mock('@/utils/projectManagementRead', () => ({
 import BackgroundTasksButton from './BackgroundTasksButton.vue'
 import NotificationCenter from './NotificationCenter.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
+import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 
 function operation(
   overrides: Partial<EccBackgroundOperation> = {},
@@ -115,6 +117,45 @@ describe('BackgroundTasksButton', () => {
     expect(wrapper.text()).toContain('Creating Workspace')
 
     finishWorkspaceCreation(creationToken)
+    wrapper.unmount()
+  })
+
+  it('opens a background Optimization Episode in its owning Agent Session', async () => {
+    const episodes = useOptimizationEpisodeStore()
+    episodes.episodes = [
+      {
+        agentSessionId: 'session-optimization',
+        episodeId: 'episode-1',
+        inFlightCount: 2,
+        optimization: {
+          episode_id: 'episode-1',
+          in_flight: 2,
+          phase: 'running',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'running',
+          turn_count: 3,
+          workspace: '/projects/demo/ws_1',
+        },
+        parentWorkspaceDirectory: '/projects/demo/ws_1',
+        parentWorkspaceId: 'handle-parent',
+        parentWorkspaceRevision: 7,
+        providerId: 'ecos_agent',
+        startedAt: Date.now() - 10_000,
+        state: 'running',
+        turnCount: 3,
+        updatedAt: Date.now(),
+      },
+    ]
+    const wrapper = mount(BackgroundTasksButton)
+
+    expect(wrapper.get('.background-tasks-trigger').text()).toContain('1')
+    await wrapper.get('.background-tasks-trigger').trigger('click')
+    expect(wrapper.text()).toContain('Agent optimization')
+    expect(wrapper.text()).toContain('Turn 3')
+    await wrapper.get('.background-task-optimization').trigger('click')
+
+    expect(useAgentShellStore().activeTabId).toBe('session-optimization')
+    expect(testState.openProject).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

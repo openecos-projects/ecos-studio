@@ -23,6 +23,9 @@ class ProviderOptimizationEpisodeMixin:
         error_text = None
         try:
             while True:
+                if session.optimization_shutdown.is_set() and not runner.pending_execution_ids:
+                    final_phase = "interrupted"
+                    break
                 if not session.optimization_stop.is_set() and runner.state not in {
                     OptimizationEpisodeState.CREATED,
                     OptimizationEpisodeState.PLANNING,
@@ -35,6 +38,7 @@ class ProviderOptimizationEpisodeMixin:
                 while (
                     session.optimization_pause.is_set()
                     and not runner.pending_execution_ids
+                    and not session.optimization_shutdown.is_set()
                     and not session.optimization_stop.wait(0.1)
                 ):
                     pass
@@ -44,6 +48,7 @@ class ProviderOptimizationEpisodeMixin:
                     # U1: one candidate ending never reads as all-complete; the
                     # episode only finishes after every in-flight terminal is
                     # collected or cancelled.
+                    runner.finish_stop()
                     final_phase = "stopped"
                     break
                 if runner.state == OptimizationEpisodeState.QUARANTINED:
@@ -150,6 +155,9 @@ class ProviderOptimizationEpisodeMixin:
                 if session.optimization_stop.is_set() and not runner.pending_execution_ids:
                     final_phase = "stopped"
                     break
+                if session.optimization_shutdown.is_set() and not runner.pending_execution_ids:
+                    final_phase = "interrupted"
+                    break
             if final_phase == "completed":
                 final_phase = {
                     OptimizationEpisodeState.ESCALATED: "error",
@@ -193,6 +201,7 @@ class ProviderOptimizationEpisodeMixin:
             status = {
                 "completed": "idle",
                 "stopped": "interrupted",
+                "interrupted": "interrupted",
                 "error": "error",
                 "quarantined": "error",
             }.get(final_phase, "idle")
