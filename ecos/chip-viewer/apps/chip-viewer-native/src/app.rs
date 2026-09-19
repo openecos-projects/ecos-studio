@@ -582,6 +582,7 @@ enum SessionActionProgressPhase {
     Saving,
     Discarding,
     VerifyingArtifacts,
+    RecordingMacroPlacements,
     RefreshingLayoutImage,
     Published,
     ReloadingGeometry,
@@ -596,6 +597,7 @@ impl SessionActionProgressPhase {
             SessionActionProgressPhase::Saving => "Saving in ECC",
             SessionActionProgressPhase::Discarding => "Discarding edits",
             SessionActionProgressPhase::VerifyingArtifacts => "Verifying artifacts",
+            SessionActionProgressPhase::RecordingMacroPlacements => "Recording macro placements",
             SessionActionProgressPhase::RefreshingLayoutImage => "Refreshing layout image",
             SessionActionProgressPhase::Published => "Published",
             SessionActionProgressPhase::ReloadingGeometry => "Reloading geometry",
@@ -6699,6 +6701,12 @@ impl LoadedViewer {
             self.last_edit_result = Some("there are no uncommitted layout edits".to_string());
             return;
         }
+        if matches!(action, SessionActionKind::Save) {
+            if let Some(blocker) = macro_save_blocker(self.macro_staging.as_ref()) {
+                self.last_edit_result = Some(blocker);
+                return;
+            }
+        }
         if self.pending_edit.is_some()
             || self.draft.is_some()
             || self.pending_session_action.is_some()
@@ -11596,6 +11604,16 @@ fn session_action_result_message(result: &SessionActionResult) -> String {
     }
 }
 
+/// Saving a manual macro-placement session records every placement as the
+/// `macro.placements` parameter, which makes macroPlacement skip DreamPlace
+/// entirely. A save with macros still staged in the unplaced column would
+/// strand them unplaced, so it is rejected until each one has a placement.
+fn macro_save_blocker(staging: Option<&crate::macro_staging::MacroStagingState>) -> Option<String> {
+    let staged = staging?.staged.len();
+    (staged > 0)
+        .then(|| format!("{staged} macro(s) are still unplaced; place every macro before saving"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -14980,6 +14998,55 @@ mod tests {
             session_action_result_message(&result),
             "discard rejected: source changed"
         );
+    }
+
+    #[test]
+    fn macro_save_blocker_rejects_saves_while_macros_remain_staged() {
+        assert!(macro_save_blocker(None).is_none());
+        let mut state = crate::macro_staging::MacroStagingState {
+            staged: Vec::new(),
+            selection: BTreeSet::new(),
+            orient_by_name: BTreeMap::new(),
+            core_rect: None,
+            queue: Default::default(),
+            message: None,
+        };
+        assert!(macro_save_blocker(Some(&state)).is_none());
+
+        state.staged.push(crate::macro_staging::StagedMacro {
+            name: "u_sram01".to_string(),
+            master: "SRAM_64x32".to_string(),
+            width: 40000,
+            height: 30000,
+            orient: crate::macro_orient::MacroOrientation::R0,
+            rect: Rect32::default(),
+        });
+        assert_eq!(
+            macro_save_blocker(Some(&state)).as_deref(),
+            Some("1 macro(s) are still unplaced; place every macro before saving")
+        );
+    }
+
+    #[test]
+    fn session_action_progress_deserializes_the_macro_params_phase() {
+        let progress: SessionActionProgress = serde_json::from_str(
+            r#"{
+                "action": "save",
+                "command_id": 43,
+                "phase": "recording_macro_placements",
+                "percent": 65,
+                "message": "Recording macro placements in workspace parameters"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            progress.phase,
+            SessionActionProgressPhase::RecordingMacroPlacements
+        );
+        assert_eq!(progress.phase.label(), "Recording macro placements");
+        assert_eq!(progress.percent, 65);
+        assert!(!progress.phase.is_terminal());
     }
 
     #[test]
