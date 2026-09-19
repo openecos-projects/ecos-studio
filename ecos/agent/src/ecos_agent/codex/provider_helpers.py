@@ -520,13 +520,28 @@ def _strict_response_schema(schema: dict[str, Any]) -> dict[str, Any]:
     omits declared properties.  Making an optional field required without
     allowance would also force the model to invent values (claim hashes on
     unbound probes), so every newly required property becomes nullable
-    instead — the JSON-schema shape of the fill-or-null contract.  GLM's
-    endpoint accepts the pydantic schema as-is, so this is only applied on
-    the strict provider path.
+    instead — the JSON-schema shape of the fill-or-null contract.  Strict
+    endpoints also reject JSON-null keyword values (pydantic's
+    ``"default": null``, generated ``"description": null``) with
+    ``None is not of type 'string'`` request errors, so those are stripped.
+    GLM's endpoint accepts the pydantic schema as-is, so this is only
+    applied on the strict provider path.
     """
     strict = copy.deepcopy(schema)
     _strictify_schema_node(strict)
+    _strip_null_keyword_values(strict)
     return strict
+
+
+def _strip_null_keyword_values(node: Any) -> None:
+    if isinstance(node, dict):
+        for key in [k for k, value in node.items() if value is None and k != "const"]:
+            del node[key]
+        for value in node.values():
+            _strip_null_keyword_values(value)
+    elif isinstance(node, list):
+        for value in node:
+            _strip_null_keyword_values(value)
 
 
 def _strictify_schema_node(node: Any) -> None:
@@ -568,10 +583,12 @@ def _nullable_schema(subschema: dict[str, Any]) -> dict[str, Any]:
         # expressed as anyOf branches, with the constraints kept inside the
         # non-null branch (siblings next to anyOf would be rejected).
         constraints = {key: value for key, value in subschema.items() if key != "type"}
-        return {
-            "description": subschema.get("description"),
-            "anyOf": [{**constraints, "type": declared}, {"type": "null"}],
+        nullable: dict[str, Any] = {
+            "anyOf": [{**constraints, "type": declared}, {"type": "null"}]
         }
+        if subschema.get("description") is not None:
+            nullable["description"] = subschema["description"]
+        return nullable
     return subschema
 
 

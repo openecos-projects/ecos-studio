@@ -651,6 +651,11 @@ class CodexAppServerProposalProvider(CodexThreadManagementMixin):
                 raise CodexProviderError(
                     "Codex turn interrupted", failure_class="interrupted"
                 )
+        if self._model is not None and not self._model.startswith("glm"):
+            # Single submission choke point: every structured-output call
+            # site (proposal, objective, GUI) gets the strict-provider
+            # schema normalization, not just the proposal path.
+            output_schema = _strict_response_schema(output_schema)
         client = self._ensure_client()
         thread_id = self._ensure_thread(client)
         return self._start_and_wait(
