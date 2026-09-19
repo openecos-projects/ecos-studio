@@ -40,6 +40,9 @@ from ecos_agent.optimization.experiments.baselines import BaselineMethod
 from ecos_agent.optimization.experiments.direction_only_provider import (
     DirectionOnlyProposalProvider,
 )
+from ecos_agent.optimization.experiments.replay_provider import (
+    ReplayProposalProvider,
+)
 from ecos_agent.optimization.experiments.knowledge_treatment_execution import (
     DesignSpec,
     ExperimentManifest,
@@ -54,7 +57,10 @@ from ecos_agent.optimization.experiments.knowledge_mediation import (
     read_jsonl,
     summarize_episode_mediation,
 )
-from ecos_agent.optimization.experiments.knowledge_metrics import state_match_summary
+from ecos_agent.optimization.experiments.knowledge_metrics import (
+    decision_level_endpoints,
+    state_match_summary,
+)
 from ecos_agent.optimization.knowledge.cases import EmpiricalCaseAuditStore
 from ecos_agent.optimization.decision_audit import OptimizationDecisionAudit
 from ecos_agent.optimization.ledger import (
@@ -291,10 +297,11 @@ def _build_mediation_audit(
             value = metric_epsilon.get(objective_metric.value)
             if isinstance(value, (int, float)):
                 epsilon = float(value)
+    proposal_rows = read_jsonl(observation_path)
     calls = audit_episode_mediation(
         design_id=design_id,
         planning_entries=planning.entries,
-        proposal_rows=read_jsonl(observation_path),
+        proposal_rows=proposal_rows,
         decision_rows=decisions.entries,
         starts=tuple(
             entry.payload
@@ -315,6 +322,11 @@ def _build_mediation_audit(
         "calls": calls,
         "summary": summarize_episode_mediation(calls),
         "state_match": state_match_summary(calls),
+        "decision_level_endpoints": decision_level_endpoints(
+            calls,
+            proposal_rows,
+            objective_metric=objective_metric.value,
+        ),
         "missing_evidence_reason_counts": missing_evidence_reason_counts(calls),
     }
 
@@ -508,6 +520,14 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         "value mechanism as the deterministic baselines (direction-only "
         "ablation arm)",
     )
+    parser.add_argument(
+        "--replay-proposals",
+        type=Path,
+        default=None,
+        help="shadow-duplicate arm: JSON list of stored proposal specs; the "
+        "episode replays them verbatim instead of calling a model, so any "
+        "terminal delta versus the source episode is machine/load drift",
+    )
     parser.add_argument("--terminal-timeout-seconds", type=float, default=1800.0)
     parser.add_argument(
         "--calibration-replays",
@@ -600,7 +620,15 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
     episode_output = output / episode_id
     episode_output.mkdir(parents=True, exist_ok=True)
 
-    if args.baseline_method:
+    replay_specs: list[dict[str, object]] | None = None
+    if args.replay_proposals is not None:
+        if args.baseline_method:
+            raise SystemExit("--replay-proposals drives the LLM arm only")
+        replay_specs = json.loads(
+            args.replay_proposals.read_text(encoding="utf-8")
+        )
+        provider = ReplayProposalProvider(replay_specs)
+    elif args.baseline_method:
         if args.value_policy != "model":
             raise SystemExit(
                 "--value-policy applies to the LLM arm only; baselines always "
@@ -623,9 +651,14 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
         raise SystemExit(
             "either --baseline-method or an LLM provider factory is required"
         )
+    provider_policy = (
+        "replay"
+        if replay_specs is not None
+        else ("baseline" if args.baseline_method else "llm")
+    )
     try:
         model = args.model
-        if args.baseline_method:
+        if args.baseline_method or replay_specs is not None:
             model = None
         else:
             # reasoning effort is applied by create_optimization_runner from
@@ -713,6 +746,12 @@ def main(provider_factory: Callable[..., Any] | None, argv: list[str] | None = N
             else "llm"
         ),
         "value_policy": args.value_policy,
+        "provider_policy": provider_policy,
+        "replayed_proposals": (
+            getattr(provider, "consumed", None)
+            if provider_policy == "replay"
+            else None
+        ),
         "model": model,
         "seed": args.seed,
         "reference_runtime_seconds": reference_runtime,
