@@ -1086,7 +1086,7 @@ describe('registerIpc', () => {
       start: vi.fn(),
       startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
     } as unknown as DesktopBridgeServices['agentRuntimeService']
-    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const { handlers } = registerHandlers(agentRuntimeService)
     const senderA = { id: 41, isDestroyed: vi.fn(() => false), once: vi.fn() }
     const senderB = { id: 42, isDestroyed: vi.fn(() => false), once: vi.fn() }
     await handlers.get(desktopApiIpcChannels.agentStartSession)?.(

@@ -368,10 +368,10 @@ import { executeConfirmedWorkspaceParameterUpdate } from './workspaceParameterUp
 import type { Message } from '../types'
 import { useMessageStore } from '../stores/messageStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
-import { useOptimizationEpisodeStore } from '@/stores/optimizationEpisodeStore'
 import { resolveAgentTabContext } from '@/stores/agentTabContext'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import { useOptimizationEpisodeTabs } from '@/composables/useOptimizationEpisodeTabs'
 import {
   isQuickStartChoice,
   isQuickStartNextChoice,
@@ -405,18 +405,13 @@ const props = withDefaults(
 const AGENT_PROVIDER_ID = 'ecos_agent'
 const messageStore = useMessageStore()
 const agentShell = useAgentShellStore()
-const optimizationEpisodes = useOptimizationEpisodeStore()
 const { messages } = storeToRefs(messageStore)
-const { episodes: optimizationEpisodeSnapshots } = storeToRefs(optimizationEpisodes)
 const codexSetupStatus = ref<DesktopCodexDependencyStatus | null>(null)
 const codexSetupBusy = ref(false)
 const profileState = ref<DesktopModelProfileState | null>(null)
 const profileManagerOpen = ref(false)
 const profileManagerError = ref('')
 const codexSetupManageOpen = ref(false)
-const pendingTabCloseId = ref<string | null>(null)
-const tabCloseStopping = ref(false)
-const tabCloseIssue = ref('')
 let unsubscribeCodexProgress: (() => void) | null = null
 const codexSetupCardStatus = computed(() =>
   codexSetupStatus.value &&
@@ -457,6 +452,31 @@ const interactionDockRef = ref<HTMLElement | null>(null)
 const agentSessionId = computed({
   get: () => sharedSessionId.value,
   set: (value: string | null) => agentShell.setSessionId(value),
+})
+const {
+  activeOptimizationEpisode,
+  cancelTabClose,
+  closeChatTab,
+  handleOptimizationControl,
+  handleTabCloseDialogVisibility,
+  keepRunningAndCloseChatTab,
+  pendingTabCloseId,
+  start: startOptimizationEpisodes,
+  stopAndCloseChatTab,
+  tabCloseIssue,
+  tabCloseStopping,
+} = useOptimizationEpisodeTabs({
+  formatError: agentErrorMessage,
+  removeTab: removeChatTab,
+  createTab: (directory, sessionId, activate) =>
+    agentShell.createTab(
+      resolveAgentTabContext({
+        shell: 'workspace',
+        currentWorkspacePath: directory,
+      }),
+      { activate, id: sessionId },
+    ),
+  sessionId: agentSessionId,
 })
 
 function sessionUi(sessionId: string | null | undefined) {
@@ -680,12 +700,6 @@ const isRunning = computed(
     agentRunStatus.value === 'running' ||
     Boolean(activeOptimizationEpisode.value),
 )
-const activeOptimizationEpisode = computed(() => {
-  const episode = optimizationEpisodes.episodeForSession(agentSessionId.value)
-  return episode && !['completed', 'failed', 'stopped'].includes(episode.state)
-    ? episode
-    : null
-})
 const pendingInteraction = computed(() => interactionPresentation.value.interaction)
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
 const interactionCardRef = ref<{
@@ -844,13 +858,10 @@ watch(
   () => agentSessionId.value,
   (sessionId) => {
     messageStore.setActiveSessionId(sessionId)
-    hydrateOptimizationEpisodes()
     if (sessionId) void flushPendingGuiActionForActiveTab()
   },
   { immediate: true },
 )
-
-watch(optimizationEpisodeSnapshots, hydrateOptimizationEpisodes)
 
 function currentTabContext() {
   const workspacePath = currentProject.value?.path
@@ -879,8 +890,7 @@ async function connectAgent(): Promise<void> {
   unsubscribeAgentEvents?.()
   unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
   agentShell.setMode(props.shell === 'home' ? 'home' : 'workspace')
-  await optimizationEpisodes.start()
-  restoreOptimizationTabs()
+  await startOptimizationEpisodes()
 
   if (agentShell.tabs.length === 0) {
     await createChatTab()
@@ -927,51 +937,6 @@ async function connectAgent(): Promise<void> {
   }
 }
 
-function restoreOptimizationTabs(): void {
-  for (const episode of optimizationEpisodeSnapshots.value) {
-    if (
-      ['completed', 'failed', 'stopped'].includes(episode.state) ||
-      agentShell.isOptimizationSessionHidden(episode.agentSessionId) ||
-      agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)
-    ) {
-      continue
-    }
-    agentShell.createTab(
-      resolveAgentTabContext({
-        shell: 'workspace',
-        currentWorkspacePath: episode.parentWorkspaceDirectory,
-      }),
-      {
-        activate: agentShell.tabs.length === 0,
-        id: episode.agentSessionId,
-      },
-    )
-  }
-  hydrateOptimizationEpisodes()
-}
-
-function hydrateOptimizationEpisodes(): void {
-  for (const episode of optimizationEpisodeSnapshots.value) {
-    if (!agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)) continue
-    messageStore.upsertOptimizationProjection(
-      episode.agentSessionId,
-      episode.optimization,
-    )
-  }
-}
-
-async function handleOptimizationControl(
-  action: 'pause' | 'resume' | 'retry' | 'stop',
-): Promise<void> {
-  const sessionId = agentSessionId.value
-  if (!sessionId) return
-  try {
-    await optimizationEpisodes.control(sessionId, action)
-  } catch (error) {
-    messageStore.addAssistantMessage(agentErrorMessage(error), 'error', sessionId)
-  }
-}
-
 async function createChatTab(): Promise<void> {
   const tab = agentShell.createTab(currentTabContext())
   messageStore.setActiveSessionId(tab.id)
@@ -983,51 +948,6 @@ function selectChatTab(id: string): void {
   if (!agentShell.activateTab(id)) return
   messageStore.setActiveSessionId(id)
   void loadAgentModelSettings(id)
-}
-
-async function closeChatTab(id: string): Promise<void> {
-  const episode = optimizationEpisodes.episodeForSession(id)
-  if (episode && !['completed', 'failed', 'stopped'].includes(episode.state)) {
-    pendingTabCloseId.value = id
-    tabCloseIssue.value = ''
-    return
-  }
-  await removeChatTab(id, { interrupt: true, preserveSession: false })
-}
-
-async function keepRunningAndCloseChatTab(): Promise<void> {
-  const id = pendingTabCloseId.value
-  if (!id) return
-  pendingTabCloseId.value = null
-  agentShell.hideOptimizationSession(id)
-  await removeChatTab(id, { interrupt: false, preserveSession: true })
-}
-
-async function stopAndCloseChatTab(): Promise<void> {
-  const id = pendingTabCloseId.value
-  if (!id || tabCloseStopping.value) return
-  tabCloseStopping.value = true
-  tabCloseIssue.value = ''
-  try {
-    await optimizationEpisodes.control(id, 'stop')
-    await optimizationEpisodes.waitForTerminal(id)
-    pendingTabCloseId.value = null
-    await removeChatTab(id, { interrupt: false, preserveSession: false })
-  } catch (error) {
-    tabCloseIssue.value = agentErrorMessage(error)
-  } finally {
-    tabCloseStopping.value = false
-  }
-}
-
-function cancelTabClose(): void {
-  if (tabCloseStopping.value) return
-  pendingTabCloseId.value = null
-  tabCloseIssue.value = ''
-}
-
-function handleTabCloseDialogVisibility(visible: boolean): void {
-  if (!visible) cancelTabClose()
 }
 
 async function removeChatTab(
