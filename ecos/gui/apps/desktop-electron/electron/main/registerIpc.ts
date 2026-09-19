@@ -204,6 +204,13 @@ export interface DesktopBridgeServices {
     ): () => void
     optimizationProjection?(): DesktopAgentOptimizationEpisodeProjection
     isOptimizationParentGuarded?(workspaceId: string): boolean
+    isOptimizationParentDirectoryGuarded?(directory: string): boolean
+    rebindOptimizationEpisode?(
+      episodeId: string,
+      workspaceId: string,
+      workspaceRevision: number,
+      directory: string,
+    ): void
     markOptimizationEpisodeCleaned?(episodeId: string): void
     syncEnvironmentOverrides?(
       overrides: Record<string, string | undefined>,
@@ -1014,6 +1021,23 @@ export function registerIpc(
     })
   }
 
+  const requireOptimizationParentDirectoryAllowed = (
+    _event: IpcMainInvokeEvent,
+    directory: string,
+  ): void => {
+    if (services.agentRuntimeService?.isOptimizationParentDirectoryGuarded?.(directory)) {
+      throw Object.assign(new Error('Optimization is running in the background.'), {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
+      })
+    }
+  }
+
+  const requireOptimizationWindowWorkspaceAllowed = (event: IpcMainInvokeEvent): void => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const directory = window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    if (directory) requireOptimizationParentDirectoryAllowed(event, directory)
+  }
+
   const requireCreationCleanupAllowed = async (
     event: IpcMainInvokeEvent,
     projectRoot: string,
@@ -1787,6 +1811,13 @@ export function registerIpc(
     }
     let acceptedCreationRegistration = false
     const mutationInput = isRecord(request.mutation.input) ? request.mutation.input : {}
+    if (
+      request.mutation.type === 'delete-workspace' ||
+      request.mutation.type === 'archive-workspace' ||
+      request.mutation.type === 'record-replacement-backup'
+    ) {
+      requireOptimizationWindowWorkspaceAllowed(event)
+    }
     const mutationBlocked =
       services.shutdownCoordinator?.isMutationBlocked(event.sender.id) ?? false
     if (mutationBlocked && request.mutation.type === 'register-workspace') {
@@ -2201,7 +2232,11 @@ export function registerIpc(
     async (event, path) => {
       requireBackendMutationAllowed(event)
       return await services.workspaceService.prepareProjectDirectoryReplacement(
-        path as string,
+        (() => {
+          if (typeof path !== 'string') throw new Error('Workspace path must be a string')
+          requireOptimizationParentDirectoryAllowed(event, path)
+          return path
+        })(),
       )
     },
   )
@@ -2214,6 +2249,7 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      requireOptimizationParentDirectoryAllowed(event, replacement.targetPath)
       await requireCreationCleanupAllowed(
         event,
         replacement.projectRoot,
@@ -2233,6 +2269,7 @@ export function registerIpc(
       }
       const replacement =
         services.workspaceService.getProjectDirectoryReplacement(replacementId)
+      requireOptimizationParentDirectoryAllowed(event, replacement.targetPath)
       await requireCreationCleanupAllowed(
         event,
         replacement.projectRoot,
@@ -2610,6 +2647,11 @@ export function registerIpc(
         ) {
           throw new Error(
             'Optimization cleanup Parent Workspace does not match the Episode.',
+          )
+        }
+        if (episode.parentWorkspaceId !== payload.workspaceHandle) {
+          throw new Error(
+            'Optimization cleanup Workspace ownership does not match the Episode.',
           )
         }
         const adoptionMarker = optimizationEpisodeMarkerPath(
@@ -3099,27 +3141,48 @@ export function registerIpc(
     const windowDirectory = window
       ? workspaceWindowRegistry.getPathForWindow(window)
       : null
-    return {
-      ...projection,
-      episodes: projection.episodes.filter((episode) => {
-        const key = agentSessionKey(episode.providerId, episode.agentSessionId)
-        const subscription = agentSessionSubscriptions.get(key)
-        if (subscription) return subscription.sender === event.sender
-        if (
-          !windowDirectory ||
-          normalizeWorkspacePath(windowDirectory) !==
-            normalizeWorkspacePath(episode.parentWorkspaceDirectory)
-        ) {
-          return false
-        }
+    const episodes: typeof projection.episodes = []
+    for (const episode of projection.episodes) {
+      const key = agentSessionKey(episode.providerId, episode.agentSessionId)
+      const subscription = agentSessionSubscriptions.get(key)
+      if (subscription) {
+        if (subscription.sender === event.sender) episodes.push(episode)
+        continue
+      }
+      if (
+        !windowDirectory ||
+        normalizeWorkspacePath(windowDirectory) !==
+          normalizeWorkspacePath(episode.parentWorkspaceDirectory)
+      ) {
+        continue
+      }
+      try {
+        const context = await resolveAgentWorkspaceContext(
+          episode.parentWorkspaceDirectory,
+        )
         trackAgentSession(event.sender, {
           directory: episode.parentWorkspaceDirectory,
           providerId: episode.providerId,
           sessionId: episode.agentSessionId,
+          workspaceId: context.workspaceHandle,
+          workspaceRevision: context.workspaceRevision,
         })
-        return true
-      }),
+        runtime.rebindOptimizationEpisode?.(
+          episode.episodeId,
+          context.workspaceHandle,
+          context.workspaceRevision,
+          episode.parentWorkspaceDirectory,
+        )
+        episodes.push({
+          ...episode,
+          parentWorkspaceId: context.workspaceHandle,
+          parentWorkspaceRevision: context.workspaceRevision,
+        })
+      } catch {
+        // A closed or invalid Workspace is not safe to claim for control.
+      }
     }
+    return { ...projection, episodes }
   })
 
   handle(desktopApiIpcChannels.agentOptimizationControl, async (event, value) => {

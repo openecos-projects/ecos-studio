@@ -144,6 +144,8 @@ describe('AgentRuntimeManager', () => {
         workspaceId: 'workspace-handle-2',
         workspaceRevision: 7,
       })
+      expect(restored.isOptimizationParentGuarded('workspace-handle-1')).toBe(false)
+      expect(restored.isOptimizationParentGuarded('workspace-handle-2')).toBe(true)
 
       await restored.controlOptimizationEpisode({
         action: 'resume',

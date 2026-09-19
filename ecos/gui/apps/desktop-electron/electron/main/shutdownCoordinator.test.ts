@@ -216,6 +216,66 @@ describe('ShutdownCoordinator', () => {
     expect(cancelOptimizationDrain).toHaveBeenCalledOnce()
   })
 
+  it('drains only the Optimization Episodes owned by a closing window', async () => {
+    const episodes = [
+      {
+        agentSessionId: 'session-a',
+        episodeId: 'episode-a',
+        inFlightCount: 0,
+        optimization: {
+          episode_id: 'episode-a',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'running' as const,
+        },
+        parentWorkspaceDirectory: '/work/a',
+        parentWorkspaceId: 'handle-a',
+        providerId: 'ecos_agent',
+        startedAt: 1,
+        state: 'running' as const,
+        turnCount: 1,
+        updatedAt: 2,
+      },
+      {
+        agentSessionId: 'session-b',
+        episodeId: 'episode-b',
+        inFlightCount: 0,
+        optimization: {
+          episode_id: 'episode-b',
+          schema_version: 'ecos.optimization_status.v2',
+          state: 'running' as const,
+        },
+        parentWorkspaceDirectory: '/work/b',
+        parentWorkspaceId: 'handle-b',
+        providerId: 'ecos_agent',
+        startedAt: 1,
+        state: 'running' as const,
+        turnCount: 1,
+        updatedAt: 2,
+      },
+    ] satisfies DesktopAgentOptimizationEpisodeSummary[]
+    const beginOptimizationDrain = vi.fn(async () => undefined)
+    const coordinator = new ShutdownCoordinator({
+      approve: vi.fn(),
+      beginOptimizationDrain,
+      cancelOperation: vi.fn(async () => undefined),
+      forceTerminate: vi.fn(async () => undefined),
+      listWindowIds: () => [7, 8],
+      markCreationsUnfinished: vi.fn(async () => undefined),
+      operationProjection: projection,
+      optimizationEpisodes: () => episodes,
+      promptForce: vi.fn(async () => 'keep-waiting' as const),
+      promptInitial: vi.fn(async () => 'wait' as const),
+      requestRendererCleanup: vi.fn(),
+    })
+    coordinator.trackWorkspaceHandle(7, 'handle-a')
+    coordinator.trackWorkspaceHandle(8, 'handle-b')
+
+    await coordinator.requestWindowClose(7)
+
+    expect(beginOptimizationDrain).toHaveBeenCalledWith(['handle-a'])
+    expect(coordinator.status()).toMatchObject({ activeOptimizations: 1 })
+  })
+
   it('persists unfinished creation evidence before cancelling or terminating', async () => {
     const state = setup(operationProjection())
     state.promptForce.mockResolvedValueOnce('force')

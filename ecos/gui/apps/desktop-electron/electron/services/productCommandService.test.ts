@@ -27,17 +27,19 @@ describe('executeProductCommand Workspace creation', () => {
     expect(adoptOptimizationCandidate).toHaveBeenCalledWith(payload)
   })
 
-  it('routes confirmed Optimization cleanup without a workspace handle', async () => {
+  it('routes confirmed Optimization cleanup through the owned Parent handle', async () => {
     const cleanupOptimizationEpisode = vi.fn().mockResolvedValue({ cleaned: true })
     const payload = {
       confirmation: true as const,
       episodeId: 'episode-1',
       executionWorkspaceDirectories: ['/runs/episode-1/candidate-1'],
       parentWorkspaceDirectory: '/runs/parent',
+      workspaceHandle: 'handle-parent',
     }
     await expect(
       executeProductCommand({ command: 'optimization.cleanup', payload }, {
         cleanupOptimizationEpisode,
+        ownsWorkspaceHandle: () => true,
       } as never),
     ).resolves.toEqual({ cleaned: true })
     expect(cleanupOptimizationEpisode).toHaveBeenCalledWith(payload)

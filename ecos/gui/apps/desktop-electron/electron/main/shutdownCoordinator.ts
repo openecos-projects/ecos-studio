@@ -42,7 +42,7 @@ interface ShutdownCoordinatorOptions {
 }
 
 export interface OptimizationShutdownLifecycle {
-  beginDrain(): Promise<void>
+  beginDrain(workspaceHandles?: readonly string[]): Promise<void>
   cancelDrain(): Promise<void>
   episodes(): DesktopAgentOptimizationEpisodeSummary[]
 }
@@ -320,7 +320,9 @@ export class ShutdownCoordinator {
     if (this.optimizationLifecycle) {
       try {
         attempt.optimizationDrainStarted = true
-        await this.optimizationLifecycle.beginDrain()
+        await this.optimizationLifecycle.beginDrain(
+          workspaceHandlesInShutdownScope(this.handleOwners, attempt.scope),
+        )
       } catch (error) {
         if (this.attempt !== attempt) return
         attempt.state = 'error'
