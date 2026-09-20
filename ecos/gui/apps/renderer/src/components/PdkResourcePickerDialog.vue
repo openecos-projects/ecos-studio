@@ -56,6 +56,27 @@
       </div>
 
       <div
+        v-if="(sources?.length ?? 0) > 1"
+        class="flex shrink-0 flex-wrap items-center gap-2 border-b border-(--border-color) px-5 py-2"
+      >
+        <button
+          v-for="(source, index) in sources ?? []"
+          :key="source.rootPath"
+          type="button"
+          class="cursor-pointer rounded-full border px-3 py-1 text-xs font-semibold transition-colors duration-200"
+          :class="
+            index === activeSourceIndex
+              ? 'border-(--accent-color) bg-(--accent-color)/10 text-(--accent-color)'
+              : 'border-(--border-color) bg-(--bg-primary)/60 text-(--text-secondary) hover:border-(--accent-color)/40'
+          "
+          :title="source.rootPath"
+          @click="activeSourceIndex = index"
+        >
+          <i class="ri-folder-3-line mr-1"></i>{{ source.label }}
+        </button>
+      </div>
+
+      <div
         class="grid min-h-0 flex-1 gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)]"
       >
         <section
@@ -81,7 +102,7 @@
             <DesignFileTransferTree
               v-else
               :node="directoryTree"
-              :root-path="rootPath"
+              :root-path="effectiveRootPath"
               :selected-paths="availableSelection"
               @toggle="toggleAvailableSelection"
               @add="addFile"
@@ -185,12 +206,21 @@ import { computed, ref, watch } from 'vue'
 import DesignFileTransferTree from './DesignFileTransferTree.vue'
 import { buildRtlFileTree } from '@/utils/rtlFileTree'
 
+export interface PdkResourcePickerSource {
+  label: string
+  rootPath: string
+  files: string[]
+}
+
 const props = defineProps<{
   resourceTitle: string
-  rootPath: string
+  /** Multi-source candidate pools (PDK root plus external macro paths). */
+  sources?: PdkResourcePickerSource[]
   directories: string[]
   availableFiles: string[]
   selectedFiles: string[]
+  /** Fallback single root when no sources are provided. */
+  rootPath?: string
 }>()
 
 const emit = defineEmits<{
@@ -199,13 +229,31 @@ const emit = defineEmits<{
 }>()
 
 const searchQuery = ref('')
+const activeSourceIndex = ref(0)
 const draftSelectedFiles = ref<string[]>([...props.selectedFiles])
 const availableSelection = ref<string[]>([])
 const selectedSelection = ref<string[]>([])
 
+const activeSource = computed<PdkResourcePickerSource | null>(
+  () => props.sources?.[activeSourceIndex.value] ?? null,
+)
+
+const effectiveRootPath = computed(
+  () => activeSource.value?.rootPath ?? props.rootPath ?? '',
+)
+
+const availableFiles = computed(() => activeSource.value?.files ?? props.availableFiles)
+
+watch(
+  () => props.sources?.map((source) => `${source.label}:${source.rootPath}`).join('|'),
+  () => {
+    activeSourceIndex.value = 0
+  },
+)
+
 const unselectedFiles = computed(() => {
   const selected = new Set(draftSelectedFiles.value)
-  return props.availableFiles.filter((file) => !selected.has(file))
+  return availableFiles.value.filter((file) => !selected.has(file))
 })
 
 const filteredAvailableFiles = computed(() => {
@@ -217,7 +265,7 @@ const filteredAvailableFiles = computed(() => {
 })
 
 const directoryTree = computed(() =>
-  buildRtlFileTree(props.rootPath, filteredAvailableFiles.value),
+  buildRtlFileTree(effectiveRootPath.value, filteredAvailableFiles.value),
 )
 
 watch(
@@ -245,7 +293,7 @@ function closeDialog() {
 }
 
 function displayRelativePath(filePath: string): string {
-  const normalizedRoot = props.rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedRoot = effectiveRootPath.value.replace(/\\/g, '/').replace(/\/+$/, '')
   const normalizedFile = filePath.replace(/\\/g, '/')
   const prefix = `${normalizedRoot}/`
   return normalizedFile.startsWith(prefix)

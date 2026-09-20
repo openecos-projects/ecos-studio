@@ -171,6 +171,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireOptionalString(payload, 'projectRoot')
       requireRecord(payload, 'workspaceBindings')
       requireRecord(payload, 'workspaceSpec')
+      if ('eccPdkConfig' in payload && !isRecord(payload.eccPdkConfig)) {
+        throw new Error('Workspace create eccPdkConfig must be an object')
+      }
       break
     case 'workspace.run':
       requireString(payload, 'workspaceHandle')
@@ -189,6 +192,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       if (!isRecord(payload.draft)) throw new Error('Workspace update requires a draft')
       requireRecord(payload.draft, 'workspaceBindings')
       requireRecord(payload.draft, 'workspaceSpec')
+      if ('eccPdkConfig' in payload.draft && !isRecord(payload.draft.eccPdkConfig)) {
+        throw new Error('Workspace update eccPdkConfig must be an object')
+      }
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.updateConfiguration':

@@ -210,6 +210,10 @@ function registerHandlers(
       resolveBinding: vi.fn(),
       validateWorkspace: vi.fn(),
     },
+    projectEccConfigService: {
+      read: vi.fn(),
+      write: vi.fn(),
+    },
     surferProtocolService: {
       authorizeWaveform: vi.fn(),
       resolveWaveformPath: vi.fn(),
@@ -1483,6 +1487,98 @@ describe('registerIpc', () => {
       services.resourceManagerService.validatePdkRootForWorkspace,
     ).not.toHaveBeenCalled()
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('persists eccPdkConfig to ecc.toml and strips it from the runtime request', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
+    services.pdkInventoryService.bindInstallation.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.createWorkspace.mockResolvedValue({
+      directory: '/tmp/workspace',
+      workspaceHandle: 'workspace-handle',
+    })
+    const eccPdkConfig = {
+      externalPaths: ['/macros/sram'],
+      overrides: {
+        lefs: ['/canonical/pdk/IP/lef/std.lef', '/macros/sram/sram.lef'],
+      },
+    }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
+        payload: workspaceCreateRequest({
+          commandId: 'workspace-create-ecc-pdk-config',
+          pdkInstallationId: 'pdk-installation:ics55',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
+          pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
+          eccPdkConfig,
+        }),
+      }),
+    ).resolves.toMatchObject({ workspaceHandle: 'workspace-handle' })
+
+    const runtimeCall = services.eccRuntimeService.createWorkspace.mock.calls[0][0]
+    expect(runtimeCall).not.toHaveProperty('eccPdkConfig')
+    expect(services.projectEccConfigService.write).toHaveBeenCalledWith({
+      projectRoot: '/tmp/project',
+      pdkRoot: '/canonical/pdk',
+      pdkName: 'ics55',
+      ...eccPdkConfig,
+    })
+  })
+
+  it('skips ecc.toml persistence when the create carries no eccPdkConfig', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.createWorkspace.mockResolvedValue({
+      directory: '/tmp/workspace',
+      workspaceHandle: 'workspace-handle',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
+        payload: workspaceCreateRequest({
+          commandId: 'workspace-create-without-ecc-pdk-config',
+          pdkInstallationId: 'pdk-installation:ics55',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
+          pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
+        }),
+      }),
+    ).resolves.toMatchObject({ workspaceHandle: 'workspace-handle' })
+    expect(services.projectEccConfigService.write).not.toHaveBeenCalled()
   })
 
   it('uses the requested Project Requirement for workspace creation', async () => {

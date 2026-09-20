@@ -1,3 +1,4 @@
+import type { EccWorkspacePdkConfigPersist } from './projectEccConfig.ts'
 import type { PdkRequirement } from './pdkInventory.ts'
 
 export interface EccWorkspaceCreateRequest {
@@ -9,6 +10,11 @@ export interface EccWorkspaceCreateRequest {
   pdkRequirement?: PdkRequirement
   projectId?: string
   projectRoot?: string
+  /**
+   * ecc.toml persistence intent for this create/update. Consumed by the
+   * Electron bridge (stripped before the request reaches ECC).
+   */
+  eccPdkConfig?: EccWorkspacePdkConfigPersist
 }
 
 export interface EccWorkspaceOpenRequest {

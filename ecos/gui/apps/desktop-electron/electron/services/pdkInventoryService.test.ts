@@ -236,7 +236,39 @@ describe('PdkInventoryService', () => {
           },
         },
       }),
-    ).rejects.toThrow('must be relative')
+    ).resolves.toMatchObject({ readiness: expect.any(String) })
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          // Absolute entries declare external resources (macro LEF/lib
+          // pools outside the installation root); existence is the contract.
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['cells.lef', join(root, 'outside.lib')],
+            liberty: ['typ.lib'],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ readiness: expect.any(String) })
+    await expect(
+      service.validateWorkspace({
+        projectId: 'proj_demo',
+        projectRoot,
+        requirement: {
+          familyId: 'vendor-pdk',
+          version: null,
+          manualConfig: {
+            techLef: 'tech.lef',
+            cellLefs: ['cells.lef'],
+            liberty: [join(root, 'missing.lib')],
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(
       service.validateWorkspace({
         projectId: 'proj_demo',

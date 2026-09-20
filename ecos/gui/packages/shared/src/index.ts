@@ -368,6 +368,13 @@ export type {
   PdkWorkspaceValidationRequest,
 } from './contracts/pdkInventory.ts'
 export type {
+  EccPdkOverrides,
+  EccWorkspacePdkConfigPersist,
+  ProjectEccPdkConfig,
+  ProjectEccPdkConfigReadResult,
+  ProjectEccPdkConfigWriteRequest,
+} from './contracts/projectEccConfig.ts'
+export type {
   DesktopFailure,
   DesktopResult,
   DesktopSuccess,
