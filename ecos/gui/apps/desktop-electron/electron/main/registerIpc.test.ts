@@ -336,6 +336,8 @@ function registerHandlers(
     },
     chipViewerService: {
       isOpen: vi.fn(),
+      onWorkspaceRevisionChanged:
+        undefined as DesktopBridgeServices['chipViewerService']['onWorkspaceRevisionChanged'],
       open: vi.fn(),
     },
   }
@@ -2384,6 +2386,50 @@ describe('registerIpc', () => {
     ).resolves.toEqual({ open: true })
 
     expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
+  })
+
+  it('republishes layout-edit revision bumps as workspace.committed runtime events', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/demo' },
+    )
+
+    services.chipViewerService.onWorkspaceRevisionChanged?.({
+      projectPath: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 5,
+    })
+
+    expect(ownerSend).toHaveBeenCalledWith(
+      desktopApiEventChannels.designRuntimeEvent,
+      expect.objectContaining({
+        designTool: 'backend',
+        type: 'runtime.protocol',
+        workspaceDirectory: '/work/demo',
+        workspaceHandle: 'workspace-handle-1',
+        event: expect.objectContaining({
+          type: 'workspace.committed',
+          operationId: 'layout-edit-save:workspace-handle-1',
+          workspaceId: 'workspace-handle-1',
+          workspaceRevision: 5,
+        }),
+      }),
+    )
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

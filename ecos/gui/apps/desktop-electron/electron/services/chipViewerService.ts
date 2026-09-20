@@ -148,8 +148,16 @@ interface LayoutEditContext {
   geometryManifestPath: string
   /** True when the macro staging manifest was published for this session. */
   macroPlacement: boolean
+  projectPath: string
   revision: number
   step: string
+  workspaceHandle: string
+  workspaceRevision: number
+}
+
+/** Adopted by the IPC layer to republish a layout-edit revision bump. */
+export interface ChipViewerWorkspaceRevisionNotification {
+  projectPath: string
   workspaceHandle: string
   workspaceRevision: number
 }
@@ -191,6 +199,14 @@ export interface ChipViewerServiceOptions {
   getFileModifiedTime?: GetFileModifiedTime
   isPackaged: boolean
   layoutEditRuntime?: LayoutEditRuntime
+  /**
+   * Called whenever a layout edit session adopts a new Workspace revision
+   * (save, macro.placements writeback) so the window can refresh the
+   * revision it sends on the next step run.
+   */
+  onWorkspaceRevisionChanged?: (
+    notification: ChipViewerWorkspaceRevisionNotification,
+  ) => void
   openLogFile?: OpenLogFile
   platform?: NodeJS.Platform
   readBinaryFile?: ReadBinaryFile
@@ -591,6 +607,8 @@ export class ChipViewerService {
   private readonly watchDirectory: WatchDirectory
   private readonly writeTextFile: WriteTextFile
   private readonly workspaceResourceService: ChipViewerServiceOptions['workspaceResourceService']
+  /** See ChipViewerServiceOptions.onWorkspaceRevisionChanged. */
+  onWorkspaceRevisionChanged?: ChipViewerServiceOptions['onWorkspaceRevisionChanged']
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
   private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
   private readonly openViewerCounts = new Map<string, number>()
@@ -626,6 +644,7 @@ export class ChipViewerService {
     this.watchDirectory = options.watchDirectory ?? defaultWatchDirectory
     this.writeTextFile = options.writeTextFile ?? defaultWriteTextFile
     this.workspaceResourceService = options.workspaceResourceService
+    this.onWorkspaceRevisionChanged = options.onWorkspaceRevisionChanged
   }
 
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
@@ -995,11 +1014,25 @@ export class ChipViewerService {
       editSessionId: editSession.editSessionId,
       geometryManifestPath: editSession.geometryManifestPath,
       macroPlacement: false,
+      projectPath,
       revision: editSession.revision,
       step,
       workspaceHandle: workspace.workspaceHandle,
       workspaceRevision: workspace.workspaceRevision!,
     }
+  }
+
+  /**
+   * Republishes the session's adopted Workspace revision so the owning
+   * window refreshes the revision it sends with the next step run; ECC
+   * rejects runs whose expected revision predates a layout edit save.
+   */
+  private notifyWorkspaceRevisionChanged(layoutEdit: LayoutEditContext): void {
+    this.onWorkspaceRevisionChanged?.({
+      projectPath: layoutEdit.projectPath,
+      workspaceHandle: layoutEdit.workspaceHandle,
+      workspaceRevision: layoutEdit.workspaceRevision,
+    })
   }
 
   /**
@@ -1165,6 +1198,7 @@ export class ChipViewerService {
       })
       if (typeof updated.workspaceRevision === 'number') {
         layoutEdit.workspaceRevision = updated.workspaceRevision
+        this.notifyWorkspaceRevisionChanged(layoutEdit)
       }
       return `; macro_location.tcl exported and macro.placements recorded (${entries.length} macros)`
     } catch (error) {
@@ -1319,6 +1353,7 @@ export class ChipViewerService {
         layoutEdit.revision = saved.revision
         if (typeof saved.workspaceRevision === 'number') {
           layoutEdit.workspaceRevision = saved.workspaceRevision
+          this.notifyWorkspaceRevisionChanged(layoutEdit)
         }
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
