@@ -10,7 +10,10 @@
     "vm80",
     "mos6502",
     "dbg_bridge",
-    "s35932"
+    "s35932",
+    "dcpu",
+    "gng",
+    "i2c"
   ],
   "rules": {
     "rules.evidence.present.v1": {
