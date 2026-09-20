@@ -1393,28 +1393,32 @@ describe('ChipViewerService', () => {
     expect(stagingWrite).toBeDefined()
     expect(renameFile).toHaveBeenCalledWith(`${stagingPath}.tmp`, stagingPath)
     expect(stagingWrite?.[1]).toMatchInlineSnapshot(`
-        "{
-          "schema": 1,
-          "dbuPerMicron": 1000,
-          "dieArea": {
-            "lx": 0,
-            "ly": 0,
-            "hx": 52000,
-            "hy": 53000
-          },
-          "macros": [
-            {
-              "name": "u_sram01",
-              "master": "SRAM_64x32",
-              "widthDbu": 40000,
-              "heightDbu": 30000,
-              "orient": "R0",
-              "placed": false
-            }
-          ]
+      "{
+        "schema": 1,
+        "dbuPerMicron": 1000,
+        "dieArea": {
+          "lx": 0,
+          "ly": 0,
+          "hx": 52000,
+          "hy": 53000
+        },
+        "macros": [
+          {
+            "name": "u_sram01",
+            "master": "SRAM_64x32",
+            "widthDbu": 40000,
+            "heightDbu": 30000,
+            "orient": "R0",
+            "placed": false
+          }
+        ],
+        "stdcellStaging": {
+          "count": 1,
+          "areaDbu": 0
         }
-        "
-      `)
+      }
+      "
+    `)
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       expect.arrayContaining(['--macro-staging-file', stagingPath]),
