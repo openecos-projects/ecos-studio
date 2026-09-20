@@ -305,6 +305,44 @@ describe('buildMacroStagingManifest', () => {
         placed: false,
       },
     ])
+    // DFFQX1H7L has no master size row, so it counts without area.
+    expect(manifest.stdcellStaging).toEqual({ count: 1, areaDbu: 0 })
+  })
+
+  it('aggregates unplaced non-block components into stdcellStaging', () => {
+    const manifest = buildMacroStagingManifest({
+      defComponents: parseDefComponents(
+        defWithComponents(
+          [
+            '    - u_buf0 BUFX1P4H7L ;',
+            '    - u_buf1 BUFX1P4H7L ;',
+            '    - u_pad ANALOG_PAD ;',
+            '    - u_buf_placed BUFX1P4H7L + PLACED ( 1000 2000 ) N ;',
+            '    - u_rom01 ROM_16x8 ;',
+          ].join('\n'),
+        ),
+      ),
+      mastersText: MASTERS_TSV,
+    })
+
+    expect(manifest.macros).toHaveLength(1)
+    expect(manifest.macros[0]?.name).toBe('u_rom01')
+    expect(manifest.stdcellStaging).toEqual({
+      count: 3,
+      areaDbu: 2 * 4800 * 1400 + 20000 * 20000,
+    })
+  })
+
+  it('omits stdcellStaging when every non-block component is placed', () => {
+    const manifest = buildMacroStagingManifest({
+      defComponents: parseDefComponents(
+        defWithComponents('    - u_buf_placed BUFX1P4H7L + PLACED ( 1000 2000 ) N ;'),
+      ),
+      mastersText: MASTERS_TSV,
+    })
+
+    expect(manifest.stdcellStaging).toBeUndefined()
+    expect(JSON.parse(serializeMacroStagingManifest(manifest))).toEqual(manifest)
   })
 
   it('round-trips through the serializer', () => {

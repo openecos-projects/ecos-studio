@@ -8,7 +8,9 @@ import { Readable } from 'node:stream'
  * skips unplaced instances. This module rebuilds the block-macro inventory
  * from two existing artifacts so the viewer can stage unplaced macros next
  * to the die: the step DEF (instance names, masters, placements) and the
- * geometry snapshot master metadata (block master sizes).
+ * geometry snapshot master metadata (block master sizes). Unplaced standard
+ * cells are aggregated into a single count/area entry so the viewer can show
+ * a placeholder blob without shipping every component.
  *
  * Step DEFs easily exceed the V8 maximum string length, so the DEF is
  * scanned as a statement stream instead of one decoded string.
@@ -66,6 +68,15 @@ export interface MacroStagingManifest {
   dbuPerMicron: number | null
   dieArea: { lx: number; ly: number; hx: number; hy: number } | null
   macros: MacroStagingEntry[]
+  /** Aggregate of unplaced standard cells; omitted when none are unplaced. */
+  stdcellStaging?: StdcellStaging
+}
+
+export interface StdcellStaging {
+  /** Number of unplaced standard-cell components. */
+  count: number
+  /** Sum of width*height over unplaced standard cells, in DBU^2. */
+  areaDbu: number
 }
 
 export type ReadBinaryFile = (path: string) => Promise<Buffer>
@@ -344,8 +355,38 @@ export function parseBlockMasters(mastersText: string): Map<string, BlockMaster>
 }
 
 /**
+ * Parses every geometry `geometry.masters.txt` row with numeric dimensions
+ * into a name → size map, regardless of master type.
+ */
+export function parseMasterSizes(
+  mastersText: string,
+): Map<string, { widthDbu: number; heightDbu: number }> {
+  const sizes = new Map<string, { widthDbu: number; heightDbu: number }>()
+  const lines = mastersText.split(/\r?\n/)
+  for (const [lineIndex, line] of lines.entries()) {
+    if (!line.trim() || lineIndex === 0) {
+      continue
+    }
+    const columns = line.split('\t')
+    const [name, , , , , , width, height] = columns
+    if (!name) {
+      continue
+    }
+    const widthDbu = Number(width)
+    const heightDbu = Number(height)
+    if (!Number.isFinite(widthDbu) || !Number.isFinite(heightDbu)) {
+      continue
+    }
+    sizes.set(name, { widthDbu, heightDbu })
+  }
+  return sizes
+}
+
+/**
  * Joins DEF components with block master metadata into the staging manifest
- * consumed by the native viewer. Macros keep their DEF order.
+ * consumed by the native viewer. Macros keep their DEF order; unplaced
+ * standard cells are aggregated into a single count/area entry because their
+ * individual positions are not needed for staging.
  */
 export function buildMacroStagingManifest(input: {
   defComponents: DefComponents
@@ -353,27 +394,40 @@ export function buildMacroStagingManifest(input: {
 }): MacroStagingManifest {
   const parsed = input.defComponents
   const blockMasters = parseBlockMasters(input.mastersText)
+  const masterSizes = parseMasterSizes(input.mastersText)
   const macros: MacroStagingEntry[] = []
+  let stdcellCount = 0
+  let stdcellAreaDbu = 0
   for (const component of parsed.components) {
     const master = blockMasters.get(component.master)
-    if (!master) {
+    if (master) {
+      const orient = component.placed ? DEF_TO_R_ORIENT[component.orient] : 'R0'
+      macros.push({
+        name: component.name,
+        master: component.master,
+        widthDbu: master.widthDbu,
+        heightDbu: master.heightDbu,
+        orient,
+        placed: component.placed,
+      })
       continue
     }
-    const orient = component.placed ? DEF_TO_R_ORIENT[component.orient] : 'R0'
-    macros.push({
-      name: component.name,
-      master: component.master,
-      widthDbu: master.widthDbu,
-      heightDbu: master.heightDbu,
-      orient,
-      placed: component.placed,
-    })
+    if (component.placed) {
+      continue
+    }
+    stdcellCount += 1
+    const size = masterSizes.get(component.master)
+    if (size) {
+      stdcellAreaDbu += size.widthDbu * size.heightDbu
+    }
   }
   return {
     schema: 1,
     dbuPerMicron: parsed.dbuPerMicron,
     dieArea: parsed.dieArea,
     macros,
+    stdcellStaging:
+      stdcellCount > 0 ? { count: stdcellCount, areaDbu: stdcellAreaDbu } : undefined,
   }
 }
 
