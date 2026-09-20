@@ -246,10 +246,8 @@ export function backendWorkspaceOptions(
                 : 'die_util',
               ...(fixedDie
                 ? {
-                    [specKey(
-                      'die_width',
-                      'floorplan.die_builder.die_size.width_micron',
-                    )]: numberValue(parameters.die_width, 100),
+                    [specKey('die_width', 'floorplan.die_builder.die_size.width_micron')]:
+                      numberValue(parameters.die_width, 100),
                     [specKey(
                       'die_height',
                       'floorplan.die_builder.die_size.height_micron',
