@@ -43,7 +43,7 @@ export async function validatePackagedAgent(appOutDir) {
     if (
       manifest.command !== './ecos-agent' ||
       manifest.providerId !== 'ecos_agent' ||
-      manifest.protocolVersion !== 1
+      manifest.protocolVersion !== 2
     ) {
       throw new Error('agent manifest does not match the bundled provider')
     }
