@@ -80,6 +80,7 @@ import {
   type PdkInstallationSnapshot,
   type PdkLocateRequest,
   type PdkResolveBindingRequest,
+  type ProjectEccPdkConfigWriteRequest,
   type DesktopShellDataEvent,
   type DesktopShellExitEvent,
   type DesktopShellSession,
@@ -120,6 +121,7 @@ import { executeProductCommand } from '../services/productCommandService'
 import { buildWorkspaceCreationModel } from '../services/workspaceCreationModel'
 import { rememberWorkspaceParameterCatalog } from '../services/workspaceParameterCatalogCache'
 import {
+  persistEccPdkConfigFromCreate,
   prepareWorkspaceCreateBinding,
   prepareWorkspaceOpenBinding,
 } from '../services/workspacePdkBindings'
@@ -399,6 +401,14 @@ export interface DesktopBridgeServices {
     validateWorkspace(
       request: import('@ecos-studio/shared').PdkWorkspaceValidationRequest,
     ): Promise<PdkInstallationSnapshot>
+  }
+  projectEccConfigService: {
+    read(
+      projectRoot: string,
+    ): Promise<import('@ecos-studio/shared').ProjectEccPdkConfigReadResult>
+    write(
+      request: import('@ecos-studio/shared').ProjectEccPdkConfigWriteRequest,
+    ): Promise<import('@ecos-studio/shared').ProjectEccPdkConfigReadResult>
   }
   frontendRpcRuntimeService: {
     cancelOperationLegacy(
@@ -2242,6 +2252,17 @@ export function registerIpc(
       request as PdkResolveBindingRequest,
     )
   })
+  // ecc.toml is a project declaration rather than a backend-workspace
+  // artifact, so writes skip backend workspace invalidation.
+  handle(desktopApiIpcChannels.projectEccConfigRead, async (_event, projectRoot) => {
+    return await services.projectEccConfigService.read(String(projectRoot ?? ''))
+  })
+  handle(desktopApiIpcChannels.projectEccConfigWrite, async (event, request) => {
+    requireBackendMutationAllowed(event)
+    return await services.projectEccConfigService.write(
+      request as ProjectEccPdkConfigWriteRequest,
+    )
+  })
 
   handle(desktopApiIpcChannels.designRuntimeCancel, async (_event, request) => {
     const runtimeRequest = request as DesignRuntimeCancelRequest
@@ -2330,8 +2351,12 @@ export function registerIpc(
         : undefined,
       ownsWorkspaceHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
-      prepareCreate: async (createRequest) =>
-        await prepareWorkspaceCreateBinding(services, createRequest),
+      prepareCreate: async (createRequest) => {
+        const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
+        const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared
+        await persistEccPdkConfigFromCreate(services, runtimeRequest, persistConfig)
+        return runtimeRequest
+      },
       runtime: services.eccRuntimeService,
       trackCreateResult: (result) => {
         const workspaceHandle = workspaceHandleFromResult(result)

@@ -265,6 +265,7 @@ const desktopBridge = {
     remove: removePdkInstallation,
     resolveBinding: async () => null,
   },
+  projectEccConfig: {} as DesktopApi['projectEccConfig'],
   runtime: {} as DesktopApi['runtime'],
   ecc: {},
   shell: {

@@ -17,6 +17,12 @@ const wizardMocks = vi.hoisted(() => ({
     async () => null,
   ),
   resolveBinding: vi.fn(),
+  readProjectEccPdkConfig: vi.fn(async () => ({
+    exists: false,
+    externalPaths: [],
+    overrides: {},
+  })),
+  writeProjectEccPdkConfig: vi.fn(),
   scanPdkDirectory: vi.fn(),
   pickFiles: vi.fn(),
   discoverHdlModules: vi.fn(async (request: { rtlPaths?: string[] }) => {
@@ -53,6 +59,10 @@ vi.mock('../composables/useWorkspace', () => ({
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
     pdkInventory: { resolveBinding: wizardMocks.resolveBinding },
+    projectEccConfig: {
+      read: wizardMocks.readProjectEccPdkConfig,
+      write: wizardMocks.writeProjectEccPdkConfig,
+    },
     dialog: { pickFiles: wizardMocks.pickFiles },
     workspaceCreationModel: { get: wizardMocks.getWorkspaceCreationModel },
     workspace: {

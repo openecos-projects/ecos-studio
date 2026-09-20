@@ -36,6 +36,10 @@ import type {
   PdkResolveBindingRequest,
 } from './pdkInventory.ts'
 import type {
+  ProjectEccPdkConfigReadResult,
+  ProjectEccPdkConfigWriteRequest,
+} from './projectEccConfig.ts'
+import type {
   ProjectManifest,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,
@@ -400,6 +404,12 @@ export interface DesktopApi {
     locate(request: PdkLocateRequest): Promise<PdkInstallationSnapshot>
     remove(installationId: string): Promise<{ unboundProjectIds: string[] }>
     resolveBinding(request: PdkResolveBindingRequest): Promise<PdkBinding | null>
+  }
+  projectEccConfig: {
+    read(projectRoot: string): Promise<ProjectEccPdkConfigReadResult>
+    write(
+      request: ProjectEccPdkConfigWriteRequest,
+    ): Promise<ProjectEccPdkConfigReadResult>
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi

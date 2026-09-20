@@ -70,6 +70,8 @@ export interface WorkspaceConfig {
   design_input_mode?: 'rtl' | 'post_synthesis'
   sdc?: string
   pdk_config_mode?: 'default' | 'manual'
+  /** External PDK directories (macro LEF/lib pools) declared in ecc.toml. */
+  pdk_external_paths?: string[]
   flow_config?: {
     start_step: string
     end_step: string

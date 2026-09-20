@@ -4,6 +4,7 @@ import { getDesktopApi } from '@/platform/desktop'
 import {
   projectIdFromName,
   type DesignTool,
+  type EccPdkOverrides,
   type EccWorkspaceConfigurationUpdateRequest,
   type EccWorkspaceCreateRequest,
   type EccWorkspaceStepConfigurationReadRequest,
@@ -126,6 +127,29 @@ export function backendWorkspaceOptions(
     addPdkFiles('liberty', config.pdk_config?.liberty ?? [])
   }
 
+  // Project ecc.toml persistence intent: external PDK directories and the
+  // manual resource selection are recorded by the Electron bridge so ECC
+  // CLI fresh runs and future wizard sessions see the same declaration.
+  const externalPaths = config.pdk_external_paths ?? []
+  const manualOverrides: EccPdkOverrides | undefined =
+    pdkMode === 'manual' &&
+    (config.pdk_config?.tech_lef.length ||
+      config.pdk_config?.cell_lef.length ||
+      config.pdk_config?.liberty.length)
+      ? {
+          tech: config.pdk_config?.tech_lef[0] ?? '',
+          lefs: [...(config.pdk_config?.cell_lef ?? [])],
+          libs: [...(config.pdk_config?.liberty ?? [])],
+        }
+      : undefined
+  const eccPdkConfig =
+    externalPaths.length || manualOverrides
+      ? {
+          externalPaths,
+          ...(manualOverrides ? { overrides: manualOverrides } : {}),
+        }
+      : undefined
+
   const numberValue = (value: unknown, fallback: number) => {
     const number = Number(value)
     return Number.isFinite(number) ? number : fallback
@@ -158,6 +182,7 @@ export function backendWorkspaceOptions(
     targetDirectory,
     pdkInstallationId: config.pdk_installation_id,
     pdkRequirement: config.pdk_requirement,
+    ...(eccPdkConfig ? { eccPdkConfig } : {}),
     projectId:
       projectContext?.project_id ??
       projectIdFromName(

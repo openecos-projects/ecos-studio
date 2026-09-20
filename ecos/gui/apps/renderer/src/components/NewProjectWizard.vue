@@ -1013,6 +1013,58 @@
                   <section
                     class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
+                    <section
+                      class="mb-3 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                    >
+                      <div class="mb-2 flex items-start justify-between gap-4">
+                        <div>
+                          <h3 class="text-sm font-bold text-(--text-primary)">
+                            External PDK Paths
+                          </h3>
+                          <p class="mt-1 text-xs text-(--text-secondary)">
+                            Import macro LEF/lib pools outside the selected PDK (recorded
+                            in the project's ecc.toml). Their files join the Manual Config
+                            resource picker.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          class="shrink-0 cursor-pointer rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-3 py-1.5 text-xs font-semibold text-(--text-primary) transition-colors duration-200 hover:border-(--accent-color)/45"
+                          @click="handleAddExternalPdkPath"
+                        >
+                          <i class="ri-add-line mr-1"></i>
+                          Add External Path
+                        </button>
+                      </div>
+                      <p
+                        v-if="externalPdkPaths.length === 0"
+                        class="rounded-lg border border-dashed border-(--border-color) px-3 py-2 text-xs text-(--text-secondary)"
+                      >
+                        No external PDK paths declared.
+                      </p>
+                      <ul v-else class="grid gap-1.5">
+                        <li
+                          v-for="path in externalPdkPaths"
+                          :key="path"
+                          class="flex items-center justify-between gap-3 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-3 py-1.5"
+                        >
+                          <span
+                            class="min-w-0 truncate font-mono text-xs text-(--text-primary)"
+                            :title="path"
+                            >{{ path }}</span
+                          >
+                          <button
+                            type="button"
+                            class="shrink-0 cursor-pointer rounded-md px-2 py-0.5 text-xs text-(--text-secondary) transition-colors duration-200 hover:text-red-500"
+                            title="Remove external PDK path"
+                            @click="handleRemoveExternalPdkPath(path)"
+                          >
+                            <i class="ri-delete-bin-line"></i>
+                          </button>
+                        </li>
+                      </ul>
+                    </section>
+
                     <div class="mb-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Config Mode</h3>
                       <p class="mt-1 text-xs text-(--text-secondary)">
@@ -1607,7 +1659,13 @@
     <PdkResourcePickerDialog
       v-if="pdkResourcePickerOpen && activePdkStep"
       :resource-title="activePdkStep.title"
-      :root-path="selectedPdk?.path || config.pdk_root || projectContext.project_root"
+      :sources="
+        pdkPickerSources.map((source) => ({
+          label: source.label,
+          rootPath: source.rootPath,
+          files: source.classified[activePdkWizardStep],
+        }))
+      "
       :directories="detectedPdkDirectories"
       :available-files="detectedPdkFiles[activePdkWizardStep]"
       :selected-files="pdkSelections[activePdkWizardStep]"
@@ -1632,6 +1690,7 @@ import {
   isHdlFilePath,
   projectIdFromName,
   type DesktopFileDialogOptions,
+  type EccPdkOverrides,
   type PdkDetectedFiles,
   type PickedRtlSources,
   type ProjectManifest,
@@ -2479,6 +2538,14 @@ const defaultConfigUnavailableReason = computed(() => {
   return ''
 })
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
+/** External PDK directories (macro LEF/lib pools) declared for this project. */
+const externalPdkPaths = ref<string[]>([
+  ...(props.initialConfig?.pdk_external_paths ?? []),
+])
+/** Scan cache per external path; a missing entry means "not scanned yet". */
+const externalPdkScans = ref<Map<string, PdkDetectedFiles | null>>(new Map())
+/** Manual PDK override recorded in ecc.toml, used to pre-fill manual mode. */
+const projectEccPdkOverrides = ref<EccPdkOverrides | null>(null)
 const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
   () =>
     manualPdkDetectedFiles.value ??
@@ -2489,9 +2556,38 @@ const activeManualPdkSelections = computed(
   () => pdkSelections.value[activePdkWizardStep.value] ?? [],
 )
 
+interface PdkScanSource {
+  label: string
+  root: string
+  detected: PdkDetectedFiles | null
+}
+
+/** Candidate pool = the selected PDK root plus every external macro path. */
+const pdkScanSources = computed<PdkScanSource[]>(() => [
+  {
+    label: 'PDK root',
+    root: getCurrentPdkRoot(),
+    detected: currentPdkDetectedFiles.value,
+  },
+  ...externalPdkPaths.value.map((path) => ({
+    label: getFileName(path) || path,
+    root: path,
+    detected: externalPdkScans.value.get(path) ?? null,
+  })),
+])
+
 const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
-  const files = currentPdkDetectedFiles.value.files
-  const resolvedFiles = files.map((file) => resolvePdkFile(file))
+  const resolvedFiles: string[] = []
+  const seen = new Set<string>()
+  for (const source of pdkScanSources.value) {
+    if (!source.detected || !source.root) continue
+    for (const file of source.detected.files) {
+      const absolute = resolvePdkFileIn(file, source.root)
+      if (seen.has(absolute)) continue
+      seen.add(absolute)
+      resolvedFiles.push(absolute)
+    }
+  }
   const lefFiles = resolvedFiles.filter((file) => hasExtension(file, ['lef']))
   const techLefFiles = lefFiles.filter((file) => isTechLefFile(file))
   return {
@@ -2499,6 +2595,31 @@ const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
     cell_lef: lefFiles.filter((file) => !techLefFiles.includes(file)),
     liberty: resolvedFiles.filter((file) => hasExtension(file, ['lib', 'liberty'])),
   }
+})
+
+/** Files per source for the resource picker, keyed like detectedPdkFiles. */
+const pdkPickerSources = computed(() => {
+  const classify = (files: string[]) => {
+    const lefFiles = files.filter((file) => hasExtension(file, ['lef']))
+    const techLefFiles = lefFiles.filter((file) => isTechLefFile(file))
+    return {
+      tech_lef: techLefFiles.length > 0 ? techLefFiles : lefFiles,
+      cell_lef: lefFiles.filter((file) => !techLefFiles.includes(file)),
+      liberty: files.filter((file) => hasExtension(file, ['lib', 'liberty'])),
+    }
+  }
+  return pdkScanSources.value
+    .filter((source) => source.detected && source.root)
+    .map((source) => {
+      const files = source.detected!.files.map((file) =>
+        resolvePdkFileIn(file, source.root),
+      )
+      return {
+        label: source.label,
+        rootPath: source.root,
+        classified: classify(files),
+      }
+    })
 })
 const pdkRequirementItems = computed(() => [
   { label: 'PDK selected', ready: Boolean(selectedPdk.value) },
@@ -2644,7 +2765,8 @@ watch(dieAreaMode, (mode) => {
   syncWorkspaceConfig()
 })
 
-watch(pdkConfigMode, () => {
+watch(pdkConfigMode, (mode) => {
+  if (mode === 'manual') applyEccPdkOverridesToSelections()
   syncWorkspaceConfig()
   void refreshWorkspaceCreationModel()
 })
@@ -2701,9 +2823,8 @@ function isTechLefFile(path: string) {
   )
 }
 
-function resolvePdkFile(file: string) {
+function resolvePdkFileIn(file: string, root: string) {
   if (file.startsWith('/') || /^[A-Za-z]:[\\/]/.test(file)) return file
-  const root = getCurrentPdkRoot()
   return root ? joinPath(root, file) : file
 }
 
@@ -3570,18 +3691,119 @@ async function handleLocatePdk(id: string) {
 
 async function scanManualPdkResources() {
   const root = getCurrentPdkRoot()
-  if (!root) return
+  if (root) {
+    try {
+      const scanned = await getDesktopApi().workspace.scanPdkDirectory(root)
+      manualPdkDetectedFiles.value = scanned.detectedFiles
+    } catch (error) {
+      showToast({
+        severity: 'error',
+        summary: 'PDK Scan Failed',
+        detail:
+          error instanceof Error
+            ? error.message
+            : 'Failed to scan the current PDK folder.',
+        life: 5000,
+      })
+    }
+  }
+  await scanExternalPdkPaths()
+}
+
+/** Scan every external path once; results are cached until the list changes. */
+async function scanExternalPdkPaths() {
+  for (const path of externalPdkPaths.value) {
+    if (externalPdkScans.value.has(path)) continue
+    try {
+      const scanned = await getDesktopApi().workspace.scanPdkDirectory(path)
+      externalPdkScans.value.set(path, scanned.detectedFiles)
+    } catch (error) {
+      externalPdkScans.value.set(path, null)
+      showToast({
+        severity: 'error',
+        summary: 'External PDK Scan Failed',
+        detail:
+          error instanceof Error
+            ? error.message
+            : `Failed to scan the external PDK folder ${path}.`,
+        life: 5000,
+      })
+    }
+  }
+}
+
+async function handleAddExternalPdkPath() {
+  const directory = await getDesktopApi().dialog.pickDirectory({
+    title: 'Select External PDK Directory',
+  })
+  if (!directory) return
+  if (externalPdkPaths.value.includes(directory)) return
+  externalPdkPaths.value = [...externalPdkPaths.value, directory]
+  await scanExternalPdkPaths()
+  syncWorkspaceConfig()
+  void persistExternalPdkPaths()
+}
+
+function handleRemoveExternalPdkPath(path: string) {
+  externalPdkPaths.value = externalPdkPaths.value.filter((item) => item !== path)
+  externalPdkScans.value.delete(path)
+  syncWorkspaceConfig()
+  void persistExternalPdkPaths()
+}
+
+/**
+ * Record the current external paths in the project's ecc.toml right away.
+ * Fails silently while the project directory does not exist yet (fresh
+ * projects persist through the create pipeline instead).
+ */
+async function persistExternalPdkPaths() {
+  const projectRoot = projectContext.value.project_root
+  if (!projectRoot) return
   try {
-    const scanned = await getDesktopApi().workspace.scanPdkDirectory(root)
-    manualPdkDetectedFiles.value = scanned.detectedFiles
-  } catch (error) {
-    showToast({
-      severity: 'error',
-      summary: 'PDK Scan Failed',
-      detail:
-        error instanceof Error ? error.message : 'Failed to scan the current PDK folder.',
-      life: 5000,
+    await getDesktopApi().projectEccConfig.write({
+      projectRoot,
+      externalPaths: [...externalPdkPaths.value],
+      ...(getCurrentPdkRoot() ? { pdkRoot: getCurrentPdkRoot() } : {}),
     })
+  } catch {
+    // New projects have no project directory yet; the create pipeline
+    // persists ecc.toml once the project exists.
+  }
+}
+
+/** Load the project's ecc.toml PDK declaration for external paths + manual pre-fill. */
+async function loadProjectEccPdkConfig() {
+  const projectRoot = projectContext.value.project_root
+  if (!projectRoot) return
+  try {
+    const result = await getDesktopApi().projectEccConfig.read(projectRoot)
+    if (result.exists) {
+      if (!externalPdkPaths.value.length) {
+        externalPdkPaths.value = [...result.externalPaths]
+        await scanExternalPdkPaths()
+      }
+      projectEccPdkOverrides.value = result.overrides
+    }
+  } catch {
+    // No readable ecc.toml (fresh project); manual defaults apply.
+  }
+}
+
+function applyEccPdkOverridesToSelections() {
+  const overrides = projectEccPdkOverrides.value
+  if (!overrides) return
+  const hasSelections = (['tech_lef', 'cell_lef', 'liberty'] as PdkResourceKey[]).some(
+    (key) => (pdkSelections.value[key] ?? []).length > 0,
+  )
+  if (hasSelections || props.initialConfig?.pdk_config) return
+  const root = getCurrentPdkRoot()
+  const resolve = (entry: string | undefined) =>
+    entry ? resolvePdkFileIn(entry, root) : ''
+  const tech = overrides.tech ? [resolve(overrides.tech)] : []
+  pdkSelections.value = {
+    tech_lef: tech.filter(Boolean),
+    cell_lef: (overrides.lefs ?? []).map(resolve).filter(Boolean),
+    liberty: (overrides.libs ?? []).map(resolve).filter(Boolean),
   }
 }
 
@@ -3653,6 +3875,7 @@ function syncWorkspaceConfig() {
     cell_lef: pdkSelections.value.cell_lef,
     liberty: pdkSelections.value.liberty,
   }
+  config.value.pdk_external_paths = [...externalPdkPaths.value]
   if (config.value.pdk_requirement) {
     config.value.pdk_requirement = {
       ...config.value.pdk_requirement,
@@ -3827,6 +4050,7 @@ const topModuleReturnToDesignFiles = computed(() => {
 })
 
 watch(currentStep, (step) => {
+  if (step === 5) void loadProjectEccPdkConfig()
   if (step === 6) void refreshTopModuleDiscovery()
 })
 

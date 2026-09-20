@@ -102,6 +102,8 @@ export const desktopApiIpcChannels = {
   pdkInventoryLocate: 'pdk-inventory:locate',
   pdkInventoryRemove: 'pdk-inventory:remove',
   pdkInventoryResolveBinding: 'pdk-inventory:resolve-binding',
+  projectEccConfigRead: 'project-ecc-config:read',
+  projectEccConfigWrite: 'project-ecc-config:write',
   cliInstallerGetStatus: 'cli-installer:get-status',
   cliInstallerInstall: 'cli-installer:install',
   cliInstallerUninstall: 'cli-installer:uninstall',
