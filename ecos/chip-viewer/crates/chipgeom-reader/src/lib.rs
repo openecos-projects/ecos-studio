@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chipgeom_format::{
@@ -52,6 +52,7 @@ pub struct GeometryManifest {
     pub nets: Option<PathBuf>,
     pub buses: Option<PathBuf>,
     pub groups: Option<PathBuf>,
+    pub drc: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -469,6 +470,24 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
     }
 
     let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let drc = values
+        .get("drc")
+        .map(|value| {
+            let relative = Path::new(value);
+            if relative.as_os_str().is_empty()
+                || !relative
+                    .components()
+                    .all(|component| matches!(component, Component::Normal(_)))
+            {
+                anyhow::bail!("unsafe DRC snapshot path: {value}");
+            }
+            let candidate = base.join(relative);
+            if candidate.exists() && !candidate.canonicalize()?.starts_with(base.canonicalize()?) {
+                anyhow::bail!("DRC snapshot path escapes geometry directory: {value}");
+            }
+            Ok(candidate)
+        })
+        .transpose()?;
     let required = |key: &'static str| -> Result<String> {
         values
             .get(key)
@@ -534,6 +553,7 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         nets: values.get("nets").map(|value| base.join(value)),
         buses: values.get("buses").map(|value| base.join(value)),
         groups: values.get("groups").map(|value| base.join(value)),
+        drc,
     })
 }
 
@@ -1703,6 +1723,57 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn manifest_resolves_drc_sidecar_in_snapshot_epoch() {
+        let snapshot_dir = temp_snapshot_dir("drc-sidecar");
+        let epoch_dir = snapshot_dir.join("epochs/1");
+        std::fs::create_dir_all(&epoch_dir).unwrap();
+        let drc_path = epoch_dir.join("geometry.drc.json");
+        std::fs::write(&drc_path, r#"{"drc":{"number":0,"distribution":{}}}"#).unwrap();
+        let manifest_path = snapshot_dir.join("geometry.manifest");
+        std::fs::write(
+            &manifest_path,
+            "schema_version=1\nshape_count=0\nowner_count=0\npayload_size=0\n\
+             meta=geometry.meta.bin\nshapes=geometry.shapes.bin\nowners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\nnames=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\nsidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\ndrc=epochs/1/geometry.drc.json\n",
+        )
+        .unwrap();
+
+        assert_eq!(read_manifest(&manifest_path).unwrap().drc, Some(drc_path));
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[test]
+    fn manifest_rejects_drc_sidecar_outside_geometry_directory() {
+        let snapshot_dir = temp_snapshot_dir("drc-path-traversal");
+        let manifest_path = snapshot_dir.join("geometry.manifest");
+        for unsafe_path in ["../escape.json", "/tmp/escape.json"] {
+            std::fs::write(&manifest_path, format!("drc={unsafe_path}\n")).unwrap();
+            assert!(read_manifest(&manifest_path).is_err());
+        }
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manifest_rejects_drc_sidecar_through_external_symlink() {
+        let snapshot_dir = temp_snapshot_dir("drc-symlink");
+        let external_dir = temp_snapshot_dir("drc-external");
+        std::fs::write(external_dir.join("geometry.drc.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(&external_dir, snapshot_dir.join("epoch")).unwrap();
+        let manifest_path = snapshot_dir.join("geometry.manifest");
+        std::fs::write(&manifest_path, "drc=epoch/geometry.drc.json\n").unwrap();
+
+        assert!(read_manifest(&manifest_path).is_err());
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+        std::fs::remove_dir_all(external_dir).unwrap();
     }
 
     fn write_geometry_file(
