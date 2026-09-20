@@ -81,6 +81,59 @@ const primevueStubs = {
 }
 
 describe('NewProjectWizard behavior', () => {
+  it('accepts the preselected Quick Start GCD RTL on Design Files', async () => {
+    const projectContext = {
+      mode: 'select' as const,
+      project_name: 'gcd',
+      project_root: '/projects/gcd',
+      project_json_path: '/projects/gcd/project.json',
+    }
+    const wrapper = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/gcd/ws_0001',
+          project_context: projectContext,
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    await flushPromises()
+    wrapper.unmount()
+    const quickStartWizard = mount(NewProjectWizard, {
+      props: {
+        initialConfig: {
+          directory: '/projects/gcd/ws_0001',
+          rtl_list: ['/resources/gcd/gcd.v'],
+          flow_config: { start_step: 'Synthesis', end_step: 'Harden', steps: [] },
+          project_context: projectContext,
+        },
+      },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = quickStartWizard.vm as unknown as { currentStep: number }
+    wizard.currentStep = 4
+    await flushPromises()
+
+    expect(quickStartWizard.text()).toContain('/resources/gcd/gcd.v')
+    const continueButton = quickStartWizard
+      .findAll('button')
+      .find((button) => button.text() === 'Continue')
+    expect(continueButton?.attributes('disabled')).toBeUndefined()
+    quickStartWizard.unmount()
+  })
+
   it('loads the ECC-backed Workspace Creation Model', async () => {
     const wrapper = mount(NewProjectWizard, {
       props: { initialConfig: { standaloneWorkspace: true } },

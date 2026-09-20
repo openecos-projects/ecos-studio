@@ -328,6 +328,16 @@ describe('ProjectManagementReadService', () => {
     })
   })
 
+  it('returns null when discovering a directory that does not exist yet', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'ecos-project-discovery-'))
+    temporaryDirectories.push(projectRoot)
+    const service = createReadService()
+
+    await expect(
+      service.discoverProject(join(projectRoot, 'pending-workspace')),
+    ).resolves.toBeNull()
+  })
+
   it('requires a valid manifest before listing project root entries', async () => {
     const emptyRoot = await mkdtemp(join(tmpdir(), 'ecos-project-management-empty-'))
     temporaryDirectories.push(emptyRoot)

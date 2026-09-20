@@ -274,7 +274,10 @@ class ProviderEmissionMixin:
             }
         )
 
-    def _emit_phase_choice(self, session: _Session, *, reuse_pending: bool = False) -> None:
+    def _emit_phase_choice(
+        self, session: _Session, *, reuse_pending: bool = False,
+        authorization: dict[str, Any] | None = None,
+    ) -> None:
         if reuse_pending and session.pending_interaction is not None:
             request = session.pending_interaction["request"]
             self._emit(session, "interaction", request["title"], interaction=request)
@@ -439,6 +442,8 @@ class ProviderEmissionMixin:
             choice = confirmation_choice(session.language, prompt_id, allow_free_text=False)
         if choice is not None:
             request, values = self._interaction_for_choice(session, choice)
+            if authorization is not None:
+                request["optimizationAuthorization"] = authorization
             self._validate_interaction_budget(request)
             session.pending_interaction = {"request": request, "values": values}
             self._emit(session, "interaction", request["title"], interaction=request)
@@ -462,6 +467,7 @@ class ProviderEmissionMixin:
             "workspace_continue_confirmation",
             "workspace_parameter_confirmation",
             "workspace_signoff_confirmation",
+            "optimization_authorization",
         }:
             interaction = {
                 "cancel": {"id": option_ids[options[1]["id"]], "label": options[1]["label"]},

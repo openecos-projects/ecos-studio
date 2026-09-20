@@ -59,6 +59,45 @@ def test_completed_quick_start_binds_workspace_and_emits_next_actions(tmp_path: 
     assert session.phase == "optimization_objective"
 
 
+@pytest.mark.parametrize("status,expected_phase", [
+    ("flow_completed", "quick_start_completed"),
+    ("flow_failed", "quick_start_recovery"),
+])
+def test_quick_start_result_after_workspace_handoff(
+    tmp_path: Path, status: str, expected_phase: str,
+) -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    send_session_input(provider, session_id, "1")
+    workspace, message = receipt(tmp_path, status=status)
+
+    provider.start_session({"sessionId": session_id, "mode": "workspace", "directory": str(workspace)})
+    assert provider.sessions[session_id].phase == "operation"
+    provider.send_message({"sessionId": session_id, "directory": str(workspace), "message": message})
+
+    assert provider.sessions[session_id].phase == expected_phase
+
+
+def test_quick_start_result_cannot_replace_a_different_workspace(tmp_path: Path) -> None:
+    provider = EcosAgentProvider(emit=lambda _event: None)
+    session_id = provider.start_session({"mode": "home"})["sessionId"]
+    workspace, message = receipt(tmp_path)
+    other_workspace = tmp_path / "other" / "ws_0001"
+    other_workspace.mkdir(parents=True)
+    provider.start_session({
+        "sessionId": session_id, "mode": "workspace", "directory": str(other_workspace),
+    })
+    session = provider.sessions[session_id]
+    pending = session.pending_interaction
+
+    with pytest.raises(ValueError, match="active workflow"):
+        provider.send_message({"sessionId": session_id, "directory": str(workspace), "message": message})
+
+    assert session.phase == "operation"
+    assert session.pending_interaction is pending
+    assert session.rerun_workspace_path == str(other_workspace)
+
+
 @pytest.mark.parametrize("action,phase", [
     ("manual_rerun", "rerun_source_run"), ("create_flow", "workspace_project_mode"),
 ])

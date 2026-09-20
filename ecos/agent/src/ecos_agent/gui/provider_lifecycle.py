@@ -166,8 +166,6 @@ from ecos_agent.optimization.rules import freeze_optimization_objective
 from ecos_agent.optimization.runner import OptimizationEpisodeRunner
 from ecos_agent.gui.session import ProviderSession
 
-
-
 from ecos_agent.gui.provider_common import (
     PROVIDER_ID,
     _WorkspaceSetupParser,
@@ -201,10 +199,7 @@ from ecos_agent.gui.provider_common import (
     _INTERACTION_DESCRIPTION_PHASES,
     _Session,
 )
-
-
 from ecos_agent.gui.provider_turn import ProviderTurnMixin
-
 
 class ProviderLifecycleMixin(ProviderTurnMixin):
     def _sync_workspace_context(self, session: _Session, request: Mapping[str, Any]) -> None:
@@ -271,9 +266,10 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
 
     def send_message(self, request: Mapping[str, Any]) -> dict[str, str]:
         session = self._session(request)
-        self._sync_workspace_context(session, request)
         message = _required_message(request.get("message"))
         quick_start_result = message.startswith("quick_start_result:")
+        if not quick_start_result:
+            self._sync_workspace_context(session, request)
         with session.state_lock:
             if session.pending_interaction is not None and not quick_start_result:
                 raise ValueError("An interaction answer is required for this session.")
@@ -439,6 +435,11 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
                     current, answer, allow_operations=False
                 )
             )
+        elif session.phase == "optimization_authorization":
+            episode_id = request.get("episodeId")
+            handler = lambda current, answer: self._confirm_optimization_start(
+                current, answer, episode_id
+            )
         else:
             handler = None
         self._reserve_turn(session)
@@ -544,6 +545,17 @@ class ProviderLifecycleMixin(ProviderTurnMixin):
 
     def interrupt(self, request: Mapping[str, Any] | None = None) -> None:
         session = self._session(request or {})
+        if session.phase == "optimization_authorization" and session.pending_interaction is not None:
+            request_id = session.pending_interaction["request"]["requestId"]
+            session.interaction_history[request_id] = "cancelled"
+            session.pending_interaction = None
+            session.interaction_retry = None
+            self._close_idle_optimization_provider(session)
+            session.phase = "operation" if session.mode == "workspace" else "home_ready"
+            session.optimization_phase = "idle"
+            self._emit(session, "message", cancellation_message(session.language))
+            self._emit_phase_choice(session)
+            return
         if self._optimization_thread_active(session):
             self._request_optimization_stop(session)
             session.optimization_phase = "stopping"

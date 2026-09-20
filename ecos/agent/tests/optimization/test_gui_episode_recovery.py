@@ -127,9 +127,9 @@ def test_gui_resumes_an_episode_in_a_fresh_provider_process(tmp_path: Path) -> N
     )["sessionId"]
     _send(first_provider, session_id, "3")
     _send(first_provider, session_id, "reduce wirelength")
+    _send(first_provider, session_id, "1")
     episode_id = first_provider.sessions[session_id].optimization_episode_id
     assert episode_id is not None
-    _send(first_provider, session_id, "1")
     assert first_runner.started.wait(timeout=2)
     assert (
         workspace
@@ -203,9 +203,9 @@ def test_gui_stops_a_recoverable_episode_in_a_fresh_provider_process(
     )["sessionId"]
     _send(first_provider, session_id, "3")
     _send(first_provider, session_id, "reduce wirelength")
+    _send(first_provider, session_id, "1")
     episode_id = first_provider.sessions[session_id].optimization_episode_id
     assert episode_id is not None
-    _send(first_provider, session_id, "1")
     assert first_runner.started.wait(timeout=2)
     first_provider.prepare_optimization_shutdown({"sessionId": session_id})
     first_runner.release.set()

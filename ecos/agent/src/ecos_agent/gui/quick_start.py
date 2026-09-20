@@ -90,7 +90,12 @@ class ProviderQuickStartMixin:
         result_key = (str(workspace), operation_id)
         if result_key in session.quick_start_results:
             return
-        if session.phase != "home_ready":
+        if session.phase != "home_ready" and not (
+            session.phase == "operation"
+            and session.mode == "workspace"
+            and session.rerun_workspace_path
+            and Path(session.rerun_workspace_path).resolve() == workspace
+        ):
             raise ValueError("Quick Start result cannot replace an active workflow.")
         session.quick_start_results.add(result_key)
         session.mode = "workspace"

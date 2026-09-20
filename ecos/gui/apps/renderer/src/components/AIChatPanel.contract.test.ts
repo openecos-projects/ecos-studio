@@ -180,6 +180,12 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('Message ECOS Agent')
   })
 
+  it('keeps optimization authorization interactive before execution starts', () => {
+    expect(source).toContain('const episodeLocked = computed(')
+    expect(source).toContain('episodeLocked.value ||')
+    expect(source).toContain('isRunning.value || episodeLocked.value')
+  })
+
   it('sizes user messages to their content and wraps long text', () => {
     expect(source).toContain('width: fit-content')
     expect(source).toContain('max-width: min(82%, 52rem)')

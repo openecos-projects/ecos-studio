@@ -36,7 +36,7 @@ vi.mock('@/composables/useSubflow', () => ({
 
 vi.mock('@/composables/useWorkspace', () => ({
   useWorkspace: () => ({
-    currentProject: ref(null),
+    currentProject: ref({ path: '/work/demo' }),
     ensureApiReady: vi.fn(),
     showToast: vi.fn(),
     workspaceSession: ref({ workspaceId: 'workspace-parent' }),
@@ -64,7 +64,7 @@ describe('FlowRunControl Agent capture', () => {
     })
     const button = wrapper.get('button.flow-run-start-button')
 
-    expect(episodeForParent).toHaveBeenCalledWith('workspace-parent')
+    expect(episodeForParent).toHaveBeenCalledWith('workspace-parent', '/work/demo')
     expect(button.attributes('disabled')).toBeDefined()
     expect(button.attributes('aria-busy')).toBe('false')
     expect(button.attributes('title')).toBe('Optimization is running in the background.')

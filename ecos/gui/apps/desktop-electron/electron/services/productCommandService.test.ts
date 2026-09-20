@@ -74,6 +74,7 @@ describe('executeProductCommand Workspace creation', () => {
     expect(authorizeWorkspaceMutation).toHaveBeenCalledWith(
       'workspace.run',
       'handle-parent',
+      undefined,
     )
     expect(startFlowOperation).not.toHaveBeenCalled()
   })

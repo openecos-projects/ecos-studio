@@ -109,16 +109,24 @@ export function registerOptimizationEpisodeIpc(
           workspaceId: workspace.workspaceHandle,
           workspaceRevision: workspace.workspaceRevision,
         })
-        runtime.rebindOptimizationEpisode?.(
-          episode.episodeId,
-          workspace.workspaceHandle,
-          workspace.workspaceRevision,
-          episode.parentWorkspaceDirectory,
-        )
+        const sameRevision =
+          episode.parentWorkspaceRevision === undefined ||
+          episode.parentWorkspaceRevision === workspace.workspaceRevision
+        if (sameRevision)
+          runtime.rebindOptimizationEpisode?.(
+            episode.episodeId,
+            workspace.workspaceHandle,
+            workspace.workspaceRevision,
+            episode.parentWorkspaceDirectory,
+          )
         episodes.push({
           ...episode,
-          parentWorkspaceId: workspace.workspaceHandle,
-          parentWorkspaceRevision: workspace.workspaceRevision,
+          ...(sameRevision
+            ? {
+                parentWorkspaceId: workspace.workspaceHandle,
+                parentWorkspaceRevision: workspace.workspaceRevision,
+              }
+            : {}),
         })
       } catch {
         // A closed or invalid Workspace is not safe to claim for control.

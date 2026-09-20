@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +60,11 @@ def _send(provider: EcosAgentProvider, session_id: str, message: str) -> None:
                     "requestId": pending["request"]["requestId"],
                     "kind": pending["request"]["kind"],
                     "optionId": option_id,
+                    **(
+                        {"episodeId": f"episode-{uuid.uuid4().hex}"}
+                        if session.phase == "optimization_authorization" and message == "1"
+                        else {}
+                    ),
                 }
             )
             return
@@ -276,28 +282,18 @@ def test_gui_optimization_reuses_one_codex_provider_for_objective_and_episode(
     assert fake_provider.closed == 1
     assert len(factory_calls) == 2
     assert factory_calls[0]["cwd"] == workspace
-    assert factory_calls[0]["diagnostics_path"] == (
-        workspace
-        / ".agent"
-        / "optimization"
-        / session.optimization_episode_id
-        / "codex-rpc-diagnostics.v1.jsonl"
-    )
+    diagnostics = factory_calls[0]["diagnostics_path"]
+    assert diagnostics.parent.parent == workspace / ".agent" / "optimization"
+    assert diagnostics.parent.name.startswith("turn-")
+    assert diagnostics.name == "codex-rpc-diagnostics.v1.jsonl"
     assert factory_calls[1]["context"]["episode_id"] == session.optimization_episode_id
     assert factory_calls[1]["context"]["workspace"] == str(workspace)
     assert isinstance(factory_calls[1]["context"]["workspace"], str)
     assert factory_calls[1]["context"]["objective"]["primary_metric"] == "route_wirelength"
-    terminal = next(
-        event["optimization"]
+    assert any(
+        event["type"] == "error" and "test stop" in str(event["text"])
         for event in events
-        if event["type"] == "optimization"
-        and event["optimization"].get("schema_version")
-        == "ecos.optimization_status.v1"
     )
-    assert terminal["schema_version"] == "ecos.optimization_status.v1"
-    assert terminal["state"] == "error"
-    assert terminal["rejection_reason"] == "test stop"
-    assert any(event["type"] == "error" and "test stop" in str(event["text"]) for event in events)
 
 
 def test_gui_stop_requests_terminal_closure_before_runner_close(tmp_path: Path) -> None:
@@ -430,9 +426,10 @@ def test_gui_optimization_fails_closed_without_runner_factory(tmp_path: Path) ->
     _send(provider, session_id, "1")
 
     session = provider.sessions[session_id]
-    assert session.optimization_phase == "unavailable"
+    assert session.optimization_phase == "error"
     assert session.phase == "operation"
     assert any(event["type"] == "error" and "not configured" in str(event["text"]) for event in events)
+    assert any(event.get("optimization", {}).get("state") == "failed" for event in events)
 
 
 def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
@@ -458,12 +455,13 @@ def test_gui_runner_start_failure_returns_to_operation(tmp_path: Path) -> None:
 
     session = provider.sessions[session_id]
     assert session.phase == "operation"
-    assert session.optimization_phase == "unavailable"
+    assert session.optimization_phase == "error"
     assert fake_provider.closed == 1
     assert any(
         event["type"] == "error" and "runner startup failed" in str(event["text"])
         for event in events
     )
+    assert any(event.get("optimization", {}).get("state") == "failed" for event in events)
 
 
 def test_gui_optimization_reports_decision_and_winner_evidence(tmp_path: Path) -> None:
@@ -559,6 +557,9 @@ def test_gui_optimization_collects_and_confirms_normalized_objective(
     assert fake_provider.closed == 0
     # The GUI-selected chat model/effort must reach optimization turns.
     assert fake_provider.inherited_from is chat
+    assert session.pending_interaction is not None
+    assert session.pending_interaction["request"]["kind"] == "confirm"
+    assert session.pending_interaction["request"]["interaction"]["kind"] == "confirm"
 
     _send(provider, session_id, "1")
     deadline = time.monotonic() + 2
@@ -631,9 +632,9 @@ def test_gui_drc_and_timing_goal_requires_drc_recovery_confirmation(
     session = provider.sessions[session_id]
     assert session.phase == "optimization_authorization"
     authorization = next(
-        event["optimization"]
+        event["interaction"]["optimizationAuthorization"]
         for event in events
-        if event.get("optimization", {}).get("schema_version")
+        if event.get("interaction", {}).get("optimizationAuthorization", {}).get("schema_version")
         == "ecos.optimization_authorization.v2"
     )
     assert authorization["original_primary_metric"] == "route_wirelength"
@@ -681,9 +682,9 @@ def test_gui_authorizes_recovery_then_original_objective_with_one_confirmation(
     _send(provider, session_id, "reduce wirelength")
 
     authorization = next(
-        event["optimization"]
+        event["interaction"]["optimizationAuthorization"]
         for event in events
-        if event.get("optimization", {}).get("schema_version")
+        if event.get("interaction", {}).get("optimizationAuthorization", {}).get("schema_version")
         == "ecos.optimization_authorization.v2"
     )
     assert authorization["original_primary_metric"] == "route_wirelength"
@@ -736,7 +737,7 @@ def test_gui_blocks_authorization_when_baseline_evidence_is_incomplete(
 
     assert provider.sessions[session_id].optimization_phase == "unavailable"
     assert not any(
-        event.get("optimization", {}).get("schema_version")
+        event.get("interaction", {}).get("optimizationAuthorization", {}).get("schema_version")
         == "ecos.optimization_authorization.v2"
         for event in events
     )

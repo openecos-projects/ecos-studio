@@ -82,14 +82,9 @@ export function buildShutdownBlockers(options: {
   const activeOptimizations = (options.optimizationEpisodes ?? []).filter(
     (episode) =>
       inScope(episode.parentWorkspaceId ?? '') &&
-      [
-        'awaiting_confirmation',
-        'starting',
-        'calibrating',
-        'running',
-        'paused',
-        'stopping',
-      ].includes(episode.state),
+      ['starting', 'calibrating', 'running', 'paused', 'stopping'].includes(
+        episode.state,
+      ),
   )
   return {
     activeFlows: operations.length,

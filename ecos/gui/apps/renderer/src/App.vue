@@ -1,5 +1,8 @@
 <template>
-  <div class="app-wrapper">
+  <div
+    class="app-wrapper"
+    :style="{ '--home-agent-drawer-width': `${quickStartAgentPanelWidth}px` }"
+  >
     <!-- 主应用容器 -->
     <div class="app-container">
       <!-- 全局顶部菜单栏 -->
@@ -49,6 +52,7 @@
       v-if="showNewProjectWizard"
       :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
+      :quick-start="quickStartWizardResolve !== null"
       @close="handleWizardClose"
       @create="handleWizardCreate"
     />
@@ -240,6 +244,7 @@ import {
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { AGENT_PANEL_DEFAULT_WIDTH } from '@/composables/agentPanelWidth'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
@@ -321,9 +326,15 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
 
 const router = useRouter()
 const themeStore = useThemeStore()
+const agentShell = useAgentShellStore()
 const route = useRoute()
 const isWelcome = computed(() => route.path === '/')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
+const quickStartAgentPanelWidth = computed(() =>
+  agentShell.homeAgentOpen
+    ? Math.min(agentShell.panelWidthPx, AGENT_PANEL_DEFAULT_WIDTH)
+    : 0,
+)
 const zoomFactors = [0.8, 0.9, 1, 1.1, 1.25, 1.4] as const
 const zoomFactor = ref<(typeof zoomFactors)[number]>(1)
 const zoomSettingKey = 'ui.zoomFactor'
@@ -482,7 +493,6 @@ async function createWorkspaceFromAgent(
     }
   }
   config = await prepareAgentWorkspaceConfig(config)
-  const agentShell = useAgentShellStore()
   const ownerTab = agentShell.tabs.find((tab) => tab.id === ownerSessionId)
   const targetWorkspacePath = normalizeLocalPath(config.directory)
   const previousWorkspaceTab =
@@ -1016,6 +1026,8 @@ async function driveQuickStartWorkspaceWizard(
     quickStartWizardResolve = resolve
     quickStartWizardReject = reject
   })
+  showNewProjectWizard.value = false
+  await nextTick()
   workspaceWizardInitialConfig.value = { ...config }
   showNewProjectWizard.value = true
   try {

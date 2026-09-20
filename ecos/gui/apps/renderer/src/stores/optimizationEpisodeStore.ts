@@ -63,14 +63,28 @@ export const useOptimizationEpisodeStore = defineStore('optimizationEpisodes', (
 
   function episodeForParent(
     workspaceId: string | null | undefined,
+    workspaceDirectory?: string | null,
   ): DesktopAgentOptimizationEpisodeSummary | null {
-    if (!workspaceId) return null
+    const normalizedDirectory = normalizeWorkspaceDirectory(workspaceDirectory)
+    if (!workspaceId && !normalizedDirectory) return null
     return (
       episodes.value.find(
         (episode) =>
-          episode.parentWorkspaceId === workspaceId && !isTerminalEpisode(episode.state),
+          !isTerminalEpisode(episode.state) &&
+          (episode.parentWorkspaceId === workspaceId ||
+            (normalizedDirectory !== null &&
+              normalizeWorkspaceDirectory(episode.parentWorkspaceDirectory) ===
+                normalizedDirectory)),
       ) ?? null
     )
+  }
+
+  function normalizeWorkspaceDirectory(
+    directory: string | null | undefined,
+  ): string | null {
+    if (!directory) return null
+    const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '')
+    return normalized || '/'
   }
 
   async function control(
