@@ -21,6 +21,9 @@ pub struct CanvasUniform {
     pub screen_size_px: [f32; 2],
     pub is_interacting: f32,
     pub global_alpha: f32,
+    pub visibility_mask: u32,
+    pub show_context: u32,
+    pub reserved: [u32; 2],
 }
 
 #[repr(C)]
@@ -159,6 +162,10 @@ struct CanvasUniform {
     screen_size_px: vec2<f32>,
     is_interacting: f32,
     global_alpha: f32,
+    visibility_mask: u32,
+    show_context: u32,
+    reserved0: u32,
+    reserved1: u32,
 };
 
 struct GpuShapeInstance {
@@ -198,7 +205,7 @@ fn vs_main(
 
     let unit_pos = quad_positions[vertex_index];
     let inst = s_instances[instance_index];
-    let shape_type = inst.pattern_bits >> 16u;
+    let shape_type = (inst.pattern_bits >> 16u) & 0x3u;
 
     var screen_min: vec2<f32>;
     var screen_max: vec2<f32>;
@@ -288,6 +295,11 @@ fn unpack_rgba(packed: u32) -> vec4<f32> {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let inst = s_instances[in.instance_idx];
+    let category = (inst.pattern_bits >> 18u) & 0x1Fu;
+    if (category < 16u && (u_canvas.visibility_mask & (1u << category)) == 0u)
+        || ((inst.pattern_bits & (1u << 23u)) != 0u && u_canvas.show_context == 0u) {
+        discard;
+    }
     let fill_color = unpack_rgba(inst.fill_rgba);
     let frame_color = unpack_rgba(inst.frame_rgba);
 
@@ -517,6 +529,65 @@ mod tests {
     }
 
     #[test]
+    fn gpu_instances_pack_category_and_zoom_visibility_without_changing_stride() {
+        let style = chip_display::LayerStyle::default_for_layer(1, chip_display::ColorTheme::Vivid);
+        let instances = build_gpu_instances(
+            [
+                (
+                    chip_view_db::ShapeGeometry::Rect(chipgeom_format::Rect32 {
+                        lx: 0,
+                        ly: 0,
+                        hx: 10,
+                        hy: 10,
+                    }),
+                    style,
+                    3,
+                    false,
+                ),
+                (
+                    chip_view_db::ShapeGeometry::Rect(chipgeom_format::Rect32 {
+                        lx: 10,
+                        ly: 0,
+                        hx: 20,
+                        hy: 10,
+                    }),
+                    style,
+                    16,
+                    true,
+                ),
+            ]
+            .into_iter(),
+        );
+
+        assert_eq!(std::mem::size_of::<GpuShapeInstance>(), 32);
+        assert_eq!(std::mem::size_of::<CanvasUniform>(), 64);
+        assert_eq!((instances[0].pattern_bits >> 18) & 0x1f, 3);
+        assert_eq!((instances[1].pattern_bits >> 18) & 0x1f, 16);
+        assert_eq!((instances[0].pattern_bits >> 23) & 1, 0);
+        assert_eq!((instances[1].pattern_bits >> 23) & 1, 1);
+    }
+
+    #[test]
+    fn canvas_pipeline_accepts_visibility_uniforms() {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Some(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            return;
+        };
+        let Ok((device, _queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+        else {
+            return;
+        };
+        if device_supports_storage_buffers(&device) {
+            assert!(
+                CanvasGpuResources::new(&device, wgpu::TextureFormat::Bgra8UnormSrgb).is_some()
+            );
+        }
+    }
+
+    #[test]
     fn heatmap_texture_row_alignment_calculation() {
         let width = 20u32;
         let unpadded_bytes_per_row = (4 * width) as usize;
@@ -530,6 +601,7 @@ mod tests {
 use wgpu::util::DeviceExt;
 
 pub const MAX_CACHED_TILE_BUFFERS: usize = 128;
+pub const MAX_CACHED_TILE_BYTES: usize = 512 * 1024 * 1024;
 
 pub struct GpuBufferCacheEntry {
     pub instance_buffer: wgpu::Buffer,
@@ -692,16 +764,26 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
             .retain(|key, _| key.geometry_epoch == self.buffer_key.geometry_epoch);
 
         if !resources.instance_buffers.contains_key(&self.buffer_key) {
-            // LRU eviction if too many tiles are cached (skipping tiles used in the current frame)
-            if resources.instance_buffers.len() >= MAX_CACHED_TILE_BUFFERS {
-                if let Some(oldest_key) = resources
+            let mut cached_bytes = resources
+                .instance_buffers
+                .values()
+                .map(|entry| entry.count as usize * std::mem::size_of::<GpuShapeInstance>())
+                .sum::<usize>();
+            let incoming_bytes = self.instances.len() * std::mem::size_of::<GpuShapeInstance>();
+            while resources.instance_buffers.len() >= MAX_CACHED_TILE_BUFFERS
+                || cached_bytes + incoming_bytes > MAX_CACHED_TILE_BYTES
+            {
+                let Some(oldest_key) = resources
                     .instance_buffers
                     .iter()
                     .filter(|(_, entry)| entry.last_used_frame < self.frame_counter)
                     .min_by_key(|(_, entry)| entry.last_used_frame)
                     .map(|(k, _)| *k)
-                {
-                    resources.instance_buffers.remove(&oldest_key);
+                else {
+                    break;
+                };
+                if let Some(oldest) = resources.instance_buffers.remove(&oldest_key) {
+                    cached_bytes -= oldest.count as usize * std::mem::size_of::<GpuShapeInstance>();
                 }
             }
 
@@ -776,10 +858,17 @@ impl egui_wgpu::CallbackTrait for CanvasGpuCallback {
 }
 
 pub fn build_gpu_instances(
-    shapes: impl Iterator<Item = (chip_view_db::ShapeGeometry, chip_display::LayerStyle)>,
+    shapes: impl Iterator<
+        Item = (
+            chip_view_db::ShapeGeometry,
+            chip_display::LayerStyle,
+            u8,
+            bool,
+        ),
+    >,
 ) -> Vec<GpuShapeInstance> {
     let mut instances = Vec::new();
-    for (geometry, style) in shapes {
+    for (geometry, style, category, context_only) in shapes {
         let (rect_dbu, shape_type) = match geometry {
             chip_view_db::ShapeGeometry::Rect(rect) => ([rect.lx, rect.ly, rect.hx, rect.hy], 0u32),
             chip_view_db::ShapeGeometry::Line(line) => {
@@ -797,7 +886,10 @@ pub fn build_gpu_instances(
         frame_rgba[3] = style.frame_alpha;
 
         let pattern_id = fill_pattern_id(style.fill_pattern);
-        let pattern_bits = (shape_type << 16) | pattern_id;
+        let pattern_bits = (shape_type << 16)
+            | pattern_id
+            | ((category as u32) << 18)
+            | (u32::from(context_only) << 23);
 
         instances.push(GpuShapeInstance {
             rect_dbu,
