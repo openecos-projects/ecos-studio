@@ -53,6 +53,32 @@ describe('AgentInteractionCard', () => {
     expect(wrapper.emitted('answer')).toEqual([[{ text: 'Use 72 percent' }]])
   })
 
+  it('renders confirmations without a free-text Other option', async () => {
+    const wrapper = mount(AgentInteractionCard, {
+      props: {
+        interaction: {
+          interaction: {
+            cancel: { id: 'cancel', label: 'Cancel' },
+            confirm: { id: 'confirm', label: 'Confirm and start' },
+            kind: 'confirm',
+          },
+          kind: 'confirm',
+          purpose: 'execution',
+          requestId: 'confirm-1',
+          schema_version: 'flow-agent.interaction_request.v1',
+          status: 'pending',
+          title: 'Confirm execution',
+        },
+      },
+    })
+
+    expect(wrapper.find('.interaction-card__other').exists()).toBe(false)
+    const options = wrapper.findAll('.interaction-card__option')
+    expect(options).toHaveLength(2)
+    await options[1]!.trigger('click')
+    expect(wrapper.emitted('answer')).toEqual([[{ optionId: 'cancel' }]])
+  })
+
   it('offers undo only when the backend marks the interaction reversible', async () => {
     const wrapper = mount(AgentInteractionCard, {
       props: {

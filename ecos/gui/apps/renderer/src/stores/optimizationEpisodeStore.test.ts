@@ -79,6 +79,19 @@ describe('optimizationEpisodeStore', () => {
     })
   })
 
+  it('guards the Parent by directory when its runtime handle is reopened', async () => {
+    agent.optimizationProjection.mockResolvedValue({
+      episodes: [episode()],
+      generation: 3,
+    })
+    const store = useOptimizationEpisodeStore()
+    await store.start()
+
+    expect(store.episodeForParent('workspace-handle-2', '/work/demo')).toMatchObject({
+      episodeId: 'episode-1',
+    })
+  })
+
   it('refreshes on invalidation and rejects an older projection', async () => {
     let invalidate!: (event: DesktopAgentOptimizationEpisodeInvalidatedEvent) => void
     agent.onOptimizationProjectionInvalidated.mockImplementation((listener) => {

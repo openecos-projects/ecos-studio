@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping
 from ecos_agent.gui.provider_optimization_episode import ProviderOptimizationEpisodeMixin
 from ecos_agent.gui.provider_optimization_recovery import (
     ProviderOptimizationRecoveryMixin,
+    optimization_resume_context_path,
     write_optimization_resume_context,
 )
 from ecos_agent.codex.provider import (
@@ -210,6 +211,7 @@ from ecos_agent.gui.provider_common import (
     _Session,
 )
 
+
 def _optimization_turn_event_payload(
     session: _Session,
     runner: OptimizationEpisodeRunner,
@@ -226,6 +228,7 @@ def _optimization_turn_event_payload(
         "kind": kind,
         **detail,
     }
+
 
 class ProviderOptimizationMixin(
     ProviderOptimizationRecoveryMixin, ProviderOptimizationEpisodeMixin
@@ -276,6 +279,7 @@ class ProviderOptimizationMixin(
             return
         session.phase = "optimization_objective"
         session.optimization_phase = "awaiting_objective"
+        session.optimization_episode_id = None
         session.optimization_objective = None
         session.optimization_objective_sha256 = None
         session.optimization_primary_metric = None
@@ -290,11 +294,6 @@ class ProviderOptimizationMixin(
             return
         session.phase = "optimization_authorization"
         session.optimization_phase = "awaiting_confirmation"
-        # The episode id and its diagnostics file are created with the
-        # objective provider so the episode reuses that provider.
-        session.optimization_episode_id = (
-            session.optimization_episode_id or f"episode-{uuid.uuid4().hex}"
-        )
         active = session.optimization_active_objective
         alignment = session.optimization_objective_alignment
         if active is None or alignment is None or session.optimization_objective is None:
@@ -318,9 +317,11 @@ class ProviderOptimizationMixin(
                 recovery_stage=str(active["recovery_stage"]),
                 violation_counts=counts,
             ),
-            optimization={
+        )
+        self._emit_phase_choice(
+            session,
+            authorization={
                 "schema_version": "ecos.optimization_authorization.v2",
-                "episode_id": session.optimization_episode_id,
                 "workspace": workspace,
                 "original_objective": session.optimization_objective,
                 "objective_sha256": session.optimization_objective_sha256,
@@ -334,8 +335,6 @@ class ProviderOptimizationMixin(
                 "execution": "fixed candidate.rerun only",
             },
         )
-        self._emit_optimization_status(session, "awaiting_confirmation")
-        self._emit_phase_choice(session)
     def _select_optimization_workspace(self, session: _Session, message: str) -> None:
         try:
             workspace = normalize_path(
@@ -380,10 +379,7 @@ class ProviderOptimizationMixin(
         if not workspace:
             raise ValueError("Optimization objective requires a workspace.")
         self._close_idle_optimization_provider(session)
-        session.optimization_episode_id = f"episode-{uuid.uuid4().hex}"
         provider: CodexAppServerProposalProvider | None = None
-        # The baseline scan reads only workspace reports and the objective
-        # parse only reads the goal text; run them concurrently.
         with ThreadPoolExecutor(max_workers=1) as baseline_pool:
             baseline_future = baseline_pool.submit(
                 build_terminal_observation, Path(workspace)
@@ -397,7 +393,7 @@ class ProviderOptimizationMixin(
                         Path(workspace)
                         / ".agent"
                         / "optimization"
-                        / session.optimization_episode_id
+                        / f"turn-{session.active_turn_id or uuid.uuid4().hex}"
                         / "codex-rpc-diagnostics.v1.jsonl"
                     ),
                 )
@@ -408,6 +404,8 @@ class ProviderOptimizationMixin(
             except Exception as exc:
                 if provider is not None:
                     provider.close()
+                self._check_interrupted(session)
+                self._raise_if_interrupted(exc)
                 session.phase = "operation" if session.mode == "workspace" else "home_ready"
                 session.optimization_phase = "unavailable"
                 self._emit(session, "error", f"Unable to parse optimization objective: {exc}")
@@ -415,8 +413,6 @@ class ProviderOptimizationMixin(
                 return
             finally:
                 session.active_interrupt = None
-            # Keep the provider alive: the episode reuses it after
-            # confirmation instead of paying a second app-server start.
             session.optimization_provider = provider
             session.optimization_objective = contract
             session.optimization_objective_sha256 = _objective_sha256(contract)
@@ -433,8 +429,6 @@ class ProviderOptimizationMixin(
                 alignment = build_objective_alignment(objective, baseline)
                 active = build_active_objective(alignment, objective, baseline)
             except Exception as exc:
-                # A fresh objective parse creates a new provider, so a failed
-                # alignment must not leave this one lingering.
                 self._close_idle_optimization_provider(session)
                 session.phase = "operation" if session.mode == "workspace" else "home_ready"
                 session.optimization_phase = "unavailable"
@@ -462,38 +456,47 @@ class ProviderOptimizationMixin(
             ),
         )
         self._begin_optimization_authorization(session)
-
-    def _confirm_optimization_start(self, session: _Session, message: str) -> None:
+    def _confirm_optimization_start(
+        self, session: _Session, message: str, episode_id: object = None
+    ) -> None:
         if message != "1":
             self._close_idle_optimization_provider(session)
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             session.optimization_phase = "idle"
+            session.optimization_episode_id = None
             self._emit(session, "message", cancellation_message(session.language))
             self._emit_phase_choice(session)
             return
         if self.optimization_runner_factory is None:
             self._close_idle_optimization_provider(session)
+            workspace = session.rerun_workspace_path
+            if not workspace or not isinstance(episode_id, str) or not episode_id.startswith("episode-"):
+                raise ValueError("Optimization authorization is incomplete.")
+            session.optimization_episode_id = episode_id
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
-            session.optimization_phase = "unavailable"
+            session.optimization_phase = "error"
             self._emit(
                 session,
                 "error",
                 "Optimization runner is not configured with observation and ECC adapters; execution is blocked.",
             )
+            self._emit_optimization_status(session, "failed")
             self._emit_phase_choice(session)
             return
         workspace = session.rerun_workspace_path
-        if not workspace or session.optimization_episode_id is None:
+        if not workspace or not isinstance(episode_id, str) or not episode_id.startswith("episode-"):
             raise ValueError("Optimization authorization is incomplete.")
+        optimization_resume_context_path(Path(workspace), episode_id)
+        session.optimization_episode_id = episode_id
         workspace_path = Path(workspace)
         try:
             write_optimization_resume_context(session)
         except Exception as exc:
             self._close_idle_optimization_provider(session)
-            session.optimization_phase = "needs_attention"
+            session.optimization_phase = "error"
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             self._emit(session, "error", f"Unable to persist optimization recovery context: {exc}")
-            self._emit_optimization_status(session, "needs_attention")
+            self._emit_optimization_status(session, "failed")
             self._emit_phase_choice(session)
             return
         if not epsilon_artifact_path(workspace_path).is_file():
@@ -622,9 +625,10 @@ class ProviderOptimizationMixin(
             if provider is not None:
                 provider.close()
             session.optimization_provider = None
-            session.optimization_phase = "unavailable"
+            session.optimization_phase = "error"
             session.phase = "operation" if session.mode == "workspace" else "home_ready"
             self._emit(session, "error", f"Unable to start optimization: {exc}")
+            self._emit_optimization_status(session, "failed")
             self._emit_phase_choice(session)
             return
         assert provider is not None
@@ -662,8 +666,6 @@ class ProviderOptimizationMixin(
         self._emit_optimization_status(
             session, "stopping" if stop_before_dispatch else "running"
         )
-        # Collapse planner progress lines into one tool message; per-turn
-        # status lives on the optimization card, not in chat text.
         session.active_tool_message_id = (
             f"optimization-progress-{session.session_id}"
         )
@@ -794,7 +796,4 @@ class ProviderOptimizationMixin(
         if session.optimization_runner is not None:
             session.optimization_runner.request_stop()
         if session.optimization_runner is not None and session.optimization_provider is not None:
-            # Interrupt only aborts an in-flight planning turn; with no runner
-            # (e.g. during noise calibration) it would leave the reused
-            # provider marked interrupted for the next episode.
             session.optimization_provider.interrupt()

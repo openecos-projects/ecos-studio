@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ECC_FLOW_STEPS } from '@ecos-studio/shared'
 import source from './App.vue?raw'
+import wizardSource from './components/NewProjectWizard.vue?raw'
 
 describe('agent workspace creation', () => {
   it('consumes workspace wizard requests from project management', () => {
@@ -96,6 +97,16 @@ describe('agent workspace creation', () => {
 })
 
 describe('quick start resources', () => {
+  it('positions the workspace wizard beside the Agent during Quick Start', () => {
+    expect(source).toContain(':quick-start="quickStartWizardResolve !== null"')
+    expect(source).toContain(
+      "'--home-agent-drawer-width': `${quickStartAgentPanelWidth}px`",
+    )
+    expect(source).toContain('agentShell.homeAgentOpen')
+    expect(wizardSource).toContain('new-workspace-wizard-overlay--quick-start')
+    expect(wizardSource).toContain('right: var(--home-agent-drawer-width)')
+  })
+
   it('renders a click-aware cursor and target highlight', () => {
     expect(source).toContain(':class="{ \'is-clicking\': quickStartCursor.clicking }"')
     expect(source).toContain('.quick-start-cursor::after')
@@ -155,6 +166,16 @@ describe('quick start resources', () => {
     expect(workspaceSource).toContain('pdk_installation_id: input.resources.pdk?.id')
     expect(workspaceSource).toContain("familyId: 'ics55'")
     expect(workspaceSource).toContain('manualConfig: null')
+  })
+
+  it('remounts the already-open project wizard before applying Quick Start design inputs', () => {
+    const start = source.indexOf('async function driveQuickStartWorkspaceWizard')
+    const end = source.indexOf('async function clickQuickStartWizardButton', start)
+    const driver = source.slice(start, end)
+
+    expect(driver).toMatch(
+      /showNewProjectWizard\.value = false\s+await nextTick\(\)\s+workspaceWizardInitialConfig\.value = \{ \.\.\.config \}\s+showNewProjectWizard\.value = true/,
+    )
   })
 
   it('fills and closes the existing New Project dialog', () => {

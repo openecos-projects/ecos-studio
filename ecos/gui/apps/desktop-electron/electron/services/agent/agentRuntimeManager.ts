@@ -27,6 +27,7 @@ import type {
   DesktopAgentOptimizationEpisodeSummary,
 } from '@ecos-studio/shared'
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import type { AgentProviderRuntime } from './agentProviderContract'
 import { RuntimeEventFanout } from '../runtime/runtimeEvents'
@@ -42,6 +43,17 @@ export interface AgentRuntimeManagerOptions {
   providers: AgentRuntimeProviderRegistration[]
 }
 
+type OptimizationParent = { workspaceId: string; workspaceRevision: number }
+type PendingAuthorization = {
+  requestId: string
+  confirmOptionId: string
+  cancelOptionId: string
+  directory: string
+  objectiveSha256: string
+  alignmentSha256: string
+  observed: Promise<{ parent?: OptimizationParent; error?: unknown }>
+}
+
 export class AgentRuntimeManager implements AgentProviderRuntime {
   private readonly defaultProviderId: string
   private readonly eventFanout = new RuntimeEventFanout<DesktopAgentEvent>()
@@ -49,6 +61,14 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     string,
     DesktopAgentOptimizationEpisodeSummary
   >()
+  private readonly admittedOptimizationEpisodeIds = new Set<string>()
+  private readonly pendingAuthorizations = new Map<string, PendingAuthorization>()
+  private resolveOptimizationWorkspace?: (
+    directory: string,
+  ) => Promise<OptimizationParent>
+  private reconcileOptimizationStop?: (
+    episode: DesktopAgentOptimizationEpisodeSummary,
+  ) => Promise<void>
   private readonly optimizationInvalidationListeners = new Set<
     (generation: number) => void
   >()
@@ -158,7 +178,20 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
   async sendMessage(
     request: DesktopAgentSendMessageRequest,
   ): Promise<DesktopAgentSendMessageResponse> {
+    this.updateSessionContext(request)
     return await this.providerForRequest(request).sendMessage(request)
+  }
+
+  setOptimizationWorkspaceResolver(
+    resolver: (directory: string) => Promise<OptimizationParent>,
+  ): void {
+    this.resolveOptimizationWorkspace = resolver
+  }
+
+  setOptimizationStopReconciler(
+    reconcile: (episode: DesktopAgentOptimizationEpisodeSummary) => Promise<void>,
+  ): void {
+    this.reconcileOptimizationStop = reconcile
   }
 
   async getModelSettings(
@@ -176,10 +209,139 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
   async answerInteraction(
     request: DesktopAgentInteractionAnswerRequest,
   ): Promise<DesktopAgentInteractionAnswerResponse> {
-    return await this.providerForRequest(request).answerInteraction(request)
+    const providerId = request.providerId ?? this.defaultProviderId
+    const key = this.sessionKey(providerId, request.sessionId)
+    const pending = this.pendingAuthorizations.get(key)
+    const answer = { ...request, episodeId: undefined }
+    if (
+      !pending ||
+      pending.requestId !== request.requestId ||
+      !('optionId' in request) ||
+      request.kind !== 'confirm'
+    ) {
+      return await this.providerForRequest(request).answerInteraction(answer)
+    }
+    if (request.optionId !== pending.confirmOptionId) {
+      const result = await this.providerForRequest(request).answerInteraction(answer)
+      this.pendingAuthorizations.delete(key)
+      return result
+    }
+    const resolveParent = this.resolveOptimizationWorkspace
+    if (!resolveParent)
+      throw new Error('Optimization Workspace verification is unavailable.')
+    const observedResult = await pending.observed
+    if (!observedResult.parent)
+      throw observedResult.error ?? new Error('Optimization Parent is unavailable.')
+    const observed = observedResult.parent
+    const current = await resolveParent(pending.directory)
+    const decline: DesktopAgentInteractionAnswerRequest = {
+      kind: 'confirm',
+      optionId: pending.cancelOptionId,
+      providerId,
+      requestId: request.requestId,
+      sessionId: request.sessionId,
+    }
+    // workspaceId is an ECC runtime handle and may be recreated after idle
+    // release. The canonical directory plus committed Revision is the Parent
+    // identity used for authorization; the current handle is used for dispatch.
+    if (observed.workspaceRevision !== current.workspaceRevision) {
+      await this.providerForRequest(request).answerInteraction(decline)
+      this.pendingAuthorizations.delete(key)
+      throw new Error(
+        `Optimization Parent Workspace Revision changed (${observed.workspaceRevision} -> ${current.workspaceRevision}). Please propose a new objective.`,
+      )
+    }
+    const conflict = [...this.optimizationEpisodes.values()].find(
+      (episode) =>
+        !TERMINAL_OPTIMIZATION_STATES.has(episode.state) &&
+        (episode.parentWorkspaceId === current.workspaceId ||
+          resolve(episode.parentWorkspaceDirectory) === resolve(pending.directory)),
+    )
+    if (conflict) {
+      await this.providerForRequest(request).answerInteraction(decline)
+      this.pendingAuthorizations.delete(key)
+      return {
+        accepted: true,
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+        admissionConflict: { episodeId: conflict.episodeId },
+      }
+    }
+    const episodeId = `episode-${randomUUID().replaceAll('-', '')}`
+    const now = Date.now()
+    const episode: DesktopAgentOptimizationEpisodeSummary = {
+      agentSessionId: request.sessionId,
+      episodeId,
+      inFlightCount: 0,
+      optimization: {
+        schema_version: 'ecos.optimization_status.v2',
+        episode_id: episodeId,
+        workspace: pending.directory,
+        objective_sha256: pending.objectiveSha256,
+        alignment_sha256: pending.alignmentSha256,
+        state: 'starting',
+      },
+      parentWorkspaceDirectory: pending.directory,
+      parentWorkspaceId: current.workspaceId,
+      parentWorkspaceRevision: current.workspaceRevision,
+      providerId,
+      startedAt: now,
+      state: 'starting',
+      turnCount: 0,
+      updatedAt: now,
+    }
+    this.optimizationEpisodes.set(episodeId, episode)
+    this.admittedOptimizationEpisodeIds.add(episodeId)
+    if (!this.persistOptimizationProjection()) {
+      this.optimizationEpisodes.delete(episodeId)
+      throw new Error('Unable to persist Optimization Episode admission.')
+    }
+    this.optimizationGeneration += 1
+    this.sessionContexts.set(key, {
+      directory: pending.directory,
+      workspaceId: current.workspaceId,
+      workspaceRevision: current.workspaceRevision,
+    })
+    for (const listener of this.optimizationInvalidationListeners)
+      listener(this.optimizationGeneration)
+    this.pendingAuthorizations.delete(key)
+    try {
+      return await this.providerForRequest(request).answerInteraction({
+        ...answer,
+        directory: pending.directory,
+        workspaceId: current.workspaceId,
+        workspaceRevision: current.workspaceRevision,
+        episodeId,
+      })
+    } catch (error) {
+      this.publishOptimizationEpisode({
+        ...episode,
+        state: 'needs_attention',
+        optimization: { ...episode.optimization, state: 'needs_attention' },
+        updatedAt: Date.now(),
+      })
+      throw error
+    }
+  }
+
+  private updateSessionContext(request: DesktopAgentSendMessageRequest): void {
+    const providerId = request.providerId ?? this.defaultProviderId
+    const key = this.sessionKey(providerId, request.sessionId)
+    const previous = this.sessionContexts.get(key)
+    if (previous)
+      this.sessionContexts.set(key, {
+        directory: request.directory ?? previous.directory,
+        workspaceId: request.workspaceId ?? previous.workspaceId,
+        workspaceRevision: request.workspaceRevision ?? previous.workspaceRevision,
+      })
   }
 
   async interrupt(request?: DesktopAgentProviderRequest): Promise<void> {
+    const sessionId = request && 'sessionId' in request ? request.sessionId : undefined
+    if (typeof sessionId === 'string' && sessionId)
+      this.pendingAuthorizations.delete(
+        this.sessionKey(request?.providerId ?? this.defaultProviderId, sessionId),
+      )
     return await this.providerForRequest(request).interrupt(request)
   }
 
@@ -286,7 +448,6 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
 
   async cancelOptimizationShutdownDrain(): Promise<void> {
     const previousStates = [...this.optimizationShutdownStates]
-    this.optimizationShutdownStates.clear()
     await Promise.all(
       previousStates.map(async ([episodeId, previousState]) => {
         const episode = this.optimizationEpisodes.get(episodeId)
@@ -317,9 +478,15 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
         })
       }),
     )
+    this.optimizationShutdownStates.clear()
   }
 
   async stop(request?: DesktopAgentProviderRequest): Promise<void> {
+    const sessionId = request && 'sessionId' in request ? request.sessionId : undefined
+    if (typeof sessionId === 'string' && sessionId)
+      this.pendingAuthorizations.delete(
+        this.sessionKey(request?.providerId ?? this.defaultProviderId, sessionId),
+      )
     return await this.providerForRequest(request).stop(request)
   }
 
@@ -393,16 +560,31 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       throw new Error('Optimization Episode is unavailable for this Agent Session.')
     }
     const provider = this.providerForRequest(request)
-    if (
-      (request.action === 'resume' && episode.state === 'interrupted') ||
-      (request.action === 'retry' && episode.state === 'needs_attention')
-    ) {
+    if (request.action === 'resume' && episode.state === 'interrupted') {
+      if (
+        !this.optimizationShutdownStates.has(episode.episodeId) &&
+        !this.hasOptimizationRecoveryContext(episode)
+      ) {
+        throw new Error(
+          'Optimization Episode recovery context is missing or incompatible.',
+        )
+      }
       if (
         !episode.parentWorkspaceId ||
         episode.parentWorkspaceRevision === undefined ||
         !episode.parentWorkspaceDirectory
       ) {
         throw new Error('Optimization Episode recovery context is incomplete.')
+      }
+      if (this.resolveOptimizationWorkspace) {
+        const current = await this.resolveOptimizationWorkspace(
+          episode.parentWorkspaceDirectory,
+        )
+        if (current.workspaceRevision !== episode.parentWorkspaceRevision) {
+          throw new Error(
+            'Optimization Parent Workspace changed; Resume requires a fresh recovery context.',
+          )
+        }
       }
       await provider.resumeOptimizationEpisode({
         directory: episode.parentWorkspaceDirectory,
@@ -419,29 +601,63 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       })
       return
     }
-    if (
-      request.action === 'stop' &&
-      (episode.state === 'interrupted' || episode.state === 'needs_attention')
-    ) {
+    if (request.action === 'stop' && !TERMINAL_OPTIMIZATION_STATES.has(episode.state)) {
       if (
-        !episode.parentWorkspaceId ||
-        episode.parentWorkspaceRevision === undefined ||
-        !episode.parentWorkspaceDirectory
+        episode.state !== 'interrupted' &&
+        episode.state !== 'needs_attention' &&
+        episode.parentWorkspaceId &&
+        episode.parentWorkspaceRevision !== undefined &&
+        episode.parentWorkspaceDirectory
       ) {
-        throw new Error('Optimization Episode recovery context is incomplete.')
+        try {
+          await provider.stopOptimizationEpisode({
+            directory: episode.parentWorkspaceDirectory,
+            episodeId: episode.episodeId,
+            providerId,
+            sessionId: episode.agentSessionId,
+            workspaceId: episode.parentWorkspaceId,
+            workspaceRevision: episode.parentWorkspaceRevision,
+          })
+          return
+        } catch {
+          // A dead provider falls through to ECC evidence reconciliation.
+        }
       }
-      await provider.stopOptimizationEpisode({
-        directory: episode.parentWorkspaceDirectory,
-        episodeId: episode.episodeId,
-        providerId,
-        sessionId: episode.agentSessionId,
-        workspaceId: episode.parentWorkspaceId,
-        workspaceRevision: episode.parentWorkspaceRevision,
-      })
+      if (!this.reconcileOptimizationStop) {
+        throw new Error(
+          'ECC Operation reconciliation is unavailable; Parent remains guarded.',
+        )
+      }
+      try {
+        await this.reconcileOptimizationStop(episode)
+      } catch (error) {
+        this.publishOptimizationEpisode({
+          ...episode,
+          state: 'needs_attention',
+          optimization: { ...episode.optimization, state: 'needs_attention' },
+          updatedAt: Date.now(),
+        })
+        throw error
+      }
+      this.publishOptimizationEpisode(
+        {
+          ...episode,
+          state: 'stopped',
+          optimization: { ...episode.optimization, state: 'stopped' },
+          notificationStates: [
+            ...new Set([...(episode.notificationStates ?? []), 'stopped' as const]),
+          ],
+          cleanupState: 'available',
+          updatedAt: Date.now(),
+        },
+        true,
+      )
       return
     }
     if (request.action === 'retry') {
-      throw new Error('Optimization Retry is unavailable in the current Episode state.')
+      throw new Error(
+        'No independently verified recovery source exists for this Episode; Parent remains guarded.',
+      )
     }
     await provider.sendMessage({
       message: request.action,
@@ -475,13 +691,47 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
   }
 
   private observeOptimizationEvent(event: DesktopAgentEvent): boolean {
+    if (
+      event.type === 'interaction' &&
+      event.interaction?.optimizationAuthorization &&
+      event.interaction.status === 'pending' &&
+      event.sessionId &&
+      event.providerId
+    ) {
+      const authorization = event.interaction.optimizationAuthorization
+      const choice = event.interaction.interaction
+      const resolver = this.resolveOptimizationWorkspace
+      if (choice.kind === 'confirm' && resolver && authorization.workspace) {
+        const key = this.sessionKey(event.providerId, event.sessionId)
+        this.pendingAuthorizations.set(key, {
+          requestId: event.interaction.requestId,
+          confirmOptionId: choice.confirm.id,
+          cancelOptionId: choice.cancel.id,
+          directory: authorization.workspace,
+          objectiveSha256: authorization.objective_sha256,
+          alignmentSha256: authorization.alignment_sha256,
+          observed: resolver(authorization.workspace).then(
+            (parent) => ({ parent }),
+            (error: unknown) => ({ error }),
+          ),
+        })
+      }
+    }
     const payload = event.optimization
     const providerId = event.providerId
     const sessionId = event.sessionId
     if (event.type !== 'optimization' || !payload || !providerId || !sessionId)
       return true
+    if (payload.state === 'awaiting_confirmation') return false
     const context = this.sessionContexts.get(this.sessionKey(providerId, sessionId))
     const previous = this.optimizationEpisodes.get(payload.episode_id)
+    if (!previous && !this.admittedOptimizationEpisodeIds.has(payload.episode_id))
+      return false
+    if (
+      previous &&
+      (previous.providerId !== providerId || previous.agentSessionId !== sessionId)
+    )
+      return false
     const parentWorkspaceId = context?.workspaceId ?? previous?.parentWorkspaceId
     const parentWorkspaceDirectory =
       payload.workspace ?? context?.directory ?? previous?.parentWorkspaceDirectory ?? ''
@@ -586,10 +836,18 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
 
   private publishOptimizationEpisode(
     episode: DesktopAgentOptimizationEpisodeSummary,
+    requirePersistence = false,
   ): void {
+    const previous = this.optimizationEpisodes.get(episode.episodeId)
     this.optimizationEpisodes.set(episode.episodeId, episode)
+    if (!this.persistOptimizationProjection() && requirePersistence) {
+      if (previous) this.optimizationEpisodes.set(episode.episodeId, previous)
+      else this.optimizationEpisodes.delete(episode.episodeId)
+      throw new Error(
+        'Unable to persist Optimization Episode outcome; Parent remains guarded.',
+      )
+    }
     this.optimizationGeneration += 1
-    this.persistOptimizationProjection()
     for (const listener of this.optimizationInvalidationListeners) {
       listener(this.optimizationGeneration)
     }
@@ -608,19 +866,31 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       if (!isRecord(value) || value.schemaVersion !== OPTIMIZATION_PROJECTION_SCHEMA)
         return
       if (!Array.isArray(value.episodes)) return
+      let discardedLegacyConfirmation = false
       for (const candidate of value.episodes.slice(-MAX_OPTIMIZATION_EPISODES)) {
+        if (
+          isRecord(candidate) &&
+          isRecord(candidate.optimization) &&
+          candidate.optimization.phase === 'awaiting_confirmation'
+        ) {
+          discardedLegacyConfirmation = true
+          continue
+        }
         const episode = readOptimizationEpisodeSummary(candidate)
         if (!episode) continue
         const state = TERMINAL_OPTIMIZATION_STATES.has(episode.state)
           ? episode.state
-          : 'interrupted'
+          : this.hasOptimizationRecoveryContext(episode)
+            ? 'interrupted'
+            : 'needs_attention'
         this.optimizationEpisodes.set(episode.episodeId, {
           ...episode,
           optimization: { ...episode.optimization, state },
           state,
         })
+        this.admittedOptimizationEpisodeIds.add(episode.episodeId)
       }
-      if (this.optimizationEpisodes.size > 0) {
+      if (this.optimizationEpisodes.size > 0 || discardedLegacyConfirmation) {
         this.optimizationGeneration = 1
         this.persistOptimizationProjection()
       }
@@ -629,9 +899,42 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     }
   }
 
-  private persistOptimizationProjection(): void {
+  private hasOptimizationRecoveryContext(
+    episode: DesktopAgentOptimizationEpisodeSummary,
+  ): boolean {
+    if (!/^episode-[a-zA-Z0-9_-]{1,120}$/.test(episode.episodeId)) return false
+    try {
+      const path = resolve(
+        episode.parentWorkspaceDirectory,
+        '.agent',
+        'optimization',
+        episode.episodeId,
+        'provider-resume-context.v1.json',
+      )
+      if (statSync(path).size > MAX_OPTIMIZATION_PROJECTION_BYTES) return false
+      const context = JSON.parse(readFileSync(path, 'utf8')) as unknown
+      return (
+        isRecord(context) &&
+        context.schema_version === 'ecos.optimization_provider_resume.v1' &&
+        context.session_id === episode.agentSessionId &&
+        context.episode_id === episode.episodeId &&
+        context.workspace === resolve(episode.parentWorkspaceDirectory) &&
+        context.workspace_revision === episode.parentWorkspaceRevision &&
+        isRecord(context.objective) &&
+        isRecord(context.objective_alignment) &&
+        context.objective_sha256 === episode.optimization.objective_sha256 &&
+        typeof context.parameter_policy_sha256 === 'string' &&
+        typeof context.ecc_revision === 'string' &&
+        Boolean(context.ecc_revision)
+      )
+    } catch {
+      return false
+    }
+  }
+
+  private persistOptimizationProjection(): boolean {
     const path = this.optimizationProjectionPath
-    if (!path) return
+    if (!path) return true
     const episodes = [...this.optimizationEpisodes.values()]
     const active = episodes.filter(
       (episode) => !TERMINAL_OPTIMIZATION_STATES.has(episode.state),
@@ -652,8 +955,10 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
         'utf8',
       )
       renameSync(temporaryPath, path)
+      return true
     } catch {
       // Projection persistence failure cannot change Runtime or ledger outcomes.
+      return false
     }
   }
 }
@@ -684,7 +989,6 @@ function optimizationEpisodeState(
   fallback: DesktopAgentOptimizationEpisodeState | undefined,
 ): DesktopAgentOptimizationEpisodeState {
   switch (value) {
-    case 'awaiting_confirmation':
     case 'starting':
     case 'calibrating':
     case 'running':

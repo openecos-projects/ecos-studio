@@ -1368,6 +1368,11 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
     const confirm = readInteractionOption(interaction.confirm)
     const cancel = readInteractionOption(interaction.cancel)
     if (!confirm || !cancel) return null
+    const authorization =
+      record.optimizationAuthorization === undefined
+        ? null
+        : readOptimizationAuthorization(record.optimizationAuthorization)
+    if (record.optimizationAuthorization !== undefined && !authorization) return null
     return {
       interaction: { cancel, confirm, kind },
       kind,
@@ -1377,6 +1382,7 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
       status,
       ...(canUndo ? { canUndo } : {}),
       ...(description ? { description } : {}),
+      ...(authorization ? { optimizationAuthorization: authorization } : {}),
       title,
     }
   }
@@ -1402,6 +1408,56 @@ function readAgentInteraction(value: unknown): DesktopAgentInteractionRequest | 
     ...(canUndo ? { canUndo } : {}),
     ...(description ? { description } : {}),
     title,
+  }
+}
+
+function readOptimizationAuthorization(
+  value: unknown,
+): DesktopAgentInteractionRequest['optimizationAuthorization'] | null {
+  const record = readRecord(value)
+  const workspace = readEventText(record.workspace)
+  const objective = record.original_objective
+  const objectiveHash = readEventText(record.objective_sha256)
+  const alignmentHash = readEventText(record.alignment_sha256)
+  const originalMetric = readEventText(record.original_primary_metric)
+  const activeMetric = readEventText(record.active_primary_metric)
+  const stage = readEventText(record.recovery_stage)
+  const counts = readRecord(record.violation_counts)
+  if (
+    record.schema_version !== 'ecos.optimization_authorization.v2' ||
+    !workspace ||
+    !isRecord(objective) ||
+    !objectiveHash ||
+    !alignmentHash ||
+    !originalMetric ||
+    !activeMetric ||
+    !stage ||
+    !Array.isArray(record.active_preserve_metrics) ||
+    record.active_preserve_metrics.some((metric) => typeof metric !== 'string') ||
+    record.requires_confirmation !== true ||
+    typeof record.execution !== 'string' ||
+    !['drc_count', 'sta_setup_violation_count', 'sta_hold_violation_count'].every(
+      (key) => Number.isSafeInteger(counts[key]) && Number(counts[key]) >= 0,
+    )
+  )
+    return null
+  return {
+    schema_version: 'ecos.optimization_authorization.v2',
+    workspace,
+    original_objective: objective,
+    objective_sha256: objectiveHash,
+    alignment_sha256: alignmentHash,
+    original_primary_metric: originalMetric,
+    active_primary_metric: activeMetric,
+    active_preserve_metrics: record.active_preserve_metrics as string[],
+    violation_counts: counts as unknown as {
+      drc_count: number
+      sta_setup_violation_count: number
+      sta_hold_violation_count: number
+    },
+    recovery_stage: stage,
+    requires_confirmation: true,
+    execution: record.execution,
   }
 }
 

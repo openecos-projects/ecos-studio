@@ -254,8 +254,16 @@ _Avoid_: runtime snapshot steps, executed-step prefix
 The latest runtime operation for a Workspace whose events may contribute to recovering the visible execution state.
 _Avoid_: historical operation, mixed execution events
 
+**Optimization Authorization**:
+A pending execution interaction that asks the user to approve a normalized optimization objective bound to one Parent Workspace Revision and Agent Session. It expires if that Revision changes, its tab is closed, or the application exits before confirmation; switching tabs or hiding the panel does not expire it. It does not create an Optimization Episode, acquire the Optimization Parent Guard, become a background task, or enter the Optimization Episode lifecycle state model.
+_Avoid_: awaiting episode, pre-start episode, resumable episode
+
+**Agent Turn Interruption**:
+An explicit request to stop the current in-flight Agent response or proposal turn. It does not pause, resume, retry, or stop an Optimization Episode and does not cancel an ECC Runtime Operation.
+_Avoid_: Episode Stop, Flow cancellation, Agent Session deletion
+
 **Optimization Episode**:
-A bounded Agent-controlled optimization run anchored to one Parent Workspace and one Agent Session. It may contain calibration replays and candidate execution workspaces, and it remains independently observable until terminal.
+A bounded Agent-controlled optimization run created only when the user accepts an Optimization Authorization and anchored to one Parent Workspace and one Agent Session. It may contain calibration replays and candidate execution workspaces, and it remains independently observable until terminal.
 _Avoid_: current Flow, one candidate run, chat turn
 
 **Parent Workspace**:
@@ -307,7 +315,7 @@ snapshots while Electron privately correlates underlying Runtime Operations.
 _Avoid_: chat-message identity, active-tab identity, event-derived state
 
 **Optimization Episode Stop**:
-An explicit user Stop/Cancel prevents new optimization turns, requests cancellation for in-flight execution operations, waits for their terminal receipts, and ends the episode as stopped while retaining completed operation results.
+An explicit user Stop/Cancel prevents new optimization turns, requests cancellation for in-flight execution operations, waits until no active execution remains, and durably ends the episode as stopped while retaining completed operation results. It remains available when controller recovery data is missing or invalid, but never releases the Parent Guard while an active Runtime Operation cannot be ruled out.
 _Avoid_: immediate process kill, successful completion, silent background drain
 
 **Optimization Episode Pause**:
@@ -365,11 +373,15 @@ _Avoid_: episode completion as consent, stale confirmation, hidden writeback
 The temporary exclusion on Parent Workspace mutations and ordinary Flow starts while its Optimization Episode is active, including interrupted and needs-attention states. Read-only inspection and work in other Workspaces remain available; the Parent run control is disabled with a background-optimization explanation rather than shown as Running. Resume/Retry preserves the guarded Revision, while Episode Stop makes the episode terminal and releases the guard.
 _Avoid_: application-wide lock, queued mutation, false Parent Flow state
 
+**Optimization Episode Admission**:
+The atomic decision made when an Optimization Authorization is accepted: either create the Parent Workspace's episode and acquire its Parent Guard, or reject the authorization in favor of the episode that already owns that Parent. A pending confirmation never reserves admission.
+_Avoid_: prompt lock, Renderer admission, queued optimization start
+
 **Optimization Parent Exclusivity**:
 A Parent Workspace owns at most one active Optimization Episode. A repeated
-start resolves to the existing episode rather than creating, queuing, merging
-or silently replacing another episode; different Parent Workspaces remain
-independent.
+or concurrently confirmed start resolves to the first admitted episode rather
+than creating, queuing, merging or silently replacing another episode; different
+Parent Workspaces remain independent.
 _Avoid_: competing incumbents, per-parent optimization queue, implicit replacement
 
 **Optimization Workspace Cleanup**:

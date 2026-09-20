@@ -1,6 +1,7 @@
 <template>
   <div
     class="new-workspace-wizard-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 sm:p-6"
+    :class="{ 'new-workspace-wizard-overlay--quick-start': props.quickStart }"
     @click.self="closeWizard"
   >
     <div
@@ -1652,6 +1653,7 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
 
 interface Props {
   initialConfig?: WorkspaceWizardInitialConfig
+  quickStart?: boolean
   title?: string
 }
 type ProjectMode = 'select' | 'create'
@@ -3875,6 +3877,11 @@ function createWorkspace() {
 }
 
 @media (min-width: 1280px) {
+  .new-workspace-wizard-overlay--quick-start {
+    right: var(--home-agent-drawer-width);
+    overflow: hidden;
+  }
+
   .flow-step-connector {
     display: flex;
   }

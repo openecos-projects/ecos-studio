@@ -688,6 +688,7 @@ const contractPanelBind = computed(() => ({
   workspaceSetupMessage: workspaceSetupMessage.value,
 }))
 
+const episodeLocked = computed(() => Boolean(activeOptimizationEpisode.value))
 const isRunning = computed(
   () =>
     isAgentRequestPending.value ||
@@ -697,8 +698,7 @@ const isRunning = computed(
     isWorkspaceContinuePending.value ||
     isWorkspaceParameterPending.value ||
     isWorkspaceSignoffPending.value ||
-    agentRunStatus.value === 'running' ||
-    Boolean(activeOptimizationEpisode.value),
+    (agentRunStatus.value === 'running' && !episodeLocked.value),
 )
 const pendingInteraction = computed(() => interactionPresentation.value.interaction)
 const undoInteraction = computed(() => activeUi.value.undoInteraction)
@@ -760,6 +760,7 @@ const composerLocked = computed(
   () =>
     isInterruptPending.value ||
     !agentSessionId.value ||
+    episodeLocked.value ||
     (Boolean(pendingInteraction.value) && !pendingInteractionAcceptsText.value),
 )
 const canSubmit = computed(
@@ -772,6 +773,7 @@ const canSubmit = computed(
 const composerPlaceholder = computed(() => {
   if (isAgentConnecting.value) return 'Connecting…'
   if (!agentSessionId.value) return 'Unavailable'
+  if (episodeLocked.value) return 'Optimization in progress'
   if (pendingInteraction.value) return 'Ask anything or reply…'
   if (isRunning.value) return 'Add a follow-up…'
   return 'Ask anything…'
@@ -1873,6 +1875,29 @@ async function handleInteraction(
             sessionId,
           }
     const result = await agent.answerInteraction(request)
+    if (result.admissionConflict) {
+      const projection = await agent.optimizationProjection()
+      const episode = projection.episodes.find(
+        (item) => item.episodeId === result.admissionConflict?.episodeId,
+      )
+      messageStore.addAssistantMessage(
+        `This Workspace already has optimization ${result.admissionConflict.episodeId}.`,
+        'done',
+        sessionId,
+      )
+      if (episode && agentShell.tabs.some((tab) => tab.id === episode.agentSessionId)) {
+        selectChatTab(episode.agentSessionId)
+      } else if (episode) {
+        agentShell.createTab(
+          resolveAgentTabContext({
+            shell: 'workspace',
+            currentWorkspacePath: episode.parentWorkspaceDirectory,
+          }),
+          { activate: true, id: episode.agentSessionId },
+        )
+        void startProviderSession(episode.agentSessionId)
+      }
+    }
     ownerUi.undoInteraction =
       result.canUndo && !startsQuickStart ? { kind, requestId } : undefined
     markContractInteractionAnswered(sessionId, requestId)
@@ -2077,7 +2102,7 @@ function cancelQueuedMessage(): void {
 
 async function flushQueuedMessage(): Promise<void> {
   const message = queuedMessage.value
-  if (!message || isRunning.value) return
+  if (!message || isRunning.value || episodeLocked.value) return
   queuedMessage.value = ''
   await sendAgentMessage(message)
 }
@@ -2103,6 +2128,10 @@ watch(isRunning, (running) => {
   }
   activeUi.value.runStartedAt = undefined
   void flushQueuedMessage()
+})
+
+watch(episodeLocked, (locked) => {
+  if (!locked) void flushQueuedMessage()
 })
 
 async function createWorkspaceFromAgent(

@@ -998,6 +998,9 @@ describe('registerIpc', () => {
         workspaceRevision: 9,
       }),
     )
+    expect(agentRuntimeService?.answerInteraction).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ episodeId: expect.anything() }),
+    )
     for (const sessionId of ['home-chat', 'source-chat']) {
       await handlers.get(desktopApiIpcChannels.agentSendMessage)?.(
         { sender },
@@ -3115,6 +3118,40 @@ describe('registerIpc', () => {
         code: 'OPTIMIZATION_PARENT_GUARDED',
         message: 'Optimization is running in the background.',
         name: 'Error',
+      },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.startFlowOperation).not.toHaveBeenCalled()
+  })
+
+  it('preserves the Parent Guard when the runtime handle was reopened', async () => {
+    const agentRuntimeService = {
+      isOptimizationParentGuarded: vi.fn(() => false),
+      isOptimizationParentDirectoryGuarded: vi.fn(
+        (directory: string) => directory === '/work/demo',
+      ),
+      onEvent: vi.fn(() => () => undefined),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const event = { sender: { id: 'owner-reopened' } }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-reopened',
+    })
+    await openBackendWorkspace(handlers, event, { directory: '/work/demo' })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.run',
+        payload: {
+          expectedWorkspaceRevision: 7,
+          idempotencyKey: 'command-reopened',
+          workspaceHandle: 'workspace-handle-reopened',
+        },
+      }),
+    ).resolves.toMatchObject({
+      error: {
+        code: 'OPTIMIZATION_PARENT_GUARDED',
       },
       ok: false,
     })

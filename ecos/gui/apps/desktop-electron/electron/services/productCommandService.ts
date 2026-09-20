@@ -51,7 +51,9 @@ interface ProductCommandContext {
   authorizeWorkspaceMutation?(
     command: ProductCommandRequest['command'],
     workspaceHandle: string,
+    workspaceDirectory?: string,
   ): void
+  workspaceDirectoryForHandle?(workspaceHandle: string): string | undefined
   beginCreate?(
     request: EccWorkspaceCreateRequest,
   ): Promise<{ creationId: string; targetDirectory: string }>
@@ -153,7 +155,11 @@ export async function executeProductCommand(
     throw new Error('Product Command does not own this Workspace handle')
   }
   if (GUARDED_PARENT_COMMANDS.has(request.command)) {
-    context.authorizeWorkspaceMutation?.(request.command, workspaceHandle)
+    context.authorizeWorkspaceMutation?.(
+      request.command,
+      workspaceHandle,
+      context.workspaceDirectoryForHandle?.(workspaceHandle),
+    )
   }
 
   switch (request.command) {

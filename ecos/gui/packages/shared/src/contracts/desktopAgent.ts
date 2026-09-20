@@ -182,6 +182,24 @@ export interface DesktopAgentInteractionRequest {
   description?: string
   interaction: DesktopAgentInteractionPayload
   kind: DesktopAgentInteractionKind
+  optimizationAuthorization?: {
+    schema_version: 'ecos.optimization_authorization.v2'
+    workspace: string
+    objective_sha256: string
+    alignment_sha256: string
+    original_objective: Record<string, unknown>
+    original_primary_metric: string
+    active_primary_metric: string
+    active_preserve_metrics: string[]
+    violation_counts: {
+      drc_count: number
+      sta_setup_violation_count: number
+      sta_hold_violation_count: number
+    }
+    recovery_stage: string
+    requires_confirmation: true
+    execution: string
+  }
   purpose: DesktopAgentInteractionPurpose
   requestId: string
   schema_version: 'flow-agent.interaction_request.v1'
@@ -194,6 +212,8 @@ export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest &
   directory?: string
   workspaceId?: string
   workspaceRevision?: number
+  /** Electron-issued only; never accepted from renderer IPC. */
+  episodeId?: string
   kind: DesktopAgentInteractionKind
   requestId: string
   sessionId: string
@@ -229,6 +249,7 @@ export type DesktopAgentInteractionAnswerRequest = DesktopAgentProviderRequest &
 
 export interface DesktopAgentInteractionAnswerResponse {
   accepted: true
+  admissionConflict?: { episodeId: string }
   canUndo?: boolean
   requestId: string
   sessionId: string
@@ -520,7 +541,6 @@ export interface DesktopAgentOptimizationPayload {
 }
 
 export type DesktopAgentOptimizationEpisodeState =
-  | 'awaiting_confirmation'
   | 'starting'
   | 'calibrating'
   | 'running'

@@ -73,7 +73,12 @@ const optimizationEpisodes = useOptimizationEpisodeStore()
 
 const flowRunControlBusy = computed(() => preparingRerun.value || isRunning.value)
 const parentRunGuarded = computed(() =>
-  Boolean(optimizationEpisodes.episodeForParent(workspaceSession.value.workspaceId)),
+  Boolean(
+    optimizationEpisodes.episodeForParent(
+      workspaceSession.value.workspaceId,
+      currentProject.value?.path,
+    ),
+  ),
 )
 const flowRunControlDisabled = computed(
   () => flowRunControlBusy.value || parentRunGuarded.value,
