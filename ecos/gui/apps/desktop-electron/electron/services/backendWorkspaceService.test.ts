@@ -1678,7 +1678,12 @@ describe('BackendWorkspaceService', () => {
             start_point: 'u0/Q',
             end_point: 'u1/D',
             slack_ns: -0.1,
-            stages: [],
+            stages: Array.from({ length: 675 }, (_, index) => ({
+              pin: `u${index}/A`,
+              cell: 'BUF_X1',
+              arrival_ns: index / 100,
+              incremental_delay_ns: 0.01,
+            })),
           },
         ],
       }),
@@ -1688,7 +1693,7 @@ describe('BackendWorkspaceService', () => {
         artifactId: 'timing-paths-sta',
         availability: 'available',
         kind: 'timing_paths',
-        name: 'timing_paths.json',
+        name: 'MAX_125/RCworst/timing_paths.json',
         reference: 'STA_ecc/feature/MAX_125/RCworst/timing_paths.json',
         sha256: 'b'.repeat(64),
         sizeBytes: validBytes.byteLength,
@@ -1723,10 +1728,13 @@ describe('BackendWorkspaceService', () => {
         timingPaths: {
           corner: 'MAX_125/RCworst',
           pathLimit: 10,
-          paths: [{ pathId: 'setup-1', slackNs: -0.1 }],
+          paths: [{ pathId: 'setup-1', slackNs: -0.1, stages: { length: 675 } }],
         },
       },
     })
+    expect(result.artifact.status === 'ready' && result.artifact.data).not.toHaveProperty(
+      'bytes',
+    )
 
     await expect(
       runWithWindowScope(58, () =>

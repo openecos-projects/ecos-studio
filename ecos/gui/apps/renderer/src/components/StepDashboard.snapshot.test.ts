@@ -111,8 +111,11 @@ describe('StepDashboard committed Snapshot rendering', () => {
       currentStep: ref('Place'),
       data: ref(snapshotStepDashboardData(detail())),
       error: ref(null),
+      loadTimingCorner: vi.fn(),
       loading: ref(false),
       refresh: vi.fn(),
+      timingDetailErrors: ref({}),
+      timingDetailLoading: ref([]),
     }
   })
 
@@ -167,8 +170,11 @@ describe('StepDashboard committed Snapshot rendering', () => {
       currentStep: ref('preFloorplan'),
       data: ref(snapshotStepDashboardData(preFloorplanDetail)),
       error: ref(null),
+      loadTimingCorner: vi.fn(),
       loading: ref(false),
       refresh: vi.fn(),
+      timingDetailErrors: ref({}),
+      timingDetailLoading: ref([]),
     }
 
     const wrapper = mount(StepDashboard, {

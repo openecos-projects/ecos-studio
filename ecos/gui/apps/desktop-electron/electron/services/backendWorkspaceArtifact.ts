@@ -81,7 +81,7 @@ function timingPaths(bytes: Uint8Array): WorkspaceTimingPathsDetail | null {
       !endPoint ||
       slackNs === null ||
       !Array.isArray(path?.stages) ||
-      path.stages.length > 512
+      path.stages.length > 2048
     ) {
       return null
     }
@@ -229,7 +229,6 @@ export async function readWorkspaceArtifact(
     status: 'ready',
     data: {
       artifactId: artifact.artifactId,
-      bytes: read.bytes,
       kind: artifact.kind,
       mimeType: artifact.name.toLowerCase().endsWith('.png')
         ? 'image/png'
@@ -237,6 +236,9 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
+      ...(['layout_image', 'congestion_image'].includes(artifact.kind)
+        ? { bytes: read.bytes }
+        : {}),
       ...(text === undefined ? {} : { text }),
       ...(parsedTimingPaths ? { timingPaths: parsedTimingPaths } : {}),
       ...(parsedTimingSummary ? { timingSummary: parsedTimingSummary } : {}),
