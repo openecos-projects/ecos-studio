@@ -78,7 +78,7 @@ def test_zero_shot_gate_requires_audited_positive_signal() -> None:
     no_knowledge = KnowledgeTreatment.LLM_NO_KNOWLEDGE
     raw_rag = KnowledgeTreatment.CURRENT_METRIC_ID_RAW_RAG
     zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
-    design_ids = tuple(f"d{index}" for index in range(8))
+    design_ids = tuple(f"d{index}" for index in range(6))
     traces = {
         treatment: tuple(
             _trace(
@@ -93,7 +93,7 @@ def test_zero_shot_gate_requires_audited_positive_signal() -> None:
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
-            for candidate_index in range(2)
+            for candidate_index in range(3)
         )
         for treatment in (item.treatment for item in ZERO_SHOT_GATE_TREATMENTS)
     }
@@ -149,7 +149,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
     unconditioned = KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT
     zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
     full = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT
-    design_ids = tuple(f"d{index}" for index in range(8))
+    design_ids = tuple(f"d{index}" for index in range(6))
     traces = {
         no_knowledge: tuple(
             _trace(
@@ -160,7 +160,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
-            for candidate_index in range(2)
+            for candidate_index in range(3)
         ),
         raw_rag: tuple(
             _trace(
@@ -171,7 +171,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
-            for candidate_index in range(2)
+            for candidate_index in range(3)
         ),
         unconditioned: tuple(
             _trace(
@@ -182,7 +182,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
-            for candidate_index in range(2)
+            for candidate_index in range(3)
         ),
         zero_shot: tuple(
             _trace(
@@ -193,7 +193,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
-            for candidate_index in range(2)
+            for candidate_index in range(3)
         ),
         full: tuple(
             _trace(
@@ -204,7 +204,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
                 candidate_index=candidate_index,
             )
             for design_id in design_ids
-            for candidate_index in range(2)
+            for candidate_index in range(3)
         ),
     }
     flags = {treatment: True for treatment in KnowledgeTreatment}
@@ -238,7 +238,7 @@ def test_treatment_report_applies_all_go_gates_at_the_design_level() -> None:
         "mean_paired_difference"
     ] == 2.0
     assert report["paired_utility"]["full_vs_raw_rag"]["win_tie_loss"] == {
-        "win": 8,
+        "win": 6,
         "tie": 0,
         "loss": 0,
     }
@@ -269,7 +269,7 @@ def test_treatment_report_does_not_assess_incomplete_evidence() -> None:
         traces,
         planning_calls_by_treatment={treatment: 1 for treatment in traces},
         config=EqualBudgetConfig(),
-        design_ids=tuple(f"d{index}" for index in range(8)),
+        design_ids=tuple(f"d{index}" for index in range(6)),
         rule_guided_utility_by_design=None,
         budget_complete_by_treatment=complete,
         terminal_artifacts_complete_by_treatment=complete,
@@ -287,7 +287,7 @@ def test_treatment_report_does_not_assess_incomplete_evidence() -> None:
     assert report["research_claim"] == "not_assessed"
     assert report["research_classification"] == "Research Claim Not Assessed"
     assert report["design_coverage"]["missing"] == [
-        f"d{index}" for index in range(1, 8)
+        f"d{index}" for index in range(1, 6)
     ]
 
 
@@ -297,7 +297,7 @@ def test_full_treatment_with_partial_case_coverage_remains_not_assessed() -> Non
     unconditioned = KnowledgeTreatment.UNCONDITIONED_SUPPORT_ZERO_SHOT
     zero_shot = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_ZERO_SHOT
     full = KnowledgeTreatment.STATE_CONDITIONED_DUAL_LAYER_FEW_SHOT
-    design_ids = tuple(f"d{index}" for index in range(8))
+    design_ids = tuple(f"d{index}" for index in range(6))
     traces = {
         no_knowledge: tuple(
             _trace(no_knowledge, design_id, 8.0, effective=False, candidate_index=index)
@@ -384,7 +384,7 @@ def test_treatment_report_rejects_reused_candidate_execution() -> None:
             traces,
             planning_calls_by_treatment={treatment: 1 for treatment in traces},
             config=EqualBudgetConfig(),
-            design_ids=tuple(f"d{index}" for index in range(8)),
+            design_ids=tuple(f"d{index}" for index in range(6)),
             rule_guided_utility_by_design=None,
             budget_complete_by_treatment=flags,
             terminal_artifacts_complete_by_treatment=flags,

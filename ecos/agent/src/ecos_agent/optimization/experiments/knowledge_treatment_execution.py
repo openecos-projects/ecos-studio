@@ -66,7 +66,7 @@ def load_experiment_manifest(
     path: Path, benchmark_root: Path, pdk_root: Path
 ) -> ExperimentManifest:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if payload.get("schema_version") != "ecos.frozen_design_manifest.v2":
+    if payload.get("schema_version") != "ecos.frozen_design_manifest.v3":
         raise ValueError("Phase 8 manifest schema is invalid")
     declared_hash = payload.get("manifest_sha256")
     expected_hash = canonical_sha256(

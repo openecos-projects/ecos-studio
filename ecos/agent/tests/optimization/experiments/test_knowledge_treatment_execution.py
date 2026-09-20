@@ -14,7 +14,7 @@ from tests.optimization.experiments.equal_budget_support import (
     _terminal_observation,
 )
 
-def test_phase8_runner_loads_hash_bound_eight_design_manifest(tmp_path) -> None:
+def test_phase8_runner_loads_hash_bound_six_design_manifest(tmp_path) -> None:
     runner = _load_experiment_execution()
     benchmark = tmp_path / "benchmarks"
     pdk = tmp_path / "pdk"
@@ -22,7 +22,7 @@ def test_phase8_runner_loads_hash_bound_eight_design_manifest(tmp_path) -> None:
     tech.parent.mkdir(parents=True)
     tech.write_text("VERSION 5.8 ;\n", encoding="utf-8")
     designs = []
-    design_ids = [f"d{i}" for i in range(8)]
+    design_ids = [f"d{i}" for i in range(6)]
     for design_id in design_ids:
         root = benchmark / design_id
         (root / "rtl").mkdir(parents=True)
@@ -47,7 +47,7 @@ def test_phase8_runner_loads_hash_bound_eight_design_manifest(tmp_path) -> None:
             }
         )
     payload = {
-        "schema_version": "ecos.frozen_design_manifest.v2",
+        "schema_version": "ecos.frozen_design_manifest.v3",
         "design_ids": design_ids,
         "designs": designs,
         "baseline": {
