@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, SystemTime};
 use chip_display::{FillPattern, LayerRole, LayerStack, LayerStyle};
 use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
 use chip_view_db::{
-    ChipViewDb, ChipViewMemoryStats, ConnectivityMetadata, DeltaStats, GridMetadata, NearestShape,
-    OwnerLocalInfo, ShapeGeometry, SnapshotStats, UnroutedNetGuide,
+    ChipViewDb, ChipViewMemoryStats, ConnectivityMetadata, DeltaStats, GridMetadata, LayerSummary,
+    NearestShape, OwnerLocalInfo, ShapeGeometry, SnapshotStats, UnroutedNetGuide,
 };
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, OwnerRef,
@@ -26,6 +26,9 @@ use crate::macro_staging::{
     clamp_rect_into, instance_names_intersecting, rect_fits_inside, MacroStagingState, MacroTarget,
 };
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
+
+mod gpu_tile_worker;
+use gpu_tile_worker::GpuTileWorker;
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
@@ -80,11 +83,35 @@ struct GpuCachedLabel {
     rect: Rect32,
     text: String,
     kind: ShapeLabelKind,
+    category: u8,
+    context_only: bool,
 }
 
 struct GpuTileData {
     instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
     labels: Vec<GpuCachedLabel>,
+    category_counts: [[usize; 17]; 2],
+    byte_size: usize,
+}
+
+impl GpuTileData {
+    fn estimated_bytes(&self) -> usize {
+        self.byte_size
+    }
+
+    fn visible_count(&self, visibility_mask: u32, show_context: bool) -> usize {
+        (0..=16)
+            .filter(|&category| category == 16 || visibility_mask & (1 << category) != 0)
+            .map(|category| {
+                self.category_counts[0][category]
+                    + if show_context {
+                        self.category_counts[1][category]
+                    } else {
+                        0
+                    }
+            })
+            .sum()
+    }
 }
 
 pub struct ChipViewerApp {
@@ -97,7 +124,7 @@ pub struct ChipViewerApp {
 struct LoadingViewer {
     manifest: PathBuf,
     started_at: Instant,
-    receiver: Receiver<Result<ChipViewDb, String>>,
+    receiver: Receiver<Result<PreparedViewer, String>>,
     edit_enabled: bool,
     initial_session_dirty: bool,
     edit_command_dir: Option<PathBuf>,
@@ -112,10 +139,37 @@ struct LoadingViewer {
     pub render_mode: crate::RenderMode,
 }
 
+struct PreparedViewer {
+    db: std::sync::Arc<ChipViewDb>,
+    stats: SnapshotStats,
+    grid_bounds: Option<Rect32>,
+    drawing_category_counts: BTreeMap<DrawingCategory, usize>,
+    snapshot_signature: SnapshotFileSignature,
+    layer_catalog: Vec<LayerSummary>,
+}
+
+impl From<ChipViewDb> for PreparedViewer {
+    fn from(db: ChipViewDb) -> Self {
+        let stats = db.stats();
+        let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
+        let drawing_category_counts = drawing_category_counts(&db);
+        let snapshot_signature = snapshot_signature_for_db(&db);
+        let layer_catalog = db.layer_catalog();
+        Self {
+            db: std::sync::Arc::new(db),
+            stats,
+            grid_bounds,
+            drawing_category_counts,
+            snapshot_signature,
+            layer_catalog,
+        }
+    }
+}
+
 struct LoadedViewer {
     color_theme: chip_display::ColorTheme,
     start_time: Instant,
-    db: ChipViewDb,
+    db: std::sync::Arc<ChipViewDb>,
     stats: SnapshotStats,
     grid_bounds: Option<Rect32>,
     drawing_category_counts: BTreeMap<DrawingCategory, usize>,
@@ -185,6 +239,7 @@ struct LoadedViewer {
     gpu_frame_counter: u64,
     gpu_tile_instances:
         std::collections::HashMap<crate::canvas_gpu::GpuBufferKey, std::sync::Arc<GpuTileData>>,
+    gpu_tile_worker: GpuTileWorker,
     gpu_3d_instances_cache: Option<(
         u64,
         Rect32,
@@ -193,8 +248,6 @@ struct LoadedViewer {
     last_3d_query_rect: Option<Rect32>,
     perf_3d: Perf3dState,
     label_collector: ShapeLabelCollector,
-    frame_valid_shapes: Vec<(chip_view_db::ShapeGeometry, chip_display::LayerStyle)>,
-    frame_valid_labels: Vec<GpuCachedLabel>,
     status_line_buffer: String,
     shortcuts_overlay_visible: bool,
     loading_3d_start: Option<std::time::Instant>,
@@ -898,6 +951,7 @@ impl Default for ObjectVisibility {
     }
 }
 
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum DrawingCategory {
     InstanceMacro,
@@ -1033,6 +1087,12 @@ impl DrawingCategory {
 }
 
 impl ObjectVisibility {
+    fn gpu_visibility_mask(&self) -> u32 {
+        DrawingCategory::ALL.into_iter().fold(0, |mask, category| {
+            mask | (u32::from(self.is_category_visible(category)) << (category as u8))
+        })
+    }
+
     fn includes_owner_type(self, owner_type: u8) -> bool {
         if OwnerType::from_raw(owner_type) == Some(OwnerType::NetWireSegment) {
             return self.net_signal || self.net_clock || self.net_other;
@@ -1450,7 +1510,9 @@ impl ChipViewerApp {
         let (sender, receiver) = mpsc::channel();
         let load_manifest = manifest.clone();
         thread::spawn(move || {
-            let result = ChipViewDb::open(&load_manifest).map_err(|err| err.to_string());
+            let result = ChipViewDb::open(&load_manifest)
+                .map(PreparedViewer::from)
+                .map_err(|err| err.to_string());
             let _ = sender.send(result);
         });
         Self {
@@ -2097,7 +2159,7 @@ fn json_string_vec(value: Option<&serde_json::Value>) -> Vec<String> {
 impl LoadedViewer {
     fn new(
         color_theme: chip_display::ColorTheme,
-        db: ChipViewDb,
+        db: impl Into<PreparedViewer>,
         edit_enabled: bool,
         initial_session_dirty: bool,
         edit_command_dir: Option<PathBuf>,
@@ -2111,11 +2173,16 @@ impl LoadedViewer {
         target_format: wgpu::TextureFormat,
         render_mode: crate::RenderMode,
     ) -> Self {
-        let stats = db.stats();
-        let grid_bounds = grid_reference_bounds(&db).or(stats.bbox);
-        let snapshot_signature = snapshot_signature_for_db(&db);
-        let drawing_category_counts = drawing_category_counts(&db);
-        let layers = layer_ui_states(&db, &BTreeMap::new(), color_theme);
+        let PreparedViewer {
+            db,
+            stats,
+            grid_bounds,
+            drawing_category_counts,
+            snapshot_signature,
+            layer_catalog,
+        } = db.into();
+        let gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&db));
+        let layers = layer_ui_states_from_summaries(layer_catalog, &BTreeMap::new(), color_theme);
         let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
         let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
@@ -2232,13 +2299,12 @@ impl LoadedViewer {
             render_mode,
             gpu_canvas,
             gpu_tile_instances: std::collections::HashMap::new(),
+            gpu_tile_worker,
             gpu_3d_instances_cache: None,
             last_3d_query_rect: None,
             perf_3d: Perf3dState::default(),
             gpu_frame_counter: 0,
             label_collector: ShapeLabelCollector::default(),
-            frame_valid_shapes: Vec::new(),
-            frame_valid_labels: Vec::new(),
             status_line_buffer: String::with_capacity(128),
             shortcuts_overlay_visible: false,
             loading_3d_start: None,
@@ -3586,6 +3652,9 @@ impl LoadedViewer {
             screen_size_px: [canvas.width(), canvas.height()],
             is_interacting: 0.0,
             global_alpha: heatmap.opacity,
+            visibility_mask: u32::MAX,
+            show_context: 1,
+            reserved: [0; 2],
         };
 
         // Dedicated cache key so the instance buffer is uploaded once per heatmap edit.
@@ -3918,11 +3987,23 @@ impl LoadedViewer {
             if self.is_gpu_active() {
                 let gpu_start = Instant::now();
 
+                self.gpu_tile_worker.set_view_state(
+                    self.geometry_epoch,
+                    self.visibility_rules_cache.layer_visibility_hash,
+                );
+                for (key, data) in self.gpu_tile_worker.poll() {
+                    if key.geometry_epoch == self.geometry_epoch
+                        && key.layer_visibility_hash
+                            == self.visibility_rules_cache.layer_visibility_hash
+                    {
+                        self.gpu_tile_instances.insert(key, data);
+                    }
+                }
+
                 self.gpu_tile_instances.retain(|key, _| {
                     key.geometry_epoch == self.geometry_epoch
                         && key.layer_visibility_hash
                             == self.visibility_rules_cache.layer_visibility_hash
-                        && key.object_visibility_bits == self.object_visibility.bits()
                 });
 
                 let gpu_scale = world_to_screen_scale(world, canvas, self.zoom);
@@ -3943,14 +4024,25 @@ impl LoadedViewer {
                     screen_size_px: [canvas.width(), canvas.height()],
                     is_interacting: if is_interacting { 1.0 } else { 0.0 },
                     global_alpha: 1.0,
+                    visibility_mask: self.object_visibility.gpu_visibility_mask(),
+                    show_context: u32::from(self.zoom > 1.25),
+                    reserved: [0; 2],
                 };
 
                 let tiles = crate::canvas_gpu::tile_coords_for_bbox(
                     viewport,
                     crate::canvas_gpu::GPU_TILE_SIZE_DBU,
                 );
+                let visible_tiles: std::collections::HashSet<_> = tiles.iter().copied().collect();
 
-                if self.gpu_tile_instances.len() > crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS {
+                let cached_bytes = self
+                    .gpu_tile_instances
+                    .values()
+                    .map(|tile| tile.estimated_bytes())
+                    .sum::<usize>();
+                if self.gpu_tile_instances.len() > crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS
+                    || cached_bytes > crate::canvas_gpu::MAX_CACHED_TILE_BYTES
+                {
                     let vx = (viewport.lx as i64 + viewport.hx as i64) / 2;
                     let vy = (viewport.ly as i64 + viewport.hy as i64) / 2;
                     let ts = crate::canvas_gpu::GPU_TILE_SIZE_DBU as i64;
@@ -3961,14 +4053,25 @@ impl LoadedViewer {
                         let ty = k.tile_y as i64 * ts + ts / 2;
                         let dx = tx - vx;
                         let dy = ty - vy;
-                        dx * dx + dy * dy
+                        (
+                            !visible_tiles.contains(&(k.tile_x, k.tile_y)),
+                            dx * dx + dy * dy,
+                        )
                     });
 
-                    // Evict down to 96 (3/4 of max) to avoid thrashing every frame
-                    let retain_count = crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS * 3 / 4;
-                    if cached_keys.len() > retain_count {
-                        for key in &cached_keys[retain_count..] {
+                    let mut retained_bytes = 0;
+                    for (index, key) in cached_keys.iter().enumerate() {
+                        let size = self.gpu_tile_instances[key].estimated_bytes();
+                        if visible_tiles.contains(&(key.tile_x, key.tile_y)) {
+                            retained_bytes += size;
+                        } else if index >= crate::canvas_gpu::MAX_CACHED_TILE_BUFFERS * 3 / 4
+                            || (index > 0
+                                && retained_bytes + size
+                                    > crate::canvas_gpu::MAX_CACHED_TILE_BYTES * 3 / 4)
+                        {
                             self.gpu_tile_instances.remove(key);
+                        } else {
+                            retained_bytes += size;
                         }
                     }
                 }
@@ -3984,109 +4087,35 @@ impl LoadedViewer {
                         geometry_epoch: self.geometry_epoch,
                         tile_x: tx,
                         tile_y: ty,
-                        zoom_tier: crate::canvas_gpu::GpuBufferKey::zoom_tier(self.zoom),
+                        zoom_tier: 0,
                         layer_visibility_hash: self.visibility_rules_cache.layer_visibility_hash,
-                        object_visibility_bits: self.object_visibility.bits(),
+                        object_visibility_bits: 0,
                     };
 
-                    let tile_instances = if let Some(cached) =
-                        self.gpu_tile_instances.get(&buffer_key)
-                    {
-                        std::sync::Arc::clone(cached)
-                    } else {
-                        let query_start_tile = collect_stats.then(Instant::now);
-                        let tile_visible_ids = self.render_cache.visible_shape_ids_for_layers(
-                            &self.db,
-                            &query_layer_ids,
+                    let Some(tile_instances) = self.gpu_tile_instances.get(&buffer_key) else {
+                        if let Err(err) = self.gpu_tile_worker.request(
+                            buffer_key,
                             tile_bbox,
-                        );
-                        if let Some(start) = query_start_tile {
-                            query_duration += start.elapsed();
+                            &query_layer_ids,
+                            layer_index,
+                        ) {
+                            log::error!("{err}");
+                            if let Some(gpu_canvas) = self.gpu_canvas.as_mut() {
+                                gpu_canvas.failed = true;
+                            }
                         }
-
-                        // Reuse persistent scratch buffers — no heap allocation per tile.
-                        self.frame_valid_shapes.clear();
-                        self.frame_valid_labels.clear();
-                        for &shape_id in &tile_visible_ids {
-                            let filter_start = collect_stats.then(Instant::now);
-                            let Some(shape) = self.db.find_shape(shape_id) else {
-                                if let Some(start) = filter_start {
-                                    filter_duration += start.elapsed();
-                                }
-                                continue;
-                            };
-                            if !is_renderable_shape(shape) {
-                                if let Some(start) = filter_start {
-                                    filter_duration += start.elapsed();
-                                }
-                                continue;
-                            }
-                            let owner = self.db.owner_for_shape(shape);
-                            let owner_type =
-                                owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
-                            if !zoom_rules.is_drawn_at_zoom(owner_type, self.zoom) {
-                                if let Some(start) = filter_start {
-                                    filter_duration += start.elapsed();
-                                }
-                                continue;
-                            }
-                            let owner_category = owner.and_then(|owner| {
-                                self.owner_category_cache
-                                    .get(self.geometry_epoch, &self.db, owner)
-                            });
-                            if !shape_is_visible_fast(
-                                shape,
-                                owner_type,
-                                owner_category,
-                                &layer_index,
-                                &self.object_visibility,
-                            ) {
-                                if let Some(start) = filter_start {
-                                    filter_duration += start.elapsed();
-                                }
-                                continue;
-                            }
-                            let Some(style) = visible_style_for_shape_fast(
-                                shape,
-                                owner,
-                                owner_type,
-                                &layer_index,
-                            ) else {
-                                if let Some(start) = filter_start {
-                                    filter_duration += start.elapsed();
-                                }
-                                continue;
-                            };
-                            let geometry = self.db.shape_geometry(shape);
-                            if let Some(start) = filter_start {
-                                filter_duration += start.elapsed();
-                            }
-
-                            if let Some(label_info) = shape_label_info(
-                                &geometry,
-                                owner,
-                                owner.and_then(|owner| self.db.owner_name(owner)),
-                            ) {
-                                self.frame_valid_labels.push(label_info);
-                            }
-
-                            self.frame_valid_shapes.push((geometry, style));
-                        }
-
-                        let gpu_instances = crate::canvas_gpu::build_gpu_instances(
-                            self.frame_valid_shapes.drain(..),
-                        );
-                        let built = std::sync::Arc::new(GpuTileData {
-                            instances: std::sync::Arc::new(gpu_instances),
-                            labels: std::mem::take(&mut self.frame_valid_labels),
-                        });
-                        self.gpu_tile_instances
-                            .insert(buffer_key, std::sync::Arc::clone(&built));
-                        built
+                        ui.ctx().request_repaint_after(Duration::from_millis(16));
+                        continue;
                     };
 
                     if !is_interacting {
                         for label in &tile_instances.labels {
+                            if (label.category < 16
+                                && uniform.visibility_mask & (1 << label.category) == 0)
+                                || (label.context_only && uniform.show_context == 0)
+                            {
+                                continue;
+                            }
                             let screen_rect =
                                 shape_screen_rect(label.rect, world, canvas, self.zoom, self.pan);
                             let visible_rect = screen_rect.intersect(canvas);
@@ -4106,7 +4135,8 @@ impl LoadedViewer {
                         }
                     }
 
-                    drawn += tile_instances.instances.len();
+                    drawn += tile_instances
+                        .visible_count(uniform.visibility_mask, uniform.show_context != 0);
 
                     let target_format = self
                         .gpu_canvas
@@ -7256,7 +7286,8 @@ impl LoadedViewer {
         self.stats = stats;
         self.drawing_category_counts = drawing_category_counts(&db);
         self.layers = layer_ui_states(&db, &visibility, self.color_theme);
-        self.db = db;
+        self.db = std::sync::Arc::new(db);
+        self.gpu_tile_worker = GpuTileWorker::new(std::sync::Arc::clone(&self.db));
         if let Some(staging) = self.macro_staging.as_mut() {
             staging.reconcile(&self.db);
         }
@@ -8565,7 +8596,15 @@ fn layer_ui_states(
     visibility: &BTreeMap<LayerId, bool>,
     color_theme: chip_display::ColorTheme,
 ) -> Vec<LayerUiState> {
-    db.layer_catalog()
+    layer_ui_states_from_summaries(db.layer_catalog(), visibility, color_theme)
+}
+
+fn layer_ui_states_from_summaries(
+    summaries: Vec<LayerSummary>,
+    visibility: &BTreeMap<LayerId, bool>,
+    color_theme: chip_display::ColorTheme,
+) -> Vec<LayerUiState> {
+    summaries
         .into_iter()
         .enumerate()
         .map(|(index, summary)| {
@@ -8986,6 +9025,8 @@ fn shape_label_info(
         rect: *rect,
         text,
         kind,
+        category: 16,
+        context_only: false,
     })
 }
 
@@ -11735,6 +11776,87 @@ mod tests {
     use super::*;
     use crate::instance_visibility::is_filler_instance;
     use std::io::Write;
+
+    #[test]
+    fn gpu_tile_counts_follow_visibility_without_rebuilding() {
+        let mut visibility = ObjectVisibility::default();
+        visibility.set_all_visible(true);
+        let mut counts = [[0; 17]; 2];
+        counts[0][DrawingCategory::NetSignal as usize] = 2;
+        counts[0][DrawingCategory::InstanceStdCell as usize] = 3;
+        counts[1][DrawingCategory::NetSignal as usize] = 4;
+        counts[0][16] = 1;
+        let tile = GpuTileData {
+            instances: std::sync::Arc::new(Vec::new()),
+            labels: Vec::new(),
+            category_counts: counts,
+            byte_size: 0,
+        };
+
+        assert_eq!(
+            tile.visible_count(visibility.gpu_visibility_mask(), true),
+            10
+        );
+        visibility.set_category_visible(DrawingCategory::NetSignal, false);
+        assert_eq!(
+            tile.visible_count(visibility.gpu_visibility_mask(), true),
+            4
+        );
+        assert_eq!(
+            tile.visible_count(visibility.gpu_visibility_mask(), false),
+            4
+        );
+        visibility.set_category_visible(DrawingCategory::NetSignal, true);
+        assert_eq!(
+            tile.visible_count(visibility.gpu_visibility_mask(), false),
+            6
+        );
+    }
+
+    #[test]
+    fn gpu_tile_worker_returns_current_geometry_without_blocking_ui() {
+        let dir = temp_snapshot_dir("gpu-tile-worker");
+        write_empty_snapshot(&dir, false);
+        let db = std::sync::Arc::new(ChipViewDb::open(dir.join("geometry.manifest")).unwrap());
+        let mut worker = GpuTileWorker::new(db);
+        let key = crate::canvas_gpu::GpuBufferKey {
+            geometry_epoch: 1,
+            tile_x: 0,
+            tile_y: 0,
+            zoom_tier: 0,
+            layer_visibility_hash: 3,
+            object_visibility_bits: 0,
+        };
+        worker.set_view_state(1, 3);
+        worker
+            .request(
+                key,
+                Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 600_000,
+                    hy: 600_000,
+                },
+                &[],
+                &LayerRenderIndex::default(),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let result = loop {
+            if let Some(result) = worker.poll().pop() {
+                break result;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "tile worker did not return a result"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(result.0, key);
+        assert!(result.1.instances.is_empty());
+        drop(worker);
+        let _ = fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn world_to_screen_rect_flips_y_and_fits_canvas() {
