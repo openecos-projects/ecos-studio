@@ -163,10 +163,17 @@ export function useHomeSnapshots() {
                 result.artifact.issues[0]?.code ?? 'ARTIFACT_READ_FAILED',
               )
             }
-            if (result.artifact.data.artifactId !== artifact.artifactId) return null
+            if (
+              result.artifact.data.artifactId !== artifact.artifactId ||
+              !result.artifact.data.bytes
+            ) {
+              return null
+            }
             const content = result.artifact.data
+            const bytes = content.bytes
+            if (!bytes) return null
             url = URL.createObjectURL(
-              new Blob([content.bytes.slice()], { type: content.mimeType }),
+              new Blob([bytes.slice()], { type: content.mimeType }),
             )
             if (version !== requestVersion) {
               revoke(url)

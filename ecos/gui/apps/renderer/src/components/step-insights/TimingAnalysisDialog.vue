@@ -15,8 +15,11 @@
       :overview="overview"
       :paths-by-corner="pathsByCorner ?? null"
       :run-info="runInfo ?? []"
-      :initial-corner="initialCorner ?? null"
+      :selected-corner="selectedCorner ?? null"
+      :detail-loading="detailLoading"
+      :detail-error="detailError ?? null"
       :empty-hint="emptyHint"
+      @select-corner="emit('select-corner', $event)"
     />
   </Dialog>
 </template>
@@ -32,12 +35,15 @@ defineProps<{
   overview: StaOverviewModel | null
   pathsByCorner?: Array<{ corner: string; paths: StaCriticalPath[] }> | null
   runInfo?: Array<{ id: string; label: string; value: string }>
-  initialCorner?: string | null
+  selectedCorner?: string | null
+  detailLoading?: boolean
+  detailError?: string | null
   emptyHint?: string
 }>()
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  'select-corner': [corner: string | null]
 }>()
 
 function onVisibleUpdate(value: boolean): void {

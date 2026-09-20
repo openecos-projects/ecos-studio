@@ -1107,7 +1107,11 @@
     :overview="data?.timingAnalysis?.overview ?? null"
     :paths-by-corner="data?.timingAnalysis?.pathsByCorner ?? null"
     :run-info="data?.timingAnalysis?.runInfo ?? []"
+    :selected-corner="selectedTimingCorner"
+    :detail-loading="selectedTimingDetailLoading"
+    :detail-error="selectedTimingDetailError"
     empty-hint="No timing summary is available for this step."
+    @select-corner="selectTimingCorner"
     @update:visible="showTimingAnalysis = $event"
   />
 
@@ -1204,7 +1208,16 @@ import {
   type StepDashboardStaCorner,
 } from './step-dashboard/stepDashboardData'
 
-const { currentStep, data, error, loading, refresh } = useStepDashboardData()
+const {
+  currentStep,
+  data,
+  error,
+  loadTimingCorner,
+  loading,
+  refresh,
+  timingDetailErrors,
+  timingDetailLoading,
+} = useStepDashboardData()
 const { openReport, reportDialog } = useStepReportDialog(
   currentStep,
   computed(() => data.value?.step),
@@ -1223,6 +1236,7 @@ const dataChartIndex = ref(0)
 const showChecklistDetails = ref(false)
 const showQorDetails = ref(false)
 const showTimingAnalysis = ref(false)
+const selectedTimingCorner = ref<string | null>(null)
 const showStaCornerDetails = ref(false)
 const showDataSummary = ref(false)
 const showCongestionDialog = ref(false)
@@ -1345,6 +1359,16 @@ const timingDialogTitle = computed(() => {
   const stepName = data.value?.step ?? currentStep.value
   return `Timing Analysis · ${stepName}`
 })
+const selectedTimingDetailLoading = computed(
+  () =>
+    !!selectedTimingCorner.value &&
+    timingDetailLoading.value.includes(selectedTimingCorner.value),
+)
+const selectedTimingDetailError = computed(() =>
+  selectedTimingCorner.value
+    ? (timingDetailErrors.value[selectedTimingCorner.value] ?? null)
+    : null,
+)
 const staCornerDialogTitle = computed(() => {
   const stepName = data.value?.step ?? currentStep.value
   return `STA Corners · ${stepName}`
@@ -1420,6 +1444,13 @@ function staCornerDetailSubtitle(corner: StepDashboardStaCorner): string {
 
 function openTimingAnalysis(): void {
   showTimingAnalysis.value = true
+  const overview = data.value?.timingAnalysis?.overview
+  selectTimingCorner(overview?.worstSetup?.corner ?? overview?.corners[0]?.corner ?? null)
+}
+
+function selectTimingCorner(corner: string | null): void {
+  selectedTimingCorner.value = corner
+  if (corner) void loadTimingCorner(corner)
 }
 
 function metricTone(metric: StepDashboardMetric): string {
