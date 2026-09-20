@@ -469,3 +469,62 @@ def test_adapter_set_event_callback_forwards_to_transport() -> None:
 
     adapter.set_event_callback(None)
     assert rpc.event_callback is None
+
+
+def _rpc_client_with_fake_transport(monkeypatch, tmp_path: Path) -> EccContentLengthRpcClient:
+    executable = tmp_path / "ecc"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    client = EccContentLengthRpcClient(executable)
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda method, params, *, timeout_seconds: {
+            "workspaceId": "workspace-1",
+            "directory": str(tmp_path.resolve()),
+        },
+    )
+    return client
+
+
+def test_open_workspace_materializes_named_filelist_for_reload(
+    monkeypatch, tmp_path: Path
+) -> None:
+    origin = tmp_path / "origin"
+    (origin / "rtl").mkdir(parents=True)
+    (origin / "filelist.f").write_text("rtl/top.v\n", encoding="utf-8")
+    client = _rpc_client_with_fake_transport(monkeypatch, tmp_path)
+
+    client.open_workspace(tmp_path)
+
+    # ECC load_workspace rehydrates synthesis inputs only from the
+    # extensionless origin/filelist; without it a reopened workspace silently
+    # falls back to a single *.v and multi-file designs lose their top module.
+    assert (origin / "filelist").read_text(encoding="utf-8") == "rtl/top.v\n"
+
+
+def test_open_workspace_keeps_existing_extensionless_filelist(
+    monkeypatch, tmp_path: Path
+) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir(parents=True)
+    (origin / "filelist").write_text("rtl/canonical.v\n", encoding="utf-8")
+    (origin / "filelist.f").write_text("rtl/other.v\n", encoding="utf-8")
+    client = _rpc_client_with_fake_transport(monkeypatch, tmp_path)
+
+    client.open_workspace(tmp_path)
+
+    assert (origin / "filelist").read_text(encoding="utf-8") == "rtl/canonical.v\n"
+
+
+def test_open_workspace_without_named_filelist_touches_nothing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir(parents=True)
+    (origin / "top.v").write_text("module top();\nendmodule\n", encoding="utf-8")
+    client = _rpc_client_with_fake_transport(monkeypatch, tmp_path)
+
+    client.open_workspace(tmp_path)
+
+    assert not (origin / "filelist").exists()

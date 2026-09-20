@@ -7,6 +7,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -34,6 +35,27 @@ _TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 _FORWARDED_STEP_EVENTS = frozenset(
     {"step.started", "step.completed", "operation.rerun_prepared"}
 )
+
+
+def _ensure_reloadable_filelist(workspace: Path) -> None:
+    """Materialize ``origin/filelist`` for workspaces prepared from a named filelist.
+
+    Workspace prepare persists the CLI filelist under its original name
+    (``origin/filelist.f``), but ECC's workspace reload rehydrates synthesis
+    inputs only from the extensionless ``origin/filelist``. Reopening such a
+    workspace silently falls back to a single ``*.v`` from origin, which breaks
+    multi-file designs (top module not found at synthesis). Every agent-side
+    rerun of an existing workspace funnels through ``open_workspace``, so the
+    compatibility copy is made once here, at the reload boundary.
+    """
+    origin = workspace / "origin"
+    canonical = origin / "filelist"
+    if not origin.is_dir() or canonical.exists():
+        return
+    named = origin / "filelist.f"
+    if not named.is_file():
+        return
+    shutil.copy2(named, canonical)
 
 
 class EccContentLengthRpcClient:
@@ -112,6 +134,7 @@ class EccContentLengthRpcClient:
         """Open the parent workspace and return the runtime session id."""
         if not directory.is_absolute() or not directory.is_dir():
             raise OptimizationEccAdapterError("workspace directory is unavailable")
+        _ensure_reloadable_filelist(directory)
         result = self._request(
             "workspace.open",
             {"directory": str(directory.resolve())},
