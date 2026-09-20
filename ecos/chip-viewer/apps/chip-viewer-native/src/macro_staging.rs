@@ -3,9 +3,11 @@
 //! After preFloorplan every instance is unplaced, and the geometry snapshot
 //! skips unplaced instances, so the Electron bridge publishes a macro staging
 //! manifest (built from the step DEF and master metadata). This module owns
-//! the viewer-side state for those macros: the staging column left of the
-//! die, multi-selection, placement constraints, and reconciliation against
-//! snapshots that already contain placed macros.
+//! the viewer-side state for those macros: the staging row extending left
+//! from the die origin, an aggregate placeholder for unplaced standard cells
+//! parked at the die bottom-right corner, multi-selection, placement
+//! constraints, and reconciliation against snapshots that already contain
+//! placed macros.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -20,20 +22,35 @@ use crate::macro_orient::{MacroOrientation, MasterSymmetry};
 /// Layout geometry lives on layer 0; see `LAYOUT_GEOMETRY_LAYER` in app.rs.
 const LAYOUT_GEOMETRY_LAYER: u16 = 0;
 
-/// Fraction of the die width kept as a gap between die and staging column.
-const STAGING_COLUMN_MARGIN_FRACTION: i64 = 10;
-/// Gap between staged macro slots, as a fraction of the tallest macro.
+/// Gap between staged macro slots, as a fraction of the largest macro.
 const STAGING_SLOT_GAP_FRACTION: i64 = 10;
+/// Fraction of the die width kept as a margin around the stdcell blob.
+const STDCELL_BLOB_MARGIN_FRACTION: i64 = 100;
+/// Maximum fraction of the die width/height the stdcell blob may occupy.
+const STDCELL_BLOB_MAX_FRACTION: i64 = 5;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MacroStagingManifestFile {
     #[serde(default)]
     schema: u32,
     #[serde(default)]
     macros: Vec<MacroStagingEntryFile>,
+    #[serde(default)]
+    stdcell_staging: Option<StdcellStagingFile>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StdcellStagingFile {
+    #[serde(default)]
+    count: u64,
+    #[serde(default)]
+    area_dbu: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MacroStagingEntryFile {
     name: String,
     #[serde(default)]
@@ -49,7 +66,7 @@ struct MacroStagingEntryFile {
 }
 
 /// A selected or manipulated macro: either a placed snapshot shape or an
-/// unplaced macro in the staging column.
+/// unplaced macro in the staging row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum MacroTarget {
     Placed(u64),
@@ -86,6 +103,17 @@ pub(crate) struct MacroStagingState {
     pub core_rect: Option<Rect32>,
     pub queue: MacroOpQueue,
     pub message: Option<String>,
+    /// Aggregate placeholder for unplaced standard cells at the die
+    /// bottom-right corner; purely visual, never selectable or saved.
+    pub stdcell_blob: Option<StdcellBlob>,
+}
+
+/// Visual placeholder covering the unplaced standard-cell population.
+pub(crate) struct StdcellBlob {
+    pub count: u64,
+    pub area_dbu: i64,
+    /// Blob rectangle in world (DBU) coordinates.
+    pub rect: Rect32,
 }
 
 impl MacroStagingState {
@@ -106,6 +134,7 @@ impl MacroStagingState {
             core_rect: resolve_core_rect(db),
             queue: MacroOpQueue::default(),
             message: None,
+            stdcell_blob: None,
         };
         for entry in manifest.macros {
             let orient = entry
@@ -126,21 +155,24 @@ impl MacroStagingState {
                 rect: Rect32::default(),
             });
         }
-        state.layout_staged(db);
+        if let Some(die) = die_rect(db) {
+            state.layout_staged(die);
+            if let Some(stdcell) = manifest.stdcell_staging {
+                state.layout_stdcell_blob(die, stdcell.count, stdcell.area_dbu);
+            }
+        }
         state.reconcile(db);
         Some(state)
     }
 
-    /// Assigns each unplaced macro a slot in the column directly left of the
-    /// die origin, ordered by manifest order, top to bottom.
-    pub(crate) fn layout_staged(&mut self, db: &ChipViewDb) {
+    /// Assigns each unplaced macro a slot in the row extending left from the
+    /// die origin, ordered by manifest order: the first macro's right edge
+    /// sits at the die lower-left corner x and every bottom aligns with the
+    /// die bottom y.
+    pub(crate) fn layout_staged(&mut self, die: Rect32) {
         if self.staged.is_empty() {
             return;
         }
-        let Some(die) = die_rect(db) else {
-            return;
-        };
-        let margin = ((die.hx as i64 - die.lx as i64) / STAGING_COLUMN_MARGIN_FRACTION).max(1);
         let gap = self
             .staged
             .iter()
@@ -148,28 +180,58 @@ impl MacroStagingState {
             .max()
             .unwrap_or(1)
             / STAGING_SLOT_GAP_FRACTION;
-        let column_right = die.lx.saturating_sub(margin as i32);
-        let mut slot_top = die.hy;
+        let mut slot_right = die.lx;
         for macro_entry in &mut self.staged {
             let (width, height) = macro_entry
                 .orient
                 .bbox_size(macro_entry.width, macro_entry.height);
-            let bottom = slot_top.saturating_sub(height as i32);
+            let left = slot_right.saturating_sub(width as i32);
             macro_entry.rect = Rect32 {
-                lx: column_right.saturating_sub(width as i32),
-                ly: bottom,
-                hx: column_right,
-                hy: slot_top,
+                lx: left,
+                ly: die.ly,
+                hx: slot_right,
+                hy: die.ly.saturating_add(height as i32),
             };
-            slot_top = bottom.saturating_sub(gap as i32);
+            slot_right = left.saturating_sub(gap as i32);
         }
     }
 
-    /// Staging column bounds that the canvas world rect must cover.
+    /// Places the unplaced-stdcell placeholder blob inside the die at its
+    /// bottom-right corner. The blob never exceeds a small fraction of the
+    /// die so it stays a visual hint rather than a placement obstacle.
+    fn layout_stdcell_blob(&mut self, die: Rect32, count: u64, area_dbu: i64) {
+        if count == 0 {
+            return;
+        }
+        let die_width = (die.hx as i64 - die.lx as i64).max(1);
+        let die_height = (die.hy as i64 - die.ly as i64).max(1);
+        let margin = (die_width / STDCELL_BLOB_MARGIN_FRACTION).max(1);
+        let max_side = (die_width.min(die_height) / STDCELL_BLOB_MAX_FRACTION).max(1);
+        let area_side = (area_dbu.max(1) as f64).sqrt().ceil() as i64;
+        let side = area_side.clamp(1, max_side);
+        let hx = die.hx as i64 - margin;
+        let ly = die.ly as i64 + margin;
+        self.stdcell_blob = Some(StdcellBlob {
+            count,
+            area_dbu,
+            rect: Rect32 {
+                lx: (hx - side) as i32,
+                ly: ly as i32,
+                hx: hx as i32,
+                hy: (ly + side) as i32,
+            },
+        });
+    }
+
+    /// Staging bounds that the canvas world rect must cover (staging row and
+    /// stdcell blob).
     pub(crate) fn expanded_world(&self, base: Rect32) -> Rect32 {
         let mut world = base;
         for macro_entry in &self.staged {
             world.include(macro_entry.rect);
+        }
+        if let Some(blob) = &self.stdcell_blob {
+            world.include(blob.rect);
         }
         world
     }
@@ -359,6 +421,47 @@ pub(crate) fn rect_contains(rect: Rect32, point: Point32) -> bool {
     point.x >= rect.lx && point.x <= rect.hx && point.y >= rect.ly && point.y <= rect.hy
 }
 
+/// Paints the unplaced-stdcell placeholder blob in screen space. The striped
+/// fill marks it as aggregate staging geometry rather than real shapes.
+pub(crate) fn paint_stdcell_blob(painter: &egui::Painter, blob: &StdcellBlob, screen: egui::Rect) {
+    if !screen.is_positive() {
+        return;
+    }
+    let base = egui::Color32::from_rgb(150, 150, 160);
+    painter.rect_filled(
+        screen,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(150, 150, 160, 40),
+    );
+    let clipped = painter.with_clip_rect(screen);
+    let step = 14.0;
+    let mut x = screen.left();
+    while x < screen.right() {
+        clipped.line_segment(
+            [egui::pos2(x, screen.top()), egui::pos2(x, screen.bottom())],
+            egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgba_unmultiplied(150, 150, 160, 70),
+            ),
+        );
+        x += step;
+    }
+    painter.rect_stroke(
+        screen,
+        0.0,
+        egui::Stroke::new(1.0, base),
+        egui::StrokeKind::Inside,
+    );
+    let label = format!("{} unplaced stdcells", blob.count);
+    painter.text(
+        screen.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        base,
+    );
+}
+
 /// Strict interior overlap; macros sharing only an edge do not conflict.
 pub(crate) fn rects_overlap(a: Rect32, b: Rect32) -> bool {
     a.lx < b.hx && b.lx < a.hx && a.ly < b.hy && b.ly < a.hy
@@ -430,6 +533,47 @@ mod tests {
     }
 
     #[test]
+    fn manifest_file_deserializes_camel_case_fields() {
+        let manifest: MacroStagingManifestFile = serde_json::from_str(
+            r#"{
+                "schema": 1,
+                "dbuPerMicron": 1000,
+                "dieArea": { "lx": 0, "ly": 0, "hx": 52000, "hy": 53000 },
+                "macros": [
+                    {
+                        "name": "u_rom01",
+                        "master": "ROM_16x8",
+                        "widthDbu": 12000,
+                        "heightDbu": 8000,
+                        "orient": "R0",
+                        "placed": false
+                    }
+                ],
+                "stdcellStaging": { "count": 42, "areaDbu": 900 }
+            }"#,
+        )
+        .expect("manifest parses");
+
+        assert_eq!(manifest.schema, 1);
+        let entry = &manifest.macros[0];
+        assert_eq!(entry.name, "u_rom01");
+        assert_eq!(entry.width_dbu, 12000);
+        assert_eq!(entry.height_dbu, 8000);
+        assert!(!entry.placed);
+        let stdcell = manifest.stdcell_staging.expect("stdcell staging");
+        assert_eq!(stdcell.count, 42);
+        assert_eq!(stdcell.area_dbu, 900);
+    }
+
+    #[test]
+    fn manifest_file_omits_stdcell_staging_when_absent() {
+        let manifest: MacroStagingManifestFile =
+            serde_json::from_str(r#"{ "schema": 1, "macros": [] }"#)
+                .expect("legacy manifest parses");
+        assert!(manifest.stdcell_staging.is_none());
+    }
+
+    #[test]
     fn overlap_detection_excludes_touching_edges() {
         let a = Rect32 {
             lx: 0,
@@ -451,5 +595,100 @@ mod tests {
         };
         assert!(!rects_overlap(a, touching));
         assert!(rects_overlap(a, overlapping));
+    }
+
+    fn staged_state(sizes: &[(i64, i64)]) -> MacroStagingState {
+        MacroStagingState {
+            staged: sizes
+                .iter()
+                .enumerate()
+                .map(|(index, &(width, height))| StagedMacro {
+                    name: format!("u_macro{index}"),
+                    master: "BLK".to_string(),
+                    width,
+                    height,
+                    orient: MacroOrientation::R0,
+                    rect: Rect32::default(),
+                })
+                .collect(),
+            selection: BTreeSet::new(),
+            orient_by_name: BTreeMap::new(),
+            core_rect: None,
+            queue: MacroOpQueue::default(),
+            message: None,
+            stdcell_blob: None,
+        }
+    }
+
+    #[test]
+    fn layout_staged_rows_macros_left_from_die_origin() {
+        let die = Rect32 {
+            lx: 1000,
+            ly: 500,
+            hx: 51000,
+            hy: 5500,
+        };
+        let mut state = staged_state(&[(400, 300), (200, 100)]);
+        state.layout_staged(die);
+
+        // Largest macro is 400 DBU, so the gap is 40 DBU.
+        assert_eq!(
+            state.staged[0].rect,
+            Rect32 {
+                lx: 600,
+                ly: 500,
+                hx: 1000,
+                hy: 800,
+            },
+        );
+        assert_eq!(
+            state.staged[1].rect,
+            Rect32 {
+                lx: 360,
+                ly: 500,
+                hx: 560,
+                hy: 600,
+            },
+        );
+    }
+
+    #[test]
+    fn layout_stdcell_blob_parks_inside_die_bottom_right() {
+        let die = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100_000,
+            hy: 80_000,
+        };
+        let mut state = staged_state(&[]);
+        state.layout_stdcell_blob(die, 42_000, 900_000_000);
+        let blob = state.stdcell_blob.expect("blob");
+        assert_eq!(blob.count, 42_000);
+        // sqrt(900_000_000) ≈ 30000 clamps to the 5% die cap of 16000.
+        assert_eq!(blob.rect.hx, 100_000 - 1_000);
+        assert_eq!(blob.rect.ly, 1_000);
+        assert_eq!(blob.rect.hy - blob.rect.ly, 16_000);
+        assert!(rect_fits_inside(blob.rect, die));
+
+        let mut empty = staged_state(&[]);
+        empty.layout_stdcell_blob(die, 0, 0);
+        assert!(empty.stdcell_blob.is_none());
+    }
+
+    #[test]
+    fn expanded_world_covers_staging_row_and_blob() {
+        let die = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 10_000,
+            hy: 5_000,
+        };
+        let mut state = staged_state(&[(400, 300)]);
+        state.layout_staged(die);
+        state.layout_stdcell_blob(die, 10, 100);
+        let world = state.expanded_world(die);
+        assert!(world.lx <= state.staged[0].rect.lx);
+        assert!(world.ly <= die.ly);
+        assert_eq!(world.hx, die.hx);
     }
 }

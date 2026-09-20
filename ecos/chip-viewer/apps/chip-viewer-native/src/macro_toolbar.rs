@@ -9,6 +9,7 @@ use crate::macro_ops::MacroOp;
 pub(crate) struct MacroToolbarState {
     pub unplaced_count: usize,
     pub selected_count: usize,
+    pub unplaced_stdcell_count: u64,
     pub rotation_allowed: bool,
     pub mirror_allowed: bool,
     pub queue_busy: bool,
@@ -113,6 +114,17 @@ pub(crate) fn show_macro_toolbar(
             egui::RichText::new("postFloorplan needs every macro placed before saving")
                 .small()
                 .color(crate::app::ecos_text_secondary()),
+        );
+    }
+    if state.unplaced_stdcell_count > 0 {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "{} standard cells unplaced (aggregate blob at die bottom-right)",
+                state.unplaced_stdcell_count
+            ))
+            .small()
+            .color(crate::app::ecos_text_secondary()),
         );
     }
 }
