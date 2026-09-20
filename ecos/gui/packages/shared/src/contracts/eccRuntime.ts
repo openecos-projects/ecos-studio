@@ -494,6 +494,7 @@ export type EccEngineeringAnalysisFileStatus =
   | 'invalid'
   | 'unsupported'
   | 'unsafe'
+  | 'oversized'
 
 export interface EccEngineeringAnalysisFile {
   artifactId: string
