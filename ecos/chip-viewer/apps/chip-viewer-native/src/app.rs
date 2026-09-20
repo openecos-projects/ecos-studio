@@ -801,7 +801,7 @@ enum ViewMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ObjectVisibility {
-    instances: bool,
+    instances: crate::instance_visibility::InstanceClassVisibility,
     net_signal: bool,
     net_clock: bool,
     net_other: bool,
@@ -820,8 +820,19 @@ struct ObjectVisibility {
 impl ObjectVisibility {
     pub fn bits(&self) -> u32 {
         let mut b = 0;
-        if self.instances {
+        // Bit 0 mirrors "any instance class visible" so tile-cache keys keep
+        // their coarse instance granularity; bits 14..16 hold the classes.
+        if self.instances.any_visible() {
             b |= 1 << 0;
+        }
+        if self.instances.macro_ {
+            b |= 1 << 14;
+        }
+        if self.instances.stdcell {
+            b |= 1 << 15;
+        }
+        if self.instances.filler {
+            b |= 1 << 16;
         }
         if self.net_signal {
             b |= 1 << 1;
@@ -869,7 +880,7 @@ impl ObjectVisibility {
 impl Default for ObjectVisibility {
     fn default() -> Self {
         Self {
-            instances: true,
+            instances: crate::instance_visibility::InstanceClassVisibility::default(),
             net_signal: false,
             net_clock: false,
             net_other: false,
@@ -889,7 +900,9 @@ impl Default for ObjectVisibility {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum DrawingCategory {
-    Instances,
+    InstanceMacro,
+    InstanceStdCell,
+    InstanceFiller,
     NetSignal,
     NetClock,
     NetOther,
@@ -906,8 +919,9 @@ enum DrawingCategory {
 }
 
 impl DrawingCategory {
-    const ALL: [Self; 14] = [
-        Self::Instances,
+    /// Categories rendered flat in the drawing-data sidebar. The three
+    /// instance classes are grouped under the tri-state "Instances" node.
+    const SIDEBAR_FLAT: [Self; 13] = [
         Self::NetSignal,
         Self::NetClock,
         Self::NetOther,
@@ -923,9 +937,39 @@ impl DrawingCategory {
         Self::Regions,
     ];
 
+    const ALL: [Self; 16] = [
+        Self::InstanceMacro,
+        Self::InstanceStdCell,
+        Self::InstanceFiller,
+        Self::NetSignal,
+        Self::NetClock,
+        Self::NetOther,
+        Self::Pdn,
+        Self::Vias,
+        Self::IoPins,
+        Self::Placement,
+        Self::Tracks,
+        Self::GCells,
+        Self::Obstructions,
+        Self::Boundaries,
+        Self::Fill,
+        Self::Regions,
+    ];
+
+    fn instance_class(self) -> Option<crate::instance_visibility::InstanceClass> {
+        match self {
+            Self::InstanceMacro => Some(crate::instance_visibility::InstanceClass::Macro),
+            Self::InstanceStdCell => Some(crate::instance_visibility::InstanceClass::StdCell),
+            Self::InstanceFiller => Some(crate::instance_visibility::InstanceClass::Filler),
+            _ => None,
+        }
+    }
+
     fn label(self) -> &'static str {
         match self {
-            Self::Instances => "Instances",
+            Self::InstanceMacro => "Macro",
+            Self::InstanceStdCell => "StdCell",
+            Self::InstanceFiller => "Filler",
             Self::NetSignal => "Signal Nets",
             Self::NetClock => "Clock Nets",
             Self::NetOther => "Other Nets",
@@ -944,6 +988,9 @@ impl DrawingCategory {
 
     fn tooltip(self) -> &'static str {
         match self {
+            Self::InstanceMacro | Self::InstanceStdCell | Self::InstanceFiller => {
+                "Toggle this instance class in the layout canvas."
+            }
             Self::NetSignal => "Regular signal net wire segments.",
             Self::NetClock => "Clock net wire segments from DEF net connect type.",
             Self::NetOther => "Non-signal and non-clock regular net wire segments.",
@@ -957,10 +1004,12 @@ impl DrawingCategory {
 
     fn includes_owner_type(self, owner_type: OwnerType) -> bool {
         match self {
-            Self::Instances => matches!(
-                owner_type,
-                OwnerType::InstanceBBox | OwnerType::InstanceHalo
-            ),
+            Self::InstanceMacro | Self::InstanceStdCell | Self::InstanceFiller => {
+                matches!(
+                    owner_type,
+                    OwnerType::InstanceBBox | OwnerType::InstanceHalo
+                )
+            }
             Self::NetSignal | Self::NetClock | Self::NetOther => {
                 owner_type == OwnerType::NetWireSegment
             }
@@ -977,10 +1026,7 @@ impl DrawingCategory {
             Self::GCells => owner_type == OwnerType::GCellGrid,
             Self::Obstructions => matches!(owner_type, OwnerType::Blockage | OwnerType::Obs),
             Self::Boundaries => matches!(owner_type, OwnerType::Die | OwnerType::Core),
-            Self::Fill => matches!(
-                owner_type,
-                OwnerType::Fill | OwnerType::InstanceBBox | OwnerType::InstanceHalo
-            ),
+            Self::Fill => owner_type == OwnerType::Fill,
             Self::Regions => matches!(owner_type, OwnerType::Region | OwnerType::Slot),
         }
     }
@@ -995,7 +1041,7 @@ impl ObjectVisibility {
             OwnerType::from_raw(owner_type),
             Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo)
         ) {
-            return self.instances || self.fill;
+            return self.instances.any_visible();
         }
         OwnerType::from_raw(owner_type)
             .and_then(|owner_type| {
@@ -1013,8 +1059,10 @@ impl ObjectVisibility {
     }
 
     fn is_category_visible(self, category: DrawingCategory) -> bool {
+        if let Some(class) = category.instance_class() {
+            return self.instances.is_visible(class);
+        }
         match category {
-            DrawingCategory::Instances => self.instances,
             DrawingCategory::NetSignal => self.net_signal,
             DrawingCategory::NetClock => self.net_clock,
             DrawingCategory::NetOther => self.net_other,
@@ -1028,12 +1076,16 @@ impl ObjectVisibility {
             DrawingCategory::Boundaries => self.boundaries,
             DrawingCategory::Fill => self.fill,
             DrawingCategory::Regions => self.regions,
+            _ => unreachable!("instance categories handled above"),
         }
     }
 
     fn set_category_visible(&mut self, category: DrawingCategory, visible: bool) {
+        if let Some(class) = category.instance_class() {
+            self.instances.set_visible(class, visible);
+            return;
+        }
         match category {
-            DrawingCategory::Instances => self.instances = visible,
             DrawingCategory::NetSignal => self.net_signal = visible,
             DrawingCategory::NetClock => self.net_clock = visible,
             DrawingCategory::NetOther => self.net_other = visible,
@@ -1047,6 +1099,7 @@ impl ObjectVisibility {
             DrawingCategory::Boundaries => self.boundaries = visible,
             DrawingCategory::Fill => self.fill = visible,
             DrawingCategory::Regions => self.regions = visible,
+            _ => unreachable!("instance categories handled above"),
         }
     }
 
@@ -1071,55 +1124,25 @@ fn drawing_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> 
     counts
 }
 
-fn is_filler_instance(inst_name: Option<&str>, master_name: Option<&str>) -> bool {
-    let is_filler_str = |s: &str| -> bool {
-        let s = s.trim();
-        if s.is_empty() {
-            return false;
-        }
-        let lower = s.to_ascii_lowercase();
-        lower.contains("fill")
-            || lower.contains("decap")
-            || lower.contains("tapcell")
-            || lower.contains("welltap")
-            || lower.contains("tapvpwr")
-            || lower.contains("tapvgnd")
-            || lower.contains("endcap")
-            || lower.starts_with("tap_")
-            || (lower.starts_with("tap") && lower.contains('_'))
-            || lower.ends_with("_tap")
-            || lower.contains("__tap")
-            || lower.starts_with("phy_")
-            || lower.starts_with("filler")
-    };
-    if let Some(master) = master_name {
-        if is_filler_str(master) {
-            return true;
-        }
-    }
-    if let Some(inst) = inst_name {
-        if is_filler_str(inst) {
-            return true;
-        }
-    }
-    false
-}
-
 fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<DrawingCategory> {
     db.owner_for_shape(shape)
         .and_then(|owner| drawing_category_for_owner(db, owner))
 }
 
+/// Maps an owner to its drawing category; instance owners are classified into
+/// the macro / standard-cell / filler classes (see `instance_visibility`).
 fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
     let owner_type = OwnerType::from_raw(owner.owner_type)?;
     Some(match owner_type {
         OwnerType::InstanceBBox | OwnerType::InstanceHalo => {
-            let inst_name = db.owner_name(owner);
-            let master_name = db.owner_local_name(owner);
-            if is_filler_instance(inst_name, master_name) {
-                DrawingCategory::Fill
-            } else {
-                DrawingCategory::Instances
+            match crate::instance_visibility::classify_instance(db, owner) {
+                crate::instance_visibility::InstanceClass::Macro => DrawingCategory::InstanceMacro,
+                crate::instance_visibility::InstanceClass::StdCell => {
+                    DrawingCategory::InstanceStdCell
+                }
+                crate::instance_visibility::InstanceClass::Filler => {
+                    DrawingCategory::InstanceFiller
+                }
             }
         }
         OwnerType::NetWireSegment => net_kind_drawing_category(
@@ -3115,7 +3138,8 @@ impl LoadedViewer {
             .max_height(scroll_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for category in DrawingCategory::ALL {
+                object_visibility_changed |= self.sidebar_instances_tree(ui);
+                for category in DrawingCategory::SIDEBAR_FLAT {
                     let shape_count = self.drawing_category_shape_count(category);
                     let mut visible = self.object_visibility.is_category_visible(category);
                     ui.horizontal(|ui| {
@@ -3139,6 +3163,86 @@ impl LoadedViewer {
         if object_visibility_changed {
             self.apply_object_visibility();
         }
+    }
+
+    /// Tri-state "Instances" node with macro / standard-cell / filler
+    /// children; returns true when any visibility flag changed.
+    fn sidebar_instances_tree(&mut self, ui: &mut egui::Ui) -> bool {
+        use crate::instance_visibility::{InstanceClass, TriState};
+
+        let mut changed = false;
+        let total_count = InstanceClass::ALL
+            .into_iter()
+            .map(|class| {
+                self.drawing_category_shape_count(match class {
+                    InstanceClass::Macro => DrawingCategory::InstanceMacro,
+                    InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
+                    InstanceClass::Filler => DrawingCategory::InstanceFiller,
+                })
+            })
+            .sum::<usize>();
+        let tri_state = self.object_visibility.instances.tri_state();
+        let tree_id = ui.id().with("drawing_data_instances_tree");
+        let mut expanded = true;
+        ui.ctx()
+            .data_mut(|data| expanded = data.get_persisted::<bool>(tree_id).unwrap_or(true));
+
+        ui.horizontal(|ui| {
+            let response =
+                crate::instance_visibility::tri_state_checkbox(ui, tri_state, "Instances")
+                    .on_hover_text("Toggle all instance classes in the layout canvas.");
+            if response.clicked() {
+                let visible = tri_state != TriState::All;
+                self.object_visibility.instances.set_all(visible);
+                changed = true;
+            }
+            let arrow = if expanded { "▾" } else { "▸" };
+            if ui
+                .small_button(arrow)
+                .on_hover_text("Expand instance classes")
+                .clicked()
+            {
+                expanded = !expanded;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(total_count.to_string())
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+            });
+        });
+        ui.data_mut(|data| data.insert_persisted(tree_id, expanded));
+
+        if expanded {
+            ui.indent("drawing_data_instances_children", |ui| {
+                for class in InstanceClass::ALL {
+                    let category = match class {
+                        InstanceClass::Macro => DrawingCategory::InstanceMacro,
+                        InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
+                        InstanceClass::Filler => DrawingCategory::InstanceFiller,
+                    };
+                    let shape_count = self.drawing_category_shape_count(category);
+                    let mut visible = self.object_visibility.instances.is_visible(class);
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut visible, class.label())
+                            .on_hover_text(class.tooltip());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(shape_count.to_string())
+                                    .small()
+                                    .color(ecos_text_secondary()),
+                            );
+                        });
+                    });
+                    if visible != self.object_visibility.instances.is_visible(class) {
+                        self.object_visibility.instances.set_visible(class, visible);
+                        changed = true;
+                    }
+                }
+            });
+        }
+        changed
     }
 
     fn sidebar_interaction_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
@@ -3561,8 +3665,8 @@ impl LoadedViewer {
             );
             return;
         };
-        // The macro staging column lives left of the die; widen the world
-        // rect so pan/zoom/fit can reach it.
+        // The macro staging row lives left of the die origin; widen the
+        // world rect so pan/zoom/fit can reach it.
         let world = self
             .macro_staging
             .as_ref()
@@ -6213,7 +6317,7 @@ impl LoadedViewer {
         let (dx, dy) = screen_to_world_delta(screen_delta, world, canvas, self.zoom);
         let mut requested = translate_rect(draft.original_bbox, dx, dy);
         // Macro placements are confined to the core area once the draft
-        // enters it; the staging column itself stays unconstrained.
+        // enters it; the staging row itself stays unconstrained.
         if let Some(core) = self
             .macro_staging
             .as_ref()
@@ -6311,7 +6415,7 @@ impl LoadedViewer {
     }
 
     /// Enforces the macro placement constraints for a committed draft:
-    /// releases inside the staging column cancel the move, and positions
+    /// releases inside the staging row cancel the move, and positions
     /// that overlap another placed instance are refused. Returns false when
     /// the draft must not become an edit command.
     fn validate_macro_draft(&mut self, draft: &EditDraft) -> bool {
@@ -6425,6 +6529,7 @@ impl LoadedViewer {
         let state = crate::macro_toolbar::MacroToolbarState {
             unplaced_count: staging.staged.len(),
             selected_count: views.len(),
+            unplaced_stdcell_count: staging.stdcell_blob.as_ref().map_or(0, |blob| blob.count),
             rotation_allowed: views.iter().all(|view| view.symmetry.rotation_allowed()),
             mirror_allowed: views.iter().all(|view| view.symmetry.mirror_allowed()),
             queue_busy: staging.queue.is_busy(),
@@ -6591,6 +6696,16 @@ impl LoadedViewer {
         };
         let staged_fill = egui::Color32::from_rgba_unmultiplied(96, 140, 210, 70);
         let staged_selected_fill = egui::Color32::from_rgba_unmultiplied(96, 160, 230, 120);
+        if let Some(blob) = &staging.stdcell_blob {
+            let stdcell_visible = self
+                .object_visibility
+                .instances
+                .is_visible(crate::instance_visibility::InstanceClass::StdCell);
+            let screen = world_to_screen_rect(blob.rect, world, canvas, self.zoom, self.pan);
+            if stdcell_visible && screen.is_positive() && screen.intersects(canvas) {
+                crate::macro_staging::paint_stdcell_blob(painter, blob, screen);
+            }
+        }
         for (index, staged) in staging.staged.iter().enumerate() {
             let screen = world_to_screen_rect(staged.rect, world, canvas, self.zoom, self.pan);
             if !screen.is_positive() || !screen.intersects(canvas) {
@@ -10926,7 +11041,7 @@ fn shape_uses_layer_visibility(shape: &ShapeRecord, owner_type: Option<OwnerType
 }
 
 fn object_visibility_needs_layout_layer(visibility: ObjectVisibility) -> bool {
-    visibility.instances
+    visibility.instances.any_visible()
         || visibility.fill
         || visibility.boundaries
         || visibility.placement
@@ -11617,6 +11732,7 @@ fn macro_save_blocker(staging: Option<&crate::macro_staging::MacroStagingState>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::instance_visibility::is_filler_instance;
     use std::io::Write;
 
     #[test]
@@ -13188,7 +13304,9 @@ mod tests {
         assert_eq!(
             enabled,
             vec![
-                DrawingCategory::Instances,
+                DrawingCategory::InstanceMacro,
+                DrawingCategory::InstanceStdCell,
+                DrawingCategory::InstanceFiller,
                 DrawingCategory::Placement,
                 DrawingCategory::Boundaries,
                 DrawingCategory::Fill,
@@ -13200,7 +13318,11 @@ mod tests {
     #[test]
     fn object_visibility_hides_only_the_requested_owner_categories() {
         let visibility = ObjectVisibility {
-            instances: false,
+            instances: crate::instance_visibility::InstanceClassVisibility {
+                macro_: false,
+                stdcell: false,
+                filler: false,
+            },
             fill: false,
             io_pin: true,
             net_signal: false,
@@ -13220,6 +13342,33 @@ mod tests {
         assert!(visibility.includes_owner_type(OwnerType::IoPinPortShape as u8));
         assert!(visibility.includes_owner_type(OwnerType::TrackGrid as u8));
         assert!(!visibility.is_all_visible());
+    }
+
+    #[test]
+    fn instance_class_categories_toggle_independently() {
+        let mut visibility = ObjectVisibility::default();
+        assert_eq!(
+            visibility.instances.tri_state(),
+            crate::instance_visibility::TriState::All
+        );
+
+        visibility.set_category_visible(DrawingCategory::InstanceStdCell, false);
+        assert!(!visibility.is_category_visible(DrawingCategory::InstanceStdCell));
+        assert!(visibility.is_category_visible(DrawingCategory::InstanceMacro));
+        assert!(visibility.is_category_visible(DrawingCategory::InstanceFiller));
+        assert_eq!(
+            visibility.instances.tri_state(),
+            crate::instance_visibility::TriState::Partial
+        );
+        assert!(visibility.includes_owner_type(OwnerType::InstanceBBox as u8));
+
+        visibility.set_category_visible(DrawingCategory::InstanceMacro, false);
+        visibility.set_category_visible(DrawingCategory::InstanceFiller, false);
+        assert!(!visibility.includes_owner_type(OwnerType::InstanceBBox as u8));
+        assert_eq!(
+            visibility.instances.tri_state(),
+            crate::instance_visibility::TriState::None
+        );
     }
 
     #[test]
@@ -14172,7 +14321,7 @@ mod tests {
         );
 
         let mut visibility = ObjectVisibility::default();
-        visibility.set_category_visible(DrawingCategory::Instances, false);
+        visibility.instances.set_all(false);
         visibility.set_category_visible(DrawingCategory::Boundaries, false);
         visibility.set_category_visible(DrawingCategory::Placement, false);
         visibility.set_category_visible(DrawingCategory::Regions, false);
@@ -15010,6 +15159,7 @@ mod tests {
             core_rect: None,
             queue: Default::default(),
             message: None,
+            stdcell_blob: None,
         };
         assert!(macro_save_blocker(Some(&state)).is_none());
 
