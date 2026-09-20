@@ -106,6 +106,7 @@ function createService(options: {
   isPackaged?: boolean
   layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
   modifiedTimes?: Record<string, number>
+  onWorkspaceRevisionChanged?: ChipViewerServiceOptions['onWorkspaceRevisionChanged']
   openLogFile?: (path: string, flags: string) => number
   readBinaryFile?: ChipViewerServiceOptions['readBinaryFile']
   readTextFile?: ChipViewerServiceOptions['readTextFile']
@@ -237,6 +238,7 @@ function createService(options: {
       }),
     isPackaged: options.isPackaged ?? false,
     layoutEditRuntime,
+    onWorkspaceRevisionChanged: options.onWorkspaceRevisionChanged,
     openLogFile,
     platform: 'linux',
     readBinaryFile:
@@ -1689,8 +1691,10 @@ describe('ChipViewerService', () => {
     const geometryMasters = join(GEOMETRY_EPOCH_DIR, 'geometry.masters.txt')
     const macroLocationPath = join(PROJECT_ROOT, 'config', 'macro_location.tcl')
     const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-13.json')
+    const onWorkspaceRevisionChanged = vi.fn()
     const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
       createService({
+        onWorkspaceRevisionChanged,
         execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
         existingPaths: [
           devBinaries.cargoManifest,
@@ -1792,6 +1796,17 @@ describe('ChipViewerService', () => {
     expect(saveResultText).toContain(
       'macro_location.tcl exported and macro.placements recorded (1 macros)',
     )
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledTimes(2)
+    expect(onWorkspaceRevisionChanged).toHaveBeenNthCalledWith(1, {
+      projectPath: PROJECT_ROOT,
+      workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 4,
+    })
+    expect(onWorkspaceRevisionChanged).toHaveBeenNthCalledWith(2, {
+      projectPath: PROJECT_ROOT,
+      workspaceHandle: 'workspace-handle-1',
+      workspaceRevision: 5,
+    })
   })
 
   it('keeps the save successful when the macro.placements writeback fails', async () => {

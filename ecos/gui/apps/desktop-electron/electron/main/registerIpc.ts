@@ -98,6 +98,7 @@ import {
 } from '@ecos-studio/shared'
 import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import { readAgentWorkspaceParameterValues } from '../services/agent/agentWorkspaceParameterUpdates'
+import type { ChipViewerWorkspaceRevisionNotification } from '../services/chipViewerService'
 import {
   closeWindow,
   isWindowMaximized,
@@ -354,6 +355,9 @@ export interface DesktopBridgeServices {
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
     isOpen(request: ChipViewerOpenRequest): Promise<{ open: boolean }>
+    onWorkspaceRevisionChanged?: (
+      notification: ChipViewerWorkspaceRevisionNotification,
+    ) => void
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -1148,6 +1152,30 @@ export function registerIpc(
   services.frontendRpcRuntimeService.onEvent((payload) =>
     deliverRuntimeEvent('frontend', payload),
   )
+
+  // Layout edit saves advance the Workspace revision inside ECC without
+  // emitting a runtime protocol event. Republish the adopted revision as a
+  // synthetic workspace.committed event so the window refreshes the revision
+  // it sends with the next step run (ECC rejects stale expected revisions
+  // with revision_conflict) and invalidates its workspace caches.
+  services.chipViewerService.onWorkspaceRevisionChanged = (notification) => {
+    deliverRuntimeEvent('backend', {
+      type: 'runtime.protocol',
+      workspaceHandle: notification.workspaceHandle,
+      workspaceDirectory: notification.projectPath,
+      event: {
+        type: 'workspace.committed',
+        eventId: `layout-edit-save:${notification.workspaceHandle}:${notification.workspaceRevision}:${randomUUID()}`,
+        operationId: `layout-edit-save:${notification.workspaceHandle}`,
+        origin: 'gui',
+        payload: { source: 'layout.edit.save' },
+        sequence: 0,
+        timestamp: Date.now(),
+        workspaceId: notification.workspaceHandle,
+        workspaceRevision: notification.workspaceRevision,
+      },
+    })
+  }
 
   services.agentRuntimeService?.onEvent((payload) => {
     if (!payload.providerId || !payload.sessionId) return
