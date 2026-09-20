@@ -2116,6 +2116,7 @@ impl LoadedViewer {
         let snapshot_signature = snapshot_signature_for_db(&db);
         let drawing_category_counts = drawing_category_counts(&db);
         let layers = layer_ui_states(&db, &BTreeMap::new(), color_theme);
+        let drc_data_path = db.snapshot().manifest().drc.clone().or(drc_data_path);
         let drc_overlay = DrcOverlay::load(drc_data_path, drc_statis_path);
         let antenna_overlay = AntennaOverlay::load(antenna_data_path, antenna_statis_path);
         let (map_catalog, map_catalog_error) = match map_root_path.as_deref() {

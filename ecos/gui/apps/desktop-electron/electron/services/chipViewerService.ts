@@ -68,6 +68,7 @@ const OPTIONAL_GEOMETRY_MANIFEST_FILE_KEYS = [
   'nets',
   'buses',
   'groups',
+  'drc',
 ] as const
 const REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS = [
   'shape_count',
@@ -230,7 +231,6 @@ export interface ChipViewerServiceOptions {
 interface SnapshotInputs {
   dbPath: string
   defPath: string
-  drcDataPath?: string
   drcStatisPath?: string
   editCommandDirectory: string
   editResultDirectory: string
@@ -690,9 +690,6 @@ export class ChipViewerService {
     }
 
     const viewerArgs = ['--manifest', viewerManifestPath, '--mode', mode]
-    if (snapshotInputs.drcDataPath) {
-      viewerArgs.push('--drc-data', snapshotInputs.drcDataPath)
-    }
     if (snapshotInputs.drcStatisPath) {
       viewerArgs.push('--drc-statis', snapshotInputs.drcStatisPath)
     }
@@ -837,7 +834,6 @@ export class ChipViewerService {
     // Geometry is atomically replaced by layout.edit.save. Keep the live
     // command/result transport outside that published artifact tree.
     const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
-    const drcDataPath = join(workspaceStepDirectory, 'feature', 'drc.step.json')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
     const mapRootPath = join(workspaceStepDirectory, 'feature')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
@@ -845,7 +841,6 @@ export class ChipViewerService {
     return {
       dbPath,
       defPath,
-      drcDataPath: isDrcStep && this.fileExists(drcDataPath) ? drcDataPath : undefined,
       drcStatisPath:
         isDrcStep && this.fileExists(drcStatisPath) ? drcStatisPath : undefined,
       editCommandDirectory: join(editDirectory, 'commands'),
@@ -1719,6 +1714,7 @@ export class ChipViewerService {
 
   private async findInvalidSnapshotManifest(
     manifestPath: string,
+    requireDrc: boolean = false,
   ): Promise<string | null> {
     let values: Map<string, string>
     try {
@@ -1742,6 +1738,10 @@ export class ChipViewerService {
     }
     if (Number(schemaVersion) !== GEOMETRY_SCHEMA_VERSION) {
       return `manifest schema_version ${schemaVersion} is unsupported; expected ${GEOMETRY_SCHEMA_VERSION}`
+    }
+
+    if (requireDrc && !values.get('drc')) {
+      return 'manifest is missing drc'
     }
 
     for (const key of REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS) {
@@ -1801,6 +1801,7 @@ export class ChipViewerService {
 
     const invalidManifest = await this.findInvalidSnapshotManifest(
       snapshotInputs.manifestPath,
+      isDrcWorkspaceStep(step, step, snapshotInputs.workspaceStepDirectory),
     )
     if (invalidManifest) {
       unavailable(invalidManifest)

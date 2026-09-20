@@ -28,6 +28,7 @@ const GEOMETRY_NAMES = join(GEOMETRY_EPOCH_DIR, 'geometry.names.bin')
 const GEOMETRY_NAME_INDEX = join(GEOMETRY_EPOCH_DIR, 'geometry.name_index.bin')
 const GEOMETRY_SIDMAP = join(GEOMETRY_EPOCH_DIR, 'geometry.sidmap.bin')
 const GEOMETRY_VIEW = join(GEOMETRY_EPOCH_DIR, 'geometry.view.bin')
+const GEOMETRY_DRC = join(GEOMETRY_EPOCH_DIR, 'geometry.drc.json')
 const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
 const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
 const MAP_ROOT_PATH = join(STEP_DIRECTORY, 'feature')
@@ -491,17 +492,21 @@ describe('ChipViewerService', () => {
     expect(closeLogFile).toHaveBeenCalledWith(12)
   })
 
-  it('passes DRC data files to the native viewer for the DRC step', async () => {
+  it('loads DRC data via geometry while still passing the statistics path', async () => {
     const devBinaries = devChipViewerPaths()
     const { service, spawnProcess } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
         devBinaries.viewer,
         GEOMETRY_MANIFEST,
+        GEOMETRY_DRC,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
         DRC_DATA_PATH,
         DRC_STATIS_PATH,
       ],
-      files: {},
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({ drc: 'epochs/1/geometry.drc.json' }),
+      },
     })
 
     await service.open({
@@ -516,8 +521,6 @@ describe('ChipViewerService', () => {
         GEOMETRY_MANIFEST,
         '--mode',
         'view',
-        '--drc-data',
-        DRC_DATA_PATH,
         '--drc-statis',
         DRC_STATIS_PATH,
       ],
@@ -528,17 +531,21 @@ describe('ChipViewerService', () => {
     )
   })
 
-  it('passes DRC data files when the workspace step directory is drc_ecc', async () => {
+  it('loads DRC data via geometry when the workspace step directory is drc_ecc', async () => {
     const devBinaries = devChipViewerPaths()
     const { service, spawnProcess } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
         devBinaries.viewer,
         GEOMETRY_MANIFEST,
+        GEOMETRY_DRC,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
         DRC_DATA_PATH,
         DRC_STATIS_PATH,
       ],
-      files: {},
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({ drc: 'epochs/1/geometry.drc.json' }),
+      },
       stepInfoResult: {
         id: 'layout',
         info: {
@@ -566,8 +573,6 @@ describe('ChipViewerService', () => {
         GEOMETRY_MANIFEST,
         '--mode',
         'view',
-        '--drc-data',
-        DRC_DATA_PATH,
         '--drc-statis',
         DRC_STATIS_PATH,
       ],
@@ -576,6 +581,44 @@ describe('ChipViewerService', () => {
         stdio: ['ignore', expect.any(Number), expect.any(Number)],
       }),
     )
+  })
+
+  it('rejects a DRC snapshot without a geometry DRC sidecar', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        DRC_DATA_PATH,
+      ],
+      files: {},
+    })
+
+    await expect(
+      service.open({ projectPath: PROJECT_ROOT, step: 'drc' }),
+    ).rejects.toThrow('manifest is missing drc')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('rejects a DRC snapshot whose geometry DRC sidecar is missing', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        ...DEFAULT_MANIFEST_FILE_PATHS,
+      ],
+      files: {
+        [GEOMETRY_MANIFEST]: geometryManifest({ drc: 'epochs/1/geometry.drc.json' }),
+      },
+    })
+
+    await expect(
+      service.open({ projectPath: PROJECT_ROOT, step: 'drc' }),
+    ).rejects.toThrow(`manifest drc file does not exist: ${GEOMETRY_DRC}`)
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('passes the current step feature directory when map data may be available', async () => {
