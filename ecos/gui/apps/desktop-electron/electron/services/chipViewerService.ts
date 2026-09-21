@@ -1356,21 +1356,9 @@ export class ChipViewerService {
         if (skippedMacroLocation) {
           message += '; macro_location.tcl export skipped (ECC runtime too old)'
         }
-        if (layoutEdit.macroPlacement && saved.macroLocationPath) {
-          await this.writeSessionActionProgress(progressPath, command, {
-            message: 'Recording macro placements in workspace parameters',
-            percent: 65,
-            phase: 'recording_macro_placements',
-          })
-          message += await this.writeMacroPlacementParams(
-            layoutEdit,
-            saved.macroLocationPath,
-            `${layoutEdit.bridgeId}:${command.command_id}:macro-params`,
-          )
-        }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Refreshing layout image',
-          percent: 75,
+          percent: 65,
           phase: 'refreshing_layout_image',
         })
         try {
@@ -1379,6 +1367,18 @@ export class ChipViewerService {
           message += `; layout image refresh failed: ${
             imageError instanceof Error ? imageError.message : String(imageError)
           }`
+        }
+        if (layoutEdit.macroPlacement && saved.macroLocationPath) {
+          await this.writeSessionActionProgress(progressPath, command, {
+            message: 'Recording macro placements in workspace parameters',
+            percent: 75,
+            phase: 'recording_macro_placements',
+          })
+          message += await this.writeMacroPlacementParams(
+            layoutEdit,
+            saved.macroLocationPath,
+            `${layoutEdit.bridgeId}:${command.command_id}:macro-params`,
+          )
         }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Published layout artifacts verified',
