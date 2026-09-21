@@ -47,7 +47,27 @@ describe('ProjectEccConfigService', () => {
 
   it('reads a missing ecc.toml as non-existent with empty values', async () => {
     const result = await service.read(projectRoot)
-    expect(result).toEqual({ exists: false, externalPaths: [], overrides: {} })
+    expect(result).toEqual({
+      exists: false,
+      pdkName: '',
+      pdkRoot: '',
+      externalPaths: [],
+      overrides: {},
+    })
+  })
+
+  it('reads the declared PDK identity and partial resource overrides', async () => {
+    await writeFile(
+      eccTomlPath(),
+      `${CLI_ECC_TOML}\n[pdk.overrides]\ntech = "lef/tech.lef"\n`,
+    )
+    await expect(service.read(projectRoot)).resolves.toEqual({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '/nonexistent/pdk',
+      externalPaths: [],
+      overrides: { tech: 'lef/tech.lef' },
+    })
   })
 
   it('rejects a missing project root', async () => {
@@ -71,6 +91,8 @@ describe('ProjectEccConfigService', () => {
     })
 
     expect(result.exists).toBe(true)
+    expect(result.pdkName).toBe('ics55')
+    expect(result.pdkRoot).toBe('/nonexistent/pdk')
     expect(result.externalPaths).toEqual([externalRoot])
     // In-root entries relativize; external macro files stay absolute.
     expect(result.overrides).toEqual({
@@ -112,6 +134,8 @@ describe('ProjectEccConfigService', () => {
         pdkRoot,
       })
       expect(result.exists).toBe(true)
+      expect(result.pdkName).toBe('ics55')
+      expect(result.pdkRoot).toBe(pdkRoot)
       const text = await readFile(join(guiProject, 'ecc.toml'), 'utf-8')
       expect(text).toContain('[pdk]')
       expect(text).toContain('name = "ics55"')

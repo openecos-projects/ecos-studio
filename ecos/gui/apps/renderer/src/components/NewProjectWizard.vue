@@ -1,11 +1,30 @@
 <template>
   <div
-    class="new-workspace-wizard-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 sm:p-6"
+    class="new-workspace-wizard-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/45"
+    :class="isWizardMaximized ? 'p-0' : 'p-4 sm:p-6'"
     @click.self="closeWizard"
   >
     <div
-      class="new-workspace-wizard-panel relative flex h-[88vh] max-h-[900px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-(--border-color) bg-(--bg-primary) shadow-[0_28px_70px_-24px_rgba(0,0,0,0.55)]"
+      class="new-workspace-wizard-panel relative flex w-full flex-col overflow-hidden border border-(--border-color) bg-(--bg-primary) shadow-[0_28px_70px_-24px_rgba(0,0,0,0.55)]"
+      :class="
+        isWizardMaximized
+          ? 'h-full max-h-none max-w-none rounded-none'
+          : 'h-[88vh] max-h-[900px] max-w-6xl rounded-[20px]'
+      "
     >
+      <button
+        type="button"
+        class="absolute top-5 right-15 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/60 text-(--text-secondary) transition-colors duration-200 hover:bg-(--bg-secondary) hover:text-(--text-primary)"
+        :title="isWizardMaximized ? 'Restore window' : 'Maximize window'"
+        :aria-label="isWizardMaximized ? 'Restore window' : 'Maximize window'"
+        :aria-pressed="isWizardMaximized"
+        @click="isWizardMaximized = !isWizardMaximized"
+      >
+        <i
+          :class="isWizardMaximized ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"
+          aria-hidden="true"
+        ></i>
+      </button>
       <button
         @click="closeWizard"
         class="absolute top-5 right-5 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/60 text-(--text-secondary) transition-colors duration-200 hover:bg-(--bg-secondary) hover:text-(--text-primary)"
@@ -18,7 +37,7 @@
         <aside
           class="flex w-full shrink-0 flex-col border-b border-(--border-color) bg-(--bg-secondary)/35 p-6 md:w-72 md:border-r md:border-b-0"
         >
-          <div class="mb-7">
+          <div class="mb-7 pr-20 md:pr-0">
             <h1 class="text-2xl font-bold text-(--text-primary)">{{ wizardTitle }}</h1>
             <p class="mt-1 text-sm text-(--text-secondary)">
               Build a project-scoped RTL2GDS workspace.
@@ -1013,6 +1032,41 @@
                   <section
                     class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
+                    <div class="mb-3 min-w-0 border-b border-(--border-color) pb-3">
+                      <h3 class="text-sm font-bold text-(--text-primary)">PDK Path</h3>
+                      <p class="mt-1 text-xs text-(--text-secondary)">
+                        {{
+                          projectEccPdkConfig?.pdkName ||
+                          selectedPdk?.pdkId ||
+                          'No PDK selected'
+                        }}
+                      </p>
+                      <p
+                        class="mt-1 font-mono text-xs break-all text-(--text-primary)"
+                        :title="projectEccPdkConfig?.pdkRoot || getCurrentPdkRoot()"
+                      >
+                        {{
+                          projectEccPdkConfig?.pdkRoot ||
+                          getCurrentPdkRoot() ||
+                          'No PDK path configured.'
+                        }}
+                      </p>
+                      <p
+                        v-if="projectPdkMismatch"
+                        role="alert"
+                        class="mt-2 text-xs text-amber-600"
+                      >
+                        The PDK in ecc.toml does not match an available installation.
+                        Select or import that PDK to continue.
+                      </p>
+                      <p
+                        v-if="projectEccPdkError"
+                        role="alert"
+                        class="mt-2 text-xs text-red-500"
+                      >
+                        {{ projectEccPdkError }}
+                      </p>
+                    </div>
                     <section
                       class="mb-3 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                     >
@@ -1037,7 +1091,13 @@
                         </button>
                       </div>
                       <p
-                        v-if="externalPdkPaths.length === 0"
+                        v-if="isLoadingProjectEccPdk"
+                        class="text-xs text-(--text-secondary)"
+                      >
+                        Loading project PDK paths...
+                      </p>
+                      <p
+                        v-else-if="externalPdkPaths.length === 0"
                         class="rounded-lg border border-dashed border-(--border-color) px-3 py-2 text-xs text-(--text-secondary)"
                       >
                         No external PDK paths declared.
@@ -1178,47 +1238,23 @@
                   </section>
 
                   <section
-                    v-if="pdkConfigMode === 'default'"
-                    class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
-                  >
-                    <div
-                      class="rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-4"
-                    >
-                      <div class="mb-3 flex items-center gap-3">
-                        <div
-                          class="flex h-10 w-10 items-center justify-center rounded-lg bg-(--accent-color) text-white"
-                        >
-                          <i class="ri-check-double-line text-xl"></i>
-                        </div>
-                        <div>
-                          <h3 class="text-base font-bold text-(--text-primary)">
-                            Use ECC default PDK config
-                          </h3>
-                          <p class="mt-1 text-sm text-(--text-secondary)">
-                            Tech LEF, Cell LEF, and Liberty will be resolved by ECC
-                            defaults for the selected PDK.
-                          </p>
-                        </div>
-                      </div>
-                      <p class="text-xs text-(--text-secondary)">
-                        Switch to Manual Config only when this workspace needs a custom
-                        PDK resource set.
-                      </p>
-                    </div>
-                  </section>
-
-                  <section
-                    v-else
                     class="flex min-h-[420px] flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
                   >
                     <div class="mb-3 flex items-start justify-between gap-4">
                       <div>
                         <h3 class="text-sm font-bold text-(--text-primary)">
-                          Manual PDK Resources
+                          {{
+                            pdkConfigMode === 'default'
+                              ? 'Effective PDK Resources'
+                              : 'Manual PDK Resources'
+                          }}
                         </h3>
                         <p class="mt-1 text-xs text-(--text-secondary)">
-                          Review each resource type on the left, then update the selection
-                          from the current PDK folder when needed.
+                          {{
+                            pdkConfigMode === 'default'
+                              ? 'Files used for this workspace, including project overrides.'
+                              : 'Review each resource type, then update the selection when needed.'
+                          }}
                         </p>
                       </div>
                       <span
@@ -1228,7 +1264,10 @@
                       </span>
                     </div>
                     <p
-                      v-if="activeManualPdkSelections.length === 0"
+                      v-if="
+                        pdkConfigMode === 'manual' &&
+                        activeManualPdkSelections.length === 0
+                      "
                       class="mb-3 rounded-lg border border-amber-300/60 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-700"
                     >
                       <i class="ri-information-line mr-1" aria-hidden="true"></i>
@@ -1269,7 +1308,7 @@
                                 : 'bg-(--bg-secondary)/60 text-(--text-secondary)'
                             "
                           >
-                            {{ pdkSelections[item.key].length }}
+                            {{ displayedPdkSelections[item.key].length }}
                           </span>
                         </button>
                       </aside>
@@ -1287,6 +1326,7 @@
                             </p>
                           </div>
                           <button
+                            v-if="pdkConfigMode === 'manual'"
                             type="button"
                             class="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary) transition-colors duration-200 hover:border-(--accent-color)/45 hover:bg-(--accent-color)/10 hover:text-(--text-primary)"
                             title="Update selection"
@@ -1325,11 +1365,10 @@
                             >
                               No file selected.
                             </p>
-                            <button
+                            <div
                               v-for="file in activeManualPdkSelections"
                               :key="file"
-                              type="button"
-                              class="flex w-full cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-200"
+                              class="flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left"
                               :title="file"
                             >
                               <i
@@ -1347,7 +1386,7 @@
                                   {{ file }}
                                 </span>
                               </span>
-                            </button>
+                            </div>
                           </div>
                         </div>
                       </section>
@@ -1664,12 +1703,13 @@
           label: source.label,
           rootPath: source.rootPath,
           files: source.classified[activePdkWizardStep],
+          unavailable: source.unavailable,
         }))
       "
-      :directories="detectedPdkDirectories"
       :available-files="detectedPdkFiles[activePdkWizardStep]"
       :selected-files="pdkSelections[activePdkWizardStep]"
       @update:selected-files="updatePdkResourceSelection"
+      @retry-source="refreshPdkResourceSource"
       @close="closePdkResourcePicker"
     />
   </div>
@@ -1693,6 +1733,7 @@ import {
   type EccPdkOverrides,
   type PdkDetectedFiles,
   type PickedRtlSources,
+  type ProjectEccPdkConfigReadResult,
   type ProjectManifest,
   type ProjectManifestMpc,
 } from '@ecos-studio/shared'
@@ -1841,6 +1882,7 @@ onBeforeUnmount(() => {
 
 const currentStep = ref(1)
 const highestStep = ref(1)
+const isWizardMaximized = ref(false)
 const isCreating = ref(false)
 const topModuleDiscovery = ref<HdlModuleDiscoveryResult | null>(null)
 const topModuleDiscoverySeen = ref(false)
@@ -2524,7 +2566,10 @@ const selectedPdk = computed(() =>
   pdkOptions.value.find((pdk) => pdk.id === selectedPdkId.value),
 )
 const defaultConfigAvailable = computed(
-  () => selectedPdk.value?.readiness === 'ready' && selectedPdk.value.supportsEccDefaults,
+  () =>
+    selectedPdk.value?.readiness === 'ready' &&
+    selectedPdk.value.supportsEccDefaults &&
+    Boolean(selectedPdk.value.defaultResources),
 )
 const defaultConfigUnavailableReason = computed(() => {
   if (!selectedPdk.value) return 'Select a PDK first.'
@@ -2535,6 +2580,8 @@ const defaultConfigUnavailableReason = computed(() => {
   if (!isPdkEligible(selectedPdk.value)) return 'This PDK is not validated.'
   if (!selectedPdk.value.supportsEccDefaults)
     return 'ECC defaults are only available for a known PDK layout.'
+  if (!selectedPdk.value.defaultResources)
+    return 'Default PDK resources are unavailable; re-check the PDK.'
   return ''
 })
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
@@ -2546,14 +2593,72 @@ const externalPdkPaths = ref<string[]>([
 const externalPdkScans = ref<Map<string, PdkDetectedFiles | null>>(new Map())
 /** Manual PDK override recorded in ecc.toml, used to pre-fill manual mode. */
 const projectEccPdkOverrides = ref<EccPdkOverrides | null>(null)
+const projectEccPdkConfig = ref<ProjectEccPdkConfigReadResult | null>(null)
+const canonicalProjectPdkRoot = ref('')
+const projectEccPdkError = ref('')
+const isLoadingProjectEccPdk = ref(false)
+let projectEccPdkLoadGeneration = 0
+let manualPdkEdited = false
+let externalPdkPathsEdited = false
+let loadedEccPdkProjectRoot = ''
+const projectPdkMismatch = computed(() => {
+  const declared = projectEccPdkConfig.value
+  if (!declared?.exists || (!declared.pdkName && !declared.pdkRoot)) return false
+  const selected = selectedPdk.value
+  if (!selected) return true
+  return Boolean(
+    (declared.pdkName &&
+      declared.pdkName.toLowerCase() !== selected.pdkId.toLowerCase()) ||
+    (declared.pdkRoot &&
+      normalizePath(canonicalProjectPdkRoot.value || declared.pdkRoot) !==
+        normalizePath(selected.path)),
+  )
+})
+const effectiveDefaultPdkResources = computed<Record<PdkResourceKey, string[]>>(() => {
+  const defaults = selectedPdk.value?.defaultResources
+  if (
+    !defaults ||
+    projectPdkMismatch.value ||
+    isLoadingProjectEccPdk.value ||
+    projectEccPdkError.value
+  ) {
+    return { tech_lef: [], cell_lef: [], liberty: [] }
+  }
+  const overrides = projectEccPdkOverrides.value
+  const root = projectEccPdkConfig.value?.pdkRoot || getCurrentPdkRoot()
+  const resolve = (file: string) => resolvePdkFileIn(file, root)
+  return {
+    tech_lef:
+      overrides?.tech !== undefined ? [resolve(overrides.tech)] : [defaults.techLef],
+    cell_lef:
+      overrides?.lefs !== undefined
+        ? overrides.lefs.map(resolve)
+        : [...defaults.cellLefs],
+    liberty:
+      overrides?.libs !== undefined ? overrides.libs.map(resolve) : [...defaults.liberty],
+  }
+})
+const hasProjectPdkResourceOverrides = computed(() => {
+  const overrides = projectEccPdkOverrides.value
+  return Boolean(
+    overrides &&
+    (overrides.tech !== undefined ||
+      overrides.lefs !== undefined ||
+      overrides.libs !== undefined),
+  )
+})
+const displayedPdkSelections = computed(() =>
+  pdkConfigMode.value === 'default'
+    ? effectiveDefaultPdkResources.value
+    : pdkSelections.value,
+)
 const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
   () =>
     manualPdkDetectedFiles.value ??
     selectedPdk.value?.detectedFiles ?? { directories: [], files: [] },
 )
-const detectedPdkDirectories = computed(() => currentPdkDetectedFiles.value.directories)
 const activeManualPdkSelections = computed(
-  () => pdkSelections.value[activePdkWizardStep.value] ?? [],
+  () => displayedPdkSelections.value[activePdkWizardStep.value] ?? [],
 )
 
 interface PdkScanSource {
@@ -2609,15 +2714,19 @@ const pdkPickerSources = computed(() => {
     }
   }
   return pdkScanSources.value
-    .filter((source) => source.detected && source.root)
+    .filter((source) => source.root)
     .map((source) => {
-      const files = source.detected!.files.map((file) =>
+      const files = (source.detected?.files ?? []).map((file) =>
         resolvePdkFileIn(file, source.root),
       )
       return {
         label: source.label,
         rootPath: source.root,
         classified: classify(files),
+        unavailable:
+          !source.detected &&
+          externalPdkPaths.value.includes(source.root) &&
+          externalPdkScans.value.has(source.root),
       }
     })
 })
@@ -2657,8 +2766,18 @@ const canProceed = computed(() => {
     case 4:
       return designFilesReady()
     case 5:
-      if (!hasSelectedPdkConfig.value) return false
-      if (pdkConfigMode.value === 'default') return true
+      if (
+        !hasSelectedPdkConfig.value ||
+        projectPdkMismatch.value ||
+        isLoadingProjectEccPdk.value ||
+        projectEccPdkError.value
+      )
+        return false
+      if (pdkConfigMode.value === 'default') {
+        return pdkWizardSteps.every(
+          (step) => effectiveDefaultPdkResources.value[step.key].length > 0,
+        )
+      }
       return (
         pdkSelections.value.tech_lef.length > 0 &&
         pdkSelections.value.cell_lef.length > 0 &&
@@ -2672,6 +2791,9 @@ const canProceed = computed(() => {
 })
 const stepFiveBlockedReason = computed(() => {
   if (currentStep.value !== 5 || canProceed.value) return ''
+  if (isLoadingProjectEccPdk.value) return 'Loading the project PDK configuration.'
+  if (projectEccPdkError.value) return projectEccPdkError.value
+  if (projectPdkMismatch.value) return 'Select the PDK installation declared in ecc.toml.'
   if (!selectedPdk.value) return 'Select a valid PDK first.'
   if (!isPdkEligible(selectedPdk.value)) {
     return pdkValidationMessage(selectedPdk.value)
@@ -2770,8 +2892,9 @@ watch(pdkConfigMode, (mode) => {
   syncWorkspaceConfig()
   void refreshWorkspaceCreationModel()
 })
-watch(defaultConfigAvailable, (available) => {
-  if (!available && pdkConfigMode.value === 'default') pdkConfigMode.value = 'manual'
+watch(selectedPdk, (selected) => {
+  if (selected && !defaultConfigAvailable.value && pdkConfigMode.value === 'default')
+    pdkConfigMode.value = 'manual'
 })
 watch(pdkSelections, syncWorkspaceConfig, { deep: true })
 
@@ -3252,8 +3375,19 @@ function applyFlowStartStep(stepName: FlowStepName) {
   activeDesignInputType.value = initialDesignInputType(stepName)
 }
 
+let pdksLoading: Promise<void> | null = null
 async function ensurePdksLoaded() {
+  if (pdksLoading) return pdksLoading
   if (hasLoadedPdks.value) return
+  pdksLoading = loadAndSelectPdks()
+  try {
+    await pdksLoading
+  } finally {
+    pdksLoading = null
+  }
+}
+
+async function loadAndSelectPdks() {
   hasLoadedPdks.value = true
   await loadPdks(true)
   const requirement = config.value.pdk_requirement
@@ -3738,6 +3872,7 @@ async function handleAddExternalPdkPath() {
   })
   if (!directory) return
   if (externalPdkPaths.value.includes(directory)) return
+  externalPdkPathsEdited = true
   externalPdkPaths.value = [...externalPdkPaths.value, directory]
   await scanExternalPdkPaths()
   syncWorkspaceConfig()
@@ -3745,6 +3880,7 @@ async function handleAddExternalPdkPath() {
 }
 
 function handleRemoveExternalPdkPath(path: string) {
+  externalPdkPathsEdited = true
   externalPdkPaths.value = externalPdkPaths.value.filter((item) => item !== path)
   externalPdkScans.value.delete(path)
   syncWorkspaceConfig()
@@ -3771,32 +3907,105 @@ async function persistExternalPdkPaths() {
   }
 }
 
-/** Load the project's ecc.toml PDK declaration for external paths + manual pre-fill. */
+async function selectDeclaredProjectPdk(
+  declared: ProjectEccPdkConfigReadResult,
+  generation: number,
+) {
+  if (!declared.pdkName && !declared.pdkRoot) return
+  let root = normalizePath(declared.pdkRoot)
+  if (root && !pdkOptions.value.some((pdk) => normalizePath(pdk.path) === root)) {
+    try {
+      root = normalizePath(
+        (await getDesktopApi().workspace.scanPdkDirectory(root)).canonicalPath,
+      )
+    } catch {
+      // An unavailable declaration stays visible and fails the match check.
+    }
+  }
+  if (generation !== projectEccPdkLoadGeneration) return
+  canonicalProjectPdkRoot.value = root
+  const candidates = pdkOptions.value.filter(
+    (pdk) =>
+      (!declared.pdkName || pdk.pdkId.toLowerCase() === declared.pdkName.toLowerCase()) &&
+      (!declared.pdkRoot || normalizePath(pdk.path) === root),
+  )
+  const matching =
+    candidates.find((pdk) => pdk.id === selectedPdkId.value) ??
+    (candidates.length === 1 ? candidates[0] : undefined)
+  if (matching && matching.id !== selectedPdkId.value) selectPdk(matching)
+}
+
+/** Load only the current project's ecc.toml; stale project reads are discarded. */
 async function loadProjectEccPdkConfig() {
+  const generation = ++projectEccPdkLoadGeneration
   const projectRoot = projectContext.value.project_root
-  if (!projectRoot) return
+  if (loadedEccPdkProjectRoot !== projectRoot) {
+    loadedEccPdkProjectRoot = projectRoot
+    externalPdkPathsEdited = false
+    manualPdkEdited = false
+    externalPdkPaths.value = [...(props.initialConfig?.pdk_external_paths ?? [])]
+    externalPdkScans.value = new Map()
+  }
+  projectEccPdkConfig.value = null
+  canonicalProjectPdkRoot.value = ''
+  projectEccPdkOverrides.value = null
+  projectEccPdkError.value = ''
+  if (!projectRoot) {
+    isLoadingProjectEccPdk.value = false
+    return
+  }
+  isLoadingProjectEccPdk.value = true
   try {
     const result = await getDesktopApi().projectEccConfig.read(projectRoot)
+    if (generation !== projectEccPdkLoadGeneration) return
+    await ensurePdksLoaded()
+    if (generation !== projectEccPdkLoadGeneration) return
+    projectEccPdkConfig.value = result
     if (result.exists) {
-      if (!externalPdkPaths.value.length) {
+      await selectDeclaredProjectPdk(result, generation)
+      if (generation !== projectEccPdkLoadGeneration) return
+      if (!externalPdkPathsEdited) {
         externalPdkPaths.value = [...result.externalPaths]
         await scanExternalPdkPaths()
       }
+      if (generation !== projectEccPdkLoadGeneration) return
       projectEccPdkOverrides.value = result.overrides
     }
-  } catch {
-    // No readable ecc.toml (fresh project); manual defaults apply.
+  } catch (error) {
+    if (
+      generation === projectEccPdkLoadGeneration &&
+      projectContext.value.mode === 'select'
+    ) {
+      projectEccPdkError.value =
+        error instanceof Error ? error.message : 'Could not load ecc.toml.'
+    }
+  } finally {
+    if (generation === projectEccPdkLoadGeneration) {
+      isLoadingProjectEccPdk.value = false
+      applyEccPdkOverridesToSelections()
+      syncWorkspaceConfig()
+    }
   }
 }
 
 function applyEccPdkOverridesToSelections() {
   const overrides = projectEccPdkOverrides.value
-  if (!overrides) return
+  if (manualPdkEdited) return
   const hasSelections = (['tech_lef', 'cell_lef', 'liberty'] as PdkResourceKey[]).some(
     (key) => (pdkSelections.value[key] ?? []).length > 0,
   )
-  if (hasSelections || props.initialConfig?.pdk_config) return
-  const root = getCurrentPdkRoot()
+  if (hasSelections) return
+  const effective = effectiveDefaultPdkResources.value
+  if (pdkWizardSteps.every((step) => effective[step.key].length)) {
+    pdkSelections.value = {
+      tech_lef: [...effective.tech_lef],
+      cell_lef: [...effective.cell_lef],
+      liberty: [...effective.liberty],
+    }
+    return
+  }
+  if (!overrides) return
+  const root = projectEccPdkConfig.value?.pdkRoot || getCurrentPdkRoot()
   const resolve = (entry: string | undefined) =>
     entry ? resolvePdkFileIn(entry, root) : ''
   const tech = overrides.tech ? [resolve(overrides.tech)] : []
@@ -3809,8 +4018,17 @@ function applyEccPdkOverridesToSelections() {
 
 async function openPdkResourcePicker(type: PdkResourceKey) {
   activePdkWizardStep.value = type
-  await scanManualPdkResources()
   pdkResourcePickerOpen.value = true
+  await scanManualPdkResources()
+}
+
+async function refreshPdkResourceSource(root: string) {
+  if (externalPdkPaths.value.includes(root)) {
+    externalPdkScans.value.delete(root)
+    await scanExternalPdkPaths()
+  } else if (root === getCurrentPdkRoot()) {
+    await scanManualPdkResources()
+  }
 }
 
 function closePdkResourcePicker() {
@@ -3818,6 +4036,7 @@ function closePdkResourcePicker() {
 }
 
 function updatePdkResourceSelection(files: string[]) {
+  manualPdkEdited = true
   pdkSelections.value[activePdkWizardStep.value] = uniquePaths(files)
 }
 
@@ -3874,6 +4093,21 @@ function syncWorkspaceConfig() {
     tech_lef: pdkSelections.value.tech_lef,
     cell_lef: pdkSelections.value.cell_lef,
     liberty: pdkSelections.value.liberty,
+  }
+  if (
+    pdkConfigMode.value === 'default' &&
+    hasProjectPdkResourceOverrides.value &&
+    !projectPdkMismatch.value &&
+    !isLoadingProjectEccPdk.value &&
+    !projectEccPdkError.value
+  ) {
+    config.value.pdk_effective_resources = {
+      tech_lef: [...effectiveDefaultPdkResources.value.tech_lef],
+      cell_lef: [...effectiveDefaultPdkResources.value.cell_lef],
+      liberty: [...effectiveDefaultPdkResources.value.liberty],
+    }
+  } else {
+    delete config.value.pdk_effective_resources
   }
   config.value.pdk_external_paths = [...externalPdkPaths.value]
   if (config.value.pdk_requirement) {
@@ -4053,6 +4287,23 @@ watch(currentStep, (step) => {
   if (step === 5) void loadProjectEccPdkConfig()
   if (step === 6) void refreshTopModuleDiscovery()
 })
+
+watch(
+  () => projectContext.value.project_root,
+  (root, previousRoot) => {
+    if (previousRoot && previousRoot !== root) {
+      projectEccPdkLoadGeneration += 1
+      projectEccPdkConfig.value = null
+      projectEccPdkOverrides.value = null
+      canonicalProjectPdkRoot.value = ''
+      projectEccPdkError.value = ''
+      isLoadingProjectEccPdk.value = false
+      manualPdkEdited = false
+      pdkSelections.value = { tech_lef: [], cell_lef: [], liberty: [] }
+    }
+    if (currentStep.value === 5) void loadProjectEccPdkConfig()
+  },
+)
 
 watch(
   () => [

@@ -17,6 +17,8 @@ export interface EccPdkOverrides {
 
 /** GUI view of the ecc.toml [pdk] section; values stay as written. */
 export interface ProjectEccPdkConfig {
+  pdkName: string
+  pdkRoot: string
   externalPaths: string[]
   overrides: EccPdkOverrides
 }

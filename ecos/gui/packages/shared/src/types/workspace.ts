@@ -83,6 +83,12 @@ export interface WorkspaceConfig {
     cell_lef: string[]
     liberty: string[]
   }
+  /** Transient complete file set for a Default UI backed by ecc.toml overrides. */
+  pdk_effective_resources?: {
+    tech_lef: string[]
+    cell_lef: string[]
+    liberty: string[]
+  }
   pdk_json?: string
   mpc?: ProjectManifestMpc | null
   replaceExistingWorkspace?: boolean

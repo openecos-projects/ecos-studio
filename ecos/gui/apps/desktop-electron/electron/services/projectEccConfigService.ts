@@ -36,7 +36,7 @@ const PDK_OVERRIDES_TABLE = 'pdk.overrides'
 const writeChains = new Map<string, Promise<unknown>>()
 
 function emptyResult(exists: boolean): ProjectEccPdkConfigReadResult {
-  return { exists, externalPaths: [], overrides: {} }
+  return { exists, pdkName: '', pdkRoot: '', externalPaths: [], overrides: {} }
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -101,7 +101,13 @@ export class ProjectEccConfigService {
     }
     const pdk = pdkTableOf(parseDocument(text))
     const externalPaths = isStringArray(pdk.external_paths) ? pdk.external_paths : []
-    return { exists: true, externalPaths, overrides: readOverrides(pdk) }
+    return {
+      exists: true,
+      pdkName: typeof pdk.name === 'string' ? pdk.name : '',
+      pdkRoot: typeof pdk.root === 'string' ? pdk.root : '',
+      externalPaths,
+      overrides: readOverrides(pdk),
+    }
   }
 
   async write(

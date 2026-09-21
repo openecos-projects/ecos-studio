@@ -111,7 +111,19 @@ export function backendWorkspaceOptions(
   addInput('def', 'def', config.origin_def)
   addInput('sdc', 'sdc', config.sdc ?? '')
 
-  const pdkMode = config.pdk_config_mode === 'manual' ? 'manual' : 'default'
+  const effectiveResources =
+    config.pdk_config_mode === 'default' ? config.pdk_effective_resources : undefined
+  if (
+    effectiveResources &&
+    (!effectiveResources.tech_lef.length ||
+      !effectiveResources.cell_lef.length ||
+      !effectiveResources.liberty.length)
+  ) {
+    throw new Error('Effective PDK resources are incomplete')
+  }
+  const pdkMode =
+    config.pdk_config_mode === 'manual' || effectiveResources ? 'manual' : 'default'
+  const pdkResources = effectiveResources ?? config.pdk_config
   const pdkFiles: Array<{ fileId: string; role: string }> = []
   const pdkFileBindings: Record<string, string> = {}
   const addPdkFiles = (role: string, paths: string[]) => {
@@ -122,9 +134,9 @@ export function backendWorkspaceOptions(
     })
   }
   if (pdkMode === 'manual') {
-    addPdkFiles('tech', config.pdk_config?.tech_lef ?? [])
-    addPdkFiles('lef', config.pdk_config?.cell_lef ?? [])
-    addPdkFiles('liberty', config.pdk_config?.liberty ?? [])
+    addPdkFiles('tech', pdkResources?.tech_lef ?? [])
+    addPdkFiles('lef', pdkResources?.cell_lef ?? [])
+    addPdkFiles('liberty', pdkResources?.liberty ?? [])
   }
 
   // Project ecc.toml persistence intent: external PDK directories and the
@@ -132,7 +144,7 @@ export function backendWorkspaceOptions(
   // CLI fresh runs and future wizard sessions see the same declaration.
   const externalPaths = config.pdk_external_paths ?? []
   const manualOverrides: EccPdkOverrides | undefined =
-    pdkMode === 'manual' &&
+    config.pdk_config_mode === 'manual' &&
     (config.pdk_config?.tech_lef.length ||
       config.pdk_config?.cell_lef.length ||
       config.pdk_config?.liberty.length)
@@ -181,7 +193,17 @@ export function backendWorkspaceOptions(
     designTool: 'backend',
     targetDirectory,
     pdkInstallationId: config.pdk_installation_id,
-    pdkRequirement: config.pdk_requirement,
+    pdkRequirement: effectiveResources
+      ? {
+          familyId: config.pdk || 'ics55',
+          version: config.pdk_requirement?.version ?? null,
+          manualConfig: {
+            techLef: effectiveResources.tech_lef[0],
+            cellLefs: [...effectiveResources.cell_lef],
+            liberty: [...effectiveResources.liberty],
+          },
+        }
+      : config.pdk_requirement,
     ...(eccPdkConfig ? { eccPdkConfig } : {}),
     projectId:
       projectContext?.project_id ??
