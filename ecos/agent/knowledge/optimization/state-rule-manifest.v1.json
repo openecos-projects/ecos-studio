@@ -12,7 +12,7 @@
     "dbg_bridge",
     "s35932",
     "dcpu",
-    "gng",
+    "xtea",
     "i2c"
   ],
   "rules": {

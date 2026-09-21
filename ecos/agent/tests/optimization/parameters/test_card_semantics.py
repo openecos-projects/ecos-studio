@@ -56,7 +56,7 @@ def test_state_rule_manifest_scope_is_frozen_experiment_cohort() -> None:
         "dbg_bridge",
         "s35932",
         "dcpu",
-        "gng",
+        "xtea",
         "i2c",
     ]
 
