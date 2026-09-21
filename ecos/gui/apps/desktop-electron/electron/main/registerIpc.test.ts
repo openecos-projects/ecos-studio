@@ -2360,7 +2360,7 @@ describe('registerIpc', () => {
     expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
   })
 
-  it('republishes layout-edit revision bumps as workspace.committed runtime events', async () => {
+  it('republishes layout-edit revision bumps on the subscribed workspace handle', async () => {
     const { handlers, services } = registerHandlers()
     const ownerSend = vi.fn()
     const ownerSender = Object.assign(new EventEmitter(), {
@@ -2380,7 +2380,7 @@ describe('registerIpc', () => {
 
     services.chipViewerService.onWorkspaceRevisionChanged?.({
       projectPath: '/work/demo',
-      workspaceHandle: 'workspace-handle-1',
+      workspaceHandle: 'layout-edit-handle-2',
       workspaceRevision: 5,
     })
 
@@ -2393,8 +2393,8 @@ describe('registerIpc', () => {
         workspaceHandle: 'workspace-handle-1',
         event: expect.objectContaining({
           type: 'workspace.committed',
-          operationId: 'layout-edit-save:workspace-handle-1',
-          workspaceId: 'workspace-handle-1',
+          operationId: 'layout-edit-save:layout-edit-handle-2',
+          workspaceId: 'layout-edit-handle-2',
           workspaceRevision: 5,
         }),
       }),

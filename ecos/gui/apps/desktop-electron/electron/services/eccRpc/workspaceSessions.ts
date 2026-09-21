@@ -93,7 +93,14 @@ export class WorkspaceSessionRegistry {
 
   updateRevision(workspaceHandle: string, workspaceRevision: number): void {
     const session = this.require(workspaceHandle)
-    this.sessions.set(workspaceHandle, { ...session, workspaceRevision })
+    for (const [candidateHandle, candidate] of this.sessions) {
+      if (
+        candidateHandle === workspaceHandle ||
+        (session.eccWorkspaceId && candidate.eccWorkspaceId === session.eccWorkspaceId)
+      ) {
+        this.sessions.set(candidateHandle, { ...candidate, workspaceRevision })
+      }
+    }
   }
 
   updateBindings(

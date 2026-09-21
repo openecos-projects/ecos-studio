@@ -1088,7 +1088,7 @@ export function registerIpc(
     }
 
     const deliveredSenders = new Set<IpcMainInvokeEvent['sender']>()
-    for (const subscription of workspaceHandleSubscriptions.values()) {
+    for (const [subscribedHandle, subscription] of workspaceHandleSubscriptions) {
       if (subscription.designTool !== designTool) continue
       if (!subscription.directories.has(normalizedDirectory)) continue
       if (deliveredSenders.has(subscription.sender)) continue
@@ -1096,6 +1096,12 @@ export function registerIpc(
       const scopedPayload = {
         ...payload,
         workspaceDirectory: normalizedDirectory,
+        // Directory fallback is used when a sidecar event carries an
+        // unattached or stale GUI handle. Route it under the handle that the
+        // target renderer actually owns so its workspace filter accepts it.
+        ...(readWorkspaceHandleFromEvent(payload)
+          ? { workspaceHandle: subscribedHandle }
+          : {}),
       }
       if (designTool === 'backend' && runtimeEventCommitsWorkspaceFacts(payload)) {
         invalidateBackendWorkspaceForSender(subscription.sender)

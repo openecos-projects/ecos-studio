@@ -1735,10 +1735,16 @@ describe('ChipViewerService', () => {
     const macroLocationPath = join(PROJECT_ROOT, 'config', 'macro_location.tcl')
     const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-13.json')
     const onWorkspaceRevisionChanged = vi.fn()
+    const execFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
+    const updateWorkspaceStepConfiguration = vi.fn(async () => ({
+      directory: PROJECT_ROOT,
+      workspaceId: 'workspace-handle-1',
+      workspaceRevision: 5,
+    }))
     const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
       createService({
         onWorkspaceRevisionChanged,
-        execFile: vi.fn(async () => ({ stderr: '', stdout: '' })),
+        execFile,
         existingPaths: [
           devBinaries.cargoManifest,
           devBinaries.viewer,
@@ -1791,11 +1797,7 @@ describe('ChipViewerService', () => {
             workspaceHandle: 'workspace-handle-1',
             workspaceRevision: 1,
           })),
-          updateWorkspaceStepConfiguration: vi.fn(async () => ({
-            directory: PROJECT_ROOT,
-            workspaceId: 'workspace-handle-1',
-            workspaceRevision: 5,
-          })),
+          updateWorkspaceStepConfiguration,
         },
       })
 
@@ -1823,6 +1825,9 @@ describe('ChipViewerService', () => {
       stepId: 'macroPlacement',
       workspaceHandle: 'workspace-handle-1',
     })
+    expect(execFile.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      updateWorkspaceStepConfiguration.mock.invocationCallOrder[0]!,
+    )
     const progressPhases = writeTextFile.mock.calls
       .filter(
         ([path]) =>
