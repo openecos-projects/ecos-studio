@@ -8175,6 +8175,7 @@ impl eframe::App for ChipViewerApp {
                 egui::SidePanel::left("chip_viewer_macro_tools")
                     .resizable(false)
                     .min_width(190.0)
+                    .max_width(220.0)
                     .default_width(220.0)
                     .show(ctx, |ui| loaded.macro_toolbar(ui));
             }

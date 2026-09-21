@@ -45,14 +45,14 @@ pub(crate) fn show_macro_toolbar(
     let distributable = state.placed_selected_count >= 3 && !state.queue_busy;
     let centerable = has_selection && state.die_available && state.core_available;
 
-    let card_content_width = (ui.available_width() - 16.0).max(SECONDARY_ROW_WIDTH);
+    let card_content_width = macro_toolbar_content_width(ui.available_width());
     egui::Frame::NONE
         .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 7))
         .stroke(egui::Stroke::new(1.0, crate::app::ecos_border()))
         .corner_radius(6)
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
-            ui.set_min_width(card_content_width);
+            ui.set_width(card_content_width);
             centered_ui(ui, ALIGNMENT_PAD_WIDTH, ALIGNMENT_PAD_WIDTH, |ui| {
                 egui::Grid::new("macro_alignment_pad")
                     .spacing(egui::vec2(ICON_GAP, ICON_GAP))
@@ -210,6 +210,11 @@ const ICON_BUTTON_SIZE: f32 = 32.0;
 const ICON_GAP: f32 = 3.0;
 const ALIGNMENT_PAD_WIDTH: f32 = ICON_BUTTON_SIZE * 3.0 + ICON_GAP * 2.0;
 const SECONDARY_ROW_WIDTH: f32 = ICON_BUTTON_SIZE * 5.0 + ICON_GAP * 4.0;
+const CARD_HORIZONTAL_MARGIN: f32 = 16.0;
+
+fn macro_toolbar_content_width(available_width: f32) -> f32 {
+    (available_width - CARD_HORIZONTAL_MARGIN).clamp(ALIGNMENT_PAD_WIDTH, SECONDARY_ROW_WIDTH)
+}
 
 #[derive(Clone, Copy)]
 enum ToolbarIcon {
@@ -442,4 +447,17 @@ fn paint_rotate_icon(
         color,
         egui::Stroke::NONE,
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toolbar_content_width_stays_bounded_by_its_controls() {
+        assert_eq!(macro_toolbar_content_width(80.0), ALIGNMENT_PAD_WIDTH);
+        assert_eq!(macro_toolbar_content_width(150.0), 134.0);
+        assert_eq!(macro_toolbar_content_width(220.0), SECONDARY_ROW_WIDTH);
+        assert_eq!(macro_toolbar_content_width(10_000.0), SECONDARY_ROW_WIDTH);
+    }
 }
