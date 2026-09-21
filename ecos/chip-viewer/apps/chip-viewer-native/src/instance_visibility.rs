@@ -4,6 +4,9 @@
 //! children toggle each class independently. Classification is viewer-side:
 //! fillers are recognized by instance/master naming heuristics, macros by
 //! their block masters, and everything else is a standard cell.
+//!
+//! The tri-state tree renderer is shared with the other grouped sidebar
+//! nodes (nets, PDN) so every group behaves identically.
 
 use chip_view_db::{ChipViewDb, OwnerLocalInfo};
 use chipgeom_format::OwnerRef;
@@ -147,13 +150,16 @@ impl InstanceClassVisibility {
 }
 
 /// Paints a tri-state checkbox (check / dash / empty) and returns the click
-/// response. The caller maps a click to the desired child state.
+/// response. The caller maps a click to the desired child state. The box
+/// uses the same `icon_width`/`icon_spacing` metrics as egui's `Checkbox` so
+/// the row aligns with the plain checkboxes beside it.
 pub(crate) fn tri_state_checkbox(
     ui: &mut egui::Ui,
     state: TriState,
     label: &str,
 ) -> egui::Response {
-    let box_side = ui.spacing().interact_size.y - 4.0;
+    let box_side = ui.spacing().icon_width;
+    let icon_spacing = ui.spacing().icon_spacing;
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
         egui::FontId::proportional(14.0),
@@ -161,7 +167,7 @@ pub(crate) fn tri_state_checkbox(
     );
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(
-            box_side + 8.0 + galley.size().x,
+            box_side + icon_spacing + galley.size().x,
             box_side.max(galley.size().y),
         ),
         egui::Sense::click(),
@@ -217,12 +223,92 @@ pub(crate) fn tri_state_checkbox(
             TriState::None => {}
         }
         let text_pos = egui::pos2(
-            box_rect.right() + 8.0,
+            box_rect.right() + icon_spacing,
             rect.center().y - galley.size().y * 0.5,
         );
         ui.painter().galley(text_pos, galley, visuals.text_color());
     }
     response
+}
+
+/// One selectable child row of a tri-state sidebar group.
+pub(crate) struct SidebarGroupChild {
+    pub label: &'static str,
+    pub tooltip: &'static str,
+    pub count: usize,
+    pub visible: bool,
+}
+
+/// Interaction produced by [`sidebar_tristate_tree`]; the caller applies it
+/// to its own visibility state.
+pub(crate) enum SidebarGroupAction {
+    SetAll(bool),
+    SetChild { index: usize, visible: bool },
+}
+
+/// Renders a tri-state parent row followed by one plain checkbox per child.
+/// A single click on the parent toggles every child, a double click expands
+/// or collapses the child rows. Returns the action to apply when the user
+/// interacted with the group.
+pub(crate) fn sidebar_tristate_tree(
+    ui: &mut egui::Ui,
+    tree_key: &str,
+    title: &str,
+    parent_tooltip: &str,
+    children: &[SidebarGroupChild],
+) -> Option<SidebarGroupAction> {
+    let mut action = None;
+    let total_count = children.iter().map(|child| child.count).sum::<usize>();
+    let visible_count = children.iter().filter(|child| child.visible).count();
+    let tri_state = match visible_count {
+        0 => TriState::None,
+        n if n == children.len() => TriState::All,
+        _ => TriState::Partial,
+    };
+    let tree_id = ui.id().with(tree_key);
+    let mut expanded = true;
+    ui.ctx()
+        .data_mut(|data| expanded = data.get_persisted::<bool>(tree_id).unwrap_or(true));
+
+    ui.horizontal(|ui| {
+        let response = tri_state_checkbox(ui, tri_state, title).on_hover_text(parent_tooltip);
+        if response.double_clicked() {
+            expanded = !expanded;
+        } else if response.clicked() {
+            action = Some(SidebarGroupAction::SetAll(tri_state != TriState::All));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(total_count.to_string())
+                    .small()
+                    .color(crate::app::ecos_text_secondary()),
+            );
+        });
+    });
+    ui.data_mut(|data| data.insert_persisted(tree_id, expanded));
+
+    if expanded {
+        ui.indent(format!("{tree_key}_children"), |ui| {
+            for (index, child) in children.iter().enumerate() {
+                let mut visible = child.visible;
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut visible, child.label)
+                        .on_hover_text(child.tooltip);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(child.count.to_string())
+                                .small()
+                                .color(crate::app::ecos_text_secondary()),
+                        );
+                    });
+                });
+                if visible != child.visible {
+                    action = Some(SidebarGroupAction::SetChild { index, visible });
+                }
+            }
+        });
+    }
+    action
 }
 
 #[cfg(test)]
