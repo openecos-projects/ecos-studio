@@ -641,6 +641,13 @@ describe('ProjectManagementReadService', () => {
     await expect(
       service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
     ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REVISION_MISMATCH' })
+    await expect(
+      service.readVerifiedArtifact({
+        ...request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)),
+        artifact: request(Buffer.byteLength(valid) + 1, 'a'.repeat(64)).artifacts[0]!,
+        verifyFingerprint: false,
+      }),
+    ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(valid) })
 
     const invalidJson = 'x'.repeat(Buffer.byteLength(valid))
     await writeFile(path, invalidJson)

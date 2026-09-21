@@ -1604,6 +1604,7 @@ describe('BackendWorkspaceService', () => {
 
   it('reads a declared layout Artifact by identity and Snapshot revision', async () => {
     const snapshot = engineeringSnapshot()
+    snapshot.workspaceRevision = 2
     snapshot.artifacts = [
       {
         artifactId: 'layout-place',
@@ -1616,9 +1617,19 @@ describe('BackendWorkspaceService', () => {
         stepId: 'Place',
       },
     ] as never
+    const stale = structuredClone(snapshot)
+    stale.workspaceRevision = 1
+    snapshot.stalePredecessor = {
+      workspaceRevision: 1,
+      invalidatedStepIds: ['Place'],
+    }
     const expectedBytes = new Uint8Array([1, 2, 3])
     const projectManagementReadService = {
       ...persistedReadService(snapshot),
+      readEngineeringSnapshot: vi.fn().mockResolvedValue({
+        ...persistedSnapshotResult(snapshot),
+        staleSnapshot: persistedSnapshotResult(stale),
+      }),
       expectedBytes,
       readVerifiedArtifact: vi.fn(function (this: { expectedBytes?: Uint8Array }) {
         if (!this.expectedBytes) throw new Error('reader lost its receiver')
@@ -1635,7 +1646,7 @@ describe('BackendWorkspaceService', () => {
       service.getArtifact({
         artifactId: 'layout-place',
         workspaceContextId: overview.workspaceContextId,
-        workspaceRevision: 1,
+        workspaceRevision: 2,
       }),
     )
 
@@ -1646,6 +1657,7 @@ describe('BackendWorkspaceService', () => {
         sizeBytes: 3,
       },
       projectRoot: '/project',
+      verifyFingerprint: false,
       workspacePath: '/project/ws-a',
     })
     expect(result).toMatchObject({
@@ -1657,7 +1669,24 @@ describe('BackendWorkspaceService', () => {
           mimeType: 'image/png',
         },
       },
-      workspaceRevision: 1,
+      workspaceRevision: 2,
+    })
+    await runWithWindowScope(50, () =>
+      service.getArtifact({
+        artifactId: 'layout-place',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+    expect(projectManagementReadService.readVerifiedArtifact).toHaveBeenLastCalledWith({
+      artifact: {
+        reference: 'Place_ecc/output/gcd_Place.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 3,
+      },
+      projectRoot: '/project',
+      verifyFingerprint: true,
+      workspacePath: '/project/ws-a',
     })
     expect(JSON.stringify(result)).not.toContain('Place_ecc/')
   })
