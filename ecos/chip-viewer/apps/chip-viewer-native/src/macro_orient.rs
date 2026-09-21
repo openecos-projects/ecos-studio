@@ -142,33 +142,59 @@ impl MacroOrientation {
             MacroOrientation::My90 => MacroOrientation::R270,
         }
     }
+
+    /// Result of mirroring the placed instance about its horizontal center
+    /// axis (MX applied in placed space): `MX · self`.
+    pub(crate) fn mirrored_x(self) -> Self {
+        match self {
+            MacroOrientation::R0 => MacroOrientation::Mx,
+            MacroOrientation::Mx => MacroOrientation::R0,
+            MacroOrientation::R90 => MacroOrientation::My90,
+            MacroOrientation::My90 => MacroOrientation::R90,
+            MacroOrientation::R180 => MacroOrientation::My,
+            MacroOrientation::My => MacroOrientation::R180,
+            MacroOrientation::R270 => MacroOrientation::Mx90,
+            MacroOrientation::Mx90 => MacroOrientation::R270,
+        }
+    }
 }
 
 /// Master symmetry flags parsed from the geometry master metadata, e.g.
-/// `"X,Y"` or `"X,Y,R90"`. Empty or unknown values allow every operation so
-/// the UI stays usable when metadata is missing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// `"X,Y"` or `"X,Y,R90"`. Empty values allow every operation so the UI
+/// stays usable when metadata is missing; unknown non-empty flags remain
+/// conservative and grant no additional symmetry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MasterSymmetry {
     pub x: bool,
     pub y: bool,
     pub r90: bool,
 }
 
+impl Default for MasterSymmetry {
+    fn default() -> Self {
+        Self {
+            x: true,
+            y: true,
+            r90: true,
+        }
+    }
+}
+
 impl MasterSymmetry {
     pub(crate) fn parse(value: &str) -> Self {
-        let mut symmetry = MasterSymmetry::default();
         let tokens: Vec<&str> = value
             .split(',')
             .map(str::trim)
             .filter(|token| !token.is_empty())
             .collect();
         if tokens.is_empty() {
-            return MasterSymmetry {
-                x: true,
-                y: true,
-                r90: true,
-            };
+            return MasterSymmetry::default();
         }
+        let mut symmetry = MasterSymmetry {
+            x: false,
+            y: false,
+            r90: false,
+        };
         for token in tokens {
             match token.to_ascii_uppercase().as_str() {
                 "X" => symmetry.x = true,
@@ -186,6 +212,31 @@ impl MasterSymmetry {
 
     pub(crate) fn mirror_allowed(self) -> bool {
         self.x || self.y
+    }
+
+    /// Whether a concrete DEF orientation belongs to the symmetry group
+    /// declared by the master.
+    pub(crate) fn allows_orientation(self, orient: MacroOrientation) -> bool {
+        match orient {
+            MacroOrientation::R0 => true,
+            MacroOrientation::R90 | MacroOrientation::R270 => self.r90,
+            MacroOrientation::R180 => self.r90 || (self.x && self.y),
+            MacroOrientation::Mx => self.x || (self.r90 && self.y),
+            MacroOrientation::My => self.y || (self.r90 && self.x),
+            MacroOrientation::Mx90 | MacroOrientation::My90 => self.r90 && (self.x || self.y),
+        }
+    }
+
+    pub(crate) fn rotate_90_allowed(self, current: MacroOrientation) -> bool {
+        self.allows_orientation(current.rotated_90())
+    }
+
+    pub(crate) fn mirror_horizontal_allowed(self, current: MacroOrientation) -> bool {
+        self.allows_orientation(current.mirrored_y())
+    }
+
+    pub(crate) fn mirror_vertical_allowed(self, current: MacroOrientation) -> bool {
+        self.allows_orientation(current.mirrored_x())
     }
 }
 
@@ -262,6 +313,20 @@ mod tests {
     }
 
     #[test]
+    fn mirrored_x_matches_matrix_composition() {
+        let mirror = MacroOrientation::Mx.linear();
+        for orient in MacroOrientation::ALL {
+            let composed = compose_matrix(mirror, orient.linear());
+            assert_eq!(
+                orient.mirrored_x().linear(),
+                composed,
+                "vertical mirror composition mismatch for {}",
+                orient.as_str()
+            );
+        }
+    }
+
+    #[test]
     fn rotation_cycles_form_closed_groups() {
         assert_eq!(
             MacroOrientation::R0
@@ -313,5 +378,24 @@ mod tests {
         let unknown = MasterSymmetry::parse("");
         assert!(unknown.rotation_allowed() && unknown.mirror_allowed());
         assert!(!MasterSymmetry::parse("R90").mirror_allowed());
+    }
+
+    #[test]
+    fn symmetry_gates_each_transform_against_its_result_orientation() {
+        let x_only = MasterSymmetry::parse("X");
+        assert!(x_only.mirror_vertical_allowed(MacroOrientation::R0));
+        assert!(!x_only.mirror_horizontal_allowed(MacroOrientation::R0));
+        assert!(!x_only.rotate_90_allowed(MacroOrientation::R0));
+
+        let y_only = MasterSymmetry::parse("Y");
+        assert!(y_only.mirror_horizontal_allowed(MacroOrientation::R0));
+        assert!(!y_only.mirror_vertical_allowed(MacroOrientation::R0));
+
+        let all = MasterSymmetry::parse("X,Y,R90");
+        for orient in MacroOrientation::ALL {
+            assert!(all.rotate_90_allowed(orient));
+            assert!(all.mirror_horizontal_allowed(orient));
+            assert!(all.mirror_vertical_allowed(orient));
+        }
     }
 }

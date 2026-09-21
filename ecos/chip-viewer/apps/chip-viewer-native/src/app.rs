@@ -20,10 +20,16 @@ use eframe::egui;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::macro_ops::{plan_macro_op, MacroOp, PlannedMacroMove};
+use crate::macro_interaction::{
+    apply_selection, MacroCanvasInteraction, MacroGroupDrag, MacroMarquee, SelectionMode,
+};
+use crate::macro_ops::{
+    plan_macro_op, planned_move_overlap, MacroOp, MacroOpBounds, PlannedMacroMove,
+};
 use crate::macro_orient::MacroOrientation;
 use crate::macro_staging::{
-    clamp_rect_into, instance_names_intersecting, rect_fits_inside, MacroStagingState, MacroTarget,
+    clamp_rect_into, instance_names_intersecting, instance_names_intersecting_except,
+    rect_fits_inside, MacroStagingState, MacroTarget,
 };
 use crate::map_data::{ColormapMode, HeatmapData, MapCatalog, MapItem};
 
@@ -90,7 +96,7 @@ struct GpuCachedLabel {
 struct GpuTileData {
     instances: std::sync::Arc<Vec<crate::canvas_gpu::GpuShapeInstance>>,
     labels: Vec<GpuCachedLabel>,
-    category_counts: [[usize; 17]; 2],
+    category_counts: [[usize; 32]; 2],
     byte_size: usize,
 }
 
@@ -100,9 +106,13 @@ impl GpuTileData {
     }
 
     fn visible_count(&self, visibility_mask: u32, show_context: bool) -> usize {
-        (0..=16)
-            .filter(|&category| category == 16 || visibility_mask & (1 << category) != 0)
+        (0..32)
+            .filter(|&category| {
+                category == crate::canvas_gpu::UNCATEGORIZED_DRAWING_CATEGORY
+                    || visibility_mask & (1 << category) != 0
+            })
             .map(|category| {
+                let category = usize::from(category);
                 self.category_counts[0][category]
                     + if show_context {
                         self.category_counts[1][category]
@@ -186,6 +196,7 @@ struct LoadedViewer {
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
     pending_focus: Option<PendingFocus>,
+    macro_interaction: Option<MacroCanvasInteraction>,
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     pending_session_action: Option<PendingSessionAction>,
@@ -858,7 +869,8 @@ struct ObjectVisibility {
     net_signal: bool,
     net_clock: bool,
     net_other: bool,
-    pdn: bool,
+    pdn_power: bool,
+    pdn_ground: bool,
     vias: bool,
     io_pin: bool,
     placement: bool,
@@ -896,8 +908,11 @@ impl ObjectVisibility {
         if self.net_other {
             b |= 1 << 3;
         }
-        if self.pdn {
+        if self.pdn_power {
             b |= 1 << 4;
+        }
+        if self.pdn_ground {
+            b |= 1 << 17;
         }
         if self.vias {
             b |= 1 << 5;
@@ -937,7 +952,8 @@ impl Default for ObjectVisibility {
             net_signal: false,
             net_clock: false,
             net_other: false,
-            pdn: false,
+            pdn_power: false,
+            pdn_ground: false,
             vias: false,
             io_pin: false,
             placement: true,
@@ -960,7 +976,6 @@ enum DrawingCategory {
     NetSignal,
     NetClock,
     NetOther,
-    Pdn,
     Vias,
     IoPins,
     Placement,
@@ -970,16 +985,15 @@ enum DrawingCategory {
     Boundaries,
     Fill,
     Regions,
+    PdnPower,
+    PdnGround,
 }
 
 impl DrawingCategory {
-    /// Categories rendered flat in the drawing-data sidebar. The three
-    /// instance classes are grouped under the tri-state "Instances" node.
-    const SIDEBAR_FLAT: [Self; 13] = [
-        Self::NetSignal,
-        Self::NetClock,
-        Self::NetOther,
-        Self::Pdn,
+    /// Categories rendered flat in the drawing-data sidebar. Instance
+    /// classes, net kinds, and the PDN power/ground split are grouped under
+    /// tri-state parent nodes instead.
+    const SIDEBAR_FLAT: [Self; 9] = [
         Self::Vias,
         Self::IoPins,
         Self::Placement,
@@ -991,14 +1005,13 @@ impl DrawingCategory {
         Self::Regions,
     ];
 
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::InstanceMacro,
         Self::InstanceStdCell,
         Self::InstanceFiller,
         Self::NetSignal,
         Self::NetClock,
         Self::NetOther,
-        Self::Pdn,
         Self::Vias,
         Self::IoPins,
         Self::Placement,
@@ -1008,6 +1021,8 @@ impl DrawingCategory {
         Self::Boundaries,
         Self::Fill,
         Self::Regions,
+        Self::PdnPower,
+        Self::PdnGround,
     ];
 
     fn instance_class(self) -> Option<crate::instance_visibility::InstanceClass> {
@@ -1027,7 +1042,8 @@ impl DrawingCategory {
             Self::NetSignal => "Signal Nets",
             Self::NetClock => "Clock Nets",
             Self::NetOther => "Other Nets",
-            Self::Pdn => "PDN",
+            Self::PdnPower => "Power",
+            Self::PdnGround => "Ground",
             Self::Vias => "Vias",
             Self::IoPins => "IO Pins",
             Self::Placement => "Rows",
@@ -1048,6 +1064,8 @@ impl DrawingCategory {
             Self::NetSignal => "Regular signal net wire segments.",
             Self::NetClock => "Clock net wire segments from DEF net connect type.",
             Self::NetOther => "Non-signal and non-clock regular net wire segments.",
+            Self::PdnPower => "Power net special wire segments (e.g. VDD, VCC).",
+            Self::PdnGround => "Ground net special wire segments (e.g. VSS, GND).",
             Self::Vias => "Via owners are drawn on their assigned physical layer.",
             Self::Placement | Self::Tracks | Self::GCells | Self::Obstructions => {
                 "Context geometry is shown after zooming in to keep the fitted route view readable."
@@ -1067,7 +1085,7 @@ impl DrawingCategory {
             Self::NetSignal | Self::NetClock | Self::NetOther => {
                 owner_type == OwnerType::NetWireSegment
             }
-            Self::Pdn => owner_type == OwnerType::SpecialWireSegment,
+            Self::PdnPower | Self::PdnGround => owner_type == OwnerType::SpecialWireSegment,
             Self::Vias => owner_type == OwnerType::Via,
             Self::IoPins => matches!(
                 owner_type,
@@ -1126,7 +1144,8 @@ impl ObjectVisibility {
             DrawingCategory::NetSignal => self.net_signal,
             DrawingCategory::NetClock => self.net_clock,
             DrawingCategory::NetOther => self.net_other,
-            DrawingCategory::Pdn => self.pdn,
+            DrawingCategory::PdnPower => self.pdn_power,
+            DrawingCategory::PdnGround => self.pdn_ground,
             DrawingCategory::Vias => self.vias,
             DrawingCategory::IoPins => self.io_pin,
             DrawingCategory::Placement => self.placement,
@@ -1149,7 +1168,8 @@ impl ObjectVisibility {
             DrawingCategory::NetSignal => self.net_signal = visible,
             DrawingCategory::NetClock => self.net_clock = visible,
             DrawingCategory::NetOther => self.net_other = visible,
-            DrawingCategory::Pdn => self.pdn = visible,
+            DrawingCategory::PdnPower => self.pdn_power = visible,
+            DrawingCategory::PdnGround => self.pdn_ground = visible,
             DrawingCategory::Vias => self.vias = visible,
             DrawingCategory::IoPins => self.io_pin = visible,
             DrawingCategory::Placement => self.placement = visible,
@@ -1209,7 +1229,7 @@ fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<Drawi
             db.owner_name(owner)
                 .and_then(|net_name| db.net_kind_for_name(net_name)),
         ),
-        OwnerType::SpecialWireSegment => DrawingCategory::Pdn,
+        OwnerType::SpecialWireSegment => pdn_category_for_name(db.owner_name(owner)),
         OwnerType::Via => DrawingCategory::Vias,
         OwnerType::PinPortShape | OwnerType::InstancePinPortShape | OwnerType::IoPinPortShape => {
             DrawingCategory::IoPins
@@ -1235,6 +1255,23 @@ fn net_kind_drawing_category(kind: Option<&str>) -> DrawingCategory {
         Some("signal") => DrawingCategory::NetSignal,
         Some("clock") => DrawingCategory::NetClock,
         _ => DrawingCategory::NetOther,
+    }
+}
+
+/// True when a special-net name denotes ground (VSS / GND / GROUND...); the
+/// check is case-insensitive and matches substrings so stacked names like
+/// `VSS_DIG` are recognized. Everything else (VDD, VCC, ...) is power.
+fn is_ground_net(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    lower.contains("vss") || lower.contains("gnd") || lower.contains("ground")
+}
+
+/// Maps a special-net name to its power / ground drawing category. Names
+/// without metadata default to power.
+fn pdn_category_for_name(name: Option<&str>) -> DrawingCategory {
+    match name {
+        Some(name) if is_ground_net(name) => DrawingCategory::PdnGround,
+        _ => DrawingCategory::PdnPower,
     }
 }
 
@@ -2248,6 +2285,7 @@ impl LoadedViewer {
             highlighted: BTreeSet::new(),
             selected: None,
             pending_focus: None,
+            macro_interaction: None,
             draft: None,
             pending_edit: None,
             pending_session_action: None,
@@ -3206,6 +3244,8 @@ impl LoadedViewer {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 object_visibility_changed |= self.sidebar_instances_tree(ui);
+                object_visibility_changed |= self.sidebar_nets_tree(ui);
+                object_visibility_changed |= self.sidebar_pdn_tree(ui);
                 for category in DrawingCategory::SIDEBAR_FLAT {
                     let shape_count = self.drawing_category_shape_count(category);
                     let mut visible = self.object_visibility.is_category_visible(category);
@@ -3233,81 +3273,156 @@ impl LoadedViewer {
     }
 
     /// Tri-state "Instances" node with macro / standard-cell / filler
-    /// children; returns true when any visibility flag changed.
+    /// children; single click toggles every class, double click expands or
+    /// collapses the children. Returns true when any visibility flag changed.
     fn sidebar_instances_tree(&mut self, ui: &mut egui::Ui) -> bool {
-        use crate::instance_visibility::{InstanceClass, TriState};
+        use crate::instance_visibility::{InstanceClass, SidebarGroupAction, SidebarGroupChild};
 
         let mut changed = false;
-        let total_count = InstanceClass::ALL
+        let children = InstanceClass::ALL
             .into_iter()
             .map(|class| {
-                self.drawing_category_shape_count(match class {
+                let category = match class {
                     InstanceClass::Macro => DrawingCategory::InstanceMacro,
                     InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
                     InstanceClass::Filler => DrawingCategory::InstanceFiller,
-                })
+                };
+                SidebarGroupChild {
+                    label: class.label(),
+                    tooltip: class.tooltip(),
+                    count: self.drawing_category_shape_count(category),
+                    visible: self.object_visibility.instances.is_visible(class),
+                }
             })
-            .sum::<usize>();
-        let tri_state = self.object_visibility.instances.tri_state();
-        let tree_id = ui.id().with("drawing_data_instances_tree");
-        let mut expanded = true;
-        ui.ctx()
-            .data_mut(|data| expanded = data.get_persisted::<bool>(tree_id).unwrap_or(true));
+            .collect::<Vec<_>>();
+        if let Some(action) = crate::instance_visibility::sidebar_tristate_tree(
+            ui,
+            "drawing_data_instances_tree",
+            "Instances",
+            "Toggle all instance classes in the layout canvas. Double-click to expand or collapse the classes.",
+            &children,
+        ) {
+            match action {
+                SidebarGroupAction::SetAll(visible) => {
+                    self.object_visibility.instances.set_all(visible);
+                }
+                SidebarGroupAction::SetChild { index, visible } => {
+                    self.object_visibility
+                        .instances
+                        .set_visible(InstanceClass::ALL[index], visible);
+                }
+            }
+            changed = true;
+        }
+        changed
+    }
 
-        ui.horizontal(|ui| {
-            let response =
-                crate::instance_visibility::tri_state_checkbox(ui, tri_state, "Instances")
-                    .on_hover_text("Toggle all instance classes in the layout canvas.");
-            if response.clicked() {
-                let visible = tri_state != TriState::All;
-                self.object_visibility.instances.set_all(visible);
+    /// Tri-state "Nets" node with signal / clock / other children; single
+    /// click toggles every kind, double click expands or collapses the
+    /// children. Returns true when any visibility flag changed.
+    fn sidebar_nets_tree(&mut self, ui: &mut egui::Ui) -> bool {
+        use crate::instance_visibility::{SidebarGroupAction, SidebarGroupChild};
+
+        let mut changed = false;
+        let children = [
+            (
+                DrawingCategory::NetSignal,
+                "Signal",
+                self.object_visibility.net_signal,
+            ),
+            (
+                DrawingCategory::NetClock,
+                "Clock",
+                self.object_visibility.net_clock,
+            ),
+            (
+                DrawingCategory::NetOther,
+                "Other",
+                self.object_visibility.net_other,
+            ),
+        ]
+        .into_iter()
+        .map(|(category, label, visible)| SidebarGroupChild {
+            label,
+            tooltip: category.tooltip(),
+            count: self.drawing_category_shape_count(category),
+            visible,
+        })
+        .collect::<Vec<_>>();
+        match crate::instance_visibility::sidebar_tristate_tree(
+            ui,
+            "drawing_data_nets_tree",
+            "Nets",
+            "Toggle all net kinds in the layout canvas. Double-click to expand or collapse the kinds.",
+            &children,
+        ) {
+            Some(SidebarGroupAction::SetAll(visible)) => {
+                self.object_visibility.net_signal = visible;
+                self.object_visibility.net_clock = visible;
+                self.object_visibility.net_other = visible;
                 changed = true;
             }
-            let arrow = if expanded { "▾" } else { "▸" };
-            if ui
-                .small_button(arrow)
-                .on_hover_text("Expand instance classes")
-                .clicked()
-            {
-                expanded = !expanded;
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(total_count.to_string())
-                        .small()
-                        .color(ecos_text_secondary()),
-                );
-            });
-        });
-        ui.data_mut(|data| data.insert_persisted(tree_id, expanded));
-
-        if expanded {
-            ui.indent("drawing_data_instances_children", |ui| {
-                for class in InstanceClass::ALL {
-                    let category = match class {
-                        InstanceClass::Macro => DrawingCategory::InstanceMacro,
-                        InstanceClass::StdCell => DrawingCategory::InstanceStdCell,
-                        InstanceClass::Filler => DrawingCategory::InstanceFiller,
-                    };
-                    let shape_count = self.drawing_category_shape_count(category);
-                    let mut visible = self.object_visibility.instances.is_visible(class);
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut visible, class.label())
-                            .on_hover_text(class.tooltip());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(shape_count.to_string())
-                                    .small()
-                                    .color(ecos_text_secondary()),
-                            );
-                        });
-                    });
-                    if visible != self.object_visibility.instances.is_visible(class) {
-                        self.object_visibility.instances.set_visible(class, visible);
-                        changed = true;
-                    }
+            Some(SidebarGroupAction::SetChild { index, visible }) => {
+                match index {
+                    0 => self.object_visibility.net_signal = visible,
+                    1 => self.object_visibility.net_clock = visible,
+                    _ => self.object_visibility.net_other = visible,
                 }
-            });
+                changed = true;
+            }
+            None => {}
+        }
+        changed
+    }
+
+    /// Tri-state "PDN" node with power / ground children; single click
+    /// toggles both, double click expands or collapses the children.
+    /// Returns true when any visibility flag changed.
+    fn sidebar_pdn_tree(&mut self, ui: &mut egui::Ui) -> bool {
+        use crate::instance_visibility::{SidebarGroupAction, SidebarGroupChild};
+
+        let mut changed = false;
+        let children = [
+            (
+                DrawingCategory::PdnPower,
+                "Power",
+                self.object_visibility.pdn_power,
+            ),
+            (
+                DrawingCategory::PdnGround,
+                "Ground",
+                self.object_visibility.pdn_ground,
+            ),
+        ]
+        .into_iter()
+        .map(|(category, label, visible)| SidebarGroupChild {
+            label,
+            tooltip: category.tooltip(),
+            count: self.drawing_category_shape_count(category),
+            visible,
+        })
+        .collect::<Vec<_>>();
+        match crate::instance_visibility::sidebar_tristate_tree(
+            ui,
+            "drawing_data_pdn_tree",
+            "PDN",
+            "Toggle power and ground special nets in the layout canvas. Double-click to expand or collapse the classes.",
+            &children,
+        ) {
+            Some(SidebarGroupAction::SetAll(visible)) => {
+                self.object_visibility.pdn_power = visible;
+                self.object_visibility.pdn_ground = visible;
+                changed = true;
+            }
+            Some(SidebarGroupAction::SetChild { index, visible }) => {
+                if index == 0 {
+                    self.object_visibility.pdn_power = visible;
+                } else {
+                    self.object_visibility.pdn_ground = visible;
+                }
+                changed = true;
+            }
+            None => {}
         }
         changed
     }
@@ -3817,13 +3932,25 @@ impl LoadedViewer {
                         .ctx()
                         .input(|input| input.pointer.press_origin())
                         .or_else(|| response.interact_pointer_pos());
-                    let edit_started = self.edit_enabled
-                        && edit_start_pos
-                            .is_some_and(|pos| self.begin_edit_drag_at_pointer(pos, world, canvas));
-                    Some(if edit_started {
-                        CanvasDragMode::Edit
-                    } else {
-                        CanvasDragMode::Pan
+                    let modifiers = ui.ctx().input(|input| input.modifiers);
+                    let macro_mode = edit_start_pos.and_then(|pos| {
+                        let point = screen_to_world_point(pos, world, canvas, self.zoom, self.pan);
+                        self.begin_macro_canvas_interaction(
+                            point,
+                            modifiers.shift,
+                            modifiers.command || modifiers.ctrl,
+                        )
+                    });
+                    macro_mode.or_else(|| {
+                        let edit_started = self.edit_enabled
+                            && edit_start_pos.is_some_and(|pos| {
+                                self.begin_edit_drag_at_pointer(pos, world, canvas)
+                            });
+                        Some(if edit_started {
+                            CanvasDragMode::Edit
+                        } else {
+                            CanvasDragMode::Pan
+                        })
                     })
                 }
             } else {
@@ -3845,12 +3972,28 @@ impl LoadedViewer {
                     self.pan = self.pan_drag.apply_pan_frame(self.pan, frame_delta);
                     ui.ctx().request_repaint();
                 }
+                Some(CanvasDragMode::MacroMove) => {
+                    let total_delta = self.pan_drag.accumulate(frame_delta);
+                    let (dx, dy) = screen_to_world_delta(total_delta, world, canvas, self.zoom);
+                    self.update_macro_group_drag(dx, dy);
+                    ui.ctx().request_repaint();
+                }
+                Some(CanvasDragMode::MacroMarquee) => {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let point = screen_to_world_point(pos, world, canvas, self.zoom, self.pan);
+                        self.update_macro_marquee(point);
+                    }
+                    ui.ctx().request_repaint();
+                }
                 _ => {}
             }
         }
         if response.drag_stopped() {
-            if self.pan_drag.mode() == Some(CanvasDragMode::Edit) && self.draft.is_some() {
-                self.commit_draft();
+            match self.pan_drag.mode() {
+                Some(CanvasDragMode::Edit) if self.draft.is_some() => self.commit_draft(),
+                Some(CanvasDragMode::MacroMove) => self.commit_macro_group_drag(),
+                Some(CanvasDragMode::MacroMarquee) => self.commit_macro_marquee(),
+                _ => {}
             }
             self.pan_drag.reset();
         }
@@ -3889,9 +4032,11 @@ impl LoadedViewer {
                     self.ruler_tool.commit(point);
                 }
             } else if self.macro_staging.is_some() {
-                let additive = ui.ctx().input(|input| input.modifiers.shift);
+                let modifiers = ui.ctx().input(|input| input.modifiers);
+                let mode =
+                    SelectionMode::for_click(modifiers.shift, modifiers.command || modifiers.ctrl);
                 let handled =
-                    interaction_point.is_some_and(|point| self.select_macro_at(point, additive));
+                    interaction_point.is_some_and(|point| self.select_macro_at(point, mode));
                 if !handled {
                     self.selected = response
                         .interact_pointer_pos()
@@ -3903,7 +4048,11 @@ impl LoadedViewer {
                     .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
             }
         }
-        if self.ruler_tool.enabled && pointer_over_layout {
+        if self.pan_drag.mode() == Some(CanvasDragMode::MacroMarquee) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        } else if self.pan_drag.mode() == Some(CanvasDragMode::MacroMove) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if self.ruler_tool.enabled && pointer_over_layout {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
         } else {
             if let Some(cursor_icon) = canvas_cursor_icon(
@@ -4110,7 +4259,7 @@ impl LoadedViewer {
 
                     if !is_interacting {
                         for label in &tile_instances.labels {
-                            if (label.category < 16
+                            if (label.category < crate::canvas_gpu::UNCATEGORIZED_DRAWING_CATEGORY
                                 && uniform.visibility_mask & (1 << label.category) == 0)
                                 || (label.context_only && uniform.show_context == 0)
                             {
@@ -4405,6 +4554,7 @@ impl LoadedViewer {
             );
         }
         self.paint_macro_staging(&painter, world, canvas);
+        self.paint_macro_interaction(&painter, world, canvas);
 
         paint_scale_ruler(
             &painter,
@@ -5537,6 +5687,10 @@ impl LoadedViewer {
                     self.ruler_tool.clear();
                 } else if self.selected.is_some()
                     || !self.highlighted.is_empty()
+                    || self
+                        .macro_staging
+                        .as_ref()
+                        .is_some_and(|staging| !staging.selection.is_empty())
                     || self.selected_drc.is_some()
                     || self.selected_antenna.is_some()
                     || self.selected_map_bbox.is_some()
@@ -5546,7 +5700,11 @@ impl LoadedViewer {
                     self.selected_drc = None;
                     self.selected_antenna = None;
                     self.selected_map_bbox = None;
+                    if let Some(staging) = self.macro_staging.as_mut() {
+                        staging.selection.clear();
+                    }
                 }
+                self.macro_interaction = None;
                 self.pan_drag.reset();
             }
             if ui.input(|input| input.key_pressed(egui::Key::Q)) {
@@ -6507,62 +6665,180 @@ impl LoadedViewer {
         staging.is_macro_instance(&self.db, name)
     }
 
-    /// Handles a primary click in macro placement mode: staged slots and
-    /// placed block macros join the multi-selection. Returns true when the
-    /// click selected a macro target.
-    fn select_macro_at(&mut self, point: Point32, additive: bool) -> bool {
-        let staged_hit = self
+    fn macro_hit_at(&self, point: Point32) -> Option<(MacroTarget, Option<ShapeId>)> {
+        if let Some(target) = self
             .macro_staging
             .as_ref()
-            .and_then(|staging| staging.staged_index_at(point))
-            .map(MacroTarget::Staged);
-        let placed_hit = if staged_hit.is_none() {
-            self.pick_editable_instance_bbox_at(point)
-                .filter(|shape_id| self.placed_shape_is_macro(*shape_id))
-                .map(MacroTarget::Placed)
-        } else {
-            None
-        };
-        let target = staged_hit.or(placed_hit);
+            .and_then(|staging| staging.staged_target_at(point))
+        {
+            return Some((target, None));
+        }
+        let shape_id = self
+            .pick_editable_instance_bbox_at(point)
+            .filter(|shape_id| self.placed_shape_is_macro(*shape_id))?;
+        let shape = self.db.find_shape(shape_id)?;
+        let name = crate::macro_staging::shape_instance_name(&self.db, shape)?;
+        Some((MacroTarget::Placed(name.to_owned()), Some(shape_id)))
+    }
+
+    /// Handles a primary click in macro placement mode. A replace click on
+    /// empty space clears the macro selection before ordinary shape picking
+    /// continues.
+    fn select_macro_at(&mut self, point: Point32, mode: SelectionMode) -> bool {
+        let hit = self.macro_hit_at(point);
+        let target = hit.as_ref().map(|(target, _)| target.clone());
+        let preferred_shape = hit.as_ref().and_then(|(_, shape_id)| *shape_id);
         let Some(staging) = self.macro_staging.as_mut() else {
             return false;
         };
-        match target {
-            Some(target) => {
-                if additive && !staging.selection.insert(target) {
-                    staging.selection.remove(&target);
-                } else if !additive {
-                    staging.selection.clear();
-                    staging.selection.insert(target);
+        if let Some(target) = target.clone() {
+            apply_selection(&mut staging.selection, [target], mode);
+        } else if mode == SelectionMode::Replace {
+            staging.selection.clear();
+        }
+        self.sync_primary_macro_selection(preferred_shape);
+        target.is_some()
+    }
+
+    fn sync_primary_macro_selection(&mut self, preferred: Option<ShapeId>) {
+        let Some(staging) = self.macro_staging.as_ref() else {
+            return;
+        };
+        let preferred_is_selected = preferred.is_some_and(|shape_id| {
+            self.db
+                .find_shape(shape_id)
+                .and_then(|shape| crate::macro_staging::shape_instance_name(&self.db, shape))
+                .is_some_and(|name| {
+                    staging
+                        .selection
+                        .contains(&MacroTarget::Placed(name.to_owned()))
+                })
+        });
+        self.selected = if preferred_is_selected {
+            preferred
+        } else {
+            staging.selection.iter().find_map(|target| match target {
+                MacroTarget::Placed(name) => {
+                    crate::macro_staging::instance_shape(&self.db, name).map(|shape| shape.id)
+                }
+                MacroTarget::Staged(_) => None,
+            })
+        };
+    }
+
+    fn begin_macro_canvas_interaction(
+        &mut self,
+        point: Point32,
+        shift: bool,
+        command_or_ctrl: bool,
+    ) -> Option<CanvasDragMode> {
+        self.macro_staging.as_ref()?;
+        if let Some((target, preferred_shape)) = self.macro_hit_at(point) {
+            let already_selected = self
+                .macro_staging
+                .as_ref()
+                .is_some_and(|staging| staging.selection.contains(&target));
+            if !already_selected {
+                let mode = SelectionMode::for_click(shift, command_or_ctrl);
+                if let Some(staging) = self.macro_staging.as_mut() {
+                    apply_selection(&mut staging.selection, [target], mode);
                 }
             }
-            None if !additive => staging.selection.clear(),
-            None => {}
+            self.sync_primary_macro_selection(preferred_shape);
+            if !self.edit_enabled
+                || !can_start_edit_command(
+                    self.draft.is_some(),
+                    self.pending_edit.is_some(),
+                    self.pending_session_action.is_some(),
+                )
+                || self.macro_queue_busy()
+            {
+                self.last_edit_result = Some("wait for the current edit to finish".to_string());
+                return Some(CanvasDragMode::Pan);
+            }
+            let views = self
+                .macro_staging
+                .as_ref()
+                .map(|staging| staging.selected_placement_views(&self.db))
+                .unwrap_or_default();
+            if views.is_empty() {
+                return Some(CanvasDragMode::Pan);
+            }
+            self.macro_interaction = Some(MacroCanvasInteraction::GroupDrag(MacroGroupDrag::new(
+                views,
+            )));
+            return Some(CanvasDragMode::MacroMove);
         }
-        match target {
-            Some(MacroTarget::Placed(shape_id)) => {
-                self.selected = Some(shape_id);
-                true
-            }
-            Some(MacroTarget::Staged(_)) => {
-                self.selected = None;
-                true
-            }
-            None => false,
+
+        let mode = SelectionMode::for_marquee(shift, command_or_ctrl);
+        self.macro_interaction = Some(MacroCanvasInteraction::Marquee(MacroMarquee::new(
+            point, mode,
+        )));
+        Some(CanvasDragMode::MacroMarquee)
+    }
+
+    fn update_macro_group_drag(&mut self, dx: i32, dy: i32) {
+        let core = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.core_rect);
+        if let Some(MacroCanvasInteraction::GroupDrag(drag)) = self.macro_interaction.as_mut() {
+            drag.update(dx, dy, core);
         }
     }
 
-    fn macro_toolbar(&mut self, ui: &mut egui::Ui) {
+    fn update_macro_marquee(&mut self, point: Point32) {
+        if let Some(MacroCanvasInteraction::Marquee(marquee)) = self.macro_interaction.as_mut() {
+            marquee.update(point);
+        }
+    }
+
+    fn commit_macro_marquee(&mut self) {
+        let Some(MacroCanvasInteraction::Marquee(marquee)) = self.macro_interaction.take() else {
+            return;
+        };
         let Some(staging) = self.macro_staging.as_mut() else {
+            return;
+        };
+        let hits = staging.targets_intersecting(&self.db, marquee.rect());
+        apply_selection(&mut staging.selection, hits, marquee.mode);
+        self.sync_primary_macro_selection(None);
+    }
+
+    fn commit_macro_group_drag(&mut self) {
+        let Some(MacroCanvasInteraction::GroupDrag(drag)) = self.macro_interaction.take() else {
+            return;
+        };
+        if !drag.valid() {
+            if let Some(staging) = self.macro_staging.as_mut() {
+                staging.message = drag.error().map(str::to_owned);
+            }
+            return;
+        }
+        self.apply_macro_moves(drag.planned_moves(), None);
+    }
+
+    fn macro_toolbar(&mut self, ui: &mut egui::Ui) {
+        let Some(staging) = self.macro_staging.as_ref() else {
             return;
         };
         let views = staging.selected_placement_views(&self.db);
         let state = crate::macro_toolbar::MacroToolbarState {
             unplaced_count: staging.staged.len(),
             selected_count: views.len(),
+            placed_selected_count: staging.selected_placed_count(),
             unplaced_stdcell_count: staging.stdcell_blob.as_ref().map_or(0, |blob| blob.count),
-            rotation_allowed: views.iter().all(|view| view.symmetry.rotation_allowed()),
-            mirror_allowed: views.iter().all(|view| view.symmetry.mirror_allowed()),
+            rotation_allowed: views
+                .iter()
+                .all(|view| view.symmetry.rotate_90_allowed(view.orient)),
+            mirror_horizontal_allowed: views
+                .iter()
+                .all(|view| view.symmetry.mirror_horizontal_allowed(view.orient)),
+            mirror_vertical_allowed: views
+                .iter()
+                .all(|view| view.symmetry.mirror_vertical_allowed(view.orient)),
+            die_available: staging.die_rect.is_some(),
+            core_available: staging.core_rect.is_some(),
             queue_busy: staging.queue.is_busy(),
             queue_status: staging.queue.status(),
         };
@@ -6574,10 +6850,14 @@ impl LoadedViewer {
     }
 
     fn run_macro_op(&mut self, op: &MacroOp) {
-        let core = self
+        let bounds = self
             .macro_staging
             .as_ref()
-            .and_then(|staging| staging.core_rect);
+            .map(|staging| MacroOpBounds {
+                core: staging.core_rect,
+                die: staging.die_rect,
+            })
+            .unwrap_or_default();
         let Some(staging) = self.macro_staging.as_mut() else {
             return;
         };
@@ -6585,19 +6865,79 @@ impl LoadedViewer {
             return;
         }
         let views = staging.selected_placement_views(&self.db);
-        let plan = plan_macro_op(op, &views, core);
+        let plan = plan_macro_op(op, &views, bounds);
         let skipped_summary = plan
             .skipped
             .iter()
             .map(|(name, reason)| format!("{name}: {reason}"))
             .collect::<Vec<_>>()
             .join("; ");
-        staging.message = (!skipped_summary.is_empty()).then_some(skipped_summary);
         if plan.moves.is_empty() {
+            staging.message = (!skipped_summary.is_empty()).then_some(skipped_summary);
             return;
         }
-        staging.queue.enqueue(plan.moves);
+        self.apply_macro_moves(
+            plan.moves,
+            (!skipped_summary.is_empty()).then_some(skipped_summary),
+        );
+    }
+
+    fn apply_macro_moves(&mut self, moves: Vec<PlannedMacroMove>, message: Option<String>) {
+        if let Some(reason) = self.macro_moves_validation_error(&moves) {
+            if let Some(staging) = self.macro_staging.as_mut() {
+                staging.message = Some(reason);
+            }
+            return;
+        }
+        let total = moves.len();
+        let Some(staging) = self.macro_staging.as_mut() else {
+            return;
+        };
+        staging.message = message;
+        let committed = staging.apply_staged_moves(moves);
+        if committed.is_empty() {
+            staging.queue.record_completed(total);
+            return;
+        }
+        staging.queue.enqueue(committed);
         self.pump_macro_queue();
+    }
+
+    fn macro_moves_validation_error(&self, moves: &[PlannedMacroMove]) -> Option<String> {
+        if let Some((first, second)) = planned_move_overlap(moves) {
+            return Some(format!(
+                "operation rejected: {} overlaps {} at the final positions",
+                first.name, second.name
+            ));
+        }
+        let core = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.core_rect);
+        let moving_names = moves
+            .iter()
+            .map(|item| item.name.clone())
+            .collect::<BTreeSet<_>>();
+        for item in moves.iter().filter(|item| !item.staged) {
+            let Some(core) = core else {
+                return Some("operation rejected: core area is unknown".to_string());
+            };
+            if !rect_fits_inside(item.rect, core) {
+                return Some(format!(
+                    "operation rejected: {} would leave the core area",
+                    item.name
+                ));
+            }
+            if let Some(collider) =
+                instance_names_intersecting_except(&self.db, item.rect, &moving_names).first()
+            {
+                return Some(format!(
+                    "operation rejected: {} overlaps {collider}",
+                    item.name
+                ));
+            }
+        }
+        None
     }
 
     /// Emits the next queued macro placement command when the edit bridge is
@@ -6612,7 +6952,7 @@ impl LoadedViewer {
         {
             return;
         }
-        let head: PlannedMacroMove = {
+        let (head, moving_names): (PlannedMacroMove, BTreeSet<String>) = {
             let Some(staging) = self.macro_staging.as_ref() else {
                 return;
             };
@@ -6620,7 +6960,7 @@ impl LoadedViewer {
                 return;
             }
             match staging.queue.pending.front() {
-                Some(head) => head.clone(),
+                Some(head) => (head.clone(), staging.queue.moving_names.clone()),
                 None => return,
             }
         };
@@ -6640,7 +6980,7 @@ impl LoadedViewer {
                 return;
             }
         }
-        let colliders = instance_names_intersecting(&self.db, head.rect, &head.name);
+        let colliders = instance_names_intersecting_except(&self.db, head.rect, &moving_names);
         if let Some(first) = colliders.first() {
             staging
                 .queue
@@ -6719,6 +7059,7 @@ impl LoadedViewer {
             }
         }
         staging.reconcile(&self.db);
+        staging.queue.finish_if_idle();
     }
 
     fn paint_macro_staging(&self, painter: &egui::Painter, world: Rect32, canvas: egui::Rect) {
@@ -6737,12 +7078,21 @@ impl LoadedViewer {
                 crate::macro_staging::paint_stdcell_blob(painter, blob, screen);
             }
         }
-        for (index, staged) in staging.staged.iter().enumerate() {
+        if !self
+            .object_visibility
+            .instances
+            .is_visible(crate::instance_visibility::InstanceClass::Macro)
+        {
+            return;
+        }
+        for staged in &staging.staged {
             let screen = world_to_screen_rect(staged.rect, world, canvas, self.zoom, self.pan);
             if !screen.is_positive() || !screen.intersects(canvas) {
                 continue;
             }
-            let selected = staging.selection.contains(&MacroTarget::Staged(index));
+            let selected = staging
+                .selection
+                .contains(&MacroTarget::Staged(staged.name.clone()));
             painter.rect_filled(
                 screen,
                 0.0,
@@ -6776,10 +7126,10 @@ impl LoadedViewer {
             }
         }
         for target in &staging.selection {
-            let MacroTarget::Placed(shape_id) = target else {
+            let MacroTarget::Placed(name) = target else {
                 continue;
             };
-            let Some(shape) = self.db.find_shape(*shape_id) else {
+            let Some(shape) = crate::macro_staging::instance_shape(&self.db, name) else {
                 continue;
             };
             let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
@@ -6789,6 +7139,44 @@ impl LoadedViewer {
                 egui::Stroke::new(2.0_f32, ecos_accent()),
                 egui::StrokeKind::Inside,
             );
+        }
+    }
+
+    fn paint_macro_interaction(&self, painter: &egui::Painter, world: Rect32, canvas: egui::Rect) {
+        match self.macro_interaction.as_ref() {
+            Some(MacroCanvasInteraction::Marquee(marquee)) => {
+                let screen =
+                    world_to_screen_rect(marquee.rect(), world, canvas, self.zoom, self.pan);
+                painter.rect_filled(
+                    screen,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(82, 168, 255, 30),
+                );
+                painter.rect_stroke(
+                    screen,
+                    0.0,
+                    egui::Stroke::new(1.5, ecos_accent()),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            Some(MacroCanvasInteraction::GroupDrag(drag)) => {
+                let invalid =
+                    !drag.valid() || self.macro_moves_validation_error(drag.preview()).is_some();
+                let stroke = egui::Stroke::new(
+                    2.0,
+                    if invalid {
+                        egui::Color32::from_rgb(248, 113, 113)
+                    } else {
+                        ecos_accent()
+                    },
+                );
+                for item in drag.preview() {
+                    let screen =
+                        world_to_screen_rect(item.rect, world, canvas, self.zoom, self.pan);
+                    painter.rect_stroke(screen.expand(2.0), 0.0, stroke, egui::StrokeKind::Inside);
+                }
+            }
+            None => {}
         }
     }
 
@@ -7201,6 +7589,15 @@ impl LoadedViewer {
                 render_shortcut_row(ui, "Esc", "Clear ruler, selection, or close popup");
                 render_shortcut_row(ui, "Ctrl + F  or  /", "Focus search query");
                 render_shortcut_row(ui, "?  or  F1", "Toggle Keyboard Shortcuts overlay");
+                if self.macro_staging.is_some() {
+                    render_shortcut_row(
+                        ui,
+                        "Shift/Ctrl/Cmd + Click",
+                        "Add or remove a macro from the selection",
+                    );
+                    render_shortcut_row(ui, "Drag Empty Area", "Select macros with a marquee");
+                    render_shortcut_row(ui, "Drag Selected Macro", "Move the selected macro group");
+                }
 
                 ui.add_space(8.0);
                 ui.label(
@@ -7845,7 +8242,7 @@ fn ecos_panel() -> egui::Color32 {
     egui::Color32::from_rgb(34, 34, 38)
 }
 
-fn ecos_border() -> egui::Color32 {
+pub(crate) fn ecos_border() -> egui::Color32 {
     egui::Color32::from_rgb(54, 54, 58)
 }
 
@@ -9025,7 +9422,7 @@ fn shape_label_info(
         rect: *rect,
         text,
         kind,
-        category: 16,
+        category: crate::canvas_gpu::UNCATEGORIZED_DRAWING_CATEGORY,
         context_only: false,
     })
 }
@@ -11670,6 +12067,8 @@ fn append_positive_layer_rule(text: &mut String, label: &str, value: i32) {
 enum CanvasDragMode {
     Pan,
     Edit,
+    MacroMove,
+    MacroMarquee,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -11781,11 +12180,11 @@ mod tests {
     fn gpu_tile_counts_follow_visibility_without_rebuilding() {
         let mut visibility = ObjectVisibility::default();
         visibility.set_all_visible(true);
-        let mut counts = [[0; 17]; 2];
+        let mut counts = [[0; 32]; 2];
         counts[0][DrawingCategory::NetSignal as usize] = 2;
         counts[0][DrawingCategory::InstanceStdCell as usize] = 3;
         counts[1][DrawingCategory::NetSignal as usize] = 4;
-        counts[0][16] = 1;
+        counts[0][crate::canvas_gpu::UNCATEGORIZED_DRAWING_CATEGORY as usize] = 1;
         let tile = GpuTileData {
             instances: std::sync::Arc::new(Vec::new()),
             labels: Vec::new(),
@@ -13451,7 +13850,8 @@ mod tests {
             net_signal: false,
             net_clock: false,
             net_other: false,
-            pdn: true,
+            pdn_power: true,
+            pdn_ground: true,
             tracks: true,
             ..ObjectVisibility::default()
         };
@@ -13509,6 +13909,31 @@ mod tests {
             DrawingCategory::NetOther
         );
         assert_eq!(net_kind_drawing_category(None), DrawingCategory::NetOther);
+    }
+
+    #[test]
+    fn pdn_net_names_split_into_power_and_ground_categories() {
+        assert_eq!(
+            pdn_category_for_name(Some("VSS")),
+            DrawingCategory::PdnGround
+        );
+        assert_eq!(
+            pdn_category_for_name(Some("vss_dig")),
+            DrawingCategory::PdnGround
+        );
+        assert_eq!(
+            pdn_category_for_name(Some("GND")),
+            DrawingCategory::PdnGround
+        );
+        assert_eq!(
+            pdn_category_for_name(Some("VDD")),
+            DrawingCategory::PdnPower
+        );
+        assert_eq!(
+            pdn_category_for_name(Some("VCC_CORE")),
+            DrawingCategory::PdnPower
+        );
+        assert_eq!(pdn_category_for_name(None), DrawingCategory::PdnPower);
     }
 
     #[test]
@@ -15214,8 +15639,18 @@ mod tests {
             state.orient_by_name.get("u_sram02").copied(),
             Some(crate::macro_orient::MacroOrientation::R90)
         );
-        // The synthetic snapshot has no die or core shapes yet.
-        assert!(state.core_rect.is_none());
+        // The synthetic snapshot has no boundary shapes, so the manifest DIE
+        // is also the placement boundary fallback.
+        assert_eq!(
+            state.die_rect,
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 52000,
+                hy: 53000,
+            })
+        );
+        assert_eq!(state.core_rect, state.die_rect);
 
         state.staged[0].rect = Rect32 {
             lx: -5000,
@@ -15229,18 +15664,31 @@ mod tests {
             hx: 1000,
             hy: 1000,
         });
+        let staged_left = state
+            .staged
+            .iter()
+            .map(|staged| staged.rect.lx)
+            .min()
+            .expect("staged macros");
         assert_eq!(
             world,
             Rect32 {
-                lx: -5000,
+                lx: staged_left,
                 ly: 0,
                 hx: 1000,
                 hy: 4000
             }
         );
 
+        state
+            .selection
+            .insert(MacroTarget::Staged("u_core_cell".to_string()));
+        state.staged.reverse();
         state.reconcile(&db);
         assert_eq!(state.staged.len(), 2);
+        assert!(state
+            .selection
+            .contains(&MacroTarget::Staged("u_core_cell".to_string())));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -15279,6 +15727,7 @@ mod tests {
             staged: Vec::new(),
             selection: BTreeSet::new(),
             orient_by_name: BTreeMap::new(),
+            die_rect: None,
             core_rect: None,
             queue: Default::default(),
             message: None,

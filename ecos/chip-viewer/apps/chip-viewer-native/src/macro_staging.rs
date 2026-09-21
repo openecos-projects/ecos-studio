@@ -5,9 +5,9 @@
 //! manifest (built from the step DEF and master metadata). This module owns
 //! the viewer-side state for those macros: the staging row extending left
 //! from the die origin, an aggregate placeholder for unplaced standard cells
-//! parked at the die bottom-right corner, multi-selection, placement
-//! constraints, and reconciliation against snapshots that already contain
-//! placed macros.
+//! parked just outside the die to the right of its bottom-right corner,
+//! multi-selection, placement constraints, and reconciliation against
+//! snapshots that already contain placed macros.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -16,7 +16,7 @@ use chip_view_db::ChipViewDb;
 use chipgeom_format::{OwnerRef, OwnerType, Point32, Rect32, ShapeRecord};
 use serde::Deserialize;
 
-use crate::macro_ops::MacroOpQueue;
+use crate::macro_ops::{MacroOpQueue, PlannedMacroMove};
 use crate::macro_orient::{MacroOrientation, MasterSymmetry};
 
 /// Layout geometry lives on layer 0; see `LAYOUT_GEOMETRY_LAYER` in app.rs.
@@ -24,8 +24,6 @@ const LAYOUT_GEOMETRY_LAYER: u16 = 0;
 
 /// Gap between staged macro slots, as a fraction of the largest macro.
 const STAGING_SLOT_GAP_FRACTION: i64 = 10;
-/// Fraction of the die width kept as a margin around the stdcell blob.
-const STDCELL_BLOB_MARGIN_FRACTION: i64 = 100;
 /// Maximum fraction of the die width/height the stdcell blob may occupy.
 const STDCELL_BLOB_MAX_FRACTION: i64 = 5;
 
@@ -34,6 +32,8 @@ const STDCELL_BLOB_MAX_FRACTION: i64 = 5;
 struct MacroStagingManifestFile {
     #[serde(default)]
     schema: u32,
+    #[serde(default)]
+    die_area: Option<Rect32>,
     #[serde(default)]
     macros: Vec<MacroStagingEntryFile>,
     #[serde(default)]
@@ -67,10 +67,18 @@ struct MacroStagingEntryFile {
 
 /// A selected or manipulated macro: either a placed snapshot shape or an
 /// unplaced macro in the staging row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum MacroTarget {
-    Placed(u64),
-    Staged(usize),
+    Placed(String),
+    Staged(String),
+}
+
+impl MacroTarget {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Placed(name) | Self::Staged(name) => name,
+        }
+    }
 }
 
 pub(crate) struct StagedMacro {
@@ -85,7 +93,9 @@ pub(crate) struct StagedMacro {
     pub rect: Rect32,
 }
 
-/// Consistent snapshot of one macro used by the operation planners.
+/// Consistent snapshot of one macro used by the operation planners and drag
+/// previews.
+#[derive(Clone, Debug)]
 pub(crate) struct MacroPlacementView {
     pub name: String,
     pub orient: MacroOrientation,
@@ -100,11 +110,13 @@ pub(crate) struct MacroStagingState {
     /// Orientations of macros that already have a placed shape; the snapshot
     /// does not encode instance orientation.
     pub orient_by_name: BTreeMap<String, MacroOrientation>,
+    pub die_rect: Option<Rect32>,
     pub core_rect: Option<Rect32>,
     pub queue: MacroOpQueue,
     pub message: Option<String>,
-    /// Aggregate placeholder for unplaced standard cells at the die
-    /// bottom-right corner; purely visual, never selectable or saved.
+    /// Aggregate placeholder for unplaced standard cells just outside the
+    /// die, to the right of its bottom-right corner; purely visual, never
+    /// selectable or saved.
     pub stdcell_blob: Option<StdcellBlob>,
 }
 
@@ -127,11 +139,13 @@ impl MacroStagingState {
             return None;
         }
 
+        let die_rect = die_rect(db).or(manifest.die_area);
         let mut state = MacroStagingState {
             staged: Vec::new(),
             selection: BTreeSet::new(),
             orient_by_name: BTreeMap::new(),
-            core_rect: resolve_core_rect(db),
+            die_rect,
+            core_rect: resolve_core_rect(db).or(die_rect),
             queue: MacroOpQueue::default(),
             message: None,
             stdcell_blob: None,
@@ -155,7 +169,7 @@ impl MacroStagingState {
                 rect: Rect32::default(),
             });
         }
-        if let Some(die) = die_rect(db) {
+        if let Some(die) = state.die_rect {
             state.layout_staged(die);
             if let Some(stdcell) = manifest.stdcell_staging {
                 state.layout_stdcell_blob(die, stdcell.count, stdcell.area_dbu);
@@ -196,28 +210,29 @@ impl MacroStagingState {
         }
     }
 
-    /// Places the unplaced-stdcell placeholder blob inside the die at its
-    /// bottom-right corner. The blob never exceeds a small fraction of the
-    /// die so it stays a visual hint rather than a placement obstacle.
+    /// Places the unplaced-stdcell placeholder blob just outside the die to
+    /// the right of its bottom-right corner: the blob bottom edge aligns with
+    /// the die bottom edge and it extends rightward from the die right edge.
+    /// The blob never exceeds a small fraction of the die so it stays a
+    /// visual hint rather than a placement obstacle.
     fn layout_stdcell_blob(&mut self, die: Rect32, count: u64, area_dbu: i64) {
         if count == 0 {
             return;
         }
         let die_width = (die.hx as i64 - die.lx as i64).max(1);
         let die_height = (die.hy as i64 - die.ly as i64).max(1);
-        let margin = (die_width / STDCELL_BLOB_MARGIN_FRACTION).max(1);
         let max_side = (die_width.min(die_height) / STDCELL_BLOB_MAX_FRACTION).max(1);
         let area_side = (area_dbu.max(1) as f64).sqrt().ceil() as i64;
         let side = area_side.clamp(1, max_side);
-        let hx = die.hx as i64 - margin;
-        let ly = die.ly as i64 + margin;
+        let lx = die.hx as i64;
+        let ly = die.ly as i64;
         self.stdcell_blob = Some(StdcellBlob {
             count,
             area_dbu,
             rect: Rect32 {
-                lx: (hx - side) as i32,
+                lx: lx as i32,
                 ly: ly as i32,
-                hx: hx as i32,
+                hx: (lx + side) as i32,
                 hy: (ly + side) as i32,
             },
         });
@@ -240,6 +255,12 @@ impl MacroStagingState {
         self.staged
             .iter()
             .position(|macro_entry| rect_contains(macro_entry.rect, point))
+    }
+
+    pub(crate) fn staged_target_at(&self, point: Point32) -> Option<MacroTarget> {
+        self.staged_index_at(point)
+            .and_then(|index| self.staged.get(index))
+            .map(|macro_entry| MacroTarget::Staged(macro_entry.name.clone()))
     }
 
     /// True when the instance name belongs to a block macro: staged here,
@@ -270,22 +291,44 @@ impl MacroStagingState {
     /// Drops staged macros that now have a placed shape and prunes selection
     /// entries whose shapes disappeared. Called after every snapshot reload.
     pub(crate) fn reconcile(&mut self, db: &ChipViewDb) {
+        let selected_names: BTreeSet<String> = self
+            .selection
+            .iter()
+            .map(|target| target.name().to_owned())
+            .collect();
         self.staged
             .retain(|macro_entry| instance_shape(db, &macro_entry.name).is_none());
-        self.selection.retain(|target| match *target {
-            MacroTarget::Staged(index) => index < self.staged.len(),
-            MacroTarget::Placed(shape_id) => db.find_shape(shape_id).is_some(),
-        });
-        self.core_rect = resolve_core_rect(db);
+        self.selection = selected_names
+            .into_iter()
+            .filter_map(|name| {
+                if instance_shape(db, &name).is_some() {
+                    Some(MacroTarget::Placed(name))
+                } else if self
+                    .staged
+                    .iter()
+                    .any(|macro_entry| macro_entry.name == name)
+                {
+                    Some(MacroTarget::Staged(name))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.die_rect = die_rect(db).or(self.die_rect);
+        self.core_rect = resolve_core_rect(db).or(self.die_rect);
     }
 
     /// Gathers the current placement views for every selected macro.
     pub(crate) fn selected_placement_views(&self, db: &ChipViewDb) -> Vec<MacroPlacementView> {
         let mut views = Vec::new();
         for target in &self.selection {
-            match *target {
-                MacroTarget::Staged(index) => {
-                    let Some(macro_entry) = self.staged.get(index) else {
+            match target {
+                MacroTarget::Staged(name) => {
+                    let Some(macro_entry) = self
+                        .staged
+                        .iter()
+                        .find(|macro_entry| macro_entry.name == *name)
+                    else {
                         continue;
                     };
                     views.push(MacroPlacementView {
@@ -296,11 +339,8 @@ impl MacroStagingState {
                         staged: true,
                     });
                 }
-                MacroTarget::Placed(shape_id) => {
-                    let Some(shape) = db.find_shape(shape_id) else {
-                        continue;
-                    };
-                    let Some(name) = shape_instance_name(db, shape) else {
+                MacroTarget::Placed(name) => {
+                    let Some(shape) = instance_shape(db, name) else {
                         continue;
                     };
                     views.push(MacroPlacementView {
@@ -314,6 +354,56 @@ impl MacroStagingState {
             }
         }
         views
+    }
+
+    pub(crate) fn selected_placed_count(&self) -> usize {
+        self.selection
+            .iter()
+            .filter(|target| matches!(target, MacroTarget::Placed(_)))
+            .count()
+    }
+
+    pub(crate) fn targets_intersecting(
+        &self,
+        db: &ChipViewDb,
+        rect: Rect32,
+    ) -> BTreeSet<MacroTarget> {
+        let mut targets = self
+            .staged
+            .iter()
+            .filter(|macro_entry| macro_entry.rect.intersects(rect))
+            .map(|macro_entry| MacroTarget::Staged(macro_entry.name.clone()))
+            .collect::<BTreeSet<_>>();
+        for name in self.orient_by_name.keys() {
+            if instance_shape(db, name).is_some_and(|shape| shape.bbox.intersects(rect)) {
+                targets.insert(MacroTarget::Placed(name.clone()));
+            }
+        }
+        targets
+    }
+
+    /// Applies orientation-only operations to macros that still live in the
+    /// local staging row and returns the moves that require backend commands.
+    pub(crate) fn apply_staged_moves(
+        &mut self,
+        moves: Vec<PlannedMacroMove>,
+    ) -> Vec<PlannedMacroMove> {
+        let mut committed = Vec::new();
+        for item in moves {
+            if item.staged {
+                if let Some(macro_entry) = self
+                    .staged
+                    .iter_mut()
+                    .find(|macro_entry| macro_entry.name == item.name)
+                {
+                    macro_entry.orient = item.orient;
+                    macro_entry.rect = item.rect;
+                }
+            } else {
+                committed.push(item);
+            }
+        }
+        committed
     }
 }
 
@@ -383,6 +473,26 @@ pub(crate) fn instance_names_intersecting(
         .filter(|shape| rects_overlap(shape.bbox, bbox))
         .filter_map(|shape| shape_instance_name(db, shape))
         .filter(|name| *name != skip)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Names of placed instances overlapping `bbox`, excluding every instance
+/// participating in the same planned batch.
+pub(crate) fn instance_names_intersecting_except(
+    db: &ChipViewDb,
+    bbox: Rect32,
+    skipped_names: &BTreeSet<String>,
+) -> Vec<String> {
+    db.query_layer_intersect_records(LAYOUT_GEOMETRY_LAYER, bbox)
+        .into_iter()
+        .filter(|shape| {
+            db.owner_for_shape(shape)
+                .is_some_and(|owner| owner_type_is(owner, OwnerType::InstanceBBox))
+        })
+        .filter(|shape| rects_overlap(shape.bbox, bbox))
+        .filter_map(|shape| shape_instance_name(db, shape))
+        .filter(|name| !skipped_names.contains(*name))
         .map(str::to_owned)
         .collect()
 }
@@ -555,6 +665,15 @@ mod tests {
         .expect("manifest parses");
 
         assert_eq!(manifest.schema, 1);
+        assert_eq!(
+            manifest.die_area,
+            Some(Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 52000,
+                hy: 53000,
+            })
+        );
         let entry = &manifest.macros[0];
         assert_eq!(entry.name, "u_rom01");
         assert_eq!(entry.width_dbu, 12000);
@@ -613,6 +732,7 @@ mod tests {
                 .collect(),
             selection: BTreeSet::new(),
             orient_by_name: BTreeMap::new(),
+            die_rect: None,
             core_rect: None,
             queue: MacroOpQueue::default(),
             message: None,
@@ -653,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_stdcell_blob_parks_inside_die_bottom_right() {
+    fn layout_stdcell_blob_parks_right_of_die_bottom_right() {
         let die = Rect32 {
             lx: 0,
             ly: 0,
@@ -665,10 +785,11 @@ mod tests {
         let blob = state.stdcell_blob.expect("blob");
         assert_eq!(blob.count, 42_000);
         // sqrt(900_000_000) ≈ 30000 clamps to the 5% die cap of 16000.
-        assert_eq!(blob.rect.hx, 100_000 - 1_000);
-        assert_eq!(blob.rect.ly, 1_000);
-        assert_eq!(blob.rect.hy - blob.rect.ly, 16_000);
-        assert!(rect_fits_inside(blob.rect, die));
+        assert_eq!(blob.rect.lx, die.hx);
+        assert_eq!(blob.rect.ly, die.ly);
+        assert_eq!(blob.rect.hx - blob.rect.lx, 16_000);
+        assert!(blob.rect.lx >= die.hx);
+        assert!(blob.rect.ly >= die.ly);
 
         let mut empty = staged_state(&[]);
         empty.layout_stdcell_blob(die, 0, 0);
@@ -689,6 +810,76 @@ mod tests {
         let world = state.expanded_world(die);
         assert!(world.lx <= state.staged[0].rect.lx);
         assert!(world.ly <= die.ly);
-        assert_eq!(world.hx, die.hx);
+        let blob = state.stdcell_blob.expect("blob");
+        assert_eq!(world.hx, blob.rect.hx);
+        assert!(world.hx > die.hx);
+    }
+
+    #[test]
+    fn apply_staged_moves_updates_local_preview_and_returns_placed_moves() {
+        let mut state = staged_state(&[(400, 300)]);
+        state.staged[0].rect = Rect32 {
+            lx: -400,
+            ly: 0,
+            hx: 0,
+            hy: 300,
+        };
+        let staged_move = PlannedMacroMove {
+            name: "u_macro0".to_string(),
+            orient: MacroOrientation::R90,
+            rect: Rect32 {
+                lx: -350,
+                ly: -50,
+                hx: -50,
+                hy: 350,
+            },
+            staged: true,
+        };
+        let placed_move = PlannedMacroMove {
+            name: "u_placed".to_string(),
+            orient: MacroOrientation::My,
+            rect: Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 500,
+                hy: 500,
+            },
+            staged: false,
+        };
+
+        let committed = state.apply_staged_moves(vec![staged_move.clone(), placed_move.clone()]);
+
+        assert_eq!(state.staged[0].orient, staged_move.orient);
+        assert_eq!(state.staged[0].rect, staged_move.rect);
+        assert_eq!(committed.len(), 1);
+        assert_eq!(committed[0].name, placed_move.name);
+        assert_eq!(committed[0].orient, placed_move.orient);
+        assert_eq!(committed[0].rect, placed_move.rect);
+        assert_eq!(committed[0].staged, placed_move.staged);
+    }
+
+    #[test]
+    fn apply_staged_moves_ignores_unknown_staged_names() {
+        let mut state = staged_state(&[(400, 300)]);
+        let original_name = state.staged[0].name.clone();
+        let original_orient = state.staged[0].orient;
+        let original_rect = state.staged[0].rect;
+
+        let committed = state.apply_staged_moves(vec![PlannedMacroMove {
+            name: "missing".to_string(),
+            orient: MacroOrientation::R180,
+            rect: Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 410,
+                hy: 320,
+            },
+            staged: true,
+        }]);
+
+        assert!(committed.is_empty());
+        assert_eq!(state.staged[0].name, original_name);
+        assert_eq!(state.staged[0].orient, original_orient);
+        assert_eq!(state.staged[0].rect, original_rect);
     }
 }

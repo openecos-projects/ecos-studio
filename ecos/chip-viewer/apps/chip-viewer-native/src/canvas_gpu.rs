@@ -9,6 +9,11 @@ pub const GPU_CANVAS_DEBUG_ENV: &str = "ECOS_GPU_CANVAS_DEBUG";
 pub const PATTERN_MIN_SIZE_PX: f32 = 20.0;
 pub const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
 
+/// Drawing-category sentinel packed for shapes without a category. The GPU
+/// shader and CPU visible counting treat it as always visible so
+/// uncategorized shapes stay drawn regardless of the visibility mask.
+pub(crate) const UNCATEGORIZED_DRAWING_CATEGORY: u8 = 31;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CanvasUniform {
@@ -296,7 +301,9 @@ fn unpack_rgba(packed: u32) -> vec4<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let inst = s_instances[in.instance_idx];
     let category = (inst.pattern_bits >> 18u) & 0x1Fu;
-    if (category < 16u && (u_canvas.visibility_mask & (1u << category)) == 0u)
+    // 31u mirrors UNCATEGORIZED_DRAWING_CATEGORY: uncategorized shapes stay
+    // visible regardless of the mask.
+    if (category < 31u && (u_canvas.visibility_mask & (1u << category)) == 0u)
         || ((inst.pattern_bits & (1u << 23u)) != 0u && u_canvas.show_context == 0u) {
         discard;
     }

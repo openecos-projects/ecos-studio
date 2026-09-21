@@ -47,7 +47,7 @@ impl GpuTileWorker {
                 }
                 let mut shapes = Vec::new();
                 let mut labels = Vec::new();
-                let mut counts = [[0; 17]; 2];
+                let mut counts = [[0; 32]; 2];
                 for (index, shape_id) in db
                     .query_layers_intersect(&request.layer_ids, request.bbox)
                     .into_iter()
@@ -80,7 +80,10 @@ impl GpuTileWorker {
                         continue;
                     };
                     let geometry = db.shape_geometry(shape);
-                    let category = owner_category.map_or(16, |category| category as u8);
+                    let category = owner_category.map_or(
+                        crate::canvas_gpu::UNCATEGORIZED_DRAWING_CATEGORY,
+                        |category| category as u8,
+                    );
                     let context_only = owner_type
                         .is_some_and(|owner_type| is_context_owner_type(owner_type as u8));
                     if let Some(mut label) = shape_label_info(

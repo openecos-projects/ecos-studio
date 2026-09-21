@@ -3,6 +3,7 @@ mod camera3d;
 mod canvas_gpu;
 mod canvas_gpu3d;
 mod instance_visibility;
+mod macro_interaction;
 mod macro_ops;
 mod macro_orient;
 mod macro_staging;
