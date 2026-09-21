@@ -15,24 +15,29 @@ export type {
   ProjectWorkspace,
 } from './model'
 
-import type { ProjectManifest } from '@ecos-studio/shared'
+import type { BackendProjectComparison, ProjectManifest } from '@ecos-studio/shared'
 import type { Project } from '@/types'
 import {
   FLOW_STEPS,
   buildProjectManagementProject as buildBackendProjectManagementProject,
   type ProjectSelectionUpdateMode,
-  type ProjectWorkspaceAnalysisInputsById,
   type ProjectWorkspaceFlowStatesById,
 } from '../backendProjectManagement'
 import { buildFrontendProjectManagementProject } from './frontendProjectManagement'
 import { buildFrontendProjectAnalysis } from '@/views/project-management/frontendProjectAnalysis'
 export { FRONTEND_FLOW_STEPS } from './frontendProjectManagement'
-import type { ProjectManagementProject, ProjectSelectionState } from './model'
+import type {
+  ProjectManagementProject,
+  ProjectSelectionState,
+  ProjectWorkspaceAnalysisInputsById,
+} from './model'
+export type { ProjectWorkspaceAnalysisInputsById } from './model'
 
 export function buildProjectManagementProject(
   project?: Project | null,
   manifest?: ProjectManifest | null,
   workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
+  comparison: BackendProjectComparison | null = null,
   workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
 ): ProjectManagementProject {
   if (manifest?.project_type === 'frontend') {
@@ -56,7 +61,7 @@ export function buildProjectManagementProject(
       project,
       manifest,
       workspaceFlowStates,
-      workspaceAnalysisInputs,
+      comparison,
     ),
     flowSteps: FLOW_STEPS,
     frontendAnalysis: null,

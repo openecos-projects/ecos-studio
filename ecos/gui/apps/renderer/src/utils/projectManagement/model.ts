@@ -1,4 +1,8 @@
-import type { ProjectManifestStage, ProjectManifestType } from '@ecos-studio/shared'
+import type {
+  ProjectManifestFrontendFlowStep,
+  ProjectManifestStage,
+  ProjectManifestType,
+} from '@ecos-studio/shared'
 import type {
   ProjectFlowStatusHint as BackendProjectFlowStatusHint,
   ProjectManagementProject as BackendProjectManagementProject,
@@ -8,6 +12,24 @@ import type {
 import type { FrontendProjectAnalysis } from '@/views/project-management/frontendProjectAnalysis'
 
 export type ProjectStage = ProjectManifestStage
+
+export interface ProjectWorkspaceAnalysisInput {
+  frontendDetailTexts?: Partial<Record<ProjectManifestFrontendFlowStep, string | null>>
+  frontendQorMetricTexts?: Partial<Record<ProjectManifestFrontendFlowStep, string | null>>
+  frontendQorSummaryTexts?: Partial<
+    Record<ProjectManifestFrontendFlowStep, string | null>
+  >
+  frontendQorHotspotTexts?: Partial<
+    Record<ProjectManifestFrontendFlowStep, string | null>
+  >
+  frontendUnavailablePaths?: readonly string[]
+  flowText?: string | null
+}
+
+export type ProjectWorkspaceAnalysisInputsById = Record<
+  string,
+  ProjectWorkspaceAnalysisInput
+>
 
 export interface ProjectStepCell extends Omit<BackendProjectStepCell, 'step'> {
   step: ProjectStage

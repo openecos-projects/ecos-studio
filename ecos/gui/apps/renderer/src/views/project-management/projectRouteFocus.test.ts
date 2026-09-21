@@ -79,4 +79,22 @@ describe('resolveProjectManagementRouteFocus', () => {
       }),
     ).toBeNull()
   })
+
+  it('focuses a Workspace by canonical path from the global task list', () => {
+    expect(
+      resolveProjectManagementRouteFocus({
+        workspacePath: '/projects/demo/ws_2/',
+        projects: [
+          {
+            id: 'project-1',
+            path: '/projects/demo',
+            workspaces: [
+              { id: 'ws_1', path: '/projects/demo/ws_1' },
+              { id: 'ws_2', path: '/projects/demo/ws_2' },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ projectId: 'project-1', workspaceId: 'ws_2' })
+  })
 })

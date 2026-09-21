@@ -69,7 +69,7 @@ describe('windowService', () => {
 
   it('bridges resize and maximize state changes to renderer event channels', () => {
     const windowDouble = createWindowDouble(false)
-    const dispose = bindWindowEvents(windowDouble)
+    const dispose = bindWindowEvents(windowDouble, { onCloseRequest: vi.fn() })
 
     windowDouble.listeners.get('resize')?.()
     windowDouble.listeners.get('maximize')?.()
@@ -97,17 +97,16 @@ describe('windowService', () => {
     expect(windowDouble.closeListeners.size).toBe(0)
   })
 
-  it('requests renderer cleanup before allowing a native window close to finish', () => {
+  it('requests coordinated cleanup before allowing a native window close to finish', () => {
     const windowDouble = createWindowDouble(false)
-    const dispose = bindWindowEvents(windowDouble)
+    const onCloseRequest = vi.fn()
+    const dispose = bindWindowEvents(windowDouble, { onCloseRequest })
     const firstCloseEvent = { preventDefault: vi.fn() }
 
     windowDouble.closeListeners.get('close')?.(firstCloseEvent)
 
     expect(firstCloseEvent.preventDefault).toHaveBeenCalledTimes(1)
-    expect(windowDouble.webContents.send).toHaveBeenCalledWith(
-      desktopApiEventChannels.windowCloseRequested,
-    )
+    expect(onCloseRequest).toHaveBeenCalledOnce()
 
     confirmWindowClose(windowDouble)
 

@@ -20,6 +20,7 @@ List the commands you ran. Mark checks that are not applicable as N/A.
 - [ ] `cd ecos/gui && pnpm run typecheck`
 - [ ] `cd ecos/gui && pnpm run test`
 - [ ] `cd ecos/gui && pnpm run build`
+- [ ] `cd ecos/gui && pnpm run desktop:build && pnpm run desktop:smoke`
 - [ ] `make build`
 - [ ] `make demo-gcd`
 - [ ] `make demo-retrosoc`

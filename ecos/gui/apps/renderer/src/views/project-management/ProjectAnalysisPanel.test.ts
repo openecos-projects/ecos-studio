@@ -305,13 +305,21 @@ describe('ProjectAnalysisPanel workspace comparison', () => {
     expect(cell?.attributes('title')).toContain('listed as blocking')
   })
 
-  it('selects a workspace when its row header is clicked', async () => {
-    const wrapper = mountPanel()
+  it.each(['ws_a', '.ws_0003.replace-backup-178860182627'])(
+    'keeps the full workspace name available and selectable: %s',
+    async (workspaceId) => {
+      const wrapper = mountPanel(
+        projectFixture({ workspaces: [workspaceFixture(workspaceId)] }),
+      )
+      const button = wrapper.get('.dash-cell-action')
 
-    await rowFor(wrapper, 'ws_a')?.find('.dash-cell-action').trigger('click')
+      expect(button.attributes('title')).toBe(workspaceId)
+      expect(button.attributes('aria-label')).toBe(`Select workspace ${workspaceId}`)
+      await button.trigger('click')
 
-    expect(wrapper.emitted('select-workspace')).toEqual([['ws_a']])
-  })
+      expect(wrapper.emitted('select-workspace')).toEqual([[workspaceId]])
+    },
+  )
 
   it('sorts rows when a column header is activated, and reverses on a second click', async () => {
     const wrapper = mountPanel()
@@ -399,7 +407,7 @@ describe('ProjectAnalysisPanel needs attention', () => {
 
   it('summarizes the finding counts in the section header', () => {
     const wrapper = mountPanel()
-    const header = wrapper.findAll('.dash-section-head small')[1]
+    const header = wrapper.get('.dash-attention .dash-section-head small')
 
     // Three findings, but only two carry a severity the artifacts reported.
     expect(header.text()).toContain('3 project-wide')

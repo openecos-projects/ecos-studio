@@ -1,7 +1,5 @@
-import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { lstat, readdir, realpath, stat } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { open, readdir, stat } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 import type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
@@ -11,16 +9,10 @@ import type {
   WorkspaceStepResource,
   WorkspaceTechResources,
 } from '@ecos-studio/shared'
-import type { ProjectScopeProvider, RuntimeMutationGuard } from './workspaceService'
-import { WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE } from './workspaceService'
-import { migrateWorkspaceConfigFilenames } from './eccRpc/workspaceConfigMigration'
+import type { ProjectScopeProvider } from './workspaceService'
 import {
   locateWorkspaceParametersFile,
-  JSON_PARAMETERS_BASENAME,
   parseWorkspaceParametersText,
-  readWorkspaceConfigContained,
-  WORKSPACE_CONFIG_BASENAME,
-  writeWorkspaceParameters,
   type WorkspaceParametersFileLocation,
 } from './workspaceParametersFile'
 
@@ -28,12 +20,17 @@ type WorkspaceResourceFileKind = WorkspaceResourceFile['kind']
 type ResourceBucketName = keyof WorkspaceStepResource['resources']
 type StepFileBuckets = WorkspaceStepResource['resources']
 
+const WORKSPACE_INDEX_JSON_MAX_BYTES = 4 * 1024 * 1024
+
+function isObsoleteFlowStep(value: string): boolean {
+  return value.toLowerCase().replace(/[\s_-]/g, '') === 'fixfanout'
+}
+
 interface WorkspaceResourceServiceOptions {
   projectScopeProvider: Pick<
     ProjectScopeProvider,
-    'getProjectRoot' | 'requestProjectPathAccess' | 'requestWritableProjectPathAccess'
+    'getProjectRoot' | 'requestProjectPathAccess'
   >
-  runtimeMutationGuard?: RuntimeMutationGuard
 }
 
 interface FlowStepInput {
@@ -41,6 +38,7 @@ interface FlowStepInput {
   tool: string
   state: string
   runtime: string
+  peakMemoryMb?: number
   info: Record<string, unknown>
 }
 
@@ -56,11 +54,9 @@ interface StepInfoBuildResult {
 
 export class WorkspaceResourceService {
   private readonly projectScopeProvider: WorkspaceResourceServiceOptions['projectScopeProvider']
-  private readonly runtimeMutationGuard?: RuntimeMutationGuard
 
   constructor(options: WorkspaceResourceServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
-    this.runtimeMutationGuard = options.runtimeMutationGuard
   }
 
   async getIndex(): Promise<WorkspaceResourceIndex> {
@@ -70,116 +66,20 @@ export class WorkspaceResourceService {
 
   async readHome(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     return await this.readJsonOrNull(join(root, 'home', 'home.json'))
   }
 
   async readFlow(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     return await this.readJsonOrNull(join(root, 'home', 'flow.json'))
   }
 
   async readParameters(): Promise<Record<string, unknown> | null> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     const location = await locateWorkspaceParametersFile(root)
-    if (!location) return null
-    try {
-      const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
-        location.path,
-      )
-      const raw = await readWorkspaceConfigContained(location.path, canonicalPath)
-      return parseWorkspaceParametersText(raw, location.format, root)
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return null
-      }
-      throw error
-    }
-  }
-
-  /**
-   * Persist workspace parameters in the workspace's own format
-   * (home/params.toml preferred, home/parameters.json fallback). Refused
-   * while the workspace runtime is active, mirroring the mutation guard on
-   * direct config file writes.
-   */
-  async writeParameters(request: {
-    parameters: Record<string, unknown>
-    workspace: string
-  }): Promise<{ format: WorkspaceParametersFileLocation['format']; path: string }> {
-    if (!request || typeof request !== 'object' || !isRecord(request.parameters)) {
-      throw new Error('Workspace parameters write requires a parameters object')
-    }
-    if (typeof request.workspace !== 'string' || request.workspace.trim() === '') {
-      throw new Error('Workspace parameters write requires a workspace path')
-    }
-    const root = await this.projectScopeProvider.getProjectRoot()
-    // The save was dispatched for a specific workspace: refuse to land it
-    // in whichever workspace became active since (an openProject that
-    // registered a new root before the renderer committed the switch).
-    // Revalidated on every guard pass inside the serialized write, so a
-    // switch happening while the save queues behind another writer blocks
-    // it too.
-    const assertExpectedWorkspace = async (): Promise<void> => {
-      const activeRoot = await this.projectScopeProvider.getProjectRoot()
-      const [expected, active] = await Promise.all([
-        realpath(request.workspace),
-        realpath(activeRoot),
-      ])
-      if (expected !== active) {
-        throw new Error(
-          `Refusing to write workspace parameters for ${request.workspace}: ` +
-            'the active workspace changed before the save completed',
-        )
-      }
-    }
-    await assertExpectedWorkspace()
-    const location = await locateWorkspaceParametersFile(root)
-    if (!location) {
-      throw new Error(
-        `Workspace parameters file not found: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${join(root, 'home', JSON_PARAMETERS_BASENAME)}`,
-      )
-    }
-    const locationStats = await lstat(location.path)
-    if (locationStats.isSymbolicLink()) {
-      // A symlinked config path escapes the runtime mutation guard's
-      // spelled-path protection and makes the write target ambiguous —
-      // refuse it, matching the edit path and ECC's own symlink refusal.
-      throw new Error(
-        `Refusing to write workspace parameters through a symlink: ${location.path}`,
-      )
-    }
-    const canonicalPath =
-      await this.projectScopeProvider.requestWritableProjectPathAccess(location.path)
-    if (
-      this.runtimeMutationGuard &&
-      (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(root))
-    ) {
-      throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
-    }
-    const written = await writeWorkspaceParameters(
-      root,
-      request.parameters,
-      {
-        format: location.format,
-        path: canonicalPath,
-        spelledPath: location.path,
-      },
-      // Re-checked inside the serialized operation: a flow starting while
-      // the save queued behind another writer must still block it.
-      async () => {
-        await assertExpectedWorkspace()
-        if (
-          this.runtimeMutationGuard &&
-          (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(root))
-        ) {
-          throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
-        }
-      },
-    )
-    return { format: written.format, path: written.path }
+    const raw = await this.readTextOrNull(location.path)
+    if (raw === null) return null
+    return parseWorkspaceParametersText(raw, location.format, root)
   }
 
   async resolveStepInfo(
@@ -212,7 +112,7 @@ export class WorkspaceResourceService {
         }
       }
 
-      const stepInfoResult = await this.buildStepInfoResponse(request.id, step, index)
+      const stepInfoResult = await this.buildStepInfoResponse(request.id, step)
       const info = stepInfoResult.info
       const requiredFiles = this.requiredFilesForStepInfo(request.id, step)
       const missing = requiredFiles
@@ -244,14 +144,12 @@ export class WorkspaceResourceService {
 
   private async buildIndex(): Promise<IndexBuildResult> {
     const root = await this.projectScopeProvider.getProjectRoot()
-    await migrateWorkspaceConfigFilenames(root)
     const messages: string[] = []
     const statErrors: string[] = []
     const homePath = join(root, 'home', 'home.json')
     const flowPath = join(root, 'home', 'flow.json')
     const parametersLocation = await locateWorkspaceParametersFile(root)
-    const parametersPath =
-      parametersLocation?.path ?? join(root, 'home', JSON_PARAMETERS_BASENAME)
+    const parametersPath = parametersLocation.path
     const checklistPath = join(root, 'home', 'checklist.json')
 
     const [homeJson, flowJson, parametersJson, checklistJson] = await Promise.all([
@@ -269,10 +167,8 @@ export class WorkspaceResourceService {
     )
     const flowData = await this.readJsonForIndex(flowPath, messages)
 
-    if (!parametersLocation)
-      messages.push(
-        `Missing workspace parameters: ${join(root, 'home', WORKSPACE_CONFIG_BASENAME)} or ${parametersPath}`,
-      )
+    if (!parametersJson.exists)
+      messages.push(`Missing workspace parameters: ${parametersPath}`)
     if (!flowJson.exists) messages.push(`Missing workspace flow: ${flowPath}`)
 
     const design = stringValue(parameters, 'Design') || stringValue(parameters, 'design')
@@ -283,7 +179,10 @@ export class WorkspaceResourceService {
       isRecord(flowData) && Array.isArray(flowData.steps)
         ? flowData.steps
             .map(readFlowStep)
-            .filter((step): step is FlowStepInput => step !== null)
+            .filter(
+              (step): step is FlowStepInput =>
+                step !== null && !isObsoleteFlowStep(step.name),
+            )
         : []
     const flowSteps = await Promise.all(
       steps.map((step) =>
@@ -337,27 +236,10 @@ export class WorkspaceResourceService {
 
     if (toolKey === 'yosys') {
       addYosysResources(resources, directory, design, step.name)
-    } else if (toolKey === 'ecc' || toolKey === 'sizer') {
-      addEccLikeResources(resources, root, directory, design, topModule, step.name)
-      if (toolKey === 'sizer') {
-        const safeStepName = step.name.trim().split(/\s+/).join('_').toLowerCase()
-        resources.output.def = createFile(
-          join(directory, 'output', `${design}_${safeStepName}.def.gz`),
-          'output',
-        )
-        resources.output.verilog = createFile(
-          join(directory, 'output', `${design}_${safeStepName}.v.gz`),
-          'output',
-        )
-      }
+    } else if (toolKey === 'ecc') {
+      addEccLikeResources(resources, directory, design, topModule, step.name)
     } else if (toolKey === 'dreamplace') {
-      addEccLikeResources(resources, root, directory, design, topModule, step.name)
-      resources.config.dreamplace = createFile(
-        join(root, 'config', 'dreamplace_ecc.json'),
-        'config',
-      )
-    } else if (toolKey === 'yosys_lec') {
-      addLecResources(resources, directory, design, step.name)
+      addEccLikeResources(resources, directory, design, topModule, step.name)
     } else if (isFrontendTool(toolKey)) {
       addFrontendResources(resources, directory, design, step.name)
     } else {
@@ -372,6 +254,7 @@ export class WorkspaceResourceService {
       tool,
       state: step.state,
       runtime: step.runtime,
+      ...(step.peakMemoryMb === undefined ? {} : { peakMemoryMb: step.peakMemoryMb }),
       directory,
       info: step.info,
       resources,
@@ -574,20 +457,14 @@ export class WorkspaceResourceService {
 
   private async readParametersForIndex(
     root: string,
-    location: WorkspaceParametersFileLocation | null,
+    location: WorkspaceParametersFileLocation,
     messages: string[],
   ): Promise<Record<string, unknown> | null> {
-    if (!location) return null
     try {
-      const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(
-        location.path,
-      )
-      const raw = await readWorkspaceConfigContained(location.path, canonicalPath)
+      const raw = await this.readTextOrNull(location.path)
+      if (raw === null) return null
       return parseWorkspaceParametersText(raw, location.format, root)
     } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return null
-      }
       messages.push(
         formatErrorMessage(
           `Failed to parse workspace parameters: ${location.path}`,
@@ -598,10 +475,35 @@ export class WorkspaceResourceService {
     }
   }
 
-  private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
+  private async readTextOrNull(path: string): Promise<string | null> {
     try {
       const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-      const raw = await readWorkspaceConfigContained(path, canonicalPath)
+      const handle = await open(canonicalPath, 'r')
+      try {
+        const buffer = Buffer.alloc(WORKSPACE_INDEX_JSON_MAX_BYTES + 1)
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+        if (bytesRead > WORKSPACE_INDEX_JSON_MAX_BYTES) {
+          throw new Error(
+            `Workspace config exceeds ${WORKSPACE_INDEX_JSON_MAX_BYTES} bytes: ${path}`,
+          )
+        }
+        return buffer.subarray(0, bytesRead).toString('utf8')
+      } finally {
+        await handle.close()
+      }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return null
+      }
+
+      throw error
+    }
+  }
+
+  private async readJsonOrNull(path: string): Promise<Record<string, unknown> | null> {
+    try {
+      const raw = await this.readTextOrNull(path)
+      if (raw === null) return null
       const parsed: unknown = JSON.parse(raw)
       return isRecord(parsed) ? parsed : {}
     } catch (error) {
@@ -613,89 +515,9 @@ export class WorkspaceResourceService {
     }
   }
 
-  private async buildAnalysisStepInfo(
-    step: WorkspaceStepResource,
-    steps: WorkspaceStepResource[],
-    design: string,
-  ): Promise<StepInfoBuildResult> {
-    if (step.tool.toLowerCase() !== 'yosys_lec') {
-      return stepInfo(buildAnalysisInfo(step))
-    }
-    return stepInfo({
-      ...buildAnalysisInfo(step),
-      'lec result': step.resources.output.result?.path,
-      'lec status': await this.lecResultStatus(step, steps, design),
-    })
-  }
-
-  /** Mirrors ECC lec_result_status: rehash the recorded netlists so a stale proof degrades. */
-  private async lecResultStatus(
-    step: WorkspaceStepResource,
-    steps: WorkspaceStepResource[],
-    design: string,
-  ): Promise<string> {
-    const resultFile = step.resources.output.result
-    if (!resultFile?.exists) return 'missing'
-    const result = await this.readJsonOrNull(resultFile.path)
-    if (result?.status !== 'proven') return 'incomplete'
-    const workspaceRoot = dirname(step.directory)
-    const goldenCurrent = await this.lecNetlistIsCurrent(result, 'golden', {
-      expectedPath: lecExpectedGoldenPath(step, steps, design),
-      workspaceRoot,
-    })
-    const gateCurrent = await this.lecNetlistIsCurrent(result, 'gate', {
-      expectedPath: lecExpectedGatePath(step, steps, design),
-      workspaceRoot,
-    })
-    return goldenCurrent && gateCurrent ? 'proven' : 'stale'
-  }
-
-  private async lecNetlistIsCurrent(
-    result: Record<string, unknown>,
-    role: 'golden' | 'gate',
-    expected: { expectedPath: string | null; workspaceRoot: string },
-  ): Promise<boolean> {
-    const recordedPath = result[`${role}_verilog`]
-    const recordedSha = result[`${role}_sha256`]
-    const recordedSize = result[`${role}_size_bytes`]
-    if (typeof recordedPath !== 'string' || !recordedPath) return false
-    if (typeof recordedSha !== 'string' || !/^[0-9a-f]{64}$/.test(recordedSha))
-      return false
-    if (
-      typeof recordedSize !== 'number' ||
-      !Number.isInteger(recordedSize) ||
-      recordedSize < 0
-    ) {
-      return false
-    }
-    // The recorded file must still be the currently selected flow input.
-    if (
-      expected.expectedPath &&
-      resolve(expected.workspaceRoot, recordedPath) !==
-        resolve(expected.workspaceRoot, expected.expectedPath)
-    ) {
-      return false
-    }
-    try {
-      const canonicalPath =
-        await this.projectScopeProvider.requestProjectPathAccess(recordedPath)
-      const hash = createHash('sha256')
-      let size = 0
-      // Stream like ECC file_digest instead of loading whole netlists.
-      for await (const chunk of createReadStream(canonicalPath)) {
-        hash.update(chunk as Buffer)
-        size += (chunk as Buffer).length
-      }
-      return size === recordedSize && hash.digest('hex') === recordedSha
-    } catch {
-      return false
-    }
-  }
-
   private async buildStepInfoResponse(
     id: WorkspaceStepInfoRequest['id'],
     step: WorkspaceStepResource,
-    index: WorkspaceResourceIndex,
   ): Promise<StepInfoBuildResult> {
     switch (id) {
       case 'layout':
@@ -720,7 +542,7 @@ export class WorkspaceResourceService {
       case 'subflow':
         return stepInfo({ path: step.resources.subflow.path?.path })
       case 'analysis':
-        return await this.buildAnalysisStepInfo(step, index.flow.steps, index.design)
+        return stepInfo(buildAnalysisInfo(step))
       case 'checklist':
         return stepInfo({ path: step.resources.checklist.path?.path })
       case 'config':
@@ -904,7 +726,6 @@ function createEmptyBuckets(): StepFileBuckets {
 
 function addEccLikeResources(
   resources: StepFileBuckets,
-  root: string,
   directory: string,
   design: string,
   topModule: string,
@@ -1006,7 +827,6 @@ function addEccLikeResources(
   )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
-  addEccConfigResources(resources, root, stepName)
 }
 
 function addYosysResources(
@@ -1067,54 +887,6 @@ function addYosysResources(
   )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
-}
-
-function addEccConfigResources(
-  resources: StepFileBuckets,
-  root: string,
-  stepName: string,
-): void {
-  resources.config.dir = createFile(join(root, 'config'), 'config')
-  resources.config.flow = createFile(join(root, 'config', 'flow_ecc.json'), 'config')
-  resources.config.db = createFile(join(root, 'config', 'db_ecc.json'), 'config')
-  resources.config.cts = createFile(join(root, 'config', 'cts_ecc.json'), 'config')
-  resources.config.drc = createFile(join(root, 'config', 'drc_ecc.json'), 'config')
-  resources.config.floorplan = createFile(
-    join(root, 'config', 'floorplan_ecc.json'),
-    'config',
-  )
-  resources.config.routing = createFile(join(root, 'config', 'route_ecc.json'), 'config')
-  resources.config.rcx = createFile(join(root, 'config', 'rcx_ecc.json'), 'config')
-  resources.config.sta = createFile(join(root, 'config', 'sta_ecc.json'), 'config')
-  resources.config.filler = createFile(join(root, 'config', 'filler_ecc.json'), 'config')
-  const stepConfig = configResourceForEccStep(resources.config, stepName)
-  if (stepConfig) resources.config.config = stepConfig
-}
-
-function configResourceForEccStep(
-  config: StepFileBuckets['config'],
-  stepName: string,
-): WorkspaceResourceFile | undefined {
-  switch (stepName.toLowerCase()) {
-    case 'floorplan':
-      return config.floorplan
-    case 'cts':
-      return config.cts
-    case 'route':
-      return config.routing
-    case 'drc':
-      return config.drc
-    case 'filler':
-      return config.filler
-    case 'rcx':
-      return config.rcx
-    case 'sta':
-      return config.sta
-    case 'db':
-      return config.db
-    default:
-      return undefined
-  }
 }
 
 function isFrontendTool(tool: string): boolean {
@@ -1195,64 +967,6 @@ function addUnknownResources(
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
 }
 
-/** Yosys LEC publishes no layout; its key artifact is the equivalence result JSON. */
-function addLecResources(
-  resources: StepFileBuckets,
-  directory: string,
-  design: string,
-  stepName: string,
-): void {
-  addUnknownResources(resources, directory, stepName)
-  resources.output.result = createFile(
-    join(directory, 'output', `${design}_${stepName}_result.json`),
-    'output',
-  )
-}
-
-/** ECC publishes step netlists as output/<design>_<step>.v.gz (sizer stem underscored). */
-function stepOutputVerilogPath(step: WorkspaceStepResource, design: string): string {
-  const stem =
-    step.tool.toLowerCase() === 'sizer'
-      ? step.name.trim().split(/\s+/).join('_').toLowerCase()
-      : step.name
-  return join(step.directory, 'output', `${design}_${stem}.v.gz`)
-}
-
-/** Current gate input of a LEC step: the nearest preceding physical step's verilog. */
-function lecExpectedGatePath(
-  step: WorkspaceStepResource,
-  steps: WorkspaceStepResource[],
-  design: string,
-): string | null {
-  const stepIndex = steps.findIndex(
-    (candidate) => candidate.name.toLowerCase() === step.name.toLowerCase(),
-  )
-  for (let index = stepIndex - 1; index >= 0; index -= 1) {
-    const candidate = steps[index]!
-    if (candidate.tool.toLowerCase() === 'yosys_lec') continue
-    return stepOutputVerilogPath(candidate, design)
-  }
-  return null
-}
-
-/** Current golden input of a LEC step, mirroring the ECC flow chaining. */
-function lecExpectedGoldenPath(
-  step: WorkspaceStepResource,
-  steps: WorkspaceStepResource[],
-  design: string,
-): string | null {
-  const explicit = step.info?.golden_verilog
-  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
-  const synthesis = steps.find(
-    (candidate) => candidate.name.trim().toLowerCase() === 'synthesis',
-  )
-  if (!synthesis) return null
-  if (step.name.trim().toLowerCase() === 'lec') {
-    return join(synthesis.directory, 'output', `${design}_Synthesis_golden.v`)
-  }
-  return stepOutputVerilogPath(synthesis, design)
-}
-
 function collectFiles(resources: StepFileBuckets): WorkspaceResourceFile[] {
   return Object.values(resources).flatMap((bucket) => collectBucketFiles(bucket))
 }
@@ -1282,6 +996,10 @@ function readFlowStep(value: unknown): FlowStepInput | null {
     tool: typeof value.tool === 'string' ? value.tool : 'unknown',
     state: typeof value.state === 'string' ? value.state : '',
     runtime: typeof value.runtime === 'string' ? value.runtime : '',
+    ...(typeof value['peak memory (mb)'] === 'number' &&
+    Number.isFinite(value['peak memory (mb)'])
+      ? { peakMemoryMb: value['peak memory (mb)'] }
+      : {}),
     info: isRecord(value.info) ? value.info : {},
   }
 }
@@ -1351,9 +1069,7 @@ function analysisFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
 
 function buildConfigInfo(step: WorkspaceStepResource): Record<string, unknown> {
   const tool = step.tool.toLowerCase()
-  if (tool === 'yosys') return {}
-  if (tool === 'dreamplace') return { config: step.resources.config.dreamplace?.path }
-  return { config: step.resources.config.config?.path }
+  return isFrontendTool(tool) ? { config: step.resources.config.flow?.path } : {}
 }
 
 function stepInfo(info: Record<string, unknown>): StepInfoBuildResult {
@@ -1366,10 +1082,7 @@ function stripPngExtension(filename: string): string {
 
 function configFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
   const tool = step.tool.toLowerCase()
-  if (tool === 'yosys') return []
-  if (tool === 'dreamplace')
-    return existingResourceRefs([step.resources.config.dreamplace])
-  return existingResourceRefs([step.resources.config.config])
+  return isFrontendTool(tool) ? existingResourceRefs([step.resources.config.flow]) : []
 }
 
 function existingResourceRefs(

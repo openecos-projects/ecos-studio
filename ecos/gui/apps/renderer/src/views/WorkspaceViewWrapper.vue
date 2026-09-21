@@ -1,8 +1,10 @@
 <template>
   <div class="workspace-view">
     <main :key="workspaceViewKey" class="workspace-main">
-      <FrontendLeftSidebar v-if="currentProject?.designTool === 'frontend'" />
-      <LeftSidebar v-else />
+      <FrontendLeftSidebar
+        v-if="showLeftSidebar && currentProject?.designTool === 'frontend'"
+      />
+      <LeftSidebar v-else-if="showLeftSidebar" />
       <div class="workspace-body">
         <div class="workspace-editor">
           <router-view class="editor-view" />
@@ -14,23 +16,49 @@
 
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import FrontendLeftSidebar from '../components/FrontendLeftSidebar.vue'
 import LeftSidebar from '../components/LeftSidebar.vue'
-import { clearHomeQorComparisonCache } from '../composables/useHomeQorComparison'
 import { clearBaselineStepConfigCache } from '../composables/useBaselineStepConfig'
 import { clearHomeSnapshotCache } from '../composables/useHomeSnapshots'
 import { clearStepDashboardDataCache } from '../composables/useStepDashboardData'
 import { useWorkspace } from '../composables/useWorkspace'
+import { useWorkspaceAgentFlowCapture } from '../composables/workspaceAgentFlowCapture'
 import { useAgentShellStore } from '@/stores/agentShellStore'
+import { useBackendWorkspaceSession } from '@/stores/backendWorkspaceSession'
 
-const { currentProject } = useWorkspace()
+const { currentProject, workspaceSession } = useWorkspace()
+const route = useRoute()
 const agentShell = useAgentShellStore()
-const workspaceViewKey = computed(() => currentProject.value?.path ?? '')
+const backendWorkspaceSession = useBackendWorkspaceSession()
+useWorkspaceAgentFlowCapture()
+const showLeftSidebar = computed(() => route.path !== '/workspace/projects')
+const workspaceViewKey = computed(
+  () => `${currentProject.value?.path ?? ''}:${workspaceSession.value.sessionId}`,
+)
 
 watch(
-  () => currentProject.value?.path,
-  (path, previousPath) => {
+  () =>
+    [
+      currentProject.value?.path ?? '',
+      workspaceSession.value.sessionId,
+      workspaceSession.value.state,
+    ] as const,
+  ([path, sessionId, state], previous) => {
+    const [previousPath, previousSessionId, previousState] = previous
+    const pathChanged = path !== previousPath
+    const activeSessionReplaced =
+      state === 'active' &&
+      (sessionId !== previousSessionId || previousState !== 'active')
+    if (pathChanged || activeSessionReplaced) {
+      if (path) backendWorkspaceSession.clearWorkspace(path)
+      backendWorkspaceSession.clear()
+      if (path && currentProject.value?.designTool !== 'frontend') {
+        void backendWorkspaceSession.start(path, {
+          forceRefresh: activeSessionReplaced,
+        })
+      }
+    }
     if (!path || !previousPath || path === previousPath) return
     // Agent chat tabs keep their frozen context across workspace switches.
     if (agentShell.shouldPreserveSession()) {
@@ -42,11 +70,15 @@ watch(
 onMounted(() => {
   agentShell.setMode('workspace')
   agentShell.closeHomeAgent()
+  const path = currentProject.value?.path
+  if (path && currentProject.value?.designTool !== 'frontend') {
+    void backendWorkspaceSession.start(path)
+  }
 })
 
 onBeforeRouteLeave(() => {
+  backendWorkspaceSession.dispose()
   clearStepDashboardDataCache()
-  clearHomeQorComparisonCache()
   clearBaselineStepConfigCache()
   clearHomeSnapshotCache()
   // Keep Agent tabs across workspace navigation.

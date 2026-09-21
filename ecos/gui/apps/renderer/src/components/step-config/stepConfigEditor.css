@@ -1,6 +1,6 @@
 @import './stepConfigLayouts.css';
 
-/* Step config editor (aligned with ConfigureView); scoped to .step-config-root */
+/* Step config editor; scoped to .step-config-root */
 .step-config-root {
   --sc-indigo: #6366f1;
   --sc-purple: #8b5cf6;

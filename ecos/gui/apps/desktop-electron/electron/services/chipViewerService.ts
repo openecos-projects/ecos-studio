@@ -110,7 +110,7 @@ const defaultSpawnProcess: SpawnProcess = (file, args, options) =>
   spawnProcessCallback(file, args, options)
 
 interface ChipViewerBinaries {
-  eccPath?: string
+  eccPath: string
   viewerPath: string
 }
 
@@ -132,6 +132,7 @@ interface LayoutEditContext {
   revision: number
   step: string
   workspaceHandle: string
+  workspaceRevision: number
 }
 
 interface NativeGeometryEditCommand {
@@ -587,7 +588,7 @@ export class ChipViewerService {
     const mode = normalizeChipViewerMode(request.mode)
     const snapshotInputs = await this.resolveSnapshotInputs(projectPath, request.step)
     await this.requireSavedGeometry(snapshotInputs, request.step)
-    const binaries = this.resolveBinaries(mode)
+    const binaries = this.resolveBinaries()
 
     let viewerManifestPath = snapshotInputs.manifestPath
     let editCommandDirectory: string | undefined
@@ -930,6 +931,9 @@ export class ChipViewerService {
     if (!editSession.geometryManifestPath) {
       throw new Error('ECC layout edit session did not return a geometry manifest')
     }
+    if (!Number.isInteger(workspace.workspaceRevision)) {
+      throw new Error('ECC layout edit session did not return a Workspace revision')
+    }
     return {
       bridgeId: `bridge-${this.nextEditBridgeId++}`,
       dirty: editSession.dirty,
@@ -938,6 +942,7 @@ export class ChipViewerService {
       revision: editSession.revision,
       step,
       workspaceHandle: workspace.workspaceHandle,
+      workspaceRevision: workspace.workspaceRevision!,
     }
   }
 
@@ -1132,6 +1137,7 @@ export class ChipViewerService {
           editSessionId: layoutEdit.editSessionId,
           expectedRevision: layoutEdit.revision,
           workspaceHandle: layoutEdit.workspaceHandle,
+          expectedWorkspaceRevision: layoutEdit.workspaceRevision,
         })
         if (!saved.saved || saved.dirty) {
           throw new Error('ECC did not confirm that dirty layout edits were published')
@@ -1143,6 +1149,9 @@ export class ChipViewerService {
         })
         await this.verifyPublishedLayoutArtifacts(saved)
         layoutEdit.revision = saved.revision
+        if (typeof saved.workspaceRevision === 'number') {
+          layoutEdit.workspaceRevision = saved.workspaceRevision
+        }
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
         message = 'layout edit saved; verified DEF, IDB, GDS, and geometry manifest'
@@ -1285,9 +1294,6 @@ export class ChipViewerService {
     binaries: ChipViewerBinaries,
     snapshotInputs: SnapshotInputs,
   ): Promise<void> {
-    if (!binaries.eccPath) {
-      throw new Error('ECC is required to refresh layout artifacts in edit mode.')
-    }
     await this.ensureDirectory(dirname(snapshotInputs.imagePath))
     await this.execFile(binaries.eccPath, [
       'layout-image',
@@ -1363,16 +1369,15 @@ export class ChipViewerService {
     )
   }
 
-  private resolveBinaries(mode: ChipViewerMode): ChipViewerBinaries {
-    const requiresEcc = mode === 'edit'
+  private resolveBinaries(): ChipViewerBinaries {
     if (this.isPackaged) {
-      const packaged = this.resolvePackagedBinaries(requiresEcc)
+      const packaged = this.resolvePackagedBinaries()
       if (packaged.binaries) {
         return packaged.binaries
       }
 
       try {
-        return this.resolvePathBinaries(requiresEcc)
+        return this.resolvePathBinaries()
       } catch (error) {
         throw new Error(
           `Packaged chip viewer binaries are incomplete. Missing: ${packaged.missingPaths.join(
@@ -1384,10 +1389,10 @@ export class ChipViewerService {
       }
     }
 
-    return this.resolveDevBinaries(requiresEcc)
+    return this.resolveDevBinaries()
   }
 
-  private resolvePackagedBinaries(requiresEcc: boolean): PackagedBinaryResolution {
+  private resolvePackagedBinaries(): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const eccPath = join(binaryDir, executableName('ecc', this.platform))
     const viewerPath = join(
@@ -1396,15 +1401,13 @@ export class ChipViewerService {
     )
     const runtimePayloadPaths = packagedRuntimePayloadPaths(binaryDir, this.platform)
 
-    const requiredPaths = [
-      viewerPath,
-      ...(requiresEcc ? [eccPath, ...runtimePayloadPaths] : []),
-    ]
-    const missingPaths = requiredPaths.filter((path) => !this.fileExists(path))
+    const missingPaths = [eccPath, viewerPath, ...runtimePayloadPaths].filter(
+      (path) => !this.fileExists(path),
+    )
 
     if (missingPaths.length === 0) {
       return {
-        binaries: { ...(requiresEcc ? { eccPath } : {}), viewerPath },
+        binaries: { eccPath, viewerPath },
         missingPaths: [],
       }
     }
@@ -1415,12 +1418,12 @@ export class ChipViewerService {
     }
   }
 
-  private resolvePathBinaries(requiresEcc: boolean): ChipViewerBinaries {
+  private resolvePathBinaries(): ChipViewerBinaries {
+    const eccPath = this.resolveCommandFromPath('ecc')
     const viewerPath = this.resolveCommandFromPath('chip-viewer-native')
-    const eccPath = requiresEcc ? this.resolveCommandFromPath('ecc') : null
 
-    if (viewerPath && (!requiresEcc || eccPath)) {
-      return { ...(eccPath ? { eccPath } : {}), viewerPath }
+    if (eccPath && viewerPath) {
+      return { eccPath, viewerPath }
     }
 
     throw new Error('Chip viewer binaries were not found on PATH.')
@@ -1440,27 +1443,24 @@ export class ChipViewerService {
     return null
   }
 
-  private resolveDevBinaries(requiresEcc: boolean): ChipViewerBinaries {
+  private resolveDevBinaries(): ChipViewerBinaries {
     let repoRoot: string
     try {
       repoRoot = this.findRepoRoot()
     } catch {
-      return this.resolvePathBinaries(requiresEcc)
+      return this.resolvePathBinaries()
     }
     const eccWrapperPath = join(repoRoot, 'ecos/scripts/ecc-wrapper.sh')
     const viewerWrapperPath = join(repoRoot, 'ecos/scripts/chip-viewer-native-wrapper.sh')
 
-    if (
-      !this.fileExists(viewerWrapperPath) ||
-      (requiresEcc && !this.fileExists(eccWrapperPath))
-    ) {
+    if (!this.fileExists(eccWrapperPath) || !this.fileExists(viewerWrapperPath)) {
       throw new Error(
         `Chip viewer wrappers were not found under ${join(repoRoot, 'ecos/scripts')}. ${BUILD_HINT}`,
       )
     }
 
     return {
-      ...(requiresEcc ? { eccPath: eccWrapperPath } : {}),
+      eccPath: eccWrapperPath,
       viewerPath: viewerWrapperPath,
     }
   }

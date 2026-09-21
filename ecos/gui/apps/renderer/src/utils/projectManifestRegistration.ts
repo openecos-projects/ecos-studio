@@ -1,9 +1,13 @@
+import {
+  parseProjectManifestFlowStep,
+  projectManifestFrontendFlowSteps,
+} from '@ecos-studio/shared'
 import type { WorkspaceConfig } from '@/types'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { mutateProjectManifest } from '@/api/projectManifest'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { discoverProjectForWorkspace } from '@/utils/projectManagementRead'
+import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import { rememberProjectHistoryEntry } from '@/utils/projectHistory'
-import { parseProjectManifest } from '@ecos-studio/shared'
 
 export interface ProjectRouteContext {
   projectRoot: string
@@ -49,6 +53,21 @@ export function projectContextFromWorkspaceConfig(
   }
 }
 
+export function workspaceRouteQueryFromProjectContext(
+  workspacePath: string,
+  projectContext: ProjectRouteContext | null,
+): Record<string, string> {
+  const projectRoot = normalizePath(projectContext?.projectRoot ?? '')
+  if (!projectRoot) return {}
+  const projectName = projectContext?.projectName?.trim() ?? ''
+  const workspaceId = basenamePath(workspacePath)
+  return {
+    projectRoot,
+    ...(projectName ? { projectName } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
+  }
+}
+
 /**
  * Infers the parent project for a workspace opened outside Project Management
  * (for example Backend Design recent workspaces) when the parent directory has a
@@ -60,33 +79,22 @@ export async function resolveProjectRouteContextForWorkspace(
   const normalizedWorkspace = normalizePath(workspacePath)
   if (!normalizedWorkspace) return null
 
-  const projectRoot = parentPath(normalizedWorkspace)
-  if (!projectRoot || projectRoot === normalizedWorkspace) return null
-
   try {
-    const registeredProjectRoot = await registerLocalProjectRoot(projectRoot)
-    if (!registeredProjectRoot) return null
-
-    const manifestText = await readOptionalProjectTextFile('project.json', {
-      projectPath: registeredProjectRoot,
-    })
-    if (!manifestText) return null
-
-    const manifest = parseProjectManifest(manifestText)
+    const manifest = await discoverProjectForWorkspace(normalizedWorkspace)
+    if (!manifest) return null
+    const projectRoot = normalizePath(manifest.root_path)
     const listed = manifest.workspaces.some(
       (workspace) => normalizePath(workspace.workspace_path) === normalizedWorkspace,
     )
     if (!listed) return null
 
     return {
-      projectRoot: registeredProjectRoot,
-      projectName: manifest.name || basenamePath(registeredProjectRoot) || undefined,
+      projectRoot,
+      projectName: manifest.name || basenamePath(projectRoot) || undefined,
     }
   } catch (error) {
     console.warn('Failed to resolve project context for workspace.', error)
     return null
-  } finally {
-    await registerLocalProjectRoot(normalizedWorkspace)
   }
 }
 
@@ -110,30 +118,7 @@ export async function resolveManagedProjectContext(options: {
     }
   }
 
-  const workspacePath = normalizePath(options.workspacePath)
-  if (!workspacePath) return null
-  const projectRoot = parentPath(workspacePath)
-  if (!projectRoot || projectRoot === workspacePath) return null
-
-  const registeredRoot = await registerLocalProjectRoot(projectRoot)
-  if (!registeredRoot) return null
-
-  const manifestText = await readOptionalProjectTextFile(
-    joinPath(registeredRoot, 'project.json'),
-  )
-  if (!manifestText) return null
-
-  let projectName = basenamePath(registeredRoot) || undefined
-  try {
-    const manifest = JSON.parse(manifestText) as { name?: unknown }
-    if (typeof manifest.name === 'string' && manifest.name.trim()) {
-      projectName = manifest.name.trim()
-    }
-  } catch {
-    // Keep directory basename when the manifest is not JSON-parsable.
-  }
-
-  return { projectRoot: registeredRoot, projectName }
+  return await resolveProjectRouteContextForWorkspace(options.workspacePath)
 }
 
 export async function registerProjectManagedWorkspace(
@@ -155,7 +140,7 @@ export async function registerProjectManagedWorkspace(
     if (!registeredProjectRoot) {
       warn(
         'Project manifest not updated',
-        'Workspace was created, but the project root could not be registered for manifest access.',
+        'Workspace was created. The project root could not be registered, so project.json was not updated.',
       )
       return
     }
@@ -165,13 +150,9 @@ export async function registerProjectManagedWorkspace(
       queryString(input.routeQuery?.projectName) ||
       basenamePath(registeredProjectRoot) ||
       'project'
-    const isCreatingFrontendProject =
-      input.config?.designTool === 'frontend' && projectContext?.mode === 'create'
-    if (isCreatingFrontendProject) {
-      const existingManifest = await readOptionalProjectTextFile('project.json', {
-        projectPath: registeredProjectRoot,
-      })
-      if (existingManifest) {
+    const isFrontend = input.config?.designTool === 'frontend'
+    if (isFrontend && projectContext?.mode === 'create') {
+      if (await readProjectManagementManifest(registeredProjectRoot)) {
         throw new Error(`A project.json already exists at ${registeredProjectRoot}.`)
       }
       await mutateProjectManifest(registeredProjectRoot, {
@@ -181,25 +162,40 @@ export async function registerProjectManagedWorkspace(
         projectType: 'frontend',
       })
     }
-
+    const sourceContext = input.config?.source_context
     const manifest = await mutateProjectManifest(registeredProjectRoot, {
       type: 'register-workspace',
       input: {
         projectRoot: registeredProjectRoot,
         projectName,
         workspacePath,
-        sourceWorkspaceId: queryString(input.routeQuery?.sourceWorkspace) || undefined,
-        sourceStep: queryString(input.routeQuery?.sourceStep) || undefined,
-        sourceOutputPath: queryString(input.routeQuery?.sourceOutputPath) || undefined,
-        sourceOutputType: queryString(input.routeQuery?.sourceOutputType) || undefined,
-        startStep:
+        sourceWorkspaceId:
+          optionalString(sourceContext?.workspaceId) ||
+          queryString(input.routeQuery?.sourceWorkspace) ||
+          undefined,
+        sourceStep: canonicalManifestStep(
+          optionalString(sourceContext?.step) ||
+            queryString(input.routeQuery?.sourceStep),
+          isFrontend,
+        ),
+        sourceOutputPath:
+          optionalString(sourceContext?.outputPath) ||
+          queryString(input.routeQuery?.sourceOutputPath) ||
+          undefined,
+        sourceOutputType:
+          optionalString(sourceContext?.outputType) ||
+          queryString(input.routeQuery?.sourceOutputType) ||
+          undefined,
+        startStep: canonicalManifestStep(
           queryString(input.routeQuery?.startStep) ||
-          optionalString(input.config?.flow_config?.start_step) ||
-          undefined,
-        endStep:
+            optionalString(input.config?.flow_config?.start_step),
+          isFrontend,
+        ),
+        endStep: canonicalManifestStep(
           queryString(input.routeQuery?.endStep) ||
-          optionalString(input.config?.flow_config?.end_step) ||
-          undefined,
+            optionalString(input.config?.flow_config?.end_step),
+          isFrontend,
+        ),
         config: input.config,
       },
     })
@@ -219,15 +215,12 @@ export async function registerProjectManagedWorkspace(
     }
   } catch (error) {
     console.warn('Failed to update project manifest after workspace creation.', error)
-    warn(
-      'Project manifest not updated',
-      'Workspace was created, but project.json could not be updated.',
-    )
+    warn('Project manifest not updated', projectManifestUpdateFailureDetail(error))
   } finally {
     const registeredWorkspaceRoot = await registerLocalProjectRoot(workspacePath)
     if (registeredProjectRoot && registeredWorkspaceRoot) {
       try {
-        const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.registerProjectReadRoot(registeredProjectRoot)
       } catch (error) {
         console.warn('Failed to register managed project read scope:', error)
@@ -238,13 +231,37 @@ export async function registerProjectManagedWorkspace(
 
 async function registerLocalProjectRoot(rootPath: string): Promise<string | null> {
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const registeredRoot = await desktopApi.workspace.registerProjectRoot(rootPath)
     return normalizePath(registeredRoot || rootPath)
   } catch (error) {
     console.warn('Failed to register project root for manifest update.', error)
     return null
   }
+}
+
+function canonicalManifestStep(value: string, frontend = false): string | undefined {
+  if (!value) return undefined
+  if (frontend) {
+    const normalized = value.trim().toLowerCase()
+    if ((projectManifestFrontendFlowSteps as readonly string[]).includes(normalized)) {
+      return normalized
+    }
+    throw new Error(`Unknown frontend flow step: ${value}`)
+  }
+  const canonical = parseProjectManifestFlowStep(value)
+  if (!canonical) {
+    throw new Error(
+      `Flow step "${value}" is not a canonical project.json step. Use names such as Synth or Harden.`,
+    )
+  }
+  return canonical
+}
+
+function projectManifestUpdateFailureDetail(error: unknown): string {
+  const reason =
+    error instanceof Error && error.message.trim() ? error.message.trim() : String(error)
+  return `Workspace was created. project.json was not updated: ${reason}`
 }
 
 function queryString(value: unknown): string {
@@ -258,18 +275,6 @@ function optionalString(value: unknown): string {
 
 function basenamePath(path: string): string {
   return normalizePath(path).split('/').filter(Boolean).pop() ?? ''
-}
-
-function parentPath(path: string): string {
-  const normalized = normalizePath(path)
-  const parts = normalized.split('/').filter(Boolean)
-  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
-  const parent = parts.slice(0, -1).join('/')
-  return normalized.startsWith('/') ? `/${parent}` : parent
-}
-
-function joinPath(root: string, child: string): string {
-  return `${normalizePath(root)}/${child.replace(/^\/+/, '')}`
 }
 
 function normalizePath(path: string): string {

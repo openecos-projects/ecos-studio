@@ -1,37 +1,72 @@
-import { describe, expect, it } from 'vitest'
-import panelSource from './FlowInsightsPanel.vue?raw'
-import stepResourcesSource from './StepResourcesPanel.vue?raw'
+// @vitest-environment happy-dom
 
-describe('FlowInsightsPanel data snapshot entry', () => {
-  it('shows a five-tile Data Snapshot grid and opens modules in a dialog', () => {
-    expect(panelSource).toContain('<h2>Data Snapshot</h2>')
-    expect(panelSource).toContain('class="data-snapshot-grid"')
-    expect(panelSource).toContain('class="data-snapshot-tile"')
-    expect(panelSource).toContain('openModule(cell.id)')
-    expect(panelSource).toContain('<Dialog')
-    expect(panelSource).not.toContain('flow-insights-timeline')
-    expect(panelSource).not.toContain('role="tablist"')
-    expect(panelSource).not.toContain('More analysis modules coming soon')
-    expect(panelSource).toContain('maximizable')
-    expect(panelSource).toContain('v-model:maximized="dialogMaximized"')
-    expect(panelSource).not.toContain('select-step')
-    expect(panelSource).not.toContain('forwardSelectStep')
-  })
+import { mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
+import FlowInsightsPanel from './FlowInsightsPanel.vue'
+import type { CongestionMapTileModel, FlowInsightStep } from './flowInsightsData'
 
-  it('lays Data Snapshot out as a four-by-five grid', () => {
-    expect(panelSource).toContain('const DATA_SNAPSHOT_ROWS = 4')
-    expect(panelSource).toContain('const DATA_SNAPSHOT_COLUMNS = 5')
-    expect(panelSource).toContain('class="data-snapshot-cell"')
-    expect(panelSource).toContain('grid-template-columns: repeat(5, minmax(0, 1fr))')
-    expect(panelSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
-    expect(panelSource).toContain('snapshot-empty-')
-  })
-})
+describe('FlowInsightsPanel', () => {
+  it('renders typed module availability and lazy-loads congestion on selection', async () => {
+    const step: FlowInsightStep = {
+      directory: '',
+      key: 'Place',
+      name: 'Place',
+      tool: 'ecc',
+      state: 'succeeded',
+      runtimeSeconds: 2,
+      peakMemoryMb: 64,
+      successful: true,
+    }
+    const tile: CongestionMapTileModel = {
+      id: 'congestion-place',
+      step,
+      mapKind: 'egr',
+      direction: 'union',
+      label: 'Place EGR',
+      pngPath: 'congestion-place',
+      csvPath: '',
+      layoutCsvPath: '',
+      stats: { max: 3, total: 6, hotspotCount: 2 },
+    }
+    const loadCongestion = vi.fn()
+    const wrapper = mount(FlowInsightsPanel, {
+      props: {
+        steps: [step],
+        stepResources: {
+          steps: [step],
+          rows: [],
+          totalRuntimeSeconds: 2,
+          peakMemoryMb: 64,
+          runtimeBottleneckIndex: 0,
+          memoryBottleneckIndex: 0,
+        },
+        dbTrends: null,
+        congestionTiles: [tile],
+        congestionTileUrls: new Map(),
+        drc: null,
+        sta: null,
+        loadCongestion,
+      },
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+          StepResourcesPanel: true,
+          DbTrendsPanel: true,
+          CongestionPanel: true,
+          DrcPanel: true,
+          StaPanel: true,
+        },
+      },
+    })
 
-describe('StepResourcesPanel', () => {
-  it('does not list individual steps or jump to a step page', () => {
-    expect(stepResourcesSource).not.toContain('resource-steps')
-    expect(stepResourcesSource).not.toContain('select-step')
-    expect(stepResourcesSource).not.toContain('selectStepByKey')
+    expect(wrapper.findAll('.data-snapshot-tile')).toHaveLength(5)
+    expect(wrapper.text()).toContain('Step Trends')
+    expect(wrapper.text()).toContain('Congestion')
+    const congestion = wrapper
+      .findAll<HTMLButtonElement>('.data-snapshot-tile')
+      .find((button) => button.text().includes('Congestion'))
+    await congestion?.trigger('click')
+
+    expect(loadCongestion).toHaveBeenCalledOnce()
   })
 })

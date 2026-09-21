@@ -106,6 +106,35 @@ describe('messageStore', () => {
     expect(store.messages).toMatchObject([{ mapData: { step: 'Placement' } }])
   })
 
+  it('writes GUI artifacts into an explicit session without changing the active tab', () => {
+    const store = useMessageStore()
+    store.addInfoMessage(
+      {
+        title: 'place.rpt',
+        step: 'place',
+        items: [{ content: 'ok', format: 'text', label: 'place.rpt' }],
+      },
+      'session-b',
+    )
+
+    expect(store.messages).toEqual([])
+    expect(store.messagesBySessionId['session-b']).toMatchObject([
+      { infoData: { step: 'place' }, isGuiArtifact: true },
+    ])
+  })
+
+  it('clears GUI artifacts when the requested step uses a display alias', () => {
+    const store = useMessageStore()
+    store.addInfoMessage({
+      title: 'timing.rpt',
+      step: 'Timing optimization',
+      items: [{ content: 'ok', format: 'text', label: 'timing.rpt' }],
+    })
+
+    expect(store.clearSessionGuiArtifactsForSteps(['Timing Opt'])).toBe(true)
+    expect(store.messages).toEqual([])
+  })
+
   it('renders a provider contract as a structured assistant message', () => {
     const store = useMessageStore()
 

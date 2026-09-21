@@ -37,7 +37,10 @@ const thirdLabel = computed(() => (hasFrequency.value ? 'Frequency' : 'Violating
 const thirdValue = computed(() =>
   hasFrequency.value
     ? formatFrequency(props.overview.frequencyMhz)
-    : String(props.overview.setupViolationCount + props.overview.holdViolationCount),
+    : props.overview.setupViolationCount === null ||
+        props.overview.holdViolationCount === null
+      ? '—'
+      : String(props.overview.setupViolationCount + props.overview.holdViolationCount),
 )
 
 const thirdHint = computed(() => {
@@ -54,6 +57,12 @@ const thirdTone = computed(() => {
     const met = props.overview.allCornersMet
     if (met === null || met === undefined) return ''
     return met ? 'is-good' : 'is-bad'
+  }
+  if (
+    props.overview.setupViolationCount === null ||
+    props.overview.holdViolationCount === null
+  ) {
+    return ''
   }
   const violations =
     props.overview.setupViolationCount + props.overview.holdViolationCount

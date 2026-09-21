@@ -8,6 +8,7 @@ import {
   metricRecordFixture,
   stepSnapshotFixture,
   trendSummaryFixture,
+  withBaselineComparisons,
   workspaceSummaryFixture,
 } from './projectStepAnalysis.fixture'
 import type { ProjectWorkspaceSummary } from '@/utils/projectManagement'
@@ -54,20 +55,25 @@ function routeWorkspace(workspaceId: string, wirelength = 1000): ProjectWorkspac
 function mountPanel(overrides: Record<string, unknown> = {}) {
   // ws_b is the baseline and routes 100 um longer, so the panel has a real delta to show.
   const workspaceSummaries = [routeWorkspace('ws_a'), routeWorkspace('ws_b', 1100)]
+  const qorTrendSummary =
+    (overrides.qorTrendSummary as ReturnType<typeof trendSummaryFixture> | undefined) ??
+    trendSummaryFixture([{ workspaceId: 'ws_a' }, { workspaceId: 'ws_b' }], 'ws_b')
+  const comparedWorkspaces = withBaselineComparisons(
+    (overrides.workspaceSummaries as ProjectWorkspaceSummary[] | undefined) ??
+      workspaceSummaries,
+    qorTrendSummary.baselineWorkspaceId,
+  )
   return mount(ProjectStepAnalysisPanel, {
     props: {
       steps: [compareSummaryFixture('Route'), compareSummaryFixture('DRC')],
-      workspaceSummaries,
-      qorTrendSummary: trendSummaryFixture(
-        [{ workspaceId: 'ws_a' }, { workspaceId: 'ws_b' }],
-        'ws_b',
-      ),
       projectName: 'demo',
       projectObjective: 'QoR comparison',
       bestWorkspaceId: 'ws_b',
       selectedStep: 'Route' as const,
       selectedWorkspaceId: 'ws_a',
       ...overrides,
+      workspaceSummaries: comparedWorkspaces,
+      qorTrendSummary,
     },
   })
 }
@@ -110,6 +116,18 @@ async function openCompare(wrapper: ReturnType<typeof mountPanel>) {
 }
 
 describe('ProjectStepAnalysisPanel', () => {
+  it('renders a backend-defined step even when the renderer does not know it', () => {
+    const wrapper = mountPanel({
+      steps: [compareSummaryFixture('CustomSignoff')],
+      selectedStep: 'CustomSignoff',
+    })
+
+    expect(wrapper.find('.step-rail-name').text()).toBe('CustomSignoff')
+    expect(wrapper.find('.verdict-summary').text()).toContain(
+      'has no V3 analysis artifacts',
+    )
+  })
+
   it('badges every flow step with the selected workspace issue count and switches step', async () => {
     const wrapper = mountPanel()
 
@@ -322,6 +340,8 @@ describe('ProjectStepAnalysisPanel', () => {
     })
 
     expect(wrapper.get('.workspace-picker-total').text()).toBe('50 workspaces')
+    expect(wrapper.get('.verdict-bar').text()).toContain('50 workspaces')
+    expect(wrapper.get('.verdict-bar').text()).toContain('findings')
     expect(wrapper.get('.workspace-selector').text()).toContain('ws_0050')
     expect(wrapper.find('.workspace-picker-popover').exists()).toBe(false)
 
@@ -755,4 +775,135 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(source.text()).toBe('QoR metrics: missing')
     expect(source.attributes('title')).toBe('analysis/qor_metrics.json: missing')
   })
+
+  it('uses only verified Findings and labels a same-revision cached result', () => {
+    const details = stepSnapshotFixture({ blockingIssues: [], metrics: [] })
+    const wrapper = mountPanel({
+      findings: {
+        status: 'stale',
+        data: {
+          details,
+          engineeringWorkspaceId: 'engineering-ws-a',
+          projectWorkspaceId: 'ws_a',
+          step: 'Route',
+          workspaceRevision: 4,
+        },
+        issue: { code: 'ARTIFACT_REVISION_MISMATCH' },
+      },
+    })
+
+    expect(wrapper.get('.findings-read-status').text()).toContain('Last committed')
+    expect(wrapper.get('.issue-pane').text()).toContain('No findings reported')
+  })
+
+  it('does not fall back to unverified detail after a Findings error, while comparison remains usable', async () => {
+    const wrapper = mountPanel({
+      findings: {
+        status: 'error',
+        data: null,
+        issue: { code: 'ARTIFACT_REFERENCE_MISSING' },
+        projectWorkspaceId: 'ws_a',
+        step: 'Route',
+      },
+    })
+
+    expect(wrapper.get('.findings-read-status').text()).toContain('Findings unavailable')
+    expect(wrapper.get('.issue-pane').text()).toContain('Findings could not be read')
+    await openCompare(wrapper)
+    expect(wrapper.get('.verdict-badge').text()).toBe('Blocked')
+    expect(wrapper.find('.findings-read-status').exists()).toBe(false)
+  })
+
+  it('shows labeled previous Findings while comparison stays on current results', async () => {
+    const current = workspaceSummaryFixture('ws_a', {
+      Route: stepSnapshotFixture({
+        flowStatus: 'unstart',
+        metrics: [],
+        artifactStatus: 'missing',
+        summaryArtifactStatus: 'missing',
+        hotspotArtifactStatus: 'missing',
+        summaryStatus: null,
+      }),
+    })
+    current.analysis.resultState = {
+      workspaceRevision: 5,
+      pendingStepIds: ['Route'],
+      previous: { workspaceRevision: 4, completedStepCount: 14, stepCount: 14 },
+    }
+    const wrapper = mountPanel({
+      workspaceSummaries: [current, routeWorkspace('ws_b', 1100)],
+      findings: {
+        status: 'ready',
+        data: {
+          engineeringWorkspaceId: 'engineering-ws-a',
+          projectWorkspaceId: 'ws_a',
+          step: 'Route',
+          workspaceRevision: 4,
+          currentWorkspaceRevision: 5,
+          resultState: 'stale',
+          details: stepSnapshotFixture({
+            metrics: [
+              metricRecordFixture({
+                metricName: 'route_wirelength',
+                displayName: 'Previous wirelength',
+                value: 12345,
+              }),
+            ],
+          }),
+        },
+      },
+    })
+    expect(wrapper.get('.verdict-badge').text()).toBe('Previous result')
+    expect(wrapper.get('.findings-read-status').text()).toContain(
+      'Showing read-only results from the previous run',
+    )
+    expect(wrapper.get('.findings-read-status').text()).not.toContain('Revision')
+    expect(wrapper.get('.step-body').text()).toContain('Previous wirelength')
+    expect(wrapper.find('.metric-delta').exists()).toBe(false)
+    await openCompare(wrapper)
+    expect(wrapper.get('.verdict-badge').text()).toBe('Needs rerun')
+    expect(wrapper.get('.findings-read-status').text()).toContain(
+      'excluded from comparison',
+    )
+    expect(wrapper.text()).not.toContain('12345')
+  })
+
+  it.each(['not-started', 'pending-rerun'] as const)(
+    'treats %s as a normal empty state',
+    (resultState) => {
+      const workspace = workspaceSummaryFixture('ws_a', {})
+      workspace.analysis.resultState = {
+        workspaceRevision: 5,
+        pendingStepIds: resultState === 'pending-rerun' ? ['Route'] : [],
+      }
+      const wrapper = mountPanel({
+        workspaceSummaries: [workspace],
+        findings: {
+          status: 'ready',
+          data: {
+            engineeringWorkspaceId: 'engineering-ws-a',
+            projectWorkspaceId: 'ws_a',
+            step: 'Route',
+            workspaceRevision: 5,
+            currentWorkspaceRevision: 5,
+            resultState,
+            details: stepSnapshotFixture({
+              flowStatus: 'unstart',
+              metrics: [],
+              artifactStatus: 'missing',
+              summaryArtifactStatus: 'missing',
+              hotspotArtifactStatus: 'missing',
+              summaryStatus: null,
+            }),
+          },
+        },
+      })
+      expect(wrapper.get('.verdict-badge').text()).toBe(
+        resultState === 'pending-rerun' ? 'Needs rerun' : 'Not run',
+      )
+      expect(wrapper.text()).not.toContain('read failed')
+      expect(wrapper.text()).not.toContain('No V3')
+      expect(wrapper.find('.findings-read-status.error').exists()).toBe(false)
+    },
+  )
 })

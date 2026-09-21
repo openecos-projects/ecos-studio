@@ -1,24 +1,16 @@
-import { randomUUID } from 'node:crypto'
-import { readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import {
-  applyProjectManifestMutation,
-  parseProjectManifest,
-  recordReplacementBackupInManifest,
-  serializeProjectManifest,
-  synchronizeProjectBaseline,
-  type ProjectManifest,
-  type ProjectManifestBaseDesign,
-  type ProjectManifestMutation,
-  type ProjectManifestMutationRequest,
-  type ProjectManifestMutationResult,
-  type WorkspaceDirectoryReplacement,
+import { basename, isAbsolute, resolve } from 'node:path'
+import { projectManifestForPresentation } from '@ecos-studio/shared'
+import type {
+  EccProjectManifest,
+  ProjectManifest,
+  ProjectManifestMutation,
+  ProjectManifestMutationRequest,
+  ProjectManifestMutationResult,
+  WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
-import {
-  WorkspaceSnapshotLoader,
-  type WorkspaceBaselineSnapshot,
-} from './eccRpc/workspaceSnapshotLoader'
 import { isPathWithinRoot } from './pathScope'
+import { validateProjectManifestMutation } from './projectManifestMutationValidation'
+import type { FrontendProjectManifestService } from './frontendProjectManifestService'
 
 export interface ProjectManifestScopeProvider {
   resolveProjectRoot(path: string): Promise<string>
@@ -44,8 +36,19 @@ export interface ProjectManifestReplacementProvider {
   ): Promise<void>
 }
 
-export interface ProjectManifestBaselineSnapshotProvider {
-  loadBaselineSnapshot(directory: string): Promise<WorkspaceBaselineSnapshot>
+export interface ProjectManifestRuntime {
+  callRuntime<T>(
+    method: string,
+    params?: Record<string, unknown>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>
+}
+
+export interface WorkspaceRegistrationEvidence {
+  fingerprint: string
+  projectId: string
+  workspaceId: string
+  workspacePath: string
 }
 
 export class ProjectManifestService {
@@ -53,70 +56,190 @@ export class ProjectManifestService {
 
   constructor(
     private readonly projectScopeProvider: ProjectManifestScopeProvider,
-    private readonly replacementProvider?: ProjectManifestReplacementProvider,
-    private readonly baselineSnapshotProvider: ProjectManifestBaselineSnapshotProvider = new WorkspaceSnapshotLoader(),
+    private readonly replacementProvider: ProjectManifestReplacementProvider | undefined,
+    private readonly runtime: ProjectManifestRuntime,
+    private readonly frontend?: FrontendProjectManifestService,
   ) {}
 
   async mutate(
     request: ProjectManifestMutationRequest,
   ): Promise<ProjectManifestMutationResult> {
-    if (
-      !request ||
-      typeof request.projectRoot !== 'string' ||
-      !request.projectRoot.trim()
-    ) {
+    if (!request?.projectRoot?.trim()) {
       throw new Error('Project manifest mutation requires a project root')
     }
     validateProjectManifestMutation(request.mutation)
-
     const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
       request.projectRoot,
     )
     return await this.enqueue(projectRoot, async () => {
-      const manifestPath = join(projectRoot, 'project.json')
-      const currentContent = await readOptionalTextFile(manifestPath)
-      const currentManifest =
-        currentContent === null ? null : parseProjectManifest(currentContent)
-      if (currentManifest) {
-        const manifestRoot = await this.projectScopeProvider.resolveProjectRoot(
-          currentManifest.root_path,
-        )
-        if (manifestRoot !== projectRoot) {
-          throw new Error(
-            'Project manifest root_path does not match its containing directory.',
-          )
-        }
+      if (
+        (request.mutation.type === 'create' &&
+          request.mutation.projectType === 'frontend') ||
+        (await this.frontend?.load(projectRoot))
+      ) {
+        if (!this.frontend) throw new Error('Frontend project management is unavailable.')
+        return await this.frontend.mutate(projectRoot, request.mutation)
       }
-      if (request.mutation.type === 'create' && currentManifest) {
-        throw new Error('Project manifest already exists.')
-      }
+      return await this.mutateThroughRuntime(projectRoot, request.mutation)
+    })
+  }
+
+  async load(requestedProjectRoot: string): Promise<ProjectManifest> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    const frontendManifest = await this.frontend?.load(projectRoot)
+    if (frontendManifest) return frontendManifest
+    return projectManifestForPresentation(
+      await this.loadManifest(projectRoot),
+      projectRoot,
+    )
+  }
+
+  async importFrontendWorkspace(
+    requestedProjectRoot: string,
+    workspacePath: string,
+    workspaceId: string,
+  ): Promise<ProjectManifest> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    if (!this.frontend) throw new Error('Frontend project management is unavailable.')
+    return await this.enqueue(projectRoot, () =>
+      this.frontend!.importWorkspace(projectRoot, workspacePath, workspaceId),
+    )
+  }
+
+  async discover(directory: string): Promise<ProjectManifest | null> {
+    const frontendManifest = await this.frontend?.discover(directory)
+    if (frontendManifest) return frontendManifest
+    const discovered = await this.runtime.callRuntime<{
+      projectId: string
+      projectRoot: string
+    } | null>('project.discover', { directory })
+    if (!discovered) return null
+    const projectRoot = await this.projectScopeProvider.resolveProjectRoot(
+      discovered.projectRoot,
+    )
+    const manifest = await this.loadManifest(projectRoot)
+    if (manifest.project_id !== discovered.projectId) {
+      throw new Error('Discovered Project identity changed while loading its Manifest.')
+    }
+    return projectManifestForPresentation(manifest, projectRoot)
+  }
+
+  async inspectWorkspaceRegistration(
+    requestedProjectRoot: string,
+    workspacePath: string,
+    expectedProjectId?: string,
+  ): Promise<WorkspaceRegistrationEvidence | null> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    return await this.enqueue(projectRoot, async () => {
       const manifest =
-        request.mutation.type === 'record-replacement-backup'
-          ? this.applyReplacementBackupMutation(
-              currentManifest,
-              projectRoot,
-              request.mutation,
-            )
-          : request.mutation.type === 'select-qor-baseline'
-            ? await this.applyQorBaselineMutation(currentManifest, request.mutation)
-            : applyProjectManifestMutation(currentManifest, projectRoot, request.mutation)
-      const directoryReplacement =
-        request.mutation.type === 'delete-workspace' && request.mutation.deleteDirectory
-          ? await this.prepareManagedWorkspaceDeletion(
-              currentManifest,
-              projectRoot,
-              request.mutation.workspaceId,
-            )
-          : null
-      const content = serializeProjectManifest(manifest)
-      try {
-        if (request.mutation.type === 'record-replacement-backup') {
-          await this.setReplacementRecoveryMode(
-            request.mutation.input.replacementId,
-            projectRoot,
-            'retain',
-          )
+        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
+      requireProjectIdentity(manifest, expectedProjectId)
+      return workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
+    })
+  }
+
+  async ensureWorkspaceRegistration(
+    requestedProjectRoot: string,
+    workspacePath: string,
+    expectedProjectId?: string,
+  ): Promise<WorkspaceRegistrationEvidence> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    return await this.enqueue(projectRoot, async () => {
+      const manifest =
+        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
+      requireProjectIdentity(manifest, expectedProjectId)
+      const existing = workspaceRegistrationEvidence(manifest, workspacePath, projectRoot)
+      if (existing) return existing
+      const mutation = {
+        type: 'register-workspace' as const,
+        input: { projectRoot, workspacePath },
+      }
+      const updated =
+        manifest.project_type === 'frontend'
+          ? (await this.frontend!.mutate(projectRoot, mutation)).manifest
+          : await this.mutateManifest(projectRoot, mutation)
+      return workspaceRegistrationEvidence(updated, workspacePath, projectRoot)!
+    })
+  }
+
+  async removeWorkspaceRegistration(
+    requestedProjectRoot: string,
+    evidence: WorkspaceRegistrationEvidence,
+  ): Promise<void> {
+    const projectRoot =
+      await this.projectScopeProvider.resolveProjectRoot(requestedProjectRoot)
+    await this.enqueue(projectRoot, async () => {
+      const manifest =
+        (await this.frontend?.load(projectRoot)) ?? (await this.loadManifest(projectRoot))
+      const current = workspaceRegistrationEvidence(
+        manifest,
+        evidence.workspacePath,
+        projectRoot,
+      )
+      if (!current || current.fingerprint !== evidence.fingerprint) {
+        throw new Error(
+          'Project manifest registration changed after Workspace creation; registration was preserved.',
+        )
+      }
+      const mutation = {
+        type: 'delete-workspace' as const,
+        workspaceId: evidence.workspaceId,
+      }
+      if (manifest.project_type === 'frontend') {
+        await this.frontend!.mutate(projectRoot, mutation)
+      } else {
+        await this.mutateManifest(projectRoot, mutation)
+      }
+    })
+  }
+
+  private async mutateThroughRuntime(
+    projectRoot: string,
+    requestedMutation: ProjectManifestMutation,
+  ): Promise<ProjectManifestMutationResult> {
+    let mutation: ProjectManifestMutation | Record<string, unknown> = requestedMutation
+    let directoryReplacement: WorkspaceDirectoryReplacement | null = null
+    if (requestedMutation.type === 'record-replacement-backup') {
+      const replacement = this.requireProjectReplacement(
+        requestedMutation.input.replacementId,
+        projectRoot,
+      )
+      mutation = {
+        type: 'register-workspace',
+        input: {
+          lifecycle: 'archived',
+          name: `${basename(replacement.targetPath)} backup`,
+          workspacePath: replacement.backupPath,
+        },
+      }
+      await this.setReplacementRecoveryMode(
+        requestedMutation.input.replacementId,
+        projectRoot,
+        'retain',
+      )
+    }
+    if (
+      requestedMutation.type === 'delete-workspace' &&
+      requestedMutation.deleteDirectory
+    ) {
+      const manifest = await this.loadManifest(projectRoot)
+      const workspace = manifest.workspaces.find(
+        (candidate) => candidate.workspace_id === requestedMutation.workspaceId,
+      )
+      if (workspace) {
+        if (!this.replacementProvider) {
+          throw new Error('Workspace replacement support is unavailable.')
         }
+        directoryReplacement =
+          await this.replacementProvider.prepareManagedProjectWorkspaceDirectoryReplacement(
+            projectRoot,
+            requestedMutation.workspaceId,
+            absoluteWorkspacePath(projectRoot, workspace.workspace_path),
+          )
         if (directoryReplacement) {
           await this.setReplacementRecoveryMode(
             directoryReplacement.id,
@@ -124,92 +247,56 @@ export class ProjectManifestService {
             'delete',
           )
         }
-        await writeTextFileAtomically(manifestPath, content)
-      } catch (error) {
-        if (directoryReplacement) {
-          await this.replacementProvider!.restoreProjectDirectoryReplacement(
-            directoryReplacement.id,
-          ).catch(() => undefined)
-        }
-        throw error
       }
-      let cleanupPending = false
-      if (request.mutation.type === 'record-replacement-backup') {
-        try {
-          await this.replacementProvider!.retainProjectDirectoryReplacement(
-            request.mutation.input.replacementId,
-          )
-        } catch {
-          // The manifest now references the backup and recovery mode is retain.
-          cleanupPending = true
-        }
-      }
+    }
+
+    let manifest: EccProjectManifest
+    try {
+      manifest = await this.mutateManifest(projectRoot, mutation)
+    } catch (error) {
       if (directoryReplacement) {
-        try {
-          await this.replacementProvider!.finalizeProjectDirectoryReplacement(
-            directoryReplacement.id,
-          )
-        } catch {
-          cleanupPending = true
-        }
+        await this.replacementProvider!.restoreProjectDirectoryReplacement(
+          directoryReplacement.id,
+        ).catch(() => undefined)
       }
-      return { content, ...(cleanupPending ? { cleanupPending } : {}) }
-    })
+      throw error
+    }
+
+    let cleanupPending = false
+    const replacementId =
+      requestedMutation.type === 'record-replacement-backup'
+        ? requestedMutation.input.replacementId
+        : directoryReplacement?.id
+    if (replacementId) {
+      try {
+        if (requestedMutation.type === 'record-replacement-backup') {
+          await this.replacementProvider!.retainProjectDirectoryReplacement(replacementId)
+        } else {
+          await this.replacementProvider!.finalizeProjectDirectoryReplacement(
+            replacementId,
+          )
+        }
+      } catch {
+        cleanupPending = true
+      }
+    }
+    return {
+      manifest: projectManifestForPresentation(manifest, projectRoot),
+      ...(cleanupPending ? { cleanupPending } : {}),
+    }
   }
 
-  private applyReplacementBackupMutation(
-    currentManifest: ReturnType<typeof parseProjectManifest> | null,
+  private loadManifest(projectRoot: string): Promise<EccProjectManifest> {
+    return this.runtime.callRuntime('project.manifest.load', { projectRoot })
+  }
+
+  private mutateManifest(
     projectRoot: string,
-    mutation: Extract<
-      ProjectManifestMutationRequest['mutation'],
-      { type: 'record-replacement-backup' }
-    >,
-  ) {
-    if (!currentManifest) throw new Error('Project manifest does not exist.')
-    if (!this.replacementProvider) {
-      throw new Error('Workspace replacement support is unavailable.')
-    }
-    const replacement = this.requireProjectReplacement(
-      mutation.input.replacementId,
+    mutation: ProjectManifestMutation | Record<string, unknown>,
+  ): Promise<EccProjectManifest> {
+    return this.runtime.callRuntime('project.manifest.mutate', {
       projectRoot,
-    )
-    return recordReplacementBackupInManifest(currentManifest, {
-      backupPath: replacement.backupPath,
-      targetPath: replacement.targetPath,
-      fallbackStartStep: mutation.input.fallbackStartStep,
-      fallbackEndStep: mutation.input.fallbackEndStep,
-    })
-  }
-
-  private async applyQorBaselineMutation(
-    currentManifest: ProjectManifest | null,
-    mutation: Extract<
-      ProjectManifestMutationRequest['mutation'],
-      { type: 'select-qor-baseline' }
-    >,
-  ): Promise<ProjectManifest> {
-    if (!currentManifest) throw new Error('Project manifest does not exist.')
-    if (currentManifest.project_type !== 'backend') {
-      throw new Error('QoR baselines are only available for backend projects.')
-    }
-    const workspace = currentManifest.workspaces.find(
-      (candidate) =>
-        candidate.workspace_id === mutation.workspaceId &&
-        candidate.status !== 'archived',
-    )
-    if (!workspace) {
-      throw new Error(
-        `Workspace ${mutation.workspaceId} is not available for the project QoR baseline.`,
-      )
-    }
-
-    const snapshot = await this.baselineSnapshotProvider.loadBaselineSnapshot(
-      workspace.workspace_path,
-    )
-    return synchronizeProjectBaseline(currentManifest, {
-      workspaceId: workspace.workspace_id,
-      reason: mutation.reason,
-      baseDesign: baselineBaseDesign(currentManifest.base_design, snapshot),
+      mutation,
     })
   }
 
@@ -218,33 +305,10 @@ export class ProjectManifestService {
     projectRoot: string,
     recoveryMode: 'delete' | 'retain',
   ): Promise<void> {
-    if (!this.replacementProvider) {
-      throw new Error('Workspace replacement support is unavailable.')
-    }
     this.requireProjectReplacement(replacementId, projectRoot)
-    await this.replacementProvider.setProjectDirectoryReplacementRecoveryMode(
+    await this.replacementProvider!.setProjectDirectoryReplacementRecoveryMode(
       replacementId,
       recoveryMode,
-    )
-  }
-
-  private async prepareManagedWorkspaceDeletion(
-    currentManifest: ReturnType<typeof parseProjectManifest> | null,
-    projectRoot: string,
-    workspaceId: string,
-  ): Promise<WorkspaceDirectoryReplacement | null> {
-    if (!currentManifest) return null
-    const workspace = currentManifest.workspaces.find(
-      (candidate) => candidate.workspace_id === workspaceId,
-    )
-    if (!workspace) return null
-    if (!this.replacementProvider) {
-      throw new Error('Workspace replacement support is unavailable.')
-    }
-    return await this.replacementProvider.prepareManagedProjectWorkspaceDirectoryReplacement(
-      projectRoot,
-      workspaceId,
-      workspace.workspace_path,
     )
   }
 
@@ -272,415 +336,63 @@ export class ProjectManifestService {
       () => undefined,
     )
     this.queues.set(projectRoot, queued)
-
     try {
       return await next
     } finally {
-      if (this.queues.get(projectRoot) === queued) {
-        this.queues.delete(projectRoot)
-      }
+      if (this.queues.get(projectRoot) === queued) this.queues.delete(projectRoot)
     }
   }
 }
 
-function validateProjectManifestMutation(
-  mutation: unknown,
-): asserts mutation is ProjectManifestMutation {
-  if (!isRecord(mutation) || typeof mutation.type !== 'string') {
-    throw new Error('Project manifest mutation is required')
-  }
-
-  switch (mutation.type) {
-    case 'create':
-      requireString(mutation.name, 'Project manifest create mutation name')
-      requireString(mutation.designName, 'Project manifest create mutation designName')
-      if (
-        mutation.projectType !== undefined &&
-        mutation.projectType !== 'backend' &&
-        mutation.projectType !== 'frontend'
-      ) {
-        throw new Error('Project manifest create mutation projectType is invalid')
-      }
-      validateProjectManifestMpc(mutation.mpc)
-      return
-    case 'register-workspace': {
-      const input = requireRecord(
-        mutation.input,
-        'Project manifest workspace registration input',
-      )
-      requireString(input.projectRoot, 'Project manifest workspace projectRoot')
-      requireString(input.workspacePath, 'Project manifest workspace path')
-      requireOptionalString(input.projectName, 'Project manifest workspace projectName')
-      requireOptionalString(
-        input.sourceWorkspaceId,
-        'Project manifest source workspace id',
-      )
-      requireOptionalString(input.sourceStep, 'Project manifest source step')
-      requireOptionalString(input.sourceOutputPath, 'Project manifest source output path')
-      requireOptionalString(input.sourceOutputType, 'Project manifest source output type')
-      requireOptionalString(input.startStep, 'Project manifest start step')
-      requireOptionalString(input.endStep, 'Project manifest end step')
-      if (input.config !== undefined) validateWorkspaceConfig(input.config)
-      return
-    }
-    case 'archive-workspace':
-    case 'delete-workspace':
-      requireString(mutation.workspaceId, 'Project manifest workspace id')
-      if (
-        mutation.type === 'delete-workspace' &&
-        mutation.deleteDirectory !== undefined
-      ) {
-        if (typeof mutation.deleteDirectory !== 'boolean') {
-          throw new Error(
-            'Project manifest deleteDirectory must be a boolean when provided',
-          )
-        }
-      }
-      return
-    case 'select-qor-baseline':
-      requireString(mutation.workspaceId, 'Project manifest QoR baseline workspace id')
-      requireOptionalString(mutation.reason, 'Project manifest QoR baseline reason')
-      return
-    case 'record-replacement-backup': {
-      const input = requireRecord(
-        mutation.input,
-        'Project manifest replacement backup input',
-      )
-      requireString(input.replacementId, 'Workspace replacement id')
-      requireOptionalString(
-        input.fallbackStartStep,
-        'Project manifest fallback start step',
-      )
-      requireOptionalString(input.fallbackEndStep, 'Project manifest fallback end step')
-      return
-    }
-    default:
-      throw new Error('Unsupported project manifest mutation')
-  }
-}
-
-function validateWorkspaceConfig(value: unknown): void {
-  const config = requireRecord(value, 'Project manifest workspace config')
-  for (const key of ['pdk', 'pdk_root', 'origin_verilog', 'origin_def']) {
-    requireOptionalString(config[key], `Project manifest workspace config ${key}`)
-  }
-  if (config.rtl_list !== undefined) {
-    if (
-      !Array.isArray(config.rtl_list) ||
-      config.rtl_list.some((item) => typeof item !== 'string')
-    ) {
-      throw new Error(
-        'Project manifest workspace config rtl_list must be an array of strings',
-      )
-    }
-  }
-  if (config.parameters !== undefined && !isRecord(config.parameters)) {
-    throw new Error('Project manifest workspace config parameters must be an object')
-  }
-}
-
-function baselineBaseDesign(
-  current: ProjectManifestBaseDesign,
-  snapshot: WorkspaceBaselineSnapshot,
-): ProjectManifestBaseDesign {
-  const parameters = snapshot.parameters
-  const dbInput = recordValue(snapshot.db.INPUT) ?? {}
-  const nextParameters: Record<string, unknown> = {
-    ...current.parameters,
-    ...normalizedBaselineParameters(parameters),
-  }
-  const next: ProjectManifestBaseDesign = {
-    ...current,
-    parameters: nextParameters,
-  }
-  const pdk = firstString(parameters.PDK, parameters.pdk)
-  const pdkRoot = firstString(parameters['PDK Root'], parameters.pdk_root)
-  const topModule = firstString(
-    parameters['Top module'],
-    parameters['Top Module'],
-    parameters.top_module,
+function workspaceRegistrationEvidence(
+  manifest: EccProjectManifest,
+  workspacePath: string,
+  projectRoot: string,
+): WorkspaceRegistrationEvidence | null {
+  const normalizedPath = normalizePath(workspacePath)
+  const workspaceId = basename(normalizedPath)
+  const candidates = manifest.workspaces.filter(
+    (workspace) =>
+      workspace.workspace_id === workspaceId ||
+      absoluteWorkspacePath(projectRoot, workspace.workspace_path) === normalizedPath,
   )
-  const clock = firstString(parameters.Clock, parameters.clock)
-  if (!pdk || !topModule || !clock) {
+  if (candidates.length === 0) return null
+  const matchingPaths = candidates.filter(
+    (candidate) =>
+      absoluteWorkspacePath(projectRoot, candidate.workspace_path) === normalizedPath,
+  )
+  if (matchingPaths.length !== 1 || candidates.length !== 1) {
     throw new Error(
-      'Baseline workspace snapshot is incomplete: PDK, top module, and clock are required.',
+      'Project manifest has a conflicting Workspace identity or path; registration was preserved.',
     )
   }
-  const rtlList = stringArray(dbInput.rtl_list, dbInput.rtl_paths)
-  const originVerilog = firstString(dbInput.origin_verilog, dbInput.verilog_path)
-  const originDef = firstString(dbInput.origin_def, dbInput.def_path)
-
-  if (pdk) next.pdk = pdk
-  if (pdkRoot) next.pdk_root = pdkRoot
-  if (topModule) next.top_module = topModule
-  if (clock) next.clock = clock
-  if (rtlList.length > 0) next.rtl_list = rtlList
-  if (originVerilog) next.origin_verilog = originVerilog
-  if (originDef) next.origin_def = originDef
-  return next
+  const workspace = matchingPaths[0]!
+  return {
+    fingerprint: JSON.stringify(workspace),
+    projectId: manifest.project_id,
+    workspaceId: workspace.workspace_id,
+    workspacePath: normalizedPath,
+  }
 }
 
-function normalizedBaselineParameters(
-  parameters: Record<string, unknown>,
-): Record<string, unknown> {
-  const die = recordValue(parameters.Die) ?? recordValue(parameters.die) ?? {}
-  const core = recordValue(parameters.Core) ?? recordValue(parameters.core) ?? {}
-  const dieArea =
-    recordValue(parameters['Die Area']) ?? recordValue(parameters.die_area) ?? {}
-  const dieSize = numberArray(die.Size ?? die.size)
-  const margins = numberArray(core.Margin ?? core.margin)
-  const hasCanonicalDieSize = dieArea.width != null && dieArea.height != null
-  const normalized: Record<string, unknown> = {
-    design: firstString(parameters.Design, parameters.design),
-    top_module: firstString(
-      parameters['Top module'],
-      parameters['Top Module'],
-      parameters.top_module,
-    ),
-    clock: firstString(parameters.Clock, parameters.clock),
-    frequency_max: firstValue(
-      parameters['Frequency max [MHz]'],
-      parameters.frequency_max,
-    ),
-    max_fanout: firstValue(parameters['Max fanout'], parameters.max_fanout),
-    die_area_mode:
-      firstString(dieArea.mode, parameters.die_area_mode) ||
-      (hasCanonicalDieSize || dieSize.length >= 2 ? 'width_height' : ''),
-    die_width: firstValue(dieArea.width, dieSize[0], parameters.die_width),
-    die_height: firstValue(dieArea.height, dieSize[1], parameters.die_height),
-    utilitization: firstValue(
-      dieArea.utilitization,
-      core.Utilitization,
-      core.utilitization,
-      parameters.utilitization,
-    ),
-    margin: firstValue(scalarMarginFromCore(margins), dieArea.margin, parameters.margin),
-  }
-  assertBaselineScalarsSafe(normalized)
-  return Object.fromEntries(
-    Object.entries(normalized).filter(([, value]) => value !== undefined && value !== ''),
+function absoluteWorkspacePath(projectRoot: string, workspacePath: string): string {
+  return normalizePath(
+    isAbsolute(workspacePath) ? workspacePath : resolve(projectRoot, workspacePath),
   )
 }
 
-function assertBaselineScalarClass(value: unknown): void {
-  if (
-    value instanceof Date ||
-    typeof value === 'bigint' ||
-    (typeof value === 'number' && !Number.isFinite(value))
-  ) {
-    throw new Error(
-      'Baseline workspace snapshot holds a parameter value the manifest cannot ' +
-        'represent losslessly; edit the workspace configuration manually',
-    )
-  }
-}
-
-function firstString(...values: unknown[]): string {
-  for (const value of values) assertBaselineScalarClass(value)
-  return (
-    values
-      .find(
-        (value): value is string => typeof value === 'string' && value.trim().length > 0,
-      )
-      ?.trim() ?? ''
-  )
-}
-
-function firstValue(...values: unknown[]): unknown {
-  for (const value of values) assertBaselineScalarClass(value)
-  return values.find((value) => value !== undefined && value !== null)
-}
-
-function stringArray(...values: unknown[]): string[] {
-  for (const value of values) {
-    if (!Array.isArray(value)) continue
-    const entries = value.filter(
-      (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0,
-    )
-    if (entries.length > 0) return entries
-  }
-  return []
-}
-
-function scalarMarginFromCore(margins: number[]): number | undefined {
-  if (margins.length === 0) return undefined
-  if (!margins.every((item) => Object.is(item, margins[0]))) {
-    throw new Error(
-      'Baseline workspace snapshot holds an asymmetric core.margin that the ' +
-        'manifest cannot represent as a single scalar; edit the workspace ' +
-        'configuration manually',
-    )
-  }
-  return margins[0]
-}
-
-function numberArray(value: unknown): number[] {
-  if (value == null) return []
-  if (!Array.isArray(value)) {
-    throw new Error(
-      'Baseline workspace snapshot holds a scalar where a die/core dimension ' +
-        'array was expected; edit the workspace configuration manually',
-    )
-  }
-  // Positional semantics: dropping or rounding ANY element would silently
-  // shift the rest into the wrong slots (die.size[0] -> die_width). Numeric
-  // strings convert (legacy JSON writes them); everything else fails loud.
-  return value.map((entry) => {
-    if (typeof entry === 'number') {
-      if (!Number.isFinite(entry)) {
-        throw new Error(
-          'Baseline workspace snapshot holds a die/core dimension that is not a ' +
-            'finite number; edit the workspace configuration manually',
-        )
-      }
-      if (Number.isInteger(entry) && !Number.isSafeInteger(entry)) {
-        throw new Error(
-          'Baseline workspace snapshot holds a die/core dimension that exceeds ' +
-            'the safe integer range; edit the workspace configuration manually',
-        )
-      }
-      return entry
-    }
-    if (typeof entry === 'string' && entry.trim() !== '') {
-      const parsed = Number(entry.trim())
-      if (!Number.isFinite(parsed) || String(parsed) !== entry.trim()) {
-        throw new Error(
-          'Baseline workspace snapshot holds a die/core dimension that cannot ' +
-            'round-trip as a JavaScript number; edit the workspace configuration manually',
-        )
-      }
-      if (Number.isInteger(parsed) && !Number.isSafeInteger(parsed)) {
-        throw new Error(
-          'Baseline workspace snapshot holds a die/core dimension that exceeds ' +
-            'the safe integer range; edit the workspace configuration manually',
-        )
-      }
-      return parsed
-    }
-    throw new Error(
-      'Baseline workspace snapshot holds a die/core dimension that is not a ' +
-        'finite number; edit the workspace configuration manually',
-    )
-  })
-}
-
-/**
- * The manifest serializes to JSON: non-finite numbers would become null,
- * bigints would throw inside JSON.stringify, and TOML dates would persist
- * as lossy strings. Reject every unsupported scalar before constructing the
- * baseline, never after serializing it.
- */
-function assertBaselineScalarsSafe(value: unknown): void {
-  if (typeof value === 'number' && !Number.isFinite(value)) {
-    throw new Error(
-      'Baseline workspace snapshot holds a non-finite parameter value; ' +
-        'edit the workspace configuration manually',
-    )
-  }
-  if (typeof value === 'bigint' || value instanceof Date) {
-    throw new Error(
-      'Baseline workspace snapshot holds a parameter value the manifest cannot ' +
-        'represent losslessly; edit the workspace configuration manually',
-    )
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) assertBaselineScalarsSafe(item)
-    return
-  }
-  if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
-    for (const item of Object.values(value)) assertBaselineScalarsSafe(item)
-  }
-}
-
-function recordValue(value: unknown): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null
-  if (value instanceof Date || Array.isArray(value) || typeof value !== 'object') {
-    // A scalar where a table is expected (e.g. die = 1979-05-27) must not
-    // degrade into an empty table and silently lose the baseline geometry.
-    throw new Error(
-      'Baseline workspace snapshot holds a scalar where a parameter table was ' +
-        'expected; edit the workspace configuration manually',
-    )
-  }
-  return value as Record<string, unknown>
-}
-
-function validateProjectManifestMpc(value: unknown): void {
-  if (value === undefined || value === null) return
-  const mpc = requireRecord(value, 'Project manifest MPC')
-  const resourceId = requireString(mpc.resource_id, 'Project manifest MPC resource_id')
-  if (!resourceId.startsWith('mpc:') || resourceId.length === 4) {
-    throw new Error('Project manifest MPC resource_id must be an MPC resource id')
-  }
-  requireString(mpc.display_name, 'Project manifest MPC display_name')
-  requireString(mpc.installed_version, 'Project manifest MPC installed_version')
-  const mpcPath = normalizeMpcPath(requireString(mpc.path, 'Project manifest MPC path'))
-  const specPath = normalizeMpcPath(
-    requireString(mpc.spec_path, 'Project manifest MPC spec_path'),
-  )
-  if (specPath !== `${mpcPath}/spec/spec.json.in`) {
-    throw new Error(
-      'Project manifest MPC spec_path must reference spec/spec.json.in below MPC path',
-    )
-  }
-  const design = requireRecord(mpc.design, 'Project manifest MPC design')
-  if (!Number.isInteger(design.index) || (design.index as number) < 0) {
-    throw new Error('Project manifest MPC design index must be a non-negative integer')
-  }
-  requireString(design.design_name, 'Project manifest MPC design design_name')
-  requireOptionalString(design.directory, 'Project manifest MPC design directory')
-  requireRecord(mpc.core_template, 'Project manifest MPC core_template')
-}
-
-function normalizeMpcPath(path: string): string {
+function normalizePath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
-  return normalized.length <= 1 ? normalized : normalized.replace(/\/+$/g, '')
+  return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized
 }
 
-function requireRecord(value: unknown, name: string): Record<string, unknown> {
-  if (!isRecord(value)) throw new Error(`${name} must be an object`)
-  return value
-}
-
-function requireString(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${name} must be a non-empty string`)
+function requireProjectIdentity(
+  manifest: EccProjectManifest,
+  expectedProjectId?: string,
+): void {
+  if (expectedProjectId && manifest.project_id !== expectedProjectId) {
+    throw new Error(
+      'Project manifest identity changed after Workspace creation; registration was preserved.',
+    )
   }
-  return value
-}
-
-function requireOptionalString(value: unknown, name: string): void {
-  if (value !== undefined && typeof value !== 'string') {
-    throw new Error(`${name} must be a string when provided`)
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-async function readOptionalTextFile(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8')
-  } catch (error) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) return null
-    throw error
-  }
-}
-
-async function writeTextFileAtomically(path: string, content: string): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporaryPath, content, 'utf8')
-    await rename(temporaryPath, path)
-  } catch (error) {
-    await rm(temporaryPath, { force: true }).catch(() => undefined)
-    throw error
-  }
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'code' in error && error.code === code
-  )
 }

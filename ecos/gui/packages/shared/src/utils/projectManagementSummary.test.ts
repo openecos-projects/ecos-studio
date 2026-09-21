@@ -3,15 +3,28 @@ import {
   projectManagementFrontendWorkspaceStepAnalysisSpecs,
   projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
-  projectManagementWorkspaceReadablePaths,
-  projectManagementWorkspaceReadablePathsFor,
   projectManagementWorkspaceStepAnalysisSpecs,
-  projectManagementWorkspaceStepConfigPaths,
   projectManagementWorkspaceSummaryPaths,
   projectManagementWorkspaceSummaryPathsFor,
 } from './projectManagementSummary'
 
 describe('projectManagementWorkspaceSummaryPaths', () => {
+  it('keeps frontend reports separate from the backend allowlist', () => {
+    expect(projectManagementWorkspaceSummaryPathsFor('backend')).toBe(
+      projectManagementWorkspaceSummaryPaths,
+    )
+    expect(projectManagementWorkspaceSummaryPathsFor('frontend')).toBe(
+      projectManagementFrontendWorkspaceSummaryPaths,
+    )
+    expect(projectManagementFrontendWorkspaceStepAnalysisSpecs).toHaveLength(5)
+    expect(projectManagementFrontendWorkspaceSummaryPaths).toHaveLength(21)
+    expect(new Set(projectManagementFrontendWorkspaceSummaryPaths).size).toBe(21)
+    expect(projectManagementFrontendWorkspaceSummaryPaths).toContain('home/flow.json')
+    expect(projectManagementFrontendWorkspaceSummaryPaths).not.toContain(
+      projectManagementStaTimingIssuesPath,
+    )
+  })
+
   it('is the unique bounded summary allowlist derived from every analysis step', () => {
     expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(12)
     expect(projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)).toEqual(
@@ -23,12 +36,16 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
       metricsPath: 'lvs_ecc/analysis/qor_metrics.json',
       summaryPath: 'lvs_ecc/analysis/qor_summary.json',
     })
-    expect(projectManagementWorkspaceSummaryPaths).toContain('home/flow.json')
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain('home/flow.json')
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
+    expect(projectManagementWorkspaceSummaryPaths).not.toContain(
+      'home/engineering-snapshot.json',
+    )
     expect(projectManagementWorkspaceSummaryPaths).toContain(
       projectManagementStaTimingIssuesPath,
     )
     expect(projectManagementWorkspaceSummaryPaths).toHaveLength(
-      2 + projectManagementWorkspaceStepAnalysisSpecs.length * 3,
+      1 + projectManagementWorkspaceStepAnalysisSpecs.length * 3,
     )
     expect(new Set(projectManagementWorkspaceSummaryPaths).size).toBe(
       projectManagementWorkspaceSummaryPaths.length,
@@ -39,81 +56,5 @@ describe('projectManagementWorkspaceSummaryPaths', () => {
         expect.arrayContaining([spec.metricsPath, spec.summaryPath, spec.hotspotsPath]),
       )
     }
-  })
-})
-
-describe('frontend project management summary paths', () => {
-  it('uses the five ECC-FE detail and QoR artifact triplets plus flow state', () => {
-    expect(
-      projectManagementFrontendWorkspaceStepAnalysisSpecs.map((spec) => spec.step),
-    ).toEqual(['prepare', 'review', 'elab', 'lint', 'sim'])
-    expect(projectManagementFrontendWorkspaceSummaryPaths).toHaveLength(21)
-    for (const spec of projectManagementFrontendWorkspaceStepAnalysisSpecs) {
-      expect(projectManagementFrontendWorkspaceSummaryPaths).toEqual(
-        expect.arrayContaining([
-          spec.detailPath,
-          spec.metricsPath,
-          spec.summaryPath,
-          spec.hotspotsPath,
-        ]),
-      )
-    }
-    expect(projectManagementWorkspaceSummaryPathsFor('frontend')).toBe(
-      projectManagementFrontendWorkspaceSummaryPaths,
-    )
-    expect(projectManagementWorkspaceSummaryPathsFor('backend')).toBe(
-      projectManagementWorkspaceSummaryPaths,
-    )
-    expect(projectManagementWorkspaceReadablePathsFor('frontend')).toBe(
-      projectManagementFrontendWorkspaceSummaryPaths,
-    )
-  })
-})
-
-describe('projectManagementWorkspaceStepConfigPaths', () => {
-  it('lists the canonical step-config files plus their legacy pre-migration names', () => {
-    expect(projectManagementWorkspaceStepConfigPaths).toEqual([
-      'config/floorplan_ecc.json',
-      'config/cts_ecc.json',
-      'config/route_ecc.json',
-      'config/drc_ecc.json',
-      'config/filler_ecc.json',
-      'config/rcx_ecc.json',
-      'config/sta_ecc.json',
-      'config/db_ecc.json',
-      'config/dreamplace_ecc.json',
-      'config/fp_default_config.json',
-      'config/cts_default_config.json',
-      'config/rt_default_config.json',
-      'config/drc_default_config.json',
-      'config/pl_default_config.json',
-      'config/rcx.json',
-      'config/sta.json',
-      'config/db_default_config.json',
-      'config/dreamplace.json',
-    ])
-    expect(new Set(projectManagementWorkspaceStepConfigPaths).size).toBe(
-      projectManagementWorkspaceStepConfigPaths.length,
-    )
-  })
-
-  it('keeps the summary allowlist unchanged and merges it into the readable allowlist', () => {
-    expect(projectManagementWorkspaceSummaryPaths).not.toContain('config/cts_ecc.json')
-    expect(projectManagementWorkspaceReadablePaths).toHaveLength(
-      projectManagementWorkspaceSummaryPaths.length +
-        projectManagementWorkspaceStepConfigPaths.length,
-    )
-    expect(projectManagementWorkspaceReadablePaths).toEqual(
-      expect.arrayContaining([
-        ...projectManagementWorkspaceSummaryPaths,
-        ...projectManagementWorkspaceStepConfigPaths,
-      ]),
-    )
-    expect(new Set(projectManagementWorkspaceReadablePaths).size).toBe(
-      projectManagementWorkspaceReadablePaths.length,
-    )
-    expect(projectManagementWorkspaceReadablePathsFor('backend')).toBe(
-      projectManagementWorkspaceReadablePaths,
-    )
   })
 })

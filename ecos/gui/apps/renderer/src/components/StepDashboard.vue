@@ -1,5 +1,10 @@
 <template>
-  <main class="step-dashboard" aria-label="Step dashboard" :aria-busy="loading">
+  <main
+    class="step-dashboard"
+    :class="{ 'has-stale': data?.staleRevision }"
+    aria-label="Step dashboard"
+    :aria-busy="loading"
+  >
     <div v-if="loading && !data" class="step-dashboard-state">
       <i class="ri-loader-4-line spin" aria-hidden="true" />
       <span>Loading step results</span>
@@ -17,6 +22,17 @@
     </div>
 
     <template v-else>
+      <div
+        v-if="data.staleRevision"
+        class="step-dashboard-stale"
+        role="status"
+        title="These step results are from the previous configuration and are read-only until this step is rerun."
+        aria-description="These step results are from the previous configuration and are read-only until this step is rerun."
+      >
+        <i class="ri-history-line" aria-hidden="true" />
+        Configuration changed since the last run. These step results reflect the previous
+        configuration. Rerun this step to update them.
+      </div>
       <div class="step-dashboard-row step-dashboard-top">
         <section class="step-dashboard-card step-summary-card">
           <header class="step-dashboard-header">
@@ -64,6 +80,7 @@
                 </div>
               </div>
               <button
+                v-if="stepConfigPathResolved"
                 type="button"
                 class="status-detail-link config-details-link"
                 title="View and edit step configuration"
@@ -280,7 +297,13 @@
           </button>
           <div v-else class="card-empty">
             <i class="ri-image-2-line" aria-hidden="true" />
-            <span>No layout information</span>
+            <span v-if="data.layoutAvailability === 'stale'"
+              >Layout preview is stale</span
+            >
+            <span v-else-if="data.layoutAvailability === 'missing'"
+              >Layout preview is missing</span
+            >
+            <span v-else>No layout information</span>
           </div>
         </section>
       </div>
@@ -638,10 +661,11 @@
                       }"
                     >
                       <th :title="corner.staCorner">{{ corner.staCorner }}</th>
-                      <td>{{ corner.role }}</td>
-                      <td>{{ staCornerPvt(corner) }}</td>
-                      <td>{{ corner.rcCorner }}</td>
+                      <td :title="corner.role">{{ corner.role }}</td>
+                      <td :title="staCornerPvt(corner)">{{ staCornerPvt(corner) }}</td>
+                      <td :title="corner.rcCorner">{{ corner.rcCorner }}</td>
                       <td
+                        :title="corner.availability"
                         :class="{ 'is-good': isStaCornerAvailable(corner.availability) }"
                       >
                         {{ corner.availability }}
@@ -1134,14 +1158,12 @@ import {
   type StepDashboardReport,
 } from '@/composables/useStepDashboardData'
 import { useStepConfigInfo } from '@/composables/useStepConfigInfo'
-import { useFlowStages } from '@/composables/useFlowStages'
-import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
+import { useStepReportDialog } from '@/composables/useStepReportDialog'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
+import { useBackendWorkspaceQor } from '@/composables/useBackendWorkspaceQor'
 import { useWorkspace } from '@/composables/useWorkspace'
 import CongestionPanel from './flow-insights/CongestionPanel.vue'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
-import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { getDesktopApi } from '@/platform/desktop'
-import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { buildChipViewerOpenRequest, canOpenChipViewer } from './drawingAreaChipViewer'
 import StatusPieChart from './home/StatusPieChart.vue'
 import { homeQorFlowStepForLabel } from './home/qorComparisonData'
@@ -1167,9 +1189,13 @@ import {
 } from './step-dashboard/stepDashboardData'
 
 const { currentStep, data, error, loading, refresh } = useStepDashboardData()
+const { openReport, reportDialog } = useStepReportDialog(
+  currentStep,
+  computed(() => data.value?.step),
+)
 const { currentProject } = useWorkspace()
-const { flowStages } = useFlowStages()
-const { state: qorComparisonState } = useHomeQorComparison()
+const { flowStages } = useBackendFlowStages()
+const { state: qorComparisonState } = useBackendWorkspaceQor()
 const {
   loading: configLoading,
   stepConfigParsed,
@@ -1186,13 +1212,6 @@ const showCongestionDialog = ref(false)
 const showStepConfiguration = ref(false)
 const dataSummaryFocusId = ref<string | null>(null)
 const imagePreview = ref({ label: '', url: '', visible: false })
-const reportDialog = ref({
-  label: '',
-  content: '',
-  error: '',
-  loading: false,
-  visible: false,
-})
 
 const chipViewerStep = computed(() =>
   Object.values(StepEnum).find(
@@ -1203,7 +1222,7 @@ const chipViewerAvailable = computed(() =>
   canOpenChipViewer({
     chipViewerBusy: chipViewerBusy.value,
     chipViewerEditBusy: false,
-    isDesktopRuntime: isDesktopRuntime(),
+    isDesktopRuntime: true,
     projectPath: currentProject.value?.path,
     step: chipViewerStep.value,
   }),
@@ -1530,27 +1549,6 @@ async function openChipViewer(): Promise<void> {
   }
 }
 
-async function openReport(report: StepDashboardReport): Promise<void> {
-  reportDialog.value = {
-    label: report.label,
-    content: '',
-    error: '',
-    loading: true,
-    visible: true,
-  }
-  try {
-    const path = await resolveProjectPathAccess(report.path)
-    if (!path) throw new Error('Report is outside the active workspace scope.')
-    const content = await readOptionalProjectTextFile(path)
-    reportDialog.value.content =
-      content === null ? 'Report is no longer available.' : content
-  } catch (cause) {
-    reportDialog.value.error = cause instanceof Error ? cause.message : String(cause)
-  } finally {
-    reportDialog.value.loading = false
-  }
-}
-
 function reportMeta(report: StepDashboardReport): string {
   return report.sizeBytes === null
     ? ''
@@ -1622,6 +1620,23 @@ function fileName(path: string): string {
   min-width: 0;
   overflow: hidden;
   padding: 8px;
+}
+
+.step-dashboard.has-stale {
+  grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
+}
+
+.step-dashboard-stale {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--warning-color, #b7791f);
+  border-radius: 6px;
+  color: var(--text-primary);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
 }
 
 .step-dashboard-row {
@@ -2397,8 +2412,9 @@ function fileName(path: string): string {
   line-height: 1.2;
 }
 .rcx-summary-grid {
-  flex: 0 0 86px;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  flex: 0 0 auto;
+  grid-auto-rows: minmax(42px, auto);
+  max-height: 150px;
 }
 .rcx-summary-grid > div {
   padding: 4px 6px;
@@ -2547,6 +2563,10 @@ function fileName(path: string): string {
 .sta-corner-summary-table tbody tr {
   height: 1.5rem;
 }
+.sta-corner-summary-table table {
+  min-width: 430px;
+  table-layout: auto;
+}
 .sta-corner-summary-table tr.is-unavailable th,
 .sta-corner-summary-table tr.is-unavailable td {
   color: var(--text-secondary);
@@ -2654,7 +2674,7 @@ function fileName(path: string): string {
   text-align: right;
 }
 .data-highlights {
-  align-content: center;
+  align-content: start;
   display: grid;
   gap: 7px;
   overflow: auto;
@@ -2740,15 +2760,20 @@ function fileName(path: string): string {
   padding-top: 3px;
 }
 .reports-card.is-sta-report-card .report-copy strong {
+  display: -webkit-box;
   line-height: 1.35;
-  overflow: visible;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
 }
 .reports-card.is-sta-report-card .report-copy small {
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .step-config-dialog {
@@ -2988,11 +3013,17 @@ function fileName(path: string): string {
     grid-template-rows: repeat(3, minmax(232px, auto));
     overflow: auto;
   }
+  .step-dashboard.has-stale {
+    grid-template-rows: auto repeat(3, minmax(232px, auto));
+  }
   .step-dashboard-top,
   .step-dashboard-middle,
   .step-dashboard-bottom {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(210px, auto) minmax(210px, auto);
+  }
+  .sta-data-body {
+    grid-template-columns: 1fr;
   }
   .step-summary-body {
     grid-template-columns: 1fr;

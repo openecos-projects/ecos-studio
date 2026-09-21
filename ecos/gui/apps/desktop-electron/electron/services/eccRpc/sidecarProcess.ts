@@ -36,6 +36,7 @@ export type EccRpcSidecarSpawn = (
 ) => SpawnedEccRpcSidecar
 
 export interface EccRpcSidecarProcessOptions {
+  managementRpc?: boolean
   command?: string
   commandArgs?: string[]
   env?: NodeJS.ProcessEnv
@@ -181,9 +182,7 @@ export class EccRpcSidecarProcess {
     this.shuttingDown = false
     this.outputTail = ''
     this.launchError = null
-    this.appendLog(
-      `[sidecar] spawning ${this.command} rpc serve --stdio --persistent-db\n`,
-    )
+    this.appendLog(`[sidecar] spawning ${launch.command} ${launch.args.join(' ')}\n`)
 
     const child = this.spawnImpl(launch.command, launch.args, {
       env,
@@ -288,6 +287,12 @@ export class EccRpcSidecarProcess {
     await this.stopForRestart(child)
   }
 
+  async forceShutdown(): Promise<void> {
+    this.shuttingDown = true
+    this.clearForceKillTimer()
+    this.child?.kill('SIGKILL')
+  }
+
   /**
    * Move a legacy workspace-owned sidecar log before ECC deletes rerun artifacts.
    * stderr is appended by path, so updating logFile synchronously prevents the
@@ -322,6 +327,7 @@ export class EccRpcSidecarProcess {
   }
 
   private async stopForRestart(child: SpawnedEccRpcSidecar): Promise<void> {
+    this.shuttingDown = true
     let didExit = false
     let resolveExit: (() => void) | undefined
     const onClose = () => {
@@ -336,9 +342,10 @@ export class EccRpcSidecarProcess {
     try {
       this.clearForceKillTimer()
       const client = this.client
-      const shutdownResult = client
-        ? await this.requestShutdown(client)
-        : { kind: 'failed' as const }
+      const shutdownResult =
+        this.options.managementRpc && client
+          ? await this.requestShutdown(client)
+          : { kind: 'failed' as const }
       if (shutdownResult.kind === 'deferred') {
         this.shuttingDown = false
         throw new EccRpcShutdownDeferredError(shutdownResult.shutdownBarrier)
@@ -372,7 +379,6 @@ export class EccRpcSidecarProcess {
   private async requestShutdown(
     client: EccJsonRpcClient,
   ): Promise<ShutdownRequestResult> {
-    this.shuttingDown = true
     try {
       const result = await client.call<{
         deferred?: boolean

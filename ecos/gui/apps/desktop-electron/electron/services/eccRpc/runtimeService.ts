@@ -1,4 +1,8 @@
 import type {
+  EccBackgroundOperationProjection,
+  EccBackgroundOperationLogResult,
+  EccEngineeringSnapshot,
+  EccPersistedEngineeringSnapshot,
   EccFlowRunRequest,
   EccFlowRunResult,
   EccFlowRunStepRequest,
@@ -11,22 +15,18 @@ import type {
   EccLayoutEditDiscardResult,
   EccLayoutEditSaveRequest,
   EccLayoutEditSaveResult,
-  EccRpcHelloResult,
-  EccRpcPingResult,
-  EccRpcShutdownResult,
   EccRuntimeEvent,
   EccRuntimeOperation,
   EccRuntimeOperationRequest,
   EccRuntimeStartFlowRequest,
   EccRuntimeStartStepRequest,
-  EccRuntimeStepRenderedAckRequest,
   EccWorkspaceCloseResult,
+  EccWorkspaceConfigurationUpdateRequest,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
   EccWorkspaceExportSignoffRequest,
   EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
-  EccWorkspaceInspectSignoffResult,
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
   EccWorkspaceInfoResult,
@@ -35,9 +35,16 @@ import type {
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceRuntimeSnapshot,
-  EccWorkspaceSyncConfigRequest,
-  EccWorkspaceSyncConfigResult,
+  EccWorkspaceStepConfigurationUpdateRequest,
+  EccWorkspaceStepConfigurationReadRequest,
+  EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputsResult,
+  EccWorkspaceSpecValidationRequest,
+  EccWorkspaceSpecValidationResult,
+  EccWorkspaceUpdateRequest,
+  EccWorkspaceUpdateResult,
 } from '@ecos-studio/shared'
+import { open, stat } from 'node:fs/promises'
 
 import { electronLogger } from '../logger'
 
@@ -49,6 +56,13 @@ import {
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
 import type { JsonRpcNotificationPayload } from './jsonRpcClient'
+import type { RuntimeShutdownResult } from './runtimeClient'
+import { RuntimeOperationProjection } from './runtimeOperationProjection'
+import { mapStepConfigurationReadResult } from './stepConfigurationResult'
+import {
+  hasPersistedWorkspace,
+  readPersistedEngineeringSnapshot,
+} from './engineeringSnapshotReader'
 
 export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
@@ -60,10 +74,7 @@ export interface EccRpcRuntimeServiceOptions {
   ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
   lazyWorkspaceOpen?: boolean
-  forwardLegacyFlowOperationId?: boolean
-  snapshotLoader?: (
-    directory: string,
-  ) => Promise<Omit<EccWorkspaceRuntimeSnapshot, 'workspaceHandle'>>
+  managementRpc?: boolean
 }
 
 /**
@@ -75,6 +86,15 @@ export class EccRpcRuntimeService {
   private readonly runtimes = new Map<string, EccWorkspaceRuntime>()
   private readonly handleToDirectory = new Map<string, string>()
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  private readonly pendingReleaseHandles = new Set<string>()
+  private readonly workspaceReleasedListeners = new Set<
+    (workspaceHandle: string) => void
+  >()
+  private readonly projection = new RuntimeOperationProjection({
+    handleEntries: () => this.handleToDirectory,
+    runtimeForDirectory: (directory) => this.runtimes.get(directory),
+    runtimes: () => this.uniqueRuntimes(),
+  })
   private controlRuntime: EccWorkspaceRuntime | null = null
 
   constructor(private readonly options: EccRpcRuntimeServiceOptions) {}
@@ -135,19 +155,62 @@ export class EccRpcRuntimeService {
     return this.uniqueRuntimes().some((runtime) => runtime.isActive())
   }
 
-  hasPendingRuntimeWork(): boolean {
-    return this.uniqueRuntimes().some((runtime) => runtime.hasPendingRuntimeWork())
+  activeOperations(): EccRuntimeOperation[] {
+    return this.uniqueRuntimes().flatMap((runtime) => runtime.activeOperations())
   }
 
-  rpcHello(): Promise<EccRpcHelloResult> {
-    return this.getOrCreateControlRuntime().rpcHello()
+  operationProjection(): EccBackgroundOperationProjection {
+    return this.projection.snapshot()
   }
 
-  rpcPing(): Promise<EccRpcPingResult> {
-    return this.getOrCreateControlRuntime().rpcPing()
+  async reconcileOperationProjection(): Promise<EccBackgroundOperationProjection> {
+    const seen = new Set<EccWorkspaceRuntime>()
+    const reconciliations: Promise<void>[] = []
+    for (const [workspaceHandle, directory] of this.handleToDirectory) {
+      const runtime = this.runtimes.get(directory)
+      if (!runtime || seen.has(runtime)) continue
+      seen.add(runtime)
+      reconciliations.push(runtime.reconcileActiveOperations(workspaceHandle))
+    }
+    await Promise.allSettled(reconciliations)
+    this.projection.refresh()
+    return this.projection.snapshot()
   }
 
-  async rpcShutdown(): Promise<EccRpcShutdownResult> {
+  onOperationProjectionInvalidated(listener: (generation: number) => void): () => void {
+    return this.projection.onInvalidated(listener)
+  }
+
+  onWorkspaceReleased(listener: (workspaceHandle: string) => void): () => void {
+    this.workspaceReleasedListeners.add(listener)
+    return () => this.workspaceReleasedListeners.delete(listener)
+  }
+
+  hasPendingRuntimeWork(workspaceHandles?: readonly string[]): boolean {
+    return this.runtimesForHandles(workspaceHandles).some((runtime) =>
+      runtime.hasPendingRuntimeWork(),
+    )
+  }
+
+  waitForIdle(workspaceHandles?: readonly string[]): Promise<void> {
+    if (!this.hasPendingRuntimeWork(workspaceHandles)) return Promise.resolve()
+    return new Promise((resolve) => {
+      const unsubscribe = this.onOperationProjectionInvalidated(() => {
+        if (this.hasPendingRuntimeWork(workspaceHandles)) return
+        unsubscribe()
+        resolve()
+      })
+    })
+  }
+
+  async flushPendingState(): Promise<void> {
+    // Sidecar and application log writes are synchronous. One event-loop turn
+    // drains queued Runtime notifications before publishing the last projection.
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    this.projection.refresh()
+  }
+
+  async shutdown(): Promise<RuntimeShutdownResult> {
     const runtimes = this.uniqueRuntimes()
     const blockingRuntime = runtimes.find((runtime) => runtime.hasPendingRuntimeWork())
     if (blockingRuntime) {
@@ -173,9 +236,62 @@ export class EccRpcRuntimeService {
     return { ok: true }
   }
 
+  async forceShutdown(workspaceHandles?: readonly string[]): Promise<void> {
+    if (!workspaceHandles) {
+      await Promise.allSettled(
+        this.uniqueRuntimes().map((runtime) => runtime.forceShutdown()),
+      )
+      this.runtimes.clear()
+      this.handleToDirectory.clear()
+      this.controlRuntime = null
+      return
+    }
+
+    const handles = new Set(workspaceHandles)
+    const runtimes = new Set<EccWorkspaceRuntime>()
+    for (const workspaceHandle of handles) {
+      try {
+        runtimes.add(this.runtimeForHandle(workspaceHandle))
+      } catch {
+        // The handle may have completed release while Force quit was being confirmed.
+      }
+    }
+    await Promise.allSettled([...runtimes].map((runtime) => runtime.forceShutdown()))
+    for (const [workspaceHandle, directory] of this.handleToDirectory) {
+      const runtime = this.runtimes.get(directory)
+      if (!handles.has(workspaceHandle) && (!runtime || !runtimes.has(runtime))) continue
+      if (runtime) this.projection.rememberReleased(runtime, workspaceHandle, directory)
+      this.pendingReleaseHandles.delete(workspaceHandle)
+      this.handleToDirectory.delete(workspaceHandle)
+      for (const listener of this.workspaceReleasedListeners) listener(workspaceHandle)
+    }
+    for (const runtime of runtimes) this.removeRuntimeAliases(runtime)
+    this.projection.refresh()
+  }
+
+  async inspectWorkspaceIdentity(
+    directory: string,
+  ): Promise<{ workspaceId?: string; workspaceRevision?: number }> {
+    const key = normalizeWorkspacePath(directory)
+    const existingHandle = [...this.handleToDirectory].find(
+      ([, candidate]) => candidate === key,
+    )?.[0]
+    if (existingHandle) return await this.workspaceSession(existingHandle)
+
+    const opened = await this.openWorkspace({ directory: key })
+    try {
+      return {
+        workspaceId: opened.workspaceId,
+        workspaceRevision: opened.workspaceRevision,
+      }
+    } finally {
+      await this.closeWorkspace({ workspaceHandle: opened.workspaceHandle })
+    }
+  }
+
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
-    const requestKey = normalizeWorkspacePath(request.directory)
-    const runtime = this.getOrCreateRuntime(request.directory)
+    const requestKey = normalizeWorkspacePath(request.targetDirectory)
+    const runtime = this.getOrCreateRuntime(request.targetDirectory)
     return runtime.createWorkspace(request).then(async (result) => {
       this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
       await runtime.releaseIdleSidecar()
@@ -183,13 +299,56 @@ export class EccRpcRuntimeService {
     })
   }
 
-  openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
+  describeWorkspaceSpec(): Promise<Record<string, unknown>> {
+    return this.getOrCreateControlRuntime().describeWorkspaceSpec()
+  }
+
+  validateWorkspaceSpec(
+    request: EccWorkspaceSpecValidationRequest,
+  ): Promise<EccWorkspaceSpecValidationResult> {
+    return this.getOrCreateControlRuntime().validateWorkspaceSpec(request)
+  }
+
+  updateWorkspace(request: EccWorkspaceUpdateRequest): Promise<EccWorkspaceUpdateResult> {
+    return this.runtimeForHandle(request.workspaceHandle).updateWorkspace(request)
+  }
+
+  updateWorkspaceConfiguration(
+    request: EccWorkspaceConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    return this.runtimeForHandle(request.workspaceHandle).updateWorkspaceConfiguration(
+      request,
+    )
+  }
+
+  updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult> {
+    return this.runtimeForHandle(
+      request.workspaceHandle,
+    ).updateWorkspaceStepConfiguration(request)
+  }
+
+  async openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     const requestKey = normalizeWorkspacePath(request.directory)
     const runtime = this.getOrCreateRuntime(request.directory)
-    return runtime.openWorkspace(request).then(async (result) => {
-      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+    const retainedHandle = [...this.pendingReleaseHandles].find((workspaceHandle) => {
       try {
-        await runtime.recoverInterrupted(result.workspaceHandle)
+        return this.runtimeForHandle(workspaceHandle) === runtime
+      } catch {
+        return false
+      }
+    })
+    if (retainedHandle) return await this.workspaceSession(retainedHandle)
+
+    const result = await runtime.openWorkspace(request)
+    this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+    if (!result.reused) {
+      try {
+        const recovery = await runtime.recoverInterrupted(result.workspaceHandle)
+        if (typeof recovery.workspaceRevision === 'number') {
+          result.workspaceRevision = recovery.workspaceRevision
+        }
       } catch (error) {
         electronLogger.error(
           '[runtime] failed to recover interrupted operations while opening %s: %s',
@@ -197,8 +356,19 @@ export class EccRpcRuntimeService {
           error,
         )
       }
-      return result
-    })
+    }
+    return result
+  }
+
+  async workspaceSession(workspaceHandle: string): Promise<EccWorkspaceOpenResult> {
+    this.pendingReleaseHandles.delete(workspaceHandle)
+    const runtime = this.runtimeForHandle(workspaceHandle)
+    const session = runtime.workspaceSession(workspaceHandle)
+    if (runtime.finalization()?.state === 'snapshot-failed') {
+      await runtime.retryFinalSnapshot()
+      this.projection.refresh()
+    }
+    return session
   }
 
   async closeWorkspace(
@@ -209,12 +379,32 @@ export class EccRpcRuntimeService {
     try {
       return await runtime.closeWorkspace(request)
     } finally {
+      this.projection.rememberReleased(runtime, request.workspaceHandle, directory)
+      this.pendingReleaseHandles.delete(request.workspaceHandle)
       this.handleToDirectory.delete(request.workspaceHandle)
       if (!runtime.hasSessions()) {
         this.removeRuntimeAliases(runtime)
         await runtime.shutdown()
       }
+      this.projection.refresh()
+      for (const listener of this.workspaceReleasedListeners) {
+        listener(request.workspaceHandle)
+      }
     }
+  }
+
+  async releaseWorkspace(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceCloseResult & { retained?: boolean }> {
+    // Release is idempotent: Force quit may have torn the session down before
+    // the owning renderer's teardown runs.
+    if (!this.handleToDirectory.has(request.workspaceHandle)) return { ok: true }
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    if (runtime.hasPendingRuntimeWork()) {
+      this.pendingReleaseHandles.add(request.workspaceHandle)
+      return { ok: true, retained: true }
+    }
+    return await this.closeWorkspace(request)
   }
 
   async workspaceHome(
@@ -227,16 +417,38 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).workspaceInfo(request)
   }
 
+  async readWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationReadRequest,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const result = await this.runtimeForHandle(
+      request.workspaceHandle,
+    ).readWorkspaceStepConfiguration(request)
+    return mapStepConfigurationReadResult(result)
+  }
+
+  async readWorkspaceStepConfigurationForDirectory(
+    directory: string,
+    step: string,
+  ): Promise<EccWorkspaceStepConfigurationReadResult> {
+    const result =
+      await this.getOrCreateControlRuntime().readWorkspaceStepConfigurationForDirectory(
+        directory,
+        step,
+      )
+    return mapStepConfigurationReadResult(result)
+  }
+
+  async workspaceStepOutputs(
+    directory: string,
+    step?: string,
+  ): Promise<EccWorkspaceStepOutputsResult> {
+    return await this.getOrCreateControlRuntime().workspaceStepOutputs(directory, step)
+  }
+
   async refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     return this.runtimeForHandle(request.workspaceHandle).refreshConfig(request)
-  }
-
-  async syncConfig(
-    request: EccWorkspaceSyncConfigRequest,
-  ): Promise<EccWorkspaceSyncConfigResult> {
-    return this.runtimeForHandle(request.workspaceHandle).syncConfig(request)
   }
 
   async resetFlow(
@@ -249,12 +461,6 @@ export class EccRpcRuntimeService {
     request: EccWorkspaceExportSignoffRequest,
   ): Promise<EccWorkspaceExportSignoffResult> {
     return this.runtimeForHandle(request.workspaceHandle).exportSignoff(request)
-  }
-
-  async inspectSignoff(
-    request: EccWorkspaceHandleRequest,
-  ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.runtimeForHandle(request.workspaceHandle).inspectSignoff(request)
   }
 
   layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult> {
@@ -283,12 +489,24 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).runStep(request)
   }
 
-  startFlowOperation(request: EccRuntimeStartFlowRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).startFlowOperation(request)
+  async startFlowOperation(
+    request: EccRuntimeStartFlowRequest,
+  ): Promise<EccRuntimeOperation> {
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    const operation = await runtime.startFlowOperation(request)
+    runtime.trackOperationSnapshot(operation)
+    this.projection.refresh()
+    return operation
   }
 
-  startStepOperation(request: EccRuntimeStartStepRequest): Promise<EccRuntimeOperation> {
-    return this.runtimeForHandle(request.workspaceHandle).startStepOperation(request)
+  async startStepOperation(
+    request: EccRuntimeStartStepRequest,
+  ): Promise<EccRuntimeOperation> {
+    const runtime = this.runtimeForHandle(request.workspaceHandle)
+    const operation = await runtime.startStepOperation(request)
+    runtime.trackOperationSnapshot(operation)
+    this.projection.refresh()
+    return operation
   }
 
   operationStatus(request: EccRuntimeOperationRequest): Promise<EccRuntimeOperation> {
@@ -299,30 +517,34 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).waitForOperation(request)
   }
 
+  async operationLog(
+    request: EccRuntimeOperationRequest,
+  ): Promise<EccBackgroundOperationLogResult> {
+    const path = this.runtimeForHandle(request.workspaceHandle).operationLogFile(request)
+    const size = (await stat(path)).size
+    const maxBytes = 64 * 1024
+    const offset = Math.max(0, size - maxBytes)
+    const handle = await open(path, 'r')
+    try {
+      const buffer = Buffer.alloc(Math.min(size, maxBytes))
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
+      return {
+        content: buffer.subarray(0, bytesRead).toString('utf8'),
+        truncated: offset > 0,
+      }
+    } finally {
+      await handle.close()
+    }
+  }
+
   cancelOperation(
     request: EccRuntimeOperationRequest,
   ): Promise<{ accepted: boolean; operationId: string; state: string }> {
     return this.runtimeForHandle(request.workspaceHandle).cancelOperation(request)
   }
 
-  acknowledgeStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
-    accepted: boolean
-    duplicate: boolean
-    eventId: string
-    operationId: string
-  }> {
-    return this.runtimeForHandle(request.workspaceHandle).acknowledgeStepRendered(request)
-  }
-
-  acknowledgeDetachedStepRendered(request: EccRuntimeStepRenderedAckRequest): Promise<{
-    accepted: boolean
-    duplicate: boolean
-    eventId: string
-    operationId: string
-  }> {
-    return this.runtimeForHandle(request.workspaceHandle).acknowledgeDetachedStepRendered(
-      request,
-    )
+  retryFinalSnapshot(request: EccWorkspaceHandleRequest): Promise<boolean> {
+    return this.runtimeForHandle(request.workspaceHandle).retryFinalSnapshot()
   }
 
   workspaceSnapshot(
@@ -331,8 +553,50 @@ export class EccRpcRuntimeService {
     return this.runtimeForHandle(request.workspaceHandle).workspaceSnapshot(request)
   }
 
-  replayPendingRecoveryEvents(workspaceHandle: string): void {
-    this.runtimeForHandle(workspaceHandle).replayPendingRecoveryEvents(workspaceHandle)
+  async engineeringSnapshot(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccEngineeringSnapshot> {
+    const snapshot = await this.rawEngineeringSnapshot(request.workspaceHandle)
+    if (
+      request.expectedWorkspaceRevision !== undefined &&
+      snapshot.workspaceRevision !== request.expectedWorkspaceRevision
+    ) {
+      throw new Error('ENGINEERING_WORKSPACE_REVISION_MISMATCH')
+    }
+    return {
+      ...snapshot,
+      artifacts: snapshot.artifacts.map(
+        ({ reference: _reference, ...artifact }) => artifact,
+      ),
+    }
+  }
+
+  async engineeringSnapshotForDirectory(
+    directory: string,
+  ): Promise<EccEngineeringSnapshot> {
+    const key = normalizeWorkspacePath(directory)
+    if (hasPersistedWorkspace(key)) {
+      return await readPersistedEngineeringSnapshot(key)
+    }
+    const workspaceHandle = [...this.handleToDirectory].find(
+      ([, candidateDirectory]) => candidateDirectory === key,
+    )?.[0]
+    if (workspaceHandle) return await this.engineeringSnapshot({ workspaceHandle })
+
+    const opened = await this.openWorkspace({ directory: key })
+    try {
+      return await this.engineeringSnapshot({ workspaceHandle: opened.workspaceHandle })
+    } finally {
+      await this.closeWorkspace({ workspaceHandle: opened.workspaceHandle })
+    }
+  }
+
+  private async rawEngineeringSnapshot(
+    workspaceHandle: string,
+  ): Promise<EccPersistedEngineeringSnapshot> {
+    return await this.runtimeForHandle(workspaceHandle).engineeringSnapshot({
+      workspaceHandle,
+    })
   }
 
   private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {
@@ -346,10 +610,9 @@ export class EccRpcRuntimeService {
         createSidecar: (onEvent, onNotification) =>
           this.options.createSidecar(key, onEvent, onNotification),
         directory: key,
-        forwardLegacyFlowOperationId: this.options.forwardLegacyFlowOperationId,
         lazyWorkspaceOpen: this.options.lazyWorkspaceOpen,
+        managementRpc: this.options.managementRpc,
         onEvent: (event) => this.emit(event),
-        snapshotLoader: this.options.snapshotLoader,
       })
       this.runtimes.set(key, runtime)
     }
@@ -365,13 +628,28 @@ export class EccRpcRuntimeService {
     )
   }
 
+  private runtimesForHandles(
+    workspaceHandles?: readonly string[],
+  ): EccWorkspaceRuntime[] {
+    if (!workspaceHandles) return this.uniqueRuntimes()
+    const runtimes = new Set<EccWorkspaceRuntime>()
+    for (const workspaceHandle of workspaceHandles) {
+      try {
+        runtimes.add(this.runtimeForHandle(workspaceHandle))
+      } catch {
+        // A scoped handle may finish releasing while shutdown state is reconciling.
+      }
+    }
+    return [...runtimes]
+  }
+
   private getOrCreateControlRuntime(): EccWorkspaceRuntime {
     if (!this.controlRuntime) {
       this.controlRuntime = new EccWorkspaceRuntime({
         createSidecar: (onEvent, onNotification) =>
           this.options.createSidecar(null, onEvent, onNotification),
         directory: null,
-        forwardLegacyFlowOperationId: this.options.forwardLegacyFlowOperationId,
+        managementRpc: this.options.managementRpc,
         onEvent: (event) => this.emit(event),
       })
     }
@@ -446,6 +724,30 @@ export class EccRpcRuntimeService {
     this.options.onEvent?.(event)
     for (const listener of this.eventListeners) {
       listener(event)
+    }
+    this.projection.refresh()
+    if (event.type === 'runtime.idle') {
+      void this.releaseUnreferencedIdleSessions()
+    }
+  }
+
+  private async releaseUnreferencedIdleSessions(): Promise<void> {
+    for (const workspaceHandle of this.pendingReleaseHandles) {
+      let runtime: EccWorkspaceRuntime
+      try {
+        runtime = this.runtimeForHandle(workspaceHandle)
+      } catch {
+        this.pendingReleaseHandles.delete(workspaceHandle)
+        continue
+      }
+      if (runtime.hasPendingRuntimeWork()) continue
+      await this.closeWorkspace({ workspaceHandle }).catch((error) => {
+        electronLogger.error(
+          '[runtime] failed to release background Workspace %s: %s',
+          workspaceHandle,
+          error,
+        )
+      })
     }
   }
 }

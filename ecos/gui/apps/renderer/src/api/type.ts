@@ -1,3 +1,5 @@
+import { sameProjectManifestFlowStep } from '@ecos-studio/shared'
+
 export enum CMDEnum {
   catalog_list = 'catalog_list',
   validate_frontend_config = 'validate_frontend_config',
@@ -8,7 +10,6 @@ export enum CMDEnum {
   get_info = 'get_info',
   home_page = 'home_page',
   refresh_config = 'refresh_config',
-  sync_config = 'sync_config',
   reset_flow = 'reset_flow',
 }
 
@@ -39,6 +40,9 @@ export enum StepEnum {
   INIT = 'Init',
   SYNTHESIS = 'Synthesis',
   FLOORPLAN = 'Floorplan',
+  PRE_FLOORPLAN = 'preFloorplan',
+  MACRO_PLACEMENT = 'macroPlacement',
+  POST_FLOORPLAN = 'postFloorplan',
   PLACEMENT = 'place',
   CTS = 'CTS',
   TIMING_OPT = 'Timing optimization',
@@ -56,6 +60,16 @@ export enum StepEnum {
   RCX = 'RCX',
   ABSTRACT_LEF = 'Abstract lef',
 }
+
+/**
+ * Steps that cannot start a flow: LEC compares the golden netlist against a
+ * later one, so starting a workspace at it would let ECC self-compare the
+ * origin netlist.
+ */
+export const FLOW_START_DISABLED_STEPS: ReadonlySet<string> = new Set([
+  StepEnum.LEC,
+  StepEnum.POST_ROUTE_LEC,
+])
 
 /** 步骤元数据配置 */
 export interface StepMetadata {
@@ -88,14 +102,6 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     showInSidebar: false,
     group: 'setup',
   },
-  configure: {
-    label: 'Config',
-    icon: 'ri-settings-3-line',
-    path: 'configure',
-    showInSidebar: true,
-    group: 'setup',
-  },
-
   // 运行步骤 (key 为 flow.json 中的 step.name 小写)
   [StepEnum.SYNTHESIS.toLowerCase()]: {
     label: 'Synthesis',
@@ -108,6 +114,27 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'Floorplan',
     icon: 'ri-layout-4-line',
     path: StepEnum.FLOORPLAN,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.PRE_FLOORPLAN.toLowerCase()]: {
+    label: 'Pre Floorplan',
+    icon: 'ri-layout-4-line',
+    path: StepEnum.PRE_FLOORPLAN,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.MACRO_PLACEMENT.toLowerCase()]: {
+    label: 'Macro Placement',
+    icon: 'ri-layout-4-line',
+    path: StepEnum.MACRO_PLACEMENT,
+    showInSidebar: true,
+    group: 'run',
+  },
+  [StepEnum.POST_FLOORPLAN.toLowerCase()]: {
+    label: 'Post Floorplan',
+    icon: 'ri-layout-4-line',
+    path: StepEnum.POST_FLOORPLAN,
     showInSidebar: true,
     group: 'run',
   },
@@ -277,13 +304,28 @@ export function getStepMetadata(stepName: string): StepMetadata | undefined {
 
 /** True when both names refer to the same flow step, including display labels. */
 export function sameFlowStepName(left: string, right: string): boolean {
-  const a = left.trim().toLowerCase()
-  const b = right.trim().toLowerCase()
+  const a = left.trim()
+  const b = right.trim()
   if (!a || !b) return false
-  if (a === b) return true
+  if (a.toLowerCase() === b.toLowerCase()) return true
   const leftMeta = getStepMetadata(left)
   const rightMeta = getStepMetadata(right)
-  return Boolean(leftMeta && rightMeta && leftMeta.path === rightMeta.path)
+  if (leftMeta && rightMeta) return leftMeta.path === rightMeta.path
+  return sameProjectManifestFlowStep(a, b)
+}
+
+/**
+ * True when an ECC catalog `appliesTo` name belongs to a persisted flow step.
+ *
+ * Catalog entries still say `floorplan`, but rtl2gds persists that shared
+ * config on `preFloorplan` rather than a `Floorplan` step.
+ */
+export function catalogAppliesToFlowStep(appliesTo: string, stepPath: string): boolean {
+  if (sameFlowStepName(appliesTo, stepPath)) return true
+  return (
+    sameFlowStepName(appliesTo, StepEnum.FLOORPLAN) &&
+    sameFlowStepName(stepPath, StepEnum.PRE_FLOORPLAN)
+  )
 }
 
 const STEP_TOOL_LABELS: Record<string, string> = {

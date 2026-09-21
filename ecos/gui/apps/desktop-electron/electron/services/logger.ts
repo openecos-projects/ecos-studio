@@ -158,27 +158,43 @@ function formatFileLine(level: LogLevelName, rawMessage: string, date: Date): st
   return `${date.toISOString()} ${LEVEL_LABELS[level]} ${scopePrefix}${body}`
 }
 
+function isBrokenPipeError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false
+  }
+
+  const code = 'code' in error ? error.code : undefined
+  return code === 'EIO' || code === 'EPIPE'
+}
+
 function writeToConsole(
   consoleSink: ConsoleSink,
   level: LogLevelName,
   line: string,
 ): void {
-  if (level === 'debug') {
-    consoleSink.debug(line)
-    return
-  }
+  try {
+    if (level === 'debug') {
+      consoleSink.debug(line)
+      return
+    }
 
-  if (level === 'info') {
-    consoleSink.info(line)
-    return
-  }
+    if (level === 'info') {
+      consoleSink.info(line)
+      return
+    }
 
-  if (level === 'warning') {
-    consoleSink.warn(line)
-    return
-  }
+    if (level === 'warning') {
+      consoleSink.warn(line)
+      return
+    }
 
-  consoleSink.error(line)
+    consoleSink.error(line)
+  } catch (error) {
+    if (isBrokenPipeError(error)) {
+      return
+    }
+    throw error
+  }
 }
 
 export function createElectronLogger(

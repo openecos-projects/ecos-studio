@@ -1,16 +1,16 @@
 import {
   isProjectManifestType,
-  parseProjectManifest,
   type DesktopSettingsValue,
+  type ProjectManifest,
   type ProjectManifestType,
 } from '@ecos-studio/shared'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import type { Project, ProjectStatus } from '@/types'
 import { readProjectManagementManifest } from './projectManagementRead'
 
 const PROJECT_HISTORY_SETTING_KEY = 'project_history'
 const LEGACY_RECENT_PROJECTS_SETTING_KEY = 'recent_projects'
-const LEGACY_PROJECT_ROOT_READ_CONCURRENCY = 2
+const PROJECT_ROOT_READ_CONCURRENCY = 2
 
 interface SerializedProjectHistoryEntry {
   id: string
@@ -25,19 +25,21 @@ interface SerializedProjectHistoryEntry {
 
 export async function loadProjectHistory(): Promise<Project[]> {
   const savedProjects = await getSetting<unknown>(PROJECT_HISTORY_SETTING_KEY)
+  if (savedProjects === null) {
+    const legacyProjects = await getSetting<unknown>(LEGACY_RECENT_PROJECTS_SETTING_KEY)
+    if (!Array.isArray(legacyProjects)) return []
+
+    const migratedHistory = await migrateLegacyWorkspaceHistory(legacyProjects)
+    if (migratedHistory.length > 0) await saveProjectHistory(migratedHistory)
+    return migratedHistory
+  }
+
   const history = Array.isArray(savedProjects)
     ? savedProjects
         .map(deserializeProjectHistoryEntry)
         .filter((project): project is Project => project !== null)
     : []
-  if (history.length > 0) return history
-
-  const legacyProjects = await getSetting<unknown>(LEGACY_RECENT_PROJECTS_SETTING_KEY)
-  if (!Array.isArray(legacyProjects)) return []
-
-  const migratedHistory = await migrateLegacyWorkspaceHistory(legacyProjects)
-  if (migratedHistory.length > 0) await saveProjectHistory(migratedHistory)
-  return migratedHistory
+  return await forgetGoneProjectHistory(history)
 }
 
 export async function rememberProjectHistoryEntry(project: Project): Promise<Project[]> {
@@ -73,13 +75,42 @@ async function saveProjectHistory(projects: Project[]): Promise<void> {
   )
 }
 
+async function forgetGoneProjectHistory(history: Project[]): Promise<Project[]> {
+  if (history.length === 0) return history
+
+  const gone = await mapWithConcurrency(
+    history,
+    PROJECT_ROOT_READ_CONCURRENCY,
+    async (project) => {
+      try {
+        await readProjectManagementManifest(project.path)
+        return false
+      } catch (error) {
+        return isGoneProjectRootError(error)
+      }
+    },
+  )
+  const kept = history.filter((_, index) => !gone[index])
+  if (kept.length !== history.length) await saveProjectHistory(kept)
+  return kept
+}
+
+function isGoneProjectRootError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  )
+}
+
 async function getSetting<T>(key: string): Promise<T | null> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   return (await desktopApi.settings.get(key)) as T | null
 }
 
 async function setSetting(key: string, value: unknown): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   await desktopApi.settings.set(key, value as DesktopSettingsValue)
 }
 
@@ -99,12 +130,11 @@ async function migrateLegacyWorkspaceHistory(values: unknown[]): Promise<Project
 
   const discovered = await mapWithConcurrency(
     candidates,
-    LEGACY_PROJECT_ROOT_READ_CONCURRENCY,
+    PROJECT_ROOT_READ_CONCURRENCY,
     async ({ projectRoot, workspace }) => {
       try {
-        const manifestText = await readProjectManagementManifest(projectRoot)
-        if (!manifestText) return null
-        const manifest = parseProjectManifest(manifestText)
+        const manifest = await readProjectManagementManifest(projectRoot)
+        if (!manifest) return null
         return projectFromLegacyWorkspace(manifest, workspace)
       } catch {
         // A stale workspace history entry is expected during migration.
@@ -140,7 +170,7 @@ function parentLocalPath(path: string): string {
 }
 
 function projectFromLegacyWorkspace(
-  manifest: ReturnType<typeof parseProjectManifest>,
+  manifest: ProjectManifest,
   workspace: Project,
 ): Project {
   const path = normalizePath(manifest.root_path)
@@ -239,6 +269,7 @@ function asString(value: unknown): string | undefined {
 function asProjectStatus(value: unknown): ProjectStatus | undefined {
   if (
     value === 'success' ||
+    value === 'warning' ||
     value === 'failed' ||
     value === 'running' ||
     value === 'in_progress' ||

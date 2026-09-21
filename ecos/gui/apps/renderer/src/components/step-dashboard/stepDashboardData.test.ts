@@ -17,7 +17,6 @@ import {
   qorSummary,
   rcxInsights,
   runSummary,
-  staCornerSummaryPaths,
   staInsights,
   stepFeatureInsights,
   stepTimingAnalysis,
@@ -495,6 +494,27 @@ describe('step dashboard data', () => {
       isComparisonAvailable: false,
     })
 
+    const currentOnly = prioritizeQorMetricComparisons(qor.metrics, 'RCX', [
+      {
+        step: 'RCX',
+        metricName: 'gate-first',
+        baselineValue: null,
+        currentValue: 40,
+        absoluteDelta: null,
+        relativeDeltaPct: null,
+        state: 'neutral',
+        isDirectional: false,
+        polarity: 'lower_is_better',
+        baselinePolarity: null,
+      },
+    ])
+    expect(currentOnly[0]).toMatchObject({
+      baselineValue: null,
+      currentValue: 40,
+      comparisonState: 'unavailable',
+      isComparisonAvailable: false,
+    })
+
     const changedFirst = prioritizeQorMetricComparisons(
       qor.metrics,
       'RCX',
@@ -863,14 +883,6 @@ describe('step dashboard data', () => {
         },
       },
     }
-    expect(staCornerSummaryPaths(step, '/workspace/sta/')).toEqual([
-      {
-        id: 'MAX_125/Cworst',
-        path: '/workspace/sta/feature/MAX_125/Cworst/qor_summary.json',
-        timingPathsPath: '/workspace/sta/feature/MAX_125/Cworst/timing_paths.json',
-      },
-    ])
-
     const insights = staInsights(step)
     expect(insights?.corners).toEqual([
       expect.objectContaining({

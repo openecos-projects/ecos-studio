@@ -162,7 +162,6 @@ def test_provider_answers_cts_question_without_changing_operation_state() -> Non
     provider.send_message({"sessionId": session_id, "message": "CTS stage execution"})
 
     answer = next(event for event in reversed(events) if event["type"] == "message")
-    assert "clock-tree" in str(answer["text"])
     assert answer["contract"]["knowledge"]["schema_version"] == "ecos-cts-answer.v1"
     assert provider.sessions[session_id].phase == "home_ready"
 

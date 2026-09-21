@@ -64,9 +64,9 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import { useCurrentStage } from '@/composables/useCurrentStage'
-import { useFlowStages } from '@/composables/useFlowStages'
+import { useBackendFlowStages } from '@/composables/useBackendFlowStages'
 
-const { flowStages } = useFlowStages()
+const { flowStages } = useBackendFlowStages()
 const { currentStage } = useCurrentStage()
 const route = useRoute()
 

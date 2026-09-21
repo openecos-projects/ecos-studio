@@ -68,6 +68,7 @@
                 <button
                   type="button"
                   class="project-toolbar-action primary"
+                  :disabled="mutationsDisabled"
                   @click="openNewProjectDialog"
                 >
                   <i class="ri-add-line" aria-hidden="true"></i>
@@ -151,6 +152,7 @@
                     <button
                       type="button"
                       class="row-primary-action"
+                      :disabled="mutationsDisabled"
                       :aria-label="`New workspace in ${project.model.name}`"
                       @click="createWorkspaceForProject(project.model)"
                     >
@@ -176,6 +178,7 @@
                       <button
                         type="button"
                         class="row-action-menu-item"
+                        :disabled="mutationsDisabled"
                         @click="importWorkspaceIntoProject(project.model)"
                       >
                         <i class="ri-file-add-line" aria-hidden="true"></i>
@@ -241,12 +244,20 @@
                             {{ workspace.branchStep }}</em
                           >
                         </span>
-                        <span
-                          class="workspace-flow-hint"
-                          :class="flowStatusHintClass(workspace.flowStatusHint.state)"
-                        >
-                          {{ workspace.flowStatusHint.label }}
-                        </span>
+                        <ProjectExecutionStatus
+                          v-if="
+                            projectExecutionOperations(project.source.path, workspace.id)
+                              .length > 0
+                          "
+                          :operations="
+                            projectExecutionOperations(project.source.path, workspace.id)
+                          "
+                        />
+                        <ProjectResultStatus
+                          v-else
+                          :hint="workspace.flowStatusHint"
+                          :result-state="workspace.resultState"
+                        />
                       </button>
                       <div
                         class="workspace-tree-actions"
@@ -305,6 +316,7 @@
                           <button
                             type="button"
                             class="row-action-menu-item danger"
+                            :disabled="mutationsDisabled"
                             @click="
                               requestDeleteWorkspace(project.model.id, workspace.id)
                             "
@@ -340,24 +352,38 @@
                           {{ selectedPopoverWorkspace.endStep }}</small
                         >
                       </header>
+                      <p
+                        v-if="popoverBranchRows.status === 'loading'"
+                        class="popover-step-empty"
+                      >
+                        Loading step outputs…
+                      </p>
+                      <p
+                        v-else-if="popoverBranchRows.status === 'error'"
+                        class="popover-step-empty"
+                      >
+                        Step outputs unavailable.
+                      </p>
+                      <p
+                        v-else-if="!popoverBranchRows.rows.length"
+                        class="popover-step-empty"
+                      >
+                        No committed flow steps.
+                      </p>
                       <button
-                        v-for="cell in workspaceConfiguredSteps(selectedPopoverWorkspace)"
-                        :key="`${selectedPopoverWorkspace.id}-${cell.step}`"
+                        v-for="row in popoverBranchRows.rows"
+                        :key="`${selectedPopoverWorkspace.id}-${row.step}`"
                         type="button"
                         class="popover-step-row"
-                        :disabled="!cell.canCreateWorkspace"
+                        :disabled="!row.canCreateWorkspace"
                         @click.stop="
-                          cell.canCreateWorkspace &&
-                          startWorkspaceFromPopoverStep(
-                            project.model,
-                            selectedPopoverWorkspace.id,
-                            cell.step,
-                          )
+                          row.canCreateWorkspace &&
+                          startWorkspaceFromPopoverStep(selectedPopoverWorkspace.id, row)
                         "
                       >
-                        <span>{{ cell.step }}</span>
-                        <em :class="stepStatusClass(cell.status)">{{ cell.label }}</em>
-                        <span v-if="cell.canCreateWorkspace" class="popover-step-add">
+                        <span>{{ row.step }}</span>
+                        <em :class="stepStatusClass(row.status)">{{ row.label }}</em>
+                        <span v-if="row.canCreateWorkspace" class="popover-step-add">
                           <i class="ri-add-line"></i>
                         </span>
                       </button>
@@ -401,6 +427,7 @@
                     <button
                       type="button"
                       class="empty-state-action primary"
+                      :disabled="mutationsDisabled"
                       @click="createWorkspaceForProject(project.model)"
                     >
                       New workspace
@@ -408,6 +435,7 @@
                     <button
                       type="button"
                       class="empty-state-action"
+                      :disabled="mutationsDisabled"
                       @click="importWorkspaceIntoProject(project.model)"
                     >
                       Import workspace
@@ -415,31 +443,6 @@
                   </div>
                 </div>
               </article>
-
-              <button
-                v-if="projectListCanToggle"
-                type="button"
-                class="list-preview-toggle project-list-preview-toggle"
-                :aria-expanded="projectPreviewShowsAll"
-                :aria-label="
-                  projectPreviewShowsAll
-                    ? 'Show fewer projects'
-                    : `Show all ${projectCards.length} projects`
-                "
-                @click="projectPreviewShowsAll = !projectPreviewShowsAll"
-              >
-                <i
-                  :class="
-                    projectPreviewShowsAll ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'
-                  "
-                  aria-hidden="true"
-                ></i>
-                <span>{{
-                  projectPreviewShowsAll
-                    ? 'Show fewer projects'
-                    : `Show all ${projectCards.length} projects`
-                }}</span>
-              </button>
 
               <div v-if="projectCards.length === 0" class="empty-state">
                 <template v-if="searchQuery.trim()">
@@ -473,6 +476,7 @@
                     <button
                       type="button"
                       class="empty-state-action"
+                      :disabled="mutationsDisabled"
                       @click="openNewProjectDialog"
                     >
                       New Project
@@ -481,12 +485,53 @@
                 </template>
               </div>
             </div>
+            <button
+              v-if="projectListCanToggle"
+              type="button"
+              class="list-preview-toggle project-list-preview-toggle"
+              :aria-expanded="projectPreviewShowsAll"
+              :aria-label="
+                projectPreviewShowsAll
+                  ? 'Show fewer projects'
+                  : `Show all ${projectCards.length} projects`
+              "
+              @click="projectPreviewShowsAll = !projectPreviewShowsAll"
+            >
+              <i
+                :class="
+                  projectPreviewShowsAll ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'
+                "
+                aria-hidden="true"
+              ></i>
+              <span>{{
+                projectPreviewShowsAll
+                  ? 'Show fewer projects'
+                  : `Show all ${projectCards.length} projects`
+              }}</span>
+            </button>
           </div>
         </aside>
 
         <main class="manager-table-panel">
           <div class="project-analysis-shell">
+            <ProjectComparisonRefreshStatus
+              :automatic="
+                projectComparisonSession.projection.data?.refresh.automatic ?? 'available'
+              "
+              :refreshing="projectComparisonSession.projection.status === 'refreshing'"
+              @refresh="projectComparisonSession.refresh()"
+            />
+            <ProjectCreationRecoveryPanel />
+            <ProjectBackgroundOperationPanel
+              v-if="selectedWorkspace"
+              :operation-ids="selectedWorkspaceOperationIds"
+              :workspace-path="selectedWorkspace.workspacePath"
+              @open-workspace="
+                selectedWorkspace && openWorkspace(selectedProject, selectedWorkspace)
+              "
+            />
             <ProjectAnalysisPanel
+              :findings="projectComparisonSession.findings"
               :project="selectedProject"
               :selected-analysis-tab="selectedAnalysisTab"
               :selected-step="selectedStep"
@@ -730,10 +775,18 @@
           checked by default.
         </p>
         <label class="workspace-delete-option">
-          <input v-model="keepWorkspaceDataOnDelete" type="checkbox" />
+          <input
+            v-model="keepWorkspaceDataOnDelete"
+            type="checkbox"
+            :disabled="pendingDeleteWorkspaceIsExternal"
+          />
           <span>
             <strong>Keep workspace data</strong>
-            <small v-if="keepWorkspaceDataOnDelete">
+            <small v-if="pendingDeleteWorkspaceIsExternal">
+              External workspace data cannot be deleted from Project Management. The
+              manifest entry only will be removed.
+            </small>
+            <small v-else-if="keepWorkspaceDataOnDelete">
               Workspace folder will remain at
               {{ pendingDeleteWorkspace?.workspacePath || '-' }}.
             </small>
@@ -758,6 +811,7 @@
           <button
             type="button"
             class="secondary-button danger"
+            :disabled="mutationsDisabled"
             @click="confirmDeleteWorkspace"
           >
             <i class="ri-delete-bin-line"></i>
@@ -804,6 +858,7 @@
           <button
             type="button"
             class="secondary-button danger"
+            :disabled="mutationsDisabled"
             @click="confirmDeleteProject"
           >
             <i class="ri-subtract-line"></i>
@@ -820,46 +875,62 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
+import {
+  consumeWorkspaceManagementReturnRoute,
+  requestWorkspaceWizard,
+} from '@/utils/workspaceNavigation'
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
+import ProjectComparisonRefreshStatus from './project-management/ProjectComparisonRefreshStatus.vue'
+import ProjectExecutionStatus from './project-management/ProjectExecutionStatus.vue'
+import ProjectResultStatus from './project-management/ProjectResultStatus.vue'
+import ProjectBackgroundOperationPanel from './project-management/ProjectBackgroundOperationPanel.vue'
+import ProjectCreationRecoveryPanel from './project-management/ProjectCreationRecoveryPanel.vue'
 import MpcTemplatePreview from '@/components/MpcTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import { resolveProjectManagementRouteFocus } from './project-management/projectRouteFocus'
 import { mapWithConcurrency } from './project-management/asyncConcurrency'
-import { readProjectWorkspaceData } from './project-management/projectWorkspaceData'
-import { waitForDesktopApi } from '@/platform/desktop'
+import {
+  readFrontendProjectWorkspaceData,
+  type FrontendProjectWorkspaceData,
+} from './project-management/frontendProjectWorkspaceData'
+import { getDesktopApi } from '@/platform/desktop'
 import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
+import { readWorkspaceStepOutputsApi } from '@/api/workspace'
+import { FLOW_START_DISABLED_STEPS } from '@/api/type'
 import {
-  parseProjectManifest,
+  type EccWorkspaceStepOutputsResult,
   type ProjectManifest,
   type ProjectManifestMpc,
   type ProjectManifestType,
 } from '@ecos-studio/shared'
 import {
-  FLOW_STEPS,
-  type BackendProjectManagementProject,
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
+  isCompletedStepStatus,
   type ProjectManifestMpcCandidate,
   projectMpcOptionFromResource,
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
-  type FlowStep,
-  type ProjectStage,
   type ProjectFlowStatusHint,
   type ProjectManagementProject,
   type ProjectStepStatus,
   type ProjectWorkspace,
-  type ProjectWorkspaceAnalysisInputsById,
   type ProjectWorkspaceFlowStatesById,
   type WorkspaceBranchDraft,
 } from '@/utils/projectManagement'
+import { useBackendProjectComparisonSession } from '@/stores/backendProjectComparisonSession'
+import {
+  isShutdownInProgress,
+  useBackgroundOperationStore,
+} from '@/stores/backgroundOperationStore'
 import {
   createProjectManifestMpcSnapshot,
   parseMpcSpecDesigns,
   type MpcSpecDesign,
 } from '@/utils/mpcSpec'
 import {
+  importProjectManagementWorkspace,
   listProjectManagementEntries,
   readProjectManagementManifest,
 } from '@/utils/projectManagementRead'
@@ -880,7 +951,12 @@ const PROJECT_MANIFEST_READ_CONCURRENCY = 2
 
 const route = useRoute()
 const router = useRouter()
-const { openProject, showToast } = useWorkspace()
+const { openProject, showToast, currentProject } = useWorkspace()
+const projectComparisonSession = useBackendProjectComparisonSession()
+const backgroundOperations = useBackgroundOperationStore()
+const mutationsDisabled = computed(() =>
+  isShutdownInProgress(backgroundOperations.shutdownStatus.state),
+)
 
 const searchQuery = ref('')
 const selectedProjectId = ref<string | null>(null)
@@ -888,12 +964,14 @@ const selectedWorkspaceId = ref('')
 const expandedProjectIds = ref<Set<string>>(new Set())
 const workspacePreviewProjectIds = ref<Set<string>>(new Set())
 const projectPreviewShowsAll = ref(false)
-const selectedStep = ref<ProjectStage>('DRC')
+const selectedStep = ref<string>('DRC')
 const selectedIssueMetric = ref<string | null>(null)
 const selectedAnalysisTab = ref<'dashboard' | 'step'>('dashboard')
 const hasOpenedStepAnalysis = ref(false)
 const branchDraft = ref<BranchDraft | null>(null)
 const popoverWorkspaceTarget = ref<WorkspaceTarget | null>(null)
+const workspaceStepOutputs = ref<Record<string, EccWorkspaceStepOutputsResult>>({})
+const workspaceStepOutputsFailed = ref<Record<string, boolean>>({})
 const workspacePopoverStyle = ref<Record<string, string>>({})
 const projectActionMenuId = ref<string | null>(null)
 const workspaceActionMenuTarget = ref<WorkspaceTarget | null>(null)
@@ -905,9 +983,8 @@ const isDialogMaximized = ref(false)
 const projectHistory = ref<Project[]>([])
 const projectManifests = ref<Record<string, ProjectManifest>>({})
 const workspaceFlowStates = ref<Record<string, ProjectWorkspaceFlowStatesById>>({})
-const workspaceAnalysisInputs = ref<Record<string, ProjectWorkspaceAnalysisInputsById>>(
-  {},
-)
+const frontendWorkspaceData = ref<Record<string, FrontendProjectWorkspaceData>>({})
+const comparisonProjectRoot = ref<string | null>(null)
 const showNewProjectDialog = ref(false)
 const projectRootError = ref('')
 const projectRootDraft = ref({
@@ -944,6 +1021,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  projectComparisonSession.dispose()
   document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)
   document.removeEventListener('keydown', handleWorkspacePopoverKeydown)
   window.removeEventListener('resize', updateWorkspaceFlowPopoverPosition)
@@ -951,9 +1029,28 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [route.query.projectRoot, route.query.workspaceId] as const,
+  () =>
+    [
+      route.query.projectRoot,
+      route.query.workspaceId,
+      route.query.workspacePath,
+    ] as const,
   () => {
     void applyRouteProjectFocus()
+  },
+)
+
+watch(
+  [
+    selectedAnalysisTab,
+    selectedWorkspaceId,
+    selectedStep,
+    () => projectComparisonSession.generation,
+  ],
+  ([tab, workspaceId, step]) => {
+    if (tab === 'step' && workspaceId) {
+      void projectComparisonSession.loadStepFindings(workspaceId, step)
+    }
   },
 )
 
@@ -997,13 +1094,28 @@ const projectCards = computed<ProjectCard[]>(() => {
         project,
         projectManifests.value[project.path] ?? null,
         workspaceFlowStates.value[project.path] ?? {},
-        workspaceAnalysisInputs.value[project.path] ?? {},
+        project.projectType === 'frontend'
+          ? null
+          : projectComparisonForProject(project.path),
+        frontendWorkspaceData.value[project.path]?.analysisInputs ?? {},
       ),
     }))
 
   if (!query) return cards
   return cards.filter((project) => projectCardMatchesSearch(project, query))
 })
+
+function projectComparisonForProject(projectRoot: string) {
+  const comparison = projectComparisonSession.projection.data
+  return comparisonProjectRoot.value === projectRoot ? comparison : null
+}
+
+function projectExecutionOperations(projectRoot: string, workspaceId: string) {
+  if (comparisonProjectRoot.value !== projectRoot) return []
+  return projectComparisonSession.execution.operations.filter(
+    (operation) => operation.projectWorkspaceId === workspaceId,
+  )
+}
 
 const searchShowsAll = computed(() => Boolean(searchQuery.value.trim()))
 const visibleProjectCards = computed(() =>
@@ -1071,6 +1183,14 @@ const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
     null
   )
 })
+const selectedWorkspaceOperationIds = computed(() =>
+  selectedWorkspace.value
+    ? projectExecutionOperations(
+        selectedProject.value.path,
+        selectedWorkspace.value.id,
+      ).map((operation) => operation.operationId)
+    : [],
+)
 
 const popoverWorkspaceId = computed(() => popoverWorkspaceTarget.value?.workspaceId ?? '')
 const workspaceActionMenuId = computed(
@@ -1089,6 +1209,86 @@ const selectedPopoverWorkspace = computed<ProjectWorkspace | null>(() => {
     ) ?? null
   )
 })
+
+interface PopoverBranchRow {
+  step: string
+  nextStep: string
+  status: ProjectStepStatus
+  label: string
+  canCreateWorkspace: boolean
+  verilogPath: string | null
+  defPath: string | null
+}
+
+function branchStepStatus(state: string): ProjectStepStatus {
+  switch (state.trim().toLowerCase()) {
+    case 'success':
+      return 'success'
+    case 'warning':
+      return 'warning'
+    case 'reused':
+      return 'reused'
+    case 'skipped':
+      return 'skipped'
+    case 'ongoing':
+    case 'running':
+      return 'running'
+    case 'failed':
+    case 'invalid':
+    case 'incomplete':
+      return 'failed'
+    default:
+      return 'unstart'
+  }
+}
+
+function branchStepLabel(status: ProjectStepStatus): string {
+  const map: Record<ProjectStepStatus, string> = {
+    success: 'S',
+    warning: 'W',
+    reused: 'R',
+    skipped: '-',
+    unstart: 'U',
+    running: '...',
+    failed: '!',
+  }
+  return map[status]
+}
+
+const popoverBranchRows = computed<{
+  status: 'loading' | 'error' | 'ready'
+  rows: PopoverBranchRow[]
+}>(() => {
+  const workspace = selectedPopoverWorkspace.value
+  if (!workspace) return { status: 'ready', rows: [] }
+  if (workspaceStepOutputsFailed.value[workspace.id]) {
+    return { status: 'error', rows: [] }
+  }
+  const result = workspaceStepOutputs.value[workspace.id]
+  if (!result) return { status: 'loading', rows: [] }
+  return {
+    status: 'ready',
+    rows: result.steps.map((entry, index) => {
+      const status = branchStepStatus(entry.state)
+      const verilogPath = entry.verilog?.exists ? entry.verilog.path : null
+      const defPath = entry.def?.exists ? entry.def.path : null
+      const nextStep =
+        result.steps
+          .slice(index + 1)
+          .find((candidate) => !FLOW_START_DISABLED_STEPS.has(candidate.step))?.step ??
+        entry.step
+      return {
+        step: entry.step,
+        nextStep,
+        status,
+        label: branchStepLabel(status),
+        canCreateWorkspace: isCompletedStepStatus(status) && Boolean(verilogPath),
+        verilogPath,
+        defPath,
+      }
+    }),
+  }
+})
 const pendingDeleteWorkspace = computed<ProjectWorkspace | null>(() => {
   const target = pendingDeleteWorkspaceTarget.value
   if (!target) return null
@@ -1096,6 +1296,16 @@ const pendingDeleteWorkspace = computed<ProjectWorkspace | null>(() => {
     workspaceTargetProject(target)?.workspaces.find(
       (workspace) => workspace.id === target.workspaceId,
     ) ?? null
+  )
+})
+const pendingDeleteWorkspaceIsExternal = computed(() => {
+  const workspacePath = normalizePath(pendingDeleteWorkspace.value?.workspacePath ?? '')
+  const projectRoot = normalizePath(selectedProject.value.path)
+  return Boolean(
+    workspacePath &&
+    projectRoot &&
+    workspacePath !== projectRoot &&
+    !workspacePath.startsWith(`${projectRoot}/`),
   )
 })
 
@@ -1265,10 +1475,14 @@ async function applyRouteProjectFocus(): Promise<boolean> {
   const focus = resolveProjectManagementRouteFocus({
     projectRoot: queryString(route.query.projectRoot),
     workspaceId: queryString(route.query.workspaceId),
+    workspacePath: queryString(route.query.workspacePath),
     projects: projectCards.value.map((project) => ({
       id: project.model.id,
       path: project.model.path,
-      workspaces: project.model.workspaces.map((workspace) => ({ id: workspace.id })),
+      workspaces: project.model.workspaces.map((workspace) => ({
+        id: workspace.id,
+        path: workspace.workspacePath,
+      })),
     })),
   })
   if (!focus) return false
@@ -1301,7 +1515,7 @@ function cssEscape(value: string): string {
   return value.replace(/["\\]/g, '\\$&')
 }
 
-function selectStep(step: ProjectStage) {
+function selectStep(step: string) {
   selectedStep.value = step
   selectedIssueMetric.value = null
   hasOpenedStepAnalysis.value = true
@@ -1360,24 +1574,27 @@ function toggleDialogMaximized() {
   isDialogMaximized.value = !isDialogMaximized.value
 }
 
-async function startWorkspaceFromCell(
-  project: ProjectManagementProject,
-  workspaceId: string,
-  step: ProjectStage,
-) {
+async function loadWorkspaceStepOutputs(workspaceId: string) {
   if (
-    project.projectType !== 'backend' ||
-    !(FLOW_STEPS as readonly ProjectStage[]).includes(step)
-  )
+    workspaceStepOutputs.value[workspaceId] ||
+    workspaceStepOutputsFailed.value[workspaceId]
+  ) {
     return
-  const targetWorkspaceId = await nextAvailableWorkspaceId(project)
-  if (!targetWorkspaceId) return
-  branchDraft.value = createWorkspaceBranchDraft(
-    project as BackendProjectManagementProject,
-    workspaceId,
-    step as FlowStep,
-    targetWorkspaceId,
+  }
+  const workspace = selectedProject.value.workspaces.find(
+    (candidate) => candidate.id === workspaceId,
   )
+  if (!workspace) return
+  try {
+    const result = await readWorkspaceStepOutputsApi(workspace.workspacePath)
+    workspaceStepOutputs.value = { ...workspaceStepOutputs.value, [workspaceId]: result }
+  } catch (error) {
+    console.warn('Failed to load workspace step outputs.', error)
+    workspaceStepOutputsFailed.value = {
+      ...workspaceStepOutputsFailed.value,
+      [workspaceId]: true,
+    }
+  }
 }
 
 function toggleWorkspaceFlowPopover(projectId: string, workspaceId: string) {
@@ -1391,6 +1608,7 @@ function toggleWorkspaceFlowPopover(projectId: string, workspaceId: string) {
   branchDraft.value = null
   closeRowActionMenus()
   popoverWorkspaceTarget.value = wasOpen ? null : { projectId, workspaceId }
+  if (popoverWorkspaceTarget.value) void loadWorkspaceStepOutputs(workspaceId)
   void nextTick(updateWorkspaceFlowPopoverPosition)
 }
 
@@ -1523,26 +1741,23 @@ function handleWorkspacePopoverKeydown(event: KeyboardEvent) {
   if (projectActionMenuId.value || workspaceActionMenuId.value) closeRowActionMenus()
 }
 
-async function startWorkspaceFromPopoverStep(
-  project: ProjectManagementProject,
-  workspaceId: string,
-  step: ProjectStage,
-) {
-  await startWorkspaceFromCell(project, workspaceId, step)
+async function startWorkspaceFromPopoverStep(workspaceId: string, row: PopoverBranchRow) {
+  const targetWorkspaceId = await nextAvailableWorkspaceId(selectedProject.value)
+  if (!targetWorkspaceId) return
+  const result = workspaceStepOutputs.value[workspaceId]
+  branchDraft.value = createWorkspaceBranchDraft(
+    selectedProject.value,
+    workspaceId,
+    {
+      step: row.step,
+      nextStep: row.nextStep,
+      verilogPath: row.verilogPath,
+      defPath: row.defPath,
+      sdcPath: result?.sdc?.exists ? result.sdc.path : null,
+    },
+    targetWorkspaceId,
+  )
   closeWorkspaceFlowPopover()
-}
-
-function workspaceConfiguredSteps(
-  workspace: ProjectWorkspace,
-): ProjectWorkspace['steps'] {
-  const flowSteps = workspace.steps.map((cell) => cell.step)
-  const startIndex = flowSteps.indexOf(workspace.startStep)
-  const endIndex = flowSteps.indexOf(workspace.endStep)
-  if (startIndex < 0 || endIndex < startIndex) return workspace.steps
-  return workspace.steps.filter((cell) => {
-    const stepIndex = flowSteps.indexOf(cell.step)
-    return stepIndex >= startIndex && stepIndex <= endIndex
-  })
 }
 
 function closeWorkspaceDraftDialog() {
@@ -1551,26 +1766,41 @@ function closeWorkspaceDraftDialog() {
 
 async function continueWorkspaceDraft() {
   if (!branchDraft.value) return
-  await router.push({
-    path: '/ecc',
-    query: {
-      workspacePath: branchDraft.value.targetWorkspacePath,
-      projectRoot: selectedProject.value.path,
+  const draft = branchDraft.value
+  requestWorkspaceWizard({
+    directory: draft.targetWorkspacePath,
+    lockWorkspaceDirectory: true,
+    managedWorkspaceRoot: selectedProject.value.path,
+    origin_def: draft.originDef,
+    origin_verilog: draft.originVerilog,
+    sdc: draft.originSdc,
+    project_context: {
+      mode: 'select',
+      project_name: selectedProject.value.name,
+      project_root: selectedProject.value.path,
+      project_json_path: joinProjectPath(selectedProject.value.path, 'project.json'),
+      project_id: selectedProject.value.id,
+    },
+    source_context: {
       projectName: selectedProject.value.name,
-      designName: selectedProject.value.designName,
-      sourceWorkspace: branchDraft.value.sourceWorkspaceId,
-      sourceWorkspacePath: branchDraft.value.sourceWorkspacePath,
-      sourceStep: branchDraft.value.step,
-      sourceOutputPath: branchDraft.value.sourceOutputPath,
-      sourceOutputType: branchDraft.value.sourceOutputType,
-      originDef: branchDraft.value.originDef,
-      originVerilog: branchDraft.value.originVerilog,
-      sdc: branchDraft.value.originSdc,
-      startStep: branchDraft.value.targetStartStep,
-      endStep: branchDraft.value.targetEndStep,
-      workspaceId: branchDraft.value.targetWorkspaceId,
+      projectRoot: selectedProject.value.path,
+      workspaceId: draft.sourceWorkspaceId,
+      workspacePath: draft.sourceWorkspacePath,
+      step: draft.step,
+      outputPath: draft.sourceOutputPath,
+      outputType: draft.sourceOutputType,
+      startStep: draft.targetStartStep,
+    },
+    parameters: {
+      design: selectedProject.value.designName,
+      description: `Created from ${draft.sourceWorkspaceId} ${draft.step} output`,
+      source_output_path: draft.sourceOutputPath,
+      source_output_type: draft.sourceOutputType,
+      start_step: draft.targetStartStep,
+      end_step: draft.targetEndStep,
     },
   })
+  closeWorkspaceDraftDialog()
 }
 
 async function openWorkspace(
@@ -1578,24 +1808,50 @@ async function openWorkspace(
   workspace: ProjectWorkspace,
 ) {
   closeRowActionMenus()
-  const success = await openProject({
-    id: workspace.workspacePath,
-    name: `${project.name}/${workspace.id}`,
-    path: workspace.workspacePath,
-    lastOpened: new Date(),
-    designTool: project.projectType,
-  })
+  const originFullPath = normalizeProjectManagementLocation(route.fullPath)
+  const originWorkspacePath = currentProject.value?.path
+  const success = await openProject(
+    {
+      id: workspace.workspacePath,
+      name: `${project.name}/${workspace.id}`,
+      path: workspace.workspacePath,
+      lastOpened: new Date(),
+    },
+    {
+      projectContext: {
+        projectRoot: project.path,
+        projectName: project.name,
+      },
+      shouldActivate: () =>
+        normalizeProjectManagementLocation(route.fullPath) === originFullPath &&
+        normalizePath(currentProject.value?.path ?? '') ===
+          normalizePath(originWorkspacePath ?? ''),
+    },
+  )
   if (success) {
-    await router.push({
-      path: '/workspace/home',
-      query: workspaceRouteQuery(project, workspace.workspacePath, workspace.id),
-    })
+    if (normalizeProjectManagementLocation(route.fullPath) === originFullPath) {
+      await router.push({
+        path: '/workspace/home',
+        query: workspaceRouteQuery(project, workspace.workspacePath, workspace.id),
+      })
+    } else {
+      showToast({
+        severity: 'info',
+        summary: 'Workspace ready',
+        detail: `${workspace.id} is available in Recent Workspaces.`,
+        life: 5000,
+      })
+    }
   } else {
     showToast({
       severity: 'warn',
       summary: 'Workspace not opened',
       detail: `${workspace.workspacePath} is not available yet.`,
     })
+    if (route.fullPath === originFullPath) {
+      const returnRoute = consumeWorkspaceManagementReturnRoute() ?? '/workspace/home'
+      await router.replace(returnRoute)
+    }
   }
 }
 
@@ -1617,8 +1873,8 @@ async function refreshProjectManifestsNow() {
     PROJECT_MANIFEST_READ_CONCURRENCY,
     async (project): Promise<readonly [string, ProjectManifest] | null> => {
       try {
-        const manifestText = await readProjectManagementManifest(project.path)
-        return manifestText ? [project.path, parseProjectManifest(manifestText)] : null
+        const manifest = await readProjectManagementManifest(project.path)
+        return manifest ? [project.path, manifest] : null
       } catch (error) {
         console.warn(`Failed to load project manifest: ${project.path}`, error)
         return null
@@ -1633,9 +1889,6 @@ async function refreshProjectManifestsNow() {
   workspaceFlowStates.value = Object.fromEntries(
     entries.map(([path]) => [path, workspaceFlowStates.value[path] ?? {}]),
   )
-  workspaceAnalysisInputs.value = Object.fromEntries(
-    entries.map(([path]) => [path, workspaceAnalysisInputs.value[path] ?? {}]),
-  )
   void loadSelectedProjectWorkspaceData()
 }
 
@@ -1647,10 +1900,27 @@ async function loadSelectedProjectWorkspaceData() {
   const projectId = project.id
   const loadGeneration = ++selectedProjectSummaryLoadGeneration
   try {
-    const { flowStates, analysisInputs } = await readProjectWorkspaceData(
-      project.path,
-      manifest,
-    )
+    if (manifest.project_type === 'frontend') {
+      comparisonProjectRoot.value = null
+      const data = await readFrontendProjectWorkspaceData(project.path, manifest)
+      if (
+        selectedProjectSummaryLoadGeneration !== loadGeneration ||
+        selectedProjectId.value !== projectId ||
+        projectManifests.value[project.path] !== manifest
+      )
+        return
+      frontendWorkspaceData.value = {
+        ...frontendWorkspaceData.value,
+        [project.path]: data,
+      }
+      workspaceFlowStates.value = {
+        ...workspaceFlowStates.value,
+        [project.path]: data.flowStates,
+      }
+      return
+    }
+    comparisonProjectRoot.value = project.path
+    await projectComparisonSession.selectProject(project.path)
     if (
       selectedProjectSummaryLoadGeneration !== loadGeneration ||
       selectedProjectId.value !== projectId ||
@@ -1658,13 +1928,16 @@ async function loadSelectedProjectWorkspaceData() {
     ) {
       return
     }
-    workspaceFlowStates.value = {
-      ...workspaceFlowStates.value,
-      [project.path]: flowStates,
-    }
-    workspaceAnalysisInputs.value = {
-      ...workspaceAnalysisInputs.value,
-      [project.path]: analysisInputs,
+    const comparison = projectComparisonSession.projection.data
+    if (
+      comparison &&
+      (comparison.workspaceSnapshots.status === 'ready' ||
+        comparison.workspaceSnapshots.status === 'partial')
+    ) {
+      workspaceFlowStates.value = {
+        ...workspaceFlowStates.value,
+        [project.path]: comparison.workspaceSnapshots.data.flowStates,
+      }
     }
   } catch (error) {
     if (
@@ -1681,7 +1954,7 @@ async function loadSelectedProjectWorkspaceData() {
 
 async function importProject() {
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const directory = await desktopApi.dialog.pickDirectory({
       title: 'Select Project Folder',
     })
@@ -1693,14 +1966,6 @@ async function importProject() {
     projectManifests.value = {
       ...projectManifests.value,
       [project.path]: manifest,
-    }
-    workspaceFlowStates.value = {
-      ...workspaceFlowStates.value,
-      [project.path]: {},
-    }
-    workspaceAnalysisInputs.value = {
-      ...workspaceAnalysisInputs.value,
-      [project.path]: {},
     }
     const wasSelected = selectedProjectId.value === project.id
     selectProject(project.id)
@@ -1719,24 +1984,28 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
   closeRowActionMenus()
   if (!project.path) return
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const directory = await desktopApi.dialog.pickDirectory({
-      title: 'Select Workspace Folder',
-    })
-    if (!directory) return
-
     const projectRoot = project.path
-
-    const updated = await mutateProjectManifest(projectRoot, {
-      type: 'register-workspace',
-      input: {
-        projectRoot,
-        projectName: project.name,
-        workspacePath: directory,
-      },
-    })
-    await applyProjectManifestForProject(updated, projectRoot)
-    selectProject(project.id)
+    const result = await importProjectManagementWorkspace(projectRoot)
+    if (result.status === 'cancelled') return
+    if (result.status === 'failed') {
+      throw new Error(`${result.code}: ${result.message}`)
+    }
+    await applyProjectManifestForProject(result.manifest, projectRoot)
+    selectedProjectId.value = project.id
+    selectedWorkspaceId.value = result.workspaceId
+    showToast(
+      result.status === 'already_registered'
+        ? {
+            severity: 'info',
+            summary: 'Workspace already registered',
+            detail: `${result.workspaceId} is already part of this project.`,
+          }
+        : {
+            severity: 'success',
+            summary: 'Workspace imported',
+            detail: `${result.workspaceId} was imported into this project.`,
+          },
+    )
   } catch (error) {
     console.warn('Failed to import workspace into project.', error)
     showToast({
@@ -1752,14 +2021,20 @@ async function createWorkspaceForProject(project: ProjectManagementProject) {
   if (!project.path) return
   const workspaceId = await nextAvailableWorkspaceId(project)
   if (!workspaceId) return
-  await router.push({
-    path: project.projectType === 'frontend' ? '/fe' : '/ecc',
-    query: {
-      projectRoot: project.path,
-      projectName: project.name,
-      designName: project.designName,
-      workspacePath: joinProjectPath(project.path, workspaceId),
-      workspaceId,
+  requestWorkspaceWizard({
+    directory: joinProjectPath(project.path, workspaceId),
+    lockWorkspaceDirectory: true,
+    managedWorkspaceRoot: project.path,
+    parameters: {
+      design: project.designName,
+      description: 'Created from Project Management',
+    },
+    project_context: {
+      mode: 'select',
+      project_name: project.name,
+      project_root: project.path,
+      project_json_path: joinProjectPath(project.path, 'project.json'),
+      project_id: project.id,
     },
   })
 }
@@ -1781,7 +2056,8 @@ async function confirmDeleteWorkspace() {
   const target = pendingDeleteWorkspaceTarget.value
   deleteWorkspaceError.value = ''
   const deleted = await deleteWorkspace(target, {
-    keepWorkspaceData: keepWorkspaceDataOnDelete.value,
+    keepWorkspaceData:
+      pendingDeleteWorkspaceIsExternal.value || keepWorkspaceDataOnDelete.value,
   })
   if (deleted) closeDeleteWorkspaceDialog()
 }
@@ -1872,9 +2148,6 @@ async function removeProjectFromHistory(project: Project) {
   const nextWorkspaceFlowStates = { ...workspaceFlowStates.value }
   delete nextWorkspaceFlowStates[project.path]
   workspaceFlowStates.value = nextWorkspaceFlowStates
-  const nextWorkspaceAnalysisInputs = { ...workspaceAnalysisInputs.value }
-  delete nextWorkspaceAnalysisInputs[project.path]
-  workspaceAnalysisInputs.value = nextWorkspaceAnalysisInputs
   if (selectedProjectId.value === project.id) {
     const nextProjectId = projectCards.value[0]?.model.id
     if (nextProjectId) {
@@ -1979,7 +2252,7 @@ async function loadProjectMpcSpec(resourceId: string): Promise<void> {
 async function selectProjectStorageLocation() {
   projectRootError.value = ''
   try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const desktopApi = getDesktopApi()
     const directory = await desktopApi.dialog.pickDirectory({
       title: 'Select Project Storage Location',
     })
@@ -2032,7 +2305,14 @@ async function createProjectFolderDraft() {
   closeNewProjectDialog()
 }
 
-const goBack = () => router.push('/')
+const goBack = () => {
+  const returnRoute = consumeWorkspaceManagementReturnRoute()
+  if (returnRoute) {
+    void router.replace(returnRoute)
+    return
+  }
+  void router.replace(route.path.startsWith('/workspace/') ? '/workspace/home' : '/')
+}
 
 function workspaceCountLabel(count: number): string {
   return `${count} workspace${count === 1 ? '' : 's'}`
@@ -2063,6 +2343,7 @@ function workspacePopoverPlacementClass(projectId: string, workspaceId: string):
 function stepStatusClass(status: ProjectStepStatus): string {
   const map: Record<ProjectStepStatus, string> = {
     success: 'step-success',
+    warning: 'step-warning',
     reused: 'step-reused',
     skipped: 'step-skipped',
     unstart: 'step-unstart',
@@ -2085,9 +2366,9 @@ async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
 }
 
 async function readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
-  const manifestText = await readProjectManagementManifest(projectRoot)
-  if (!manifestText) throw new Error('Project manifest does not exist.')
-  return parseProjectManifest(manifestText)
+  const manifest = await readProjectManagementManifest(projectRoot)
+  if (!manifest) throw new Error('Project manifest does not exist.')
+  return manifest
 }
 
 async function applyProjectManifestForProject(
@@ -2099,16 +2380,6 @@ async function applyProjectManifestForProject(
     ...projectManifests.value,
     [projectRoot]: manifest,
     [normalizedRoot]: manifest,
-  }
-  workspaceFlowStates.value = {
-    ...workspaceFlowStates.value,
-    [projectRoot]: {},
-    [normalizedRoot]: {},
-  }
-  workspaceAnalysisInputs.value = {
-    ...workspaceAnalysisInputs.value,
-    [projectRoot]: {},
-    [normalizedRoot]: {},
   }
   projectHistory.value = await rememberProjectHistoryEntry(
     projectFromManifest(manifest, normalizedRoot),
@@ -2177,14 +2448,22 @@ function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
     return 'in_progress'
   if (
     manifest.workspaces.length > 0 &&
-    manifest.workspaces.every((workspace) => workspace.status === 'success')
+    manifest.workspaces.every((workspace) =>
+      ['success', 'warning'].includes(workspace.status),
+    )
   )
-    return 'success'
+    return manifest.workspaces.some((workspace) => workspace.status === 'warning')
+      ? 'warning'
+      : 'success'
   return manifest.workspaces.length > 0 ? 'in_progress' : 'not_started'
 }
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+function normalizeProjectManagementLocation(fullPath: string): string {
+  return fullPath.replace(/^\/workspace\/projects(?=[?#]|$)/, '/projects')
 }
 
 function basenamePath(path: string): string {

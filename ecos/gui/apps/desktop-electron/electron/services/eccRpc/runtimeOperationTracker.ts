@@ -5,11 +5,8 @@ interface OperationWaiter {
   resolve(operation: EccRuntimeOperation): void
 }
 
-const terminalEventTypes = new Set([
-  'operation.completed',
-  'operation.failed',
-  'operation.cancelled',
-])
+const terminalStates = new Set(['succeeded', 'failed', 'cancelled', 'interrupted'])
+const activeStates = new Set(['queued', 'running'])
 
 /**
  * Keeps the notification-derived operation state separate from RPC session
@@ -17,37 +14,119 @@ const terminalEventTypes = new Set([
  * both idempotent.
  */
 export class RuntimeOperationTracker {
-  private readonly activeOperationIds = new Set<string>()
+  private readonly active = new Map<string, EccRuntimeOperation>()
+  private readonly latestSequences = new Map<string, number>()
   private readonly terminalOperations = new Map<string, EccRuntimeOperation>()
   private readonly waiters = new Map<string, OperationWaiter[]>()
 
   hasActiveOperations(): boolean {
-    return this.activeOperationIds.size > 0
+    return this.active.size > 0
   }
 
   firstActiveOperationId(): string | null {
-    return this.activeOperationIds.values().next().value ?? null
+    return this.active.keys().next().value ?? null
+  }
+
+  activeOperations(): EccRuntimeOperation[] {
+    return [...this.active.values()]
+  }
+
+  recentOutcomes(limit = 64): EccRuntimeOperation[] {
+    return [...this.terminalOperations.values()].slice(-limit)
   }
 
   hasTerminalOperation(operationId: string): boolean {
     return this.terminalOperations.has(operationId)
   }
 
+  knowsOperation(operationId: string): boolean {
+    return this.active.has(operationId) || this.terminalOperations.has(operationId)
+  }
+
+  interruptActiveOperations(
+    message = 'ECC sidecar exited before the operation completed.',
+  ): EccRuntimeOperation[] {
+    const interrupted = [...this.active.values()].map((operation) => ({
+      ...operation,
+      error: { code: 'interrupted', message },
+      state: 'interrupted' as const,
+      updatedAt: Date.now(),
+    }))
+    this.active.clear()
+    for (const operation of interrupted) {
+      this.terminalOperations.set(operation.operationId, operation)
+      this.resolveWaiters(operation.operationId, operation)
+    }
+    this.trimOutcomes()
+    return interrupted
+  }
+
   track(protocolEvent: EccRuntimeProtocolPayload): boolean {
-    if (!terminalEventTypes.has(protocolEvent.type)) {
-      if (this.terminalOperations.has(protocolEvent.operationId)) return false
-      this.activeOperationIds.add(protocolEvent.operationId)
+    const updatesActiveOperation =
+      protocolEvent.type === 'execution.progress' ||
+      protocolEvent.type === 'workspace.committed'
+    if (protocolEvent.type !== 'operation.changed' && !updatesActiveOperation) {
       return false
     }
-
-    this.activeOperationIds.delete(protocolEvent.operationId)
-    const operation = terminalOperationFrom(protocolEvent)
-    this.terminalOperations.set(operation.operationId, operation)
-    if (this.terminalOperations.size > 512) {
-      this.terminalOperations.delete(this.terminalOperations.keys().next().value!)
+    const latestSequence = this.latestSequences.get(protocolEvent.operationId)
+    if (latestSequence !== undefined && protocolEvent.sequence <= latestSequence) {
+      return false
     }
+    if (this.terminalOperations.has(protocolEvent.operationId)) return false
+    if (updatesActiveOperation) {
+      const active = this.active.get(protocolEvent.operationId)
+      const workspaceRevision =
+        protocolEvent.payload.workspaceRevision ?? protocolEvent.workspaceRevision
+      if (!active) return false
+      this.latestSequences.set(protocolEvent.operationId, protocolEvent.sequence)
+      this.active.set(protocolEvent.operationId, {
+        ...active,
+        currentStep:
+          stringPayloadValue(protocolEvent.payload, 'step') || active.currentStep,
+        currentTool:
+          stringPayloadValue(protocolEvent.payload, 'tool') || active.currentTool,
+        updatedAt: protocolEvent.timestamp,
+        ...(typeof workspaceRevision === 'number' ? { workspaceRevision } : {}),
+      })
+      return false
+    }
+    this.latestSequences.set(protocolEvent.operationId, protocolEvent.sequence)
+    const state = stringPayloadValue(protocolEvent.payload, 'state')
+    if (activeStates.has(state)) {
+      this.active.set(
+        protocolEvent.operationId,
+        operationFrom(protocolEvent, this.active.get(protocolEvent.operationId)),
+      )
+      return false
+    }
+    if (!terminalStates.has(state)) return false
+
+    const previous = this.active.get(protocolEvent.operationId)
+    this.active.delete(protocolEvent.operationId)
+    const operation = operationFrom(protocolEvent, previous)
+    this.terminalOperations.set(operation.operationId, operation)
+    this.trimOutcomes()
     this.resolveWaiters(operation.operationId, operation)
     return true
+  }
+
+  reconcile(operation: EccRuntimeOperation): boolean {
+    if (terminalStates.has(operation.state)) {
+      const alreadyTerminal = this.terminalOperations.has(operation.operationId)
+      if (alreadyTerminal) return false
+      this.active.delete(operation.operationId)
+      this.terminalOperations.set(operation.operationId, operation)
+      this.trimOutcomes()
+      this.resolveWaiters(operation.operationId, operation)
+      return true
+    }
+    if (
+      activeStates.has(operation.state) &&
+      !this.terminalOperations.has(operation.operationId)
+    ) {
+      this.active.set(operation.operationId, operation)
+    }
+    return false
   }
 
   waitFor(operationId: string): Promise<EccRuntimeOperation> {
@@ -70,12 +149,18 @@ export class RuntimeOperationTracker {
       for (const waiter of waiters) waiter.reject(reason)
     }
     this.waiters.clear()
-    this.activeOperationIds.clear()
+    this.active.clear()
   }
 
   reset(reason: Error): void {
     this.rejectAll(reason)
     this.terminalOperations.clear()
+    this.latestSequences.clear()
+  }
+
+  resetForClientReplacement(reason: Error): void {
+    this.rejectAll(reason)
+    this.latestSequences.clear()
   }
 
   private resolveWaiters(operationId: string, operation: EccRuntimeOperation): void {
@@ -83,6 +168,14 @@ export class RuntimeOperationTracker {
     if (!waiters) return
     this.waiters.delete(operationId)
     for (const waiter of waiters) waiter.resolve(operation)
+  }
+
+  private trimOutcomes(): void {
+    while (this.terminalOperations.size > 512) {
+      const oldestOperationId = this.terminalOperations.keys().next().value!
+      this.terminalOperations.delete(oldestOperationId)
+      this.latestSequences.delete(oldestOperationId)
+    }
   }
 }
 
@@ -103,37 +196,71 @@ export function isRuntimeProtocolPayload(
   )
 }
 
-function terminalOperationFrom(
+function operationFrom(
   protocolEvent: EccRuntimeProtocolPayload,
+  previous?: EccRuntimeOperation,
 ): EccRuntimeOperation {
   const payload = protocolEvent.payload
   const error = isRuntimeErrorPayload(payload.error)
     ? payload.error
-    : protocolEvent.type === 'operation.cancelled'
+    : payload.state === 'cancelled'
       ? { code: 'cancelled', message: 'ECC operation cancelled.' }
       : null
   return {
-    awaitingEventId: null,
-    cancelRequested: protocolEvent.type === 'operation.cancelled',
-    createdAt: protocolEvent.timestamp,
-    currentStep: stringPayloadValue(payload, 'step'),
-    currentTool: stringPayloadValue(payload, 'tool'),
+    cancelRequested: payload.state === 'cancelled' || Boolean(payload.cancelRequested),
+    createdAt:
+      numberPayloadValue(payload, 'createdAt') ??
+      previous?.createdAt ??
+      protocolEvent.timestamp,
+    currentStep: stringPayloadValue(payload, 'step') || previous?.currentStep || '',
+    currentTool: stringPayloadValue(payload, 'tool') || previous?.currentTool || '',
     error,
     kind: protocolEvent.kind ?? 'step',
     operationId: protocolEvent.operationId,
     origin: protocolEvent.origin,
     rerun: Boolean(protocolEvent.rerun),
+    ...(isInterruptibility(payload.interruptibility)
+      ? { interruptibility: payload.interruptibility }
+      : previous?.interruptibility
+        ? { interruptibility: previous.interruptibility }
+        : {}),
+    ...(protocolEvent.runSessionId ? { runSessionId: protocolEvent.runSessionId } : {}),
+    ...(protocolEvent.runtimeInstanceId
+      ? { runtimeInstanceId: protocolEvent.runtimeInstanceId }
+      : {}),
     result: recordPayloadValue(payload, 'result'),
-    state:
-      protocolEvent.type === 'operation.completed'
-        ? 'succeeded'
-        : protocolEvent.type === 'operation.cancelled'
-          ? 'cancelled'
-          : 'failed',
+    state: stringPayloadValue(payload, 'state') as EccRuntimeOperation['state'],
     step: stringPayloadValue(payload, 'step'),
+    ...(typeof payload.safeToStop === 'boolean'
+      ? { safeToStop: payload.safeToStop }
+      : {}),
+    ...(typeof payload.shutdownBarrier === 'boolean'
+      ? { shutdownBarrier: payload.shutdownBarrier }
+      : {}),
     updatedAt: protocolEvent.timestamp,
+    ...(typeof (payload.workspaceRevision ?? protocolEvent.workspaceRevision) === 'number'
+      ? {
+          workspaceRevision: (payload.workspaceRevision ??
+            protocolEvent.workspaceRevision) as number,
+        }
+      : {}),
     workspaceId: protocolEvent.workspaceId,
   }
+}
+
+function numberPayloadValue(
+  payload: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  return typeof payload[key] === 'number' && Number.isFinite(payload[key])
+    ? payload[key]
+    : undefined
+}
+
+function isInterruptibility(
+  value: unknown,
+): value is NonNullable<EccRuntimeOperation['interruptibility']> {
+  return value === 'safe' || value === 'deferred' || value === 'forbidden'
 }
 
 function stringPayloadValue(payload: Record<string, unknown>, key: string): string {

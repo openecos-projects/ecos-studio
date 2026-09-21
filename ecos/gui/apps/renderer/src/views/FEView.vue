@@ -206,7 +206,7 @@ import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import FrontendProjectWizard from '../components/FrontendProjectWizard.vue'
 import FrontendExperimentalBanner from '../components/frontend/FrontendExperimentalBanner.vue'
 import { useWorkspace } from '../composables/useWorkspace'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
 import {
   projectContextFromWorkspaceConfig,
@@ -314,7 +314,7 @@ async function frontendProjectTargetAvailable(config: WorkspaceConfig): Promise<
   const projectRoot = normalizePath(context.project_root)
   if (!projectRoot) return false
   try {
-    const desktopApi = await waitForDesktopApi()
+    const desktopApi = getDesktopApi()
     if (!(await desktopApi.workspace.pathExists(projectRoot))) return true
     if (!(await readProjectManagementManifest(projectRoot))) return true
 
@@ -409,6 +409,7 @@ const formatDate = (date: Date) => {
 function statusBadgeClass(status: ProjectStatus): string {
   const map: Record<ProjectStatus, string> = {
     success: 'bg-emerald-500/15 text-emerald-400',
+    warning: 'bg-amber-500/15 text-amber-400',
     failed: 'bg-red-500/15 text-red-400',
     running: 'bg-blue-500/15 text-blue-400',
     in_progress: 'bg-amber-500/15 text-amber-400',
@@ -420,6 +421,7 @@ function statusBadgeClass(status: ProjectStatus): string {
 function statusLabel(status: ProjectStatus): string {
   const map: Record<ProjectStatus, string> = {
     success: 'Success',
+    warning: 'Completed with warnings',
     failed: 'Failed',
     running: 'Running',
     in_progress: 'In Progress',

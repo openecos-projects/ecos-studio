@@ -1,50 +1,47 @@
-import { describe, expect, it } from 'vitest'
-import source from './WorkspaceWorkbench.vue?raw'
+// @vitest-environment happy-dom
+import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { nextTick } from 'vue'
+import { beforeEach, describe, expect, it } from 'vitest'
+import WorkspaceWorkbench from './WorkspaceWorkbench.vue'
+import { useAgentShellStore } from '@/stores/agentShellStore'
 
-describe('WorkspaceWorkbench shared right panel', () => {
-  it('enforces the agreed 3:2 default with one-third and one-quarter bounds', () => {
-    expect(source).toContain(':gutter-size="7"')
-    expect(source).toContain(':size="60"')
-    expect(source).toContain(':min-size="33"')
-    expect(source).toContain(':size="40"')
-    expect(source).toContain(':min-size="25"')
+describe('WorkspaceWorkbench Agent panel', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setActivePinia(createPinia())
   })
 
-  it('keeps flow status, log slot, and the existing inspector/chat panel once', () => {
-    expect(source).toContain('workspace-workbench-flow-status')
-    expect(source).toContain('FlowRunControl')
-    expect(source).toContain('<template #actions>')
-    expect(source).toContain(':selected-node="selectedLogNode"')
-    expect(source).toContain(':selected-node-pinned="logSelectionPinned"')
-    expect(source).toContain('@select="selectFlowNode"')
-    expect(source).not.toContain('FlowReportPanel')
-    expect(source).toContain('<ChatInspectorPanel')
-    expect(source).not.toContain('chatToolbarTarget')
-    expect(source).not.toContain('toolbar-target')
-  })
+  it('collapses the Agent panel and gives the log the remaining height', async () => {
+    const store = useAgentShellStore()
+    const wrapper = mount(WorkspaceWorkbench, {
+      props: { flowTitle: 'Flow', nodes: [] },
+      global: {
+        stubs: {
+          Splitter: { template: '<div><slot /></div>' },
+          SplitterPanel: { template: '<div><slot /></div>' },
+          FlowStatusStrip: {
+            template: '<div class="flow-status"><slot name="actions" /></div>',
+          },
+          FlowRunControl: { template: '<button />' },
+          ChatInspectorPanel: { template: '<div class="workspace-agent" />' },
+        },
+      },
+    })
 
-  it('lets the chat region fill the space below the status and log bands', () => {
-    expect(source).toContain('height: 100%')
-    expect(source).toContain('background: var(--bg-secondary)')
-    expect(source).toContain('flex: 1 1 auto')
-    expect(source).toContain('min-height: clamp(184px, 30vh, 280px)')
-    expect(source).toContain('height: auto !important')
-  })
+    expect(wrapper.find('.workspace-agent').exists()).toBe(true)
+    store.setWorkspaceAgentCollapsed(true)
+    await nextTick()
 
-  it('switches the right-panel node when flow execution advances to another step', () => {
-    expect(source).toContain('runningFlowNodeId')
-    expect(source).toContain('lastRunningNodeId')
-    expect(source).toContain('nextFlowNodeSelection')
-    expect(source).toContain('selectedFlowNode.value =')
-    expect(source).toContain(
-      'if (!logSelectionPinned.value) selectedLogNode.value = selectedFlowNode.value',
+    expect(wrapper.find('.workspace-agent').exists()).toBe(true)
+    expect(wrapper.get('.workspace-workbench-inspector').attributes('style')).toContain(
+      'display: none',
     )
-    expect(source).toContain('function selectFlowNode')
-  })
-
-  it('unpins a selected log when GUI rerun preparation invalidates that step', () => {
-    expect(source).toContain('logRerunAffectedSteps?: readonly string[]')
-    expect(source).toContain('sameFlowStepName(step, selectedLogNode.value!.label)')
-    expect(source).toContain('logSelectionPinned.value = false')
+    const toggle = wrapper.get('button.workspace-workbench-agent-toggle')
+    expect(toggle.attributes('aria-label')).toBe('Expand Agent panel')
+    await toggle.trigger('click')
+    await nextTick()
+    expect(store.workspaceAgentCollapsed).toBe(false)
+    expect(wrapper.get('.workspace-workbench-inspector').isVisible()).toBe(true)
   })
 })

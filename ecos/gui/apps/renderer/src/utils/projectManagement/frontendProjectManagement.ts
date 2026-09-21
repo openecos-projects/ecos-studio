@@ -11,7 +11,6 @@ import {
   buildProjectManagementProject as buildBackendProjectManagementProject,
   workspaceStatusFromFlow,
   type ProjectStepStatus,
-  type ProjectWorkspaceAnalysisInputsById,
   type ProjectWorkspaceFlowStateMap,
   type ProjectWorkspaceFlowStatesById,
   type ProjectWorkspaceStatus,
@@ -22,6 +21,7 @@ import type {
   ProjectStage,
   ProjectStepCell,
   ProjectWorkspace,
+  ProjectWorkspaceAnalysisInputsById,
 } from './model'
 
 export const FRONTEND_FLOW_STEPS = projectManifestFrontendFlowSteps
@@ -51,7 +51,7 @@ export function buildFrontendProjectManagementProject(
       endStage: workspace.endStep as ProjectManifestFrontendFlowStep,
       steps: workspace.steps.map((step) => ({
         stage: step.step as ProjectManifestFrontendFlowStep,
-        status: step.status,
+        status: step.status === 'warning' ? 'success' : step.status,
       })),
       detailTexts:
         workspaceAnalysisInputs[workspace.id]?.frontendDetailTexts ?? undefined,
@@ -124,7 +124,6 @@ function buildFrontendWorkspace(
     id: workspace.workspace_id,
     name: workspaceName(workspace),
     workspacePath: workspace.workspace_path,
-    artifactDesignName: '',
     status,
     description: workspace.branch_from
       ? `from ${workspace.branch_from.source_workspace_id}/${branchStep}`

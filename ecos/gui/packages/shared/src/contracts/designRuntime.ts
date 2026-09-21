@@ -1,9 +1,8 @@
 import type {
   EccFlowRunResult,
   EccFlowRunStepResult,
-  EccRpcPingResult,
-  EccRpcShutdownResult,
   EccRuntimeEvent,
+  EccRuntimeInterruptibility,
   EccWorkspaceCloseResult,
   EccWorkspaceCreateResult,
   EccWorkspaceHomeResult,
@@ -11,7 +10,8 @@ import type {
   EccWorkspaceOpenResult,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
-  EccWorkspaceSyncConfigResult,
+  EccWorkspaceStepConfigurationReadResult,
+  EccWorkspaceStepOutputsResult,
 } from './eccRuntime.ts'
 import type { DesktopEventUnsubscribe } from './desktopEvents.ts'
 import type { DesignTool } from '../types/workspace.ts'
@@ -23,6 +23,24 @@ export interface DesignRuntimeHelloResult {
   eccFeVersion?: string
   eccVersion?: string
   version: number
+}
+
+export interface DesignRuntimePingResult {
+  ok: boolean
+}
+
+export interface DesignRuntimeShutdownResult {
+  ok: boolean
+  deferred?: boolean
+  shutdownBarrier?: {
+    cancelRequested?: boolean
+    interruptibility?: EccRuntimeInterruptibility
+    operationId: string
+    safeToStop?: boolean
+    state: string
+    step: string
+    workspaceId: string
+  }
 }
 
 export interface DesignRuntimeTargetRequest {
@@ -38,6 +56,7 @@ export interface DesignRuntimeWorkspaceOpenRequest extends DesignRuntimeTargetRe
 }
 
 export interface DesignRuntimeWorkspaceHandleRequest extends DesignRuntimeTargetRequest {
+  expectedWorkspaceRevision?: number
   workspaceHandle: string
 }
 
@@ -46,8 +65,9 @@ export interface DesignRuntimeWorkspaceInfoRequest extends DesignRuntimeWorkspac
   step: string
 }
 
-export interface DesignRuntimeWorkspaceSyncConfigRequest extends DesignRuntimeWorkspaceHandleRequest {
-  configPath: string
+export interface DesignRuntimeWorkspaceStepOutputsRequest extends DesignRuntimeTargetRequest {
+  directory: string
+  step?: string
 }
 
 export interface DesignRuntimeFlowRunRequest extends DesignRuntimeWorkspaceHandleRequest {
@@ -72,7 +92,6 @@ export interface DesignRuntimeApi {
   cancel(request: DesignRuntimeCancelRequest): Promise<DesignRuntimeCancelResult>
   events: {
     onEvent(listener: (event: DesignRuntimeEvent) => void): DesktopEventUnsubscribe
-    replay(request: DesignRuntimeWorkspaceHandleRequest): Promise<void>
   }
   flow: {
     run(request: DesignRuntimeFlowRunRequest): Promise<EccFlowRunResult>
@@ -84,8 +103,8 @@ export interface DesignRuntimeApi {
   }
   rpc: {
     hello(request: DesignRuntimeTargetRequest): Promise<DesignRuntimeHelloResult>
-    ping(request: DesignRuntimeTargetRequest): Promise<EccRpcPingResult>
-    shutdown(request: DesignRuntimeTargetRequest): Promise<EccRpcShutdownResult>
+    ping(request: DesignRuntimeTargetRequest): Promise<DesignRuntimePingResult>
+    shutdown(request: DesignRuntimeTargetRequest): Promise<DesignRuntimeShutdownResult>
   }
   workspace: {
     close(request: DesignRuntimeWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>
@@ -94,6 +113,12 @@ export interface DesignRuntimeApi {
     ): Promise<EccWorkspaceCreateResult>
     home(request: DesignRuntimeWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult>
     info(request: DesignRuntimeWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult>
+    stepConfiguration(
+      request: DesignRuntimeWorkspaceHandleRequest & { step: string },
+    ): Promise<EccWorkspaceStepConfigurationReadResult>
+    stepOutputs(
+      request: DesignRuntimeWorkspaceStepOutputsRequest,
+    ): Promise<EccWorkspaceStepOutputsResult>
     open(request: DesignRuntimeWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult>
     refreshConfig(
       request: DesignRuntimeWorkspaceHandleRequest,
@@ -101,8 +126,5 @@ export interface DesignRuntimeApi {
     resetFlow(
       request: DesignRuntimeWorkspaceHandleRequest,
     ): Promise<EccWorkspaceResetFlowResult>
-    syncConfig(
-      request: DesignRuntimeWorkspaceSyncConfigRequest,
-    ): Promise<EccWorkspaceSyncConfigResult>
   }
 }

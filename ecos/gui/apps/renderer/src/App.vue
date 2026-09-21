@@ -6,6 +6,9 @@
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
+        :mutations-disabled="mutationsDisabled"
+        :signoff-export-disabled="currentWorkspaceFlowActive"
+        :workspace-update-disabled="currentWorkspaceFlowActive"
         @menu-action="handleMenuAction"
         @step-config="showStepConfigDialog = true"
       />
@@ -68,7 +71,11 @@
         >
           <p class="workspace-update-backup-eyebrow">Update Workspace</p>
           <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
-          <p>Keep a copy of the current workspace before replacing it.</p>
+          <p>
+            Updating replaces the current Flow state, engineering results, Artifacts,
+            logs, and user files. Keep a complete Project-managed backup for later
+            inspection or recovery, or choose permanent replacement without a backup.
+          </p>
           <div class="workspace-update-backup-actions">
             <button
               type="button"
@@ -213,31 +220,23 @@ import {
   appMenuActionIds,
   type AppMenuAction,
   type DesktopAgentWorkspaceSetupContract,
-  type DesktopApi,
 } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
+import {
+  isShutdownInProgress,
+  useBackgroundOperationStore,
+} from '@/stores/backgroundOperationStore'
 import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useDesignReportExport } from '@/composables/useDesignReportExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import {
-  hasCanonicalDieDimensions,
-  losslessNumberList,
-  losslessOptionalNumber,
-  losslessOptionalString,
-  losslessOptionalRecord,
-  scalarMarginFromCore,
-} from '@/utils/numbers'
-import {
-  getOptionalDesktopApi,
-  hasDesktopApi,
-  waitForDesktopApi,
-} from '@/platform/desktop'
+import { isFlowExecutionActiveForWorkspace } from '@/composables/flowExecutionState'
+import { getDesktopApi } from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import HomeAgentDrawer from '@/components/HomeAgentDrawer.vue'
@@ -260,25 +259,24 @@ import {
   requestOpenStepConfigAfterCreate,
   usePendingOpenStepConfigAfterCreate,
 } from '@/composables/openStepConfigAfterCreate'
-import {
-  readOptionalProjectTextFile,
-  readWorkspaceParametersFile,
-} from '@/utils/projectFiles'
+import { getWorkspaceRuntimeSnapshotApi } from '@/api/workspaceResources'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
   resolveProjectRouteContextForWorkspace,
+  workspaceRouteQueryFromProjectContext,
   type ProjectRouteContext,
 } from '@/utils/projectManifestRegistration'
-
-type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
-  managedWorkspaceRoot?: string
-  deriveDirectoryFromDesign?: boolean
-  lockWorkspaceDirectory?: boolean
-  standaloneWorkspace?: boolean
-  suggestedWorkspaceName?: string
-}
+import {
+  beginWorkspaceCreation,
+  consumeWorkspaceWizardRequest,
+  finishWorkspaceCreation,
+  useWorkspaceWizardRequest,
+  type WorkspaceWizardInitialConfig,
+  consumeWorkspaceManagementReturnRoute,
+} from '@/utils/workspaceNavigation'
+import { workspaceReconfigureInitialConfig } from '@/utils/workspaceReconfigure'
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -316,6 +314,9 @@ const {
   showToast,
   workspaceSession,
 })
+const currentWorkspaceFlowActive = computed(() =>
+  isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+)
 const {
   closeDesignReportExport,
   copyToClipboard: copyDesignReport,
@@ -333,34 +334,60 @@ const {
 } = useDesignReportExport({
   currentProject,
   showToast,
+  workspaceSession,
 })
-const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+const desktopApi = getDesktopApi()
 
 function updatePdkNameDialogVisibility(visible: boolean): void {
   if (!visible) cancelPdkName()
 }
 
 watch(
-  () => [Boolean(currentProject.value?.path), isWorkspaceRoute.value] as const,
-  ([hasWorkspace, workspaceRoute]) => {
+  () =>
+    [
+      Boolean(currentProject.value?.path),
+      isWorkspaceRoute.value,
+      currentWorkspaceFlowActive.value,
+    ] as const,
+  ([hasWorkspace, workspaceRoute, flowActive]) => {
     void (async () => {
       try {
-        const api = desktopApi.value ?? (await waitForDesktopApi({ timeoutMs: 5000 }))
-        desktopApi.value = api
         await Promise.all([
-          api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
-          api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
-          api.menu.setActionEnabled(appMenuActionIds.exportDesignMetrics, hasWorkspace),
-          api.menu.setActionEnabled(
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.reconfigureWorkspace,
+            hasWorkspace && !flowActive,
+          ),
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.manageDesignFiles,
+            hasWorkspace,
+          ),
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.exportDesignMetrics,
+            hasWorkspace,
+          ),
+          desktopApi.menu.setActionEnabled(
             appMenuActionIds.exportSignoffPackage,
             workspaceRoute,
           ),
-          api.menu.setActionEnabled(appMenuActionIds.exportDesignSummary, workspaceRoute),
+          desktopApi.menu.setActionEnabled(
+            appMenuActionIds.exportDesignSummary,
+            workspaceRoute,
+          ),
         ])
       } catch (error) {
         console.warn('[App] Failed to sync workspace menu availability:', error)
       }
     })()
+  },
+  { immediate: true },
+)
+
+watch(
+  [() => route.path, () => Boolean(currentProject.value?.path)] as const,
+  ([path, hasWorkspace]) => {
+    if (path === '/workspace/projects' && !hasWorkspace) {
+      void router.replace({ path: '/projects', query: route.query })
+    }
   },
   { immediate: true },
 )
@@ -389,6 +416,23 @@ const stepConfigDialogRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
 const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+const pendingWorkspaceWizardRequest = useWorkspaceWizardRequest()
+const backgroundOperations = useBackgroundOperationStore()
+const mutationsDisabled = computed(() =>
+  isShutdownInProgress(backgroundOperations.shutdownStatus.state),
+)
+
+watch(
+  pendingWorkspaceWizardRequest,
+  (request) => {
+    if (!request) return
+    consumeWorkspaceWizardRequest()
+    workspaceWizardInitialConfig.value = request.initialConfig
+    reconfigureWorkspacePath.value = ''
+    showNewProjectWizard.value = true
+  },
+  { flush: 'sync' },
+)
 
 function closeStepConfigDialog(): void {
   if (
@@ -407,6 +451,7 @@ function updateStepConfigDialogVisibility(visible: boolean): void {
   }
   closeStepConfigDialog()
 }
+
 const pendingWorkspaceUpdatePath = ref('')
 const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
@@ -428,9 +473,7 @@ async function createWorkspaceFromAgent(
   }
   const workspacePath = currentProject.value?.path
   if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  desktopApi.value = api
-  await api.workspace.writeProjectTextFile(
+  await desktopApi.workspace.writeProjectTextFile(
     `${normalizeLocalPath(workspacePath)}/home/workspace_setup_contract.v2.json`,
     `${JSON.stringify(contract, null, 2)}\n`,
   )
@@ -502,13 +545,54 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     return
   }
 
-  resetWorkspaceWizard()
-  const success = await newProject(config)
-  if (!success) return
+  const creationToken = beginWorkspaceCreation(config.directory)
+  if (creationToken === null) {
+    showToast({
+      severity: 'info',
+      summary: 'Workspace creation already in progress',
+      detail:
+        'Wait for the current Workspace creation to finish before submitting again.',
+      life: 4000,
+    })
+    return
+  }
 
-  await syncProjectManagedWorkspace(config)
-  requestOpenStepConfigAfterCreate()
-  router.push('/workspace')
+  const creationOriginPath = route.path
+  const creationOriginFullPath = route.fullPath
+  const creationOriginWorkspacePath = currentProject.value?.path
+  const managementRoute =
+    creationOriginPath === '/projects' || creationOriginPath === '/workspace/projects'
+  resetWorkspaceWizard()
+  try {
+    const success = await newProject(config, {
+      shouldActivate: () =>
+        route.fullPath === creationOriginFullPath &&
+        normalizeLocalPath(currentProject.value?.path ?? '') ===
+          normalizeLocalPath(creationOriginWorkspacePath ?? ''),
+    })
+    if (!success) {
+      if (managementRoute && route.fullPath === creationOriginFullPath) {
+        const returnRoute = consumeWorkspaceManagementReturnRoute()
+        await router.replace(returnRoute ?? '/workspace/home')
+      }
+      return
+    }
+
+    const projectContext = projectContextFromWorkspaceConfig(config)
+    await syncProjectManagedWorkspace(config, config.directory)
+    if (route.fullPath === creationOriginFullPath) {
+      requestOpenStepConfigAfterCreate()
+      await router.push({
+        path: '/workspace/home',
+        query: workspaceRouteQueryFromProjectContext(
+          currentProject.value?.path ?? config.directory,
+          projectContext,
+        ),
+      })
+    }
+  } finally {
+    finishWorkspaceCreation(creationToken)
+  }
 }
 
 function cancelWorkspaceUpdateBackup() {
@@ -582,14 +666,12 @@ async function openWorkspaceReconfigureWizard() {
 
   try {
     const normalizedWorkspacePath = normalizeLocalPath(workspacePath)
-    const api = desktopApi.value ?? (await waitForDesktopApi())
-    desktopApi.value = api
-    await api.workspace.registerProjectRoot(normalizedWorkspacePath)
+    await desktopApi.workspace.registerProjectRoot(normalizedWorkspacePath)
     const projectContext = await resolveProjectRouteContextForWorkspace(
       normalizedWorkspacePath,
     )
     if (projectContext) {
-      await api.workspace.registerProjectReadRoot(projectContext.projectRoot)
+      await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
     }
 
     workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
@@ -617,393 +699,14 @@ async function buildReconfigureWizardInitialConfig(
     projectContext === undefined
       ? await resolveProjectRouteContextForWorkspace(workspacePath)
       : projectContext
-  const [parametersJson, pdkText, dbConfigText, flowText] = await Promise.all([
-    readWorkspaceParametersFile(workspacePath),
-    readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
-    readOptionalProjectTextFile('config/db_ecc.json', {
-      projectPath: workspacePath,
-    }),
-    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
-  ])
-
-  const pdkJson = parseOptionalJson(pdkText)
-  const dbConfigJson = parseOptionalJson(dbConfigText)
-  const flowConfig = normalizeWorkspaceFlowConfig(flowText)
-  const normalizedParameters = normalizeWorkspaceParameters(parametersJson, workspacePath)
-  const dbInput = optionalRecord(dbConfigJson?.INPUT)
-  const pdkConfig = normalizePdkConfig(pdkJson, dbConfigJson)
-  const designName =
-    optionalString(parametersJson?.Design) ||
-    optionalString(parametersJson?.design) ||
-    getPathLeafName(workspacePath)
-  const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
-  const rtlList =
-    flowConfig.start_step === 'Synthesis'
-      ? await existingWorkspaceFiles(workspacePath, [
-          ...originInputs.rtlFiles,
-          `origin/${designName}.v`,
-          `origin/${designName}.v.gz`,
-          `origin/${designName}.sv`,
-          `origin/${designName}.sv.gz`,
-          `origin/${designName}.vhd`,
-          `origin/${designName}.vhdl`,
-          ...stringList(dbInput?.rtl_paths),
-          ...stringList(dbInput?.rtl_list),
-        ])
-      : []
-  const filelist =
-    flowConfig.start_step === 'Synthesis'
-      ? await firstExistingWorkspaceFile(workspacePath, [
-          ...originInputs.filelists,
-          'origin/filelist',
-          optionalString(dbInput?.filelist),
-          optionalString(dbInput?.filelist_path),
-        ])
-      : ''
-  const originDef =
-    flowConfig.start_step === 'Synthesis'
-      ? ''
-      : await firstExistingWorkspaceFile(workspacePath, [
-          ...originInputs.defFiles,
-          `origin/${designName}.def`,
-          `origin/${designName}.def.gz`,
-          optionalString(dbInput?.origin_def),
-          optionalString(dbInput?.def_path),
-        ])
-  const originVerilog =
-    flowConfig.start_step === 'Synthesis'
-      ? ''
-      : await firstExistingWorkspaceFile(workspacePath, [
-          ...originInputs.verilogFiles,
-          `origin/${designName}.v`,
-          `origin/${designName}.v.gz`,
-          `origin/${designName}.sv`,
-          `origin/${designName}.sv.gz`,
-          `origin/${designName}.vg`,
-          `origin/${designName}.vg.gz`,
-          optionalString(dbInput?.origin_verilog),
-          optionalString(dbInput?.verilog_path),
-        ])
-  const sdc =
-    (await firstExistingWorkspaceFile(workspacePath, [
-      ...originInputs.sdcFiles,
-      `origin/${designName}.sdc`,
-      `origin/${designName}.sdc.gz`,
-      optionalString(dbInput?.sdc_path),
-      optionalString(pdkJson?.sdc),
-    ])) || ''
-
-  return {
-    directory: workspacePath,
-    lockWorkspaceDirectory: true,
-    standaloneWorkspace: !resolvedProjectContext,
-    pdk:
-      optionalString(parametersJson?.PDK) ||
-      optionalString(parametersJson?.pdk) ||
-      'ics55',
-    pdk_root:
-      optionalString(parametersJson?.['PDK Root']) ||
-      optionalString(parametersJson?.pdk_root),
-    parameters: normalizedParameters,
-    origin_def: originDef,
-    origin_verilog: originVerilog,
-    rtl_list: rtlList,
-    filelist,
-    design_input_mode: flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
-    sdc,
-    pdk_config_mode: pdkConfig.mode,
-    pdk_config: pdkConfig,
-    pdk_json: pdkText ? `${workspacePath}/home/pdk.json` : '',
-    flow_config: flowConfig,
-    project_context: resolvedProjectContext
-      ? {
-          mode: 'select',
-          project_name:
-            resolvedProjectContext.projectName ||
-            getPathLeafName(resolvedProjectContext.projectRoot),
-          project_root: resolvedProjectContext.projectRoot,
-          project_json_path: `${resolvedProjectContext.projectRoot}/project.json`,
-        }
-      : undefined,
-  }
-}
-
-function parseOptionalJson(content: string | null): Record<string, unknown> | null {
-  if (!content) return null
-  try {
-    return JSON.parse(content) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-function normalizeWorkspaceParameters(
-  parametersJson: Record<string, unknown> | null,
-  workspacePath: string,
-): WorkspaceConfig['parameters'] {
-  const dieArea =
-    optionalRecord(parametersJson?.['Die Area']) ??
-    optionalRecord(parametersJson?.die_area) ??
-    {}
-  const die =
-    optionalRecord(parametersJson?.Die) ?? optionalRecord(parametersJson?.die) ?? {}
-  const core =
-    optionalRecord(parametersJson?.Core) ?? optionalRecord(parametersJson?.core) ?? {}
-  const dieSize = numberList(die.Size ?? die.size)
-  const coreMargin = numberList(core.Margin ?? core.margin)
-  const hasDieSize = dieSize.length >= 2
-  const hasCanonicalDieSize = hasCanonicalDieDimensions(dieArea)
-  const inferredDieAreaMode: NonNullable<WorkspaceConfig['parameters']['die_area_mode']> =
-    hasCanonicalDieSize || hasDieSize ? 'width_height' : 'utilitization_margin'
-
-  return {
-    design:
-      optionalString(parametersJson?.Design) ||
-      optionalString(parametersJson?.design) ||
-      getPathLeafName(workspacePath),
-    description: optionalString(parametersJson?.description),
-    top_module:
-      optionalString(parametersJson?.['Top module']) ||
-      optionalString(parametersJson?.top_module),
-    clock: optionalString(parametersJson?.Clock) || optionalString(parametersJson?.clock),
-    frequency_max: optionalNumber(
-      parametersJson?.['Frequency max [MHz]'] ?? parametersJson?.frequency_max,
-      50,
-    ),
-    max_fanout: optionalNumber(
-      parametersJson?.['Max fanout'] ?? parametersJson?.max_fanout,
-      32,
-    ),
-    die_area_mode: normalizeDieAreaMode(
-      dieArea.mode ?? parametersJson?.die_area_mode,
-      inferredDieAreaMode,
-    ),
-    die_width: optionalNumber(
-      dieArea.width ?? dieSize[0] ?? parametersJson?.die_width,
-      100,
-    ),
-    die_height: optionalNumber(
-      dieArea.height ?? dieSize[1] ?? parametersJson?.die_height,
-      100,
-    ),
-    utilitization: optionalNumber(
-      dieArea.utilitization ??
-        core.Utilitization ??
-        core.utilitization ??
-        parametersJson?.utilitization,
-      0.6,
-    ),
-    margin: optionalNumber(
-      scalarMarginFromCore(coreMargin, 'workspace parameter') ??
-        dieArea.margin ??
-        parametersJson?.margin,
-      0,
-    ),
-  }
-}
-
-function normalizeWorkspaceFlowConfig(
-  flowText: string | null,
-): NonNullable<WorkspaceConfig['flow_config']> {
-  const flowJson = parseOptionalJson(flowText)
-  const steps = Array.isArray(flowJson?.steps)
-    ? flowJson.steps
-        .map((step) => {
-          if (typeof step === 'string') return step
-          if (optionalRecord(step)) return optionalString(optionalRecord(step)?.name)
-          return ''
-        })
-        .filter((step): step is string => step.trim() !== '')
-    : []
-  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
-
-  return {
-    start_step: normalizedSteps[0],
-    end_step: normalizedSteps[normalizedSteps.length - 1],
-    steps: normalizedSteps,
-  }
-}
-
-function normalizePdkConfig(
-  pdkJson: Record<string, unknown> | null,
-  dbConfigJson: Record<string, unknown> | null,
-): NonNullable<WorkspaceConfig['pdk_config']> & { mode: 'default' | 'manual' } {
-  const dbInput = optionalRecord(dbConfigJson?.INPUT)
-  const techLef = stringList(
-    pdkJson?.tech_lef ??
-      pdkJson?.tech ??
-      pdkJson?.selected_tech_lef ??
-      dbInput?.tech_lef_path,
+  const workspaceHandle = workspaceSession.value.workspaceId
+  if (!workspaceHandle) throw new Error('ECC Workspace session is unavailable.')
+  const snapshot = await getWorkspaceRuntimeSnapshotApi(workspaceHandle)
+  return workspaceReconfigureInitialConfig(
+    snapshot,
+    workspacePath,
+    resolvedProjectContext,
   )
-  const cellLef = stringList(
-    pdkJson?.cell_lef ?? pdkJson?.lefs ?? pdkJson?.cell_lef_list ?? dbInput?.lef_paths,
-  )
-  const liberty = stringList(
-    pdkJson?.liberty ?? pdkJson?.libs ?? pdkJson?.liberty_list ?? dbInput?.lib_path,
-  )
-  const hasManualResources =
-    techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
-
-  return {
-    mode: hasManualResources ? 'manual' : 'default',
-    tech_lef: techLef,
-    cell_lef: cellLef,
-    liberty,
-  }
-}
-
-async function firstExistingWorkspaceFile(
-  workspacePath: string,
-  candidates: string[],
-): Promise<string> {
-  const files = await existingWorkspaceFiles(workspacePath, candidates)
-  return files[0] ?? ''
-}
-
-interface WorkspaceOriginDesignInputs {
-  rtlFiles: string[]
-  filelists: string[]
-  defFiles: string[]
-  verilogFiles: string[]
-  sdcFiles: string[]
-}
-
-function emptyWorkspaceOriginDesignInputs(): WorkspaceOriginDesignInputs {
-  return {
-    rtlFiles: [],
-    filelists: [],
-    defFiles: [],
-    verilogFiles: [],
-    sdcFiles: [],
-  }
-}
-
-async function scanWorkspaceOriginDesignInputs(
-  workspacePath: string,
-): Promise<WorkspaceOriginDesignInputs> {
-  const inputs = emptyWorkspaceOriginDesignInputs()
-  try {
-    const api = desktopApi.value ?? (await waitForDesktopApi())
-    desktopApi.value = api
-    const entries = await api.workspace.listProjectDirectory(`${workspacePath}/origin`)
-    for (const entry of entries) {
-      if (entry.type !== 'file') continue
-      const filePath = normalizeLocalPath(entry.path)
-      if (hasAnySuffix(filePath, ['.def', '.def.gz'])) {
-        inputs.defFiles.push(filePath)
-      }
-      if (hasAnySuffix(filePath, ['.v', '.v.gz', '.sv', '.sv.gz', '.vg', '.vg.gz'])) {
-        inputs.rtlFiles.push(filePath)
-        inputs.verilogFiles.push(filePath)
-      }
-      if (hasAnySuffix(filePath, ['.vhd', '.vhd.gz', '.vhdl', '.vhdl.gz'])) {
-        inputs.rtlFiles.push(filePath)
-      }
-      if (hasAnySuffix(filePath, ['.sdc', '.sdc.gz'])) {
-        inputs.sdcFiles.push(filePath)
-      }
-      const fileName = getPathLeafName(filePath).toLowerCase()
-      if (
-        fileName === 'filelist' ||
-        hasAnySuffix(filePath, [
-          '.f',
-          '.f.gz',
-          '.fl',
-          '.fl.gz',
-          '.flist',
-          '.flist.gz',
-          '.filelist',
-          '.filelist.gz',
-          '.lst',
-          '.lst.gz',
-          '.txt',
-          '.txt.gz',
-        ])
-      ) {
-        inputs.filelists.push(filePath)
-      }
-    }
-    return {
-      rtlFiles: uniquePathList(inputs.rtlFiles),
-      filelists: uniquePathList(inputs.filelists),
-      defFiles: uniquePathList(inputs.defFiles),
-      verilogFiles: uniquePathList(inputs.verilogFiles),
-      sdcFiles: uniquePathList(inputs.sdcFiles),
-    }
-  } catch {
-    return inputs
-  }
-}
-
-function hasAnySuffix(filePath: string, suffixes: string[]): boolean {
-  const lowerPath = filePath.toLowerCase()
-  return suffixes.some((suffix) => lowerPath.endsWith(suffix))
-}
-
-function uniquePathList(paths: string[]): string[] {
-  return [...new Set(paths)]
-}
-
-async function existingWorkspaceFiles(
-  workspacePath: string,
-  candidates: string[],
-): Promise<string[]> {
-  const existing: string[] = []
-  const seen = new Set<string>()
-  for (const candidate of candidates) {
-    const relativeOrAbsolute = candidate.trim()
-    if (!relativeOrAbsolute) continue
-    const path = isAbsoluteLocalPath(relativeOrAbsolute)
-      ? normalizeLocalPath(relativeOrAbsolute)
-      : `${workspacePath}/${relativeOrAbsolute.replace(/^\/+/, '')}`
-    if (seen.has(path)) continue
-    seen.add(path)
-    if (await workspaceTextFileExists(path)) {
-      existing.push(path)
-    }
-  }
-  return existing
-}
-
-async function workspaceTextFileExists(path: string): Promise<boolean> {
-  try {
-    return (await readOptionalProjectTextFile(path)) !== null
-  } catch {
-    return false
-  }
-}
-
-function optionalRecord(value: unknown): Record<string, unknown> | null {
-  return losslessOptionalRecord(value, 'workspace parameter')
-}
-
-function optionalString(value: unknown): string {
-  return losslessOptionalString(value, 'workspace parameter')
-}
-
-function optionalNumber(value: unknown, fallback: number): number {
-  return losslessOptionalNumber(value, fallback, 'workspace parameter')
-}
-
-function normalizeDieAreaMode(
-  value: unknown,
-  fallback: NonNullable<WorkspaceConfig['parameters']['die_area_mode']>,
-): NonNullable<WorkspaceConfig['parameters']['die_area_mode']> {
-  return value === 'width_height' || value === 'utilitization_margin' ? value : fallback
-}
-
-function stringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter(
-      (item): item is string => typeof item === 'string' && item.trim() !== '',
-    )
-  }
-  if (typeof value === 'string' && value.trim()) return [value.trim()]
-  return []
-}
-
-function numberList(value: unknown): number[] {
-  return losslessNumberList(value, 'workspace parameter')
 }
 
 function normalizeLocalPath(path: string): string {
@@ -1011,23 +714,9 @@ function normalizeLocalPath(path: string): string {
   return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized
 }
 
-function getPathLeafName(path: string): string {
-  return normalizeLocalPath(path).split('/').filter(Boolean).pop() || path
-}
-
-function isAbsoluteLocalPath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
-}
-
 const openDocumentation = async () => {
   try {
-    if (desktopApi.value ?? hasDesktopApi()) {
-      const api = desktopApi.value ?? (await waitForDesktopApi())
-      desktopApi.value = api
-      await api.system.openExternal(documentationUrl)
-    } else {
-      window.open(documentationUrl, '_blank', 'noopener,noreferrer')
-    }
+    await desktopApi.system.openExternal(documentationUrl)
   } catch (error) {
     console.error('Failed to open documentation:', error)
     showToast({
@@ -1043,12 +732,10 @@ async function setZoomFactor(nextFactor: number): Promise<void> {
   const factor = zoomFactors.includes(nextFactor as (typeof zoomFactors)[number])
     ? (nextFactor as (typeof zoomFactors)[number])
     : 1
-  const api = desktopApi.value ?? (await waitForDesktopApi())
-  desktopApi.value = api
-  await api.window.setZoomFactor(factor)
+  await desktopApi.window.setZoomFactor(factor)
   zoomFactor.value = factor
   try {
-    await api.settings.set(zoomSettingKey, factor)
+    await desktopApi.settings.set(zoomSettingKey, factor)
   } catch (error) {
     console.warn('[App] Failed to persist UI zoom setting:', error)
   }
@@ -1068,8 +755,7 @@ async function adjustZoom(action: AppMenuAction): Promise<void> {
 
 const { handleMenuAction } = useAppMenuActions({
   createWindow: async () => {
-    const api = await waitForDesktopApi()
-    await api.window.create({ initialRoute: '/' })
+    await desktopApi.window.create({ initialRoute: '/' })
   },
   navigateToWorkspace: () => {
     router.push('/workspace')
@@ -1082,7 +768,18 @@ const { handleMenuAction } = useAppMenuActions({
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
   exportSignoffPackage: () => {
-    if (isWorkspaceRoute.value) return exportSignoffPackage()
+    if (!isWorkspaceRoute.value) return
+    if (currentWorkspaceFlowActive.value) {
+      showToast({
+        severity: 'warn',
+        summary: 'Signoff Export Unavailable',
+        detail:
+          'Wait for the current flow to finish before exporting the signoff package.',
+        life: 5000,
+      })
+      return
+    }
+    return exportSignoffPackage()
   },
   exportDesignSummary: () => {
     if (isWorkspaceRoute.value) openDesignReportExport()
@@ -1162,15 +859,11 @@ const markResizing = () => {
  * 见 styles/index.css 与本文件 scoped 样式中的 `.window-maximized` 规则。
  */
 async function syncMaximizedClass() {
-  if (!desktopApi.value) {
-    return
-  }
-
   try {
-    const maxed = await desktopApi.value.window.isMaximized()
+    const maxed = await desktopApi.window.isMaximized()
     document.body.classList.toggle('window-maximized', maxed)
   } catch {
-    /* ignore: window API unavailable (e.g. SSR / test) */
+    /* ignore window state query failures */
   }
 }
 
@@ -1183,27 +876,17 @@ const handleSelectStart = (e: Event) => {
 }
 
 onMounted(async () => {
-  if (!desktopApi.value) {
-    try {
-      desktopApi.value = await waitForDesktopApi({ timeoutMs: 5000 })
-    } catch (error) {
-      console.warn('[App] Desktop bridge not available on initial mount:', error)
+  void backgroundOperations.start()
+  try {
+    const savedZoom = await desktopApi.settings.get<number>(zoomSettingKey)
+    if (
+      typeof savedZoom === 'number' &&
+      zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
+    ) {
+      await setZoomFactor(savedZoom)
     }
-  }
-  console.info('[App] Desktop bridge available:', Boolean(desktopApi.value))
-
-  if (desktopApi.value) {
-    try {
-      const savedZoom = await desktopApi.value.settings.get<number>(zoomSettingKey)
-      if (
-        typeof savedZoom === 'number' &&
-        zoomFactors.includes(savedZoom as (typeof zoomFactors)[number])
-      ) {
-        await setZoomFactor(savedZoom)
-      }
-    } catch (error) {
-      console.warn('[App] Failed to restore UI zoom setting:', error)
-    }
+  } catch (error) {
+    console.warn('[App] Failed to restore UI zoom setting:', error)
   }
 
   themeStore.initTheme()
@@ -1228,22 +911,17 @@ onMounted(async () => {
   // 启动时先同步一次最大化状态（从持久化会话恢复的场景）
   void syncMaximizedClass()
 
-  if (!desktopApi.value) {
-    return
-  }
-
   // 由桌面桥接的 resize 事件统一驱动降级状态，覆盖所有缩放来源。
-  unlistenWindowResized = desktopApi.value.window.onResized(() => {
+  unlistenWindowResized = desktopApi.window.onResized(() => {
     markResizing()
   })
-  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
-    (isMaximized) => {
-      document.body.classList.toggle('window-maximized', isMaximized)
-    },
-  )
+  unlistenWindowMaximizedChanged = desktopApi.window.onMaximizedChanged((isMaximized) => {
+    document.body.classList.toggle('window-maximized', isMaximized)
+  })
 })
 
 onUnmounted(() => {
+  backgroundOperations.dispose()
   document.removeEventListener('selectstart', handleSelectStart)
   if (resizeIdleTimer) {
     clearTimeout(resizeIdleTimer)

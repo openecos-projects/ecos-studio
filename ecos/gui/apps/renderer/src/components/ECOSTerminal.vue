@@ -175,7 +175,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { getOptionalDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{
@@ -389,10 +389,7 @@ function fitTerminalAfterLayout() {
 
 function resizeShellSession(record: TerminalRecord) {
   if (!record.sessionId) return
-  const desktopApi = getOptionalDesktopApi()
-  if (!desktopApi?.shell) return
-
-  void desktopApi.shell.resize(
+  void getDesktopApi().shell.resize(
     record.sessionId,
     record.terminal.cols,
     record.terminal.rows,
@@ -415,12 +412,8 @@ async function stopShellSession(record: TerminalRecord) {
   if (!record.sessionId) return
   const sessionId = record.sessionId
   record.sessionId = null
-  const desktopApi = getOptionalDesktopApi()
-
   try {
-    if (desktopApi?.shell) {
-      await desktopApi.shell.kill(sessionId)
-    }
+    await getDesktopApi().shell.kill(sessionId)
   } catch {
     /* Session may already have exited. */
   }
@@ -435,17 +428,9 @@ async function startShellSession(record: TerminalRecord) {
 }
 
 async function createShellSession(record: TerminalRecord) {
-  const desktopApi = getOptionalDesktopApi()
-
-  if (!desktopApi?.shell) {
-    writeLine(record, 'ECOS desktop shell bridge is not available.')
-    record.shellStartPromise = null
-    return
-  }
-
   try {
     record.cwdPath = props.projectPath
-    const session = await desktopApi.shell.createSession({
+    const session = await getDesktopApi().shell.createSession({
       cols: record.terminal.cols || 80,
       rows: record.terminal.rows || 24,
       cwd: props.projectPath ?? undefined,
@@ -609,9 +594,7 @@ function handleShellExit(event: { exitCode: number; sessionId: string }) {
 
 function handleData(record: TerminalRecord, data: string) {
   if (!record.sessionId) return
-  const desktopApi = getOptionalDesktopApi()
-  if (!desktopApi?.shell) return
-  void desktopApi.shell.write(record.sessionId, data)
+  void getDesktopApi().shell.write(record.sessionId, data)
 }
 
 function handleResizePointerDown(event: PointerEvent) {
@@ -710,11 +693,9 @@ function stopSessionListResize() {
 onMounted(() => {
   document.addEventListener('pointerdown', closeTerminalMenusOutside)
 
-  const desktopApi = getOptionalDesktopApi()
-  if (desktopApi?.shell) {
-    unsubscribeShellData = desktopApi.shell.onData(handleShellData)
-    unsubscribeShellExit = desktopApi.shell.onExit(handleShellExit)
-  }
+  const shell = getDesktopApi().shell
+  unsubscribeShellData = shell.onData(handleShellData)
+  unsubscribeShellExit = shell.onExit(handleShellExit)
 
   if (terminalBody.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(fitTerminal)

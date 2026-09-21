@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   loadProjectHistory: vi.fn(async () => []),
   readProjectManagementManifest: vi.fn(async () => null),
   listProjectManagementEntries: vi.fn(async () => []),
-  readProjectWorkspaceData: vi.fn(async () => ({ flowStates: {}, analysisInputs: {} })),
   mutateProjectManifest: vi.fn(),
   listResourcesApi: vi.fn(async () => []),
   readMpcSpecApi: vi.fn(async () => null),
-  waitForDesktopApi: vi.fn(async () => ({
+  getDesktopApi: vi.fn(() => ({
     settings: {
       get: vi.fn(async () => null),
       set: vi.fn(async () => undefined),
@@ -32,12 +32,8 @@ vi.mock('@/utils/projectManagementRead', () => ({
   readProjectManagementManifest: mocks.readProjectManagementManifest,
 }))
 
-vi.mock('@/views/project-management/projectWorkspaceData', () => ({
-  readProjectWorkspaceData: mocks.readProjectWorkspaceData,
-}))
-
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi: mocks.waitForDesktopApi,
+  getDesktopApi: mocks.getDesktopApi,
 }))
 
 vi.mock('@/api/plugin', () => ({
@@ -65,6 +61,7 @@ import ProjectsView from './ProjectsView.vue'
 
 describe('ProjectsView runtime mounting', () => {
   it('renders the project management shell during initial setup', async () => {
+    setActivePinia(createPinia())
     const wrapper = mount(ProjectsView, {
       global: {
         stubs: {

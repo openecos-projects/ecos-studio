@@ -4,7 +4,7 @@ import type { ProjectManifestMutation } from '@ecos-studio/shared'
 const mutate = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
-  waitForDesktopApi: vi.fn(async () => ({
+  getDesktopApi: vi.fn(() => ({
     projectManifest: {
       mutate,
     },
@@ -15,7 +15,7 @@ describe('mutateProjectManifest', () => {
   beforeEach(() => {
     mutate.mockReset()
     mutate.mockResolvedValue({
-      content: JSON.stringify({
+      manifest: {
         schema_version: 1,
         project_type: 'backend',
         project_id: 'proj_demo',
@@ -29,8 +29,7 @@ describe('mutateProjectManifest', () => {
         workspaces: [],
         mpc: null,
         best_workspace: null,
-        qor_baseline: null,
-      }),
+      },
     })
   })
 

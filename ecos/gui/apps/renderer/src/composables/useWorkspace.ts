@@ -1,5 +1,6 @@
 import { ref, getCurrentInstance } from 'vue'
 import type {
+  DesignRuntimeEvent,
   DesignTool,
   DesktopSettingsValue,
   WorkspaceDirectoryReplacement,
@@ -7,19 +8,30 @@ import type {
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
-import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import {
   closeWorkspaceApi,
+  backendWorkspaceOptions,
   loadWorkspaceApi,
   createWorkspaceApi,
-  waitForRuntimeReady,
+  updateWorkspaceApi,
 } from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
-import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
+import type {
+  FrontendRuntimeEventClient,
+  FrontendRuntimeEventResponse,
+} from '../api/runtimeEvents'
+import {
+  backendRuntimeEventMessage,
+  backendRuntimeEventOperationId,
+  backendRuntimeEventTerminalState,
+  connectBackendRuntimeEventSession,
+  type BackendRuntimeEventClient,
+  type BackendRuntimeEventClientOptions,
+} from '../api/backendRuntimeEvents'
 import {
   clearFlowExecutionActiveForWorkspace,
   isFlowExecutionActiveForWorkspace,
-  markFlowExecutionActiveForWorkspace,
 } from './flowExecutionState'
 import { finishRuntimeStepRender } from './runtimeStepRenderSync'
 import { setDesktopWindowTitle } from './windowTitle'
@@ -27,6 +39,7 @@ import { useAgentShellStore } from '@/stores/agentShellStore'
 import { useNotificationStore } from '@/stores/notificationStore'
 import {
   useWorkspaceLifecycle,
+  WORKSPACE_RESULT_INVALIDATION_SCOPES,
   type WorkspaceSession,
   type WorkspaceInvalidationScope,
 } from './useWorkspaceLifecycle'
@@ -45,7 +58,11 @@ import {
   rewriteWorkspaceConfigPathsForReplacement,
   workspaceParentPath,
 } from './workspaceReplacement'
-import { resolveProjectRouteContextForWorkspace } from '@/utils/projectManifestRegistration'
+import {
+  resolveProjectRouteContextForWorkspace,
+  type ProjectRouteContext,
+} from '@/utils/projectManifestRegistration'
+import { recentProjectFreshness, recentProjectSnapshot } from './recentProjectSnapshot'
 
 interface SerializedProject {
   id: string
@@ -62,6 +79,10 @@ interface SerializedProject {
   completedSteps?: number
   currentStep?: string
   totalRuntime?: string
+  committedWorkspaceId?: string
+  committedRevision?: number
+  committedVerifiedAt?: string
+  committedFreshness?: 'last-verified' | 'stale'
 }
 
 const currentProject = ref<Project | null>()
@@ -71,6 +92,8 @@ let activeCurrentProjectPathOwner: number | null = null
 let activeProjectRootOwner: number | null = null
 let currentProjectPathMutationQueue = Promise.resolve()
 let projectRootMutationQueue = Promise.resolve()
+let activeWorkspaceCreationRequest = false
+let workspaceRootOwnerSequence = 0
 
 function enqueueCurrentProjectPathMutation<T>(operation: () => Promise<T>): Promise<T> {
   const next = currentProjectPathMutationQueue.then(operation, operation)
@@ -117,7 +140,7 @@ function workspaceRuntimeIdFromResponseData(
   return workspaceHandleFromResponseData(data, fallback)
 }
 
-function scheduleStepRenderedAck(options: {
+function scheduleStepRefresh(options: {
   eventId: string
   operationId: string
   workspaceHandle: string
@@ -125,68 +148,26 @@ function scheduleStepRenderedAck(options: {
   stepCommitId?: string
   workspaceRevision?: number
 }): void {
-  const ackKey = `${options.workspaceHandle}\u001f${options.operationId}\u001f${options.stepCommitId ?? options.eventId}`
-  if (pendingStepRenderedAcks.has(ackKey)) return
-  const acknowledge = async () => {
-    await getOptionalDesktopApi()?.ecc.runtime?.acknowledgeStepRendered({
-      eventId: options.eventId,
-      operationId: options.operationId,
-      workspaceHandle: options.workspaceHandle,
-      ...(options.stepCommitId ? { stepCommitId: options.stepCommitId } : {}),
-      ...(typeof options.workspaceRevision === 'number'
-        ? { workspaceRevision: options.workspaceRevision }
-        : {}),
-    })
-  }
-  if (acknowledgedStepRenderedAcks.has(ackKey)) {
-    void acknowledge().catch((error) => {
-      console.warn('Failed to repeat an ECC step render acknowledgement:', error)
-    })
-    return
-  }
-  const nextFrame = () =>
-    new Promise<void>((resolve) => {
-      if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(() => resolve())
-        return
-      }
-      setTimeout(resolve, 0)
-    })
-
-  const acknowledgement = finishRuntimeStepRender({
+  void finishRuntimeStepRender({
     eventId: options.eventId,
     operationId: options.operationId,
+    workspaceHandle: options.workspaceHandle,
     step: options.step,
     stepCommitId: options.stepCommitId ?? options.eventId,
     workspaceRevision: options.workspaceRevision,
+  }).catch((error) => {
+    console.warn('Failed to refresh data after an ECC step commit:', error)
   })
-    .then(nextFrame)
-    .then(async () => {
-      await acknowledge()
-      acknowledgedStepRenderedAcks.add(ackKey)
-      if (acknowledgedStepRenderedAcks.size > 512) {
-        acknowledgedStepRenderedAcks.delete(
-          acknowledgedStepRenderedAcks.values().next().value!,
-        )
-      }
-    })
-    .catch((error) => {
-      console.warn('Failed to acknowledge rendered ECC step:', error)
-    })
-    .finally(() => {
-      pendingStepRenderedAcks.delete(ackKey)
-    })
-  pendingStepRenderedAcks.set(ackKey, acknowledgement)
 }
 
 // Runtime event connection（workspace 级别，跟随 workspace 生命周期）
-const runtimeEventClient = ref<RuntimeEventClient | null>(null)
-const runtimeEvents = ref<RuntimeEventResponse[]>([])
+const runtimeEventClient = ref<FrontendRuntimeEventClient | null>(null)
+const runtimeEvents = ref<FrontendRuntimeEventResponse[]>([])
+const backendRuntimeEventClient = ref<BackendRuntimeEventClient | null>(null)
+const backendRuntimeEvents = ref<DesignRuntimeEvent[]>([])
 const notificationStore = useNotificationStore()
 const handledRefreshRuntimeEvents = new Set<string>()
 const handledRuntimeProtocolEvents = new Set<string>()
-const pendingStepRenderedAcks = new Map<string, Promise<void>>()
-const acknowledgedStepRenderedAcks = new Set<string>()
 let unregisterRuntimeEventCleanup: (() => void) | null = null
 
 const workspaceLifecycle = useWorkspaceLifecycle()
@@ -198,6 +179,7 @@ const runtimeBackendSubtitle = ref(
   'First load or restoring your project may take a moment',
 )
 const lastWorkspaceCreationError = ref('')
+const lastWorkspaceCreationId = ref('')
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -206,22 +188,22 @@ let _toast: ReturnType<typeof useToast> | null = null
 const APP_NAME = 'ECOS Studio'
 
 async function getSetting<T>(key: string): Promise<T | null> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   return (await desktopApi.settings.get(key)) as T | null
 }
 
 async function setSetting(key: string, value: unknown): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   await desktopApi.settings.set(key, value as DesktopSettingsValue)
 }
 
 async function deleteSetting(key: string): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   await desktopApi.settings.delete(key)
 }
 
 async function pickDirectory(title: string): Promise<string | null> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   return await desktopApi.dialog.pickDirectory({ title })
 }
 
@@ -287,6 +269,23 @@ export function useWorkspace() {
     }
   }
 
+  const releaseWorkspaceHandleAfterFlow = (
+    workspaceHandle: string,
+    designTool: DesignTool,
+  ): void => {
+    void releaseWorkspaceHandle(workspaceHandle, designTool)
+  }
+
+  const completeWorkspaceCreation = async (): Promise<void> => {
+    const creationId = lastWorkspaceCreationId.value
+    if (!creationId) return
+    await getDesktopApi().productCommands.execute({
+      command: 'workspace.completeCreation',
+      payload: { creationId },
+    })
+    lastWorkspaceCreationId.value = ''
+  }
+
   /**
    * Wait until the desktop runtime bridge is available.
    */
@@ -298,7 +297,7 @@ export function useWorkspace() {
     runtimeBackendSubtitle.value =
       'First load or restoring your project may take a moment'
     try {
-      await waitForRuntimeReady({ timeoutMs: 180_000 })
+      getDesktopApi()
       return true
     } catch {
       if (!options.quiet) {
@@ -342,7 +341,7 @@ export function useWorkspace() {
     path: string,
   ): Promise<WorkspaceAffinityResult> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       if (typeof desktopApi.workspace.openOrFocus !== 'function') {
         return { action: 'proceed', previousPath: null }
       }
@@ -365,7 +364,7 @@ export function useWorkspace() {
 
   const bindWorkspaceWindow = async (path: string): Promise<void> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       if (typeof desktopApi.workspace.bindWindow !== 'function') return
       await desktopApi.workspace.bindWindow(path)
     } catch (error) {
@@ -375,7 +374,7 @@ export function useWorkspace() {
 
   const unbindWorkspaceWindow = async (path?: string): Promise<void> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       if (typeof desktopApi.workspace.unbindWindow !== 'function') return
       await desktopApi.workspace.unbindWindow(path)
     } catch (error) {
@@ -409,7 +408,7 @@ export function useWorkspace() {
    */
   const isProjectValid = async (path: string): Promise<boolean> => {
     try {
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       return await desktopApi.workspace.isProjectDirectory(path)
     } catch (error) {
       console.error(`Failed to check path existence: ${path}`, error)
@@ -423,7 +422,7 @@ export function useWorkspace() {
   ): Promise<string | null> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         const canonicalPath = await desktopApi.workspace.registerProjectRoot(path)
         activeProjectRootOwner = owner
         return normalizePath(canonicalPath)
@@ -433,13 +432,18 @@ export function useWorkspace() {
       }
     })
 
-  const registerProjectManagedReadScope = (workspacePath: string): Promise<void> =>
+  const registerProjectManagedReadScope = (
+    workspacePath: string,
+    explicitProjectContext?: ProjectRouteContext | null,
+  ): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const projectContext = await resolveProjectRouteContextForWorkspace(workspacePath)
+        const projectContext =
+          explicitProjectContext ??
+          (await resolveProjectRouteContextForWorkspace(workspacePath))
         if (!projectContext) return
 
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.registerProjectReadRoot(projectContext.projectRoot)
       } catch (error) {
         console.warn('Failed to register managed project read scope:', error)
@@ -449,7 +453,7 @@ export function useWorkspace() {
   const clearProjectRoot = (): Promise<void> =>
     enqueueProjectRootMutation(async () => {
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.clearProjectRoot()
         activeProjectRootOwner = null
       } catch (error) {
@@ -486,7 +490,7 @@ export function useWorkspace() {
     enqueueProjectRootMutation(async () => {
       if (activeProjectRootOwner !== owner) return
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         const committedPath = currentProject.value?.path
         if (committedPath) {
           await desktopApi.workspace.registerProjectRoot(committedPath)
@@ -538,6 +542,10 @@ export function useWorkspace() {
         // 2. 异步并行检测 workspace 识别状态（不阻塞 UI 首屏渲染）
         const checks = projects.map(async (project) => {
           project.workspaceRecognized = await isProjectValid(project.path)
+          project.committedFreshness = recentProjectFreshness(
+            project.workspaceRecognized,
+            project.committedRevision,
+          )
         })
         await Promise.all(checks)
 
@@ -555,7 +563,7 @@ export function useWorkspace() {
         return
       }
 
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       const boundPath =
         typeof desktopApi.workspace.getBoundPath === 'function'
           ? await desktopApi.workspace.getBoundPath()
@@ -608,7 +616,11 @@ export function useWorkspace() {
             await router.replace('/')
             return
           }
-          await registerProjectManagedReadScope(canonicalProjectRoot)
+          const routeProjectRoot = asString(router.currentRoute.value.query.projectRoot)
+          await registerProjectManagedReadScope(
+            canonicalProjectRoot,
+            routeProjectRoot ? { projectRoot: routeProjectRoot } : undefined,
+          )
           if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
           currentProject.value = {
             ...restored,
@@ -625,6 +637,7 @@ export function useWorkspace() {
           workspaceLifecycle.activateSession(session.sessionId, {
             workspaceId,
             projectRoot: canonicalProjectRoot,
+            workspaceRevision: response.data.workspaceRevision,
           })
           connectRuntimeEvents(workspaceId, restoredDesignTool, session.sessionId)
         } else {
@@ -681,7 +694,12 @@ export function useWorkspace() {
   }
   const openProject = async (
     project?: Project,
-    options: { designTool?: DesignTool; quiet?: boolean } = {},
+    options: {
+      designTool?: DesignTool
+      projectContext?: ProjectRouteContext | null
+      quiet?: boolean
+      shouldActivate?: () => boolean
+    } = {},
   ) => {
     const quiet = Boolean(options.quiet)
     const openProjectRequestId = ++openProjectRequestSequence
@@ -694,7 +712,9 @@ export function useWorkspace() {
     const previousDesignTool = currentProject.value?.designTool ?? 'backend'
     let candidateDesignTool: DesignTool = 'backend'
     let candidateWorkspaceHandle = ''
+    let candidateWorkspaceReused = false
     let candidateWorkspaceCommitted = false
+    let candidateWorkspaceReleaseDeferred = false
     let candidateProjectPathPersisted = false
     let candidateProjectRootRegistered = false
     let claimedAffinityPath: string | null = null
@@ -773,7 +793,7 @@ export function useWorkspace() {
 
       if (!(await ensureApiReady({ keepLoading: true, quiet }))) {
         if (!isLatestOpenProjectRequest()) return false
-        if (session) workspaceLifecycle.failSession(session.sessionId)
+        if (sessionId) workspaceLifecycle.failSession(sessionId)
         return false
       }
       if (!isLatestOpenProjectRequest()) return false
@@ -783,13 +803,6 @@ export function useWorkspace() {
         'Opening project data and preparing the workspace view'
       if (session) workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      if (currentProject.value) {
-        try {
-          await snapshotCurrentProject(isLatestOpenProjectRequest)
-        } catch (err) {
-          console.error('Failed to snapshot project data before switching:', err)
-        }
-      }
       if (!isLatestOpenProjectRequest()) return false
 
       if (!preserveExistingSession) {
@@ -803,6 +816,7 @@ export function useWorkspace() {
           ? await loadWorkspaceApi(selectedPath, requestedDesignTool)
           : await loadWorkspaceApi(selectedPath)
       if (response.response === 'success') {
+        candidateWorkspaceReused = Boolean(response.data.reused)
         candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
           response.data,
           requestedDesignTool,
@@ -833,7 +847,10 @@ export function useWorkspace() {
           }
           return false
         }
-        await registerProjectManagedReadScope(canonicalProjectRoot)
+        await registerProjectManagedReadScope(
+          canonicalProjectRoot,
+          options.projectContext,
+        )
         if (!isLatestOpenProjectRequest()) return false
         if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
           return false
@@ -850,6 +867,19 @@ export function useWorkspace() {
           path: canonicalProjectRoot,
           designTool: requestedDesignTool,
           lastOpened: new Date(),
+        }
+
+        if (options.shouldActivate && !options.shouldActivate()) {
+          if (sessionId) workspaceLifecycle.failSession(sessionId)
+          if (
+            requestedDesignTool === 'backend' &&
+            isFlowExecutionActiveForWorkspace(loadedProject.path)
+          ) {
+            candidateWorkspaceReleaseDeferred = true
+            releaseWorkspaceHandleAfterFlow(candidateWorkspaceHandle, requestedDesignTool)
+          }
+          await addToRecent(loadedProject)
+          return true
         }
 
         // 持久化当前项目路径，以便 reload 后恢复
@@ -884,49 +914,13 @@ export function useWorkspace() {
         workspaceLifecycle.activateSession(activeSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
+          workspaceRevision: response.data.workspaceRevision,
         })
         candidateWorkspaceCommitted = true
         connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
 
-        // 恢复运行状态：检查ECC runtime中是否有正在运行的operations
-        if (
-          requestedDesignTool === 'backend' &&
-          !isFlowExecutionActiveForWorkspace(canonicalProjectRoot)
-        ) {
-          try {
-            const desktopApi = await waitForDesktopApi()
-            if (desktopApi.ecc.runtime?.snapshot) {
-              const snapshot = await desktopApi.ecc.runtime.snapshot({
-                workspaceHandle: workspaceId,
-              })
-
-              // 检查是否有活跃的operations（运行中、排队中或等待GUI同步）
-              const hasActiveOperations = snapshot.operations?.some(
-                (op: import('@ecos-studio/shared').EccRuntimeOperation) =>
-                  op.state === 'running' ||
-                  op.state === 'queued' ||
-                  op.state === 'waiting_for_gui_sync' ||
-                  op.state === 'paused_for_gui_recovery',
-              )
-
-              if (hasActiveOperations) {
-                markFlowExecutionActiveForWorkspace(canonicalProjectRoot)
-                console.log(
-                  `[useWorkspace] Restored running state for workspace: ${canonicalProjectRoot}`,
-                )
-              }
-            }
-          } catch (error) {
-            // 静默失败，不影响workspace打开流程
-            console.warn(
-              `[useWorkspace] Failed to check runtime operations for ${canonicalProjectRoot}:`,
-              error,
-            )
-          }
-        }
-
         if (previousWorkspaceHandle !== workspaceId) {
-          await releaseWorkspaceHandle(previousWorkspaceHandle, previousDesignTool)
+          releaseWorkspaceHandleAfterFlow(previousWorkspaceHandle, previousDesignTool)
         }
 
         // 更新窗口标题
@@ -937,7 +931,7 @@ export function useWorkspace() {
 
         return true
       } else {
-        if (session) workspaceLifecycle.failSession(session.sessionId)
+        if (sessionId) workspaceLifecycle.failSession(sessionId)
         console.error('Failed to load project:', response.message)
         if (!quiet) {
           showToast({
@@ -973,7 +967,11 @@ export function useWorkspace() {
         if (candidateProjectPathPersisted) {
           await rollbackCurrentProjectPath(openProjectRequestId)
         }
-        if (candidateWorkspaceHandle) {
+        if (
+          candidateWorkspaceHandle &&
+          !candidateWorkspaceReleaseDeferred &&
+          !candidateWorkspaceReused
+        ) {
           await releaseWorkspaceHandle(candidateWorkspaceHandle, candidateDesignTool)
         }
       }
@@ -987,8 +985,24 @@ export function useWorkspace() {
    * 新建项目 - 支持 Wizard 配置
    * @param config 项目配置（来自向导）
    */
-  const newProject = async (config?: WorkspaceConfig) => {
+  const newProject = async (
+    config?: WorkspaceConfig,
+    options: { shouldActivate?: () => boolean } = {},
+  ) => {
+    if (activeWorkspaceCreationRequest) {
+      lastWorkspaceCreationError.value =
+        'A workspace creation request is already in progress.'
+      return false
+    }
+    activeWorkspaceCreationRequest = true
     lastWorkspaceCreationError.value = ''
+    lastWorkspaceCreationId.value = ''
+    const previousWorkspaceHandle =
+      workspaceLifecycle.session.value.state === 'active'
+        ? workspaceLifecycle.session.value.workspaceId
+        : ''
+    const previousWorkspacePath = currentProject.value?.path
+    const previousDesignTool = currentProject.value?.designTool ?? 'backend'
     let sessionId: string | null = null
     let replacement: WorkspaceDirectoryReplacement | null = null
     let committedReplacement = false
@@ -1000,31 +1014,37 @@ export function useWorkspace() {
     let selectedPath = ''
     let existedBeforeCreate = false
     let usedDirectoryReplacement = false
+    let candidateWorkspaceSucceeded = false
+    let candidateCreationCompleted = false
+    const candidateRootOwner = ++workspaceRootOwnerSequence
+    let candidateProjectRootRegistered = false
     const restoreReplacement = async () => {
       if (!replacement || committedReplacement) return
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       await desktopApi.workspace.restoreProjectDirectoryReplacement(replacement.id)
       replacement = null
     }
     const finalizeReplacement = async () => {
       if (!replacement) return
-      const desktopApi = await waitForDesktopApi()
+      const desktopApi = getDesktopApi()
       await desktopApi.workspace.finalizeProjectDirectoryReplacement(replacement.id)
       committedReplacement = true
       replacement = null
     }
     const discardFailedCreateIfNeeded = async () => {
-      // Replacement failures restore the prior workspace; only discard brand-new residue.
+      // Backend failures keep journaled partial directories for explicit recovery.
       if (
+        candidateDesignTool === 'backend' ||
         !selectedPath ||
         existedBeforeCreate ||
         usedDirectoryReplacement ||
-        candidateWorkspaceCommitted
+        candidateWorkspaceCommitted ||
+        candidateWorkspaceSucceeded
       ) {
         return
       }
       try {
-        const desktopApi = await waitForDesktopApi()
+        const desktopApi = getDesktopApi()
         await desktopApi.workspace.discardFailedWorkspaceCreate(selectedPath)
       } catch (cleanupError) {
         console.error('Failed to discard incomplete workspace create:', cleanupError)
@@ -1048,6 +1068,85 @@ export function useWorkspace() {
       }
 
       selectedPath = normalizePath(selectedPath)
+      if (
+        config?.replaceExistingWorkspace &&
+        isFlowExecutionActiveForWorkspace(selectedPath)
+      ) {
+        lastWorkspaceCreationError.value =
+          'Cannot update a workspace while its flow is running. Wait for it to finish, or create another Workspace for a parallel comparison.'
+        showToast({
+          severity: 'warn',
+          summary: 'Workspace Update Unavailable',
+          detail: lastWorkspaceCreationError.value,
+          life: 5000,
+        })
+        return false
+      }
+      if (
+        !config?.replaceExistingWorkspace &&
+        currentProject.value &&
+        normalizePath(currentProject.value.path) === selectedPath
+      ) {
+        return true
+      }
+      const updatesCurrentBackendWorkspace = Boolean(
+        config?.replaceExistingWorkspace &&
+        !config.keepReplacementBackup &&
+        (config.designTool ?? 'backend') === 'backend' &&
+        currentProject.value &&
+        normalizePath(currentProject.value.path) === selectedPath &&
+        workspaceLifecycle.session.value.workspaceId,
+      )
+      if (updatesCurrentBackendWorkspace) {
+        existedBeforeCreate = true
+        if (!(await ensureApiReady({ keepLoading: true }))) {
+          lastWorkspaceCreationError.value =
+            'The desktop runtime is unavailable. Restart the application and try again.'
+          return false
+        }
+        runtimeBackendTitle.value = 'Updating your workspace'
+        runtimeBackendSubtitle.value = 'Committing the revised engineering specification'
+        runtimeBackendConnecting.value = true
+        const expectedWorkspaceRevision =
+          workspaceLifecycle.session.value.workspaceRevision
+        if (!Number.isInteger(expectedWorkspaceRevision)) {
+          throw new Error('The current Workspace revision is unavailable.')
+        }
+        const currentWorkspaceHandle = workspaceLifecycle.session.value.workspaceId
+        const updated = await updateWorkspaceApi(
+          backendWorkspaceOptions(config!, selectedPath),
+          currentWorkspaceHandle,
+          expectedWorkspaceRevision!,
+        )
+        if (
+          !('workspaceRevision' in updated) ||
+          typeof updated.workspaceRevision !== 'number'
+        ) {
+          throw new Error('Workspace update did not return a revision.')
+        }
+        const updatedSession = workspaceLifecycle.beginSession({
+          projectRoot: selectedPath,
+        })
+        workspaceLifecycle.setSessionLoading(updatedSession.sessionId)
+        workspaceLifecycle.activateSession(updatedSession.sessionId, {
+          projectRoot: selectedPath,
+          workspaceId: currentWorkspaceHandle,
+          workspaceRevision: updated.workspaceRevision,
+        })
+        connectRuntimeEvents(currentWorkspaceHandle, 'backend', updatedSession.sessionId)
+        workspaceLifecycle.invalidate('all', {
+          reason: 'workspace-updated',
+          sessionId: updatedSession.sessionId,
+        })
+        runtimeBackendConnecting.value = false
+        showToast({
+          severity: 'success',
+          summary: 'Workspace Updated',
+          detail: 'The engineering specification was committed.',
+          life: 4000,
+        })
+        return true
+      }
       const createAffinity = await resolveWorkspaceWindowAffinity(selectedPath)
       if (createAffinity.action === 'focused') {
         lastWorkspaceCreationError.value =
@@ -1057,29 +1156,17 @@ export function useWorkspace() {
       claimedCreatePath = selectedPath
       previousCreatePath = createAffinity.previousPath
 
-      // Affinity first: do not close this window's workspace when another window
-      // already owns the target path.
-      if (currentProject.value) {
-        await closeProject()
-        // Replacing the same directory unbinds during close; reclaim for create.
-        const reclaim = await resolveWorkspaceWindowAffinity(selectedPath)
-        if (reclaim.action === 'focused') {
-          claimedCreatePath = null
-          previousCreatePath = null
-          lastWorkspaceCreationError.value =
-            'The workspace is already open in another window.'
-          return false
-        }
-        claimedCreatePath = selectedPath
-        previousCreatePath = reclaim.previousPath
-      }
-
       let creationConfig = config
       if (config?.replaceExistingWorkspace) {
-        const desktopApi = await waitForDesktopApi()
-        const registeredParent = await desktopApi.workspace.registerProjectRoot(
+        const desktopApi = getDesktopApi()
+        const registeredParent = await registerProjectRoot(
           workspaceParentPath(selectedPath),
+          candidateRootOwner,
         )
+        candidateProjectRootRegistered = Boolean(registeredParent)
+        if (!registeredParent) {
+          throw new Error('Failed to register workspace parent directory')
+        }
         replacement =
           await desktopApi.workspace.prepareProjectDirectoryReplacement(selectedPath)
         if (replacement) {
@@ -1098,9 +1185,6 @@ export function useWorkspace() {
         } else {
           selectedPath = normalizePath(selectedPath)
         }
-        if (!registeredParent) {
-          throw new Error('Failed to register workspace parent directory')
-        }
         if (claimedCreatePath !== selectedPath) {
           await unbindWorkspaceWindow(claimedCreatePath)
           const replacementAffinity = await resolveWorkspaceWindowAffinity(selectedPath)
@@ -1116,13 +1200,7 @@ export function useWorkspace() {
         }
       }
 
-      const session = workspaceLifecycle.beginSession({
-        projectRoot: normalizePath(selectedPath),
-      })
-      sessionId = session.sessionId
-
       if (!(await ensureApiReady({ keepLoading: true }))) {
-        workspaceLifecycle.failSession(session.sessionId)
         await restoreReplacement()
         lastWorkspaceCreationError.value =
           'The desktop runtime is unavailable. Restart the application and try again.'
@@ -1132,9 +1210,8 @@ export function useWorkspace() {
       runtimeBackendTitle.value = 'Creating your workspace'
       runtimeBackendSubtitle.value =
         'Writing project files and preparing the workspace view'
-      workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      const desktopApiForCreate = await waitForDesktopApi()
+      const desktopApiForCreate = getDesktopApi()
       existedBeforeCreate = await desktopApiForCreate.workspace.pathExists(selectedPath)
 
       // 3. Create the workspace through the selected persistent RPC runtime.
@@ -1205,112 +1282,27 @@ export function useWorkspace() {
           ),
         })
       } else {
-        const pdkName = creationConfig?.pdk || 'ics55'
-        const toNumber = (value: unknown, fallback: number) => {
-          const parsed = Number(value)
-          return Number.isFinite(parsed) ? parsed : fallback
-        }
-        const dieAreaMode =
-          frontendParams.die_area_mode === 'width_height'
-            ? 'width_height'
-            : 'utilitization_margin'
-        const dieArea =
-          dieAreaMode === 'width_height'
-            ? {
-                mode: dieAreaMode,
-                width: toNumber(frontendParams.die_width, 100),
-                height: toNumber(frontendParams.die_height, 100),
-              }
-            : {
-                mode: dieAreaMode,
-                utilitization: toNumber(
-                  frontendParams.utilitization ?? frontendParams.core_utilization,
-                  0.6,
-                ),
-                margin: toNumber(frontendParams.margin, 0),
-              }
-        const backendParameters = {
-          Design:
-            frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
-          'Top module': frontendParams.top_module || 'top',
-          Clock: frontendParams.clock || 'clk',
-          'Die Area': dieArea,
-          'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
-          'Max fanout': toNumber(frontendParams.max_fanout, 20),
-          'Target density': toNumber(frontendParams.target_density, 0.2),
-          'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
-          PDK: pdkName,
-          Core: {
-            Utilitization:
-              dieAreaMode === 'utilitization_margin'
-                ? toNumber(
-                    frontendParams.utilitization ?? frontendParams.core_utilization,
-                    0.6,
-                  )
-                : toNumber(frontendParams.core_utilization, 0.5),
-          },
-          ...(creationConfig?.mpc ? { MPC: creationConfig.mpc } : {}),
-        }
-
-        const resolvedPdkRoot = creationConfig?.pdk_root || ''
-        const manualPdkConfig = creationConfig?.pdk_config
-        const pdkJson =
-          creationConfig?.pdk_config_mode === 'manual' ||
-          manualPdkConfig?.mode === 'manual'
-            ? {
-                name: pdkName,
-                root: resolvedPdkRoot,
-                tech: manualPdkConfig?.tech_lef[0] ?? '',
-                lefs: manualPdkConfig?.cell_lef ?? [],
-                libs: manualPdkConfig?.liberty ?? [],
-              }
-            : creationConfig?.pdk_json
-
-        response = await createWorkspaceApi({
-          directory: selectedPath,
-          designTool: 'backend',
-          pdk: pdkName,
-          pdk_root: resolvedPdkRoot,
-          pdk_installation_id: creationConfig?.pdk_installation_id,
-          pdk_requirement: creationConfig?.pdk_requirement,
-          parameters: backendParameters,
-          origin_def: creationConfig?.origin_def,
-          origin_verilog: creationConfig?.origin_verilog,
-          rtl_list: creationConfig?.rtl_list || [],
-          filelist: creationConfig?.filelist,
-          design_input_mode: creationConfig?.design_input_mode,
-          sdc: creationConfig?.sdc,
-          flow_config: creationConfig?.flow_config,
-          pdk_config_mode: creationConfig?.pdk_config_mode,
-          pdk_config: creationConfig?.pdk_config,
-          pdk_json: pdkJson,
-          project_context: creationConfig?.project_context,
-        })
+        response = await createWorkspaceApi(
+          backendWorkspaceOptions(creationConfig!, selectedPath),
+        )
       }
       if (response.response === 'success') {
+        lastWorkspaceCreationId.value = response.data.creationId ?? ''
+        candidateWorkspaceSucceeded = true
         candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
           response.data,
           designTool,
           selectedPath,
         )
       }
-      if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
-        await restoreReplacement()
-        lastWorkspaceCreationError.value =
-          'The workspace creation request was superseded.'
-        return false
-      }
       if (response.response === 'success') {
         const resolvedPath = normalizePath(response.data.directory)
-        const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
-        if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
-          await restoreReplacement()
-          lastWorkspaceCreationError.value =
-            'The workspace creation request was superseded.'
-          return false
-        }
+        const canonicalProjectRoot = await registerProjectRoot(
+          resolvedPath,
+          candidateRootOwner,
+        )
+        candidateProjectRootRegistered = Boolean(canonicalProjectRoot)
         if (!canonicalProjectRoot) {
-          workspaceLifecycle.failSession(session.sessionId)
           await restoreReplacement()
           showToast({
             severity: 'error',
@@ -1322,12 +1314,36 @@ export function useWorkspace() {
             'The project directory could not be registered for local file access.'
           return false
         }
+
         if (replacement && config?.keepReplacementBackup) {
           await recordWorkspaceReplacementBackup(replacement, config, showToast)
           committedReplacement = true
           replacement = null
         } else {
           await finalizeReplacement()
+        }
+
+        if (options.shouldActivate && !options.shouldActivate()) {
+          if (
+            !(await addToRecent({
+              id: canonicalProjectRoot,
+              name: workspaceNameFromPath(canonicalProjectRoot),
+              path: canonicalProjectRoot,
+              designTool,
+              lastOpened: new Date(),
+            }))
+          ) {
+            throw new Error('Workspace creation did not finish application registration.')
+          }
+          await completeWorkspaceCreation()
+          candidateCreationCompleted = true
+          showToast({
+            severity: 'success',
+            summary: 'Workspace Created',
+            detail: 'The new Workspace is available in Project Management.',
+            life: 5000,
+          })
+          return true
         }
 
         const createdProject: Project = {
@@ -1337,6 +1353,17 @@ export function useWorkspace() {
           designTool,
           lastOpened: new Date(),
         }
+
+        if (!(await addToRecent(createdProject))) {
+          throw new Error('Workspace creation did not finish application registration.')
+        }
+        await completeWorkspaceCreation()
+
+        const createdSession = workspaceLifecycle.beginSession({
+          projectRoot: canonicalProjectRoot,
+        })
+        sessionId = createdSession.sessionId
+        workspaceLifecycle.setSessionLoading(createdSession.sessionId)
 
         currentProject.value = createdProject
         if (useAgentShellStore().shouldPreserveMessages()) {
@@ -1357,28 +1384,34 @@ export function useWorkspace() {
           designTool,
           canonicalProjectRoot,
         )
-        workspaceLifecycle.activateSession(session.sessionId, {
+        workspaceLifecycle.activateSession(createdSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
+          workspaceRevision: response.data.workspaceRevision,
         })
         candidateWorkspaceCommitted = true
         workspaceLifecycle.invalidate(['home', 'flow', 'parameters'], {
-          sessionId: session.sessionId,
+          sessionId: createdSession.sessionId,
           reason: 'workspace-created',
         })
-        connectRuntimeEvents(workspaceId, designTool, session.sessionId)
+        connectRuntimeEvents(workspaceId, designTool, createdSession.sessionId, {
+          allowDirectoryFallback: !usedDirectoryReplacement,
+        })
+
+        if (previousWorkspaceHandle && previousWorkspaceHandle !== workspaceId) {
+          releaseWorkspaceHandleAfterFlow(previousWorkspaceHandle, previousDesignTool)
+        }
 
         // 更新窗口标题
         await updateWindowTitle(createdProject.name)
 
-        // 添加到最近项目列表（包含路径标准化和持久化）
-        await addToRecent(createdProject)
+        candidateCreationCompleted = true
 
         return true
       } else {
         await restoreReplacement()
         await discardFailedCreateIfNeeded()
-        workspaceLifecycle.failSession(session.sessionId)
+        if (sessionId) workspaceLifecycle.failSession(sessionId)
         const error = response.message?.join('; ') || 'Unknown error'
         lastWorkspaceCreationError.value = error
         console.error('Failed to create project:', response.message)
@@ -1409,12 +1442,36 @@ export function useWorkspace() {
       })
       return false
     } finally {
+      activeWorkspaceCreationRequest = false
+      if (lastWorkspaceCreationId.value && !candidateCreationCompleted) {
+        void getDesktopApi()
+          .productCommands.execute({
+            command: 'workspace.failCreation',
+            payload: {
+              creationId: lastWorkspaceCreationId.value,
+              issue:
+                lastWorkspaceCreationError.value ||
+                'Workspace creation did not finish application registration.',
+            },
+          })
+          .catch((error) =>
+            console.warn('Failed to retain Workspace creation recovery state:', error),
+          )
+      }
       if (!candidateWorkspaceCommitted) {
         if (claimedCreatePath) {
           await unbindWorkspaceWindow(claimedCreatePath)
-          if (previousCreatePath) {
+          if (
+            previousCreatePath &&
+            (!previousWorkspacePath ||
+              normalizePath(currentProject.value?.path ?? '') ===
+                normalizePath(previousWorkspacePath))
+          ) {
             await bindWorkspaceWindow(previousCreatePath)
           }
+        }
+        if (candidateProjectRootRegistered) {
+          await rollbackProjectRoot(candidateRootOwner)
         }
         if (candidateWorkspaceHandle) {
           await releaseWorkspaceHandle(candidateWorkspaceHandle, candidateDesignTool)
@@ -1443,95 +1500,107 @@ export function useWorkspace() {
 
     const snapshot: Partial<Project> = {}
 
-    try {
-      const flowData = await readWorkspaceFlowResourceApi()
-      if (!isCurrent()) return
-      if (isRecord(flowData) && Array.isArray(flowData.steps)) {
-        const steps = flowData.steps
-        const hasMalformedStep = steps.some(
-          (step) =>
-            !isRecord(step) ||
-            asString(step.name) === undefined ||
-            asString(step.state) === undefined,
-        )
-        if (hasMalformedStep) {
-          throw new Error('Malformed flow steps in snapshot payload')
-        }
+    if ((project.designTool ?? 'backend') === 'backend') {
+      try {
+        const result = await getDesktopApi().backendWorkspace.getOverview()
+        if (!isCurrent()) return
+        Object.assign(snapshot, recentProjectSnapshot(result.overview))
+      } catch {
+        console.warn('Failed to read committed workspace summary')
+      }
+    } else {
+      try {
+        const flowData = await readWorkspaceFlowResourceApi()
+        if (!isCurrent()) return
+        if (isRecord(flowData) && Array.isArray(flowData.steps)) {
+          const steps = flowData.steps
+          const hasMalformedStep = steps.some(
+            (step) =>
+              !isRecord(step) ||
+              asString(step.name) === undefined ||
+              asString(step.state) === undefined,
+          )
+          if (hasMalformedStep) {
+            throw new Error('Malformed flow steps in snapshot payload')
+          }
 
-        const completedSteps = steps.filter((s) => asString(s.state) === 'Success').length
-        const totalSteps = steps.length
-        const failedStep = steps.find(
-          (s) => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid',
-        )
-        const ongoingStep = steps.find((s) => asString(s.state) === 'Ongoing')
-        const firstPending = steps.find(
-          (s) => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending',
-        )
+          const completedSteps = steps.filter(
+            (s) => asString(s.state) === 'Success',
+          ).length
+          const totalSteps = steps.length
+          const failedStep = steps.find(
+            (s) => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid',
+          )
+          const ongoingStep = steps.find((s) => asString(s.state) === 'Ongoing')
+          const firstPending = steps.find(
+            (s) => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending',
+          )
 
-        let status: ProjectStatus = 'not_started'
-        if (ongoingStep) status = 'running'
-        else if (completedSteps === totalSteps && totalSteps > 0) status = 'success'
-        else if (failedStep) status = 'failed'
-        else if (completedSteps > 0) status = 'in_progress'
+          let status: ProjectStatus = 'not_started'
+          if (ongoingStep) status = 'running'
+          else if (completedSteps === totalSteps && totalSteps > 0) status = 'success'
+          else if (failedStep) status = 'failed'
+          else if (completedSteps > 0) status = 'in_progress'
 
-        let totalSeconds = 0
-        let hasValidRuntime = false
-        for (const step of steps) {
-          const runtime = asString(step.runtime)
-          if (runtime) {
-            const parts = runtime.split(':')
-            const numericParts = parts.map((part) =>
-              part.trim() === '' ? Number.NaN : Number(part),
-            )
-            if (numericParts.length === 3 && numericParts.every(Number.isFinite)) {
-              totalSeconds +=
-                numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
-              hasValidRuntime = true
+          let totalSeconds = 0
+          let hasValidRuntime = false
+          for (const step of steps) {
+            const runtime = asString(step.runtime)
+            if (runtime) {
+              const parts = runtime.split(':')
+              const numericParts = parts.map((part) =>
+                part.trim() === '' ? Number.NaN : Number(part),
+              )
+              if (numericParts.length === 3 && numericParts.every(Number.isFinite)) {
+                totalSeconds +=
+                  numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
+                hasValidRuntime = true
+              }
             }
           }
+          const h = Math.floor(totalSeconds / 3600)
+          const m = Math.floor((totalSeconds % 3600) / 60)
+          const s = totalSeconds % 60
+          const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
+          const currentStep =
+            asString(ongoingStep?.name) ||
+            asString(failedStep?.name) ||
+            asString(firstPending?.name)
+
+          snapshot.status = status
+          snapshot.totalSteps = totalSteps
+          snapshot.completedSteps = completedSteps
+          snapshot.currentStep = currentStep
+          if (totalSteps > 0 && hasValidRuntime) snapshot.totalRuntime = totalRuntime
+          else if (totalSteps === 0) snapshot.totalRuntime = undefined
         }
-        const h = Math.floor(totalSeconds / 3600)
-        const m = Math.floor((totalSeconds % 3600) / 60)
-        const s = totalSeconds % 60
-        const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
-        const currentStep =
-          asString(ongoingStep?.name) ||
-          asString(failedStep?.name) ||
-          asString(firstPending?.name)
-
-        snapshot.status = status
-        snapshot.totalSteps = totalSteps
-        snapshot.completedSteps = completedSteps
-        snapshot.currentStep = currentStep
-        if (totalSteps > 0 && hasValidRuntime) snapshot.totalRuntime = totalRuntime
-        else if (totalSteps === 0) snapshot.totalRuntime = undefined
+      } catch {
+        console.warn('Failed to read flow.json for snapshot')
       }
-    } catch {
-      console.warn('Failed to read flow.json for snapshot')
-    }
 
-    try {
-      const params = await readWorkspaceParametersResourceApi()
-      if (!isCurrent()) return
-      if (isRecord(params)) {
-        const pdk = asString(params['PDK']) ?? asString(params['pdk'])
-        const topModule = asString(params['Top module']) ?? asString(params['top_module'])
-        const frequencyTarget =
-          asNumber(params['Frequency max [MHz]']) ?? asNumber(params['frequency_max'])
-        if (pdk !== undefined) snapshot.pdk = pdk
-        if (topModule !== undefined) snapshot.topModule = topModule
-        if (frequencyTarget !== undefined) snapshot.frequencyTarget = frequencyTarget
-        const dieArea = params['Die Area'] ?? params.die_area
-        const core = params.Core ?? params.core
-        const coreUtilization =
-          (isRecord(dieArea) ? asNumber(dieArea.utilitization) : undefined) ??
-          (isRecord(core)
-            ? (asNumber(core.Utilitization) ?? asNumber(core.utilitization))
-            : undefined)
-        if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
+      try {
+        const params = await readWorkspaceParametersResourceApi()
+        if (!isCurrent()) return
+        if (isRecord(params)) {
+          const pdk = asString(params['PDK']) ?? asString(params.pdk)
+          const topModule = asString(params['Top module']) ?? asString(params.top_module)
+          const frequencyTarget =
+            asNumber(params['Frequency max [MHz]']) ?? asNumber(params.frequency_max)
+          if (pdk !== undefined) snapshot.pdk = pdk
+          if (topModule !== undefined) snapshot.topModule = topModule
+          if (frequencyTarget !== undefined) snapshot.frequencyTarget = frequencyTarget
+          const dieArea = params['Die Area'] ?? params.die_area
+          const core = params.Core ?? params.core
+          const coreUtilization =
+            (isRecord(dieArea) ? asNumber(dieArea.utilitization) : undefined) ??
+            (isRecord(core)
+              ? (asNumber(core.Utilitization) ?? asNumber(core.utilitization))
+              : undefined)
+          if (coreUtilization !== undefined) snapshot.coreUtilization = coreUtilization
+        }
+      } catch {
+        console.warn('Failed to read parameters.json for snapshot')
       }
-    } catch {
-      console.warn('Failed to read workspace parameters for snapshot')
     }
 
     const currentIdx = recentProjects.value.findIndex(
@@ -1609,22 +1678,104 @@ export function useWorkspace() {
   /**
    * 建立 runtime event 连接，订阅 workspace 的运行生命周期通知
    */
+  function connectBackendRuntimeEvents(
+    workspaceId: string,
+    sessionId: string,
+    options?: BackendRuntimeEventClientOptions,
+  ): void {
+    const projectPath = currentProject.value?.path
+    const client = connectBackendRuntimeEventSession(workspaceId, projectPath, {
+      allowDirectoryFallback: options?.allowDirectoryFallback,
+      isCurrent: () => workspaceLifecycle.isCurrentSession(sessionId),
+      onEvent: (event) => {
+        backendRuntimeEvents.value.push(event)
+        if (backendRuntimeEvents.value.length > 200) {
+          backendRuntimeEvents.value.splice(0, backendRuntimeEvents.value.length - 200)
+        }
+      },
+      onFailure: (failure) => {
+        const rawMessage = failure.message
+        const [message, ...detailLines] = rawMessage.split('\n')
+        const previousRun =
+          isRecord(failure.details) && failure.details.previousRun === true
+        const stepTitle = failure.step
+          ? `${failure.step.charAt(0).toUpperCase()}${failure.step.slice(1)}`
+          : 'Flow'
+        notificationStore.addNotification({
+          key: failure.operationId,
+          severity: 'error',
+          title: failure.sidecarStopped
+            ? 'ECC sidecar stopped'
+            : previousRun
+              ? `Previous ${stepTitle} run was interrupted`
+              : failure.code === 'interrupted' || failure.terminalState === 'interrupted'
+                ? `${stepTitle} interrupted`
+                : `${stepTitle} failed`,
+          message: message?.trim() || 'ECC runtime operation failed.',
+          detail:
+            detailLines.join('\n').trim() ||
+            (failure.code === 'interrupted' || failure.terminalState === 'interrupted'
+              ? 'The step was marked Incomplete and was not rerun automatically.'
+              : 'Review the step log before rerunning.'),
+          logFile: failure.logFile,
+        })
+      },
+      onInvalidate: (step) => {
+        workspaceLifecycle.invalidate(WORKSPACE_RESULT_INVALIDATION_SCOPES, {
+          sessionId,
+          reason: 'runtime-event',
+          step,
+        })
+      },
+      onRevision: (revision) => {
+        workspaceLifecycle.updateWorkspaceRevision(revision, sessionId)
+      },
+      onRerunPrepared: (event) => {
+        notifyWorkspaceRerunPrepared(event)
+        if (
+          event.scope === 'flow' &&
+          !isAgentWorkspaceRerunHomePrepared(event.projectPath)
+        ) {
+          clearHomeRunArtifactResetAwaitingBackendStart(event.projectPath)
+          requestHomeRunArtifactReset(event.projectPath)
+        }
+      },
+      onStepCommit: scheduleStepRefresh,
+      onTerminal: (directory) => {
+        const resolvedDirectory = directory ?? currentProject.value?.path
+        if (resolvedDirectory) clearFlowExecutionActiveForWorkspace(resolvedDirectory)
+      },
+    })
+    backendRuntimeEventClient.value = client
+    unregisterRuntimeEventCleanup = workspaceLifecycle.registerCleanup(
+      () => {
+        if (backendRuntimeEventClient.value === client) {
+          backendRuntimeEventClient.value = null
+        }
+        client.close()
+      },
+      { sessionId, label: 'backend runtime event client' },
+    )
+  }
+
   function connectRuntimeEvents(
     workspaceId: string,
     designTool: DesignTool = 'backend',
     sessionId = workspaceLifecycle.session.value.sessionId,
+    options?: BackendRuntimeEventClientOptions,
   ) {
     // 如果已有连接，先关闭
     disconnectRuntimeEvents()
     handledRuntimeProtocolEvents.clear()
 
-    const client =
-      designTool === 'frontend'
-        ? runtimeEventApi.createRuntimeEventClient(workspaceId, {
-            designTool,
-            workspaceDirectory: currentProject.value?.path,
-          })
-        : runtimeEventApi.createRuntimeEventClient(workspaceId)
+    if (designTool === 'backend') {
+      connectBackendRuntimeEvents(workspaceId, sessionId, options)
+      return
+    }
+
+    const client = runtimeEventApi.createFrontendRuntimeEventClient(workspaceId, {
+      workspaceDirectory: currentProject.value?.path,
+    })
 
     // 注册通用处理器，收集所有通知到 runtimeEvents
     client.onAll((response) => {
@@ -1674,6 +1825,9 @@ export function useWorkspace() {
         const step = asString(response.data?.step) ?? ''
         const stepCommitId = asString(response.data?.stepCommitId)
         const workspaceRevision = asNumber(response.data?.workspaceRevision)
+        if (workspaceRevision !== undefined) {
+          workspaceLifecycle.updateWorkspaceRevision(workspaceRevision, sessionId)
+        }
         const runtimeEventKey = runtimeEventId
           ? [
               workspaceHandle ?? '',
@@ -1693,29 +1847,12 @@ export function useWorkspace() {
             )
           }
         }
-        if (duplicate) {
-          if (
-            eventType === 'step.completed' &&
-            runtimeEventId &&
-            operationId &&
-            workspaceHandle
-          ) {
-            scheduleStepRenderedAck({
-              eventId: runtimeEventId,
-              operationId,
-              step,
-              stepCommitId,
-              workspaceRevision,
-              workspaceHandle,
-            })
-          }
-          return
-        }
+        if (duplicate) return
         runtimeEvents.value.push(response)
         if (runtimeEvents.value.length > 200) {
           runtimeEvents.value.splice(0, runtimeEvents.value.length - 200)
         }
-        const rerunPrepared = workspaceRerunPreparedEvent(response)
+        const rerunPrepared = frontendWorkspaceRerunPreparedEvent(response)
         if (rerunPrepared) {
           notifyWorkspaceRerunPrepared(rerunPrepared)
         }
@@ -1726,14 +1863,14 @@ export function useWorkspace() {
             requestHomeRunArtifactReset(resetProjectPath)
           }
         }
-        invalidateResourcesForRuntimeEvent(response, sessionId)
+        invalidateResourcesForFrontendRuntimeEvent(response, sessionId)
         if (
           eventType === 'step.completed' &&
           runtimeEventId &&
           operationId &&
           workspaceHandle
         ) {
-          scheduleStepRenderedAck({
+          scheduleStepRefresh({
             eventId: runtimeEventId,
             operationId,
             step,
@@ -1742,7 +1879,7 @@ export function useWorkspace() {
             workspaceHandle,
           })
         }
-        if (isTerminalRuntimeOperationEvent(response)) {
+        if (isTerminalFrontendRuntimeOperationEvent(response)) {
           const directory =
             asString(response.data?.directory) ?? currentProject.value?.path
           if (directory) clearFlowExecutionActiveForWorkspace(directory)
@@ -1777,13 +1914,18 @@ export function useWorkspace() {
       runtimeEventClient.value.close()
       runtimeEventClient.value = null
     }
+    if (backendRuntimeEventClient.value) {
+      backendRuntimeEventClient.value.close()
+      backendRuntimeEventClient.value = null
+    }
     runtimeEvents.value = []
+    backendRuntimeEvents.value = []
     handledRefreshRuntimeEvents.clear()
     handledRuntimeProtocolEvents.clear()
   }
 
-  function runtimeEventInvalidationScopes(
-    response: RuntimeEventResponse,
+  function frontendRuntimeEventInvalidationScopes(
+    response: FrontendRuntimeEventResponse,
   ): WorkspaceInvalidationScope[] | null {
     const event = response.data
     const eventType = event?.type as string | undefined
@@ -1877,8 +2019,8 @@ export function useWorkspace() {
     return [...scopes]
   }
 
-  function workspaceRerunPreparedEvent(
-    response: RuntimeEventResponse,
+  function frontendWorkspaceRerunPreparedEvent(
+    response: FrontendRuntimeEventResponse,
   ): import('./homeRunArtifacts').WorkspaceRerunPrepared | null {
     const event = response.data
     if (
@@ -1904,7 +2046,9 @@ export function useWorkspace() {
     }
   }
 
-  function isTerminalRuntimeOperationEvent(response: RuntimeEventResponse): boolean {
+  function isTerminalFrontendRuntimeOperationEvent(
+    response: FrontendRuntimeEventResponse,
+  ): boolean {
     const protocolType = asString(response.data?.runtimeProtocolType)
     if (
       protocolType === 'operation.completed' ||
@@ -1916,11 +2060,11 @@ export function useWorkspace() {
     return ['task_complete', 'error', 'cancelled'].includes(String(response.data?.type))
   }
 
-  function invalidateResourcesForRuntimeEvent(
-    response: RuntimeEventResponse,
+  function invalidateResourcesForFrontendRuntimeEvent(
+    response: FrontendRuntimeEventResponse,
     sessionId: string,
   ): void {
-    const scopes = runtimeEventInvalidationScopes(response)
+    const scopes = frontendRuntimeEventInvalidationScopes(response)
     if (!scopes) return
     workspaceLifecycle.invalidate(scopes, {
       sessionId,
@@ -1939,38 +2083,52 @@ export function useWorkspace() {
     })
   }
 
-  function waitForRuntimeOperation(operationId: string): Promise<void> {
-    const isTerminalEvent = (response: RuntimeEventResponse): boolean => {
-      if (asString(response.data?.jobId) !== operationId) return false
-      return ['operation.completed', 'operation.failed', 'operation.cancelled'].includes(
-        asString(response.data?.runtimeProtocolType) ?? '',
+  function waitForRuntimeOperation(
+    operationId: string,
+    options: { workspaceHandle?: string } = {},
+  ): Promise<void> {
+    const isTerminalEvent = (event: DesignRuntimeEvent): boolean => {
+      return (
+        backendRuntimeEventOperationId(event) === operationId &&
+        backendRuntimeEventTerminalState(event) !== null
       )
     }
     const finishFromEvent = (
-      response: RuntimeEventResponse,
+      event: DesignRuntimeEvent,
       resolve: () => void,
       reject: (reason: Error) => void,
     ): void => {
-      const terminalType = asString(response.data?.runtimeProtocolType)
-      if (terminalType === 'operation.completed') {
+      const terminalState = backendRuntimeEventTerminalState(event)
+      if (terminalState === 'succeeded') {
         resolve()
         return
       }
       reject(
-        new Error(response.message[0] || `ECC operation ${terminalType ?? 'failed'}.`),
+        new Error(
+          backendRuntimeEventMessage(event) ||
+            `ECC operation ${terminalState ?? 'failed'}.`,
+        ),
       )
     }
 
-    const completed = [...runtimeEvents.value].reverse().find(isTerminalEvent)
+    const completed = [...backendRuntimeEvents.value].reverse().find(isTerminalEvent)
     if (completed) {
       return new Promise((resolve, reject) => finishFromEvent(completed, resolve, reject))
     }
 
-    const client = runtimeEventClient.value
-    const workspaceHandle = workspaceLifecycle.session.value.workspaceId
-    const waitForOperation = getOptionalDesktopApi()?.ecc.runtime?.waitForOperation
+    const client = options.workspaceHandle ? null : backendRuntimeEventClient.value
+    const workspaceHandle =
+      options.workspaceHandle ?? workspaceLifecycle.session.value.workspaceId
+    const waitForOperation = getDesktopApi().ecc.runtime?.waitForOperation
     if (!client && (!waitForOperation || !workspaceHandle)) {
       return Promise.reject(new Error('ECC runtime operation stream is unavailable.'))
+    }
+
+    if (options.workspaceHandle && waitForOperation) {
+      return waitForOperation({ operationId, workspaceHandle }).then((operation) => {
+        if (operation.state === 'succeeded') return
+        throw new Error(operation.error?.message ?? `ECC operation ${operation.state}.`)
+      })
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -1982,10 +2140,10 @@ export function useWorkspace() {
         cleanup()
         complete()
       }
-      const handler = (response: RuntimeEventResponse) => {
-        if (!isTerminalEvent(response)) return
+      const handler = (event: DesignRuntimeEvent) => {
+        if (!isTerminalEvent(event)) return
         finishFromEvent(
-          response,
+          event,
           () => settle(resolve),
           (reason) => settle(() => reject(reason)),
         )
@@ -2005,7 +2163,7 @@ export function useWorkspace() {
         { label: `runtime operation ${operationId}` },
       )
 
-      const terminal = [...runtimeEvents.value].reverse().find(isTerminalEvent)
+      const terminal = [...backendRuntimeEvents.value].reverse().find(isTerminalEvent)
       if (terminal) {
         finishFromEvent(
           terminal,
@@ -2055,6 +2213,7 @@ export function useWorkspace() {
     updateWindowTitle,
     runtimeEventClient,
     runtimeEvents,
+    backendRuntimeEvents,
     resourceVersions: workspaceLifecycle.resourceVersions,
     workspaceSession: workspaceLifecycle.session,
     invalidateWorkspaceResources,

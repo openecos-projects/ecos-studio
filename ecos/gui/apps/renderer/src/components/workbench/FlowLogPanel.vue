@@ -112,10 +112,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import { copyFlowLogText } from '@/components/flowLogCopy'
+import { matchingFlowLogSegments, selectedFlowLogSegment } from './flowLogSelection'
 import { formatFlowLogTitle } from './flowLogTitle'
 import type { FlowStatusNode } from './flowStatus'
-import type { FlowLogSegment } from '@/composables/useHomeData'
-import { sameFlowStepName } from '@/api/type'
+import type { FlowLogSegment } from '@/composables/useBackendFlowLogs'
 
 const props = defineProps<{
   activeStepName: string
@@ -135,15 +135,8 @@ const expanded = ref(true)
 const dialogVisible = ref(false)
 const copied = ref(false)
 const currentRuntimeSegment = computed(() => {
-  const activeStepName = props.activeStepName.trim().toLowerCase()
-  if (activeStepName) {
-    const matching = props.segments.filter((segment) =>
-      sameFlowStepName(segment.stepName, activeStepName),
-    )
-    const active =
-      matching.find((segment) => segment.live) ?? matching[matching.length - 1]
-    if (active) return active
-  }
+  const active = selectedFlowLogSegment(props.segments, props.activeStepName)
+  if (active) return active
   return props.segments.find((segment) => segment.live) ?? null
 })
 const selectedSegment = computed(
@@ -194,9 +187,7 @@ function selectSegmentForNode(): void {
   }
 
   selectionPinned.value = true
-  const matchingSegments = props.segments.filter((segment) =>
-    sameFlowStepName(segment.stepName, node.label),
-  )
+  const matchingSegments = matchingFlowLogSegments(props.segments, node.label)
   const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
   if (!segment) {
     selectedKey.value = ''

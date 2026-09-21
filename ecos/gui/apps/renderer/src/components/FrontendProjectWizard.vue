@@ -1079,11 +1079,11 @@ import {
   type FrontendValidationRequest,
   type FrontendValidationResult,
 } from '@/api/frontendCatalog'
-import { waitForDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 import FrontendExperimentalBanner from '@/components/frontend/FrontendExperimentalBanner.vue'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readProjectManagementManifest } from '@/utils/projectManagementRead'
-import { parseProjectManifest, type ProjectManifest } from '@ecos-studio/shared'
+import type { ProjectManifest } from '@ecos-studio/shared'
 import type { Project, WorkspaceConfig } from '../types'
 import {
   formatCpuTopModule,
@@ -1810,32 +1810,25 @@ async function applyProjectDefaultsForProject(projectRoot: string): Promise<void
   selectedProjectManifest.value = null
   projectManifestError.value = ''
   if (!root) return
-
   isLoadingProjectManifest.value = true
   try {
-    const text = await readProjectManagementManifest(root)
+    const manifest = await readProjectManagementManifest(root)
     if (generation !== projectManifestLoadGeneration) return
-    if (!text) {
+    if (!manifest) {
       projectManifestError.value =
         'The selected folder does not contain a project.json manifest.'
       return
     }
-
-    const manifest = parseProjectManifest(text)
     if (manifest.project_type !== 'frontend') {
       projectManifestError.value =
-        'The selected project is a backend project. Select a frontend project instead.'
+        'Select a frontend project instead of a backend project.'
       return
     }
-
     selectedProjectManifest.value = manifest
     projectContext.value.project_id = manifest.project_id
     projectContext.value.project_name = manifest.name
     projectContext.value.project_root = root
-    projectContext.value.project_json_path = joinPath(
-      projectContext.value.project_root,
-      'project.json',
-    )
+    projectContext.value.project_json_path = joinPath(root, 'project.json')
     config.value.parameters.design = manifest.design_name
     designNameTouched.value = true
     if (!workspaceNameTouched.value) {
@@ -1882,7 +1875,7 @@ async function selectProjectFromHistory(project: Project): Promise<void> {
 
 async function selectProjectRoot(): Promise<void> {
   if (lockProjectContext.value) return
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
     title: 'Select Frontend Project Root',
   })
@@ -1898,7 +1891,7 @@ async function selectProjectRoot(): Promise<void> {
 
 async function selectProjectParentPath(): Promise<void> {
   if (lockProjectContext.value) return
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
     title: 'Select Frontend Project Parent Path',
   })
@@ -1978,7 +1971,7 @@ function joinPath(root: string, child: string): string {
 }
 
 const selectCpuFilelist = async () => {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickFiles({
     multiple: false,
     filters: [
@@ -2005,7 +1998,7 @@ async function selectCpuSourceMode(mode: CpuSourceMode): Promise<void> {
 }
 
 async function selectCpuRtlFiles(): Promise<void> {
-  const desktopApi = await waitForDesktopApi()
+  const desktopApi = getDesktopApi()
   const result = await desktopApi.dialog.pickFiles({
     multiple: true,
     filters: [

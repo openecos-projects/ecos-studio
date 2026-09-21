@@ -329,7 +329,7 @@ const runStages = computed(() =>
 )
 const sidebarStages = computed<FrontendSidebarStage[]>(() => {
   const stages = flowStages.value
-    .filter((stage) => stage.path !== 'configure' && stage.path !== 'tech')
+    .filter((stage) => stage.path !== 'tech')
     .map((stage) => (stage.path === 'home' ? { ...stage, label: 'Home' } : stage))
 
   const srcStage = virtualStage('Src', 'src', 'ri-code-s-slash-line')

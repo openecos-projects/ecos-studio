@@ -1,5 +1,8 @@
-import { FLOW_STEPS, type FlowStep } from '@/utils/projectManagement'
-import type { ProjectQorWorkspaceComparison } from '@/utils/projectQorTrend'
+import {
+  projectManifestFlowSteps as FLOW_STEPS,
+  type ProjectManifestFlowStep as FlowStep,
+} from '@ecos-studio/shared'
+import type { BackendWorkspaceQorComparison } from '@/composables/useBackendWorkspaceQor'
 
 export interface HomeQorComparisonStep {
   step: FlowStep
@@ -26,7 +29,7 @@ export interface HomeQorDetailStep {
   improvedCount: number
   regressedCount: number
   unchangedCount: number
-  metrics: ProjectQorWorkspaceComparison['metrics']
+  metrics: BackendWorkspaceQorComparison['metrics']
 }
 
 export interface HomeQorDetailModel {
@@ -46,18 +49,29 @@ export interface HomeQorDetailModel {
 const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
   synthesis: 'Synth',
   synth: 'Synth',
+  lec: 'LEC',
   floorplan: 'Floor',
   floor: 'Floor',
+  'pre floorplan': 'Floor',
+  prefloorplan: 'Floor',
+  'macro placement': 'Floor',
+  macroplacement: 'Floor',
+  'post floorplan': 'Floor',
+  postfloorplan: 'Floor',
   place: 'Place',
   placement: 'Place',
   cts: 'CTS',
   legalization: 'Legal',
   legal: 'Legal',
+  'timing optimization': 'Timing Opt',
+  'timing opt': 'Timing Opt',
   route: 'Route',
   routing: 'Route',
   drc: 'DRC',
   lvs: 'LVS',
   filler: 'Filler',
+  postroutelec: 'Post-route LEC',
+  'post-route lec': 'Post-route LEC',
   rcx: 'RCX',
   sta: 'STA',
   harden: 'Harden',
@@ -65,14 +79,17 @@ const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
 
 const FLOW_STEP_LABELS: Record<FlowStep, string> = {
   Synth: 'Synthesis',
+  LEC: 'LEC',
   Floor: 'Floorplan',
   Place: 'Place',
   CTS: 'CTS',
   Legal: 'Legalization',
+  'Timing Opt': 'Timing Optimization',
   Route: 'Route',
   DRC: 'DRC',
   LVS: 'LVS',
   Filler: 'Filler',
+  'Post-route LEC': 'Post-route LEC',
   RCX: 'RCX',
   STA: 'STA',
   Harden: 'Harden',
@@ -83,7 +100,7 @@ export function homeQorFlowStepForLabel(label: string): FlowStep | null {
 }
 
 export function summarizeHomeQorComparison(
-  comparison: ProjectQorWorkspaceComparison | null,
+  comparison: BackendWorkspaceQorComparison | null,
 ): HomeQorComparisonSummary {
   const countsByStep = new Map<FlowStep, HomeQorComparisonStep>(
     FLOW_STEPS.map((step) => [
@@ -127,12 +144,12 @@ export function summarizeHomeQorComparison(
 }
 
 export function buildHomeQorDetailModel(
-  comparison: ProjectQorWorkspaceComparison | null,
+  comparison: BackendWorkspaceQorComparison | null,
 ): HomeQorDetailModel | null {
   if (!comparison) return null
 
   const summary = summarizeHomeQorComparison(comparison)
-  const metricsByStep = new Map<FlowStep, ProjectQorWorkspaceComparison['metrics']>()
+  const metricsByStep = new Map<FlowStep, BackendWorkspaceQorComparison['metrics']>()
   for (const metric of comparison.metrics) {
     const metrics = metricsByStep.get(metric.step) ?? []
     metrics.push(metric)
@@ -182,4 +199,76 @@ function scoreComparisonState(
   if (currentScore > baselineScore) return 'improvement'
   if (currentScore < baselineScore) return 'regression'
   return 'neutral'
+}
+
+export function formatQorValue(value: number | null | undefined, unit?: string): string {
+  if (value === null || value === undefined) return '--'
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3)
+  return unit ? `${formatted} ${unit}` : formatted
+}
+
+export function formatQorScore(score: number | null | undefined): string {
+  if (score === null || score === undefined) return 'N/A'
+  return Number.isInteger(score) ? String(score) : score.toFixed(1)
+}
+
+export function qorScoreTone(
+  score: number | null | undefined,
+  threshold: number | null | undefined,
+): 'pass' | 'fail' | 'unrated' {
+  if (
+    score === null ||
+    score === undefined ||
+    threshold === null ||
+    threshold === undefined ||
+    !Number.isFinite(score) ||
+    !Number.isFinite(threshold)
+  ) {
+    return 'unrated'
+  }
+  return score >= threshold ? 'pass' : 'fail'
+}
+
+export function qorDeltaLabel(delta: {
+  absoluteDelta: number | null
+  relativeDeltaPct: number | null
+  state: HomeQorComparisonTone
+  unit?: string
+}): string {
+  if (delta.absoluteDelta === null) return 'Not compared'
+  if (delta.state === 'neutral') return 'Unchanged'
+  const direction = delta.state === 'improvement' ? 'Improved' : 'Regressed'
+  const amount = formatQorValue(Math.abs(delta.absoluteDelta), delta.unit)
+  const percent =
+    delta.relativeDeltaPct === null ? '' : ` (${Math.abs(delta.relativeDeltaPct)}%)`
+  return `${direction} by ${amount}${percent}`
+}
+
+export function qorMetricComparisonLabel(metric: {
+  absoluteDelta: number | null
+  relativeDeltaPct: number | null
+  state: HomeQorComparisonTone
+  unit?: string
+  isDirectional: boolean
+  polarity: string | null
+  baselinePolarity: string | null
+}): string {
+  if (!metric.isDirectional) {
+    if (metric.baselinePolarity === null) return 'No baseline available'
+    return metric.polarity === metric.baselinePolarity
+      ? 'No directional QoR rule'
+      : 'QoR rule changed'
+  }
+  return qorDeltaLabel(metric)
+}
+
+export function qorScoreComparisonLabel(
+  currentScore: number | null,
+  baselineScore: number | null,
+): string {
+  if (currentScore === null || baselineScore === null) return 'Unavailable'
+  const delta = currentScore - baselineScore
+  if (delta === 0) return 'Unchanged'
+  const direction = delta > 0 ? 'Improved' : 'Regressed'
+  return `${direction} ${Math.abs(delta).toFixed(1)}`
 }

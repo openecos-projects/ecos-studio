@@ -180,7 +180,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { ProjectQorTrendPoint } from '@/utils/projectQorTrend'
+import type { ProjectQorTrendPoint } from '@ecos-studio/shared'
 
 const SCORE_TICKS = [0, 20, 40, 60, 80, 100] as const
 const SCORE_THRESHOLD = 60
@@ -230,9 +230,33 @@ const emit = defineEmits<{
 const chartViewport = ref<HTMLElement | null>(null)
 const chartViewportSize = ref({ width: 0, height: 0 })
 let chartResizeObserver: ResizeObserver | null = null
+let chartMeasureFrame: number | null = null
+
+function measureChartViewport() {
+  const element = chartViewport.value
+  if (!element) return
+
+  const rect = element.getBoundingClientRect()
+  const width = element.clientWidth || rect.width
+  const height = element.clientHeight || rect.height
+  if (width <= 0 || height <= 0) return
+
+  chartViewportSize.value = { width, height }
+}
 
 onMounted(() => {
-  if (!chartViewport.value || typeof ResizeObserver === 'undefined') return
+  if (!chartViewport.value) return
+
+  // Read the settled layout before the first paint; ResizeObserver can arrive a frame late.
+  measureChartViewport()
+  if (typeof requestAnimationFrame === 'function') {
+    chartMeasureFrame = requestAnimationFrame(() => {
+      chartMeasureFrame = null
+      measureChartViewport()
+    })
+  }
+
+  if (typeof ResizeObserver === 'undefined') return
 
   chartResizeObserver = new ResizeObserver(([entry]) => {
     chartViewportSize.value = {
@@ -245,6 +269,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   chartResizeObserver?.disconnect()
+  if (chartMeasureFrame !== null && typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(chartMeasureFrame)
+  }
 })
 
 const highestScore = computed(() =>
@@ -477,11 +504,13 @@ function formatScore(score: number | null): string {
 .qor-score-panel {
   display: flex;
   min-width: 0;
+  min-height: 370px;
+  width: 100%;
   flex-direction: column;
   gap: 8px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 12px 14px 14px;
+  padding: 14px 18px 15px;
   background: var(--bg-primary);
 }
 
@@ -498,7 +527,7 @@ function formatScore(score: number | null): string {
   align-items: baseline;
   gap: 8px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 750;
 }
 
@@ -506,7 +535,7 @@ function formatScore(score: number | null): string {
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -517,13 +546,13 @@ function formatScore(score: number | null): string {
   gap: 4px;
   color: var(--success-color);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .qor-best-chip em {
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 700;
   text-transform: uppercase;
@@ -534,10 +563,11 @@ function formatScore(score: number | null): string {
 }
 
 .qor-chart-viewport {
-  min-height: 210px;
-  height: 210px;
+  min-height: 260px;
+  height: 260px;
+  width: 100%;
   flex: 0 0 auto;
-  margin: 0 -4px;
+  margin: 0 -6px;
   padding: 8px 4px 2px;
   overflow: hidden;
 }
@@ -754,7 +784,7 @@ function formatScore(score: number | null): string {
   border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
   padding-top: 8px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 650;
 }
 

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -7,13 +7,10 @@ import type {
   DesktopApi,
   DesignRuntimeEvent,
   DesktopDirectoryDialogOptions,
-  EccRuntimeEvent,
   DesktopFileDialogOptions,
   DesktopRtlSourceDialogOptions,
   ChipViewerOpenRequest,
   DesktopMenuEventId,
-  DesktopProjectFileChangedEvent,
-  DesktopProjectLogTailEvent,
   ProjectManifestMutationRequest,
   ResourceJob,
   ResourceImportLocalRequest,
@@ -25,6 +22,7 @@ import type {
   DesktopAgentEvent,
   DesktopCodexInstallProgressEvent,
   DesktopCodexSetBinPathRequest,
+  CliInstallerProgressEvent,
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
@@ -79,20 +77,23 @@ const desktopApi: DesktopApi = {
   app: {
     getVersions: () => invokeDesktop(desktopApiIpcChannels.appGetVersions),
   },
+  productCommands: {
+    execute: (request) =>
+      invokeDesktop(desktopApiIpcChannels.productCommandExecute, request),
+  },
+  workspaceCreationModel: {
+    get: (request) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceCreationModelGet, request),
+  },
   window: {
     minimize: () => invokeDesktop(desktopApiIpcChannels.windowMinimize),
     toggleMaximize: () => invokeDesktop(desktopApiIpcChannels.windowToggleMaximize),
     close: () => invokeDesktop(desktopApiIpcChannels.windowClose),
-    confirmClose: () => invokeDesktop(desktopApiIpcChannels.windowConfirmClose),
     setTitle: (title) => invokeDesktop(desktopApiIpcChannels.windowSetTitle, title),
     isMaximized: () => invokeDesktop(desktopApiIpcChannels.windowIsMaximized),
     setZoomFactor: (factor) =>
       invokeDesktop(desktopApiIpcChannels.windowSetZoomFactor, factor),
     create: (options) => invokeDesktop(desktopApiIpcChannels.windowCreate, options),
-    onCloseRequested: (listener) =>
-      subscribeToDesktopEvent(desktopApiEventChannels.windowCloseRequested, () => {
-        listener()
-      }),
     onResized: (listener) =>
       subscribeToDesktopEvent(desktopApiEventChannels.windowResized, () => {
         listener()
@@ -103,6 +104,24 @@ const desktopApi: DesktopApi = {
         (_event, isMaximized: unknown) => {
           listener(Boolean(isMaximized))
         },
+      ),
+  },
+  shutdown: {
+    cancel: () => invokeDesktop(desktopApiIpcChannels.shutdownCancel),
+    completeCleanup: (request) =>
+      invokeDesktop(desktopApiIpcChannels.shutdownCompleteCleanup, request),
+    getStatus: () => invokeDesktop(desktopApiIpcChannels.shutdownGetStatus),
+    reviewOptions: () => invokeDesktop(desktopApiIpcChannels.shutdownReviewOptions),
+    onCleanupRequested: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.shutdownCleanupRequested,
+        (_event, payload: unknown) => listener(payload as { attemptId: string }),
+      ),
+    onStatusChanged: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.shutdownStatusChanged,
+        (_event, payload: unknown) =>
+          listener(payload as import('@ecos-studio/shared').DesktopShutdownStatus),
       ),
   },
   menu: {
@@ -129,13 +148,78 @@ const desktopApi: DesktopApi = {
     mutate: (request: ProjectManifestMutationRequest) =>
       invokeDesktop(desktopApiIpcChannels.projectManifestMutate, request),
   },
+  backendWorkspace: {
+    getArtifact: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetArtifact, request),
+    getOverview: () => invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetOverview),
+    getStepDetail: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceGetStepDetail, request),
+    refreshOverview: () =>
+      invokeDesktop(desktopApiIpcChannels.backendWorkspaceRefreshOverview),
+    onInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.backendWorkspaceInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as Parameters<typeof listener>[0])
+        },
+      ),
+  },
+  backendProjectComparison: {
+    closeProject: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendProjectComparisonCloseProject, request),
+    selectProject: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendProjectComparisonSelectProject, request),
+    getComparison: (request) =>
+      invokeDesktop(desktopApiIpcChannels.backendProjectComparisonGetComparison, request),
+    getExecutionSnapshot: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.backendProjectComparisonGetExecutionSnapshot,
+        request,
+      ),
+    getStepFindings: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.backendProjectComparisonGetStepFindings,
+        request,
+      ),
+    refreshComparison: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.backendProjectComparisonRefreshComparison,
+        request,
+      ),
+    onInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.backendProjectComparisonInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as Parameters<typeof listener>[0])
+        },
+      ),
+    onExecutionInvalidated: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.backendProjectExecutionInvalidated,
+        (_event, payload: unknown) => {
+          listener(payload as Parameters<typeof listener>[0])
+        },
+      ),
+  },
   projectManagement: {
+    discoverProject: (directory) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementDiscoverProject, directory),
     readManifest: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),
+    readFrontendWorkspaceTexts: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.projectManagementReadFrontendWorkspaceTexts,
+        request,
+      ),
     listProjectEntries: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementListEntries, projectRoot),
-    readWorkspaceTexts: (request) =>
-      invokeDesktop(desktopApiIpcChannels.projectManagementReadWorkspaceTexts, request),
+    readWorkspaceStepConfiguration: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.projectManagementReadWorkspaceStepConfiguration,
+        request,
+      ),
+    importWorkspace: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectManagementImportWorkspace, projectRoot),
   },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>
@@ -175,25 +259,6 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFile, path),
     readOptionalProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadOptionalProjectTextFile, path),
-    readWorkspaceParameters: (workspacePath) =>
-      invokeDesktop(
-        desktopApiIpcChannels.workspaceReadWorkspaceParameters,
-        workspacePath,
-      ),
-    hasWorkspaceConfigShadow: (workspacePath: string) =>
-      invokeDesktop(desktopApiIpcChannels.workspaceHasConfigShadow, workspacePath),
-    editWorkspaceParameters: (workspacePath, edits) =>
-      invokeDesktop(
-        desktopApiIpcChannels.workspaceEditWorkspaceParameters,
-        workspacePath,
-        edits,
-      ),
-    applyWorkspaceParameterWrites: (workspacePath, writes) =>
-      invokeDesktop(
-        desktopApiIpcChannels.workspaceApplyWorkspaceParameterWrites,
-        workspacePath,
-        writes,
-      ),
     readProjectTextFileTail: (path, maxChars) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadProjectTextFileTail,
@@ -206,13 +271,6 @@ const desktopApi: DesktopApi = {
         path,
         maxChars,
       ),
-    readOptionalProjectTextFileUpdate: (path, fromOffsetBytes, maxChars) =>
-      invokeDesktop(
-        desktopApiIpcChannels.workspaceReadOptionalProjectTextFileUpdate,
-        path,
-        fromOffsetBytes,
-        maxChars,
-      ),
     readOptionalProjectTextFileChunk: (path, fromOffsetBytes, maxBytes) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadOptionalProjectTextFileChunk,
@@ -220,32 +278,6 @@ const desktopApi: DesktopApi = {
         fromOffsetBytes,
         maxBytes,
       ),
-    subscribeProjectLogTail: async (path, options, listener) => {
-      const subscriptionId = (await ipcRenderer.invoke(
-        desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
-        path,
-        options,
-      )) as string
-      const eventListener = (
-        _event: IpcRendererEvent,
-        payload: DesktopProjectLogTailEvent,
-      ) => {
-        if (payload.subscriptionId !== subscriptionId) return
-        listener(payload)
-      }
-      ipcRenderer.on(desktopApiEventChannels.workspaceLogTail, eventListener)
-
-      return () => {
-        ipcRenderer.removeListener(
-          desktopApiEventChannels.workspaceLogTail,
-          eventListener,
-        )
-        void invokeDesktop(
-          desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
-          subscriptionId,
-        )
-      }
-    },
     readProjectBinaryFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectBinaryFile, path),
     writeProjectTextFile: (path, content) =>
@@ -279,36 +311,13 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),
     scanRtlDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanRtlDirectory, path),
+    discoverHdlModules: (request) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceDiscoverHdlModules, request),
     listDesignFiles: () => invokeDesktop(desktopApiIpcChannels.workspaceListDesignFiles),
     addDesignFiles: (sourcePaths) =>
       invokeDesktop(desktopApiIpcChannels.workspaceAddDesignFiles, sourcePaths),
     removeDesignFile: (filelistEntry) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRemoveDesignFile, filelistEntry),
-    watchProjectFile: async (path, listener) => {
-      const subscriptionId = (await ipcRenderer.invoke(
-        desktopApiIpcChannels.workspaceWatchProjectFile,
-        path,
-      )) as string
-      const eventListener = (
-        _event: IpcRendererEvent,
-        payload: DesktopProjectFileChangedEvent,
-      ) => {
-        if (payload.subscriptionId !== subscriptionId) return
-        listener(payload)
-      }
-      ipcRenderer.on(desktopApiEventChannels.workspaceFileChanged, eventListener)
-
-      return () => {
-        ipcRenderer.removeListener(
-          desktopApiEventChannels.workspaceFileChanged,
-          eventListener,
-        )
-        void invokeDesktop(
-          desktopApiIpcChannels.workspaceUnwatchProjectFile,
-          subscriptionId,
-        )
-      }
-    },
   },
   chipViewer: {
     open: (request: ChipViewerOpenRequest) =>
@@ -322,10 +331,6 @@ const desktopApi: DesktopApi = {
     readFlow: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadFlow),
     readParameters: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadParameters),
-    writeParameters: (request: {
-      parameters: Record<string, unknown>
-      workspace: string
-    }) => invokeDesktop(desktopApiIpcChannels.workspaceResourcesWriteParameters, request),
     resolveStepInfo: (request: WorkspaceStepInfoRequest) =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesResolveStepInfo, request),
   },
@@ -381,8 +386,6 @@ const desktopApi: DesktopApi = {
             listener(payload as DesignRuntimeEvent)
           },
         ),
-      replay: (request) =>
-        invokeDesktop(desktopApiIpcChannels.designRuntimeEventsReplay, request),
     },
     flow: {
       run: (request) =>
@@ -412,68 +415,40 @@ const desktopApi: DesktopApi = {
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceHome, request),
       info: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceInfo, request),
+      stepConfiguration: (request) =>
+        invokeDesktop(
+          desktopApiIpcChannels.designRuntimeWorkspaceStepConfiguration,
+          request,
+        ),
+      stepOutputs: (request) =>
+        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceStepOutputs, request),
       open: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceOpen, request),
       refreshConfig: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceRefreshConfig, request),
       resetFlow: (request) =>
         invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceResetFlow, request),
-      syncConfig: (request) =>
-        invokeDesktop(desktopApiIpcChannels.designRuntimeWorkspaceSyncConfig, request),
     },
   },
   ecc: {
-    events: {
-      onEvent: (listener) =>
+    runtime: {
+      engineeringSnapshot: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeEngineeringSnapshot, request),
+      operationProjection: () =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationProjection),
+      operationLog: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationLog, request),
+      onOperationProjectionInvalidated: (listener) =>
         subscribeToDesktopEvent(
-          desktopApiEventChannels.eccEvent,
+          desktopApiEventChannels.eccRuntimeOperationProjectionInvalidated,
           (_event, payload: unknown) => {
-            listener(payload as EccRuntimeEvent)
+            listener(payload as { generation: number })
           },
         ),
-    },
-    flow: {
-      run: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowRun, request),
-      runStep: (request) => invokeDesktop(desktopApiIpcChannels.eccFlowRunStep, request),
-    },
-    rpc: {
-      hello: () => invokeDesktop(desktopApiIpcChannels.eccRpcHello),
-      ping: () => invokeDesktop(desktopApiIpcChannels.eccRpcPing),
-      shutdown: () => invokeDesktop(desktopApiIpcChannels.eccRpcShutdown),
-    },
-    runtime: {
-      acknowledgeStepRendered: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeAcknowledgeStepRendered, request),
-      cancel: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationCancel, request),
       snapshot: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeSnapshot, request),
-      startFlow: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartFlow, request),
-      startStep: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeStartStep, request),
-      status: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccRuntimeOperationStatus, request),
       waitForOperation: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccRuntimeWaitForOperation, request),
-    },
-    workspace: {
-      close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),
-      create: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceCreate, request),
-      exportSignoff: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceExportSignoff, request),
-      inspectSignoff: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceInspectSignoff, request),
-      home: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceHome, request),
-      info: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceInfo, request),
-      open: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceOpen, request),
-      refreshConfig: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceRefreshConfig, request),
-      resetFlow: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceResetFlow, request),
-      syncConfig: (request) =>
-        invokeDesktop(desktopApiIpcChannels.eccWorkspaceSyncConfig, request),
     },
   },
   agent: {
@@ -505,6 +480,18 @@ const desktopApi: DesktopApi = {
           },
         ),
     },
+  },
+  cliInstaller: {
+    getStatus: () => invokeDesktop(desktopApiIpcChannels.cliInstallerGetStatus),
+    install: () => invokeDesktop(desktopApiIpcChannels.cliInstallerInstall),
+    uninstall: () => invokeDesktop(desktopApiIpcChannels.cliInstallerUninstall),
+    onProgress: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.cliInstallerProgress,
+        (_event, payload: unknown) => {
+          listener(payload as CliInstallerProgressEvent)
+        },
+      ),
   },
   shell: {
     createSession: (options: DesktopShellSessionOptions) =>

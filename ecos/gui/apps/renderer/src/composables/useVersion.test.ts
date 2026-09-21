@@ -25,16 +25,31 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     app: {
       getVersions,
     },
+    productCommands: {
+      execute: async () => ({ accepted: false, operationId: '', state: '' }),
+    },
+    workspaceCreationModel: {
+      get: async () => ({
+        context: {},
+        controls: {
+          flowBoundaries: true,
+          manualPdkFiles: true,
+          mpc: true,
+          pdkVersion: true,
+        },
+        discovery: {},
+        parameters: [],
+        pdkInstallations: [],
+      }),
+    },
     window: {
       minimize: async () => undefined,
       toggleMaximize: async () => undefined,
       close: async () => undefined,
-      confirmClose: async () => undefined,
       create: async () => undefined,
       setTitle: async (_title: string) => undefined,
       setZoomFactor: async (_factor: number) => undefined,
       isMaximized: async () => false,
-      onCloseRequested: () => () => undefined,
       onResized: () => () => undefined,
       onMaximizedChanged: () => () => undefined,
     },
@@ -51,8 +66,10 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       delete: async () => undefined,
     },
     projectManifest: {
-      mutate: async () => ({ content: '' }),
+      mutate: async () => ({ manifest: {} as never }),
     },
+    backendWorkspace: {} as DesktopApi['backendWorkspace'],
+    backendProjectComparison: {} as DesktopApi['backendProjectComparison'],
     dialog: {
       pickDirectory: async () => null,
       pickFiles: async () => null,
@@ -61,7 +78,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     workspace: {
       openOrFocus: async () => ({ action: 'proceed' as const }),
-      hasWorkspaceConfigShadow: async () => false,
       bindWindow: async (path: string) => path,
       unbindWindow: async () => undefined,
       getBoundPath: async () => null,
@@ -74,12 +90,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       openWaveformExternal: async (_path: string) => undefined,
       readProjectTextFile: async () => '',
       readOptionalProjectTextFile: async () => null,
-      readWorkspaceParameters: async () => null,
-      editWorkspaceParameters: async () => ({
-        format: 'toml',
-        path: '/tmp/home/params.toml',
-      }),
-      applyWorkspaceParameterWrites: async () => undefined,
       readProjectTextFileTail: async () => null,
       readProjectBinaryFile: async () => new Uint8Array(),
       writeProjectTextFile: async () => undefined,
@@ -105,7 +115,11 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         rootPath: '',
         files: [],
       }),
-      watchProjectFile: async () => () => undefined,
+      discoverHdlModules: async () => ({
+        candidates: [],
+        status: 'complete',
+        suggested: '',
+      }),
       listDesignFiles: async () => [],
       addDesignFiles: async () => ({ added: [], skipped: [] }),
       removeDesignFile: async () => null,
@@ -131,7 +145,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readHome: async () => null,
       readFlow: async () => null,
       readParameters: async () => null,
-      writeParameters: async () => ({ format: 'toml', path: '/tmp/home/params.toml' }),
       resolveStepInfo: async (request) => ({
         step: request.step,
         id: request.id,
@@ -186,43 +199,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     pdkInventory: {} as DesktopApi['pdkInventory'],
     runtime: {} as DesktopApi['runtime'],
-    ecc: {
-      events: {
-        onEvent: () => () => undefined,
-      },
-      flow: {
-        run: async (request) => ({ rerun: Boolean(request.rerun) }),
-        runStep: async (request) => ({ state: 'Success', step: request.step }),
-      },
-      rpc: {
-        hello: async () => ({ capabilities: [], eccVersion: 'unknown', version: 1 }),
-        ping: async () => ({ ok: true }),
-        shutdown: async () => ({ ok: true }),
-      },
-      workspace: {
-        close: async () => ({ ok: true }),
-        create: async (request) => ({
-          directory: request.directory,
-          workspaceHandle: 'workspace-handle-1',
-        }),
-        exportSignoff: async (request) => ({ outputPath: request.outputPath }),
-        inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
-        home: async () => ({ path: '' }),
-        info: async (request) => ({ id: request.id, info: {}, step: request.step }),
-        open: async (request) => ({
-          directory: request.directory,
-          workspaceHandle: 'workspace-handle-1',
-        }),
-        refreshConfig: async () => ({ directory: '', refreshed: true }),
-        resetFlow: async () => ({ directory: '' }),
-        syncConfig: async (request) => ({
-          configPath: request.configPath,
-          directory: '',
-          parametersChanged: false,
-          refreshed: true,
-        }),
-      },
-    },
+    ecc: {},
     shell: {
       createSession: async () => ({
         pid: 0,
@@ -242,6 +219,26 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
         spawned: true,
         workspaceStepDirectory: '/tmp/Floorplan_ecc',
       }),
+    },
+    cliInstaller: {
+      getStatus: async () => ({
+        status: 'not-installed',
+        expectedVersion: '',
+        installedVersion: null,
+        source: null,
+        versionDir: null,
+        shimPath: null,
+        selfCheck: null,
+        warning: null,
+        error: null,
+      }),
+      install: async () => {
+        throw new Error('not implemented')
+      },
+      uninstall: async () => {
+        throw new Error('not implemented')
+      },
+      onProgress: () => () => {},
     },
   } satisfies DesktopApi
 }

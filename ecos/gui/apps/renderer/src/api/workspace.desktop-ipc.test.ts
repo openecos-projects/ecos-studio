@@ -37,16 +37,14 @@ describe('workspace desktop bridge', () => {
 
     setWindow({
       ecosDesktop: {
-        runtime: {
-          workspace: {
-            create,
-          },
+        productCommands: {
+          execute: create,
         },
       },
     })
 
-    const { createWorkspaceApi } = await import('./workspace')
-    const options = reactive({
+    const { backendWorkspaceOptions, createWorkspaceApi } = await import('./workspace')
+    const config = reactive({
       directory: '/workspace/demo',
       filelist: '',
       origin_def: '',
@@ -61,24 +59,42 @@ describe('workspace desktop bridge', () => {
         top_module: 'top',
       },
       pdk: 'ics55',
-      pdk_json: {
-        name: 'ics55',
-        root: '/pdks/ics55',
-        tech: '/pdks/ics55/tech.lef',
-        lefs: ['/pdks/ics55/stdcells.lef'],
-        libs: ['/pdks/ics55/stdcells.lib'],
-      },
       pdk_root: '/pdks/ics55',
+      pdk_requirement: {
+        familyId: 'ics55',
+        manualConfig: null,
+        version: null,
+      },
       rtl_list: ['/rtl/top.v'],
       sdc: '/constraints/top.sdc',
       flow_config: {
         start_step: 'Synthesis',
         end_step: 'Harden',
-        steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+        steps: [
+          'Synthesis',
+          'lec',
+          'preFloorplan',
+          'macroPlacement',
+          'postFloorplan',
+          'place',
+          'CTS',
+          'legalization',
+          'Timing optimization',
+          'route',
+          'filler',
+          'RCX',
+          'sta',
+          'lvs',
+          'postRouteLec',
+          'drc',
+          'Harden',
+        ],
       },
     })
 
-    await expect(createWorkspaceApi(options)).resolves.toMatchObject({
+    await expect(
+      createWorkspaceApi(backendWorkspaceOptions(config, config.directory)),
+    ).resolves.toMatchObject({
       response: 'success',
       data: {
         workspace_handle: 'workspace-handle-1',
@@ -86,28 +102,145 @@ describe('workspace desktop bridge', () => {
     })
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        designTool: 'backend',
+        command: 'workspace.create',
         payload: expect.objectContaining({
-          parameters: expect.objectContaining({
-            design: 'demo',
+          targetDirectory: '/workspace/demo',
+          workspaceBindings: expect.objectContaining({
+            inputs: {
+              'rtl-1': '/rtl/top.v',
+              sdc: '/constraints/top.sdc',
+            },
           }),
-          rtlList: ['/rtl/top.v'],
-          flowConfig: {
-            start_step: 'Synthesis',
-            end_step: 'Harden',
-            steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
-          },
-          pdkJson: {
-            name: 'ics55',
-            root: '/pdks/ics55',
-            tech: '/pdks/ics55/tech.lef',
-            lefs: ['/pdks/ics55/stdcells.lef'],
-            libs: ['/pdks/ics55/stdcells.lib'],
-          },
-          sdc: '/constraints/top.sdc',
+          workspaceSpec: expect.objectContaining({
+            design: expect.objectContaining({ name: 'demo', topModule: 'top' }),
+            flow: {
+              flowId: 'rtl2gds',
+              fromStepId: 'Synthesis',
+              throughStepId: 'Harden',
+            },
+            parameters: {
+              'cts.max_fanout': 20,
+              'design.frequency_mhz': 100,
+              'floorplan.core_margin': [0, 0],
+              'floorplan.core_util': 0.5,
+              'floorplan.die_builder.mode': 'die_util',
+              'place.target_density': 0.6,
+              'place.target_overflow': 0.1,
+            },
+          }),
         }),
       }),
     )
+  })
+
+  it('omits RTL inputs when a filelist is present', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/filelist',
+        filelist: '/design/sources.f',
+        origin_def: '',
+        origin_verilog: '/rtl/top.v',
+        parameters: { design: 'demo', top_module: 'top' },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: ['/rtl/top.v'],
+        sdc: '/constraints/top.sdc',
+      },
+      '/workspace/filelist',
+    )
+
+    expect(options.workspaceSpec.inputs).toEqual([
+      { inputId: 'filelist', role: 'filelist' },
+      { inputId: 'sdc', role: 'sdc' },
+    ])
+    expect(options.workspaceBindings.inputs).toEqual({
+      filelist: '/design/sources.f',
+      sdc: '/constraints/top.sdc',
+    })
+  })
+
+  it('omits parameters inapplicable to a branched flow range', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/branch',
+        design_input_mode: 'post_synthesis',
+        flow_config: {
+          start_step: 'legalization',
+          end_step: 'Harden',
+          steps: [
+            'legalization',
+            'Timing optimization',
+            'route',
+            'filler',
+            'RCX',
+            'sta',
+            'lvs',
+            'postRouteLec',
+            'drc',
+            'Harden',
+          ],
+        },
+        origin_def: '/source/CTS_ecc/output/gcd_CTS.def.gz',
+        origin_verilog: '/source/CTS_ecc/output/gcd_CTS.v.gz',
+        parameters: {
+          design: 'gcd',
+          frequency_max: 50,
+          max_fanout: 32,
+          target_density: 0.2,
+          target_overflow: 0.1,
+          top_module: 'gcd',
+          utilitization: 0.3,
+        },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: [],
+        sdc: '/source/origin/gcd.sdc',
+      },
+      '/workspace/branch',
+    )
+
+    expect(options.workspaceSpec).toMatchObject({
+      inputMode: 'postSynthesis',
+      inputs: [
+        { inputId: 'netlist', role: 'netlist' },
+        { inputId: 'def', role: 'def' },
+        { inputId: 'sdc', role: 'sdc' },
+      ],
+      flow: {
+        flowId: 'rtl2gds',
+        fromStepId: 'legalization',
+        throughStepId: 'Harden',
+      },
+    })
+    expect(options.workspaceSpec.parameters).toEqual({})
+  })
+
+  it('keeps a synthesis-only Flow range when endpoints are inferred', async () => {
+    const { backendWorkspaceOptions } = await import('./workspace')
+    const options = backendWorkspaceOptions(
+      {
+        directory: '/workspace/synth',
+        flow_config: { start_step: '', end_step: '', steps: ['Synthesis'] },
+        origin_def: '',
+        origin_verilog: '/rtl/top.v',
+        parameters: { design: 'demo', top_module: 'top' },
+        pdk: 'ics55',
+        pdk_root: '/pdks/ics55',
+        rtl_list: [],
+      },
+      '/workspace/synth',
+    )
+
+    expect(options.workspaceSpec).toMatchObject({
+      design: { clockPort: 'clk' },
+      flow: {
+        flowId: 'syn_sta',
+        fromStepId: 'Synthesis',
+        throughStepId: 'Synthesis',
+      },
+    })
   })
 
   it('forwards the CPU module independently from the frontend SoC top', async () => {
