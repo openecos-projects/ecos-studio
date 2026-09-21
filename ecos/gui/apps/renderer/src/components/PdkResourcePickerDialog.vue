@@ -23,7 +23,7 @@
             {{ resourceTitle }}
           </h2>
           <p class="mt-1 text-xs text-(--text-secondary)">
-            {{ directories.length }} folders · {{ availableFiles.length }} resource files
+            {{ availableFiles.length }} resource files
           </p>
         </div>
         <button
@@ -56,7 +56,10 @@
       </div>
 
       <div
-        v-if="(sources?.length ?? 0) > 1"
+        v-if="
+          (sources?.length ?? 0) > 1 ||
+          (sources?.length === 1 && sources[0]?.label !== 'PDK root')
+        "
         class="flex shrink-0 flex-wrap items-center gap-2 border-b border-(--border-color) px-5 py-2"
       >
         <button
@@ -73,6 +76,28 @@
           @click="activeSourceIndex = index"
         >
           <i class="ri-folder-3-line mr-1"></i>{{ source.label }}
+        </button>
+      </div>
+
+      <div
+        v-if="activeSource"
+        class="shrink-0 border-b border-(--border-color) px-5 py-2"
+      >
+        <p
+          class="font-mono text-xs break-all text-(--text-secondary)"
+          :title="activeSource.rootPath"
+        >
+          {{ activeSource.rootPath }}
+        </p>
+        <button
+          v-if="activeSource.unavailable"
+          type="button"
+          class="mt-1 inline-flex cursor-pointer items-center gap-1 text-xs text-amber-600 hover:underline"
+          title="Retry directory scan"
+          @click="emit('retry-source', activeSource.rootPath)"
+        >
+          <i class="ri-refresh-line" aria-hidden="true"></i>
+          Directory unavailable. Retry scan
         </button>
       </div>
 
@@ -210,13 +235,13 @@ export interface PdkResourcePickerSource {
   label: string
   rootPath: string
   files: string[]
+  unavailable?: boolean
 }
 
 const props = defineProps<{
   resourceTitle: string
   /** Multi-source candidate pools (PDK root plus external macro paths). */
   sources?: PdkResourcePickerSource[]
-  directories: string[]
   availableFiles: string[]
   selectedFiles: string[]
   /** Fallback single root when no sources are provided. */
@@ -226,6 +251,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   'update:selectedFiles': [files: string[]]
+  'retry-source': [rootPath: string]
 }>()
 
 const searchQuery = ref('')

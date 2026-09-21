@@ -58,4 +58,57 @@ describe('backendWorkspaceOptions ecc.toml persistence payload', () => {
       },
     })
   })
+
+  it('binds overridden defaults as explicit files without rewriting ecc.toml overrides', () => {
+    const effective = {
+      tech_lef: ['/pdks/ics55/prtech/tech.lef'],
+      cell_lef: ['/pdks/ics55/lef/standard.lef'],
+      liberty: ['/macros/sram/sram.lib'],
+    }
+    const options = backendWorkspaceOptions(
+      baseConfig({
+        pdk_config_mode: 'default',
+        pdk_effective_resources: effective,
+        pdk_external_paths: ['/macros/sram'],
+      }),
+      '/projects/gcd/runs/baseline',
+    )
+    expect(options.workspaceSpec.pdk).toMatchObject({
+      mode: 'manual',
+      files: [
+        { fileId: 'tech', role: 'tech' },
+        { fileId: 'lef-1', role: 'lef' },
+        { fileId: 'liberty-1', role: 'liberty' },
+      ],
+    })
+    expect(options.workspaceBindings.pdk).toMatchObject({
+      files: {
+        tech: effective.tech_lef[0],
+        'lef-1': effective.cell_lef[0],
+        'liberty-1': effective.liberty[0],
+      },
+    })
+    expect(options.pdkRequirement?.manualConfig).toEqual({
+      techLef: effective.tech_lef[0],
+      cellLefs: effective.cell_lef,
+      liberty: effective.liberty,
+    })
+    expect(options.eccPdkConfig).toEqual({ externalPaths: ['/macros/sram'] })
+  })
+
+  it('rejects an incomplete effective resource set', () => {
+    expect(() =>
+      backendWorkspaceOptions(
+        baseConfig({
+          pdk_config_mode: 'default',
+          pdk_effective_resources: {
+            tech_lef: [],
+            cell_lef: ['/one.lef'],
+            liberty: ['/one.lib'],
+          },
+        }),
+        '/projects/gcd/runs/baseline',
+      ),
+    ).toThrow('Effective PDK resources are incomplete')
+  })
 })

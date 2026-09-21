@@ -1,6 +1,7 @@
 import type {
   DesignTool,
   DesktopAgentChoice,
+  ManualPdkConfiguration,
   PdkReadiness,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
@@ -103,6 +104,7 @@ export interface ImportedPdk {
   version?: string
   readiness: PdkReadiness
   supportsEccDefaults: boolean
+  defaultResources?: ManualPdkConfiguration
 }
 
 export interface DesignFile {
