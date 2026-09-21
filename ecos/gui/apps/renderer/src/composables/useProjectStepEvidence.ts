@@ -95,6 +95,14 @@ export function useProjectStepEvidence(
         tone: 'stale',
         label: `${previous ?? 'Last committed'} · ${findingsIssueLabel(value.issue.code)}`,
       }
+    if (data.value?.artifactIntegrity === 'externally-modified') {
+      return {
+        icon: 'ri-alert-line',
+        tone: 'stale',
+        label:
+          'Artifact files changed since the committed snapshot. Results are available for comparison but are not trusted signoff evidence.',
+      }
+    }
     if (previous) return { icon: 'ri-history-line', tone: 'stale', label: previous }
     if (emptyMessage.value)
       return { icon: 'ri-time-line', tone: 'loading', label: emptyMessage.value }

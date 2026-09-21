@@ -358,6 +358,7 @@ export interface DesktopBridgeServices {
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
     isOpen(request: ChipViewerOpenRequest): Promise<{ open: boolean }>
+    isWorkspaceMutationBusy?(workspaceHandle: string): boolean
     onWorkspaceRevisionChanged?: (
       notification: ChipViewerWorkspaceRevisionNotification,
     ) => void
@@ -2385,6 +2386,8 @@ export function registerIpc(
         : undefined,
       ownsWorkspaceHandle: (workspaceHandle) =>
         workspaceHandleSubscriptions.get(workspaceHandle)?.sender === event.sender,
+      isWorkspaceMutationBusy: (workspaceHandle) =>
+        services.chipViewerService.isWorkspaceMutationBusy?.(workspaceHandle) ?? false,
       prepareCreate: async (createRequest) => {
         const prepared = await prepareWorkspaceCreateBinding(services, createRequest)
         const { eccPdkConfig: persistConfig, ...runtimeRequest } = prepared

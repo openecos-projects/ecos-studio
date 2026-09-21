@@ -1844,13 +1844,8 @@ describe('ChipViewerService', () => {
     expect(saveResultText).toContain(
       'macro_location.tcl exported and macro.placements recorded (1 macros)',
     )
-    expect(onWorkspaceRevisionChanged).toHaveBeenCalledTimes(2)
-    expect(onWorkspaceRevisionChanged).toHaveBeenNthCalledWith(1, {
-      projectPath: PROJECT_ROOT,
-      workspaceHandle: 'workspace-handle-1',
-      workspaceRevision: 4,
-    })
-    expect(onWorkspaceRevisionChanged).toHaveBeenNthCalledWith(2, {
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledTimes(1)
+    expect(onWorkspaceRevisionChanged).toHaveBeenCalledWith({
       projectPath: PROJECT_ROOT,
       workspaceHandle: 'workspace-handle-1',
       workspaceRevision: 5,

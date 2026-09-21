@@ -34,7 +34,11 @@ export type ProjectEngineeringSnapshotReadResult = EngineeringSnapshotValidation
 }
 
 export type VerifiedProjectArtifactsReadResult =
-  | { ok: true; texts: Record<string, string> }
+  | {
+      ok: true
+      texts: Record<string, string>
+      integrity?: Record<string, 'verified' | 'externally-modified'>
+    }
   | {
       ok: false
       code:
@@ -48,7 +52,13 @@ export type VerifiedProjectArtifactsReadResult =
     }
 
 export type VerifiedProjectArtifactReadResult =
-  | { ok: true; bytes: Uint8Array }
+  | {
+      ok: true
+      bytes: Uint8Array
+      integrity?: 'verified' | 'externally-modified'
+      recordedSizeBytes?: number
+      actualSizeBytes?: number
+    }
   | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 
 export interface ProjectManifestReader {
@@ -398,6 +408,7 @@ export class ProjectManagementReadService {
     projectRoot: string
     workspacePath: string
     artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
+    allowExternallyModified?: boolean
   }): Promise<VerifiedProjectArtifactsReadResult> {
     if (
       request.artifacts.length < 1 ||
@@ -418,11 +429,14 @@ export class ProjectManagementReadService {
         request.workspacePath,
       )
       const texts: Record<string, string> = {}
+      const integrity: Record<string, 'verified' | 'externally-modified'> = {}
       for (const artifact of request.artifacts) {
         const result = await readVerifiedArtifactBytes(
           workspaceRoot,
           artifact,
           PROJECT_FINDINGS_ARTIFACT_MAX_BYTES,
+          !request.allowExternallyModified,
+          request.allowExternallyModified,
         )
         if (!result.ok) return result
         let text: string
@@ -437,8 +451,13 @@ export class ProjectManagementReadService {
           }
         }
         texts[artifact.reference] = text
+        if (result.integrity) integrity[artifact.reference] = result.integrity
       }
-      return { ok: true, texts }
+      return {
+        ok: true,
+        texts,
+        ...(request.allowExternallyModified ? { integrity } : {}),
+      }
     } catch {
       return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
     }
@@ -449,6 +468,7 @@ export class ProjectManagementReadService {
     workspacePath: string
     artifact: { reference: string; sha256: string; sizeBytes: number }
     verifyFingerprint?: boolean
+    includeIntegrity?: boolean
   }): Promise<VerifiedProjectArtifactReadResult> {
     try {
       const project = await this.loadProject(request.projectRoot)
@@ -465,8 +485,28 @@ export class ProjectManagementReadService {
         request.artifact,
         PROJECT_BINARY_ARTIFACT_MAX_BYTES,
         request.verifyFingerprint ?? true,
+        request.includeIntegrity ?? request.verifyFingerprint === false,
       )
-      return result.ok ? { ok: true, bytes: Uint8Array.from(result.bytes) } : result
+      if (!result.ok) return result
+      const response = {
+        ok: true as const,
+        bytes: Uint8Array.from(result.bytes),
+        ...(request.verifyFingerprint === false
+          ? {
+              integrity: result.integrity,
+              recordedSizeBytes: request.artifact.sizeBytes,
+              actualSizeBytes: result.bytes.byteLength,
+            }
+          : {}),
+      }
+      if (request.includeIntegrity === undefined && request.verifyFingerprint === false) {
+        Object.defineProperties(response, {
+          integrity: { enumerable: false },
+          recordedSizeBytes: { enumerable: false },
+          actualSizeBytes: { enumerable: false },
+        })
+      }
+      return response
     } catch {
       return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }
     }
@@ -520,8 +560,14 @@ async function readVerifiedArtifactBytes(
   artifact: { reference: string; sha256: string; sizeBytes: number },
   maxBytes: number,
   verifyFingerprint = true,
+  includeIntegrity = false,
 ): Promise<
-  { ok: true; bytes: Buffer } | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
+  | {
+      ok: true
+      bytes: Buffer
+      integrity?: 'verified' | 'externally-modified'
+    }
+  | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 > {
   const unsafe = (): Exclude<VerifiedProjectArtifactsReadResult, { ok: true }> => ({
     ok: false,
@@ -606,17 +652,23 @@ async function readVerifiedArtifactBytes(
       }
     }
     const bytes = buffer.subarray(0, offset)
-    if (
-      verifyFingerprint &&
-      createHash('sha256').update(bytes).digest('hex') !== artifact.sha256
-    ) {
+    const fingerprintMatches =
+      fileStats.size === artifact.sizeBytes &&
+      createHash('sha256').update(bytes).digest('hex') === artifact.sha256
+    if (verifyFingerprint && !fingerprintMatches) {
       return {
         ok: false,
         code: 'ARTIFACT_REVISION_MISMATCH',
         reference: artifact.reference,
       }
     }
-    return { ok: true, bytes }
+    return {
+      ok: true,
+      bytes,
+      ...(includeIntegrity
+        ? { integrity: fingerprintMatches ? 'verified' : 'externally-modified' }
+        : {}),
+    }
   } finally {
     await handle.close()
   }

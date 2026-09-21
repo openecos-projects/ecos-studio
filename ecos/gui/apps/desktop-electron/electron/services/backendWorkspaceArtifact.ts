@@ -19,6 +19,7 @@ export type WorkspaceArtifactReader = (request: {
   workspacePath: string
   artifact: { reference: string; sha256: string; sizeBytes: number }
   verifyFingerprint?: boolean
+  includeIntegrity?: boolean
 }) => Promise<VerifiedProjectArtifactReadResult>
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -191,6 +192,7 @@ export async function readWorkspaceArtifact(
     },
     projectRoot: dirname(workspaceRoot),
     workspacePath: workspaceRoot,
+    verifyFingerprint: false,
   })
   electronLogger.debug('[backend-workspace] artifact query metrics', {
     artifactBytes: read.ok ? read.bytes.byteLength : 0,
@@ -237,6 +239,13 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
+      ...(read.integrity
+        ? {
+            integrity: read.integrity,
+            recordedSizeBytes: artifact.sizeBytes,
+            actualSizeBytes: read.actualSizeBytes ?? read.bytes.byteLength,
+          }
+        : {}),
       ...(['layout_image', 'congestion_image'].includes(artifact.kind)
         ? { bytes: read.bytes }
         : {}),

@@ -649,6 +649,21 @@ describe('ProjectManagementReadService', () => {
       }),
     ).resolves.toEqual({ ok: true, bytes: new TextEncoder().encode(valid) })
 
+    await writeFile(path, `${valid}!`)
+    await expect(
+      service.readVerifiedArtifact({
+        ...request(Buffer.byteLength(valid), 'a'.repeat(64)),
+        artifact: request(Buffer.byteLength(valid), 'a'.repeat(64)).artifacts[0]!,
+        verifyFingerprint: false,
+        includeIntegrity: true,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      integrity: 'externally-modified',
+      recordedSizeBytes: Buffer.byteLength(valid),
+      actualSizeBytes: Buffer.byteLength(`${valid}!`),
+    })
+
     const invalidJson = 'x'.repeat(Buffer.byteLength(valid))
     await writeFile(path, invalidJson)
     await expect(

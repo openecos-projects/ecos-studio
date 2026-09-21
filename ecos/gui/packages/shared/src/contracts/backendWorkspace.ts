@@ -478,6 +478,9 @@ export interface BackendWorkspaceArtifactContent {
   mimeType: string
   name: string
   text?: string
+  integrity?: 'verified' | 'externally-modified'
+  recordedSizeBytes?: number
+  actualSizeBytes?: number
   timingPaths?: WorkspaceTimingPathsDetail
   timingSummary?: WorkspaceTimingSummaryDetail
 }

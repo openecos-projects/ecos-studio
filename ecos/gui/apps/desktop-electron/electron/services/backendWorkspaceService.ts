@@ -202,13 +202,11 @@ export class BackendWorkspaceService {
     const context = this.contexts.get(windowId)
     if (!context?.workspaceRoot || !context.snapshot?.ok) return
     const latest = await this.readEngineeringSnapshot(context.workspaceRoot)
-    if (
-      latest?.ok &&
-      (latest.snapshot.workspaceId !== context.snapshot.snapshot.workspaceId ||
-        latest.snapshot.workspaceRevision !== context.snapshot.snapshot.workspaceRevision)
-    ) {
-      this.invalidateWindow(windowId)
-    }
+    if (!latest?.ok) return
+    // A snapshot watcher cannot observe referenced artifact files. Rebuild the
+    // projection on focus so current-mode readers re-check their bytes and
+    // invalidate renderer Blob/text caches without changing the ECC revision.
+    this.invalidateWindow(windowId)
   }
 
   async getStepDetail(

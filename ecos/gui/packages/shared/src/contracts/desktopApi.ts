@@ -238,6 +238,7 @@ export interface ChipViewerOpenResult {
 
 export interface ChipViewerOpenStatus {
   open: boolean
+  saving?: boolean
 }
 
 export interface WorkspaceDirectoryReplacement {

@@ -585,6 +585,8 @@ function viewerLaunchFailureMessage(
 }
 
 export class ChipViewerService {
+  private readonly savingWorkspaceHandles = new Map<string, number>()
+  private readonly savingProjectPaths = new Map<string, number>()
   private readonly appPath: string
   private readonly cwd: string
   private readonly env: NodeJS.ProcessEnv
@@ -745,11 +747,18 @@ export class ChipViewerService {
   }
 
   async isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus> {
+    const saving =
+      (this.savingProjectPaths.get(normalizeLocalPath(request.projectPath)) ?? 0) > 0
     return {
       open:
         (this.openViewerCounts.get(this.viewerKey(request.projectPath, request.step)) ??
           0) > 0,
+      ...(saving ? { saving: true } : {}),
     }
+  }
+
+  isWorkspaceMutationBusy(workspaceHandle: string): boolean {
+    return (this.savingWorkspaceHandles.get(workspaceHandle) ?? 0) > 0
   }
 
   private trackOpenViewer(projectPath: string, step: string): () => void {
@@ -1193,7 +1202,6 @@ export class ChipViewerService {
       })
       if (typeof updated.workspaceRevision === 'number') {
         layoutEdit.workspaceRevision = updated.workspaceRevision
-        this.notifyWorkspaceRevisionChanged(layoutEdit)
       }
       return `; macro_location.tcl exported and macro.placements recorded (${entries.length} macros)`
     } catch (error) {
@@ -1326,6 +1334,18 @@ export class ChipViewerService {
         throw new Error('ECC layout edit runtime is not configured')
       }
 
+      if (command.action === 'save') {
+        this.savingWorkspaceHandles.set(
+          layoutEdit.workspaceHandle,
+          (this.savingWorkspaceHandles.get(layoutEdit.workspaceHandle) ?? 0) + 1,
+        )
+        const projectPath = normalizeLocalPath(layoutEdit.projectPath)
+        this.savingProjectPaths.set(
+          projectPath,
+          (this.savingProjectPaths.get(projectPath) ?? 0) + 1,
+        )
+      }
+
       let geometryManifestPath: string
       let message: string
       if (command.action === 'save') {
@@ -1348,7 +1368,6 @@ export class ChipViewerService {
         layoutEdit.revision = saved.revision
         if (typeof saved.workspaceRevision === 'number') {
           layoutEdit.workspaceRevision = saved.workspaceRevision
-          this.notifyWorkspaceRevisionChanged(layoutEdit)
         }
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
@@ -1379,6 +1398,9 @@ export class ChipViewerService {
             saved.macroLocationPath,
             `${layoutEdit.bridgeId}:${command.command_id}:macro-params`,
           )
+        }
+        if (typeof saved.workspaceRevision === 'number') {
+          this.notifyWorkspaceRevisionChanged(layoutEdit)
         }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Published layout artifacts verified',
@@ -1444,6 +1466,18 @@ export class ChipViewerService {
         expectedAction,
         error,
       )
+    } finally {
+      if (command?.action === 'save') {
+        const handleCount =
+          this.savingWorkspaceHandles.get(layoutEdit.workspaceHandle) ?? 0
+        if (handleCount <= 1)
+          this.savingWorkspaceHandles.delete(layoutEdit.workspaceHandle)
+        else this.savingWorkspaceHandles.set(layoutEdit.workspaceHandle, handleCount - 1)
+        const projectPath = normalizeLocalPath(layoutEdit.projectPath)
+        const count = this.savingProjectPaths.get(projectPath) ?? 0
+        if (count <= 1) this.savingProjectPaths.delete(projectPath)
+        else this.savingProjectPaths.set(projectPath, count - 1)
+      }
     }
   }
 

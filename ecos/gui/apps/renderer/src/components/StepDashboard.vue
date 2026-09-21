@@ -1165,7 +1165,12 @@
       <span>Loading report</span>
     </div>
     <p v-else-if="reportDialog.error" class="dialog-error">{{ reportDialog.error }}</p>
-    <pre v-else class="report-code">{{ reportDialog.content }}</pre>
+    <div v-else>
+      <p v-if="reportDialog.warning" class="dialog-warning">
+        {{ reportDialog.warning }}
+      </p>
+      <pre class="report-code">{{ reportDialog.content }}</pre>
+    </div>
   </Dialog>
 </template>
 
@@ -2899,6 +2904,11 @@ function fileName(path: string): string {
   color: var(--danger-color);
   font-size: 12px;
   margin: 0;
+}
+.dialog-warning {
+  color: var(--warning-color, #b7791f);
+  font-size: 12px;
+  margin: 0 0 8px;
 }
 .report-code {
   background: var(--bg-secondary);
