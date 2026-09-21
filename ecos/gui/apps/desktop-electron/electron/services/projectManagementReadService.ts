@@ -448,6 +448,7 @@ export class ProjectManagementReadService {
     projectRoot: string
     workspacePath: string
     artifact: { reference: string; sha256: string; sizeBytes: number }
+    verifyFingerprint?: boolean
   }): Promise<VerifiedProjectArtifactReadResult> {
     try {
       const project = await this.loadProject(request.projectRoot)
@@ -463,6 +464,7 @@ export class ProjectManagementReadService {
         workspaceRoot,
         request.artifact,
         PROJECT_BINARY_ARTIFACT_MAX_BYTES,
+        request.verifyFingerprint ?? true,
       )
       return result.ok ? { ok: true, bytes: Uint8Array.from(result.bytes) } : result
     } catch {
@@ -517,6 +519,7 @@ async function readVerifiedArtifactBytes(
   workspaceRoot: string,
   artifact: { reference: string; sha256: string; sizeBytes: number },
   maxBytes: number,
+  verifyFingerprint = true,
 ): Promise<
   { ok: true; bytes: Buffer } | Exclude<VerifiedProjectArtifactsReadResult, { ok: true }>
 > {
@@ -558,21 +561,25 @@ async function readVerifiedArtifactBytes(
         reference: artifact.reference,
       }
     }
-    if (fileStats.size > maxBytes || artifact.sizeBytes > maxBytes) {
+    if (
+      fileStats.size > maxBytes ||
+      (verifyFingerprint && artifact.sizeBytes > maxBytes)
+    ) {
       return {
         ok: false,
         code: 'FINDINGS_ARTIFACT_TOO_LARGE',
         reference: artifact.reference,
       }
     }
-    if (fileStats.size !== artifact.sizeBytes) {
+    if (verifyFingerprint && fileStats.size !== artifact.sizeBytes) {
       return {
         ok: false,
         code: 'ARTIFACT_REVISION_MISMATCH',
         reference: artifact.reference,
       }
     }
-    const buffer = Buffer.alloc(artifact.sizeBytes + 1)
+    const expectedReadSize = verifyFingerprint ? artifact.sizeBytes : fileStats.size
+    const buffer = Buffer.alloc(expectedReadSize + 1)
     let offset = 0
     while (offset < buffer.length) {
       const { bytesRead } = await handle.read(
@@ -591,7 +598,7 @@ async function readVerifiedArtifactBytes(
         reference: artifact.reference,
       }
     }
-    if (offset !== artifact.sizeBytes) {
+    if (offset !== expectedReadSize) {
       return {
         ok: false,
         code: 'ARTIFACT_REVISION_MISMATCH',
@@ -599,7 +606,10 @@ async function readVerifiedArtifactBytes(
       }
     }
     const bytes = buffer.subarray(0, offset)
-    if (createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) {
+    if (
+      verifyFingerprint &&
+      createHash('sha256').update(bytes).digest('hex') !== artifact.sha256
+    ) {
       return {
         ok: false,
         code: 'ARTIFACT_REVISION_MISMATCH',

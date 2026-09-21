@@ -18,6 +18,7 @@ export type WorkspaceArtifactReader = (request: {
   projectRoot: string
   workspacePath: string
   artifact: { reference: string; sha256: string; sizeBytes: number }
+  verifyFingerprint?: boolean
 }) => Promise<VerifiedProjectArtifactReadResult>
 
 function record(value: unknown): Record<string, unknown> | null {

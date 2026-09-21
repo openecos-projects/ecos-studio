@@ -296,13 +296,14 @@ export class BackendWorkspaceService {
     if (!currentSnapshot?.ok || !context.workspaceRoot) {
       return unavailable('ENGINEERING_SNAPSHOT_READ_FAILED')
     }
-    const snapshot =
+    const isCurrentSnapshot =
       currentSnapshot.snapshot.workspaceRevision === request.workspaceRevision
-        ? currentSnapshot
-        : currentSnapshot.staleSnapshot?.snapshot.workspaceRevision ===
-            request.workspaceRevision
-          ? currentSnapshot.staleSnapshot
-          : null
+    const snapshot = isCurrentSnapshot
+      ? currentSnapshot
+      : currentSnapshot.staleSnapshot?.snapshot.workspaceRevision ===
+          request.workspaceRevision
+        ? currentSnapshot.staleSnapshot
+        : null
     if (!snapshot) {
       return unavailable('ENGINEERING_SNAPSHOT_REVISION_MISMATCH')
     }
@@ -313,9 +314,10 @@ export class BackendWorkspaceService {
         request.artifactId,
         this.options.projectManagementReadService.readVerifiedArtifact
           ? (artifactRequest) =>
-              this.options.projectManagementReadService.readVerifiedArtifact!(
-                artifactRequest,
-              )
+              this.options.projectManagementReadService.readVerifiedArtifact!({
+                ...artifactRequest,
+                verifyFingerprint: !isCurrentSnapshot,
+              })
           : undefined,
       ),
       generation: context.generation,
