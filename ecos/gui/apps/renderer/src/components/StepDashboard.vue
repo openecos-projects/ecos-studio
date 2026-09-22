@@ -1,7 +1,10 @@
 <template>
   <main
     class="step-dashboard"
-    :class="{ 'has-stale': data?.staleRevision }"
+    :class="{
+      'has-integrity-warning': data?.artifactIntegrityWarnings.length,
+      'has-stale': data?.staleRevision,
+    }"
     aria-label="Step dashboard"
     :aria-busy="loading"
   >
@@ -32,6 +35,30 @@
         <i class="ri-history-line" aria-hidden="true" />
         Configuration changed since the last run. These step results reflect the previous
         configuration. Rerun this step to update them.
+      </div>
+      <div
+        v-if="data.artifactIntegrityWarnings.length"
+        class="step-dashboard-integrity-warning"
+        role="status"
+      >
+        <i class="ri-alert-line" aria-hidden="true" />
+        <div>
+          <strong>Artifact contents changed since the committed snapshot.</strong>
+          <ul>
+            <li v-for="warning in data.artifactIntegrityWarnings" :key="warning.name">
+              {{ warning.name
+              }}<span
+                v-if="
+                  warning.recordedSizeBytes !== null && warning.actualSizeBytes !== null
+                "
+              >
+                (recorded {{ formatArtifactSize(warning.recordedSizeBytes) }}, current
+                {{ formatArtifactSize(warning.actualSizeBytes) }})</span
+              >
+            </li>
+          </ul>
+          <span>Preview data is current, but it is not an immutable snapshot.</span>
+        </div>
       </div>
       <div class="step-dashboard-row step-dashboard-top">
         <section class="step-dashboard-card step-summary-card">
@@ -1669,6 +1696,12 @@ function fileName(path: string): string {
   const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
   return parts[parts.length - 1] ?? ''
 }
+
+function formatArtifactSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
 </script>
 
 <style scoped>
@@ -1688,6 +1721,14 @@ function fileName(path: string): string {
   grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
 }
 
+.step-dashboard.has-integrity-warning {
+  grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
+}
+
+.step-dashboard.has-stale.has-integrity-warning {
+  grid-template-rows: auto auto minmax(0, 2fr) minmax(0, 3fr) minmax(0, 3fr);
+}
+
 .step-dashboard-stale {
   align-items: center;
   background: var(--bg-secondary);
@@ -1699,6 +1740,28 @@ function fileName(path: string): string {
   gap: 8px;
   min-width: 0;
   padding: 7px 10px;
+}
+
+.step-dashboard-integrity-warning {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--warning-color, #b7791f) 12%, var(--bg-secondary));
+  border: 1px solid var(--warning-color, #b7791f);
+  border-radius: 6px;
+  color: var(--text-primary);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+}
+
+.step-dashboard-integrity-warning > div {
+  min-width: 0;
+}
+
+.step-dashboard-integrity-warning ul {
+  margin: 4px 0;
+  padding-left: 18px;
 }
 
 .step-dashboard-row {
@@ -3082,6 +3145,12 @@ function fileName(path: string): string {
   }
   .step-dashboard.has-stale {
     grid-template-rows: auto repeat(3, minmax(232px, auto));
+  }
+  .step-dashboard.has-integrity-warning {
+    grid-template-rows: auto repeat(3, minmax(232px, auto));
+  }
+  .step-dashboard.has-stale.has-integrity-warning {
+    grid-template-rows: auto auto repeat(3, minmax(232px, auto));
   }
   .step-dashboard-top,
   .step-dashboard-middle,
