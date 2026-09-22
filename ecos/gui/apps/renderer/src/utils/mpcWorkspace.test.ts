@@ -29,8 +29,8 @@ describe('MPC workspace die-area constraints', () => {
     })
   })
 
-  it('does not apply area bounds to Utilitization / Margin mode', () => {
-    expect(validateMpcDieArea(mpc, 'utilitization_margin', 1, 1)).toMatchObject({
+  it('does not apply area bounds to Utilization / Margin mode', () => {
+    expect(validateMpcDieArea(mpc, 'utilization_margin', 1, 1)).toMatchObject({
       area: null,
       error: null,
     })

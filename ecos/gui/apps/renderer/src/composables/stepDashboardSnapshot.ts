@@ -453,6 +453,20 @@ export function applyTimingArtifacts(
       stages: path.stages,
     })),
   }))
+  const existingPaths = new Map(
+    (data.timingAnalysis?.pathsByCorner ?? []).map((item) => [item.corner, item]),
+  )
+  for (const item of pathsByCorner) existingPaths.set(item.corner, item)
+  const existingRunInfo = new Map(
+    (data.timingAnalysis?.runInfo ?? []).map((item) => [item.id, item]),
+  )
+  for (const detail of pathDetails) {
+    existingRunInfo.set(`path-limit-${detail.corner}`, {
+      id: `path-limit-${detail.corner}`,
+      label: `${detail.corner} path limit`,
+      value: String(detail.pathLimit),
+    })
+  }
   data.timingAnalysis = {
     overview: overview ?? {
       corners: [],
@@ -465,11 +479,7 @@ export function applyTimingArtifacts(
       holdViolationCount: null,
       allCornersMet: null,
     },
-    pathsByCorner,
-    runInfo: pathDetails.map((detail) => ({
-      id: `path-limit-${detail.corner}`,
-      label: `${detail.corner} path limit`,
-      value: String(detail.pathLimit),
-    })),
+    pathsByCorner: [...existingPaths.values()],
+    runInfo: [...existingRunInfo.values()],
   }
 }

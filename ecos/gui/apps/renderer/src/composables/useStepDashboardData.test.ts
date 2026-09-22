@@ -257,6 +257,72 @@ describe('useStepDashboardData', () => {
     expect(dashboard.data.value?.layoutUrl).toBeNull()
   })
 
+  it('loads and coalesces a timing-path Artifact only when its corner is requested', async () => {
+    const result = detailResult()
+    if (result.detail.status !== 'ready') throw new Error('expected fixture detail')
+    result.detail.data.artifacts = [
+      {
+        artifactId: 'timing-paths-tt',
+        availability: 'available',
+        kind: 'timing_paths',
+        name: 'TT/typical/timing_paths.json',
+        stepId: 'Place',
+        timingCorner: 'TT/typical',
+      },
+    ]
+    testState.getStepDetail.mockResolvedValue(result)
+    let resolveArtifact!: (value: unknown) => void
+    testState.getArtifact.mockReturnValue(
+      new Promise((resolve) => {
+        resolveArtifact = resolve
+      }),
+    )
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+
+    expect(testState.getArtifact).not.toHaveBeenCalled()
+    const first = dashboard.loadTimingCorner('TT/typical')
+    const duplicate = dashboard.loadTimingCorner('TT/typical')
+    expect(testState.getArtifact).toHaveBeenCalledTimes(1)
+
+    resolveArtifact({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId: 'timing-paths-tt',
+          kind: 'timing_paths',
+          mimeType: 'application/json',
+          name: 'timing_paths.json',
+          timingPaths: {
+            corner: 'TT/typical',
+            pathLimit: 20,
+            paths: [
+              {
+                pathId: 'setup-1',
+                analysisType: 'setup',
+                pathGroup: 'clk',
+                startPoint: 'u0/Q',
+                endPoint: 'u1/D',
+                slackNs: -0.1,
+                stages: [],
+              },
+            ],
+          },
+        },
+      },
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
+    })
+    await Promise.all([first, duplicate])
+
+    expect(dashboard.data.value?.timingAnalysis?.pathsByCorner).toMatchObject([
+      { corner: 'TT/typical', paths: [{ id: 'TT/typical:setup-1' }] },
+    ])
+    expect(dashboard.timingDetailLoading.value).toEqual([])
+    expect(dashboard.timingDetailErrors.value).toEqual({})
+  })
+
   it.each(['succeeded', 'skipped'] as const)(
     'keeps stale artifacts and Checklist until the current Step is %s',
     async (state) => {
@@ -277,6 +343,7 @@ describe('useStepDashboardData', () => {
         kind,
         name: kind,
         stepId: 'Place',
+        ...(kind === 'timing_paths' ? { timingCorner: 'TT' } : {}),
       }))
       current.detail.data.step.state = 'not-started'
       current.detail.data.analysis.metrics = []
@@ -328,15 +395,17 @@ describe('useStepDashboardData', () => {
         layoutUrl: 'blob:layout-place',
         timingAnalysis: {
           overview: { worstSetup: { corner: 'TT', wns: 0.1 } },
-          pathsByCorner: [{ corner: 'TT', paths: [] }],
+          pathsByCorner: [],
         },
       })
       expect(testState.getArtifact.mock.calls.map(([request]) => request)).toEqual(
-        previous.detail.data.artifacts.map(({ artifactId }) => ({
-          artifactId,
-          workspaceContextId: 'context-a',
-          workspaceRevision: 9,
-        })),
+        previous.detail.data.artifacts
+          .filter(({ kind }) => kind !== 'timing_paths')
+          .map(({ artifactId }) => ({
+            artifactId,
+            workspaceContextId: 'context-a',
+            workspaceRevision: 9,
+          })),
       )
 
       current.detail.data.step.state = state
@@ -351,11 +420,13 @@ describe('useStepDashboardData', () => {
       expect(dashboard.data.value?.layoutUrl).toBe('blob:layout-place')
       expect(dashboard.data.value?.checklist.total).toBe(0)
       expect(testState.getArtifact.mock.calls.map(([request]) => request)).toEqual(
-        current.detail.data.artifacts.map(({ artifactId }) => ({
-          artifactId,
-          workspaceContextId: 'context-a',
-          workspaceRevision: 10,
-        })),
+        current.detail.data.artifacts
+          .filter(({ kind }) => kind !== 'timing_paths')
+          .map(({ artifactId }) => ({
+            artifactId,
+            workspaceContextId: 'context-a',
+            workspaceRevision: 10,
+          })),
       )
     },
   )

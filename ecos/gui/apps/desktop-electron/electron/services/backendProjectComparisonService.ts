@@ -52,6 +52,7 @@ interface ProjectComparisonReader {
     projectRoot: string
     workspacePath: string
     artifacts: Array<{ reference: string; sha256: string; sizeBytes: number }>
+    allowExternallyModified?: boolean
   }): Promise<VerifiedProjectArtifactsReadResult>
 }
 
@@ -328,6 +329,7 @@ export class BackendProjectComparisonService {
         this.handleSnapshotChanged(context, workspaceRoot),
       ),
     )
+    this.findings.refreshArtifacts(context.id)
   }
 
   private context(windowId: number, id: string): ProjectComparisonContext | null {

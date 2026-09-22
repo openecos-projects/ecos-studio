@@ -183,4 +183,26 @@ describe('executeProductCommand Workspace creation', () => {
       targetDirectory: '/projects/real/ws_1',
     })
   })
+
+  it('blocks flow mutations while Chip Viewer is saving layout edits', async () => {
+    const startFlowOperation = vi.fn()
+    await expect(
+      executeProductCommand(
+        {
+          command: 'workspace.run',
+          payload: {
+            expectedWorkspaceRevision: 4,
+            idempotencyKey: 'run-1',
+            workspaceHandle: 'handle-1',
+          },
+        },
+        {
+          isWorkspaceMutationBusy: () => true,
+          ownsWorkspaceHandle: () => true,
+          runtime: { startFlowOperation } as never,
+        } as never,
+      ),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_MUTATION_BUSY' })
+    expect(startFlowOperation).not.toHaveBeenCalled()
+  })
 })

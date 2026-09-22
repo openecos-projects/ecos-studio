@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Dialog from 'primevue/dialog'
 import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useFlowRunner } from '@/composables/useFlowRunner'
@@ -68,12 +68,20 @@ const {
 } = useBackendFlowStages()
 const { overallStatus } = useSubflow()
 const { currentProject, ensureApiReady, showToast } = useWorkspace()
+const chipViewerSaving = ref(false)
+let chipViewerSavingTimer: ReturnType<typeof setInterval> | undefined
 
-const flowRunControlBusy = computed(() => preparingRerun.value || isRunning.value)
+const flowRunControlBusy = computed(
+  () => preparingRerun.value || isRunning.value || chipViewerSaving.value,
+)
 const isHomeStage = computed(() => currentStage.value === 'home')
 const runTargetLabel = computed(() => (isHomeStage.value ? 'the full flow' : 'this step'))
 const runButtonLabel = computed(() =>
-  isHomeStage.value ? 'Run full flow' : 'Run current step',
+  chipViewerSaving.value
+    ? 'Chip Viewer is saving layout edits'
+    : isHomeStage.value
+      ? 'Run full flow'
+      : 'Run current step',
 )
 const hasFinishedFlow = computed(
   () =>
@@ -94,6 +102,32 @@ const hasFinishedStep = computed(
 const needsRerunConfirmation = computed(() =>
   isHomeStage.value ? hasFinishedFlow.value : hasFinishedStep.value,
 )
+
+async function refreshChipViewerSaving(): Promise<void> {
+  const projectPath = currentProject.value?.path
+  if (!projectPath) {
+    chipViewerSaving.value = false
+    return
+  }
+  try {
+    const status = await getDesktopApi().chipViewer.isOpen({
+      projectPath,
+      step: currentStage.value || 'Home',
+    })
+    chipViewerSaving.value = status.saving === true
+  } catch {
+    chipViewerSaving.value = false
+  }
+}
+
+onMounted(() => {
+  void refreshChipViewerSaving()
+  chipViewerSavingTimer = setInterval(() => void refreshChipViewerSaving(), 500)
+})
+
+onBeforeUnmount(() => {
+  if (chipViewerSavingTimer) clearInterval(chipViewerSavingTimer)
+})
 
 async function handleRunRequest(): Promise<void> {
   if (flowRunControlBusy.value) return

@@ -25,14 +25,28 @@ import {
   type EccLayoutEditSaveRequest,
   type EccLayoutEditSaveResult,
   type EccWorkspaceOpenResult,
+  type EccWorkspaceStepConfigurationUpdateRequest,
+  type EccWorkspaceUpdateResult,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
+import {
+  buildMacroStagingManifest,
+  isMacroPlacementStep,
+  readDefComponents,
+  type ReadBinaryFile,
+  serializeMacroStagingManifest,
+} from './chipViewerMacroStaging'
+import { parseMacroLocationTcl } from './chipViewerMacroLocationTcl'
 
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
 const GEOMETRY_SCHEMA_VERSION = 1
 const VIEWER_STARTUP_HEALTH_CHECK_MS = 800
+/** R-notation orientations accepted by the ECC place_instance operation. */
+const R_ORIENTATIONS = new Set(['R0', 'R90', 'R180', 'R270', 'MX', 'MY', 'MX90', 'MY90'])
+/** Placement status vocabulary accepted by the ECC place_instance operation. */
+const PLACEMENT_STATUSES = new Set(['preserve', 'placed', 'fixed', 'unplaced'])
 const REQUIRED_GEOMETRY_MANIFEST_FILE_KEYS = [
   'meta',
   'shapes',
@@ -54,6 +68,7 @@ const OPTIONAL_GEOMETRY_MANIFEST_FILE_KEYS = [
   'nets',
   'buses',
   'groups',
+  'drc',
 ] as const
 const REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS = [
   'shape_count',
@@ -122,6 +137,12 @@ interface LayoutEditRuntime {
   ): Promise<EccLayoutEditDiscardResult>
   layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult>
   openWorkspace(request: { directory: string }): Promise<EccWorkspaceOpenResult>
+  workspaceSession?(
+    workspaceHandle: string,
+  ): EccWorkspaceOpenResult | Promise<EccWorkspaceOpenResult>
+  updateWorkspaceStepConfiguration(
+    request: EccWorkspaceStepConfigurationUpdateRequest,
+  ): Promise<EccWorkspaceUpdateResult>
 }
 
 interface LayoutEditContext {
@@ -129,8 +150,18 @@ interface LayoutEditContext {
   dirty: boolean
   editSessionId: string
   geometryManifestPath: string
+  /** True when the macro staging manifest was published for this session. */
+  macroPlacement: boolean
+  projectPath: string
   revision: number
   step: string
+  workspaceHandle: string
+  workspaceRevision: number
+}
+
+/** Adopted by the IPC layer to republish a layout-edit revision bump. */
+export interface ChipViewerWorkspaceRevisionNotification {
+  projectPath: string
   workspaceHandle: string
   workspaceRevision: number
 }
@@ -140,6 +171,9 @@ interface NativeGeometryEditCommand {
   expected_version: number
   instance_name?: string
   op: string
+  /** R-notation orientation; empty when the viewer wants to preserve it. */
+  orient?: string
+  placement_status?: string
   requested_bbox: {
     hx: number
     hy: number
@@ -169,8 +203,17 @@ export interface ChipViewerServiceOptions {
   getFileModifiedTime?: GetFileModifiedTime
   isPackaged: boolean
   layoutEditRuntime?: LayoutEditRuntime
+  /**
+   * Called whenever a layout edit session adopts a new Workspace revision
+   * (save, macro.placements writeback) so the window can refresh the
+   * revision it sends on the next step run.
+   */
+  onWorkspaceRevisionChanged?: (
+    notification: ChipViewerWorkspaceRevisionNotification,
+  ) => void
   openLogFile?: OpenLogFile
   platform?: NodeJS.Platform
+  readBinaryFile?: ReadBinaryFile
   readTextFile?: ReadTextFile
   renameFile?: RenameFile
   resourcesPath?: string
@@ -191,7 +234,6 @@ export interface ChipViewerServiceOptions {
 interface SnapshotInputs {
   dbPath: string
   defPath: string
-  drcDataPath?: string
   drcStatisPath?: string
   editCommandDirectory: string
   editResultDirectory: string
@@ -327,10 +369,30 @@ function parseNativeGeometryEditCommand(raw: string): NativeGeometryEditCommand 
   if (typeof parsed.op !== 'string') {
     throw new Error('native edit command is missing op')
   }
+  const orient = parsed.orient
+  if (orient !== undefined && typeof orient !== 'string') {
+    throw new Error('native edit command orient must be a string')
+  }
+  if (orient !== undefined && orient !== '' && !R_ORIENTATIONS.has(orient)) {
+    throw new Error(`native edit command orient is not an R-notation value: ${orient}`)
+  }
+  const placementStatus = parsed.placement_status
+  if (placementStatus !== undefined && typeof placementStatus !== 'string') {
+    throw new Error('native edit command placement_status must be a string')
+  }
+  if (
+    placementStatus !== undefined &&
+    placementStatus !== '' &&
+    !PLACEMENT_STATUSES.has(placementStatus)
+  ) {
+    throw new Error(`native edit command placement_status is invalid: ${placementStatus}`)
+  }
   return {
     command_id: requireInteger(parsed.command_id, 'command_id'),
     expected_version: requireInteger(parsed.expected_version, 'expected_version'),
     ...(instanceName?.trim() ? { instance_name: instanceName.trim() } : {}),
+    ...(orient ? { orient } : {}),
+    ...(placementStatus ? { placement_status: placementStatus } : {}),
     op: parsed.op,
     requested_bbox: {
       hx: requireInteger(parsed.requested_bbox.hx, 'requested_bbox.hx'),
@@ -526,6 +588,8 @@ function viewerLaunchFailureMessage(
 }
 
 export class ChipViewerService {
+  private readonly savingWorkspaceHandles = new Map<string, number>()
+  private readonly savingProjectPaths = new Map<string, number>()
   private readonly appPath: string
   private readonly cwd: string
   private readonly env: NodeJS.ProcessEnv
@@ -538,6 +602,7 @@ export class ChipViewerService {
   private readonly layoutEditRuntime?: LayoutEditRuntime
   private readonly openLogFile: OpenLogFile
   private readonly platform: NodeJS.Platform
+  private readonly readBinaryFile: ReadBinaryFile
   private readonly readTextFile: ReadTextFile
   private readonly renameFile: RenameFile
   private readonly resourcesPath?: string
@@ -547,6 +612,8 @@ export class ChipViewerService {
   private readonly watchDirectory: WatchDirectory
   private readonly writeTextFile: WriteTextFile
   private readonly workspaceResourceService: ChipViewerServiceOptions['workspaceResourceService']
+  /** See ChipViewerServiceOptions.onWorkspaceRevisionChanged. */
+  onWorkspaceRevisionChanged?: ChipViewerServiceOptions['onWorkspaceRevisionChanged']
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
   private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
   private readonly openViewerCounts = new Map<string, number>()
@@ -570,6 +637,7 @@ export class ChipViewerService {
     this.layoutEditRuntime = options.layoutEditRuntime
     this.openLogFile = options.openLogFile ?? openSync
     this.platform = options.platform ?? process.platform
+    this.readBinaryFile = options.readBinaryFile ?? readFile
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
     this.renameFile = options.renameFile ?? rename
     this.resourcesPath = options.resourcesPath
@@ -581,6 +649,7 @@ export class ChipViewerService {
     this.watchDirectory = options.watchDirectory ?? defaultWatchDirectory
     this.writeTextFile = options.writeTextFile ?? defaultWriteTextFile
     this.workspaceResourceService = options.workspaceResourceService
+    this.onWorkspaceRevisionChanged = options.onWorkspaceRevisionChanged
   }
 
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
@@ -594,6 +663,7 @@ export class ChipViewerService {
     let editCommandDirectory: string | undefined
     let editResultDirectory: string | undefined
     let layoutEdit: LayoutEditContext | undefined
+    let macroStagingPath: string | undefined
     let viewerSnapshotInputs = snapshotInputs
     if (mode === 'edit') {
       layoutEdit = await this.beginLayoutEdit(projectPath, request.step)
@@ -616,12 +686,15 @@ export class ChipViewerService {
       this.startEditCommandBridge(binaries, viewerSnapshotInputs, layoutEdit)
       editCommandDirectory = viewerSnapshotInputs.editCommandDirectory
       editResultDirectory = viewerSnapshotInputs.editResultDirectory
+      if (isMacroPlacementStep(request.step)) {
+        macroStagingPath = await this.prepareMacroStaging(
+          viewerSnapshotInputs,
+          layoutEdit,
+        )
+      }
     }
 
     const viewerArgs = ['--manifest', viewerManifestPath, '--mode', mode]
-    if (snapshotInputs.drcDataPath) {
-      viewerArgs.push('--drc-data', snapshotInputs.drcDataPath)
-    }
     if (snapshotInputs.drcStatisPath) {
       viewerArgs.push('--drc-statis', snapshotInputs.drcStatisPath)
     }
@@ -637,6 +710,9 @@ export class ChipViewerService {
       )
       if (layoutEdit?.dirty) {
         viewerArgs.push('--edit-dirty')
+      }
+      if (macroStagingPath) {
+        viewerArgs.push('--macro-staging-file', macroStagingPath)
       }
     }
 
@@ -674,11 +750,18 @@ export class ChipViewerService {
   }
 
   async isOpen(request: ChipViewerOpenRequest): Promise<ChipViewerOpenStatus> {
+    const saving =
+      (this.savingProjectPaths.get(normalizeLocalPath(request.projectPath)) ?? 0) > 0
     return {
       open:
         (this.openViewerCounts.get(this.viewerKey(request.projectPath, request.step)) ??
           0) > 0,
+      ...(saving ? { saving: true } : {}),
     }
+  }
+
+  isWorkspaceMutationBusy(workspaceHandle: string): boolean {
+    return (this.savingWorkspaceHandles.get(workspaceHandle) ?? 0) > 0
   }
 
   private trackOpenViewer(projectPath: string, step: string): () => void {
@@ -763,7 +846,6 @@ export class ChipViewerService {
     // Geometry is atomically replaced by layout.edit.save. Keep the live
     // command/result transport outside that published artifact tree.
     const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
-    const drcDataPath = join(workspaceStepDirectory, 'feature', 'drc.step.json')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
     const mapRootPath = join(workspaceStepDirectory, 'feature')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
@@ -771,7 +853,6 @@ export class ChipViewerService {
     return {
       dbPath,
       defPath,
-      drcDataPath: isDrcStep && this.fileExists(drcDataPath) ? drcDataPath : undefined,
       drcStatisPath:
         isDrcStep && this.fileExists(drcStatisPath) ? drcStatisPath : undefined,
       editCommandDirectory: join(editDirectory, 'commands'),
@@ -939,10 +1020,65 @@ export class ChipViewerService {
       dirty: editSession.dirty,
       editSessionId: editSession.editSessionId,
       geometryManifestPath: editSession.geometryManifestPath,
+      macroPlacement: false,
+      projectPath,
       revision: editSession.revision,
       step,
       workspaceHandle: workspace.workspaceHandle,
       workspaceRevision: workspace.workspaceRevision!,
+    }
+  }
+
+  /**
+   * Republishes the session's adopted Workspace revision so the owning
+   * window refreshes the revision it sends with the next step run; ECC
+   * rejects runs whose expected revision predates a layout edit save.
+   */
+  private notifyWorkspaceRevisionChanged(layoutEdit: LayoutEditContext): void {
+    this.onWorkspaceRevisionChanged?.({
+      projectPath: layoutEdit.projectPath,
+      workspaceHandle: layoutEdit.workspaceHandle,
+      workspaceRevision: layoutEdit.workspaceRevision,
+    })
+  }
+
+  /**
+   * Builds the macro staging manifest for a macro-placement edit session and
+   * publishes it into the bridge command directory. Returns undefined (and
+   * keeps the session non-macro) when the DEF or master metadata cannot be
+   * parsed, so the viewer still opens in move-only edit mode.
+   */
+  private async prepareMacroStaging(
+    snapshotInputs: SnapshotInputs,
+    layoutEdit: LayoutEditContext,
+  ): Promise<string | undefined> {
+    try {
+      const manifestValues = parseGeometryManifestText(
+        await this.readTextFile(layoutEdit.geometryManifestPath),
+      )
+      const mastersKey = manifestValues.get('masters')
+      if (!mastersKey) {
+        throw new Error('geometry manifest is missing the masters side file')
+      }
+      const mastersPath = resolveManifestPath(layoutEdit.geometryManifestPath, mastersKey)
+      const defComponents = await readDefComponents(
+        snapshotInputs.defPath,
+        this.readBinaryFile,
+      )
+      const manifest = buildMacroStagingManifest({
+        defComponents,
+        mastersText: await this.readTextFile(mastersPath),
+      })
+      const stagingPath = join(snapshotInputs.editCommandDirectory, 'macro-staging.json')
+      const temporaryPath = `${stagingPath}.tmp`
+      await this.writeTextFile(temporaryPath, serializeMacroStagingManifest(manifest))
+      await this.renameFile(temporaryPath, stagingPath)
+      layoutEdit.macroPlacement = true
+      return stagingPath
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`chip viewer macro staging unavailable: ${message}`)
+      return undefined
     }
   }
 
@@ -1045,6 +1181,82 @@ export class ChipViewerService {
     await this.renameFile(temporaryResultPath, resultPath)
   }
 
+  /**
+   * Re-records a just-exported macro_location.tcl as the workspace
+   * `macro.placements` parameter, keeping parameters the single source of
+   * truth: the next refresh renders the Tcl from them and macroPlacement
+   * skips DreamPlace. The layout save is already published at this point, so
+   * a writeback failure is reported as a save warning instead of failing the
+   * save; the next macro-placement save realigns parameters and Tcl.
+   */
+  private async writeMacroPlacementParams(
+    layoutEdit: LayoutEditContext,
+    macroLocationPath: string,
+    commandId: string,
+  ): Promise<string> {
+    try {
+      const entries = parseMacroLocationTcl(await this.readTextFile(macroLocationPath))
+      const updated = await this.layoutEditRuntime!.updateWorkspaceStepConfiguration({
+        commandId,
+        expectedWorkspaceRevision: layoutEdit.workspaceRevision,
+        parameters: { 'macro.placements': entries },
+        stepId: 'macroPlacement',
+        workspaceHandle: layoutEdit.workspaceHandle,
+      })
+      if (typeof updated.workspaceRevision === 'number') {
+        layoutEdit.workspaceRevision = updated.workspaceRevision
+      }
+      return `; macro_location.tcl exported and macro.placements recorded (${entries.length} macros)`
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return `; WARNING: macro.placements writeback failed: ${reason} — macro_location.tcl may be overwritten by the next parameter refresh or DreamPlace run`
+    }
+  }
+
+  /**
+   * Saves a layout edit session, requesting the macro_location.tcl export for
+   * macro-placement sessions. Older ECC runtimes reject the unknown field
+   * before mutating anything, so the request is retried once without it.
+   */
+  private async layoutEditSaveWithMacroFallback(layoutEdit: LayoutEditContext): Promise<{
+    saved: EccLayoutEditSaveResult
+    skippedMacroLocation: boolean
+  }> {
+    const runtime = this.layoutEditRuntime
+    if (!runtime) {
+      throw new Error('ECC layout edit runtime is not configured')
+    }
+    const request = (writeMacroLocation: boolean): EccLayoutEditSaveRequest => ({
+      editSessionId: layoutEdit.editSessionId,
+      expectedRevision: layoutEdit.revision,
+      workspaceHandle: layoutEdit.workspaceHandle,
+      expectedWorkspaceRevision: layoutEdit.workspaceRevision,
+      ...(writeMacroLocation ? { writeMacroLocation: true } : {}),
+    })
+
+    if (!layoutEdit.macroPlacement) {
+      return {
+        saved: await runtime.layoutEditSave(request(false)),
+        skippedMacroLocation: false,
+      }
+    }
+    try {
+      return {
+        saved: await runtime.layoutEditSave(request(true)),
+        skippedMacroLocation: false,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/unknown field: write_?macro_?location/i.test(message)) {
+        throw error
+      }
+      return {
+        saved: await runtime.layoutEditSave(request(false)),
+        skippedMacroLocation: true,
+      }
+    }
+  }
+
   private async handleGeometryEditCommand(
     commandPath: string,
     resultPath: string,
@@ -1073,8 +1285,8 @@ export class ChipViewerService {
           kind: 'place_instance',
           llx: command.requested_bbox.lx,
           lly: command.requested_bbox.ly,
-          orient: '',
-          placementStatus: 'preserve',
+          orient: command.orient ?? '',
+          placementStatus: command.placement_status ?? 'preserve',
           source: '',
         },
         workspaceHandle: layoutEdit.workspaceHandle,
@@ -1125,6 +1337,18 @@ export class ChipViewerService {
         throw new Error('ECC layout edit runtime is not configured')
       }
 
+      if (command.action === 'save') {
+        this.savingWorkspaceHandles.set(
+          layoutEdit.workspaceHandle,
+          (this.savingWorkspaceHandles.get(layoutEdit.workspaceHandle) ?? 0) + 1,
+        )
+        const projectPath = normalizeLocalPath(layoutEdit.projectPath)
+        this.savingProjectPaths.set(
+          projectPath,
+          (this.savingProjectPaths.get(projectPath) ?? 0) + 1,
+        )
+      }
+
       let geometryManifestPath: string
       let message: string
       if (command.action === 'save') {
@@ -1133,12 +1357,8 @@ export class ChipViewerService {
           percent: 15,
           phase: 'saving',
         })
-        const saved = await this.layoutEditRuntime.layoutEditSave({
-          editSessionId: layoutEdit.editSessionId,
-          expectedRevision: layoutEdit.revision,
-          workspaceHandle: layoutEdit.workspaceHandle,
-          expectedWorkspaceRevision: layoutEdit.workspaceRevision,
-        })
+        const { saved, skippedMacroLocation } =
+          await this.layoutEditSaveWithMacroFallback(layoutEdit)
         if (!saved.saved || saved.dirty) {
           throw new Error('ECC did not confirm that dirty layout edits were published')
         }
@@ -1149,15 +1369,20 @@ export class ChipViewerService {
         })
         await this.verifyPublishedLayoutArtifacts(saved)
         layoutEdit.revision = saved.revision
+        let revisionNotificationRequired = false
         if (typeof saved.workspaceRevision === 'number') {
           layoutEdit.workspaceRevision = saved.workspaceRevision
+          revisionNotificationRequired = true
         }
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
         message = 'layout edit saved; verified DEF, IDB, GDS, and geometry manifest'
+        if (skippedMacroLocation) {
+          message += '; macro_location.tcl export skipped (ECC runtime too old)'
+        }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Refreshing layout image',
-          percent: 75,
+          percent: 65,
           phase: 'refreshing_layout_image',
         })
         try {
@@ -1166,6 +1391,32 @@ export class ChipViewerService {
           message += `; layout image refresh failed: ${
             imageError instanceof Error ? imageError.message : String(imageError)
           }`
+        }
+        if (layoutEdit.macroPlacement && saved.macroLocationPath) {
+          const beforeMacroWritebackRevision = layoutEdit.workspaceRevision
+          await this.writeSessionActionProgress(progressPath, command, {
+            message: 'Recording macro placements in workspace parameters',
+            percent: 75,
+            phase: 'recording_macro_placements',
+          })
+          message += await this.writeMacroPlacementParams(
+            layoutEdit,
+            saved.macroLocationPath,
+            `${layoutEdit.bridgeId}:${command.command_id}:macro-params`,
+          )
+          revisionNotificationRequired ||=
+            layoutEdit.workspaceRevision !== beforeMacroWritebackRevision
+        }
+        const currentSession = await this.layoutEditRuntime.workspaceSession?.(
+          layoutEdit.workspaceHandle,
+        )
+        if (typeof currentSession?.workspaceRevision === 'number') {
+          revisionNotificationRequired ||=
+            currentSession.workspaceRevision !== layoutEdit.workspaceRevision
+          layoutEdit.workspaceRevision = currentSession.workspaceRevision
+        }
+        if (revisionNotificationRequired) {
+          this.notifyWorkspaceRevisionChanged(layoutEdit)
         }
         await this.writeSessionActionProgress(progressPath, command, {
           message: 'Published layout artifacts verified',
@@ -1231,6 +1482,18 @@ export class ChipViewerService {
         expectedAction,
         error,
       )
+    } finally {
+      if (command?.action === 'save') {
+        const handleCount =
+          this.savingWorkspaceHandles.get(layoutEdit.workspaceHandle) ?? 0
+        if (handleCount <= 1)
+          this.savingWorkspaceHandles.delete(layoutEdit.workspaceHandle)
+        else this.savingWorkspaceHandles.set(layoutEdit.workspaceHandle, handleCount - 1)
+        const projectPath = normalizeLocalPath(layoutEdit.projectPath)
+        const count = this.savingProjectPaths.get(projectPath) ?? 0
+        if (count <= 1) this.savingProjectPaths.delete(projectPath)
+        else this.savingProjectPaths.set(projectPath, count - 1)
+      }
     }
   }
 
@@ -1244,6 +1507,7 @@ export class ChipViewerService {
         | 'saving'
         | 'discarding'
         | 'verifying_artifacts'
+        | 'recording_macro_placements'
         | 'refreshing_layout_image'
         | 'published'
         | 'failed'
@@ -1500,6 +1764,7 @@ export class ChipViewerService {
 
   private async findInvalidSnapshotManifest(
     manifestPath: string,
+    requireDrc: boolean = false,
   ): Promise<string | null> {
     let values: Map<string, string>
     try {
@@ -1523,6 +1788,10 @@ export class ChipViewerService {
     }
     if (Number(schemaVersion) !== GEOMETRY_SCHEMA_VERSION) {
       return `manifest schema_version ${schemaVersion} is unsupported; expected ${GEOMETRY_SCHEMA_VERSION}`
+    }
+
+    if (requireDrc && !values.get('drc')) {
+      return 'manifest is missing drc'
     }
 
     for (const key of REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS) {
@@ -1582,6 +1851,7 @@ export class ChipViewerService {
 
     const invalidManifest = await this.findInvalidSnapshotManifest(
       snapshotInputs.manifestPath,
+      isDrcWorkspaceStep(step, step, snapshotInputs.workspaceStepDirectory),
     )
     if (invalidManifest) {
       unavailable(invalidManifest)

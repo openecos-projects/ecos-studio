@@ -2,6 +2,12 @@ mod app;
 mod camera3d;
 mod canvas_gpu;
 mod canvas_gpu3d;
+mod instance_visibility;
+mod macro_interaction;
+mod macro_ops;
+mod macro_orient;
+mod macro_staging;
+mod macro_toolbar;
 mod map_data;
 mod nav3d;
 
@@ -37,6 +43,11 @@ struct Args {
 
     #[arg(long)]
     edit_dirty: bool,
+
+    /// Macro staging manifest published by the Electron bridge for
+    /// macro-placement edit sessions.
+    #[arg(long)]
+    macro_staging_file: Option<PathBuf>,
 
     #[arg(long)]
     drc_data: Option<PathBuf>,
@@ -483,6 +494,7 @@ fn main() -> Result<()> {
     let edit_command_dir = args.edit_command_dir.clone();
     let edit_result_dir = args.edit_result_dir.clone();
     let edit_dirty = args.edit_dirty;
+    let macro_staging_file = args.macro_staging_file.clone();
     let drc_data = args.drc_data.clone();
     let drc_statis = args.drc_statis.clone();
     let antenna_data = args.antenna_data.clone();
@@ -517,6 +529,7 @@ fn main() -> Result<()> {
                 edit_command_dir,
                 edit_result_dir,
                 edit_dirty,
+                macro_staging_file,
                 drc_data,
                 drc_statis,
                 antenna_data,

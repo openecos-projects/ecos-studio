@@ -25,6 +25,12 @@ export type {
   WorkspaceCreationModelRequest,
   WorkspaceCreationParameter,
 } from './contracts/workspaceCreationModel.ts'
+export type { WorkspaceParameterCatalogEntry } from './contracts/parameterCatalog.ts'
+export {
+  buildWorkspaceDisplayKeyIndex,
+  buildWorkspaceKnobIndex,
+  workspaceParameterCatalogEntries,
+} from './contracts/parameterCatalog.ts'
 export type {
   BackendWorkspaceApi,
   BackendWorkspaceArtifactContent,
@@ -365,6 +371,13 @@ export type {
   PdkResolveBindingRequest,
   PdkWorkspaceValidationRequest,
 } from './contracts/pdkInventory.ts'
+export type {
+  EccPdkOverrides,
+  EccWorkspacePdkConfigPersist,
+  ProjectEccPdkConfig,
+  ProjectEccPdkConfigReadResult,
+  ProjectEccPdkConfigWriteRequest,
+} from './contracts/projectEccConfig.ts'
 export type {
   DesktopFailure,
   DesktopResult,

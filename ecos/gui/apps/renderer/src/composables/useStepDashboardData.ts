@@ -1,6 +1,7 @@
 import type {
   BackendWorkspaceArtifactContent,
   BackendWorkspaceStepDetailResult,
+  WorkspaceArtifactDescriptor,
   WorkspaceStepDetail,
 } from '@ecos-studio/shared'
 import { computed, onScopeDispose, ref, watch } from 'vue'
@@ -78,6 +79,13 @@ export function useStepDashboardData() {
   const data = ref<StepDashboardData | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const timingDetailErrors = ref<Record<string, string>>({})
+  const timingDetailLoading = ref<string[]>([])
+  const loadedTimingCorners = new Set<string>()
+  const timingPathLoads = new Map<string, Promise<void>>()
+  let timingPathArtifacts = new Map<string, WorkspaceArtifactDescriptor>()
+  let timingArtifactContextId = ''
+  let timingArtifactRevision: number | null = null
   let requestVersion = 0
   let lastViewKey: string | null = null
 
@@ -95,12 +103,124 @@ export function useStepDashboardData() {
       : null
   }
 
+  function resetTimingArtifacts(
+    contextId: string,
+    revision: number,
+    artifacts: WorkspaceArtifactDescriptor[],
+  ): void {
+    clearTimingArtifacts()
+    timingArtifactContextId = contextId
+    timingArtifactRevision = revision
+    timingPathArtifacts = new Map(
+      artifacts.flatMap((artifact) =>
+        artifact.kind === 'timing_paths' &&
+        artifact.availability === 'available' &&
+        artifact.timingCorner
+          ? [[artifact.timingCorner, artifact] as const]
+          : [],
+      ),
+    )
+  }
+
+  function clearTimingArtifacts(): void {
+    timingDetailErrors.value = {}
+    timingDetailLoading.value = []
+    loadedTimingCorners.clear()
+    timingPathLoads.clear()
+    timingArtifactContextId = ''
+    timingArtifactRevision = null
+    timingPathArtifacts = new Map()
+  }
+
+  function setTimingLoading(corner: string, active: boolean): void {
+    const values = new Set(timingDetailLoading.value)
+    if (active) values.add(corner)
+    else values.delete(corner)
+    timingDetailLoading.value = [...values]
+  }
+
+  function setTimingError(corner: string, code: string | null): void {
+    const errors = { ...timingDetailErrors.value }
+    if (code) errors[corner] = code
+    else delete errors[corner]
+    timingDetailErrors.value = errors
+  }
+
+  async function loadTimingCorner(corner: string): Promise<void> {
+    const artifact = timingPathArtifacts.get(corner)
+    const contextId = timingArtifactContextId
+    const revision = timingArtifactRevision
+    if (!artifact || !contextId || revision === null) {
+      setTimingError(corner, 'TIMING_ARTIFACT_UNAVAILABLE')
+      return
+    }
+    if (loadedTimingCorners.has(corner)) return
+    const key = `${contextId}\u0000${revision}\u0000${corner}`
+    const pending = timingPathLoads.get(key)
+    if (pending) return await pending
+    const version = requestVersion
+    const request = (async () => {
+      setTimingLoading(corner, true)
+      setTimingError(corner, null)
+      try {
+        const result = await getDesktopApi().backendWorkspace.getArtifact({
+          artifactId: artifact.artifactId,
+          workspaceContextId: contextId,
+          workspaceRevision: revision,
+        })
+        if (
+          version !== requestVersion ||
+          timingArtifactContextId !== contextId ||
+          timingArtifactRevision !== revision
+        ) {
+          return
+        }
+        if (
+          result.workspaceContextId !== contextId ||
+          result.workspaceRevision !== revision ||
+          result.artifact.status !== 'ready' ||
+          result.artifact.data.artifactId !== artifact.artifactId
+        ) {
+          setTimingError(
+            corner,
+            result.artifact.issues[0]?.code ?? 'TIMING_ARTIFACT_UNAVAILABLE',
+          )
+          return
+        }
+        const detail = result.artifact.data.timingPaths
+        if (!detail || detail.corner !== corner || !data.value) {
+          setTimingError(corner, 'TIMING_ARTIFACT_INVALID')
+          return
+        }
+        applyTimingArtifacts(data.value, [], [detail])
+        loadedTimingCorners.add(corner)
+      } catch {
+        setTimingError(corner, 'TIMING_ARTIFACT_READ_FAILED')
+      } finally {
+        if (
+          version === requestVersion &&
+          timingArtifactContextId === contextId &&
+          timingArtifactRevision === revision
+        ) {
+          setTimingLoading(corner, false)
+        }
+      }
+    })()
+    timingPathLoads.set(key, request)
+    try {
+      await request
+    } finally {
+      if (timingPathLoads.get(key) === request) timingPathLoads.delete(key)
+    }
+  }
+
   async function refresh(): Promise<void> {
     const projectPath = currentProject.value?.path
     const stepId = currentStep.value
     const contextId = session.workspaceContextId
     const revision = committedRevision()
     const version = ++requestVersion
+    clearTimingArtifacts()
     const viewKey =
       projectPath && contextId && stepId
         ? `${projectPath.replace(/\\/g, '/')}\u0000${contextId}\u0000${stepId.toLowerCase()}`
@@ -138,6 +258,7 @@ export function useStepDashboardData() {
           ? detail.staleEvidence.artifacts
           : detail.artifacts
       const artifactRevision = next.staleRevision ?? revision
+      resetTimingArtifacts(contextId, artifactRevision, artifacts)
       const readArtifact = async (
         artifactId: string,
       ): Promise<BackendWorkspaceArtifactContent | null> => {
@@ -159,7 +280,7 @@ export function useStepDashboardData() {
       }
       const readImage = async (artifactId: string): Promise<string | null> => {
         const artifact = await readArtifact(artifactId)
-        if (!artifact) return null
+        if (!artifact?.bytes) return null
         const url = URL.createObjectURL(
           new Blob([artifact.bytes.slice()], {
             type: artifact.mimeType,
@@ -196,7 +317,8 @@ export function useStepDashboardData() {
         .filter(
           (artifact) =>
             artifact.availability === 'available' &&
-            (artifact.kind === 'timing_summary' || artifact.kind === 'timing_paths'),
+            (artifact.kind === 'timing_summary' || artifact.kind === 'timing_paths') &&
+            !artifact.timingCorner,
         )
         .slice(0, 32)) {
         const artifact = await readArtifact(descriptor.artifactId)
@@ -255,8 +377,18 @@ export function useStepDashboardData() {
 
   onScopeDispose(() => {
     requestVersion += 1
+    timingPathLoads.clear()
     unregisterRerun()
   })
 
-  return { currentStep, data, error, loading, refresh }
+  return {
+    currentStep,
+    data,
+    error,
+    loadTimingCorner,
+    loading,
+    refresh,
+    timingDetailErrors,
+    timingDetailLoading,
+  }
 }

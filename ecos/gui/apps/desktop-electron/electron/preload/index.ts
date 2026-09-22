@@ -375,6 +375,12 @@ const desktopApi: DesktopApi = {
     resolveBinding: (request) =>
       invokeDesktop(desktopApiIpcChannels.pdkInventoryResolveBinding, request),
   },
+  projectEccConfig: {
+    read: (projectRoot) =>
+      invokeDesktop(desktopApiIpcChannels.projectEccConfigRead, projectRoot),
+    write: (request) =>
+      invokeDesktop(desktopApiIpcChannels.projectEccConfigWrite, request),
+  },
   runtime: {
     cancel: (request) =>
       invokeDesktop(desktopApiIpcChannels.designRuntimeCancel, request),

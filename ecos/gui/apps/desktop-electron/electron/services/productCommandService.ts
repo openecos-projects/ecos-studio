@@ -43,6 +43,7 @@ interface ProductCommandContext {
   ): Promise<void>
   registerCreateWorkspace?(creationId: string): Promise<void>
   ownsWorkspaceHandle(workspaceHandle: string): boolean
+  isWorkspaceMutationBusy?(workspaceHandle: string): boolean
   prepareCreate(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateRequest>
   runtime: ProductCommandRuntime
   trackCreateResult(result: unknown): void
@@ -125,8 +126,24 @@ export async function executeProductCommand(
 
   switch (request.command) {
     case 'workspace.run':
+      if (context.isWorkspaceMutationBusy?.(workspaceHandle)) {
+        throw Object.assign(
+          new Error(
+            'Chip Viewer is saving layout edits. Run will be available when the save completes.',
+          ),
+          { code: 'WORKSPACE_MUTATION_BUSY' },
+        )
+      }
       return await context.runtime.startFlowOperation(request.payload)
     case 'workspace.runStep':
+      if (context.isWorkspaceMutationBusy?.(workspaceHandle)) {
+        throw Object.assign(
+          new Error(
+            'Chip Viewer is saving layout edits. Run will be available when the save completes.',
+          ),
+          { code: 'WORKSPACE_MUTATION_BUSY' },
+        )
+      }
       return await context.runtime.startStepOperation(request.payload)
     case 'workspace.update': {
       const draft = await context.prepareCreate({
@@ -171,6 +188,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       requireOptionalString(payload, 'projectRoot')
       requireRecord(payload, 'workspaceBindings')
       requireRecord(payload, 'workspaceSpec')
+      if ('eccPdkConfig' in payload && !isRecord(payload.eccPdkConfig)) {
+        throw new Error('Workspace create eccPdkConfig must be an object')
+      }
       break
     case 'workspace.run':
       requireString(payload, 'workspaceHandle')
@@ -189,6 +209,9 @@ function readProductCommandRequest(value: unknown): ProductCommandRequest {
       if (!isRecord(payload.draft)) throw new Error('Workspace update requires a draft')
       requireRecord(payload.draft, 'workspaceBindings')
       requireRecord(payload.draft, 'workspaceSpec')
+      if ('eccPdkConfig' in payload.draft && !isRecord(payload.draft.eccPdkConfig)) {
+        throw new Error('Workspace update eccPdkConfig must be an object')
+      }
       validateRevision(payload.expectedWorkspaceRevision)
       break
     case 'workspace.updateConfiguration':

@@ -419,6 +419,7 @@ export interface WorkspaceArtifactDescriptor {
   sourceRevision?: number
   sizeBytes?: number
   stepId?: string
+  timingCorner?: string
 }
 
 export interface WorkspaceStepAnalysis {
@@ -472,11 +473,14 @@ export interface BackendWorkspaceArtifactRequest {
 
 export interface BackendWorkspaceArtifactContent {
   artifactId: string
-  bytes: Uint8Array
+  bytes?: Uint8Array
   kind: string
   mimeType: string
   name: string
   text?: string
+  integrity?: 'verified' | 'externally-modified'
+  recordedSizeBytes?: number
+  actualSizeBytes?: number
   timingPaths?: WorkspaceTimingPathsDetail
   timingSummary?: WorkspaceTimingSummaryDetail
 }

@@ -210,6 +210,10 @@ function registerHandlers(
       resolveBinding: vi.fn(),
       validateWorkspace: vi.fn(),
     },
+    projectEccConfigService: {
+      read: vi.fn(),
+      write: vi.fn(),
+    },
     surferProtocolService: {
       authorizeWaveform: vi.fn(),
       resolveWaveformPath: vi.fn(),
@@ -332,6 +336,8 @@ function registerHandlers(
     },
     chipViewerService: {
       isOpen: vi.fn(),
+      onWorkspaceRevisionChanged:
+        undefined as DesktopBridgeServices['chipViewerService']['onWorkspaceRevisionChanged'],
       open: vi.fn(),
     },
   }
@@ -1513,6 +1519,98 @@ describe('registerIpc', () => {
     expect(services.eccRuntimeService.createWorkspace).not.toHaveBeenCalled()
   })
 
+  it('persists eccPdkConfig to ecc.toml and strips it from the runtime request', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.pdkInventoryService.resolveBinding.mockResolvedValue(null)
+    services.pdkInventoryService.bindInstallation.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.createWorkspace.mockResolvedValue({
+      directory: '/tmp/workspace',
+      workspaceHandle: 'workspace-handle',
+    })
+    const eccPdkConfig = {
+      externalPaths: ['/macros/sram'],
+      overrides: {
+        lefs: ['/canonical/pdk/IP/lef/std.lef', '/macros/sram/sram.lef'],
+      },
+    }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
+        payload: workspaceCreateRequest({
+          commandId: 'workspace-create-ecc-pdk-config',
+          pdkInstallationId: 'pdk-installation:ics55',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
+          pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
+          eccPdkConfig,
+        }),
+      }),
+    ).resolves.toMatchObject({ workspaceHandle: 'workspace-handle' })
+
+    const runtimeCall = services.eccRuntimeService.createWorkspace.mock.calls[0][0]
+    expect(runtimeCall).not.toHaveProperty('eccPdkConfig')
+    expect(services.projectEccConfigService.write).toHaveBeenCalledWith({
+      projectRoot: '/tmp/project',
+      pdkRoot: '/canonical/pdk',
+      pdkName: 'ics55',
+      ...eccPdkConfig,
+    })
+  })
+
+  it('skips ecc.toml persistence when the create carries no eccPdkConfig', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.pdkInventoryService.resolveBinding.mockResolvedValue({
+      installationId: 'pdk-installation:ics55',
+      projectId: 'proj_demo',
+      projectRoot: '/tmp/project',
+    })
+    services.pdkInventoryService.validateWorkspace.mockResolvedValue({
+      id: 'pdk-installation:ics55',
+      familyId: 'ics55',
+      displayName: 'ICS55',
+      version: null,
+      root: '/canonical/pdk',
+      ownership: 'imported',
+      readiness: 'ready',
+      reason: null,
+    })
+    services.eccRuntimeService.createWorkspace.mockResolvedValue({
+      directory: '/tmp/workspace',
+      workspaceHandle: 'workspace-handle',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.productCommandExecute)?.(event, {
+        command: 'workspace.create',
+        payload: workspaceCreateRequest({
+          commandId: 'workspace-create-without-ecc-pdk-config',
+          pdkInstallationId: 'pdk-installation:ics55',
+          projectId: 'proj_demo',
+          projectRoot: '/tmp/project',
+          pdkRequirement: { familyId: 'ics55', version: null, manualConfig: null },
+        }),
+      }),
+    ).resolves.toMatchObject({ workspaceHandle: 'workspace-handle' })
+    expect(services.projectEccConfigService.write).not.toHaveBeenCalled()
+  })
+
   it('uses the requested Project Requirement for workspace creation', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -2288,6 +2386,50 @@ describe('registerIpc', () => {
     ).resolves.toEqual({ open: true })
 
     expect(services.chipViewerService.isOpen).toHaveBeenCalledWith(request)
+  })
+
+  it('republishes layout-edit revision bumps on the subscribed workspace handle', async () => {
+    const { handlers, services } = registerHandlers()
+    const ownerSend = vi.fn()
+    const ownerSender = Object.assign(new EventEmitter(), {
+      id: 11,
+      isDestroyed: vi.fn(() => false),
+      send: ownerSend,
+    })
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+    await openBackendWorkspace(
+      handlers,
+      { sender: ownerSender },
+      { directory: '/work/demo' },
+    )
+
+    services.chipViewerService.onWorkspaceRevisionChanged?.({
+      projectPath: '/work/demo',
+      workspaceHandle: 'layout-edit-handle-2',
+      workspaceRevision: 5,
+    })
+
+    expect(ownerSend).toHaveBeenCalledWith(
+      desktopApiEventChannels.designRuntimeEvent,
+      expect.objectContaining({
+        designTool: 'backend',
+        type: 'runtime.protocol',
+        workspaceDirectory: '/work/demo',
+        workspaceHandle: 'workspace-handle-1',
+        event: expect.objectContaining({
+          type: 'workspace.committed',
+          operationId: 'layout-edit-save:layout-edit-handle-2',
+          workspaceId: 'layout-edit-handle-2',
+          workspaceRevision: 5,
+        }),
+      }),
+    )
+    expect(
+      services.backendProjectComparisonService.invalidateWorkspace,
+    ).toHaveBeenCalledWith('/work/demo')
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

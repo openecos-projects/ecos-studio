@@ -1,3 +1,4 @@
+import type { EccWorkspacePdkConfigPersist } from './projectEccConfig.ts'
 import type { PdkRequirement } from './pdkInventory.ts'
 
 export interface EccWorkspaceCreateRequest {
@@ -9,6 +10,11 @@ export interface EccWorkspaceCreateRequest {
   pdkRequirement?: PdkRequirement
   projectId?: string
   projectRoot?: string
+  /**
+   * ecc.toml persistence intent for this create/update. Consumed by the
+   * Electron bridge (stripped before the request reaches ECC).
+   */
+  eccPdkConfig?: EccWorkspacePdkConfigPersist
 }
 
 export interface EccWorkspaceOpenRequest {
@@ -262,6 +268,7 @@ export interface EccLayoutEditApplyResult {
 export interface EccLayoutEditSaveRequest extends EccWorkspaceMutationRequest {
   editSessionId: string
   expectedRevision: number
+  writeMacroLocation?: boolean
 }
 
 export interface EccLayoutEditSaveResult {
@@ -274,6 +281,7 @@ export interface EccLayoutEditSaveResult {
   dirty: boolean
   editSessionId: string
   geometryRevision: number
+  macroLocationPath?: string
   revision: number
   saved: boolean
   workspaceRevision?: number
@@ -486,6 +494,7 @@ export type EccEngineeringAnalysisFileStatus =
   | 'invalid'
   | 'unsupported'
   | 'unsafe'
+  | 'oversized'
 
 export interface EccEngineeringAnalysisFile {
   artifactId: string
