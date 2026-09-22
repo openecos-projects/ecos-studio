@@ -121,9 +121,9 @@ export class BackendProjectComparisonService {
     }
     let watcher: ProjectComparisonFileWatcher | null = null
     try {
-      const projectRoot = await (this.reader.resolveProjectRoot ?? realpath)(
-        request.projectRootLocator,
-      )
+      const projectRoot = this.reader.resolveProjectRoot
+        ? await this.reader.resolveProjectRoot(request.projectRootLocator)
+        : await realpath(request.projectRootLocator)
       let context: ProjectComparisonContext | null = null
       let manifestChangedBeforeRead = false
       let watcherIssue: ReadIssue | null = null

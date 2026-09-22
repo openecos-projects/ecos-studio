@@ -132,6 +132,9 @@ describe('preload desktop bridge contract', () => {
           getStepFindings: expect.any(Function),
           refreshComparison: expect.any(Function),
         }),
+        projectManagement: expect.objectContaining({
+          readFrontendWorkspaceTexts: expect.any(Function),
+        }),
         workspace: expect.objectContaining({
           readProjectTextFile: expect.any(Function),
         }),

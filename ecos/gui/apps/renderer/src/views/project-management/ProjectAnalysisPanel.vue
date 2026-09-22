@@ -44,8 +44,21 @@
       </div>
     </div>
 
+    <FrontendProjectAnalysisPanel
+      v-if="
+        hasProjectData && project.projectType === 'frontend' && project.frontendAnalysis
+      "
+      :project="project"
+      :selected-analysis-tab="selectedAnalysisTab"
+      :selected-step="frontendSelectedStep"
+      :selected-workspace-id="selectedWorkspaceId"
+      @select-analysis-tab="selectAnalysisTab"
+      @select-step="selectStep"
+      @select-workspace="selectWorkspace"
+    />
+
     <div
-      v-if="hasProjectData"
+      v-if="hasProjectData && project.projectType === 'backend'"
       id="analysis-dashboard-panel"
       role="tabpanel"
       aria-labelledby="analysis-tab-dashboard"
@@ -448,7 +461,7 @@
     </div>
 
     <div
-      v-if="hasProjectData"
+      v-if="hasProjectData && project.projectType === 'backend'"
       id="analysis-step-panel"
       role="tabpanel"
       aria-labelledby="analysis-tab-step"
@@ -500,11 +513,16 @@ import type { ProjectStepFindingsProjectionState } from '@/stores/backendProject
 import ProjectQorScoreChart from '@/components/ProjectQorScoreChart.vue'
 import ProjectStepAnalysisPanel from '@/components/ProjectStepAnalysisPanel.vue'
 import ProjectQorSnapshotPanel from './ProjectQorSnapshotPanel.vue'
+import FrontendProjectAnalysisPanel from './FrontendProjectAnalysisPanel.vue'
 import {
   type ProjectManagementProject,
   type ProjectMetricPoint,
 } from '@/utils/projectManagement'
-import type { QorGateStatus } from '@ecos-studio/shared'
+import {
+  projectManifestFrontendFlowSteps,
+  type ProjectManifestFrontendFlowStep,
+  type QorGateStatus,
+} from '@ecos-studio/shared'
 import {
   buildBestWorkspacePpaMetrics,
   buildDashboardMetricRows,
@@ -581,9 +599,19 @@ const dashboardCompareScrollTop = ref(0)
 const dashboardCompareTable = ref<HTMLElement | null>(null)
 
 const hasProjectData = computed(() => props.project.workspaces.length > 0)
+const frontendSelectedStep = computed<ProjectManifestFrontendFlowStep>(() =>
+  (projectManifestFrontendFlowSteps as readonly string[]).includes(props.selectedStep)
+    ? (props.selectedStep as ProjectManifestFrontendFlowStep)
+    : 'prepare',
+)
 const analysisSubtitle = computed(() => {
   const count = props.project.workspaces.length
   const workspaceLabel = `${count} workspace${count === 1 ? '' : 's'}`
+  if (props.project.projectType === 'frontend') {
+    return props.selectedAnalysisTab === 'dashboard'
+      ? `${workspaceLabel} · project overview`
+      : `${workspaceLabel} · frontend step comparison`
+  }
   if (props.selectedAnalysisTab === 'dashboard') {
     return `${workspaceLabel} · project overview`
   }
@@ -597,6 +625,9 @@ const selectedWorkspace = computed(() =>
 const analysisContext = computed(() => {
   const workspaceId = selectedWorkspace.value?.id
   if (!workspaceId) return ''
+  if (props.project.projectType === 'frontend') {
+    return `${props.project.name} / ${workspaceId}`
+  }
   const baselineId = props.project.qorTrendSummary.baselineWorkspaceId
   if (!baselineId || baselineId === workspaceId) {
     return `${props.project.name} / ${workspaceId} is the QoR reference workspace`

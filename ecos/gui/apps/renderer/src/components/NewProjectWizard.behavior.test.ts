@@ -348,6 +348,7 @@ describe('NewProjectWizard behavior', () => {
   it('reuses design files and chip identity from the selected Project', async () => {
     wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
       schema_version: 1,
+      project_type: 'backend',
       project_id: 'proj_gcd',
       name: 'gcd',
       design_name: 'gcd',
@@ -413,6 +414,7 @@ describe('NewProjectWizard behavior', () => {
   it('prefills filelist only when the Project Manifest has both RTL and filelist', async () => {
     wizardMocks.readProjectManagementManifest.mockResolvedValueOnce({
       schema_version: 1,
+      project_type: 'backend',
       project_id: 'proj_gcd',
       name: 'gcd',
       design_name: 'gcd',

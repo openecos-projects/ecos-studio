@@ -1,11 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import {
+  projectManagementFrontendWorkspaceStepAnalysisSpecs,
+  projectManagementFrontendWorkspaceSummaryPaths,
   projectManagementStaTimingIssuesPath,
   projectManagementWorkspaceStepAnalysisSpecs,
   projectManagementWorkspaceSummaryPaths,
+  projectManagementWorkspaceSummaryPathsFor,
 } from './projectManagementSummary'
 
 describe('projectManagementWorkspaceSummaryPaths', () => {
+  it('keeps frontend reports separate from the backend allowlist', () => {
+    expect(projectManagementWorkspaceSummaryPathsFor('backend')).toBe(
+      projectManagementWorkspaceSummaryPaths,
+    )
+    expect(projectManagementWorkspaceSummaryPathsFor('frontend')).toBe(
+      projectManagementFrontendWorkspaceSummaryPaths,
+    )
+    expect(projectManagementFrontendWorkspaceStepAnalysisSpecs).toHaveLength(5)
+    expect(projectManagementFrontendWorkspaceSummaryPaths).toHaveLength(21)
+    expect(new Set(projectManagementFrontendWorkspaceSummaryPaths).size).toBe(21)
+    expect(projectManagementFrontendWorkspaceSummaryPaths).toContain('home/flow.json')
+    expect(projectManagementFrontendWorkspaceSummaryPaths).not.toContain(
+      projectManagementStaTimingIssuesPath,
+    )
+  })
+
   it('is the unique bounded summary allowlist derived from every analysis step', () => {
     expect(projectManagementWorkspaceStepAnalysisSpecs).toHaveLength(12)
     expect(projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step)).toEqual(

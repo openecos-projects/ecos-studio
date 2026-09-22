@@ -12,6 +12,8 @@ const registerProjectRoot = vi.fn()
 const registerProjectReadRoot = vi.fn()
 const mutateProjectManifest = vi.fn()
 const discoverProjectForWorkspace = vi.fn()
+const readProjectManagementManifest = vi.fn()
+const rememberProjectHistoryEntry = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: vi.fn(() => ({
@@ -27,8 +29,15 @@ vi.mock('@/api/projectManifest', () => ({
 }))
 
 vi.mock('@/utils/projectManagementRead', () => ({
+  readProjectManagementManifest: (...args: unknown[]) =>
+    readProjectManagementManifest(...args),
   discoverProjectForWorkspace: (...args: unknown[]) =>
     discoverProjectForWorkspace(...args),
+}))
+
+vi.mock('@/utils/projectHistory', () => ({
+  rememberProjectHistoryEntry: (...args: unknown[]) =>
+    rememberProjectHistoryEntry(...args),
 }))
 
 describe('projectManifestRegistration', () => {
@@ -37,6 +46,8 @@ describe('projectManifestRegistration', () => {
     registerProjectReadRoot.mockReset()
     mutateProjectManifest.mockReset()
     discoverProjectForWorkspace.mockReset()
+    readProjectManagementManifest.mockReset().mockResolvedValue(null)
+    rememberProjectHistoryEntry.mockReset()
     registerProjectRoot.mockImplementation(async (path: string) => path)
     mutateProjectManifest.mockResolvedValue(undefined)
     discoverProjectForWorkspace.mockResolvedValue(null)
@@ -56,6 +67,8 @@ describe('projectManifestRegistration', () => {
     expect(projectContextFromWorkspaceConfig(config)).toEqual({
       projectRoot: '/projects/gcd',
       projectName: 'gcd',
+      mode: 'select',
+      projectId: undefined,
     })
   })
 
@@ -159,6 +172,45 @@ describe('projectManifestRegistration', () => {
           endStep: 'STA',
         }),
       }),
+    )
+  })
+
+  it('creates a frontend manifest before registering its first workspace', async () => {
+    const config = {
+      directory: '/projects/cpu/ws_0001',
+      designTool: 'frontend',
+      parameters: { design: 'cpu' },
+      project_context: {
+        mode: 'create',
+        project_name: 'cpu',
+        project_root: '/projects/cpu',
+        project_json_path: '/projects/cpu/project.json',
+      },
+    } as WorkspaceConfig
+    mutateProjectManifest.mockResolvedValue({
+      root_path: '/projects/cpu',
+      name: 'cpu',
+      base_design: { top_module: 'ecos_sim_top' },
+    })
+    await registerProjectManagedWorkspace({
+      workspacePath: config.directory,
+      config,
+      projectContext: projectContextFromWorkspaceConfig(config),
+    })
+
+    expect(mutateProjectManifest).toHaveBeenNthCalledWith(1, '/projects/cpu', {
+      type: 'create',
+      name: 'cpu',
+      designName: 'cpu',
+      projectType: 'frontend',
+    })
+    expect(mutateProjectManifest).toHaveBeenNthCalledWith(
+      2,
+      '/projects/cpu',
+      expect.objectContaining({ type: 'register-workspace' }),
+    )
+    expect(rememberProjectHistoryEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ projectType: 'frontend', path: '/projects/cpu' }),
     )
   })
 

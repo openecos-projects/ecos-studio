@@ -6,16 +6,23 @@ import {
   parseEngineeringSnapshotJson,
 } from '@ecos-studio/shared'
 import type {
+  DesktopFrontendWorkspaceTextsRequest,
+  DesktopFrontendWorkspaceTextsResult,
   DesktopProjectManagementWorkspaceStepConfigurationRequest,
   DesktopProjectManagementWorkspaceStepConfigurationResult,
   EngineeringSnapshotValidationResult,
   ProjectManifest,
 } from '@ecos-studio/shared'
+import { projectManagementFrontendWorkspaceSummaryPaths } from '@ecos-studio/shared'
 import { isPathWithinRoot } from './pathScope'
 
 const PROJECT_MANIFEST_MAX_BYTES = 512 * 1024
 export const PROJECT_FINDINGS_ARTIFACT_MAX_BYTES = 1024 * 1024
 export const PROJECT_BINARY_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024
+const FRONTEND_REPORT_MAX_BYTES = 1024 * 1024
+const frontendReportPaths = new Set<string>(
+  projectManagementFrontendWorkspaceSummaryPaths,
+)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -160,7 +167,12 @@ export class ProjectManagementReadService {
     private readonly readWorkspaceConfiguration?: (
       workspacePath: string,
     ) => Promise<ProjectWorkspaceConfiguration>,
+    private readonly resolveProjectRootAccess?: (path: string) => Promise<string>,
   ) {}
+
+  async resolveProjectRoot(path: string): Promise<string> {
+    return await (this.resolveProjectRootAccess ?? canonicalizeExistingDirectory)(path)
+  }
 
   async readManifest(projectRoot: string): Promise<ProjectManifest | null> {
     const root = await canonicalizeExistingDirectory(projectRoot)
@@ -170,7 +182,8 @@ export class ProjectManagementReadService {
     )
     if (!content) return null
     const manifest = await this.projectManifestReader.load(root)
-    if (!this.readWorkspaceConfiguration) return manifest
+    if (manifest.project_type === 'frontend' || !this.readWorkspaceConfiguration)
+      return manifest
 
     const sourceWorkspace =
       manifest.workspaces.find(
@@ -213,6 +226,57 @@ export class ProjectManagementReadService {
       .filter((entry) => entry.isDirectory() || entry.isFile())
       .map((entry) => entry.name)
       .sort((left, right) => left.localeCompare(right))
+  }
+
+  async readFrontendWorkspaceTexts(
+    request: DesktopFrontendWorkspaceTextsRequest,
+  ): Promise<DesktopFrontendWorkspaceTextsResult> {
+    const project = await this.loadProject(request.projectRoot)
+    if (project.manifest?.project_type !== 'frontend') {
+      throw new Error('Frontend workspace reports require a frontend project.')
+    }
+    if (
+      !Array.isArray(request.paths) ||
+      request.paths.length < 1 ||
+      request.paths.length > frontendReportPaths.size ||
+      request.paths.some((path) => !frontendReportPaths.has(path))
+    )
+      throw new Error('Frontend report path is not allowed.')
+    const workspaceRoot = await this.resolveDeclaredWorkspace(
+      project.root,
+      project.manifest.workspaces.map((workspace) => workspace.workspace_path),
+      request.workspacePath,
+    )
+    const texts: Record<string, string | null> = {}
+    const unavailablePaths: string[] = []
+    for (const path of new Set(request.paths)) {
+      const requestedPath = join(workspaceRoot, path)
+      let canonicalPath: string
+      try {
+        canonicalPath = await realpath(requestedPath)
+      } catch (error) {
+        if (isNodeErrorWithCode(error, 'ENOENT')) {
+          texts[path] = null
+          continue
+        }
+        unavailablePaths.push(path)
+        texts[path] = null
+        continue
+      }
+      if (!isPathWithinRoot(canonicalPath, workspaceRoot)) {
+        throw new Error('Frontend report resolves outside its workspace.')
+      }
+      try {
+        texts[path] = await readOptionalBoundedTextFile(
+          canonicalPath,
+          FRONTEND_REPORT_MAX_BYTES,
+        )
+      } catch {
+        unavailablePaths.push(path)
+        texts[path] = null
+      }
+    }
+    return { texts, unavailablePaths }
   }
 
   async readWorkspaceStepConfiguration(

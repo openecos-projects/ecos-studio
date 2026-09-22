@@ -42,6 +42,7 @@ function watcherHarness(startError?: Error) {
 function manifest(root = '/projects/demo'): ProjectManifest {
   return {
     schema_version: 1,
+    project_type: 'backend',
     project_id: 'project-1',
     name: 'demo',
     design_name: 'gcd',

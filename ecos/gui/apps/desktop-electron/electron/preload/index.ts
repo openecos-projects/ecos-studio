@@ -206,6 +206,11 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.projectManagementDiscoverProject, directory),
     readManifest: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementReadManifest, projectRoot),
+    readFrontendWorkspaceTexts: (request) =>
+      invokeDesktop(
+        desktopApiIpcChannels.projectManagementReadFrontendWorkspaceTexts,
+        request,
+      ),
     listProjectEntries: (projectRoot) =>
       invokeDesktop(desktopApiIpcChannels.projectManagementListEntries, projectRoot),
     readWorkspaceStepConfiguration: (request) =>

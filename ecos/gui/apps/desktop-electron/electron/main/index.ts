@@ -46,6 +46,7 @@ import {
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectReadGrantStore } from '../services/projectReadGrantStore'
 import { ProjectManifestService } from '../services/projectManifestService'
+import { FrontendProjectManifestService } from '../services/frontendProjectManifestService'
 import {
   ProjectManagementReadService,
   type ProjectWorkspaceConfiguration,
@@ -282,6 +283,7 @@ function getDesktopServices() {
     projectScopeService,
     workspaceService,
     eccRuntimeService,
+    new FrontendProjectManifestService(projectScopeService, workspaceService),
   )
   const creationProjectScope = projectScopeService
   const workspaceCreationJournal = new WorkspaceCreationJournal({
@@ -306,6 +308,7 @@ function getDesktopServices() {
         'workspace.configuration.read',
         { directory },
       ),
+    (path) => projectScopeService!.requestProjectPathAccess(path),
   )
   const backendProjectComparisonService = new BackendProjectComparisonService(
     projectManagementReadService,

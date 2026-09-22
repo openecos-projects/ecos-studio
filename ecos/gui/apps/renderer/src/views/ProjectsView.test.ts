@@ -18,6 +18,7 @@ const testState = vi.hoisted(() => ({
   routerPush: vi.fn(),
   showToast: vi.fn(),
   comparisonProjection: { data: null as unknown, status: 'idle' },
+  projectManifestOverride: null as unknown,
   selectProject: vi.fn(async (_projectRoot: string) => undefined),
   pickDirectory: vi.fn(async (_options?: unknown) => '/projects/demo'),
   stepOutputs: vi.fn(
@@ -77,27 +78,30 @@ vi.mock('@/utils/projectManagementRead', () => ({
     workspacePath: `${projectRoot}/ws_0001`,
   })),
   listProjectManagementEntries: vi.fn(async () => []),
-  readProjectManagementManifest: vi.fn(async (projectRoot: string) => ({
-    schema_version: 1,
-    project_id: `project-${projectRoot}`,
-    name: projectRoot.split('/').pop() ?? 'demo',
-    design_name: 'gcd',
-    description: '',
-    root_path: projectRoot,
-    created_at: '2026-09-04T00:00:00.000Z',
-    updated_at: '2026-09-04T00:00:00.000Z',
-    base_design: { parameters: {}, rtl_list: [] },
-    objectives: { primary: 'timing', directions: {} },
-    workspaces: [
-      {
-        workspace_id: 'ws_0001',
-        name: 'ws_0001',
-        workspace_path: `${projectRoot}/ws_0001`,
-        status: 'not_started',
+  readProjectManagementManifest: vi.fn(
+    async (projectRoot: string) =>
+      testState.projectManifestOverride ?? {
+        schema_version: 1,
+        project_id: `project-${projectRoot}`,
+        name: projectRoot.split('/').pop() ?? 'demo',
+        design_name: 'gcd',
+        description: '',
+        root_path: projectRoot,
+        created_at: '2026-09-04T00:00:00.000Z',
+        updated_at: '2026-09-04T00:00:00.000Z',
+        base_design: { parameters: {}, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
+        workspaces: [
+          {
+            workspace_id: 'ws_0001',
+            name: 'ws_0001',
+            workspace_path: `${projectRoot}/ws_0001`,
+            status: 'not_started',
+          },
+        ],
+        best_workspace: null,
       },
-    ],
-    best_workspace: null,
-  })),
+  ),
 }))
 vi.mock('@/stores/backendProjectComparisonSession', () => ({
   useBackendProjectComparisonSession: () => ({
@@ -112,6 +116,12 @@ vi.mock('@/stores/backendProjectComparisonSession', () => ({
     refresh: vi.fn(),
     selectProject: (projectRoot: string) => testState.selectProject(projectRoot),
   }),
+}))
+vi.mock('./project-management/frontendProjectWorkspaceData', () => ({
+  readFrontendProjectWorkspaceData: vi.fn(async () => ({
+    flowStates: { ws_0001: { prepare: 'success' } },
+    analysisInputs: { ws_0001: {} },
+  })),
 }))
 vi.mock('@/platform/desktop', () => ({
   getDesktopApi: () => ({
@@ -131,6 +141,7 @@ import ProjectsView from './ProjectsView.vue'
 import { useBackgroundOperationStore } from '@/stores/backgroundOperationStore'
 import { loadProjectHistory, rememberProjectHistoryEntry } from '@/utils/projectHistory'
 import { importProjectManagementWorkspace } from '@/utils/projectManagementRead'
+import { readFrontendProjectWorkspaceData } from './project-management/frontendProjectWorkspaceData'
 import {
   consumeWorkspaceWizardRequest,
   useWorkspaceWizardRequest,
@@ -161,8 +172,10 @@ describe('ProjectsView background lifecycle integration', () => {
     vi.mocked(rememberProjectHistoryEntry).mockResolvedValue([testState.project])
     vi.mocked(importProjectManagementWorkspace).mockClear()
     testState.comparisonProjection = { data: null, status: 'idle' }
+    testState.projectManifestOverride = null
     testState.selectProject.mockReset()
     testState.selectProject.mockImplementation(async () => undefined)
+    vi.mocked(readFrontendProjectWorkspaceData).mockClear()
     testState.pickDirectory.mockReset()
     testState.pickDirectory.mockResolvedValue('/projects/demo')
   })
@@ -188,11 +201,46 @@ describe('ProjectsView background lifecycle integration', () => {
     )
   })
 
+  it('loads frontend project steps without opening a backend comparison session', async () => {
+    const { createProjectManifestDraft, registerWorkspaceInManifest } =
+      await import('@ecos-studio/shared')
+    const projectRoot = '/projects/cpu'
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: projectRoot,
+        name: 'cpu',
+        designName: 'core',
+        projectType: 'frontend',
+      }),
+      { projectRoot, workspacePath: `${projectRoot}/ws_0001` },
+    )
+    vi.mocked(loadProjectHistory).mockResolvedValueOnce([
+      {
+        id: projectRoot,
+        name: 'cpu',
+        path: projectRoot,
+        projectType: 'frontend',
+        lastOpened: new Date(),
+      },
+    ])
+    testState.projectManifestOverride = manifest
+
+    const wrapper = shallowMount(ProjectsView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Frontend')
+    expect(wrapper.text()).toContain('prepare')
+    expect(wrapper.text()).toContain('sim')
+    expect(readFrontendProjectWorkspaceData).toHaveBeenCalledWith(projectRoot, manifest)
+    expect(testState.selectProject).not.toHaveBeenCalled()
+  })
+
   it('notifies when the picked workspace is already registered', async () => {
     vi.mocked(importProjectManagementWorkspace).mockResolvedValueOnce({
       status: 'already_registered',
       manifest: {
         schema_version: 1,
+        project_type: 'backend',
         project_id: 'project-/projects/demo',
         name: 'demo',
         design_name: 'gcd',
@@ -281,6 +329,7 @@ describe('ProjectsView background lifecycle integration', () => {
       status: 'already_registered',
       manifest: {
         schema_version: 1,
+        project_type: 'backend',
         project_id: 'project-/projects/demo',
         name: 'demo',
         design_name: 'gcd',
