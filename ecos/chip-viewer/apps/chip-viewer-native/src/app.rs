@@ -7161,6 +7161,14 @@ impl LoadedViewer {
         staging.queue.finish_if_idle();
     }
 
+    fn abort_macro_queue(&mut self, reason: impl Into<String>) {
+        if let Some(staging) = self.macro_staging.as_mut() {
+            if staging.queue.is_busy() {
+                staging.queue.abort(reason);
+            }
+        }
+    }
+
     fn paint_macro_staging(&self, painter: &egui::Painter, world: Rect32, canvas: egui::Rect) {
         let Some(staging) = self.macro_staging.as_ref() else {
             return;
@@ -7301,11 +7309,30 @@ impl LoadedViewer {
         {
             Some(result) => result,
             None => {
-                self.last_edit_result = Some("failed to read edit result".to_string());
+                let message = "failed to read edit result".to_string();
+                self.last_edit_result = Some(message.clone());
                 self.pending_edit = None;
+                self.abort_macro_queue(message);
                 return;
             }
         };
+
+        if let Some(active) = self
+            .macro_staging
+            .as_ref()
+            .and_then(|staging| staging.queue.active.as_ref())
+        {
+            if active.command_id != result.command_id {
+                let message = format!(
+                    "macro edit result command {} does not match active command {}",
+                    result.command_id, active.command_id
+                );
+                self.last_edit_result = Some(message.clone());
+                self.pending_edit = None;
+                self.abort_macro_queue(message);
+                return;
+            }
+        }
 
         let action = edit_result_action(&result);
         // Shape id 0 is the placeholder used for staged macro placements;
@@ -7319,8 +7346,10 @@ impl LoadedViewer {
             match self.reload_snapshot_at(result.geometry_manifest_path.as_deref(), completion) {
                 Ok(()) => return,
                 Err(err) => {
-                    self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
+                    let message = format!("failed to reload geometry: {err}");
+                    self.last_edit_result = Some(message.clone());
                     self.pending_edit = None;
+                    self.abort_macro_queue(message);
                     return;
                 }
             }
