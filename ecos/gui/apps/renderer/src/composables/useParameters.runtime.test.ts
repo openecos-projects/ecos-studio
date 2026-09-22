@@ -290,6 +290,88 @@ describe('useParameters desktop bridge integration', () => {
     })
   })
 
+  it('asks before forcing a refresh over modified derived configs', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+    refreshConfigApi
+      .mockRejectedValueOnce(
+        Object.assign(new Error('config files changed'), {
+          code: 'derived_configs_modified',
+        }),
+      )
+      .mockResolvedValueOnce({
+        cmd: 'refresh_config',
+        data: { directory: '/workspace/demo', refreshed: true },
+        message: ['refreshed'],
+        response: 'success',
+      })
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+
+    const parameters = useParameters()
+    await vi.waitFor(() => {
+      expect(readProjectTextFile).toHaveBeenCalledWith(
+        '/workspace/demo/home/parameters.json',
+      )
+    })
+
+    parameters.config.design = 'updated_demo'
+
+    await expect(parameters.saveParameters()).resolves.toBe(true)
+    expect(confirm).toHaveBeenCalledWith(
+      'ECC detected manually modified derived configuration files. Refreshing will overwrite those edits. Continue?',
+    )
+    expect(refreshConfigApi).toHaveBeenNthCalledWith(1, {
+      cmd: 'refresh_config',
+      data: {
+        directory: '/workspace/demo',
+        workspaceHandle: 'workspace-demo',
+      },
+    })
+    expect(refreshConfigApi).toHaveBeenNthCalledWith(2, {
+      cmd: 'refresh_config',
+      data: {
+        directory: '/workspace/demo',
+        force: true,
+        workspaceHandle: 'workspace-demo',
+      },
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('does not force a refresh when modified derived configs are rejected', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+    refreshConfigApi.mockRejectedValueOnce(
+      Object.assign(new Error('config files changed'), {
+        code: 'derived_configs_modified',
+      }),
+    )
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+
+    const parameters = useParameters()
+    await vi.waitFor(() => {
+      expect(readProjectTextFile).toHaveBeenCalledWith(
+        '/workspace/demo/home/parameters.json',
+      )
+    })
+
+    parameters.config.design = 'updated_demo'
+
+    await expect(parameters.saveParameters()).resolves.toBe(false)
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(refreshConfigApi).toHaveBeenCalledOnce()
+    expect(refreshConfigApi).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ force: true }) }),
+    )
+    vi.unstubAllGlobals()
+  })
+
   it('updates a managed backend Workspace through ECC without writing derived parameters', async () => {
     fetchSharedHomeData.mockResolvedValue({
       parameters: '/workspace/demo/home/parameters.json',
