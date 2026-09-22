@@ -6,6 +6,7 @@ import {
   type EccEngineeringMetric,
   type EccProjectManifest,
   type EccPersistedEngineeringSnapshot,
+  type EccQorSnapshotExtension,
 } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BackendWorkspaceService } from './backendWorkspaceService'
@@ -13,6 +14,36 @@ import { ProjectManagementReadService } from './projectManagementReadService'
 import { runWithWindowScope } from './windowScopeContext'
 
 const temporaryDirectories: string[] = []
+
+function qorSnapshotExtension(): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score: 70,
+    scalarStatus: 'ORANGE',
+    profile: 'balanced',
+    qphys: {},
+    feasibility: { status: 'PASS', gates: [] },
+    evidence: {
+      index: 100,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    diagnoses: [],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
+}
 
 function metric(id: string, value: number): EccEngineeringMetric {
   return {
@@ -30,6 +61,7 @@ function metric(id: string, value: number): EccEngineeringMetric {
     step_role: 'primary',
     confidence: 'high',
     source: { kind: 'feature', path: 'feature/Place.step.json', selector: '/count' },
+    stepId: 'Place',
   }
 }
 
@@ -104,21 +136,7 @@ function snapshot(workspaceId: string, revision: number, value: number) {
       'Top module': 'gcd',
       'Max fanout': 32,
     },
-    // @ts-ignore legacy payload is rejected by schema 5
-    qorAssessment: {
-      status: 'ready',
-      metrics,
-      score: { value: 70, threshold: 60, gate: 'pass' },
-      steps: [
-        {
-          stepId: 'Place',
-          name: 'Place',
-          order: 1,
-          status: 'pass',
-          summaryMetricCount: 2,
-        },
-      ],
-    },
+    qorSnapshotExtension: qorSnapshotExtension(),
     schemaVersion: 5,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     workspaceId,

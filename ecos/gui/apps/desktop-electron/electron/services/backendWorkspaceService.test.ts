@@ -108,10 +108,15 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
 function engineeringMetric(
   id: string,
   value: number,
-  options: { corner?: string; direction?: EccEngineeringMetric['direction'] } = {},
+  options: {
+    corner?: string
+    direction?: EccEngineeringMetric['direction']
+    stepId?: string
+  } = {},
 ): EccEngineeringMetric {
   return {
     id,
+    ...(options.stepId ? { stepId: options.stepId } : {}),
     display_name: id,
     value,
     unit: 'count',
@@ -135,7 +140,71 @@ function engineeringMetric(
     project_role: 'trend',
     step_role: 'primary',
     confidence: 'high',
-    source: {},
+    source: { kind: 'feature', path: `feature/${id}.step.json`, selector: `/${id}` },
+  }
+}
+
+function setQorScore(snapshot: EccEngineeringSnapshot, score: number | null): void {
+  snapshot.qorSnapshotExtension = {
+    ...snapshot.qorSnapshotExtension,
+    score,
+    scalarStatus:
+      score === null
+        ? 'NOT_RATED'
+        : score >= 90
+          ? 'GREEN'
+          : score >= 75
+            ? 'YELLOW'
+            : score >= 60
+              ? 'ORANGE'
+              : 'RED',
+  }
+}
+
+function setSnapshotMetrics(
+  snapshot: EccEngineeringSnapshot,
+  metrics: EccEngineeringMetric[],
+): void {
+  snapshot.metrics = metrics
+  const counts = new Map<string, number>()
+  for (const metric of metrics) {
+    const stepId = (metric as EccEngineeringMetric & { stepId?: unknown }).stepId
+    if (typeof stepId !== 'string' || !stepId)
+      throw new Error('v5 metric requires stepId')
+    counts.set(stepId, (counts.get(stepId) ?? 0) + 1)
+  }
+  if (snapshot.analysis.steps.length === 0 && counts.size > 0) {
+    snapshot.analysis.steps = [...counts].map(([stepId, metricCount], order) => ({
+      stepId,
+      toolId: 'ecc',
+      order,
+      flowState: 'Success',
+      metricCount,
+      summaryStatus: 'unavailable',
+      metrics: {
+        artifactId: `${stepId}-metrics`,
+        status: 'missing',
+        reasonCode: 'ANALYSIS_FILE_MISSING',
+        data: null,
+      },
+      summary: {
+        artifactId: `${stepId}-summary`,
+        status: 'missing',
+        reasonCode: 'ANALYSIS_FILE_MISSING',
+        data: null,
+      },
+      hotspots: {
+        artifactId: `${stepId}-hotspots`,
+        status: 'missing',
+        reasonCode: 'ANALYSIS_FILE_MISSING',
+        data: null,
+      },
+      timingIssues: null,
+    }))
+  } else {
+    for (const step of snapshot.analysis.steps) {
+      step.metricCount = counts.get(step.stepId) ?? 0
+    }
   }
 }
 
@@ -619,7 +688,7 @@ describe('BackendWorkspaceService', () => {
         { name: 'Place', tool: 'dreamplace', state: 'Success' },
       ],
     }
-    ;((second as any).qorAssessment!.score as { value: number }).value = 80
+    setQorScore(second, 80)
     const readEngineeringSnapshot = vi
       .fn()
       .mockResolvedValueOnce(persistedSnapshotResult(first))
@@ -692,7 +761,7 @@ describe('BackendWorkspaceService', () => {
 
   it('hydrates compact Step analysis references on demand', async () => {
     const snapshot = engineeringSnapshot()
-    const metric = engineeringMetric('route_wirelength', 42)
+    const metric = engineeringMetric('route_wirelength', 42, { stepId: 'Route' })
     const files = {
       metrics: {
         schema_version: 3,
@@ -748,20 +817,8 @@ describe('BackendWorkspaceService', () => {
         },
       ],
     }
-    snapshot.metrics = [metric]
-    ;(snapshot as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
-      steps: [
-        {
-          stepId: 'Route',
-          name: 'Route',
-          order: 0,
-          status: 'pass',
-          summaryMetricCount: 1,
-        },
-      ],
-    }
+    setSnapshotMetrics(snapshot, [metric])
+    setQorScore(snapshot, 73.5)
     snapshot.artifacts = artifacts
     const readVerifiedArtifact = vi.fn(async ({ artifact: artifactRef }) => ({
       ok: true as const,
@@ -814,7 +871,7 @@ describe('BackendWorkspaceService', () => {
     const baseline = structuredClone(current)
     baseline.workspaceId = 'engineering-baseline'
     baseline.workspaceRevision = 3
-    ;((baseline as any).qorAssessment!.score as { value: number }).value = 61
+    setQorScore(baseline, 61)
     const readEngineeringSnapshot = vi.fn(async ({ workspacePath }) =>
       persistedSnapshotResult(workspacePath === '/project/ws-base' ? baseline : current),
     )
@@ -864,8 +921,6 @@ describe('BackendWorkspaceService', () => {
 
   it('projects aliased trends, DRC detail, and STA paths from one revision', async () => {
     const snapshot = engineeringSnapshot()
-// @ts-ignore legacy schema is intentionally rejected
-    snapshot.schemaVersion = 4
     snapshot.workspaceRevision = 8
     snapshot.flow = {
       steps: [
@@ -875,59 +930,32 @@ describe('BackendWorkspaceService', () => {
       ],
     }
     const synthesisMetrics = [
-      engineeringMetric('instance_count', 450),
-      engineeringMetric('instance_area', 1000),
-      engineeringMetric('std_cell_count', 300),
-      engineeringMetric('std_cell_area', 600),
-      engineeringMetric('clock_count', 10),
-      engineeringMetric('clock_area', 20),
-      engineeringMetric('macro_count', 2),
-      engineeringMetric('macro_area', 200),
-      engineeringMetric('io_pad_count', 5),
-      engineeringMetric('io_pad_area', 10),
+      engineeringMetric('instance_count', 450, { stepId: 'Synthesis' }),
+      engineeringMetric('instance_area', 1000, { stepId: 'Synthesis' }),
+      engineeringMetric('std_cell_count', 300, { stepId: 'Synthesis' }),
+      engineeringMetric('std_cell_area', 600, { stepId: 'Synthesis' }),
+      engineeringMetric('clock_count', 10, { stepId: 'Synthesis' }),
+      engineeringMetric('clock_area', 20, { stepId: 'Synthesis' }),
+      engineeringMetric('macro_count', 2, { stepId: 'Synthesis' }),
+      engineeringMetric('macro_area', 200, { stepId: 'Synthesis' }),
+      engineeringMetric('io_pad_count', 5, { stepId: 'Synthesis' }),
+      engineeringMetric('io_pad_area', 10, { stepId: 'Synthesis' }),
     ]
     const drcMetrics = [
-      engineeringMetric('drc_count', 12, { direction: 'lower_is_better' }),
+      engineeringMetric('drc_count', 12, { direction: 'lower_is_better', stepId: 'DRC' }),
     ]
     const staMetrics = [
-      engineeringMetric('sta_setup_wns', -0.2, { corner: 'TT' }),
-      engineeringMetric('sta_setup_tns', -1.2, { corner: 'TT' }),
-      engineeringMetric('sta_setup_violation_count', 3, { corner: 'TT' }),
-      engineeringMetric('sta_frequency_mhz', 750, { corner: 'TT' }),
-      engineeringMetric('sta_hold_wns', 0.1, { corner: 'TT' }),
-      engineeringMetric('sta_hold_tns', 0, { corner: 'TT' }),
-      engineeringMetric('sta_hold_violation_count', 0, { corner: 'TT' }),
+      engineeringMetric('sta_setup_wns', -0.2, { corner: 'TT', stepId: 'STA' }),
+      engineeringMetric('sta_setup_tns', -1.2, { corner: 'TT', stepId: 'STA' }),
+      engineeringMetric('sta_setup_violation_count', 3, { corner: 'TT', stepId: 'STA' }),
+      engineeringMetric('sta_frequency_mhz', 750, { corner: 'TT', stepId: 'STA' }),
+      engineeringMetric('sta_hold_wns', 0.1, { corner: 'TT', stepId: 'STA' }),
+      engineeringMetric('sta_hold_tns', 0, { corner: 'TT', stepId: 'STA' }),
+      engineeringMetric('sta_hold_violation_count', 0, { corner: 'TT', stepId: 'STA' }),
     ]
     const metrics = [...synthesisMetrics, ...drcMetrics, ...staMetrics]
     snapshot.metrics = metrics
-    ;(snapshot as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'blocked', threshold: 60, value: 70 },
-      metrics,
-      steps: [
-        {
-          stepId: 'Synthesis',
-          name: 'Synthesis',
-          order: 0,
-          status: 'pass',
-          summaryMetricCount: synthesisMetrics.length,
-        },
-        {
-          stepId: 'DRC',
-          name: 'DRC',
-          order: 1,
-          status: 'blocked',
-          summaryMetricCount: drcMetrics.length,
-        },
-        {
-          stepId: 'STA',
-          name: 'STA',
-          order: 2,
-          status: 'blocked',
-          summaryMetricCount: staMetrics.length,
-        },
-      ],
-    }
+    setQorScore(snapshot, 70)
     const missing = (artifactId: string) => ({
       artifactId,
       data: null,
@@ -1043,6 +1071,7 @@ describe('BackendWorkspaceService', () => {
         subflow: { status: 'missing', steps: [] },
       },
     ]
+    setSnapshotMetrics(snapshot, metrics)
     const service = new BackendWorkspaceService({
       projectManagementReadService: persistedReadService(snapshot),
       workspaceRootProvider: workspaceRootProvider(),
@@ -1105,8 +1134,6 @@ describe('BackendWorkspaceService', () => {
 
   it('returns revision-bound committed Step detail without exposing artifact paths', async () => {
     const snapshot = engineeringSnapshot()
-// @ts-ignore legacy schema is intentionally rejected
-    snapshot.schemaVersion = 4
     snapshot.workspaceId = 'engineering-a'
     snapshot.workspaceRevision = 9
     snapshot.flow = {
@@ -1206,8 +1233,6 @@ describe('BackendWorkspaceService', () => {
 
   it('attaches stale Step evidence to an invalidated current Revision', async () => {
     const stale = engineeringSnapshot()
-// @ts-ignore legacy schema is intentionally rejected
-    stale.schemaVersion = 4
     stale.workspaceRevision = 1
     stale.flow = {
       steps: [{ name: 'Place', tool: 'ecc', state: 'Success', runtime: '0:0:2' }],
@@ -1225,7 +1250,7 @@ describe('BackendWorkspaceService', () => {
           artifactId: 'metrics',
           data: {
             schema_version: 3,
-            metrics: [engineeringMetric('place_hpwl', 1234)],
+            metrics: [engineeringMetric('place_hpwl', 1234, { stepId: 'Place' })],
           },
           status: 'available',
         },
@@ -1244,6 +1269,9 @@ describe('BackendWorkspaceService', () => {
         toolId: 'ecc',
       },
     ]
+    setSnapshotMetrics(stale, [
+      engineeringMetric('place_hpwl', 1234, { stepId: 'Place' }),
+    ])
     const current = structuredClone(stale)
     current.workspaceRevision = 2
     current.stalePredecessor = {
@@ -1254,6 +1282,7 @@ describe('BackendWorkspaceService', () => {
       steps: [{ name: 'Place', tool: 'ecc', state: 'Unstart', runtime: '0:0:2' }],
     }
     current.analysis.steps = []
+    current.metrics = []
     const readResult = persistedSnapshotResult(current)
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
@@ -1292,7 +1321,7 @@ describe('BackendWorkspaceService', () => {
   it('keeps the previous Dashboard result visible while the current Revision is unstarted', async () => {
     const stale = engineeringSnapshot()
     stale.workspaceRevision = 1
-    const metric = engineeringMetric('instance_count', 298)
+    const metric = engineeringMetric('instance_count', 298, { stepId: 'Synthesis' })
     stale.flow = {
       steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Success' }],
     }
@@ -1308,21 +1337,8 @@ describe('BackendWorkspaceService', () => {
         stepId: 'Synthesis',
       },
     ] as never
-    stale.metrics = [metric]
-    ;(stale as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
-      metrics: [metric],
-      steps: [
-        {
-          stepId: 'Synthesis',
-          name: 'Synthesis',
-          order: 0,
-          status: 'pass',
-          summaryMetricCount: 1,
-        },
-      ],
-    }
+    setSnapshotMetrics(stale, [metric])
+    setQorScore(stale, 73.5)
     const current = structuredClone(stale)
     current.workspaceRevision = 2
     current.stalePredecessor = {
@@ -1334,12 +1350,8 @@ describe('BackendWorkspaceService', () => {
     }
     current.artifacts = []
     current.metrics = []
-    ;(current as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'incomplete', threshold: 60, value: null },
-      metrics: [],
-      steps: [],
-    }
+    current.analysis.steps = []
+    setQorScore(current, null)
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi.fn().mockResolvedValue({
@@ -1368,7 +1380,7 @@ describe('BackendWorkspaceService', () => {
     })
     expect(result.overview.qor).toMatchObject({
       data: {
-        score: { value: 73.5 },
+        score: { value: null },
         metrics: [{ id: 'instance_count', value: 298 }],
       },
     })
@@ -1391,10 +1403,16 @@ describe('BackendWorkspaceService', () => {
   it('replaces stale Dashboard results after each current-revision Step commit', async () => {
     const stale = engineeringSnapshot()
     stale.workspaceRevision = 1
-    const staleSynthesisMetric = engineeringMetric('instance_count', 298)
-    const staleSynthesisUtilization = engineeringMetric('core_utilization', 0.4)
-    const stalePlaceMetric = engineeringMetric('instance_count', 320)
-    const stalePlaceUtilization = engineeringMetric('core_utilization', 0.4)
+    const staleSynthesisMetric = engineeringMetric('instance_count', 298, {
+      stepId: 'Synthesis',
+    })
+    const staleSynthesisUtilization = engineeringMetric('core_utilization', 0.4, {
+      stepId: 'Synthesis',
+    })
+    const stalePlaceMetric = engineeringMetric('instance_count', 320, { stepId: 'Place' })
+    const stalePlaceUtilization = engineeringMetric('core_utilization', 0.4, {
+      stepId: 'Place',
+    })
     stale.flow = {
       steps: [
         { name: 'Synthesis', tool: 'yosys', state: 'Success' },
@@ -1423,42 +1441,21 @@ describe('BackendWorkspaceService', () => {
         stepId: 'Place',
       },
     ] as never
-    stale.metrics = [
+    setSnapshotMetrics(stale, [
       staleSynthesisMetric,
       staleSynthesisUtilization,
       stalePlaceMetric,
       stalePlaceUtilization,
-    ]
-    ;(stale as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
-      metrics: [
-        staleSynthesisMetric,
-        staleSynthesisUtilization,
-        stalePlaceMetric,
-        stalePlaceUtilization,
-      ],
-      steps: [
-        {
-          stepId: 'Synthesis',
-          name: 'Synthesis',
-          order: 0,
-          status: 'pass',
-          summaryMetricCount: 2,
-        },
-        {
-          stepId: 'Place',
-          name: 'Place',
-          order: 1,
-          status: 'pass',
-          summaryMetricCount: 2,
-        },
-      ],
-    }
+    ])
+    setQorScore(stale, 73.5)
 
     const current = structuredClone(stale)
-    const currentSynthesisMetric = engineeringMetric('instance_count', 311)
-    const currentSynthesisUtilization = engineeringMetric('core_utilization', 0.58)
+    const currentSynthesisMetric = engineeringMetric('instance_count', 311, {
+      stepId: 'Synthesis',
+    })
+    const currentSynthesisUtilization = engineeringMetric('core_utilization', 0.58, {
+      stepId: 'Synthesis',
+    })
     current.workspaceRevision = 4
     current.stalePredecessor = {
       workspaceRevision: 1,
@@ -1482,21 +1479,11 @@ describe('BackendWorkspaceService', () => {
         stepId: 'Synthesis',
       },
     ] as never
-    current.metrics = [currentSynthesisMetric, currentSynthesisUtilization]
-    ;(current as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'incomplete', threshold: 60, value: null },
-      metrics: [currentSynthesisMetric, currentSynthesisUtilization],
-      steps: [
-        {
-          stepId: 'Synthesis',
-          name: 'Synthesis',
-          order: 0,
-          status: 'pass',
-          summaryMetricCount: 2,
-        },
-      ],
-    }
+    setSnapshotMetrics(current, [currentSynthesisMetric, currentSynthesisUtilization])
+    setQorScore(current, null)
+    current.analysis.steps = current.analysis.steps.filter(
+      (step) => step.stepId === 'Synthesis',
+    )
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi.fn().mockResolvedValue({
@@ -1570,30 +1557,17 @@ describe('BackendWorkspaceService', () => {
   it('matches invalidated flow aliases when current QoR covers the rerun', async () => {
     const stale = engineeringSnapshot()
     stale.workspaceRevision = 1
-    const metric = engineeringMetric('instance_count', 298)
+    const metric = engineeringMetric('instance_count', 298, { stepId: 'Floorplan' })
     stale.flow = { steps: [{ name: 'Floorplan', tool: 'ecc', state: 'Success' }] }
-    stale.metrics = [metric]
-    ;(stale as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
-      metrics: [metric],
-      steps: [
-        {
-          stepId: 'Floorplan',
-          name: 'Floorplan',
-          order: 0,
-          status: 'pass',
-          summaryMetricCount: 1,
-        },
-      ],
-    }
+    setSnapshotMetrics(stale, [metric])
+    setQorScore(stale, 73.5)
     const current = structuredClone(stale)
     current.workspaceRevision = 2
     current.stalePredecessor = {
       workspaceRevision: 1,
       invalidatedStepIds: ['Floorplan'],
     }
-    ;((current as any).qorAssessment!.score as { value: number }).value = 80
+    setQorScore(current, 80)
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi.fn().mockResolvedValue({
@@ -1617,8 +1591,6 @@ describe('BackendWorkspaceService', () => {
 
   it('returns an empty Step detail when neither current nor stale results exist', async () => {
     const stale = engineeringSnapshot()
-// @ts-ignore legacy schema is intentionally rejected
-    stale.schemaVersion = 4
     stale.workspaceRevision = 1
     stale.flow = {
       steps: [{ name: 'Floorplan', tool: 'ecc', state: 'Unstart' }],
@@ -1663,27 +1635,13 @@ describe('BackendWorkspaceService', () => {
 
   it('returns bounded LVS detail from the committed analysis projection', async () => {
     const snapshot = engineeringSnapshot()
-// @ts-ignore legacy schema is intentionally rejected
-    snapshot.schemaVersion = 4
     snapshot.flow = { steps: [{ name: 'LVS', tool: 'ecc', state: 'Success' }] }
     const lvsMetric = engineeringMetric('lvs_count', 1, {
       direction: 'lower_is_better',
+      stepId: 'LVS',
     })
     snapshot.metrics = [lvsMetric]
-    ;(snapshot as any).qorAssessment = {
-      status: 'ready',
-      score: { gate: 'blocked', threshold: 60, value: 60 },
-      metrics: [lvsMetric],
-      steps: [
-        {
-          stepId: 'LVS',
-          name: 'LVS',
-          order: 0,
-          status: 'blocked',
-          summaryMetricCount: 1,
-        },
-      ],
-    }
+    setQorScore(snapshot, 60)
     snapshot.analysis.steps = [
       {
         stepId: 'LVS',

@@ -138,6 +138,7 @@ function engineeringSnapshot(
     rating: { gate: false, score: true, trend: true },
     scope: 'route',
     source: { kind: 'feature', path: 'feature/Route.step.json', selector: '/wire' },
+    stepId: 'Route',
     step_role: 'primary' as const,
     value,
   }
@@ -159,7 +160,13 @@ function engineeringSnapshot(
           summary: {
             artifactId: 'route-summary',
             status: 'available',
-            data: { schema_version: 4, quality_status: 'pass' },
+            data: {
+              schema_version: 4,
+              analysis_status: 'complete',
+              quality_status: 'pass',
+              gates: [],
+              missing_metrics: [],
+            },
           },
           hotspots: {
             artifactId: 'route-hotspots',
@@ -441,8 +448,8 @@ describe('BackendProjectComparisonService', () => {
         signoff: workspace.signoffReadiness.status,
       })),
     ).toEqual([
-      { id: 'ws_0001', score: 72, status: 'Green', metrics: 167, signoff: 'pass' },
-      { id: 'ws_0002', score: 84, status: 'Green', metrics: 167, signoff: 'pass' },
+      { id: 'ws_0001', score: 72, status: 'ORANGE', metrics: 168, signoff: 'pass' },
+      { id: 'ws_0002', score: 84, status: 'YELLOW', metrics: 168, signoff: 'pass' },
     ])
     expect(first.data.trend.data.workspaces[1]?.qorSnapshotExtension).toMatchObject({
       scoringEngine: 'qor-v3',
@@ -496,7 +503,7 @@ describe('BackendProjectComparisonService', () => {
     for (const [index, workspaceId] of ['ws_0001', 'ws_0002'].entries()) {
       const metric = {
         analysis_group: 'route_latency',
-        category: 'runtime' as const,
+        category: 'execution' as const,
         confidence: 'medium' as const,
         corner: 'slow',
         corner_context: {
@@ -589,7 +596,7 @@ describe('BackendProjectComparisonService', () => {
             temperatureC: 125,
             voltageV: 1.62,
           },
-          dimension: 'runtime',
+          dimension: 'execution',
           displayName: 'Route Snapshot Latency',
           leads: false,
           metricName: 'snapshot_only_latency',
