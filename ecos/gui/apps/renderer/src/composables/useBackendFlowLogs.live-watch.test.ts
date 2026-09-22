@@ -193,6 +193,111 @@ describe('useBackendFlowLogs runtime updates', () => {
     scope.stop()
   })
 
+  it('tracks live timing from step.started and adopts the final ECC runtime on completion', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+    const scope = effectScope()
+    const home = scope.run(() => useBackendFlowLogs())!
+
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
+        step: 'Synthesis',
+        tool: 'yosys',
+      }),
+    )
+    await nextTick()
+    const startedSegment = home.flowLogSegments.value[0]
+    expect(startedSegment).toMatchObject({ live: true, stepName: 'Synthesis' })
+    expect(typeof startedSegment?.startedAtMs).toBe('number')
+
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
+        chunk: 'working\n',
+        cursor: 8,
+        runtimeProtocolType: 'step.log',
+        step: 'Synthesis',
+        tool: 'yosys',
+      }),
+    )
+    await nextTick()
+    expect(home.flowLogSegments.value[0]?.startedAtMs).toBe(startedSegment?.startedAtMs)
+
+    testState.getWorkspaceResourceIndexApi.mockResolvedValue({
+      flow: {
+        steps: [
+          {
+            info: {},
+            name: 'Synthesis',
+            peakMemoryMb: 512,
+            resources: {
+              log: {
+                file: { path: '/workspace/demo/synthesis_yosys/log/synthesis.log' },
+              },
+            },
+            runtime: '00:00:07',
+            state: 'Success',
+            tool: 'yosys',
+          },
+        ],
+      },
+    })
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
+        finalLog: 'done',
+        runtimeProtocolType: 'step.completed',
+        state: 'Success',
+        step: 'Synthesis',
+        tool: 'yosys',
+      }),
+    )
+    await waitForLiveLogFrame()
+
+    const segment = home.flowLogSegments.value.find(
+      (item) => item.stepName === 'Synthesis',
+    )
+    expect(segment).toMatchObject({
+      live: false,
+      runtime: '00:00:07',
+      state: 'Success',
+    })
+    expect(segment?.startedAtMs).toBeUndefined()
+    scope.stop()
+  })
+
+  it('stops live timing when the operation fails or is cancelled', async () => {
+    testState.currentProject = ref({ path: '/workspace/demo' })
+    testState.runtimeEvents = ref([])
+    const { useBackendFlowLogs } = await import('./useBackendFlowLogs')
+    const scope = effectScope()
+    const home = scope.run(() => useBackendFlowLogs())!
+
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
+        runtimeProtocolType: 'step.started',
+        state: 'Ongoing',
+        step: 'Synthesis',
+        tool: 'yosys',
+      }),
+    )
+    await nextTick()
+    expect(home.flowLogSegments.value[0]).toMatchObject({ live: true })
+
+    testState.runtimeEvents.value.push(
+      runtimeEvent({
+        runtimeProtocolType: 'operation.failed',
+        state: 'failed',
+      }),
+    )
+    await waitForLiveLogFrame()
+
+    expect(home.flowLogSegments.value[0]).toMatchObject({ live: false })
+    expect(home.flowLogSegments.value[0]?.startedAtMs).toBeUndefined()
+    scope.stop()
+  })
+
   it('clears stale log segments when the same path starts a new workspace session', async () => {
     testState.currentProject = ref({ path: '/workspace/demo' })
     testState.runtimeEvents = ref([])
