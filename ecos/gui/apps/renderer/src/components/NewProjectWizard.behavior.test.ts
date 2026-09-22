@@ -407,6 +407,59 @@ describe('NewProjectWizard behavior', () => {
     wrapper.unmount()
   })
 
+  it('resolves a relative declared PDK root against the project root', async () => {
+    wizardMocks.importedPdks.value = [
+      {
+        id: 'pdk:ics55:relative',
+        name: 'ICS55',
+        path: '/pdks/ics55',
+        pdkId: 'ics55',
+        readiness: 'ready',
+        supportsEccDefaults: true,
+        defaultResources: {
+          techLef: '/pdks/ics55/tech.lef',
+          cellLefs: ['/pdks/ics55/cell.lef'],
+          liberty: ['/pdks/ics55/cell.lib'],
+        },
+      },
+    ]
+    wizardMocks.readProjectEccPdkConfig.mockResolvedValueOnce({
+      exists: true,
+      pdkName: 'ics55',
+      pdkRoot: '../pdks/ics55',
+      externalPaths: [],
+      overrides: {},
+    })
+    wizardMocks.scanPdkDirectory.mockImplementationOnce(async (path: string) => {
+      expect(path).toBe('/projects/pdks/ics55')
+      return { canonicalPath: '/pdks/ics55' }
+    })
+    const wrapper = mount(NewProjectWizard, {
+      props: { initialConfig: { directory: '/projects/demo/ws_0001' } },
+      global: {
+        stubs: {
+          DesignFileTransfer: true,
+          PdkResourcePickerDialog: true,
+          ...primevueStubs,
+        },
+      },
+    })
+    const wizard = wrapper.vm as unknown as {
+      currentStep: number
+      pdkOptions: Array<{ id: string; path: string }>
+      selectedPdkId: string
+      canProceed: boolean
+    }
+    wizard.currentStep = 5
+    await flushPromises()
+    expect(wizardMocks.readProjectEccPdkConfig).toHaveBeenCalled()
+    expect(wizardMocks.scanPdkDirectory).toHaveBeenCalled()
+    expect(wizard.pdkOptions).toHaveLength(1)
+    expect(wizard.selectedPdkId).toBe('pdk:ics55:relative')
+    expect(wizard.canProceed).toBe(true)
+    wrapper.unmount()
+  })
+
   it('shows effective defaults and project paths across configuration modes', async () => {
     wizardMocks.importedPdks.value = [
       {

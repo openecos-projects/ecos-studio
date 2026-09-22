@@ -2341,6 +2341,28 @@ function normalizePath(path: string) {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
 }
 
+function resolveProjectRelativePath(projectRoot: string, path: string): string {
+  const normalized = normalizePath(path)
+  if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    return normalized
+  }
+  const combined = normalizePath(joinPath(projectRoot, normalized))
+  const parts = combined.split('/')
+  const resolved: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      const hasDriveRoot = resolved.length === 1 && /^[A-Za-z]:$/.test(resolved[0])
+      if (resolved.length > 0 && !hasDriveRoot) {
+        resolved.pop()
+      }
+      continue
+    }
+    resolved.push(part)
+  }
+  return `${combined.startsWith('/') ? '/' : ''}${resolved.join('/')}`
+}
+
 function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
   const candidate = String(value ?? '')
   const aliases: Record<string, FlowStepName> = {
@@ -3991,7 +4013,13 @@ async function loadProjectEccPdkConfig() {
     if (generation !== projectEccPdkLoadGeneration) return
     projectEccPdkConfig.value = result
     if (result.exists) {
-      await selectDeclaredProjectPdk(result, generation)
+      await selectDeclaredProjectPdk(
+        {
+          ...result,
+          pdkRoot: resolveProjectRelativePath(projectRoot, result.pdkRoot),
+        },
+        generation,
+      )
       if (generation !== projectEccPdkLoadGeneration) return
       if (!externalPdkPathsEdited) {
         externalPdkPaths.value = [...result.externalPaths]
