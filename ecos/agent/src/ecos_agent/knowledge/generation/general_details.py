@@ -153,7 +153,8 @@ def _strategy_entries(metric: str) -> tuple[
         body = "\n\n".join(
             [
                 f"**Topic:** {statement_metric} strategy.",
-                f"**Metric:** {statement_metric}.",
+                f"**Objective metric:** {_METRIC_OBJECTIVES[metric].value}.",
+                f"**Proxy scope:** {statement_metric} corpus labels are not substitutes for the route-level objective.",
                 f"**Applies to steps:** {', '.join(stages)}.",
                 f"**Condition:** {statement['condition']}",
                 f"**Diagnosis:** {str(diagnosis['cause']).replace('_', ' ')}.",
@@ -362,7 +363,7 @@ WIRELENGTH_REGRESSION_CASES = (
     },
     {
         "id": "wirelength-timing-veto",
-        "question": "Wirelength improves but WNS and TNS materially worsen beyond replay noise. Should the placement candidate be accepted?",
+        "question": "Wirelength improves but WNS and TNS materially worsen beyond replay noise: should the terminal guardrail regression reject the candidate?",
         "entity_id": "strategy.wirelength.reject_guardrail_regression.v1",
         "required_text": "reject_wirelength_guardrail_regression",
     },

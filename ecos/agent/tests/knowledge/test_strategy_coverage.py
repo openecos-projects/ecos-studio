@@ -88,11 +88,20 @@ def test_strategy_conditions_are_typed_and_not_just_evidence_presence() -> None:
         GeneralDomainClaim.model_validate(entry["support"]["claim"])
     local = next(entry for entry in entries if entry["id"] == "strategy.congestion.local_move_cells.v1")
     claim = GeneralDomainClaim.model_validate(local["support"]["claim"])
-    maps_only = {feature_id: True for feature_id in claim.required_evidence}
-    diagnostic = next(predicate for predicate in claim.state_predicates if predicate.op == "true")
-    assert _evaluate(diagnostic, maps_only) is None
-    assert _evaluate(diagnostic, {**maps_only, diagnostic.feature_id: False}) is False
-    assert _evaluate(diagnostic, {**maps_only, diagnostic.feature_id: True}) is True
+    feature_ids = {predicate.feature_id for predicate in claim.state_predicates}
+    assert feature_ids == {
+        "place_congestion_egr_overflow_total",
+        "route_la_total_overflow",
+        "place_lutrudy_utilization_max",
+    }
+    features = {
+        "place_congestion_egr_overflow_total": 1.0,
+        "route_la_total_overflow": 1.0,
+        "place_lutrudy_utilization_max": 0.5,
+    }
+    assert all(_evaluate(predicate, features) is True for predicate in claim.state_predicates)
+    del features["place_lutrudy_utilization_max"]
+    assert _evaluate(claim.state_predicates[-1], features) is None
 
 
 def test_routing_pressure_trials_do_not_invent_native_density_observation() -> None:
@@ -131,3 +140,40 @@ def test_wirelength_relief_requires_clean_route_and_non_regressing_timing() -> N
     assert _evaluate(anti[0], features) is True
     del features[anti[0].feature_id]
     assert _evaluate(anti[0], features) is None
+
+
+def test_claims_use_scalar_state_and_route_level_objectives() -> None:
+    forbidden_map_features = {
+        "overflow_map",
+        "egr_or_rudy_map",
+        "cell_density_map",
+        "net_density_map",
+        "pin_density_map",
+        "macro_density_map",
+    }
+    allowed_effect_metrics = {
+        "route_la_total_overflow",
+        "route_wirelength",
+        "core_area",
+        "drc_count",
+        "route_dr_total_violation_count",
+        "sta_setup_wns",
+        "sta_setup_tns",
+        "sta_hold_wns",
+        "sta_hold_tns",
+    }
+    for metric, objective in (
+        ("congestion", "route_la_total_overflow"),
+        ("wirelength", "route_wirelength"),
+    ):
+        for entry in _strategy_entries(metric)[0]:
+            claim = GeneralDomainClaim.model_validate(entry["support"]["claim"])
+            assert claim.objectives == (objective,)
+            assert not (
+                {predicate.feature_id for predicate in (*claim.state_predicates, *claim.anti_predicates)}
+                & forbidden_map_features
+            )
+            assert all(
+                effect.split(":", 1)[0] in allowed_effect_metrics
+                for effect in claim.expected_effects
+            )
