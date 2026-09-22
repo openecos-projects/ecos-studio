@@ -95,12 +95,18 @@ export function useProjectStepEvidence(
         tone: 'stale',
         label: `${previous ?? 'Last committed'} · ${findingsIssueLabel(value.issue.code)}`,
       }
-    if (data.value?.artifactIntegrity === 'externally-modified') {
+    const externallyModified = data.value?.artifactIntegrity === 'externally-modified'
+    const artifactIssues = (data.value?.artifactIssues?.length ?? 0) > 0
+    if (externallyModified || artifactIssues) {
       return {
         icon: 'ri-alert-line',
         tone: 'stale',
         label:
-          'Artifact files changed since the committed snapshot. Results are available for comparison but are not trusted signoff evidence.',
+          externallyModified && artifactIssues
+            ? 'Artifact files changed since the committed snapshot, and some could not be read. Results are incomplete and are not trusted signoff evidence.'
+            : externallyModified
+              ? 'Artifact files changed since the committed snapshot. Results are available for comparison but are not trusted signoff evidence.'
+              : 'Some artifact files could not be read. The remaining committed results are available for comparison but are not complete.',
       }
     }
     if (previous) return { icon: 'ri-history-line', tone: 'stale', label: previous }

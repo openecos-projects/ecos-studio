@@ -178,9 +178,20 @@ export class ProjectStepFindingsService {
     const externallyModified = Object.values(read.integrity ?? {}).some(
       (value) => value === 'externally-modified',
     )
-    const resultData = externallyModified
-      ? { ...data, artifactIntegrity: 'externally-modified' as const }
-      : data
+    const resultData = {
+      ...data,
+      ...(externallyModified
+        ? { artifactIntegrity: 'externally-modified' as const }
+        : {}),
+      ...(read.issues && read.issues.length > 0
+        ? {
+            artifactIssues: read.issues.map((issue) => ({
+              code: issue.code,
+              reference: issue.reference,
+            })),
+          }
+        : {}),
+    }
     this.cache.set(key, resultData)
     if (this.cache.size > MAX_VERIFIED_FINDINGS_CACHE_ENTRIES) {
       this.cache.delete(this.cache.keys().next().value!)

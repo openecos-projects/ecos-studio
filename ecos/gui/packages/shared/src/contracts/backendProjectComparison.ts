@@ -523,6 +523,10 @@ export interface BackendProjectStepFindings {
   currentWorkspaceRevision?: number
   resultState?: 'current' | 'stale' | 'not-started' | 'pending-rerun'
   artifactIntegrity?: 'verified' | 'externally-modified'
+  artifactIssues?: Array<{
+    code: BackendProjectFindingsIssueCode
+    reference: string
+  }>
   details: ProjectAnalysisStepSnapshot
 }
 

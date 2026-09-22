@@ -1797,6 +1797,11 @@ describe('ChipViewerService', () => {
             workspaceHandle: 'workspace-handle-1',
             workspaceRevision: 1,
           })),
+          workspaceSession: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceHandle: 'workspace-handle-1',
+            workspaceRevision: 5,
+          })),
           updateWorkspaceStepConfiguration,
         },
       })
@@ -1850,6 +1855,11 @@ describe('ChipViewerService', () => {
       workspaceHandle: 'workspace-handle-1',
       workspaceRevision: 5,
     })
+    expect(
+      'workspaceSession' in layoutEditRuntime
+        ? layoutEditRuntime.workspaceSession
+        : undefined,
+    ).toHaveBeenCalledWith('workspace-handle-1')
   })
 
   it('keeps the save successful when the macro.placements writeback fails', async () => {

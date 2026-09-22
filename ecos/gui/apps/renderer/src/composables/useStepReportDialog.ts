@@ -44,6 +44,7 @@ export function useStepReportDialog(
       ) {
         throw new Error('Committed Workspace revision is unavailable.')
       }
+      const generation = session.generation
       const result = await getDesktopApi().backendWorkspace.getArtifact({
         artifactId: report.artifactId,
         workspaceContextId: contextId,
@@ -54,6 +55,7 @@ export function useStepReportDialog(
         version !== requestVersion ||
         currentStep.value !== step ||
         session.workspaceContextId !== contextId ||
+        session.generation !== generation ||
         !currentRevision ||
         (currentRevision.status !== 'ready' && currentRevision.status !== 'partial') ||
         currentRevision.data.workspaceRevision !== revision.data.workspaceRevision ||

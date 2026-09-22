@@ -694,4 +694,35 @@ describe('ProjectManagementReadService', () => {
       service.readVerifiedArtifacts(request(Buffer.byteLength(valid), 'a'.repeat(64))),
     ).resolves.toMatchObject({ ok: false, code: 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE' })
   })
+
+  it('keeps valid current artifacts when another externally modified artifact is unavailable', async () => {
+    const { projectRoot, workspaceRoot } = await createProject()
+    const validReference = 'route_ecc/analysis/qor_metrics.json'
+    const missingReference = 'route_ecc/analysis/missing.json'
+    const valid = '{"schema_version":3,"metrics":[]}'
+    await mkdir(join(workspaceRoot, 'route_ecc', 'analysis'), { recursive: true })
+    await writeFile(join(workspaceRoot, validReference), valid)
+    const service = createReadService()
+
+    await expect(
+      service.readVerifiedArtifacts({
+        artifacts: [
+          {
+            reference: validReference,
+            sha256: 'a'.repeat(64),
+            sizeBytes: Buffer.byteLength(valid),
+          },
+          { reference: missingReference, sha256: 'b'.repeat(64), sizeBytes: 2 },
+        ],
+        allowExternallyModified: true,
+        projectRoot,
+        workspacePath: workspaceRoot,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      texts: { [validReference]: valid },
+      integrity: { [validReference]: 'externally-modified' },
+      issues: [{ code: 'ARTIFACT_REFERENCE_MISSING', reference: missingReference }],
+    })
+  })
 })

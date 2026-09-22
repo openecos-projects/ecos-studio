@@ -175,15 +175,24 @@ export class BackendWorkspaceService {
     query = this.buildOverview(context, generation)
       .then(({ flowInsights, result, snapshot, workspaceRoot, watchedRoots }) => {
         const current = this.contexts.get(windowId)
-        if (current === context && current.generation === generation) {
-          current.cache = result
+        const canPublish =
+          current === context &&
+          (current.generation === generation || current.inFlight === query)
+        if (canPublish) {
+          const publishedResult =
+            current.generation === result.generation
+              ? result
+              : { ...result, generation: current.generation }
+          current.cache = publishedResult
           current.flowInsights = flowInsights
           if (snapshot?.ok || !current.snapshot) current.snapshot = snapshot ?? undefined
           current.workspaceRoot = workspaceRoot
           this.observeWorkspace(current, workspaceRoot, watchedRoots)
           current.coalescedRequests = 0
         }
-        return result
+        return canPublish && current.generation !== result.generation
+          ? { ...result, generation: current.generation }
+          : result
       })
       .finally(() => {
         if (context.inFlight === query) context.inFlight = undefined
@@ -203,9 +212,17 @@ export class BackendWorkspaceService {
     if (!context?.workspaceRoot || !context.snapshot?.ok) return
     const latest = await this.readEngineeringSnapshot(context.workspaceRoot)
     if (!latest?.ok) return
-    // A snapshot watcher cannot observe referenced artifact files. Rebuild the
-    // projection on focus so current-mode readers re-check their bytes and
-    // invalidate renderer Blob/text caches without changing the ECC revision.
+    const current = context.snapshot.snapshot
+    if (
+      latest.snapshot.workspaceId === current.workspaceId &&
+      latest.snapshot.workspaceRevision === current.workspaceRevision
+    ) {
+      // A snapshot watcher cannot observe referenced artifact files. Bump only
+      // the renderer artifact token on focus; the committed overview and any
+      // in-flight overview read remain reusable.
+      this.refreshArtifactGeneration(windowId)
+      return
+    }
     this.invalidateWindow(windowId)
   }
 
@@ -305,19 +322,27 @@ export class BackendWorkspaceService {
     if (!snapshot) {
       return unavailable('ENGINEERING_SNAPSHOT_REVISION_MISMATCH')
     }
+    const generation = context.generation
+    const artifact = await readWorkspaceArtifact(
+      snapshot,
+      context.workspaceRoot,
+      request.artifactId,
+      this.options.projectManagementReadService.readVerifiedArtifact
+        ? (artifactRequest) =>
+            this.options.projectManagementReadService.readVerifiedArtifact!({
+              ...artifactRequest,
+              verifyFingerprint: !isCurrentSnapshot,
+            })
+        : undefined,
+    )
+    if (
+      this.contexts.get(context.windowId) !== context ||
+      context.generation !== generation
+    ) {
+      return unavailable('BACKEND_WORKSPACE_REVISION_CHANGED')
+    }
     return {
-      artifact: await readWorkspaceArtifact(
-        snapshot,
-        context.workspaceRoot,
-        request.artifactId,
-        this.options.projectManagementReadService.readVerifiedArtifact
-          ? (artifactRequest) =>
-              this.options.projectManagementReadService.readVerifiedArtifact!({
-                ...artifactRequest,
-                verifyFingerprint: !isCurrentSnapshot,
-              })
-          : undefined,
-      ),
+      artifact,
       generation: context.generation,
       workspaceContextId: context.id,
       workspaceId: snapshot.snapshot.workspaceId,
@@ -331,14 +356,26 @@ export class BackendWorkspaceService {
     context.generation += 1
     context.cache = undefined
     context.inFlight = undefined
-    if (notify) {
-      const event = {
-        generation: context.generation,
-        windowId,
-        workspaceContextId: context.id,
-      }
-      for (const listener of this.invalidationListeners) listener(event)
+    if (notify) this.notifyInvalidation(context, windowId)
+  }
+
+  private refreshArtifactGeneration(windowId: number): void {
+    const context = this.contexts.get(windowId)
+    if (!context) return
+    context.generation += 1
+    if (context.cache) {
+      context.cache = { ...context.cache, generation: context.generation }
     }
+    this.notifyInvalidation(context, windowId)
+  }
+
+  private notifyInvalidation(context: WorkspaceContext, windowId: number): void {
+    const event = {
+      generation: context.generation,
+      windowId,
+      workspaceContextId: context.id,
+    }
+    for (const listener of this.invalidationListeners) listener(event)
   }
 
   onInvalidated(listener: (event: BackendWorkspaceInvalidation) => void): () => void {

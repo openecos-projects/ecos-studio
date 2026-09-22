@@ -38,6 +38,16 @@ export type VerifiedProjectArtifactsReadResult =
       ok: true
       texts: Record<string, string>
       integrity?: Record<string, 'verified' | 'externally-modified'>
+      issues?: Array<{
+        code:
+          | 'ARTIFACT_REVISION_MISMATCH'
+          | 'FINDINGS_ARTIFACT_INVALID_JSON'
+          | 'FINDINGS_ARTIFACT_TOO_LARGE'
+          | 'ARTIFACT_REFERENCE_MISSING'
+          | 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE'
+          | 'FINDINGS_READ_FAILED'
+        reference: string
+      }>
     }
   | {
       ok: false
@@ -430,6 +440,16 @@ export class ProjectManagementReadService {
       )
       const texts: Record<string, string> = {}
       const integrity: Record<string, 'verified' | 'externally-modified'> = {}
+      const issues: Array<{
+        code:
+          | 'ARTIFACT_REVISION_MISMATCH'
+          | 'FINDINGS_ARTIFACT_INVALID_JSON'
+          | 'FINDINGS_ARTIFACT_TOO_LARGE'
+          | 'ARTIFACT_REFERENCE_MISSING'
+          | 'ARTIFACT_REFERENCE_OUTSIDE_WORKSPACE'
+          | 'FINDINGS_READ_FAILED'
+        reference: string
+      }> = []
       for (const artifact of request.artifacts) {
         const result = await readVerifiedArtifactBytes(
           workspaceRoot,
@@ -438,17 +458,28 @@ export class ProjectManagementReadService {
           !request.allowExternallyModified,
           request.allowExternallyModified,
         )
-        if (!result.ok) return result
+        if (!result.ok) {
+          if (!request.allowExternallyModified) return result
+          issues.push({ code: result.code, reference: result.reference })
+          continue
+        }
         let text: string
         try {
           text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes)
           JSON.parse(text)
         } catch {
-          return {
-            ok: false,
+          if (!request.allowExternallyModified) {
+            return {
+              ok: false,
+              code: 'FINDINGS_ARTIFACT_INVALID_JSON',
+              reference: artifact.reference,
+            }
+          }
+          issues.push({
             code: 'FINDINGS_ARTIFACT_INVALID_JSON',
             reference: artifact.reference,
-          }
+          })
+          continue
         }
         texts[artifact.reference] = text
         if (result.integrity) integrity[artifact.reference] = result.integrity
@@ -457,6 +488,7 @@ export class ProjectManagementReadService {
         ok: true,
         texts,
         ...(request.allowExternallyModified ? { integrity } : {}),
+        ...(issues.length > 0 ? { issues } : {}),
       }
     } catch {
       return { ok: false, code: 'FINDINGS_READ_FAILED', reference: '' }

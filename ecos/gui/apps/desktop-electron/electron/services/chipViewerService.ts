@@ -137,6 +137,9 @@ interface LayoutEditRuntime {
   ): Promise<EccLayoutEditDiscardResult>
   layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult>
   openWorkspace(request: { directory: string }): Promise<EccWorkspaceOpenResult>
+  workspaceSession?(
+    workspaceHandle: string,
+  ): EccWorkspaceOpenResult | Promise<EccWorkspaceOpenResult>
   updateWorkspaceStepConfiguration(
     request: EccWorkspaceStepConfigurationUpdateRequest,
   ): Promise<EccWorkspaceUpdateResult>
@@ -1366,8 +1369,10 @@ export class ChipViewerService {
         })
         await this.verifyPublishedLayoutArtifacts(saved)
         layoutEdit.revision = saved.revision
+        let revisionNotificationRequired = false
         if (typeof saved.workspaceRevision === 'number') {
           layoutEdit.workspaceRevision = saved.workspaceRevision
+          revisionNotificationRequired = true
         }
         geometryManifestPath = saved.artifacts.geometryManifestPath
         layoutEdit.geometryManifestPath = geometryManifestPath
@@ -1388,6 +1393,7 @@ export class ChipViewerService {
           }`
         }
         if (layoutEdit.macroPlacement && saved.macroLocationPath) {
+          const beforeMacroWritebackRevision = layoutEdit.workspaceRevision
           await this.writeSessionActionProgress(progressPath, command, {
             message: 'Recording macro placements in workspace parameters',
             percent: 75,
@@ -1398,8 +1404,18 @@ export class ChipViewerService {
             saved.macroLocationPath,
             `${layoutEdit.bridgeId}:${command.command_id}:macro-params`,
           )
+          revisionNotificationRequired ||=
+            layoutEdit.workspaceRevision !== beforeMacroWritebackRevision
         }
-        if (typeof saved.workspaceRevision === 'number') {
+        const currentSession = await this.layoutEditRuntime.workspaceSession?.(
+          layoutEdit.workspaceHandle,
+        )
+        if (typeof currentSession?.workspaceRevision === 'number') {
+          revisionNotificationRequired ||=
+            currentSession.workspaceRevision !== layoutEdit.workspaceRevision
+          layoutEdit.workspaceRevision = currentSession.workspaceRevision
+        }
+        if (revisionNotificationRequired) {
           this.notifyWorkspaceRevisionChanged(layoutEdit)
         }
         await this.writeSessionActionProgress(progressPath, command, {
