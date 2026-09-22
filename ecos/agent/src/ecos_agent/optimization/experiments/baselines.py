@@ -170,6 +170,23 @@ def _random_selection(
     return BaselineSelection(action, requested, 0)
 
 
+_TPE_MOVE = "move"
+
+
+@lru_cache(maxsize=1)
+def _tpe_joint_space() -> tuple[tuple[OptimizationKnob, bool | int | float], ...]:
+    """Frozen joint categorical space: every numeric knob's lattice values.
+
+    One categorical over (knob, value) pairs, so the surrogate steers both the
+    knob and the value each turn.  Toggle-only knobs carry no lattice and stay
+    outside the space (the paper's TPE baseline is lattice-only).
+    """
+    space: list[tuple[OptimizationKnob, bool | int | float]] = []
+    for knob_id in ACTIVE_OPTIMIZATION_KNOBS:
+        space.extend((knob_id, value) for value in lattice_values(knob_id))
+    return tuple(space)
+
+
 def _tpe_selection(
     observations: tuple[tuple[RequestedKnobValue, float], ...],
     current_values: Mapping[str, bool | int | float],
@@ -180,14 +197,14 @@ def _tpe_selection(
     design_id: str,
     permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
 ) -> BaselineSelection | None:
-    """Ask an in-process Optuna TPE sampler for the next lattice value.
+    """Ask an in-process Optuna TPE sampler for the next joint lattice move.
 
-    The study is rebuilt from ``observations`` on every call, so the arm keeps
-    no state between turns and replays deterministically from the episode
-    history.  Suggestions snap to the nearest task-permitted, unrequested
-    lattice value; single-knob permitted surfaces (the target protocol) get
-    exact TPE behavior, while wider surfaces patrol feasible knobs in active
-    order.
+    The study is rebuilt from the full-episode ``observations`` on every call,
+    so the arm keeps no state between turns and replays deterministically from
+    the episode history.  Suggestions snap to the nearest task-permitted,
+    unrequested value on the suggested knob; when that knob has no feasible
+    move left the selection falls back to the first feasible pair in frozen
+    space order.
     """
     feasible = _feasible_lattice_moves(current_values, attempted, permitted)
     if not feasible:
@@ -196,6 +213,8 @@ def _tpe_selection(
 
     # ponytail: global optuna log level; the experiment driver is single-threaded
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    space = _tpe_joint_space()
+    index = {pair: position for position, pair in enumerate(space)}
     study = optuna.create_study(
         sampler=optuna.samplers.TPESampler(
             seed=zlib.crc32(f"{random_seed}:{design_id}:{turn_index}".encode()),
@@ -205,73 +224,66 @@ def _tpe_selection(
         ),
         direction="maximize",
     )
+    distribution = optuna.distributions.CategoricalDistribution(
+        tuple(range(len(space)))
+    )
     for requested, utility in observations:
-        choices = lattice_values(requested.knob_id)
-        if not choices or requested.value not in choices:
+        position = index.get((requested.knob_id, requested.value))
+        if position is None:
             continue
         study.add_trial(
             optuna.trial.create_trial(
-                params={requested.knob_id.value: requested.value},
-                distributions={
-                    requested.knob_id.value: optuna.distributions.CategoricalDistribution(
-                        choices
-                    )
-                },
+                params={_TPE_MOVE: position},
+                distributions={_TPE_MOVE: distribution},
                 value=float(utility),
             )
         )
     trial = study.ask()
-    for knob_id, moves in feasible.items():
-        if not moves:
-            continue
-        current = float(current_values[knob_id.value])
-        suggested = trial.suggest_categorical(knob_id.value, lattice_values(knob_id))
-        value = min(
-            moves, key=lambda item: (abs(float(item) - suggested), float(item))
+    knob_id, suggested = space[
+        trial.suggest_categorical(_TPE_MOVE, tuple(range(len(space))))
+    ]
+    same_knob = tuple(
+        move for move in feasible if move[0] == knob_id
+    )
+    if same_knob:
+        choice = min(
+            same_knob,
+            key=lambda move: (abs(float(move[1]) - float(suggested)), float(move[1])),
         )
-        return BaselineSelection(
-            LegalAction(
-                knob_id=knob_id,
-                direction=(
-                    StrategyDirection.INCREASE
-                    if value > current
-                    else StrategyDirection.DECREASE
-                ),
-            ),
-            RequestedKnobValue(knob_id=knob_id, value=value),
-            0,
-        )
-    return None
+    else:
+        choice = feasible[0]
+    return BaselineSelection(
+        LegalAction(knob_id=choice[0], direction=choice[2]),
+        RequestedKnobValue(knob_id=choice[0], value=choice[1]),
+        0,
+    )
 
 
 def _feasible_lattice_moves(
     current_values: Mapping[str, bool | int | float],
     attempted: tuple[RequestedKnobValue, ...],
     permitted: frozenset[tuple[OptimizationKnob, StrategyDirection]] | None = None,
-) -> dict[OptimizationKnob, tuple[float | int, ...]]:
-    """Unrequested lattice values reachable under the permitted surface."""
+) -> tuple[tuple[OptimizationKnob, float | int, StrategyDirection], ...]:
+    """Feasible (knob, value, direction) lattice moves under the surface."""
     tried = {(item.knob_id, item.value) for item in attempted}
-    feasible: dict[OptimizationKnob, tuple[float | int, ...]] = {}
+    feasible = []
     for knob_id in ACTIVE_OPTIMIZATION_KNOBS:
         lattice = lattice_values(knob_id)
         if not lattice:
             continue
         current = float(current_values[knob_id.value])
-        moves = []
         for value in lattice:
             if value == current or (knob_id, value) in tried:
                 continue
             direction = (
                 StrategyDirection.INCREASE
-                if value > current
+                if float(value) > current
                 else StrategyDirection.DECREASE
             )
             if permitted is not None and (knob_id, direction) not in permitted:
                 continue
-            moves.append(value)
-        if moves:
-            feasible[knob_id] = tuple(moves)
-    return feasible
+            feasible.append((knob_id, value, direction))
+    return tuple(feasible)
 
 
 def _rule_selection(

@@ -364,3 +364,40 @@ def test_bayesian_tpe_skips_toggle_only_surfaces() -> None:
         permitted={(OptimizationKnob.ROUTABILITY_OPT, StrategyDirection.DISABLE)},
     )
     assert selection is None
+
+
+def test_bayesian_tpe_steers_knobs_across_the_joint_space() -> None:
+    def episode():
+        values = _values()
+        attempted: list[RequestedKnobValue] = []
+        observations: list[tuple[RequestedKnobValue, float]] = []
+        selections = []
+        for turn_index in range(20):
+            selection = select_baseline_candidate(
+                BaselineMethod.BAYESIAN_TPE,
+                design_id="gcd",
+                turn_index=turn_index,
+                coordinate_index=0,
+                random_seed=17,
+                current_values=values,
+                attempted=attempted,
+                incumbent=None,
+                permitted=None,
+                observations=tuple(observations),
+            )
+            if selection is None:
+                break
+            selections.append(selection)
+            observations.append(
+                (selection.requested, -abs(float(selection.requested.value) - 0.45))
+            )
+            attempted.append(selection.requested)
+            values[selection.requested.knob_id.value] = selection.requested.value
+        return selections
+
+    selections = episode()
+    assert len(selections) == 20
+    assert len({item.action.knob_id for item in selections}) >= 2
+    for selection in selections:
+        assert selection.requested.value in lattice_values(selection.action.knob_id)
+    assert episode() == selections

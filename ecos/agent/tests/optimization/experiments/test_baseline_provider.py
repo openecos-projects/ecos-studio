@@ -217,7 +217,7 @@ def test_tpe_provider_uses_primary_metric_history() -> None:
     )
     base = _planning_context(domain, legal_actions=_legal_surface())
     context = SimpleNamespace(
-        **{**base.__dict__, "objective": objective, "history": history}
+        **{**base.__dict__, "objective": objective, "parameter_trajectories": history}
     )
     provider = BaselineProposalProvider("bayesian_tpe", design_id="gcd", seed=3)
     proposal = provider.propose_v2(context, (domain,))

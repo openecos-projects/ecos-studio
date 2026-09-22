@@ -165,13 +165,18 @@ class BaselineProposalProvider:
 def _tpe_observations(
     context: OptimizationPlanningContext,
 ) -> tuple[tuple[RequestedKnobValue, float], ...]:
-    """Executed (requested, signed primary-metric utility) pairs for TPE."""
+    """Full-episode (requested, signed primary-metric utility) pairs for TPE.
+
+    Every finished attempt feeds the surrogate — ``parameter_trajectories``
+    spans the whole episode, not the bounded recent-planning window the LLM
+    planner sees.
+    """
     objective = context.objective
     if objective is None:
         return ()
     metric = objective.primary_metric
     rows = []
-    for entry in context.history:
+    for entry in context.parameter_trajectories:
         terminal = entry.terminal_observation
         if terminal is None or metric not in terminal.metrics:
             continue
