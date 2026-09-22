@@ -143,6 +143,32 @@ describe('ShutdownCoordinator', () => {
     expect(state.promptForce).toHaveBeenCalledOnce()
   })
 
+  it('offers Force quit directly when only the final snapshot failed', async () => {
+    const state = setup(
+      projection({
+        finalizations: [
+          {
+            issue: 'Failed to persist final ECC snapshot.',
+            state: 'snapshot-failed',
+            workspaceDirectory: '/projects/demo/ws_1',
+            workspaceHandle: 'handle-1',
+            workspaceId: 'engineering-1',
+          },
+        ],
+      }),
+    )
+
+    await state.coordinator.requestWindowClose(7)
+
+    expect(state.promptInitial).not.toHaveBeenCalled()
+    expect(state.promptForce).toHaveBeenCalledOnce()
+    expect(state.coordinator.status()).toMatchObject({
+      forceEligible: true,
+      snapshotFailures: 1,
+      state: 'draining',
+    })
+  })
+
   it('waits for an already accepted backend command before Renderer cleanup', async () => {
     const state = setup()
     const finish = state.coordinator.beginAcceptedWork(7)

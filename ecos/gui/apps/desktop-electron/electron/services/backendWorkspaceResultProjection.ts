@@ -45,9 +45,14 @@ function staleQorSnapshotExtension(): ValidSnapshot['sections']['qorSnapshotExte
   }
 }
 
-function assessmentSteps(assessment: Record<string, unknown>): AssessmentStep[] | null {
+function assessmentSteps(
+  assessment: Record<string, unknown>,
+  projectionMetrics: unknown,
+): AssessmentStep[] | null {
   const steps = assessment.steps
-  const metrics = assessment.metrics
+  const metrics = Array.isArray(assessment.metrics)
+    ? assessment.metrics
+    : projectionMetrics
   if (!Array.isArray(steps) || !Array.isArray(metrics)) return null
   const result: AssessmentStep[] = []
   let offset = 0
@@ -81,8 +86,11 @@ function mergeQor(
   if (!currentQor) return staleQor ? stale.sections.qor : current.sections.qor
   if (!staleQor) return current.sections.qor
 
-  const currentAssessmentSteps = assessmentSteps(currentQor.qorAssessment)
-  const staleAssessmentSteps = assessmentSteps(staleQor.qorAssessment)
+  const currentAssessmentSteps = assessmentSteps(
+    currentQor.qorAssessment,
+    currentQor.metrics,
+  )
+  const staleAssessmentSteps = assessmentSteps(staleQor.qorAssessment, staleQor.metrics)
   if (!currentAssessmentSteps) return stale.sections.qor
   if (!staleAssessmentSteps) return current.sections.qor
 
@@ -187,7 +195,7 @@ export function projectWorkspaceResults(
 
   const currentQor = readyData(current.sections.qor)
   const currentAssessmentSteps = currentQor
-    ? assessmentSteps(currentQor.qorAssessment)
+    ? assessmentSteps(currentQor.qorAssessment, currentQor.metrics)
     : null
   const currentResultSteps = new Set(
     (currentAssessmentSteps ?? []).map((step) => canonicalStepIdentity(step.stepId)),

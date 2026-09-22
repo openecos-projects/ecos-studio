@@ -9,6 +9,7 @@ import {
   boundedShutdownIssue,
   buildShutdownBlockers,
   emptyShutdownBlockers,
+  hasOnlySnapshotFailures,
   hasShutdownBlockers,
   idleShutdownStatus,
   workspaceHandlesInShutdownScope,
@@ -272,6 +273,11 @@ export class ShutdownCoordinator {
     attempt.blockers = blockers
     if (!hasShutdownBlockers(blockers)) {
       await this.beginRendererCleanup()
+      return
+    }
+    if (hasOnlySnapshotFailures(blockers)) {
+      this.enterDraining()
+      await this.showForcePrompt()
       return
     }
     if (attempt.initialPromptOpen) return

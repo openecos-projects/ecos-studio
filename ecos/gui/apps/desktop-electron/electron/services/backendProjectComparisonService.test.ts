@@ -131,7 +131,7 @@ function engineeringSnapshot(
         },
       ],
     },
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: workspacePath,
     workspaceRevision: 1,
@@ -156,7 +156,23 @@ function appendSnapshotStepMetric(
   )?.metrics
   const metrics = metricsFile?.data?.metrics
   if (!Array.isArray(metrics)) throw new Error(`missing ${stepId} Snapshot metrics`)
+  const assessmentSteps = snapshot.qorAssessment.steps as Array<{
+    stepId: string
+    order: number
+    summaryMetricCount?: number
+  }>
+  const assessmentStep = assessmentSteps.find((step) => step.stepId === stepId)
+  const offset = assessmentSteps
+    .filter((step) => step.order < (assessmentStep?.order ?? Number.MAX_SAFE_INTEGER))
+    .reduce((sum, step) => sum + (step.summaryMetricCount ?? 0), 0)
   metrics.push(metric)
+  snapshot.metrics.splice(offset + (assessmentStep?.summaryMetricCount ?? 0), 0, {
+    ...metric,
+    stepId,
+  })
+  if (assessmentStep) {
+    assessmentStep.summaryMetricCount = (assessmentStep.summaryMetricCount ?? 0) + 1
+  }
 }
 
 function serviceFixture() {
@@ -393,8 +409,8 @@ describe('BackendProjectComparisonService', () => {
         signoff: workspace.signoffReadiness.status,
       })),
     ).toEqual([
-      { id: 'ws_0001', score: 72, status: 'Green', metrics: 168, signoff: 'pass' },
-      { id: 'ws_0002', score: 84, status: 'Green', metrics: 168, signoff: 'pass' },
+      { id: 'ws_0001', score: 72, status: 'Green', metrics: 167, signoff: 'pass' },
+      { id: 'ws_0002', score: 84, status: 'Green', metrics: 167, signoff: 'pass' },
     ])
     expect(first.data.trend.data.workspaces[1]?.qorSnapshotExtension).toMatchObject({
       scoringEngine: 'qor-v3',

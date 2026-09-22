@@ -452,7 +452,8 @@ export interface EccWorkspaceRuntimeSnapshot extends EccWorkspaceHandleRequest {
 
 export interface EccArtifactRef {
   artifactId: string
-  availability: 'available' | 'missing' | 'stale'
+  availability: 'available' | 'missing'
+  integrity?: 'verified' | 'mismatched' | 'unverified' | 'unsafe' | 'not_checked'
   kind: string
   name: string
   sha256?: string
@@ -625,7 +626,7 @@ export interface EccEngineeringSnapshot {
   parameters: Record<string, unknown>
   qorAssessment: Record<string, unknown>
   qorSnapshotExtension?: EccQorSnapshotExtension
-  schemaVersion: 1 | 2 | 3
+  schemaVersion: 4
   signoffAssessment: EccWorkspaceInspectSignoffResult
   workspaceId: string
   workspaceRevision: number

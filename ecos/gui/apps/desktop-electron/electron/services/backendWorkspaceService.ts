@@ -8,6 +8,7 @@ import {
   type BackendWorkspaceStepDetailRequest,
   type BackendWorkspaceStepDetailResult,
   type EngineeringSnapshotValidationResult,
+  type EccEngineeringMetric,
   type ProjectManifest,
   type ReadIssue,
   type ReadSection,
@@ -243,20 +244,38 @@ export class BackendWorkspaceService {
         snapshot,
       )
     }
+    if (!context.workspaceRoot) {
+      return this.unavailableStepDetail(context, 'WORKSPACE_ROOT_UNAVAILABLE', snapshot)
+    }
     const flow = flowSection(snapshot)
     const checklist = checklistSection(snapshot, flow)
     const insights = context.flowInsights
+    const detail = workspaceStepDetail(
+      snapshot,
+      request.stepId,
+      flow,
+      checklist,
+      insights?.status === 'ready' || insights?.status === 'partial'
+        ? insights.data
+        : null,
+      snapshot.staleSnapshot,
+    )
+    const hydrated =
+      detail.status === 'ready' || detail.status === 'partial'
+        ? await hydrateWorkspaceStepDetail(
+            detail,
+            snapshot,
+            context.workspaceRoot,
+            this.options.projectManagementReadService.readVerifiedArtifact
+              ? (artifactRequest) =>
+                  this.options.projectManagementReadService.readVerifiedArtifact!(
+                    artifactRequest,
+                  )
+              : undefined,
+          )
+        : detail
     return {
-      detail: workspaceStepDetail(
-        snapshot,
-        request.stepId,
-        flow,
-        checklist,
-        insights?.status === 'ready' || insights?.status === 'partial'
-          ? insights.data
-          : null,
-        snapshot.staleSnapshot,
-      ),
+      detail: hydrated,
       generation: context.generation,
       workspaceContextId: context.id,
       workspaceId: snapshot.snapshot.workspaceId,
@@ -314,10 +333,9 @@ export class BackendWorkspaceService {
         request.artifactId,
         this.options.projectManagementReadService.readVerifiedArtifact
           ? (artifactRequest) =>
-              this.options.projectManagementReadService.readVerifiedArtifact!({
-                ...artifactRequest,
-                verifyFingerprint: !isCurrentSnapshot,
-              })
+              this.options.projectManagementReadService.readVerifiedArtifact!(
+                artifactRequest,
+              )
           : undefined,
       ),
       generation: context.generation,
@@ -670,6 +688,71 @@ export class BackendWorkspaceService {
           }
         : {}),
     }
+  }
+}
+
+async function hydrateWorkspaceStepDetail(
+  detail: Extract<
+    ReturnType<typeof workspaceStepDetail>,
+    { status: 'ready' | 'partial' }
+  >,
+  snapshot: Extract<ProjectEngineeringSnapshotReadResult, { ok: true }>,
+  workspaceRoot: string,
+  reader: WorkspaceArtifactReader | undefined,
+): Promise<typeof detail> {
+  if (snapshot.sections.qor.status !== 'ready' || !reader) return detail
+  const analysisStep = snapshot.sections.qor.data.analysis.steps.find(
+    (step) => step.stepId.toLowerCase() === detail.data.step.stepId.toLowerCase(),
+  )
+  if (!analysisStep) return detail
+  const files = [
+    ['metrics', analysisStep.metrics],
+    ['summary', analysisStep.summary],
+    ['hotspots', analysisStep.hotspots],
+    ['lec', analysisStep.lecResult],
+  ] as const
+  const missing = files.filter(
+    ([, file]) => file?.status === 'available' && file.data === null,
+  )
+  if (!missing.length) return detail
+  const results = await Promise.all(
+    missing.map(async ([key, file]) => {
+      const artifact = await readWorkspaceArtifact(
+        snapshot,
+        workspaceRoot,
+        file!.artifactId,
+        reader,
+      )
+      return [
+        key,
+        artifact.status === 'ready' ? (artifact.data.json ?? null) : null,
+      ] as const
+    }),
+  )
+  const data = Object.fromEntries(results)
+  const metrics = (data.metrics as Record<string, unknown> | null)?.metrics
+  const summary = data.summary as Record<string, unknown> | null
+  const hotspots = (data.hotspots as Record<string, unknown> | null)?.hotspots
+  const lec = data.lec
+  return {
+    ...detail,
+    data: {
+      ...detail.data,
+      analysis: {
+        ...detail.data.analysis,
+        ...(Array.isArray(metrics) ? { metrics: metrics as EccEngineeringMetric[] } : {}),
+        ...(summary ? { summary } : {}),
+        ...(Array.isArray(hotspots)
+          ? {
+              hotspots: hotspots.filter(
+                (value): value is Record<string, unknown> =>
+                  value !== null && typeof value === 'object' && !Array.isArray(value),
+              ),
+            }
+          : {}),
+        ...(lec ? { lec } : {}),
+      },
+    },
   }
 }
 

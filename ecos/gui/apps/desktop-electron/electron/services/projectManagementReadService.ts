@@ -383,7 +383,8 @@ export class ProjectManagementReadService {
   async readVerifiedArtifact(request: {
     projectRoot: string
     workspacePath: string
-    artifact: { reference: string; sha256: string; sizeBytes: number }
+    artifact: { reference: string; sha256?: string; sizeBytes?: number }
+    maxBytes?: number
     verifyFingerprint?: boolean
   }): Promise<VerifiedProjectArtifactReadResult> {
     try {
@@ -399,7 +400,7 @@ export class ProjectManagementReadService {
       const result = await readVerifiedArtifactBytes(
         workspaceRoot,
         request.artifact,
-        PROJECT_BINARY_ARTIFACT_MAX_BYTES,
+        request.maxBytes ?? PROJECT_BINARY_ARTIFACT_MAX_BYTES,
         request.verifyFingerprint ?? true,
       )
       return result.ok ? { ok: true, bytes: Uint8Array.from(result.bytes) } : result
@@ -453,7 +454,7 @@ export class ProjectManagementReadService {
 
 async function readVerifiedArtifactBytes(
   workspaceRoot: string,
-  artifact: { reference: string; sha256: string; sizeBytes: number },
+  artifact: { reference: string; sha256?: string; sizeBytes?: number },
   maxBytes: number,
   verifyFingerprint = true,
 ): Promise<
@@ -467,9 +468,10 @@ async function readVerifiedArtifactBytes(
   if (
     !artifact.reference ||
     isAbsolute(artifact.reference) ||
-    !Number.isSafeInteger(artifact.sizeBytes) ||
-    artifact.sizeBytes < 0 ||
-    !/^[a-f0-9]{64}$/.test(artifact.sha256)
+    (artifact.sizeBytes !== undefined &&
+      (!Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes < 0)) ||
+    (verifyFingerprint &&
+      (!/^[a-f0-9]{64}$/.test(artifact.sha256 ?? '') || artifact.sizeBytes === undefined))
   ) {
     return unsafe()
   }
@@ -499,7 +501,9 @@ async function readVerifiedArtifactBytes(
     }
     if (
       fileStats.size > maxBytes ||
-      (verifyFingerprint && artifact.sizeBytes > maxBytes)
+      (verifyFingerprint &&
+        artifact.sizeBytes !== undefined &&
+        artifact.sizeBytes > maxBytes)
     ) {
       return {
         ok: false,
@@ -514,7 +518,7 @@ async function readVerifiedArtifactBytes(
         reference: artifact.reference,
       }
     }
-    const expectedReadSize = verifyFingerprint ? artifact.sizeBytes : fileStats.size
+    const expectedReadSize = verifyFingerprint ? artifact.sizeBytes! : fileStats.size
     const buffer = Buffer.alloc(expectedReadSize + 1)
     let offset = 0
     while (offset < buffer.length) {
@@ -574,7 +578,10 @@ async function readBoundedSnapshot(
     if (initialSize > ENGINEERING_SNAPSHOT_MAX_BYTES) {
       return { bytes: null, sizeBytes: initialSize }
     }
-    const buffer = Buffer.alloc(ENGINEERING_SNAPSHOT_MAX_BYTES + 1)
+    // Allocate for the file's current size, with one byte reserved to detect
+    // a concurrent append. A fixed 16 MiB buffer per workspace read made
+    // project comparison unnecessarily expensive for small projections.
+    const buffer = Buffer.alloc(initialSize + 1)
     let offset = 0
     while (offset < buffer.length) {
       const { bytesRead } = await handle.read(
@@ -586,8 +593,13 @@ async function readBoundedSnapshot(
       if (bytesRead === 0) break
       offset += bytesRead
     }
-    if (offset > ENGINEERING_SNAPSHOT_MAX_BYTES) {
-      return { bytes: null, sizeBytes: Math.max(offset, (await handle.stat()).size) }
+    const finalSize = (await handle.stat()).size
+    if (
+      offset === buffer.length ||
+      finalSize > ENGINEERING_SNAPSHOT_MAX_BYTES ||
+      finalSize !== offset
+    ) {
+      return { bytes: null, sizeBytes: Math.max(offset, finalSize) }
     }
     return { bytes: buffer.subarray(0, offset), sizeBytes: offset }
   } finally {

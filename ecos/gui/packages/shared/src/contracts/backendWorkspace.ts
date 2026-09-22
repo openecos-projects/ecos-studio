@@ -474,6 +474,7 @@ export interface BackendWorkspaceArtifactRequest {
 export interface BackendWorkspaceArtifactContent {
   artifactId: string
   bytes?: Uint8Array
+  json?: Record<string, unknown>
   kind: string
   mimeType: string
   name: string

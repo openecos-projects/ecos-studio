@@ -38,7 +38,7 @@ function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
       score: { value: null, threshold: 60, gate: 'unavailable' },
       steps: [],
     },
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     workspaceId: 'engineering-workspace',
     workspaceRevision: 1,

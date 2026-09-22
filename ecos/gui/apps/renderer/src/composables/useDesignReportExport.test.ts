@@ -113,7 +113,7 @@ describe('useDesignReportExport', () => {
         metrics: [],
         parameters: {},
         qorAssessment: {},
-        schemaVersion: 1,
+        schemaVersion: 4,
         signoffAssessment: { groups: [], risks: [], status: 'ready' },
         workspaceId: 'workspace-1',
         workspaceRevision: 1,

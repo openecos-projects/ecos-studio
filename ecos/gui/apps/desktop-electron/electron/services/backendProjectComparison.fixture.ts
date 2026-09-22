@@ -173,7 +173,7 @@ function engineeringSnapshot(
       power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
       artifactIds: [],
     },
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId,
     workspaceRevision: 14,

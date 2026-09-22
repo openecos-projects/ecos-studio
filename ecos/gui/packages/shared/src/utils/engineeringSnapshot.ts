@@ -78,11 +78,7 @@ export function validateEngineeringSnapshot(
   if (!record(value)) {
     return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
   }
-  if (
-    value.schemaVersion !== 1 &&
-    value.schemaVersion !== 2 &&
-    value.schemaVersion !== 3
-  ) {
+  if (value.schemaVersion !== 4) {
     return {
       ok: false,
       issue: {
@@ -183,8 +179,11 @@ function validQor(
     return false
   }
   const assessment = snapshot.qorAssessment
-  if (!record(assessment) || !Array.isArray(assessment.metrics)) return false
-  if (!assessment.metrics.every(validMetric) || !Array.isArray(assessment.steps)) {
+  if (!record(assessment) || !Array.isArray(assessment.steps)) return false
+  if (
+    snapshot.schemaVersion !== 4 &&
+    (!Array.isArray(assessment.metrics) || !assessment.metrics.every(validMetric))
+  ) {
     return false
   }
   const score = assessment.score
@@ -499,14 +498,15 @@ function validAnalysis(
       nonEmptyString(step.toolId) &&
       nonEmptyString(step.flowState) &&
       nonNegativeInteger(step.order) &&
-      validMetricFile(step.metrics) &&
-      validSummaryFile(step.summary) &&
-      validAnalysisFile(step.hotspots, 3, 'hotspots') &&
+      validMetricFile(step.metrics, schemaVersion === 4) &&
+      validSummaryFile(step.summary, schemaVersion === 4) &&
+      validAnalysisFile(step.hotspots, 3, 'hotspots', schemaVersion === 4) &&
       (step.lecResult === undefined ||
         step.lecResult === null ||
         validLecResultFile(step.lecResult)) &&
-      (step.timingIssues === null || validTimingFile(step.timingIssues)) &&
-      (schemaVersion === 1 || validSubflow(step.subflow)),
+      (step.timingIssues === null ||
+        validTimingFile(step.timingIssues, schemaVersion === 4)) &&
+      (step.subflow === undefined || validSubflow(step.subflow)),
   )
 }
 
@@ -540,9 +540,10 @@ function validSubflow(value: unknown): boolean {
   )
 }
 
-function validMetricFile(value: unknown): boolean {
-  if (!validAnalysisFile(value, 3, 'metrics')) return false
+function validMetricFile(value: unknown, projectionRef = false): boolean {
+  if (!validAnalysisFile(value, 3, 'metrics', projectionRef)) return false
   if (value.status !== 'available') return true
+  if (projectionRef && value.data === null) return true
   return (
     record(value.data) &&
     Array.isArray(value.data.metrics) &&
@@ -550,9 +551,10 @@ function validMetricFile(value: unknown): boolean {
   )
 }
 
-function validSummaryFile(value: unknown): boolean {
-  if (!validAnalysisFile(value, 4, 'gates')) return false
+function validSummaryFile(value: unknown, projectionRef = false): boolean {
+  if (!validAnalysisFile(value, 4, 'gates', projectionRef)) return false
   if (value.status !== 'available') return true
+  if (projectionRef && value.data === null) return true
   return (
     record(value.data) &&
     nonEmptyString(value.data.analysis_status) &&
@@ -561,9 +563,10 @@ function validSummaryFile(value: unknown): boolean {
   )
 }
 
-function validTimingFile(value: unknown): boolean {
-  if (!validAnalysisFile(value, 1, 'issues')) return false
+function validTimingFile(value: unknown, projectionRef = false): boolean {
+  if (!validAnalysisFile(value, 1, 'issues', projectionRef)) return false
   if (value.status !== 'available') return true
+  if (projectionRef && value.data === null) return true
   return (
     record(value.data) &&
     finiteNumber(value.data.near_fail_slack_ns) &&
@@ -576,6 +579,7 @@ function validAnalysisFile(
   value: unknown,
   schemaVersion: number,
   arrayField: string,
+  projectionRef = false,
 ): value is EccEngineeringAnalysisFile {
   if (!record(value) || !nonEmptyString(value.artifactId)) return false
   if (
@@ -588,6 +592,7 @@ function validAnalysisFile(
   if (value.status !== 'available') {
     return value.data === null && nonEmptyString(value.reasonCode)
   }
+  if (projectionRef && value.data === null) return true
   return (
     record(value.data) &&
     value.data.schema_version === schemaVersion &&
@@ -674,13 +679,17 @@ function validArtifacts(value: unknown): value is EccEngineeringAnalysisArtifact
       !nonEmptyString(artifact.name) ||
       !nonEmptyString(artifact.stepId) ||
       !safeRelativePath(artifact.reference) ||
-      !['available', 'missing', 'stale'].includes(String(artifact.availability))
+      !['available', 'missing'].includes(String(artifact.availability)) ||
+      !['verified', 'mismatched', 'unverified', 'unsafe', 'not_checked'].includes(
+        String(artifact.integrity ?? 'not_checked'),
+      )
     ) {
       return false
     }
     ids.add(artifact.artifactId)
     return (
       artifact.availability !== 'available' ||
+      artifact.integrity !== 'verified' ||
       (nonNegativeInteger(artifact.sizeBytes) &&
         typeof artifact.sha256 === 'string' &&
         /^[a-f0-9]{64}$/.test(artifact.sha256))

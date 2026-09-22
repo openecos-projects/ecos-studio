@@ -72,7 +72,7 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [],
     },
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: 'ecc-workspace-a',
     workspaceRevision: 1,
@@ -664,6 +664,120 @@ describe('BackendWorkspaceService', () => {
     expect(detail.workspaceRevision).toBe(1)
   })
 
+  it('hydrates compact Step analysis references on demand', async () => {
+    const snapshot = engineeringSnapshot()
+    const metric = engineeringMetric('route_wirelength', 42)
+    const files = {
+      metrics: {
+        schema_version: 3,
+        metrics: [metric],
+      },
+      summary: {
+        schema_version: 4,
+        analysis_status: 'complete',
+        quality_status: 'pass',
+        gates: [],
+        missing_metrics: [],
+      },
+      hotspots: { schema_version: 3, hotspots: [] },
+    }
+    const artifacts = (Object.keys(files) as Array<keyof typeof files>).map((kind) => ({
+      artifactId: `artifact-${kind}`,
+      availability: 'available' as const,
+      integrity: 'verified' as const,
+      kind: `qor_${kind}`,
+      name: `${kind}.json`,
+      reference: `route_ecc/analysis/${kind}.json`,
+      sha256: 'a'.repeat(64),
+      sizeBytes: 2,
+      stepId: 'Route',
+    }))
+    snapshot.flow = { steps: [{ name: 'Route', state: 'Success' }] }
+    snapshot.analysis = {
+      steps: [
+        {
+          stepId: 'Route',
+          toolId: 'ecc',
+          order: 0,
+          flowState: 'Success',
+          metrics: {
+            artifactId: 'artifact-metrics',
+            status: 'available',
+            data: null,
+          },
+          summary: {
+            artifactId: 'artifact-summary',
+            status: 'available',
+            data: null,
+          },
+          hotspots: {
+            artifactId: 'artifact-hotspots',
+            status: 'available',
+            data: null,
+          },
+          timingIssues: null,
+          subflow: { status: 'missing', steps: [] },
+        },
+      ],
+    }
+    snapshot.metrics = [metric]
+    snapshot.qorAssessment = {
+      status: 'ready',
+      score: { gate: 'pass', threshold: 60, value: 73.5 },
+      steps: [
+        {
+          stepId: 'Route',
+          name: 'Route',
+          order: 0,
+          status: 'pass',
+          summaryMetricCount: 1,
+        },
+      ],
+    }
+    snapshot.artifacts = artifacts
+    const readVerifiedArtifact = vi.fn(async ({ artifact: artifactRef }) => ({
+      ok: true as const,
+      bytes: new TextEncoder().encode(
+        JSON.stringify(
+          files[
+            artifactRef.reference
+              .split('/')
+              .at(-1)!
+              .replace('.json', '') as keyof typeof files
+          ],
+        ),
+      ),
+    }))
+    const service = new BackendWorkspaceService({
+      projectManagementReadService: {
+        ...persistedReadService(snapshot),
+        readVerifiedArtifact,
+      },
+      workspaceRootProvider: workspaceRootProvider(),
+    })
+    const overview = await runWithWindowScope(73, () => service.getOverview())
+
+    const result = await runWithWindowScope(73, () =>
+      service.getStepDetail({
+        stepId: 'Route',
+        workspaceContextId: overview.workspaceContextId,
+        workspaceRevision: 1,
+      }),
+    )
+
+    expect(result.detail).toMatchObject({
+      status: 'ready',
+      data: {
+        analysis: {
+          metrics: [expect.objectContaining({ id: 'route_wirelength' })],
+          summary: { quality_status: 'pass' },
+          hotspots: [],
+        },
+      },
+    })
+    expect(readVerifiedArtifact).toHaveBeenCalledTimes(3)
+  })
+
   it('loads current and selected baseline facts through the persisted reader only', async () => {
     const index = resourceIndex()
     const current = engineeringSnapshot(index)
@@ -722,7 +836,7 @@ describe('BackendWorkspaceService', () => {
 
   it('projects aliased trends, DRC detail, and STA paths from one revision', async () => {
     const snapshot = engineeringSnapshot()
-    snapshot.schemaVersion = 2
+    snapshot.schemaVersion = 4
     snapshot.workspaceRevision = 8
     snapshot.flow = {
       steps: [
@@ -956,7 +1070,7 @@ describe('BackendWorkspaceService', () => {
 
   it('returns revision-bound committed Step detail without exposing artifact paths', async () => {
     const snapshot = engineeringSnapshot()
-    snapshot.schemaVersion = 2
+    snapshot.schemaVersion = 4
     snapshot.workspaceId = 'engineering-a'
     snapshot.workspaceRevision = 9
     snapshot.flow = {
@@ -1054,7 +1168,7 @@ describe('BackendWorkspaceService', () => {
 
   it('attaches stale Step evidence to an invalidated current Revision', async () => {
     const stale = engineeringSnapshot()
-    stale.schemaVersion = 2
+    stale.schemaVersion = 4
     stale.workspaceRevision = 1
     stale.flow = {
       steps: [{ name: 'Place', tool: 'ecc', state: 'Success', runtime: '0:0:2' }],
@@ -1462,7 +1576,7 @@ describe('BackendWorkspaceService', () => {
 
   it('returns an empty Step detail when neither current nor stale results exist', async () => {
     const stale = engineeringSnapshot()
-    stale.schemaVersion = 2
+    stale.schemaVersion = 4
     stale.workspaceRevision = 1
     stale.flow = {
       steps: [{ name: 'Floorplan', tool: 'ecc', state: 'Unstart' }],
@@ -1507,7 +1621,7 @@ describe('BackendWorkspaceService', () => {
 
   it('returns bounded LVS detail from the committed analysis projection', async () => {
     const snapshot = engineeringSnapshot()
-    snapshot.schemaVersion = 2
+    snapshot.schemaVersion = 4
     snapshot.flow = { steps: [{ name: 'LVS', tool: 'ecc', state: 'Success' }] }
     const lvsMetric = engineeringMetric('lvs_count', 1, {
       direction: 'lower_is_better',
@@ -1685,7 +1799,7 @@ describe('BackendWorkspaceService', () => {
         sizeBytes: 3,
       },
       projectRoot: '/project',
-      verifyFingerprint: true,
+      verifyFingerprint: false,
       workspacePath: '/project/ws-a',
     })
     expect(JSON.stringify(result)).not.toContain('Place_ecc/')

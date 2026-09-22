@@ -105,7 +105,7 @@ function engineeringSnapshot(metricValue: number): EccEngineeringSnapshot {
         },
       ],
     },
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: 'ecc-workspace',
     workspaceRevision: 1,
@@ -248,7 +248,7 @@ describe('analyzeWorkspaceQor', () => {
 
   it('validates and projects a schema v3 Snapshot produced by ECC', () => {
     const snapshot = engineeringSnapshot(5000)
-    snapshot.schemaVersion = 3
+    snapshot.schemaVersion = 4
     snapshot.qorSnapshotExtension = qorSnapshotExtension()
 
     const validated = validateEngineeringSnapshot(snapshot)
@@ -299,7 +299,7 @@ describe('analyzeWorkspaceQor', () => {
           },
         ],
       },
-      schemaVersion: 1,
+      schemaVersion: 4,
       signoffAssessment: { groups: [], risks: [], status: 'ready' },
       workspaceId: 'ecc-current',
       workspaceRevision: 1,

@@ -11,15 +11,25 @@ import type {
   ProjectEngineeringSnapshotReadResult,
   VerifiedProjectArtifactReadResult,
 } from './projectManagementReadService'
+import { PROJECT_FINDINGS_ARTIFACT_MAX_BYTES } from './projectManagementReadService'
 
 type ValidSnapshot = NonNullable<ProjectEngineeringSnapshotReadResult['staleSnapshot']>
 
 export type WorkspaceArtifactReader = (request: {
   projectRoot: string
   workspacePath: string
-  artifact: { reference: string; sha256: string; sizeBytes: number }
+  artifact: { reference: string; sha256?: string; sizeBytes?: number }
+  maxBytes?: number
   verifyFingerprint?: boolean
 }) => Promise<VerifiedProjectArtifactReadResult>
+
+const JSON_ARTIFACT_KINDS = new Set([
+  'lec_result',
+  'qor_hotspots',
+  'qor_metrics',
+  'qor_summary',
+  'sta_timing_issues',
+])
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -170,6 +180,7 @@ export async function readWorkspaceArtifact(
     !artifact ||
     artifact.availability !== 'available' ||
     ![
+      ...JSON_ARTIFACT_KINDS,
       'layout_image',
       'congestion_image',
       'timing_paths',
@@ -177,7 +188,7 @@ export async function readWorkspaceArtifact(
       'report_text',
     ].includes(artifact.kind) ||
     artifact.sizeBytes === undefined ||
-    !artifact.sha256 ||
+    (!['layout_image', 'congestion_image'].includes(artifact.kind) && !artifact.sha256) ||
     !reader
   ) {
     return unavailable('ARTIFACT_REFERENCE_MISSING')
@@ -190,6 +201,10 @@ export async function readWorkspaceArtifact(
       sizeBytes: artifact.sizeBytes,
     },
     projectRoot: dirname(workspaceRoot),
+    ...(JSON_ARTIFACT_KINDS.has(artifact.kind)
+      ? { maxBytes: PROJECT_FINDINGS_ARTIFACT_MAX_BYTES }
+      : {}),
+    verifyFingerprint: !['layout_image', 'congestion_image'].includes(artifact.kind),
     workspacePath: workspaceRoot,
   })
   electronLogger.debug('[backend-workspace] artifact query metrics', {
@@ -212,7 +227,11 @@ export async function readWorkspaceArtifact(
     artifact.kind === 'timing_summary'
       ? timingSummary(read.bytes, artifact.reference)
       : undefined
+  const parsedJson = JSON_ARTIFACT_KINDS.has(artifact.kind)
+    ? artifactJson(read.bytes)
+    : undefined
   if (
+    (JSON_ARTIFACT_KINDS.has(artifact.kind) && !parsedJson) ||
     (artifact.kind === 'timing_paths' && !parsedTimingPaths) ||
     (artifact.kind === 'timing_summary' && !parsedTimingSummary)
   ) {
@@ -237,6 +256,7 @@ export async function readWorkspaceArtifact(
           ? 'text/plain'
           : 'application/json',
       name: artifact.name,
+      ...(parsedJson ? { json: parsedJson } : {}),
       ...(['layout_image', 'congestion_image'].includes(artifact.kind)
         ? { bytes: read.bytes }
         : {}),

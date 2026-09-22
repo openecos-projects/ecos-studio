@@ -45,7 +45,7 @@ function engineeringSnapshot(workspaceId: string, workspaceRevision = 1) {
       status: 'unavailable',
       steps: [],
     },
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId,
     workspaceRevision,

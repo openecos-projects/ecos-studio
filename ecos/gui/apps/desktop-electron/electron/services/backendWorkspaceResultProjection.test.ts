@@ -37,7 +37,7 @@ function readResult(
     snapshot: {
       checklist: {},
       parameters: {},
-      schemaVersion: 3,
+      schemaVersion: 4,
       workspaceId: 'workspace-1',
       workspaceRevision: revision,
       ...(stalePredecessor ? { stalePredecessor } : {}),

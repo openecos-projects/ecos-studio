@@ -110,6 +110,16 @@ export function hasShutdownBlockers(blockers: ShutdownBlockerSummary): boolean {
   )
 }
 
+export function hasOnlySnapshotFailures(blockers: ShutdownBlockerSummary): boolean {
+  return (
+    blockers.snapshotFailures > 0 &&
+    blockers.activeFlows === 0 &&
+    blockers.finalizations === 0 &&
+    blockers.pendingCommands === 0 &&
+    blockers.pendingCreations === 0
+  )
+}
+
 export function workspaceHandlesInShutdownScope(
   handleOwners: ReadonlyMap<string, number>,
   scope: ShutdownScope,

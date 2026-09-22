@@ -113,7 +113,7 @@ function engineeringSnapshot(
     metrics: [],
     parameters: {},
     qorAssessment: {},
-    schemaVersion: 1,
+    schemaVersion: 4,
     signoffAssessment,
     workspaceId: 'workspace-1',
     workspaceRevision: 7,

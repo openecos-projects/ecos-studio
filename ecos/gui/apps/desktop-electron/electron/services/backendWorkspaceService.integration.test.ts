@@ -116,7 +116,7 @@ function snapshot(workspaceId: string, revision: number, value: number) {
         },
       ],
     },
-    schemaVersion: 2,
+    schemaVersion: 4,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     workspaceId,
     workspaceRevision: revision,

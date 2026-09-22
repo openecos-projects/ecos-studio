@@ -321,7 +321,18 @@ export function useDesignReportExport({
         currentProject.value?.name ||
         'gcd'
 
-      if (runtimeSnapshot?.engineeringSnapshot) {
+      const hasInlineEngineeringAnalysis =
+        runtimeSnapshot?.engineeringSnapshot?.analysis.steps.some((step) =>
+          [step.metrics, step.summary, step.hotspots, step.timingIssues].some(
+            (file) => file?.status === 'available' && file.data !== null,
+          ),
+        )
+      const engineeringAnalysis = runtimeSnapshot?.engineeringSnapshot?.analysis
+      if (
+        runtimeSnapshot?.engineeringSnapshot &&
+        engineeringAnalysis &&
+        (engineeringAnalysis.steps.length === 0 || hasInlineEngineeringAnalysis)
+      ) {
         const analysis = reportDataFromEngineeringAnalysis(
           runtimeSnapshot.engineeringSnapshot.analysis,
         )

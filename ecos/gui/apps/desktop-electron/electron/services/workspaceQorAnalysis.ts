@@ -167,7 +167,7 @@ function snapshotQorProjection(
         signoffStatus: signoffStatus!,
       }
     : null
-  const rawMetrics = Array.isArray(qor?.metrics) ? qor.metrics : snapshot.metrics
+  const rawMetrics = snapshot.metrics
   if (!Array.isArray(rawMetrics) || !Array.isArray(qor?.steps)) {
     return { assessment, qor: null, qorSnapshotExtension: extension }
   }
@@ -312,18 +312,39 @@ function snapshotComparisonMetrics(
   snapshot: WorkspaceEngineeringFacts | null | undefined,
   workspaceId: string,
 ): ProjectQorMetricRecord[] {
-  if (!snapshot) return []
-  return snapshot.analysis.steps.flatMap((analysisStep) => {
-    const step = parseProjectManifestFlowStep(analysisStep.stepId)
-    const metrics = analysisStep.metrics.data?.metrics
-    if (analysisStep.metrics.status !== 'available' || !step || !Array.isArray(metrics)) {
-      return []
+  if (!snapshot || !Array.isArray(snapshot.metrics)) return []
+  const assessment = record(snapshot.qorAssessment)
+  const steps = Array.isArray(assessment?.steps) ? assessment.steps : []
+  let offset = 0
+  const result: ProjectQorMetricRecord[] = []
+  for (const value of steps) {
+    const step = record(value)
+    const stepName =
+      typeof step?.stepId === 'string'
+        ? step.stepId
+        : typeof step?.name === 'string'
+          ? step.name
+          : ''
+    const stepId = parseProjectManifestFlowStep(stepName)
+    const count = step?.summaryMetricCount
+    if (!stepId || !Number.isSafeInteger(count) || (count as number) < 0) return []
+    const nextOffset = offset + (count as number)
+    if (nextOffset > snapshot.metrics.length) return []
+    const metrics = snapshot.metrics.slice(offset, nextOffset)
+    offset = nextOffset
+    const comparableStep = projectManagementWorkspaceStepAnalysisSpecs.find(
+      (spec) => spec.step === stepId,
+    )?.step
+    if (comparableStep) {
+      result.push(
+        ...normalizeQorMetricRecords(
+          { step: comparableStep, workspaceId, workspaceKey: workspaceId },
+          metrics,
+        ),
+      )
     }
-    return normalizeQorMetricRecords(
-      { step, workspaceId, workspaceKey: workspaceId },
-      metrics,
-    )
-  })
+  }
+  return offset === snapshot.metrics.length ? result : []
 }
 
 export function projectQorInputForWorkspace(
