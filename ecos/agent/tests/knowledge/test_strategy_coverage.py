@@ -89,18 +89,13 @@ def test_strategy_conditions_are_typed_and_not_just_evidence_presence() -> None:
     local = next(entry for entry in entries if entry["id"] == "strategy.congestion.local_move_cells.v1")
     claim = GeneralDomainClaim.model_validate(local["support"]["claim"])
     feature_ids = {predicate.feature_id for predicate in claim.state_predicates}
-    assert feature_ids == {
-        "place_congestion_egr_overflow_total",
-        "route_la_total_overflow",
-        "place_lutrudy_utilization_max",
-    }
+    assert feature_ids == {"route_la_total_overflow", "route_wirelength"}
     features = {
-        "place_congestion_egr_overflow_total": 1.0,
         "route_la_total_overflow": 1.0,
-        "place_lutrudy_utilization_max": 0.5,
+        "route_wirelength": 100.0,
     }
     assert all(_evaluate(predicate, features) is True for predicate in claim.state_predicates)
-    del features["place_lutrudy_utilization_max"]
+    del features["route_wirelength"]
     assert _evaluate(claim.state_predicates[-1], features) is None
 
 
@@ -109,7 +104,7 @@ def test_routing_pressure_trials_do_not_invent_native_density_observation() -> N
     for name in ("trial_tighter_density_convergence", "trial_stronger_initial_density_penalty"):
         statement = next(item for item in statements if item["id"] == f"strategy.congestion.{name}.v1")
         predicate = StatePredicate.model_validate(statement["state_predicates"][0])
-        assert predicate.feature_id == "place_congestion_egr_overflow_total"
+        assert predicate.feature_id == "route_la_total_overflow"
         assert _evaluate(predicate, {predicate.feature_id: 0}) is False
         assert _evaluate(predicate, {predicate.feature_id: 2.5}) is True
         assert _evaluate(predicate, {}) is None

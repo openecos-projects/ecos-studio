@@ -99,12 +99,11 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
 
     assert len(catalog.claims) == 37
     assert spreading.claim_sha256.startswith("sha256:")
-    assert spreading.required_evidence == ("route_la_total_overflow", "place_congestion_egr_overflow_total", "place.target_density")
+    assert spreading.required_evidence == ("route_la_total_overflow", "place.target_density")
     assert spreading.action_intents == ("decrease_packing_density",)
     assert spreading.evidence_refs
     assert {predicate.feature_id for predicate in spreading.state_predicates} == {
         "route_la_total_overflow",
-        "place_congestion_egr_overflow_total",
         "place.target_density",
     }
     assert any(predicate.op != "present" for predicate in spreading.state_predicates)

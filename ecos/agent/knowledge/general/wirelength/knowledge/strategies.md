@@ -13,7 +13,7 @@
 
 **Diagnosis:** placement proxy requires route validation.
 
-**Required evidence:** place_hpwl, place_flute_wirelength, route_wirelength, route_la_total_overflow, route_dr_total_wirelength.
+**Required evidence:** place_hpwl, route_wirelength, route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** validate routed wirelength after proxy gain (`validate_routed_wirelength_after_proxy_gain`).
 
@@ -42,11 +42,11 @@
 
 **Applies to steps:** place.
 
-**Condition:** Use HPWL and FLUTE only as placement-stage proxy evidence when both are available; neither is routed wirelength and neither replaces route_wirelength as the wirelength objective.
+**Condition:** FLUTE is not an agent-visible metric in the frozen 190-key epsilon inventory. Do not invent or treat a missing FLUTE value as routed wirelength; use place_hpwl only as an intermediate proxy and require route_wirelength for objective validation.
 
-**Diagnosis:** placement proxy cross check.
+**Diagnosis:** unavailable flute proxy requires route validation.
 
-**Required evidence:** place_hpwl, place_flute_wirelength, route_wirelength.
+**Required evidence:** place_hpwl, route_wirelength.
 
 **Action intent:** use flute as secondary wirelength proxy (`use_flute_as_secondary_wirelength_proxy`).
 
@@ -145,7 +145,7 @@
 
 **Diagnosis:** terminal routed wirelength rebound.
 
-**Required evidence:** route_wirelength, delta.route_wirelength, route_dr_total_wirelength, route_la_total_overflow.
+**Required evidence:** route_wirelength, delta.route_wirelength, route_la_total_overflow.
 
 **Action intent:** reject post legalization rebound (`reject_post_legalization_rebound`).
 
@@ -211,7 +211,7 @@
 
 **Diagnosis:** wide core shape wirelength exploration.
 
-**Required evidence:** route_wirelength, floorplan_die_util_mode, floorplan_aspect_ratio_offset.
+**Required evidence:** route_wirelength, core_area, floorplan_die_util_mode, floorplan_aspect_ratio_offset.
 
 **Action intent:** reduce wide core elongation trial (`reduce_wide_core_elongation_trial`).
 
@@ -244,7 +244,7 @@
 
 **Diagnosis:** tall core shape wirelength exploration.
 
-**Required evidence:** route_wirelength, floorplan_die_util_mode, floorplan_aspect_ratio_offset.
+**Required evidence:** route_wirelength, core_area, floorplan_die_util_mode, floorplan_aspect_ratio_offset.
 
 **Action intent:** reduce tall core elongation trial (`reduce_tall_core_elongation_trial`).
 
@@ -310,7 +310,7 @@
 
 **Diagnosis:** core area wirelength exploration.
 
-**Required evidence:** route_wirelength, floorplan_die_util_mode, floorplan.core_util.
+**Required evidence:** route_wirelength, core_area, floorplan_die_util_mode, floorplan.core_util.
 
 **Action intent:** reduce core area wirelength trial (`reduce_core_area_wirelength_trial`).
 
@@ -343,7 +343,7 @@
 
 **Diagnosis:** variable geometry tall shape exploration.
 
-**Required evidence:** route_wirelength, floorplan.aspect_ratio, floorplan_aspect_ratio_offset.
+**Required evidence:** route_wirelength, core_area, floorplan.aspect_ratio, floorplan_aspect_ratio_offset.
 
 **Action intent:** reduce tall core elongation trial (`reduce_tall_core_elongation_trial`).
 
@@ -376,7 +376,7 @@
 
 **Diagnosis:** variable geometry wide shape exploration.
 
-**Required evidence:** route_wirelength, floorplan.aspect_ratio, floorplan_aspect_ratio_offset.
+**Required evidence:** route_wirelength, core_area, floorplan.aspect_ratio, floorplan_aspect_ratio_offset.
 
 **Action intent:** reduce wide core elongation trial (`reduce_wide_core_elongation_trial`).
 

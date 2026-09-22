@@ -13,7 +13,7 @@
 
 **Diagnosis:** unresolved scalar congestion diagnosis.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow.
+**Required evidence:** route_la_total_overflow.
 
 **Action intent:** recheck congestion model (`recheck_congestion_model`).
 
@@ -46,7 +46,7 @@
 
 **Diagnosis:** coarse placement spreading under route overflow.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place_lutrudy_utilization_max.
+**Required evidence:** route_la_total_overflow, route_wirelength.
 
 **Action intent:** spread local movable cells (`spread_local_movable_cells`).
 
@@ -112,7 +112,7 @@
 
 **Diagnosis:** coarse area adjust under route overflow.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place.routability_opt.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** inflate cells in hotspot (`inflate_cells_in_hotspot`).
 
@@ -145,7 +145,7 @@
 
 **Diagnosis:** aggregate routability pressure.
 
-**Required evidence:** route_la_total_overflow, place_congestion_egr_overflow_total, place_lutrudy_utilization_max.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** increase cell padding (`increase_cell_padding`).
 
@@ -178,7 +178,7 @@
 
 **Diagnosis:** map presence without consumable bins.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place_rudy_utilization_max.
+**Required evidence:** route_la_total_overflow, place_hpwl.
 
 **Action intent:** recheck congestion model (`recheck_congestion_model`).
 
@@ -244,7 +244,7 @@
 
 **Diagnosis:** global padding as congestion relief.
 
-**Required evidence:** route_la_total_overflow, place_congestion_egr_overflow_total, place.cell_padding_x.
+**Required evidence:** route_la_total_overflow, place.cell_padding_x.
 
 **Action intent:** increase cell padding (`increase_cell_padding`).
 
@@ -277,7 +277,7 @@
 
 **Diagnosis:** aggregate features for padding trial.
 
-**Required evidence:** place_congestion_egr_overflow_total, place_lutrudy_utilization_max, route_la_total_overflow.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** increase cell padding (`increase_cell_padding`).
 
@@ -310,7 +310,7 @@
 
 **Diagnosis:** padding reduction after clean route.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place.cell_padding_x.
+**Required evidence:** route_la_total_overflow, place.cell_padding_x.
 
 **Action intent:** recycle padding outside hotspot (`recycle_padding_outside_hotspot`).
 
@@ -343,7 +343,7 @@
 
 **Diagnosis:** coarse relief without routed overflow.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place.cell_padding_x.
+**Required evidence:** route_la_total_overflow, place.cell_padding_x.
 
 **Action intent:** cap inflation aggressiveness (`cap_inflation_aggressiveness`).
 
@@ -409,7 +409,7 @@
 
 **Diagnosis:** routability area adjust under route overflow.
 
-**Required evidence:** route_la_total_overflow, place_congestion_egr_overflow_total, place.routability_opt.
+**Required evidence:** route_la_total_overflow, place.routability_opt.
 
 **Action intent:** enable routability adjustment (`enable_routability_adjustment`).
 
@@ -475,7 +475,7 @@
 
 **Diagnosis:** placement proxy vs route scalar gap.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, route_wirelength.
+**Required evidence:** route_la_total_overflow, route_wirelength.
 
 **Action intent:** recheck congestion model (`recheck_congestion_model`).
 
@@ -508,7 +508,7 @@
 
 **Diagnosis:** aggregate area pressure without spatial localization.
 
-**Required evidence:** route_la_total_overflow, place_congestion_egr_overflow_total, place_rudy_utilization_max.
+**Required evidence:** route_la_total_overflow, route_dr_total_violation_count.
 
 **Action intent:** inflate cells in hotspot (`inflate_cells_in_hotspot`).
 
@@ -574,7 +574,7 @@
 
 **Diagnosis:** lower packing under route overflow.
 
-**Required evidence:** route_la_total_overflow, place_congestion_egr_overflow_total, place.target_density.
+**Required evidence:** route_la_total_overflow, place.target_density.
 
 **Action intent:** decrease packing density (`decrease_packing_density`).
 
@@ -603,11 +603,11 @@
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. The agent observes positive placement EGR and routed overflow; decreasing place.target_overflow tightens one placement convergence threshold only and is not a route-overflow guarantee. Retain terminal routing, timing, DRC and budget guards. This is not native placement density overflow.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. The only metric trigger is positive routed overflow; decreasing place.target_overflow tightens one placement convergence threshold and is not a route-overflow guarantee. Retain terminal routing, timing, DRC and budget guards. It is not native placement density overflow.
 
 **Diagnosis:** placement convergence threshold exploration.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place.target_overflow.
+**Required evidence:** route_la_total_overflow, place.target_overflow.
 
 **Action intent:** tighten density overflow trial (`tighten_density_overflow_trial`).
 
@@ -636,11 +636,11 @@
 
 **Applies to steps:** place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Positive placement EGR and routed overflow motivate a trial of the initial density penalty; place.density_weight is not a fixed multiplier on final density or routing congestion. Retain terminal routing, timing, DRC and budget guards. This is not native placement density overflow.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Positive routed overflow motivates a trial of the initial density penalty; place.density_weight is not a fixed multiplier on final density or routing congestion. It is not native placement density overflow. Retain terminal routing, timing, DRC and budget guards.
 
 **Diagnosis:** initial density penalty exploration.
 
-**Required evidence:** place_congestion_egr_overflow_total, route_la_total_overflow, place.density_weight.
+**Required evidence:** route_la_total_overflow, place.density_weight.
 
 **Action intent:** increase initial density penalty trial (`increase_initial_density_penalty_trial`).
 
@@ -669,7 +669,7 @@
 
 **Applies to steps:** floorplan.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. In die-util mode, positive routed overflow and positive core utilization motivate decreasing floorplan.core_util to explore more whitespace. The source proves the area mechanism, not a QoR outcome. Retain terminal routing, timing, DRC and budget guards.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. In die-util mode, positive routed overflow motivates decreasing floorplan.core_util to explore more whitespace. The source proves the area mechanism, not a QoR outcome. Retain terminal routing, timing, DRC and budget guards.
 
 **Diagnosis:** core whitespace exploration under route overflow.
 
@@ -801,11 +801,11 @@
 
 **Applies to steps:** floorplan, place.
 
-**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Positive routed overflow, core utilization, and measured die utilization motivate decreasing floorplan.core_util in variable-geometry mode; this is not a die-size or QoR guarantee. Retain terminal routing, timing, DRC and budget guards.
+**Condition:** Source-derived bounded exploratory hypothesis, not paper-validated efficacy. Positive routed overflow and positive core area motivate decreasing floorplan.core_util in variable-geometry mode; this is not a die-size or QoR guarantee. Retain terminal routing, timing, DRC and budget guards.
 
 **Diagnosis:** variable geometry core whitespace exploration.
 
-**Required evidence:** route_la_total_overflow, floorplan.core_util, die_utilization.
+**Required evidence:** route_la_total_overflow, core_area, floorplan.core_util.
 
 **Action intent:** increase core whitespace trial (`increase_core_whitespace_trial`).
 
