@@ -125,9 +125,23 @@ jobs:
         with:
           workspaces: ecos/chip-viewer
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.12
+          enable-cache: true
+
       - name: Build chip-viewer-native
         working-directory: ecos/chip-viewer
         run: cargo build --release -p chip-viewer-native
+
+      - name: Build Agent
+        run: ./.github/scripts/build-agent.sh
 
       - name: Stage resources
         run: |
@@ -135,6 +149,10 @@ jobs:
           mkdir -p ecos/gui/apps/desktop-electron/resources/agent
           cp ecos/chip-viewer/target/release/chip-viewer-native \
              ecos/gui/apps/desktop-electron/resources/binaries/
+          cp ecos/agent/dist/ecos-agent \
+             ecos/gui/apps/desktop-electron/resources/agent/
+          cp ecos/agent/agent-provider.packaged.json \
+             ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 
       - name: Install GUI dependencies
         working-directory: ecos/gui
@@ -177,9 +195,24 @@ jobs:
         with:
           workspaces: ecos/chip-viewer
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.12
+          enable-cache: true
+
       - name: Build chip-viewer-native
         working-directory: ecos/chip-viewer
         run: cargo build --release -p chip-viewer-native
+
+      - name: Build Agent
+        shell: bash
+        run: ./.github/scripts/build-agent.sh
 
       - name: Stage resources
         shell: bash
@@ -188,6 +221,10 @@ jobs:
           mkdir -p ecos/gui/apps/desktop-electron/resources/agent
           cp ecos/chip-viewer/target/release/chip-viewer-native.exe \
              ecos/gui/apps/desktop-electron/resources/binaries/
+          cp ecos/agent/dist/ecos-agent.exe \
+             ecos/gui/apps/desktop-electron/resources/agent/
+          cp ecos/agent/agent-provider.packaged.json \
+             ecos/gui/apps/desktop-electron/resources/agent/agent-provider.json
 
       - name: Install GUI dependencies
         working-directory: ecos/gui
@@ -263,7 +300,7 @@ jobs:
         run: |
           {
             echo "> [!WARNING]"
-            echo "> **ECOS Studio** is still under rapid development. The EDA flow (Yosys, ECC-Tools, KLayout) runs on **Linux x86_64** only. macOS and Windows builds include the GUI and chip viewer; EDA tool execution is not yet supported on those platforms."
+            echo "> **ECOS Studio** is still under rapid development. The EDA flow (Yosys, ECC-Tools, KLayout) runs on **Linux x86_64** only. macOS and Windows builds include the GUI, chip viewer, and AI Agent; EDA tool execution is not yet supported on those platforms."
             echo ">"
             echo ""
             cat release-changelog.md

@@ -2,20 +2,22 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import afterPackLinuxSandbox from './after-pack-linux-sandbox.mjs'
+import afterPackLinuxSandbox, {
+  packagedAgentBinaryName,
+} from './after-pack-linux-sandbox.mjs'
 
 const tempDirs: string[] = []
 
-async function writePackagedAgent(appOutDir: string): Promise<void> {
-  const agentDir = join(appOutDir, 'resources', 'agent')
-  const agentPath = join(agentDir, 'ecos-agent')
-  await mkdir(agentDir, { recursive: true })
+async function writePackagedAgent(appOutDir: string, agentDir?: string): Promise<void> {
+  const dir = agentDir ?? join(appOutDir, 'resources', 'agent')
+  const agentPath = join(dir, 'ecos-agent')
+  await mkdir(dir, { recursive: true })
   await writeFile(
     agentPath,
     '#!/bin/sh\n[ "$1" = --version ] || exit 64\nprintf "ecos-agent 0.1.0\\n"\n',
   )
   await writeFile(
-    join(agentDir, 'agent-provider.json'),
+    join(dir, 'agent-provider.json'),
     JSON.stringify({
       command: './ecos-agent',
       protocolVersion: 1,
@@ -107,11 +109,21 @@ describe('afterPackLinuxSandbox', () => {
     ).rejects.toThrow('Packaged ECOS Agent validation failed')
   })
 
-  it('skips non-Linux targets', async () => {
+  it('skips the Linux sandbox wrapper on non-Linux targets', async () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     const executablePath = join(appOutDir, 'ecos-studio')
     await writeFile(executablePath, 'binary-placeholder')
+    // On macOS, agent lives inside the .app bundle at
+    // <appOutDir>/<productFilename>.app/Contents/Resources/agent/
+    const macAgentDir = join(
+      appOutDir,
+      'ecos-studio.app',
+      'Contents',
+      'Resources',
+      'agent',
+    )
+    await writePackagedAgent(appOutDir, macAgentDir)
 
     await afterPackLinuxSandbox({
       appOutDir,
@@ -124,6 +136,14 @@ describe('afterPackLinuxSandbox', () => {
       },
     })
 
+    // Agent validation runs on all platforms, but the sandbox wrapper
+    // is only applied on Linux. The binary must remain untouched.
     expect(await readFile(executablePath, 'utf8')).toBe('binary-placeholder')
+  })
+
+  it('uses the target platform when resolving the packaged Agent binary', () => {
+    expect(packagedAgentBinaryName('win32')).toBe('ecos-agent.exe')
+    expect(packagedAgentBinaryName('darwin')).toBe('ecos-agent')
+    expect(packagedAgentBinaryName('linux')).toBe('ecos-agent')
   })
 })

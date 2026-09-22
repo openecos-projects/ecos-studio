@@ -12,18 +12,7 @@ build_chip_viewer() {
 }
 
 build_agent_provider() {
-  cd "$REPO_ROOT/ecos/agent"
-
-  uv run --locked --with pyinstaller==6.17 pyinstaller \
-    --clean \
-    --noconfirm \
-    --onefile \
-    --name ecos-agent \
-    --distpath dist \
-    --specpath build \
-    --workpath build \
-    --add-data "$PWD/knowledge:knowledge" \
-    packaging/run_ecos_agent.py
+  bash "$REPO_ROOT/.github/scripts/build-agent.sh"
 }
 
 validate_packaged_binaries() {
