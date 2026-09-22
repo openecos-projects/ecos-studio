@@ -454,6 +454,17 @@ def offline_gate(
     controls_rejected = bool(controls) and all(
         bool(row.get("correct")) for row in controls
     )
+    opportunities = [
+        row for row in rows
+        if row.get("treatment") == "state-conditioned-dual-layer-zero-shot"
+        and row.get("stratum") == "knowledge_opportunity"
+    ]
+    opportunities_claim_bound = bool(opportunities) and all(
+        row.get("decision") == "propose"
+        and row.get("claim_bound") is True
+        and row.get("support_status") in SUPPORT_COVERED_STATUSES
+        for row in opportunities
+    )
     opportunity_contexts = sum(
         context.get("stratum") == "knowledge_opportunity"
         and context.get("design_id") == design_id
@@ -464,9 +475,9 @@ def offline_gate(
         dual_layer.get("exact_action_divergence", {}).get("unique_actions", 0)
     )
     errors = sum(
-        count
-        for key, count in dual_layer.get("decision_counts", {}).items()
-        if str(key).endswith("_error")
+        str(row.get("decision")).endswith("_error")
+        or row.get("decision") == "not_started"
+        for row in rows
     )
     # A2 primary judgment: the predeclared divergence-rate CI against every
     # comparator arm.  The pass rule stays divergence > disagreement; the CI
@@ -484,6 +495,7 @@ def offline_gate(
         "context_bank_replayable": bool(contexts),
         "negative_controls_present": bool(controls),
         "negative_controls_rejected": controls_rejected,
+        "knowledge_opportunities_claim_bound": opportunities_claim_bound,
         "dual_layer_divergence_exceeds_disagreement": divergence > disagreement,
         "divergence_without_repair": errors == 0,
         "knowledge_opportunity_contexts": opportunity_contexts,
@@ -492,6 +504,7 @@ def offline_gate(
         "offline_gate_pass": bool(
             contexts
             and controls_rejected
+            and opportunities_claim_bound
             and divergence > disagreement
             and errors == 0
             and opportunity_contexts >= min_opportunity_contexts
