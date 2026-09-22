@@ -651,7 +651,7 @@ export class EccWorkspaceRuntime {
   ): Promise<EccPersistedEngineeringSnapshot> {
     const session = this.sessions.require(request.workspaceHandle)
     if (!existsSync(session.directory)) {
-      return await this.readLegacyEngineeringSnapshot(request, session.eccWorkspaceId)
+      return await this.readRpcEngineeringSnapshot(request, session.eccWorkspaceId)
     }
     return await readPersistedEngineeringSnapshot(
       session.directory,
@@ -659,7 +659,7 @@ export class EccWorkspaceRuntime {
     )
   }
 
-  private async readLegacyEngineeringSnapshot(
+  private async readRpcEngineeringSnapshot(
     request: EccWorkspaceHandleRequest,
     workspaceId: string | null,
   ): Promise<EccPersistedEngineeringSnapshot> {
@@ -674,6 +674,10 @@ export class EccWorkspaceRuntime {
     if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)
     if (flow.status !== 'ready') throw new Error(flow.issues[0]?.code)
     if (qor.status !== 'ready') throw new Error(qor.issues[0]?.code)
+    const qorSnapshotExtension = validated.sections.qorSnapshotExtension
+    if (qorSnapshotExtension.status !== 'ready') {
+      throw new Error(qorSnapshotExtension.issues[0]?.code)
+    }
     if (signoff.status !== 'ready') throw new Error(signoff.issues[0]?.code)
     return {
       ...validated.snapshot,
@@ -681,7 +685,7 @@ export class EccWorkspaceRuntime {
       artifacts: artifacts.data,
       flow: flow.data,
       metrics: qor.data.metrics,
-      qorAssessment: qor.data.qorAssessment,
+      qorSnapshotExtension: qorSnapshotExtension.data,
       signoffAssessment: signoff.data,
     }
   }

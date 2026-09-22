@@ -1,11 +1,17 @@
 <template>
   <section
-    v-if="criticalPaths && (criticalPaths.setup.length || criticalPaths.hold.length)"
+    v-if="
+      criticalPaths &&
+      (criticalPaths.setup.length ||
+        criticalPaths.hold.length ||
+        criticalPaths.bestSetup.length ||
+        criticalPaths.bestHold.length)
+    "
     class="timing-paths-card"
   >
     <header class="timing-subheader">
       <h3>Critical Paths</h3>
-      <span class="timing-hint">worst slack first · stage delay waterfall</span>
+      <span class="timing-hint">worst / best 5 · stage delay waterfall</span>
     </header>
     <div v-for="group in pathGroups" :key="group.id" class="timing-path-group">
       <h4>{{ group.title }}</h4>
@@ -60,15 +66,29 @@ const pathGroups = computed<
   if (props.criticalPaths?.setup.length) {
     groups.push({
       id: 'setup',
-      title: `Worst setup${props.setupCorner ? ` @ ${props.setupCorner}` : ''}`,
+      title: `Worst 5 setup${props.setupCorner ? ` @ ${props.setupCorner}` : ''}`,
       paths: props.criticalPaths.setup,
     })
   }
   if (props.criticalPaths?.hold.length) {
     groups.push({
       id: 'hold',
-      title: `Worst hold${props.holdCorner ? ` @ ${props.holdCorner}` : ''}`,
+      title: `Worst 5 hold${props.holdCorner ? ` @ ${props.holdCorner}` : ''}`,
       paths: props.criticalPaths.hold,
+    })
+  }
+  if (props.criticalPaths?.bestSetup.length) {
+    groups.push({
+      id: 'best-setup',
+      title: `Best 5 setup${props.setupCorner ? ` @ ${props.setupCorner}` : ''}`,
+      paths: props.criticalPaths.bestSetup,
+    })
+  }
+  if (props.criticalPaths?.bestHold.length) {
+    groups.push({
+      id: 'best-hold',
+      title: `Best 5 hold${props.holdCorner ? ` @ ${props.holdCorner}` : ''}`,
+      paths: props.criticalPaths.bestHold,
     })
   }
   return groups

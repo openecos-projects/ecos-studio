@@ -213,20 +213,10 @@ export function formatQorScore(score: number | null | undefined): string {
 }
 
 export function qorScoreTone(
-  score: number | null | undefined,
-  threshold: number | null | undefined,
+  status: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED' | null | undefined,
 ): 'pass' | 'fail' | 'unrated' {
-  if (
-    score === null ||
-    score === undefined ||
-    threshold === null ||
-    threshold === undefined ||
-    !Number.isFinite(score) ||
-    !Number.isFinite(threshold)
-  ) {
-    return 'unrated'
-  }
-  return score >= threshold ? 'pass' : 'fail'
+  if (!status || status === 'NOT_RATED') return 'unrated'
+  return status === 'RED' || status === 'FAIL' ? 'fail' : 'pass'
 }
 
 export function qorDeltaLabel(delta: {

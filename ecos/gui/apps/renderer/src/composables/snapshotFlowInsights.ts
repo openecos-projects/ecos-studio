@@ -20,6 +20,7 @@ import {
   type StaCriticalPathsModel,
   type StaCornerRowModel,
   type StaOverviewModel,
+  selectStaCriticalPaths,
   type StepResourcesModel,
 } from '@/components/flow-insights/flowInsightsData'
 
@@ -207,10 +208,7 @@ export function staCriticalPathsFromSnapshot(
     stageCount: path.stages.length,
     stages: path.stages,
   }))
-  return {
-    setup: paths.filter((path) => path.analysisType === 'setup'),
-    hold: paths.filter((path) => path.analysisType === 'hold'),
-  }
+  return selectStaCriticalPaths([{ corner: '', paths }], null)
 }
 
 export function congestionTilesFromArtifacts(

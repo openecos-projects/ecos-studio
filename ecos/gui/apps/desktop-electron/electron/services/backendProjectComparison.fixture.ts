@@ -110,6 +110,8 @@ function engineeringSnapshot(
       toolId: spec.metricsPath.split('/')[0]!.split('_').at(-1)!,
       order,
       flowState: 'Success',
+      metricCount: metricCount(order),
+      summaryStatus: 'pass',
       metrics: analysisFile(spec.step, 'qor_metrics', spec.metricsPath),
       summary: analysisFile(spec.step, 'qor_summary', spec.summaryPath),
       hotspots: analysisFile(spec.step, 'qor_hotspots', spec.hotspotsPath),
@@ -123,9 +125,11 @@ function engineeringSnapshot(
           : null,
     })),
   }
-  const metrics = projectManifestFlowSteps.flatMap((step, stepIndex) =>
-    stepMetrics(step, stepIndex, score > 80),
+  const metrics = projectManagementWorkspaceStepAnalysisSpecs.flatMap((spec, stepIndex) =>
+    stepMetrics(spec.step, stepIndex, score > 80),
   )
+  const scalarStatus =
+    score >= 90 ? 'GREEN' : score >= 75 ? 'YELLOW' : score >= 60 ? 'ORANGE' : 'RED'
   return {
     analysis,
     artifacts,
@@ -135,24 +139,15 @@ function engineeringSnapshot(
     },
     metrics,
     parameters: {},
-    qorAssessment: {
-      status: 'ready',
-      metrics,
-      score: { gate: 'pass', threshold: 60, value: score },
-      steps: projectManifestFlowSteps.map((stepId, order) => {
-        const summaryMetricCount = metricCount(order)
-        return { name: stepId, order, status: 'pass', stepId, summaryMetricCount }
-      }),
-    },
     qorSnapshotExtension: {
       schemaVersion: 1,
       scoringEngine: 'qor-v3',
       status: 'available',
       score,
-      scalarStatus: score >= 60 ? 'GREEN' : 'RED',
+      scalarStatus,
       profile: 'balanced',
       qphys: {
-        timing: { value: score, state: score >= 60 ? 'PASS' : 'FAIL', featureIds: [] },
+        timing: { value: score, state: scalarStatus === 'RED' ? 'FAIL' : 'PASS', featureIds: [] },
       },
       feasibility: { status: 'PASS', gates: [] },
       evidence: {
@@ -173,7 +168,7 @@ function engineeringSnapshot(
       power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
       artifactIds: [],
     },
-    schemaVersion: 4,
+    schemaVersion: 5,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId,
     workspaceRevision: 14,
@@ -271,14 +266,15 @@ function stepMetrics(
     const value = metricValue(id, stepIndex, index, candidate)
     return {
       id,
+      stepId: step,
       display_name: id.replaceAll('_', ' '),
       value,
       unit: id.includes('wns') || id.includes('tns') ? 'ns' : undefined,
       category: id.startsWith('sta_')
         ? 'timing'
         : id.includes('area') || id.includes('utilization')
-          ? 'area_cost'
-          : 'routability_physical',
+          ? 'area'
+          : 'interconnect',
       direction: higherIsBetter ? 'higher_is_better' : 'lower_is_better',
       scope: 'design',
       corner: step === 'STA' ? 'typical' : null,

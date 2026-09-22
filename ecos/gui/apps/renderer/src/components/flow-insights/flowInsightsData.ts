@@ -1164,6 +1164,8 @@ export interface StaCriticalPath {
 export interface StaCriticalPathsModel {
   setup: StaCriticalPath[]
   hold: StaCriticalPath[]
+  bestSetup: StaCriticalPath[]
+  bestHold: StaCriticalPath[]
 }
 
 function analysisTypeOf(value: unknown): StaCriticalPath['analysisType'] {
@@ -1230,7 +1232,7 @@ export function buildStaCriticalPathsModel(
   )
 }
 
-/** Worst setup/hold paths across all corners, or scoped to one corner when given. */
+/** Worst and best setup/hold paths across all corners, or one corner when given. */
 export function selectStaCriticalPaths(
   pathsByCorner: ReadonlyArray<{
     corner: string
@@ -1247,15 +1249,19 @@ export function selectStaCriticalPaths(
     const rightSlack = right.slackNs ?? Number.POSITIVE_INFINITY
     return leftSlack - rightSlack
   }
+  const select = (
+    analysisType: StaCriticalPath['analysisType'],
+    descending: boolean,
+  ): StaCriticalPath[] =>
+    paths
+      .filter((path) => path.analysisType === analysisType)
+      .sort((left, right) => (descending ? bySlack(right, left) : bySlack(left, right)))
+      .slice(0, limit)
   return {
-    setup: paths
-      .filter((path) => path.analysisType === 'setup')
-      .sort(bySlack)
-      .slice(0, limit),
-    hold: paths
-      .filter((path) => path.analysisType === 'hold')
-      .sort(bySlack)
-      .slice(0, limit),
+    setup: select('setup', false),
+    hold: select('hold', false),
+    bestSetup: select('setup', true),
+    bestHold: select('hold', true),
   }
 }
 

@@ -5,9 +5,9 @@ import ProjectQorScoreChart from './ProjectQorScoreChart.vue'
 import type { ProjectQorTrendPoint } from '@ecos-studio/shared'
 
 const TREND_POINTS: ProjectQorTrendPoint[] = [
-  { workspaceId: 'ws_a', label: 'ws_a', score: 58.4, status: 'Yellow' },
-  { workspaceId: 'ws_b', label: 'ws_b', score: 74.2, status: 'Green' },
-  { workspaceId: 'ws_c', label: 'ws_c', score: null, status: 'Blocked' },
+  { workspaceId: 'ws_a', label: 'ws_a', score: 58.4, status: 'YELLOW' },
+  { workspaceId: 'ws_b', label: 'ws_b', score: 74.2, status: 'GREEN' },
+  { workspaceId: 'ws_c', label: 'ws_c', score: null, status: 'NOT_RATED' },
 ]
 
 function mountChart(trendPoints = TREND_POINTS) {
@@ -27,7 +27,7 @@ function crowdedPoints(count: number): ProjectQorTrendPoint[] {
     workspaceId: `ws_${index}`,
     label: `ws_00${index}`,
     score: 50 + (index % 20),
-    status: 'Yellow' as const,
+    status: 'YELLOW' as const,
   }))
 }
 
@@ -103,10 +103,10 @@ describe('ProjectQorScoreChart', () => {
     const wrapper = mountChart()
 
     expect(wrapper.findAll('.qor-lollipop')[0].attributes('aria-label')).toBe(
-      'ws_a: 58.4 (baseline, below the 60 analysis threshold)',
+      'ws_a: 58.4 (baseline, YELLOW)',
     )
     expect(wrapper.findAll('.qor-lollipop')[1].attributes('aria-label')).toBe(
-      'ws_b: 74.2 (selected, meets the 60 analysis threshold)',
+      'ws_b: 74.2 (selected, GREEN)',
     )
   })
 
@@ -178,13 +178,13 @@ describe('ProjectQorScoreChart', () => {
 
     expect(wrapper.findAll('.qor-lollipop')).toHaveLength(50)
     expect(wrapper.findAll('.qor-lollipop')[7].attributes('aria-label')).toBe(
-      'ws_007: 57.0 (below the 60 analysis threshold)',
+      'ws_007: 57.0 (YELLOW)',
     )
   })
 
   it('replaces the NR pill with a marker where a pill would overlap its neighbours', () => {
     const crowded = crowdedPoints(50).map((point, index) =>
-      index % 2 === 0 ? { ...point, score: null, status: 'Blocked' as const } : point,
+      index % 2 === 0 ? { ...point, score: null, status: 'NOT_RATED' as const } : point,
     )
     const wrapper = mount(ProjectQorScoreChart, {
       props: {

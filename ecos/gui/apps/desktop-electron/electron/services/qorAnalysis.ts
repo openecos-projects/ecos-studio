@@ -7,11 +7,11 @@ import type {
 
 export type QorDimension =
   | 'timing'
-  | 'power_integrity'
-  | 'routability_physical'
-  | 'area_cost'
-  | 'clock_robustness_dfm'
-  | 'runtime'
+  | 'interconnect'
+  | 'area'
+  | 'power'
+  | 'robustness'
+  | 'execution'
 
 export type QorPolarity =
   | 'higher_is_better'
@@ -19,7 +19,7 @@ export type QorPolarity =
   | 'target_range'
   | 'trend_only'
 
-export type QorStatus = 'Green' | 'Yellow' | 'Orange' | 'Red' | 'Blocked'
+export type QorStatus = 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
 export type QorGateStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 
 export interface ProjectQorWorkspaceInput {
@@ -39,14 +39,6 @@ export interface ProjectQorWorkspaceInput {
   stepStatuses: Record<string, ProjectStepStatus>
   normalizedMetrics?: ProjectQorMetricRecord[]
   /** Present on production inputs, including null when ECC has no valid Snapshot. */
-  authoritativeAssessment?: {
-    gateStatus: QorGateStatus
-    score: number | null
-    scoreThreshold: number
-    areaScoringStep: FlowStep | null
-    dimensionScores: Partial<Record<QorDimension, number>>
-    signoffStatus: 'ready' | 'attention' | 'blocked'
-  } | null
   qorSnapshotExtension?: EccQorSnapshotExtension | null
 }
 
@@ -212,11 +204,13 @@ export interface ProjectQorTrendWorkspaceSummary {
   workspaceKey: string
   status: QorStatus
   overallScore: number | null
-  scoreThreshold: number
+  scalarStatus: EccQorSnapshotExtension['scalarStatus']
+  profile: EccQorSnapshotExtension['profile']
+  scoringEngine: 'qor-v3'
+  feasibilityStatus: EccQorSnapshotExtension['feasibility']['status']
   gateStatus: QorGateStatus
   signoffReadiness: ProjectQorSignoffReadiness
   signoffComparison: ProjectQorSignoffComparisonContext
-  areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
   /** Full per-step records used for baseline comparison counts in Home. */
@@ -236,7 +230,6 @@ export interface ProjectQorTrendSummary {
   trendPoints: ProjectQorTrendPoint[]
   baselineWorkspaceId: string | null
   baselineLabel: string
-  scoreThreshold: number
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
@@ -402,11 +395,11 @@ const QOR_FLOW_STEPS: FlowStep[] = [
 
 const QOR_DIMENSIONS: QorDimension[] = [
   'timing',
-  'power_integrity',
-  'routability_physical',
-  'area_cost',
-  'clock_robustness_dfm',
-  'runtime',
+  'interconnect',
+  'area',
+  'power',
+  'robustness',
+  'execution',
 ]
 
 const QOR_POLARITIES: QorPolarity[] = [
@@ -586,9 +579,6 @@ export function buildProjectQorTrendSummary(
     baselineLabel: baselineWorkspace
       ? baselineWorkspace.workspaceName || baselineWorkspace.workspaceId
       : 'Sequential workspace baseline',
-    scoreThreshold:
-      workspaceSummaries.find((workspace) => workspace.scoreThreshold > 0)
-        ?.scoreThreshold ?? 0,
     regressions,
     improvements,
     risks,
@@ -620,8 +610,19 @@ function buildWorkspaceSummary(
       }),
     )
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
-  const snapshotAssessment = workspace.authoritativeAssessment
-  const areaScoringStep = snapshotAssessment?.areaScoringStep ?? null
+  const extension =
+    workspace.qorSnapshotExtension?.status === 'available'
+      ? workspace.qorSnapshotExtension
+      : null
+  const snapshotAssessment = extension
+    ? {
+        score: extension.score,
+        scalarStatus: extension.scalarStatus,
+        profile: extension.profile,
+        scoringEngine: extension.scoringEngine,
+        feasibilityStatus: extension.feasibility.status,
+      }
+    : null
   const projectRecords = records
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter((step) => {
     if (step === 'LVS' && workspace.stepStatuses.LVS === undefined) return false
@@ -646,7 +647,6 @@ function buildWorkspaceSummary(
   const missingMetricCoverage = buildMissingMetricCoverage(
     records,
     summaryMissingMetrics,
-    areaScoringStep,
     workspace.stepStatuses,
   )
   const dataQuality = buildWorkspaceDataQuality(
@@ -661,29 +661,38 @@ function buildWorkspaceSummary(
     workspace.stepSummaryTexts,
     blockingIssues,
   )
-  const hasSnapshotAssessment = 'authoritativeAssessment' in workspace
-  const signoffReadiness = hasSnapshotAssessment
-    ? snapshotSignoffReadiness(snapshotAssessment)
-    : resolveWorkspaceSignoffReadiness(workspace)
+  const signoffReadiness = resolveWorkspaceSignoffReadiness(workspace)
   const signoffComparison = resolveWorkspaceSignoffComparisonContext(workspace)
-  const effectiveGateStatus = hasSnapshotAssessment
-    ? (snapshotAssessment?.gateStatus ?? 'unavailable')
+  const effectiveGateStatus = snapshotAssessment
+    ? (snapshotAssessment.feasibilityStatus === 'PHYSICAL_FAIL' ? 'blocked' : 'pass')
     : combineGateStatus(gateStatus, signoffReadiness.status)
-  const dimensionScores = snapshotAssessment?.dimensionScores ?? {}
   const overallScore = snapshotAssessment?.score ?? null
+  const dimensionScores = extension
+    ? Object.fromEntries(
+        Object.entries(extension.qphys).flatMap(([dimension, value]) =>
+          value.value === null ? [] : [[dimension, value.value]],
+        ),
+      )
+    : {}
 
   return {
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     workspaceKey: workspace.workspaceKey,
-    status: workspaceStatus(workspace.status, overallScore, effectiveGateStatus),
+    status: workspaceStatus(
+      workspace.status,
+      snapshotAssessment?.scalarStatus ?? 'NOT_RATED',
+      snapshotAssessment?.feasibilityStatus ?? 'UNKNOWN',
+    ),
     overallScore,
-    scoreThreshold: snapshotAssessment?.scoreThreshold ?? 0,
+    scalarStatus: snapshotAssessment?.scalarStatus ?? 'NOT_RATED',
+    profile: snapshotAssessment?.profile ?? 'balanced',
+    scoringEngine: snapshotAssessment?.scoringEngine ?? 'qor-v3',
+    feasibilityStatus: snapshotAssessment?.feasibilityStatus ?? 'UNKNOWN',
     gateStatus: effectiveGateStatus,
     signoffReadiness,
     signoffComparison,
-    areaScoringStep,
-    dimensionScores,
+    dimensionScores: dimensionScores as Partial<Record<QorDimension, number>>,
     records: projectRecords,
     comparisonRecords: records,
     blockingIssues,
@@ -696,33 +705,6 @@ function buildWorkspaceSummary(
     ...(workspace.qorSnapshotExtension
       ? { qorSnapshotExtension: workspace.qorSnapshotExtension }
       : {}),
-  }
-}
-
-function snapshotSignoffReadiness(
-  assessment: ProjectQorWorkspaceInput['authoritativeAssessment'],
-): ProjectQorSignoffReadiness {
-  if (!assessment) {
-    return {
-      status: 'unavailable',
-      scoreEligible: false,
-      reasonCodes: ['engineering_snapshot_unavailable'],
-      groups: [],
-    }
-  }
-  return {
-    status:
-      assessment.signoffStatus === 'ready'
-        ? 'pass'
-        : assessment.signoffStatus === 'blocked'
-          ? 'blocked'
-          : 'incomplete',
-    scoreEligible: assessment.score !== null,
-    reasonCodes:
-      assessment.signoffStatus === 'ready'
-        ? []
-        : [`signoff_assessment_${assessment.signoffStatus}`],
-    groups: [],
   }
 }
 
@@ -1012,7 +994,6 @@ function buildWorkspaceDataQualityRisks(
   const referenceStep =
     quality.missingCompletedAnalysisSteps[0] ??
     workspace.analysisIntegrityIssues[0]?.step ??
-    workspace.areaScoringStep ??
     'Route'
   if (quality.status === 'incomplete' && quality.missingCompletedAnalysisSteps.length) {
     return [
@@ -1822,7 +1803,6 @@ function buildMissingMetrics(
 function buildMissingMetricCoverage(
   records: ProjectQorMetricRecord[],
   summaryMissingMetrics: Array<{ step: FlowStep; metricName: string }>,
-  areaScoringStep: FlowStep | null,
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
 ): ProjectQorMissingMetricCoverage[] {
   const metricIdsByStep = new Map<FlowStep, Set<string>>()
@@ -1833,7 +1813,7 @@ function buildMissingMetricCoverage(
   }
 
   for (const metricName of buildMissingMetrics(records, stepStatuses)) {
-    const step = missingMetricProducerStep(metricName, areaScoringStep)
+    const step = missingMetricProducerStep(metricName)
     if (step) addMetric(step, metricName)
   }
   for (const metric of summaryMissingMetrics) {
@@ -1846,10 +1826,7 @@ function buildMissingMetricCoverage(
   })
 }
 
-function missingMetricProducerStep(
-  metricName: string,
-  areaScoringStep: FlowStep | null,
-): FlowStep | null {
+function missingMetricProducerStep(metricName: string): FlowStep | null {
   switch (metricName) {
     case 'route_wirelength':
     case 'route_via_count':
@@ -1866,7 +1843,7 @@ function missingMetricProducerStep(
       return 'CTS'
     case 'die_area':
     case 'core_utilization':
-      return areaScoringStep ?? 'Floor'
+      return 'Floor'
     default:
       return null
   }
@@ -1878,8 +1855,8 @@ function uniqueStrings(values: string[]): string[] {
 
 function workspaceStatus(
   workspaceStatus: ProjectWorkspaceStatus,
-  score: number | null,
-  gateStatus: QorGateStatus,
+  scalarStatus: QorStatus,
+  feasibilityStatus: EccQorSnapshotExtension['feasibility']['status'],
 ): QorStatus {
   if (
     workspaceStatus === 'failed' ||
@@ -1887,15 +1864,10 @@ function workspaceStatus(
     workspaceStatus === 'in_progress' ||
     workspaceStatus === 'not_started'
   ) {
-    return workspaceStatus === 'failed' ? 'Red' : 'Blocked'
+    return workspaceStatus === 'failed' ? 'FAIL' : 'NOT_RATED'
   }
-  if (gateStatus === 'blocked') return 'Orange'
-  if (gateStatus === 'incomplete') return 'Yellow'
-  if (score === null) return 'Blocked'
-  if (score >= 40) return 'Green'
-  if (score >= 25) return 'Yellow'
-  if (score >= 10) return 'Orange'
-  return 'Red'
+  if (feasibilityStatus === 'PHYSICAL_FAIL') return 'FAIL'
+  return scalarStatus
 }
 
 function parseJsonObject(

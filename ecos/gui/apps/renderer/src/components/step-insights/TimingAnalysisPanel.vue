@@ -76,7 +76,7 @@ import { sortStaCornerRows } from './timingFormat'
 
 const props = defineProps<{
   overview: StaOverviewModel | null
-  /** Pre-selected worst paths; ignored when pathsByCorner is provided. */
+  /** Pre-selected worst and best paths; ignored when pathsByCorner is provided. */
   criticalPaths?: StaCriticalPathsModel | null
   /** Per-corner paths; enables the corner scope tabs in the panel. */
   pathsByCorner?: Array<{ corner: string; paths: StaCriticalPath[] }> | null

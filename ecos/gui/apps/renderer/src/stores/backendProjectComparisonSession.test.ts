@@ -42,7 +42,6 @@ function comparison(projectName: string, contextId = 'context-1', generation = 0
         trendPoints: [],
         baselineWorkspaceId: null,
         baselineLabel: 'No baseline',
-        scoreThreshold: 60,
         regressions: [],
         improvements: [],
         risks: [],

@@ -17,11 +17,11 @@ export type ProjectStepStatus =
 
 export type QorDimension =
   | 'timing'
-  | 'power_integrity'
-  | 'routability_physical'
-  | 'area_cost'
-  | 'clock_robustness_dfm'
-  | 'runtime'
+  | 'interconnect'
+  | 'area'
+  | 'power'
+  | 'robustness'
+  | 'execution'
 
 export type QorPolarity =
   | 'higher_is_better'
@@ -29,7 +29,7 @@ export type QorPolarity =
   | 'target_range'
   | 'trend_only'
 
-export type QorStatus = 'Green' | 'Yellow' | 'Orange' | 'Red' | 'Blocked'
+export type QorStatus = 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
 export type QorGateStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 
 export interface ProjectQorWorkspaceInput {
@@ -210,10 +210,13 @@ export interface ProjectQorTrendWorkspaceSummary {
   workspaceName: string
   status: QorStatus
   overallScore: number | null
+  scalarStatus: EccQorSnapshotExtension['scalarStatus']
+  profile: EccQorSnapshotExtension['profile']
+  scoringEngine: 'qor-v3'
+  feasibilityStatus: EccQorSnapshotExtension['feasibility']['status']
   gateStatus: QorGateStatus
   signoffReadiness: ProjectQorSignoffReadiness
   signoffComparison: ProjectQorSignoffComparisonContext
-  areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
   /** Full per-step records used for baseline comparison counts in Home. */
@@ -233,7 +236,6 @@ export interface ProjectQorTrendSummary {
   trendPoints: ProjectQorTrendPoint[]
   baselineWorkspaceId: string | null
   baselineLabel: string
-  scoreThreshold: number
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]

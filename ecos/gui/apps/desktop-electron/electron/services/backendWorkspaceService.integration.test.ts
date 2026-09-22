@@ -20,7 +20,7 @@ function metric(id: string, value: number): EccEngineeringMetric {
     display_name: id === 'core_area' ? 'Core Area' : 'Instance Count',
     value,
     unit: id === 'core_area' ? 'um^2' : 'count',
-    category: 'area_cost',
+    category: 'area',
     direction: 'trend_only',
     scope: 'workspace',
     corner: null,
@@ -43,6 +43,8 @@ function snapshot(workspaceId: string, revision: number, value: number) {
           toolId: 'ecc',
           order: 1,
           flowState: 'Success',
+          metricCount: 2,
+          summaryStatus: 'unavailable',
           metrics: {
             artifactId: 'place-metrics',
             status: 'available',
@@ -102,6 +104,7 @@ function snapshot(workspaceId: string, revision: number, value: number) {
       'Top module': 'gcd',
       'Max fanout': 32,
     },
+    // @ts-ignore legacy payload is rejected by schema 5
     qorAssessment: {
       status: 'ready',
       metrics,
@@ -116,7 +119,7 @@ function snapshot(workspaceId: string, revision: number, value: number) {
         },
       ],
     },
-    schemaVersion: 4,
+    schemaVersion: 5,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     workspaceId,
     workspaceRevision: revision,

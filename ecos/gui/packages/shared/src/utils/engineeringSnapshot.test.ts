@@ -8,6 +8,7 @@ import {
 
 const metric = {
   id: 'sta_setup_wns',
+  stepId: 'sta',
   display_name: 'STA Setup WNS',
   value: -0.05,
   unit: 'ns',
@@ -114,7 +115,7 @@ function snapshot() {
     stepId: 'sta',
   }
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     workspaceId: 'engineering-workspace',
     workspaceRevision: 14,
     cause: 'flow_step.success',
@@ -122,21 +123,8 @@ function snapshot() {
     parameters: {},
     checklist: {},
     metrics: [metric],
-    qorAssessment: {
-      status: 'ready',
-      score: { value: 84, threshold: 60, gate: 'pass' },
-      metrics: [metric],
-      steps: [
-        {
-          stepId: 'sta',
-          order: 0,
-          name: 'sta',
-          status: 'pass',
-          summaryMetricCount: 1,
-        },
-      ],
-    },
-    qorSnapshotExtension: undefined as EccQorSnapshotExtension | undefined,
+    // @ts-ignore legacy payload is rejected by schema 5
+    qorSnapshotExtension: qorSnapshotExtension(),
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     analysis: {
       steps: [
@@ -145,6 +133,8 @@ function snapshot() {
           toolId: 'ecc',
           order: 0,
           flowState: 'Success',
+          metricCount: 1,
+          summaryStatus: 'pass',
           metrics: {
             artifactId: artifact.artifactId,
             status: 'available',
@@ -212,7 +202,7 @@ function snapshotWithInvalidExtension(
   mutate: (extension: EccQorSnapshotExtension) => void,
 ) {
   const current = snapshot()
-  current.schemaVersion = 4
+  current.schemaVersion = 5
   const extension = qorSnapshotExtension()
   mutate(extension)
   current.qorSnapshotExtension = extension
@@ -224,9 +214,8 @@ function invalidQorExtensionResult(current: ReturnType<typeof snapshot>) {
 }
 
 describe('Engineering Snapshot validation', () => {
-  it('exposes a valid QoR Snapshot extension independently from legacy QoR facts', () => {
+  it('exposes a valid QoR Snapshot extension independently from step metrics', () => {
     const current = snapshot()
-    current.schemaVersion = 4
     current.qorSnapshotExtension = qorSnapshotExtension()
 
     const valid = validateEngineeringSnapshot(current)
@@ -239,21 +228,20 @@ describe('Engineering Snapshot validation', () => {
     })
 
     const invalid = snapshot()
-    invalid.schemaVersion = 4
     invalid.qorSnapshotExtension = {
       ...qorSnapshotExtension(),
       qphys: [] as never,
     }
     const partial = validateEngineeringSnapshot(invalid)
-    expect(partial.ok && partial.sections.qorSnapshotExtension).toEqual({
-      status: 'unavailable',
-      issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
+    expect(partial).toEqual({
+      ok: false,
+      issue: { code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' },
     })
   })
 
-  it('accepts the extension on the v2 production Snapshot during rollout', () => {
+  it('accepts the extension on the schema 5 production Snapshot', () => {
     const current = snapshot()
-    current.schemaVersion = 4
+    current.schemaVersion = 5
     current.qorSnapshotExtension = qorSnapshotExtension()
 
     const valid = validateEngineeringSnapshot(current)
@@ -266,37 +254,27 @@ describe('Engineering Snapshot validation', () => {
 
   it('rejects out-of-range and extra QoR extension fields', () => {
     const outOfRange = snapshot()
-    outOfRange.schemaVersion = 4
+    outOfRange.schemaVersion = 5
     outOfRange.qorSnapshotExtension = {
       ...qorSnapshotExtension(),
       qphys: {
         timing: { value: 101, state: 'PASS', featureIds: [] },
       },
     }
-    expect(validateEngineeringSnapshot(outOfRange)).toMatchObject({
-      ok: true,
-      sections: {
-        qorSnapshotExtension: {
-          status: 'unavailable',
-          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
-        },
-      },
+    expect(validateEngineeringSnapshot(outOfRange)).toEqual({
+      ok: false,
+      issue: { code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' },
     })
 
     const extraField = snapshot()
-    extraField.schemaVersion = 4
+    extraField.schemaVersion = 5
     extraField.qorSnapshotExtension = {
       ...qorSnapshotExtension(),
       evidence: { ...qorSnapshotExtension().evidence, extra: true } as never,
     }
-    expect(validateEngineeringSnapshot(extraField)).toMatchObject({
-      ok: true,
-      sections: {
-        qorSnapshotExtension: {
-          status: 'unavailable',
-          issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
-        },
-      },
+    expect(validateEngineeringSnapshot(extraField)).toEqual({
+      ok: false,
+      issue: { code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' },
     })
   })
 
@@ -424,17 +402,10 @@ describe('Engineering Snapshot validation', () => {
       },
     ],
   ])('rejects %s', (_name, mutate) => {
-    expect(invalidQorExtensionResult(snapshotWithInvalidExtension(mutate))).toMatchObject(
-      {
-        ok: true,
-        sections: {
-          qorSnapshotExtension: {
-            status: 'unavailable',
-            issues: [{ code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' }],
-          },
-        },
-      },
-    )
+    expect(invalidQorExtensionResult(snapshotWithInvalidExtension(mutate))).toEqual({
+      ok: false,
+      issue: { code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' },
+    })
   })
 
   it('preserves complete metric metadata and validates sections independently', () => {
@@ -532,7 +503,7 @@ describe('Engineering Snapshot validation', () => {
 
   it('requires normalized committed Subflow data in the current schema', () => {
     const current = snapshot()
-    current.schemaVersion = 4
+    current.schemaVersion = 5
     current.analysis.steps[0]!.subflow = {
       status: 'available',
       steps: [

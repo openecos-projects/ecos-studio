@@ -21,7 +21,7 @@ describe('representativeProjectComparisonFixture', () => {
       expect(snapshot.flow).toEqual({
         steps: projectManifestFlowSteps.map((name) => ({ name, state: 'Success' })),
       })
-      expect(snapshot.metrics).toHaveLength(209)
+      expect(snapshot.metrics).toHaveLength(168)
       expect(snapshot.analysis.steps).toHaveLength(12)
       expect(snapshot.analysis.steps.map((step) => step.stepId)).toEqual(
         projectManagementWorkspaceStepAnalysisSpecs.map((spec) => spec.step),
@@ -39,8 +39,10 @@ describe('representativeProjectComparisonFixture', () => {
       })
       expect(snapshot.artifacts).toHaveLength(37)
       expect(snapshot.signoffAssessment.status).toBe('ready')
-      expect(snapshot.qorAssessment).toMatchObject({
-        score: { gate: 'pass', threshold: 60, value: expect.any(Number) },
+      expect(snapshot.qorSnapshotExtension).toMatchObject({
+        status: 'available',
+        score: expect.any(Number),
+        scalarStatus: expect.stringMatching(/^(GREEN|YELLOW|ORANGE|RED|FAIL|NOT_RATED)$/),
       })
     }
   })

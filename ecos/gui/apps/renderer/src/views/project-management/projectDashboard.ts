@@ -287,13 +287,8 @@ export function buildDashboardRecommendation(
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     score,
-    scoreTone: scoreTone(workspace.gateStatus),
-    scoreNote: buildScoreNote(
-      workspace.overallScore,
-      workspace.gateStatus,
-      signoff,
-      qorTrendSummary.scoreThreshold,
-    ),
+    scoreTone: scoreTone(workspace.scalarStatus),
+    scoreNote: buildScoreNote(workspace.scalarStatus, signoff),
     status: workspace.status,
     signoff,
     reason: bestReason.includes(score) ? null : bestReason,
@@ -364,18 +359,16 @@ function diagnosisTone(state: string): DashboardTone {
 }
 
 function buildScoreNote(
-  score: number | null,
-  scoreGate: QorGateStatus,
+  scalarStatus: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED',
   signoff: QorGateStatus,
-  threshold: number,
 ): string {
-  if (score === null) return 'Not rated: the QoR score needs a complete analysis run'
-  if (scoreGate === 'pass') return `Meets the ${threshold} analysis threshold`
-  // A sub-threshold score next to a passing signoff tag reads as a contradiction.
-  if (signoff === 'pass') {
-    return `Below the ${threshold} analysis threshold, which does not gate signoff`
+  if (scalarStatus === 'NOT_RATED') return 'Not rated: the QoR score needs a complete analysis run'
+  if (scalarStatus === 'FAIL' || scalarStatus === 'RED') {
+    return signoff === 'pass'
+      ? 'Quality failure does not gate signoff readiness'
+      : 'Quality failure requires attention'
   }
-  return `Below the ${threshold} analysis threshold`
+  return `QoR status: ${scalarStatus}`
 }
 
 export function buildDashboardWorkspaceRows(
@@ -420,7 +413,7 @@ export function buildDashboardWorkspaceRows(
       stepsLabel: `${stepsDone}/${stepsTotal}`,
       stepsPercent: stepsTotal === 0 ? 0 : Math.round((stepsDone / stepsTotal) * 100),
       score: formatScore(trend?.overallScore ?? null),
-      scoreTone: scoreTone(trend?.gateStatus ?? 'unavailable'),
+      scoreTone: scoreTone(trend?.scalarStatus ?? 'NOT_RATED'),
       blockingCount: counts.blocking,
       findingCount: counts.total,
       analysisState,
@@ -600,9 +593,13 @@ function coverageTone(covered: number, total: number): DashboardTone {
   return 'warn'
 }
 
-function scoreTone(gate: QorGateStatus): DashboardTone {
-  if (gate === 'unavailable' || gate === 'incomplete') return 'neutral'
-  return gate === 'pass' ? 'good' : 'warn'
+function scoreTone(
+  status: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED',
+): DashboardTone {
+  if (status === 'NOT_RATED') return 'neutral'
+  if (status === 'RED' || status === 'FAIL') return 'bad'
+  if (status === 'ORANGE' || status === 'YELLOW') return 'warn'
+  return 'good'
 }
 
 export function formatScore(score: number | null): string {

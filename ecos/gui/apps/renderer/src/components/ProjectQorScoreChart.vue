@@ -36,7 +36,6 @@
         <g v-for="score in SCORE_TICKS" :key="score">
           <line
             class="qor-chart-gridline"
-            :class="{ threshold: score === SCORE_THRESHOLD }"
             :x1="CHART_LEFT"
             :x2="chartPlotRight"
             :y1="scoreToChartY(score)"
@@ -44,7 +43,6 @@
           />
           <text
             class="qor-chart-score-label"
-            :class="{ threshold: score === SCORE_THRESHOLD }"
             :x="CHART_LEFT - 2.4"
             :y="scoreToChartY(score)"
             text-anchor="end"
@@ -170,8 +168,7 @@
         ><i class="legend-baseline" aria-hidden="true"></i>Baseline</span
       >
       <span role="listitem"
-        ><i class="legend-pass" aria-hidden="true"></i>{{ SCORE_THRESHOLD }} analysis
-        threshold</span
+        ><i class="legend-pass" aria-hidden="true"></i>Rated quality</span
       >
       <span role="listitem"><i class="legend-nr" aria-hidden="true"></i>Not rated</span>
     </div>
@@ -183,7 +180,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ProjectQorTrendPoint } from '@ecos-studio/shared'
 
 const SCORE_TICKS = [0, 20, 40, 60, 80, 100] as const
-const SCORE_THRESHOLD = 60
 const CHART_LEFT = 20
 const CHART_RIGHT = 8
 const CHART_TOP = 10
@@ -329,7 +325,7 @@ const axisLabelMinimumGap = computed(
 /**
  * Whether every score can be printed above its own point. When it cannot, only the points
  * a reader is tracking keep a printed value; the rest are read off the axis and the
- * threshold line, with the exact number on hover.
+ * axis with the exact number on hover.
  */
 const valueLabelsFit = computed(
   () =>
@@ -454,7 +450,7 @@ const chartCaption = computed(() => {
 
 const accessibleSummary = computed(() => {
   const rated = props.trendPoints.filter((point) => point.score !== null).length
-  return `QoR score by workspace from 0 to 100. ${rated} of ${props.trendPoints.length} workspaces are rated. The ${SCORE_THRESHOLD} line is an analysis threshold only and does not determine signoff. Baseline: ${props.baselineLabel}.`
+  return `QoR score by workspace from 0 to 100. ${rated} of ${props.trendPoints.length} workspaces are rated. Scalar quality status comes from ECC QoR v3. Baseline: ${props.baselineLabel}.`
 })
 
 function scoreToChartY(score: number): number {
@@ -480,11 +476,7 @@ function pointDescription(point: ChartPoint): string {
   if (point.score === null) {
     tags.push('not rated')
   } else {
-    tags.push(
-      point.score < SCORE_THRESHOLD
-        ? `below the ${SCORE_THRESHOLD} analysis threshold`
-        : `meets the ${SCORE_THRESHOLD} analysis threshold`,
-    )
+    tags.push(point.status)
   }
   return `${point.label}: ${formatScore(point.score)} (${tags.join(', ')})`
 }
@@ -590,12 +582,6 @@ function formatScore(score: number | null): string {
   vector-effect: non-scaling-stroke;
 }
 
-.qor-chart-gridline.threshold {
-  stroke: color-mix(in srgb, var(--warn-color) 78%, #b45309);
-  stroke-width: 1;
-  stroke-dasharray: 2.8 2.2;
-}
-
 .qor-chart-axis {
   stroke: color-mix(in srgb, var(--text-secondary) 42%, var(--border-color));
   stroke-width: 0.9;
@@ -608,10 +594,6 @@ function formatScore(score: number | null): string {
   fill: var(--text-secondary);
   font-size: 3.5px;
   font-weight: 600;
-}
-
-.qor-chart-score-label.threshold {
-  fill: color-mix(in srgb, var(--warn-color) 86%, var(--text-secondary));
 }
 
 .qor-chart-x-tick {

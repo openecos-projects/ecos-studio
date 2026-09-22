@@ -31,7 +31,7 @@ import { clearStepDashboardDataCache, useStepDashboardData } from './useStepDash
 
 const metric = {
   analysis_group: 'place',
-  category: 'area_cost' as const,
+  category: 'area' as const,
   confidence: 'high' as const,
   corner: null,
   direction: 'lower_is_better' as const,

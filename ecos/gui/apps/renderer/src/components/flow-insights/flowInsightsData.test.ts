@@ -417,6 +417,8 @@ describe('flow insights data', () => {
     expect(model.setup).toHaveLength(1)
     expect(model.setup[0]?.id).toBe('MAX_125/Cworst:setup_worst')
     expect(model.hold[0]?.slackNs).toBe(0.07)
+    expect(model.bestSetup[0]?.id).toBe('MAX_125/Cworst:setup_ok')
+    expect(model.bestHold[0]?.id).toBe('MAX_125/Cworst:hold_worst')
     expect(model.setup[0]?.stages[0]?.delayNs).toBe(0.1)
     expect(model.hold[0]?.stages[1]?.delayNs).toBeCloseTo(0.05)
   })
@@ -464,10 +466,16 @@ describe('flow insights data', () => {
       'MAX_125/Cworst:setup_slow',
       'TYP/Cbest:setup_ok',
     ])
+    expect(acrossCorners.bestSetup.map((path) => path.id)).toEqual([
+      'TYP/Cbest:setup_ok',
+      'MAX_125/Cworst:setup_slow',
+    ])
 
     const scoped = selectStaCriticalPaths(pathsByCorner, 'TYP/Cbest')
     expect(scoped.setup.map((path) => path.id)).toEqual(['TYP/Cbest:setup_ok'])
     expect(scoped.hold.map((path) => path.id)).toEqual(['TYP/Cbest:hold_bad'])
+    expect(scoped.bestSetup.map((path) => path.id)).toEqual(['TYP/Cbest:setup_ok'])
+    expect(scoped.bestHold.map((path) => path.id)).toEqual(['TYP/Cbest:hold_bad'])
   })
 
   it('hides cross-run convergence until a baseline workspace is available', () => {

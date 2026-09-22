@@ -59,7 +59,7 @@ function detail(): WorkspaceStepDetail {
           display_name: 'Core Area',
           value: 6400,
           unit: 'um2',
-          category: 'area_cost',
+          category: 'area',
           direction: 'lower_is_better',
           scope: 'workspace',
           corner: null,

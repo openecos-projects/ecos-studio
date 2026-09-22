@@ -259,7 +259,7 @@
                     class="qor-step-trend"
                     :aria-label="
                       step.displayMode === 'summary'
-                        ? `${step.label}: ${step.summaryMetricCount} reported metrics, ${step.status}`
+                        ? `${step.label}: ${step.metricCount} reported metrics, ${step.status}`
                         : `${step.label}: ${step.improvedCount} improved, ${step.regressedCount} regressed, ${step.unchangedCount} unchanged, ${step.comparableCount} compared`
                     "
                   >
@@ -693,17 +693,16 @@ const qorBaselineScoreValue = computed(() =>
 )
 const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
   const comparison = qorComparisonState.value.comparison
-  return getQorScoreTone(comparison?.score, comparison?.scoreThreshold)
+  return getQorScoreTone(comparison?.scalarStatus)
 })
 const qorBaselineScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
   const comparison = qorComparisonState.value.comparison
-  return getQorScoreTone(comparison?.baselineScore, comparison?.scoreThreshold)
+  return getQorScoreTone(comparison?.baselineScalarStatus)
 })
 const qorScoreStatusLabel = computed(() => {
   if (qorScoreTone.value === 'unrated') return 'Not rated'
-  const threshold = qorComparisonState.value.comparison?.scoreThreshold
-  if (threshold === undefined) return 'Not rated'
-  return qorScoreTone.value === 'pass' ? `PASS >= ${threshold}` : `FAIL < ${threshold}`
+  const status = qorComparisonState.value.comparison?.scalarStatus
+  return status && status !== 'NOT_RATED' ? status : 'Not rated'
 })
 const qorSummaryLabel = computed(() => {
   const state = qorComparisonState.value
@@ -749,7 +748,7 @@ const qorDashboardSteps = computed(() => {
       showCurrentSummary && step.status !== 'unavailable' ? 'summary' : 'comparison'
     return {
       ...step,
-      displayCount: displayMode === 'summary' ? step.summaryMetricCount : comparableCount,
+      displayCount: displayMode === 'summary' ? step.metricCount : comparableCount,
       displayMode,
       improvedCount,
       regressedCount,

@@ -506,7 +506,6 @@ export class BackendProjectComparisonService {
             const engineeringFacts = {
               analysis: qor.analysis,
               metrics: qor.metrics,
-              qorAssessment: qor.qorAssessment,
               ...(qorSnapshotExtension ? { qorSnapshotExtension } : {}),
               ...(flow ? { flow } : {}),
               ...(snapshotResult.sections.signoff.status === 'ready'

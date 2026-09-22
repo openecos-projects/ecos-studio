@@ -57,12 +57,11 @@ const comparison: BackendWorkspaceQorComparison = {
   workspaceId: 'ws_0004',
   workspaceName: 'ws_0004',
   score: 78.4,
-  scoreGate: 'pass',
-  scoreThreshold: 60,
+  scalarStatus: 'GREEN',
   baselineWorkspaceId: 'ws_0001',
   baselineWorkspaceName: 'baseline-run',
   baselineScore: 72.5,
-  baselineScoreGate: 'pass',
+  baselineScalarStatus: 'GREEN',
   isBaselineWorkspace: false,
   available: true,
   metrics: [
@@ -165,7 +164,7 @@ describe('Home QoR comparison data', () => {
     const detail = buildHomeQorDetailModel({
       ...comparison,
       baselineScore: null,
-      baselineScoreGate: 'unavailable',
+      baselineScalarStatus: 'NOT_RATED',
       baselineWorkspaceName: null,
       available: false,
       deltas: [],
@@ -228,9 +227,9 @@ describe('Home QoR comparison data', () => {
     ).toBe('No directional QoR rule')
   })
 
-  it('uses the authoritative score threshold for the score tone', () => {
-    expect(qorScoreTone(62.1, 60)).toBe('pass')
-    expect(qorScoreTone(59.9, 60)).toBe('fail')
-    expect(qorScoreTone(null, 60)).toBe('unrated')
+  it('uses the V3 scalar status for the score tone', () => {
+    expect(qorScoreTone('GREEN')).toBe('pass')
+    expect(qorScoreTone('FAIL')).toBe('fail')
+    expect(qorScoreTone('NOT_RATED')).toBe('unrated')
   })
 })

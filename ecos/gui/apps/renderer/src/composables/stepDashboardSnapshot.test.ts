@@ -12,7 +12,7 @@ function metric(id: string, value: number): EccEngineeringMetric {
     display_name: id,
     value,
     unit: 'count',
-    category: 'clock_robustness_dfm',
+    category: 'robustness',
     direction: 'lower_is_better',
     scope: 'workspace',
     corner: null,

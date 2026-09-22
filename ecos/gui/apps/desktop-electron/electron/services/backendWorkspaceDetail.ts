@@ -34,6 +34,16 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function timingCornerForArtifact(artifact: EccEngineeringAnalysisArtifactRef): string {
+  if (artifact.kind !== 'timing_paths' && artifact.kind !== 'timing_summary') return ''
+  const nameParts = artifact.name.replace(/\\/g, '/').split('/')
+  const fromName = nameParts.slice(0, -1).join('/')
+  if (fromName) return fromName
+  const referenceParts = artifact.reference.replace(/\\/g, '/').split('/')
+  const featureIndex = referenceParts.indexOf('feature')
+  return featureIndex >= 0 ? referenceParts.slice(featureIndex + 1, -1).join('/') : ''
+}
+
 function analysisDetail(
   data: Record<string, unknown> | null,
   id: string,
@@ -233,10 +243,7 @@ export function artifactDescriptor(
   artifact: EccEngineeringAnalysisArtifactRef,
   sourceRevision?: number,
 ): WorkspaceArtifactDescriptor {
-  const timingCorner =
-    artifact.kind === 'timing_paths' || artifact.kind === 'timing_summary'
-      ? artifact.name.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
-      : ''
+  const timingCorner = timingCornerForArtifact(artifact)
   return {
     artifactId: artifact.artifactId,
     availability: artifact.availability,

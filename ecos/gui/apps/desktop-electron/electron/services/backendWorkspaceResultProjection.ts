@@ -1,6 +1,7 @@
 import {
   parseProjectManifestFlowStep,
   type EccEngineeringAnalysisArtifactRef,
+  type EccEngineeringAnalysisStep,
   type EccEngineeringMetric,
   type WorkspaceResultFreshness,
 } from '@ecos-studio/shared'
@@ -18,7 +19,7 @@ export interface WorkspaceResultProjection {
 interface AssessmentStep {
   metrics: EccEngineeringMetric[]
   order: number
-  raw: Record<string, unknown>
+  raw: EccEngineeringAnalysisStep
   stepId: string
 }
 
@@ -38,6 +39,12 @@ function readyData<T>(section: { status: string; data?: T }): T | null {
     : null
 }
 
+function isCommittedFlowState(value: unknown): boolean {
+  return ['success', 'succeeded', 'completed', 'skipped'].includes(
+    String(value ?? '').trim().toLowerCase(),
+  )
+}
+
 function staleQorSnapshotExtension(): ValidSnapshot['sections']['qorSnapshotExtension'] {
   return {
     status: 'unavailable',
@@ -45,35 +52,39 @@ function staleQorSnapshotExtension(): ValidSnapshot['sections']['qorSnapshotExte
   }
 }
 
-function assessmentSteps(
-  assessment: Record<string, unknown>,
+function analysisSteps(
+  analysis: { steps: unknown[] },
   projectionMetrics: unknown,
 ): AssessmentStep[] | null {
-  const steps = assessment.steps
-  const metrics = Array.isArray(assessment.metrics)
-    ? assessment.metrics
-    : projectionMetrics
+  const steps = analysis.steps
+  const metrics = projectionMetrics
   if (!Array.isArray(steps) || !Array.isArray(metrics)) return null
   const result: AssessmentStep[] = []
-  let offset = 0
+  const seenStepIds = new Set<string>()
   for (const value of steps) {
     const step = record(value)
     const stepId = typeof step?.stepId === 'string' ? step.stepId : ''
-    const count = step?.summaryMetricCount
     const order = step?.order
-    if (!step || !stepId || !Number.isInteger(count) || !Number.isInteger(order))
+    if (!step || !stepId || !Number.isInteger(order))
       return null
-    const nextOffset = offset + (count as number)
-    if (nextOffset > metrics.length) return null
+    if (!isCommittedFlowState(step.flowState) || seenStepIds.has(stepId)) continue
+    seenStepIds.add(stepId)
     result.push({
-      metrics: metrics.slice(offset, nextOffset) as EccEngineeringMetric[],
+      metrics: metrics.filter((metric) => record(metric)?.stepId === stepId) as EccEngineeringMetric[],
       order: order as number,
-      raw: step,
+      raw: step as unknown as EccEngineeringAnalysisStep,
       stepId,
     })
-    offset = nextOffset
   }
-  return offset === metrics.length ? result : null
+  if (
+    metrics.some((metric) => {
+      const stepId = record(metric)?.stepId
+      return typeof stepId !== 'string' || !seenStepIds.has(stepId)
+    })
+  ) {
+    return null
+  }
+  return result
 }
 
 function mergeQor(
@@ -86,11 +97,8 @@ function mergeQor(
   if (!currentQor) return staleQor ? stale.sections.qor : current.sections.qor
   if (!staleQor) return current.sections.qor
 
-  const currentAssessmentSteps = assessmentSteps(
-    currentQor.qorAssessment,
-    currentQor.metrics,
-  )
-  const staleAssessmentSteps = assessmentSteps(staleQor.qorAssessment, staleQor.metrics)
+  const currentAssessmentSteps = analysisSteps(currentQor.analysis, currentQor.metrics)
+  const staleAssessmentSteps = analysisSteps(staleQor.analysis, staleQor.metrics)
   if (!currentAssessmentSteps) return stale.sections.qor
   if (!staleAssessmentSteps) return current.sections.qor
 
@@ -101,23 +109,18 @@ function mergeQor(
     ),
   ].sort((left, right) => left.order - right.order)
   const metrics = selectedSteps.flatMap((step) => step.metrics)
-  const analysisSteps = [
-    ...currentQor.analysis.steps,
-    ...staleQor.analysis.steps.filter((step) =>
-      staleSteps.has(canonicalStepIdentity(step.stepId)),
-    ),
+  const mergedAnalysisSteps = [
+    ...currentAssessmentSteps.map((step) => step.raw),
+    ...staleAssessmentSteps
+      .filter((step) => staleSteps.has(canonicalStepIdentity(step.stepId)))
+      .map((step) => step.raw),
   ].sort((left, right) => left.order - right.order)
 
   return {
     status: 'ready',
     data: {
-      analysis: { steps: analysisSteps },
+      analysis: { steps: mergedAnalysisSteps },
       metrics,
-      qorAssessment: {
-        ...staleQor.qorAssessment,
-        metrics,
-        steps: selectedSteps.map((step) => step.raw),
-      },
     },
     issues: [],
   }
@@ -195,7 +198,7 @@ export function projectWorkspaceResults(
 
   const currentQor = readyData(current.sections.qor)
   const currentAssessmentSteps = currentQor
-    ? assessmentSteps(currentQor.qorAssessment, currentQor.metrics)
+    ? analysisSteps(currentQor.analysis, currentQor.metrics)
     : null
   const currentResultSteps = new Set(
     (currentAssessmentSteps ?? []).map((step) => canonicalStepIdentity(step.stepId)),

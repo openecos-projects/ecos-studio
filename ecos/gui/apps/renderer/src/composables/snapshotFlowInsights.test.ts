@@ -2,6 +2,7 @@ import type { WorkspaceOverviewCore } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import {
   buildSnapshotFlowInsights,
+  staCriticalPathsFromSnapshot,
   staOverviewFromSnapshot,
 } from './snapshotFlowInsights'
 
@@ -190,5 +191,30 @@ describe('buildSnapshotFlowInsights', () => {
       expect.objectContaining({ corner: 'SS_0p8V_125C', missing: true }),
     ])
     expect(result?.allCornersMet).toBeNull()
+  })
+
+  it('keeps worst and best five timing paths in the Data Snapshot model', () => {
+    const result = staCriticalPathsFromSnapshot({
+      corners: [],
+      criticalPaths: [-1, -0.5, 0, 0.5, 1, 2].map((slackNs, index) => ({
+        issueId: `setup-${index}`,
+        corner: 'TT',
+        analysisType: 'setup' as const,
+        slackNs,
+        startPoint: 'launch',
+        endPoint: 'capture',
+        pathGroup: 'core',
+        stages: [],
+      })),
+      worstSetup: null,
+      worstHold: null,
+      frequencyMhz: null,
+      setupViolationCount: null,
+      holdViolationCount: null,
+      allCornersMet: null,
+    })
+
+    expect(result?.setup.map((path) => path.slackNs)).toEqual([-1, -0.5, 0, 0.5, 1])
+    expect(result?.bestSetup.map((path) => path.slackNs)).toEqual([2, 1, 0.5, 0, -0.5])
   })
 })

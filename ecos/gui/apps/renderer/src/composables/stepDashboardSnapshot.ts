@@ -234,9 +234,17 @@ function staDashboardInsights(sta: WorkspaceStaInsights | null): {
       overview,
       pathsByCorner: sta.corners.map((corner) => ({
         corner: corner.corner,
-        paths: [...(critical?.setup ?? []), ...(critical?.hold ?? [])].filter(
-          (path) => path.corner === corner.corner,
-        ),
+        paths: [
+          ...(critical?.setup ?? []),
+          ...(critical?.hold ?? []),
+          ...(critical?.bestSetup ?? []),
+          ...(critical?.bestHold ?? []),
+        ]
+          .filter((path) => path.corner === corner.corner)
+          .filter(
+            (path, index, paths) =>
+              paths.findIndex((candidate) => candidate.id === path.id) === index,
+          ),
       })),
       runInfo: [],
     },

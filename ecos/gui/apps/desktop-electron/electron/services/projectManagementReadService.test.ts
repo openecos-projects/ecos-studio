@@ -16,6 +16,7 @@ import {
   projectManifestForPresentation,
   type EccProjectManifest,
   type EccPersistedEngineeringSnapshot,
+  type EccQorSnapshotExtension,
 } from '@ecos-studio/shared'
 import {
   PROJECT_FINDINGS_ARTIFACT_MAX_BYTES,
@@ -25,6 +26,34 @@ import {
 const temporaryDirectories: string[] = []
 
 function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
+  const qorSnapshotExtension: EccQorSnapshotExtension = {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'unavailable',
+    reason: 'test fixture',
+    score: null,
+    scalarStatus: 'NOT_RATED',
+    profile: 'balanced',
+    qphys: {},
+    feasibility: { status: 'UNKNOWN', gates: [] },
+    evidence: {
+      index: null,
+      state: 'NOT_VERIFIED',
+      integrity: null,
+      coverage: null,
+      consistency: null,
+    },
+    diagnoses: [],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
   return {
     analysis: { steps: [] },
     artifacts: [],
@@ -32,13 +61,8 @@ function engineeringSnapshot(): EccPersistedEngineeringSnapshot {
     flow: { steps: [] },
     metrics: [],
     parameters: {},
-    qorAssessment: {
-      status: 'unavailable',
-      metrics: [],
-      score: { value: null, threshold: 60, gate: 'unavailable' },
-      steps: [],
-    },
-    schemaVersion: 4,
+    qorSnapshotExtension,
+    schemaVersion: 5,
     signoffAssessment: { status: 'ready', groups: [], risks: [] },
     workspaceId: 'engineering-workspace',
     workspaceRevision: 1,

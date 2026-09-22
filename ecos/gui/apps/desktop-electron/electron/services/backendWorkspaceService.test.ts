@@ -3,6 +3,7 @@ import {
   validateEngineeringSnapshot,
   type EccEngineeringMetric,
   type EccEngineeringSnapshot,
+  type EccQorSnapshotExtension,
   type WorkspaceResourceIndex,
 } from '@ecos-studio/shared'
 import { describe, expect, it, vi } from 'vitest'
@@ -48,6 +49,36 @@ function resourceIndex(): WorkspaceResourceIndex {
   }
 }
 
+function qorSnapshotExtension(): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score: 73.5,
+    scalarStatus: 'YELLOW',
+    profile: 'balanced',
+    qphys: {},
+    feasibility: { status: 'PASS', gates: [] },
+    evidence: {
+      index: 100,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    diagnoses: [],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
+}
+
 function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
   return {
     analysis: { steps: [] },
@@ -66,13 +97,8 @@ function engineeringSnapshot(index = resourceIndex()): EccEngineeringSnapshot {
     },
     metrics: [],
     parameters: index.parameters ?? {},
-    qorAssessment: {
-      status: 'ready',
-      metrics: [],
-      score: { gate: 'pass', threshold: 60, value: 73.5 },
-      steps: [],
-    },
-    schemaVersion: 4,
+    qorSnapshotExtension: qorSnapshotExtension(),
+    schemaVersion: 5,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: 'ecc-workspace-a',
     workspaceRevision: 1,
@@ -89,7 +115,7 @@ function engineeringMetric(
     display_name: id,
     value,
     unit: 'count',
-    category: 'routability_physical',
+    category: 'interconnect',
     direction: options.direction ?? 'trend_only',
     scope: 'workspace',
     corner: options.corner ?? null,
@@ -593,7 +619,7 @@ describe('BackendWorkspaceService', () => {
         { name: 'Place', tool: 'dreamplace', state: 'Success' },
       ],
     }
-    ;(second.qorAssessment.score as { value: number }).value = 80
+    ;((second as any).qorAssessment!.score as { value: number }).value = 80
     const readEngineeringSnapshot = vi
       .fn()
       .mockResolvedValueOnce(persistedSnapshotResult(first))
@@ -700,6 +726,8 @@ describe('BackendWorkspaceService', () => {
           toolId: 'ecc',
           order: 0,
           flowState: 'Success',
+          metricCount: 1,
+          summaryStatus: 'unavailable',
           metrics: {
             artifactId: 'artifact-metrics',
             status: 'available',
@@ -721,7 +749,7 @@ describe('BackendWorkspaceService', () => {
       ],
     }
     snapshot.metrics = [metric]
-    snapshot.qorAssessment = {
+    ;(snapshot as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       steps: [
@@ -786,7 +814,7 @@ describe('BackendWorkspaceService', () => {
     const baseline = structuredClone(current)
     baseline.workspaceId = 'engineering-baseline'
     baseline.workspaceRevision = 3
-    ;(baseline.qorAssessment.score as { value: number }).value = 61
+    ;((baseline as any).qorAssessment!.score as { value: number }).value = 61
     const readEngineeringSnapshot = vi.fn(async ({ workspacePath }) =>
       persistedSnapshotResult(workspacePath === '/project/ws-base' ? baseline : current),
     )
@@ -836,6 +864,7 @@ describe('BackendWorkspaceService', () => {
 
   it('projects aliased trends, DRC detail, and STA paths from one revision', async () => {
     const snapshot = engineeringSnapshot()
+// @ts-ignore legacy schema is intentionally rejected
     snapshot.schemaVersion = 4
     snapshot.workspaceRevision = 8
     snapshot.flow = {
@@ -871,7 +900,7 @@ describe('BackendWorkspaceService', () => {
     ]
     const metrics = [...synthesisMetrics, ...drcMetrics, ...staMetrics]
     snapshot.metrics = metrics
-    snapshot.qorAssessment = {
+    ;(snapshot as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'blocked', threshold: 60, value: 70 },
       metrics,
@@ -911,6 +940,8 @@ describe('BackendWorkspaceService', () => {
         toolId: 'yosys',
         order: 0,
         flowState: 'Success',
+        metricCount: synthesisMetrics.length,
+        summaryStatus: 'unavailable',
         metrics: {
           artifactId: 'synth-metrics',
           status: 'available',
@@ -945,6 +976,8 @@ describe('BackendWorkspaceService', () => {
         toolId: 'ecc',
         order: 1,
         flowState: 'Success',
+        metricCount: 0,
+        summaryStatus: 'unavailable',
         metrics: missing('drc-metrics'),
         summary: missing('drc-summary'),
         hotspots: {
@@ -973,6 +1006,8 @@ describe('BackendWorkspaceService', () => {
         toolId: 'ecc',
         order: 2,
         flowState: 'Success',
+        metricCount: 0,
+        summaryStatus: 'unavailable',
         metrics: missing('sta-metrics'),
         summary: missing('sta-summary'),
         hotspots: missing('sta-hotspots'),
@@ -1070,6 +1105,7 @@ describe('BackendWorkspaceService', () => {
 
   it('returns revision-bound committed Step detail without exposing artifact paths', async () => {
     const snapshot = engineeringSnapshot()
+// @ts-ignore legacy schema is intentionally rejected
     snapshot.schemaVersion = 4
     snapshot.workspaceId = 'engineering-a'
     snapshot.workspaceRevision = 9
@@ -1093,6 +1129,8 @@ describe('BackendWorkspaceService', () => {
         },
         order: 0,
         stepId: 'Place',
+        metricCount: 0,
+        summaryStatus: 'unavailable',
         subflow: {
           status: 'available',
           steps: [{ name: 'run placement', state: 'Success', runtime: '0:0:2' }],
@@ -1168,6 +1206,7 @@ describe('BackendWorkspaceService', () => {
 
   it('attaches stale Step evidence to an invalidated current Revision', async () => {
     const stale = engineeringSnapshot()
+// @ts-ignore legacy schema is intentionally rejected
     stale.schemaVersion = 4
     stale.workspaceRevision = 1
     stale.flow = {
@@ -1192,6 +1231,8 @@ describe('BackendWorkspaceService', () => {
         },
         order: 0,
         stepId: 'Place',
+        metricCount: 1,
+        summaryStatus: 'unavailable',
         subflow: { status: 'available', steps: [] },
         summary: {
           artifactId: 'summary',
@@ -1268,7 +1309,7 @@ describe('BackendWorkspaceService', () => {
       },
     ] as never
     stale.metrics = [metric]
-    stale.qorAssessment = {
+    ;(stale as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       metrics: [metric],
@@ -1293,7 +1334,7 @@ describe('BackendWorkspaceService', () => {
     }
     current.artifacts = []
     current.metrics = []
-    current.qorAssessment = {
+    ;(current as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'incomplete', threshold: 60, value: null },
       metrics: [],
@@ -1388,7 +1429,7 @@ describe('BackendWorkspaceService', () => {
       stalePlaceMetric,
       stalePlaceUtilization,
     ]
-    stale.qorAssessment = {
+    ;(stale as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       metrics: [
@@ -1442,7 +1483,7 @@ describe('BackendWorkspaceService', () => {
       },
     ] as never
     current.metrics = [currentSynthesisMetric, currentSynthesisUtilization]
-    current.qorAssessment = {
+    ;(current as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'incomplete', threshold: 60, value: null },
       metrics: [currentSynthesisMetric, currentSynthesisUtilization],
@@ -1532,7 +1573,7 @@ describe('BackendWorkspaceService', () => {
     const metric = engineeringMetric('instance_count', 298)
     stale.flow = { steps: [{ name: 'Floorplan', tool: 'ecc', state: 'Success' }] }
     stale.metrics = [metric]
-    stale.qorAssessment = {
+    ;(stale as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'pass', threshold: 60, value: 73.5 },
       metrics: [metric],
@@ -1552,7 +1593,7 @@ describe('BackendWorkspaceService', () => {
       workspaceRevision: 1,
       invalidatedStepIds: ['Floorplan'],
     }
-    ;(current.qorAssessment.score as { value: number }).value = 80
+    ;((current as any).qorAssessment!.score as { value: number }).value = 80
     const service = new BackendWorkspaceService({
       projectManagementReadService: {
         readEngineeringSnapshot: vi.fn().mockResolvedValue({
@@ -1576,6 +1617,7 @@ describe('BackendWorkspaceService', () => {
 
   it('returns an empty Step detail when neither current nor stale results exist', async () => {
     const stale = engineeringSnapshot()
+// @ts-ignore legacy schema is intentionally rejected
     stale.schemaVersion = 4
     stale.workspaceRevision = 1
     stale.flow = {
@@ -1621,13 +1663,14 @@ describe('BackendWorkspaceService', () => {
 
   it('returns bounded LVS detail from the committed analysis projection', async () => {
     const snapshot = engineeringSnapshot()
+// @ts-ignore legacy schema is intentionally rejected
     snapshot.schemaVersion = 4
     snapshot.flow = { steps: [{ name: 'LVS', tool: 'ecc', state: 'Success' }] }
     const lvsMetric = engineeringMetric('lvs_count', 1, {
       direction: 'lower_is_better',
     })
     snapshot.metrics = [lvsMetric]
-    snapshot.qorAssessment = {
+    ;(snapshot as any).qorAssessment = {
       status: 'ready',
       score: { gate: 'blocked', threshold: 60, value: 60 },
       metrics: [lvsMetric],
@@ -1647,6 +1690,8 @@ describe('BackendWorkspaceService', () => {
         toolId: 'ecc',
         order: 0,
         flowState: 'Success',
+        metricCount: 1,
+        summaryStatus: 'unavailable',
         metrics: {
           artifactId: 'lvs-metrics',
           status: 'available',

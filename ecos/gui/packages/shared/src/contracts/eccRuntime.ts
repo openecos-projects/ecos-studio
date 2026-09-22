@@ -470,13 +470,7 @@ export interface EccEngineeringMetric extends Record<string, unknown> {
   display_name: string
   value: number
   unit?: string | null
-  category:
-    | 'timing'
-    | 'power_integrity'
-    | 'routability_physical'
-    | 'area_cost'
-    | 'clock_robustness_dfm'
-    | 'runtime'
+  category: string
   direction: 'higher_is_better' | 'lower_is_better' | 'target_range' | 'trend_only'
   scope: string
   corner: string | null
@@ -510,6 +504,8 @@ export interface EccEngineeringAnalysisStep {
   lecResult?: EccEngineeringAnalysisFile | null
   metrics: EccEngineeringAnalysisFile
   order: number
+  metricCount: number
+  summaryStatus: string
   stepId: string
   summary: EccEngineeringAnalysisFile
   subflow?: EccEngineeringSubflowSummary
@@ -624,9 +620,8 @@ export interface EccEngineeringSnapshot {
   flow: Record<string, unknown>
   metrics: EccEngineeringMetric[]
   parameters: Record<string, unknown>
-  qorAssessment: Record<string, unknown>
-  qorSnapshotExtension?: EccQorSnapshotExtension
-  schemaVersion: 4
+  qorSnapshotExtension: EccQorSnapshotExtension
+  schemaVersion: 5
   signoffAssessment: EccWorkspaceInspectSignoffResult
   workspaceId: string
   workspaceRevision: number

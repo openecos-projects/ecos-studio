@@ -43,7 +43,7 @@ const session = vi.hoisted(() => ({
               order: 3,
               status: 'pass' as const,
               stepId: 'Place',
-              summaryMetricCount: 10,
+              metricCount: 10,
             },
           ],
         },
@@ -72,7 +72,7 @@ describe('useDashboardOverview', () => {
       expect.objectContaining({
         label: 'Place',
         status: 'pass',
-        summaryMetricCount: 10,
+        metricCount: 10,
       }),
     ])
   })

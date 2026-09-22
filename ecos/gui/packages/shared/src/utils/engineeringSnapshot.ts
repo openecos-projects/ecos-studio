@@ -19,7 +19,7 @@ export interface EngineeringSnapshotIssue extends ReadIssue {
 export interface EngineeringSnapshotSections {
   artifacts: ReadSection<EccEngineeringAnalysisArtifactRef[]>
   flow: ReadSection<EccEngineeringSnapshot['flow']>
-  qor: ReadSection<Pick<EccEngineeringSnapshot, 'analysis' | 'metrics' | 'qorAssessment'>>
+  qor: ReadSection<Pick<EccEngineeringSnapshot, 'analysis' | 'metrics'>>
   qorSnapshotExtension: ReadSection<EccQorSnapshotExtension>
   signoff: ReadSection<EccEngineeringSnapshot['signoffAssessment']>
 }
@@ -36,7 +36,7 @@ export type EngineeringSnapshotEnvelope = Pick<
 
 type EngineeringSnapshotQor = Pick<
   EccEngineeringSnapshot,
-  'analysis' | 'metrics' | 'qorAssessment'
+  'analysis' | 'metrics'
 >
 
 export type EngineeringSnapshotValidationResult =
@@ -78,7 +78,7 @@ export function validateEngineeringSnapshot(
   if (!record(value)) {
     return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_INVALID' } }
   }
-  if (value.schemaVersion !== 4) {
+  if (value.schemaVersion !== 5) {
     return {
       ok: false,
       issue: {
@@ -88,6 +88,12 @@ export function validateEngineeringSnapshot(
             : 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED',
       },
     }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'qorAssessment')) {
+    return { ok: false, issue: { code: 'ENGINEERING_SNAPSHOT_SCHEMA_UNSUPPORTED' } }
+  }
+  if (!validQorSnapshotExtension(value.qorSnapshotExtension)) {
+    return { ok: false, issue: { code: 'ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID' } }
   }
   if (
     !nonEmptyString(value.workspaceId) ||
@@ -134,15 +140,10 @@ export function validateEngineeringSnapshot(
         ? ready({
             analysis: value.analysis,
             metrics: value.metrics,
-            qorAssessment: value.qorAssessment,
           })
         : unavailable('ENGINEERING_QOR_INVALID'),
       qorSnapshotExtension:
-        value.qorSnapshotExtension === undefined
-          ? { status: 'unavailable', issues: [] }
-          : validQorSnapshotExtension(value.qorSnapshotExtension)
-            ? ready(value.qorSnapshotExtension)
-            : unavailable('ENGINEERING_QOR_SNAPSHOT_EXTENSION_INVALID'),
+        ready(value.qorSnapshotExtension),
       signoff: validSignoff(value.signoffAssessment)
         ? ready(value.signoffAssessment)
         : unavailable('ENGINEERING_SIGNOFF_INVALID'),
@@ -173,35 +174,29 @@ function validQor(
 ): snapshot is Record<string, unknown> & EngineeringSnapshotQor {
   if (
     !Array.isArray(snapshot.metrics) ||
-    !snapshot.metrics.every(validMetric) ||
     !validAnalysis(snapshot.analysis, snapshot.schemaVersion)
   ) {
     return false
   }
-  const assessment = snapshot.qorAssessment
-  if (!record(assessment) || !Array.isArray(assessment.steps)) return false
   if (
-    snapshot.schemaVersion !== 4 &&
-    (!Array.isArray(assessment.metrics) || !assessment.metrics.every(validMetric))
+    !snapshot.metrics.every(
+      (metric) => validMetric(metric) && nonEmptyString((metric as Record<string, unknown>).stepId),
+    )
   ) {
     return false
   }
-  const score = assessment.score
+  const steps = snapshot.analysis.steps
+  const stepIds = steps.map((step) => step.stepId)
+  if (new Set(stepIds).size !== stepIds.length) return false
+  const metricCounts = new Map<string, number>()
+  for (const metric of snapshot.metrics) {
+    const stepId = (metric as Record<string, unknown>).stepId as string
+    metricCounts.set(stepId, (metricCounts.get(stepId) ?? 0) + 1)
+  }
   return (
-    (assessment.status === 'ready' || assessment.status === 'unavailable') &&
-    record(score) &&
-    (score.value === null || finiteNumber(score.value)) &&
-    finiteNumber(score.threshold) &&
-    ['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(score.gate)) &&
-    assessment.steps.every(
-      (step) =>
-        record(step) &&
-        nonEmptyString(step.stepId) &&
-        nonEmptyString(step.name) &&
-        nonNegativeInteger(step.order) &&
-        nonNegativeInteger(step.summaryMetricCount) &&
-        ['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(step.status)),
-    )
+    snapshot.metrics.every((metric) =>
+      stepIds.includes((metric as Record<string, unknown>).stepId as string),
+    ) && steps.every((step) => step.metricCount === (metricCounts.get(step.stepId) ?? 0))
   )
 }
 
@@ -451,14 +446,7 @@ function validMetric(value: unknown): value is EccEngineeringMetric {
     nonEmptyString(value.id) &&
     nonEmptyString(value.display_name) &&
     finiteNumber(value.value) &&
-    [
-      'timing',
-      'power_integrity',
-      'routability_physical',
-      'area_cost',
-      'clock_robustness_dfm',
-      'runtime',
-    ].includes(String(value.category)) &&
+    nonEmptyString(value.category) &&
     ['higher_is_better', 'lower_is_better', 'target_range', 'trend_only'].includes(
       String(value.direction),
     ) &&
@@ -498,14 +486,16 @@ function validAnalysis(
       nonEmptyString(step.toolId) &&
       nonEmptyString(step.flowState) &&
       nonNegativeInteger(step.order) &&
-      validMetricFile(step.metrics, schemaVersion === 4) &&
-      validSummaryFile(step.summary, schemaVersion === 4) &&
-      validAnalysisFile(step.hotspots, 3, 'hotspots', schemaVersion === 4) &&
+      nonNegativeInteger(step.metricCount) &&
+      nonEmptyString(step.summaryStatus) &&
+      validMetricFile(step.metrics, schemaVersion === 5) &&
+      validSummaryFile(step.summary, schemaVersion === 5) &&
+      validAnalysisFile(step.hotspots, 3, 'hotspots', schemaVersion === 5) &&
       (step.lecResult === undefined ||
         step.lecResult === null ||
         validLecResultFile(step.lecResult)) &&
       (step.timingIssues === null ||
-        validTimingFile(step.timingIssues, schemaVersion === 4)) &&
+        validTimingFile(step.timingIssues, schemaVersion === 5)) &&
       (step.subflow === undefined || validSubflow(step.subflow)),
   )
 }

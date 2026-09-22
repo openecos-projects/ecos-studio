@@ -294,21 +294,21 @@ const REPORTED_SEVERITY_RANK: Record<StepIssueSeverity, number> = {
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
-  routability_physical: 'Routability',
-  clock_robustness_dfm: 'Clock quality',
   timing: 'Timing',
-  power_integrity: 'Power integrity',
-  area_cost: 'Area and cost',
-  runtime: 'Runtime',
+  interconnect: 'Interconnect',
+  area: 'Area',
+  power: 'Power',
+  robustness: 'Robustness',
+  execution: 'Execution',
 }
 
 const DIMENSION_ORDER: Record<string, number> = {
-  routability_physical: 0,
-  clock_robustness_dfm: 1,
-  timing: 2,
-  power_integrity: 3,
-  area_cost: 4,
-  runtime: 5,
+  timing: 0,
+  interconnect: 1,
+  area: 2,
+  power: 3,
+  robustness: 4,
+  execution: 5,
 }
 
 const POLARITY_LABELS: Record<string, string> = {

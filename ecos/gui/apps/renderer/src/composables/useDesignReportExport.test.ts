@@ -112,8 +112,9 @@ describe('useDesignReportExport', () => {
         flow: { steps: [] },
         metrics: [],
         parameters: {},
+        // @ts-ignore legacy payload is rejected by schema 5
         qorAssessment: {},
-        schemaVersion: 4,
+        schemaVersion: 5,
         signoffAssessment: { groups: [], risks: [], status: 'ready' },
         workspaceId: 'workspace-1',
         workspaceRevision: 1,
@@ -160,6 +161,49 @@ describe('useDesignReportExport', () => {
     expect(mockReadHome).not.toHaveBeenCalled()
     expect(mockReadOptionalProjectTextFile).not.toHaveBeenCalled()
     expect(mockRequestProjectPathAccess).not.toHaveBeenCalled()
+  })
+
+  it('does not treat a timing-only snapshot projection as a complete report', async () => {
+    currentProject.value = {
+      path: '/projects/gcd/ws_001',
+      name: 'gcd_run',
+      designTool: 'frontend',
+    }
+    mockRuntimeSnapshot.mockResolvedValueOnce({
+      engineeringSnapshot: {
+        analysis: {
+          steps: [
+            {
+              stepId: 'sta',
+              metrics: { status: 'missing', data: null },
+              summary: { status: 'missing', data: null },
+              hotspots: { status: 'missing', data: null },
+              timingIssues: {
+                status: 'available',
+                data: {
+                  schema_version: 1,
+                  near_fail_slack_ns: 0.05,
+                  missing_corners: [],
+                  issues: [],
+                  artifact_paths: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+      flow: { steps: [] },
+      home: {},
+      parameters: {},
+    })
+
+    const composable = useDesignReportExport({ currentProject, showToast })
+    composable.openDesignReportExport('text')
+    await vi.waitFor(() => expect(composable.loading.value).toBe(false))
+
+    expect(mockRequestProjectPathAccess).toHaveBeenCalledWith(
+      '/projects/gcd/ws_001/sta_ecc/analysis/sta_timing_issues.json',
+    )
   })
 
   it('loads workspace data and generates report content on openDesignReportExport', async () => {

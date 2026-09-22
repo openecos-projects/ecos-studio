@@ -524,7 +524,7 @@ describe('filterStepCompareGroups', () => {
   it('keeps only the rows some workspace moved, and drops the emptied groups', () => {
     expect(filterStepCompareGroups(matrix().groups, true)).toEqual([
       expect.objectContaining({
-        id: 'routability_physical',
+        id: 'interconnect',
         rows: [expect.objectContaining({ id: 'route_wirelength' })],
       }),
     ])
@@ -611,8 +611,8 @@ describe('buildStepTabs and buildStepWorkspaceChips', () => {
       workspaces,
       trendSummaryFixture(
         [
-          { workspaceId: 'ws_a', status: 'Red' },
-          { workspaceId: 'ws_b', status: 'Green' },
+          { workspaceId: 'ws_a', status: 'RED' },
+          { workspaceId: 'ws_b', status: 'GREEN' },
         ],
         'ws_b',
       ),

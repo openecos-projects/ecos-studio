@@ -10,7 +10,7 @@ function routeMetricText(value: number): string {
         display_name: 'Route wirelength',
         value,
         unit: 'um',
-        category: 'routability_physical',
+        category: 'interconnect',
         direction: 'lower_is_better',
         scope: 'design',
         corner: null,

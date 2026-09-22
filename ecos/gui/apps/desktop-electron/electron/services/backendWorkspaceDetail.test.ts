@@ -25,4 +25,17 @@ describe('artifactDescriptor', () => {
     })
     expect(descriptor).not.toHaveProperty('reference')
   })
+
+  it('derives the post-synthesis corner from the artifact reference', () => {
+    expect(
+      artifactDescriptor({
+        artifactId: 'timing-paths-synthesis',
+        availability: 'available',
+        kind: 'timing_paths',
+        name: 'timing_paths.json',
+        reference: 'Synthesis_yosys/feature/post_synthesis/timing_paths.json',
+        stepId: 'Synthesis',
+      }),
+    ).toMatchObject({ timingCorner: 'post_synthesis' })
+  })
 })

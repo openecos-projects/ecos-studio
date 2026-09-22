@@ -159,8 +159,12 @@ function timingIssues(
   const step = analysis.data.analysis.steps.find(
     (candidate) => canonicalStepId(candidate.stepId).toLowerCase() === 'sta',
   )
-  const values = record(step?.timingIssues?.data)?.issues
-  if (!Array.isArray(values)) return []
+  const timing = record(step?.timingIssues?.data)
+  const values = [
+    ...(Array.isArray(timing?.issues) ? timing.issues : []),
+    ...(Array.isArray(timing?.best_paths) ? timing.best_paths : []),
+  ]
+  const seen = new Set<string>()
   return values.flatMap((value) => {
     const issue = record(value)
     const issueId = stringValue(issue, 'issue_id')
@@ -171,10 +175,12 @@ function timingIssues(
       !issueId ||
       !corner ||
       (analysisType !== 'setup' && analysisType !== 'hold') ||
-      slackNs === null
+      slackNs === null ||
+      seen.has(issueId)
     ) {
       return []
     }
+    seen.add(issueId)
     const stages = Array.isArray(issue?.dominant_stages) ? issue.dominant_stages : []
     return [
       {

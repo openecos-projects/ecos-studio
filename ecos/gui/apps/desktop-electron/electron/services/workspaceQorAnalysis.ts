@@ -15,7 +15,6 @@ import {
   normalizeQorMetricRecords,
   type ProjectQorMetricRecord,
   type ProjectQorWorkspaceInput,
-  type QorDimension,
 } from './qorAnalysis'
 
 const FLOW_STEP_ALIASES: Record<string, ProjectManifestFlowStep> = {
@@ -51,16 +50,15 @@ interface WorkspaceQorInput extends ProjectQorWorkspaceInput {
 }
 
 interface SnapshotQorProjection {
-  assessment: ProjectQorWorkspaceInput['authoritativeAssessment']
   qor: WorkspaceQorSummary | null
   qorSnapshotExtension: EccQorSnapshotExtension | null
 }
 
 export type WorkspaceEngineeringFacts = Pick<
   EccEngineeringSnapshot,
-  'analysis' | 'metrics' | 'qorAssessment' | 'qorSnapshotExtension'
+  'analysis' | 'metrics'
 > &
-  Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment'>>
+  Partial<Pick<EccEngineeringSnapshot, 'flow' | 'signoffAssessment' | 'qorSnapshotExtension'>>
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -125,125 +123,63 @@ function snapshotQorProjection(
   snapshot: WorkspaceEngineeringFacts | null | undefined,
 ): SnapshotQorProjection {
   const empty: SnapshotQorProjection = {
-    assessment: null,
     qor: null,
     qorSnapshotExtension: snapshot?.qorSnapshotExtension ?? null,
   }
   if (!snapshot) return empty
   const extension = snapshot.qorSnapshotExtension ?? null
-  const qor = record(snapshot.qorAssessment)
-  const score = record(qor?.score)
-  const gate = score?.gate
-  const value = score?.value
-  const threshold = score?.threshold
-  if (
-    !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(gate)) ||
-    !(value === null || (typeof value === 'number' && Number.isFinite(value))) ||
-    typeof threshold !== 'number' ||
-    !Number.isFinite(threshold)
-  ) {
-    return empty
-  }
-  const signoffStatus = snapshot.signoffAssessment?.status
-  const rawDimensions = record(qor?.dimensionScores)
-  const dimensionScores: Partial<Record<QorDimension, number>> = {}
-  for (const [dimension, dimensionScore] of Object.entries(rawDimensions ?? {})) {
-    if (!isQorDimension(dimension) || !finiteNumber(dimensionScore)) return empty
-    dimensionScores[dimension] = dimensionScore
-  }
-  const rawAreaStep = qor?.areaScoringStep
-  const areaScoringStep =
-    typeof rawAreaStep === 'string' ? parseProjectManifestFlowStep(rawAreaStep) : null
-  if (rawAreaStep !== undefined && rawAreaStep !== null && !areaScoringStep) return empty
-  const assessment = ['ready', 'attention', 'blocked'].includes(String(signoffStatus))
-    ? {
-        gateStatus: gate as NonNullable<
-          ProjectQorWorkspaceInput['authoritativeAssessment']
-        >['gateStatus'],
-        score: value as number | null,
-        scoreThreshold: threshold,
-        areaScoringStep,
-        dimensionScores,
-        signoffStatus: signoffStatus!,
-      }
-    : null
   const rawMetrics = snapshot.metrics
-  if (!Array.isArray(rawMetrics) || !Array.isArray(qor?.steps)) {
-    return { assessment, qor: null, qorSnapshotExtension: extension }
+  const analysisSteps = snapshot.analysis?.steps
+  if (!Array.isArray(rawMetrics) || !Array.isArray(analysisSteps)) {
+    return { qor: null, qorSnapshotExtension: extension }
   }
 
   const metrics: MetricValue[] = []
   const steps: WorkspaceQorSummary['steps'] = []
-  const seenSteps = new Set<string>()
-  let offset = 0
-  for (const rawStep of qor.steps) {
-    const stepRecord = record(rawStep)
-    const count = stepRecord?.summaryMetricCount
-    const order = stepRecord?.order
-    const stepId = flowStep(stepRecord?.stepId ?? stepRecord?.name)
-    const status = stepRecord?.status
-    if (
-      !stepRecord ||
-      !stepId ||
-      seenSteps.has(stepId) ||
-      !Number.isInteger(count) ||
-      (count as number) < 0 ||
-      !Number.isInteger(order) ||
-      (order as number) < 0 ||
-      !['pass', 'blocked', 'incomplete', 'unavailable'].includes(String(status))
-    ) {
-      return { assessment, qor: null, qorSnapshotExtension: extension }
-    }
-    const nextOffset = offset + (count as number)
-    if (nextOffset > rawMetrics.length) {
-      return { assessment, qor: null, qorSnapshotExtension: extension }
-    }
+  for (const rawStep of analysisSteps) {
+    const stepRecord = rawStep as unknown as Record<string, unknown>
+    const rawStepId = stepRecord.stepId
+    const stepId = flowStep(rawStepId)
+    const order = stepRecord.order
+    if (!stepId || !Number.isInteger(order) || (order as number) < 0) continue
     const stepMetrics = rawMetrics
-      .slice(offset, nextOffset)
+      .filter((metric) => record(metric)?.stepId === rawStepId)
       .map((metric) => snapshotMetric(metric, stepId))
     if (stepMetrics.some((metric) => metric === null)) {
-      return { assessment, qor: null, qorSnapshotExtension: extension }
+      return { qor: null, qorSnapshotExtension: extension }
     }
-    seenSteps.add(stepId)
     metrics.push(...(stepMetrics as MetricValue[]))
+    const summaryData = record(record(stepRecord.summary)?.data)
+    const summaryStatus =
+      typeof stepRecord.summaryStatus === 'string'
+        ? stepRecord.summaryStatus
+        : typeof summaryData?.quality_status === 'string'
+          ? summaryData.quality_status
+          : String(stepRecord.flowState ?? 'unavailable')
     steps.push({
       stepId,
       order: order as number,
       name: typeof stepRecord.name === 'string' ? stepRecord.name : stepId,
       metrics: stepMetrics as MetricValue[],
-      status: status as WorkspaceQorSummary['steps'][number]['status'],
-      summaryMetricCount: count as number,
+      status: summaryStatus,
+      metricCount: stepMetrics.length,
     })
-    offset = nextOffset
-  }
-  if (offset !== rawMetrics.length) {
-    return { assessment, qor: null, qorSnapshotExtension: extension }
   }
   return {
-    assessment,
     qorSnapshotExtension: extension,
     qor: {
       score: {
-        value: value as number | null,
-        gate: gate as WorkspaceQorSummary['score']['gate'],
-        threshold,
+        value: extension?.score ?? null,
+        scalarStatus: extension?.scalarStatus ?? 'NOT_RATED',
+        profile: extension?.profile ?? 'balanced',
+        scoringEngine: 'qor-v3',
+        feasibilityStatus: extension?.feasibility.status ?? 'UNKNOWN',
       },
       metrics,
       steps,
       ...(extension ? { qorSnapshotExtension: extension } : {}),
     },
   }
-}
-
-function isQorDimension(value: string): value is QorDimension {
-  return [
-    'timing',
-    'power_integrity',
-    'routability_physical',
-    'area_cost',
-    'clock_robustness_dfm',
-    'runtime',
-  ].includes(value)
 }
 
 function finiteNumber(value: unknown): value is number {
@@ -313,25 +249,18 @@ function snapshotComparisonMetrics(
   workspaceId: string,
 ): ProjectQorMetricRecord[] {
   if (!snapshot || !Array.isArray(snapshot.metrics)) return []
-  const assessment = record(snapshot.qorAssessment)
-  const steps = Array.isArray(assessment?.steps) ? assessment.steps : []
-  let offset = 0
   const result: ProjectQorMetricRecord[] = []
-  for (const value of steps) {
-    const step = record(value)
-    const stepName =
-      typeof step?.stepId === 'string'
-        ? step.stepId
-        : typeof step?.name === 'string'
-          ? step.name
-          : ''
-    const stepId = parseProjectManifestFlowStep(stepName)
-    const count = step?.summaryMetricCount
-    if (!stepId || !Number.isSafeInteger(count) || (count as number) < 0) return []
-    const nextOffset = offset + (count as number)
-    if (nextOffset > snapshot.metrics.length) return []
-    const metrics = snapshot.metrics.slice(offset, nextOffset)
-    offset = nextOffset
+  const grouped = new Map<string, EccEngineeringSnapshot['metrics']>()
+  for (const metric of snapshot.metrics) {
+    const stepId = record(metric)?.stepId
+    if (typeof stepId !== 'string') continue
+    const list = grouped.get(stepId) ?? []
+    list.push(metric)
+    grouped.set(stepId, list)
+  }
+  for (const [rawStepId, metrics] of grouped) {
+    const stepId = parseProjectManifestFlowStep(rawStepId)
+    if (!stepId) continue
     const comparableStep = projectManagementWorkspaceStepAnalysisSpecs.find(
       (spec) => spec.step === stepId,
     )?.step
@@ -344,7 +273,7 @@ function snapshotComparisonMetrics(
       )
     }
   }
-  return offset === snapshot.metrics.length ? result : []
+  return result
 }
 
 export function projectQorInputForWorkspace(
@@ -376,7 +305,6 @@ export function projectQorInputForWorkspace(
         ?.timingIssues ?? null,
     ),
     status: workspaceStatus(workspace.status, statuses),
-    authoritativeAssessment: snapshot.assessment,
     normalizedMetrics: snapshotComparisonMetrics(engineeringSnapshot, workspaceId),
     snapshotQor: snapshot.qor,
     qorSnapshotExtension: snapshot.qorSnapshotExtension,

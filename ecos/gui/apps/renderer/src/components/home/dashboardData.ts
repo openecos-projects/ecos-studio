@@ -23,7 +23,7 @@ export interface DashboardQorStep {
   id: string
   label: string
   /** Number of metrics reported by this step's qor_summary.json. */
-  summaryMetricCount: number
+  metricCount: number
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 }
 

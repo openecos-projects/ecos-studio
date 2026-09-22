@@ -25,12 +25,11 @@ export interface BackendWorkspaceQorComparison {
   workspaceId: string
   workspaceName: string
   score: number | null
-  scoreGate: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
-  scoreThreshold: number
+  scalarStatus: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
   baselineWorkspaceId: string | null
   baselineWorkspaceName: string | null
   baselineScore: number | null
-  baselineScoreGate: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
+  baselineScalarStatus: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED' | 'FAIL' | 'NOT_RATED'
   isBaselineWorkspace: boolean
   available: boolean
   metrics: BackendWorkspaceQorMetric[]
@@ -118,12 +117,11 @@ export function useBackendWorkspaceQor() {
         workspaceId: overview.identity.workspaceId ?? '',
         workspaceName: overview.identity.workspaceName,
         score: qor.data.score.value,
-        scoreGate: qor.data.score.gate,
-        scoreThreshold: qor.data.score.threshold,
+        scalarStatus: qor.data.score.scalarStatus,
         baselineWorkspaceId: overview.identity.baselineWorkspaceId ?? null,
         baselineWorkspaceName: null,
         baselineScore: null,
-        baselineScoreGate: 'unavailable',
+        baselineScalarStatus: 'NOT_RATED',
         isBaselineWorkspace: false,
         available: false,
         metrics,
@@ -144,12 +142,11 @@ export function useBackendWorkspaceQor() {
       workspaceId: overview.identity.workspaceId ?? '',
       workspaceName: overview.identity.workspaceName,
       score: qor.data.score.value,
-      scoreGate: qor.data.score.gate,
-      scoreThreshold: qor.data.score.threshold,
+      scalarStatus: qor.data.score.scalarStatus,
       baselineWorkspaceId: baseline.data.baselineWorkspaceId,
       baselineWorkspaceName: baseline.data.baselineWorkspaceName,
       baselineScore: baseline.data.baselineScore.value,
-      baselineScoreGate: baseline.data.baselineScore.gate,
+      baselineScalarStatus: baseline.data.baselineScore.scalarStatus,
       isBaselineWorkspace: baseline.data.status === 'baseline',
       available: baseline.data.status !== 'not-comparable',
       metrics,

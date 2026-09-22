@@ -373,7 +373,7 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(wrapper.find('.step-body').exists()).toBe(false)
     const compare = wrapper.get('.compare-view')
     expect(compare.findAll('.compare-head')).toHaveLength(2)
-    expect(compare.get('.compare-group').text()).toBe('Routability')
+    expect(compare.get('.compare-group').text()).toBe('Interconnect')
 
     // Both metrics the workspaces reported get a row, not just a curated key metric.
     expect(compare.findAll('.compare-metric').map((row) => row.text())).toEqual([

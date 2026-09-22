@@ -145,7 +145,7 @@ describe('ProjectAnalysisPanel recommendation', () => {
     expect(wrapper.find('.dash-recommend-id').text()).toBe('ws_b')
     expect(wrapper.find('.dash-recommend-headline strong').text()).toContain('74.2')
     expect(wrapper.find('.dash-recommend-note').text()).toBe(
-      'Meets the 60 analysis threshold',
+      'QoR status: ORANGE',
     )
   })
 

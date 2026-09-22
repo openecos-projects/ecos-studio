@@ -27,8 +27,10 @@ export function useDashboardOverview() {
     (qor.value?.steps ?? []).map((step) => ({
       id: step.stepId,
       label: step.name,
-      status: step.status,
-      summaryMetricCount: step.summaryMetricCount,
+      status: ['pass', 'blocked', 'incomplete', 'unavailable'].includes(step.status)
+        ? (step.status as DashboardQorStep['status'])
+        : 'unavailable',
+      metricCount: step.metricCount,
     })),
   )
 

@@ -77,6 +77,8 @@ describe('TimingAnalysisPanel', () => {
         criticalPaths: {
           setup: [],
           hold: [],
+          bestSetup: [],
+          bestHold: [],
         },
       },
       global: {

@@ -38,6 +38,10 @@ export async function readPersistedEngineeringSnapshot(
   if (artifacts.status !== 'ready') throw new Error(artifacts.issues[0]?.code)
   if (flow.status !== 'ready') throw new Error(flow.issues[0]?.code)
   if (qor.status !== 'ready') throw new Error(qor.issues[0]?.code)
+  const qorSnapshotExtension = validated.sections.qorSnapshotExtension
+  if (qorSnapshotExtension.status !== 'ready') {
+    throw new Error(qorSnapshotExtension.issues[0]?.code)
+  }
   if (signoff.status !== 'ready') throw new Error(signoff.issues[0]?.code)
   return {
     ...validated.snapshot,
@@ -45,7 +49,7 @@ export async function readPersistedEngineeringSnapshot(
     artifacts: artifacts.data,
     flow: flow.data,
     metrics: qor.data.metrics,
-    qorAssessment: qor.data.qorAssessment,
+    qorSnapshotExtension: qorSnapshotExtension.data,
     signoffAssessment: signoff.data,
   }
 }

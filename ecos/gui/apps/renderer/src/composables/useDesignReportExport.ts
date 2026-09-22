@@ -323,7 +323,7 @@ export function useDesignReportExport({
 
       const hasInlineEngineeringAnalysis =
         runtimeSnapshot?.engineeringSnapshot?.analysis.steps.some((step) =>
-          [step.metrics, step.summary, step.hotspots, step.timingIssues].some(
+          [step.metrics, step.summary, step.hotspots].some(
             (file) => file?.status === 'available' && file.data !== null,
           ),
         )

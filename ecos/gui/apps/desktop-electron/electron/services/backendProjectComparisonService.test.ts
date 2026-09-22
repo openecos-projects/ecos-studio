@@ -5,6 +5,7 @@ import {
   type EccEngineeringSnapshot,
   type EccEngineeringMetric,
   type EccPersistedEngineeringSnapshot,
+  type EccQorSnapshotExtension,
   type EccRuntimeOperation,
   type ProjectManifest,
 } from '@ecos-studio/shared'
@@ -22,6 +23,36 @@ class FakeProjectComparisonWatcher {
   startProject = vi.fn(async (_projectRoot: string) => undefined)
 
   constructor(readonly callbacks: ProjectComparisonFileWatcherCallbacks) {}
+}
+
+function qorSnapshotExtension(score: number): EccQorSnapshotExtension {
+  return {
+    schemaVersion: 1,
+    scoringEngine: 'qor-v3',
+    status: 'available',
+    score,
+    scalarStatus: score >= 90 ? 'GREEN' : score >= 75 ? 'YELLOW' : 'ORANGE',
+    profile: 'balanced',
+    qphys: {},
+    feasibility: { status: 'PASS', gates: [] },
+    evidence: {
+      index: 100,
+      state: 'HIGH',
+      integrity: 1,
+      coverage: 1,
+      consistency: 1,
+    },
+    diagnoses: [],
+    inflation: {
+      iPlace: null,
+      iRoute: null,
+      iTotal: null,
+      congestionSeverity: null,
+      compatibilityStatus: 'UNAVAILABLE',
+    },
+    power: { totalUw: null, budgetUw: null, sourceKind: null, corner: null },
+    artifactIds: [],
+  }
 }
 
 function watcherHarness(startError?: Error) {
@@ -96,7 +127,7 @@ function engineeringSnapshot(
   const value = workspacePath.endsWith('ws_1') ? 120 : 100
   const metric = {
     analysis_group: 'route',
-    category: 'routability_physical' as const,
+    category: 'interconnect' as const,
     confidence: 'high' as const,
     corner: null,
     corner_context: null,
@@ -111,27 +142,41 @@ function engineeringSnapshot(
     value,
   }
   return {
-    analysis: { steps: [] },
+    analysis: {
+      steps: [
+        {
+          stepId: 'Route',
+          toolId: 'ecc',
+          order: 6,
+          flowState: 'Success',
+          metricCount: 1,
+          summaryStatus: 'pass',
+          metrics: {
+            artifactId: 'route-metrics',
+            status: 'available',
+            data: { schema_version: 3, metrics: [metric] },
+          },
+          summary: {
+            artifactId: 'route-summary',
+            status: 'available',
+            data: { schema_version: 4, quality_status: 'pass' },
+          },
+          hotspots: {
+            artifactId: 'route-hotspots',
+            status: 'available',
+            data: { schema_version: 3, hotspots: [] },
+          },
+          timingIssues: null,
+        },
+      ],
+    },
     artifacts: [],
     checklist: {},
     flow: { steps: [{ name: step, state: 'Success' }] },
     metrics: [metric],
     parameters: {},
-    qorAssessment: {
-      status: 'ready',
-      metrics: [metric],
-      score: { gate: 'pass', threshold: 60, value: 80 - value / 10 },
-      steps: [
-        {
-          name: 'Route',
-          order: 6,
-          status: 'pass',
-          stepId: 'Route',
-          summaryMetricCount: 1,
-        },
-      ],
-    },
-    schemaVersion: 4,
+    qorSnapshotExtension: qorSnapshotExtension(80 - value / 10),
+    schemaVersion: 5,
     signoffAssessment: { groups: [], risks: [], status: 'ready' },
     workspaceId: workspacePath,
     workspaceRevision: 1,
@@ -156,23 +201,10 @@ function appendSnapshotStepMetric(
   )?.metrics
   const metrics = metricsFile?.data?.metrics
   if (!Array.isArray(metrics)) throw new Error(`missing ${stepId} Snapshot metrics`)
-  const assessmentSteps = snapshot.qorAssessment.steps as Array<{
-    stepId: string
-    order: number
-    summaryMetricCount?: number
-  }>
-  const assessmentStep = assessmentSteps.find((step) => step.stepId === stepId)
-  const offset = assessmentSteps
-    .filter((step) => step.order < (assessmentStep?.order ?? Number.MAX_SAFE_INTEGER))
-    .reduce((sum, step) => sum + (step.summaryMetricCount ?? 0), 0)
   metrics.push(metric)
-  snapshot.metrics.splice(offset + (assessmentStep?.summaryMetricCount ?? 0), 0, {
-    ...metric,
-    stepId,
-  })
-  if (assessmentStep) {
-    assessmentStep.summaryMetricCount = (assessmentStep.summaryMetricCount ?? 0) + 1
-  }
+  snapshot.metrics.push({ ...metric, stepId })
+  const analysisStep = snapshot.analysis.steps.find((step) => step.stepId === stepId)
+  if (analysisStep) analysisStep.metricCount += 1
 }
 
 function serviceFixture() {

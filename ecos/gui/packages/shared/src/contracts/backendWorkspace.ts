@@ -321,8 +321,10 @@ export interface WorkspaceChecklistSummary {
 
 export interface QorScore {
   value: number | null
-  gate: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
-  threshold: number
+  scalarStatus: EccQorSnapshotExtension['scalarStatus']
+  profile: EccQorSnapshotExtension['profile']
+  scoringEngine: 'qor-v3'
+  feasibilityStatus: EccQorSnapshotExtension['feasibility']['status']
 }
 
 export interface MetricValue {
@@ -341,8 +343,8 @@ export interface QorStepSummary {
   order: number
   name: string
   metrics: MetricValue[]
-  status: QorScore['gate']
-  summaryMetricCount: number
+  status: string
+  metricCount: number
 }
 
 export interface WorkspaceDashboardMetric {

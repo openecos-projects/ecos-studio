@@ -173,7 +173,7 @@ describe('buildDashboardHealth', () => {
 })
 
 describe('buildDashboardRecommendation', () => {
-  it('reports the QoR best workspace with its score and threshold standing', () => {
+  it('reports the QoR best workspace with its score and V3 status', () => {
     const recommendation = buildDashboardRecommendation(
       trendSummaryWithScoresFixture(),
       'ws_b',
@@ -183,9 +183,9 @@ describe('buildDashboardRecommendation', () => {
     expect(recommendation).toMatchObject({
       workspaceId: 'ws_b',
       score: '74.2',
-      scoreTone: 'good',
+      scoreTone: 'warn',
       signoff: 'pass',
-      scoreNote: 'Meets the 60 analysis threshold',
+      scoreNote: 'QoR status: ORANGE',
     })
   })
 
@@ -206,17 +206,17 @@ describe('buildDashboardRecommendation', () => {
     ).toBe('Only workspace with a complete run')
   })
 
-  it('warns when the leading workspace is still under the analysis threshold', () => {
+  it('marks a failing scalar QoR status as bad', () => {
     expect(
       buildDashboardRecommendation(trendSummaryWithScoresFixture(), 'ws_a', 'reason'),
-    ).toMatchObject({ score: '58.4', scoreTone: 'warn' })
+    ).toMatchObject({ score: '58.4', scoreTone: 'bad' })
   })
 
-  it('says the threshold does not gate signoff when a passing workspace scores low', () => {
+  it('keeps signoff readiness independent from scalar QoR failure', () => {
     expect(
       buildDashboardRecommendation(trendSummaryWithScoresFixture(), 'ws_a', 'reason')
         ?.scoreNote,
-    ).toBe('Below the 60 analysis threshold, which does not gate signoff')
+    ).toBe('Quality failure does not gate signoff readiness')
   })
 
   it('explains an unrated score instead of naming a threshold', () => {

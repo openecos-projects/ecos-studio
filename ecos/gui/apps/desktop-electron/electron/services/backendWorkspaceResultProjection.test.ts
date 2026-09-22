@@ -10,26 +10,21 @@ function readResult(
   revision: number,
   stalePredecessor?: { workspaceRevision: number; invalidatedStepIds: string[] },
 ) {
+  const step = {
+    stepId: 'Route',
+    toolId: 'ecc',
+    order: 0,
+    flowState: revision === 1 ? 'Success' : 'Unstart',
+    metricCount: 0,
+    summaryStatus: revision === 1 ? 'pass' : 'unavailable',
+    metrics: { artifactId: 'metrics', status: 'missing', data: null },
+    summary: { artifactId: 'summary', status: 'missing', data: null },
+    hotspots: { artifactId: 'hotspots', status: 'missing', data: null },
+    timingIssues: null,
+  }
   const qor = {
-    analysis: { steps: [] },
+    analysis: { steps: [step] },
     metrics: [],
-    qorAssessment: {
-      status: 'ready',
-      metrics: [],
-      score: { gate: 'incomplete', threshold: 60, value: null },
-      steps:
-        revision === 1
-          ? [
-              {
-                stepId: 'Route',
-                name: 'Route',
-                order: 0,
-                status: 'pass',
-                summaryMetricCount: 0,
-              },
-            ]
-          : [],
-    },
   }
   return {
     ok: true,
@@ -37,7 +32,7 @@ function readResult(
     snapshot: {
       checklist: {},
       parameters: {},
-      schemaVersion: 4,
+      schemaVersion: 5,
       workspaceId: 'workspace-1',
       workspaceRevision: revision,
       ...(stalePredecessor ? { stalePredecessor } : {}),

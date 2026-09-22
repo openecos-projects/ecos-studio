@@ -38,17 +38,13 @@ function invalidated(
   snapshot.metrics = snapshot.metrics.filter(
     (metric) => !steps.some((step) => step.toLowerCase() === metric.analysis_group),
   )
-  snapshot.qorAssessment = {
-    status: 'ready',
-    score: { gate: 'incomplete', threshold: 60, value: null },
-    metrics: snapshot.metrics,
-    steps: snapshot.analysis.steps.map((step) => ({
-      stepId: step.stepId,
-      name: step.stepId,
-      order: step.order,
-      status: 'pass',
-      summaryMetricCount: 14,
-    })),
+  snapshot.qorSnapshotExtension = {
+    ...snapshot.qorSnapshotExtension,
+    status: 'unavailable',
+    reason: 'stale predecessor',
+    score: null,
+    scalarStatus: 'NOT_RATED',
+    feasibility: { status: 'UNKNOWN', gates: [] },
   }
   snapshot.signoffAssessment = { status: 'attention', groups: [], risks: [] }
   return snapshot
@@ -185,6 +181,13 @@ describe('Project Comparison previous results', () => {
     current.workspaceRevision += 1
     current.analysis.steps.push(
       structuredClone(previous.analysis.steps.find((step) => step.stepId === 'Legal')!),
+    )
+    const legalFlow = (
+      current.flow as { steps: Array<{ name: string; state: string }> }
+    ).steps.find((step) => step.name === 'Legal')
+    if (legalFlow) legalFlow.state = 'Success'
+    current.metrics.push(
+      ...previous.metrics.filter((metric) => metric.analysis_group === 'legal'),
     )
     current.artifacts.push(
       ...previous.artifacts.filter((artifact) => artifact.stepId === 'Legal'),

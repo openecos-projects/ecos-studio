@@ -78,7 +78,6 @@ export function projectComparisonEvidence(
     const input = projectQorInputForWorkspace(manifest, workspace.workspace_id, {
       analysis: qor.analysis,
       metrics: qor.metrics,
-      qorAssessment: qor.qorAssessment,
       ...(flow ? { flow } : {}),
       ...(stale.sections.signoff.status === 'ready'
         ? { signoffAssessment: stale.sections.signoff.data }
