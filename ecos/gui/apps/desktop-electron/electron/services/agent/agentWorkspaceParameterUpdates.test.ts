@@ -109,12 +109,50 @@ describe('catalog-driven Agent Workspace knob table', () => {
 
     expect(Object.keys(knobs).sort()).toEqual([
       'design.frequency_max',
+      'floorplan.utilitization',
       'floorplan.utilization',
       'place.gp_noise_ratio',
       'place.routability_opt',
     ])
     expect(knobs['floorplan.utilization'].parameter).toBe('floorplan.core_util')
     expect(knobs['place.gp_noise_ratio'].range).toEqual([0, 1])
+  })
+
+  it('accepts the canonical alias when an old ECC catalog is cached', () => {
+    rememberWorkspaceParameterCatalog({
+      parameterCatalog: [
+        {
+          id: 'floorplan.core_util',
+          display_key: 'utilization',
+          knob_id: 'floorplan.utilitization',
+          type: 'number',
+          range: [0.01, 1],
+        },
+      ],
+    })
+
+    expect(resolveAgentWorkspaceKnobs()['floorplan.utilization'].parameter).toBe(
+      'floorplan.core_util',
+    )
+    expect(
+      deriveAgentWorkspaceParameterUpdates([
+        { knob_id: 'floorplan.utilization', value: 0.7 },
+      ]),
+    ).toEqual({
+      workspace_parameters: { 'floorplan.core_util': 0.7 },
+      step_configurations: [],
+    })
+  })
+
+  it('rejects conflicting canonical and legacy values for one parameter', () => {
+    rememberWorkspaceParameterCatalog(CATALOG_DISCOVERY)
+
+    expect(
+      deriveAgentWorkspaceParameterUpdates([
+        { knob_id: 'floorplan.utilization', value: 0.7 },
+        { knob_id: 'floorplan.utilitization', value: 0.8 },
+      ]),
+    ).toBeNull()
   })
 
   it('derives updates from the catalog whitelist, honoring catalog ranges', () => {
