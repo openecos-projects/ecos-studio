@@ -317,8 +317,8 @@ export function useStepDashboardData() {
         .filter(
           (artifact) =>
             artifact.availability === 'available' &&
-            (artifact.kind === 'timing_summary' || artifact.kind === 'timing_paths') &&
-            !artifact.timingCorner,
+            (artifact.kind === 'timing_summary' ||
+              (artifact.kind === 'timing_paths' && !artifact.timingCorner)),
         )
         .slice(0, 32)) {
         const artifact = await readArtifact(descriptor.artifactId)

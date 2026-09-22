@@ -323,6 +323,70 @@ describe('useStepDashboardData', () => {
     expect(dashboard.timingDetailErrors.value).toEqual({})
   })
 
+  it('loads corner timing summaries while deferring their timing paths', async () => {
+    const result = detailResult()
+    if (result.detail.status !== 'ready') throw new Error('expected fixture detail')
+    result.detail.data.artifacts = [
+      {
+        artifactId: 'timing-summary-post-synthesis',
+        availability: 'available',
+        kind: 'timing_summary',
+        name: 'post_synthesis/qor_summary.json',
+        stepId: 'Synthesis',
+        timingCorner: 'post_synthesis',
+      },
+      {
+        artifactId: 'timing-paths-post-synthesis',
+        availability: 'available',
+        kind: 'timing_paths',
+        name: 'post_synthesis/timing_paths.json',
+        stepId: 'Synthesis',
+        timingCorner: 'post_synthesis',
+      },
+    ]
+    result.detail.data.step = {
+      ...result.detail.data.step,
+      name: 'Synthesis',
+      stepId: 'Synthesis',
+    }
+    testState.getStepDetail.mockResolvedValue(result)
+    testState.getArtifact.mockResolvedValue({
+      artifact: {
+        status: 'ready',
+        issues: [],
+        data: {
+          artifactId: 'timing-summary-post-synthesis',
+          kind: 'timing_summary',
+          mimeType: 'application/json',
+          name: 'qor_summary.json',
+          timingSummary: {
+            corner: 'post_synthesis',
+            meetsTiming: false,
+            setup: { wns: 18.452, tns: 0, violationCount: 0, frequencyMhz: 646 },
+            hold: { wns: -0.038, tns: -0.2, violationCount: 12 },
+          },
+        },
+      },
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
+    })
+
+    const dashboard = scope.run(() => useStepDashboardData())!
+    await vi.waitFor(() => expect(dashboard.loading.value).toBe(false))
+
+    expect(testState.getArtifact).toHaveBeenCalledWith({
+      artifactId: 'timing-summary-post-synthesis',
+      workspaceContextId: 'context-a',
+      workspaceRevision: 9,
+    })
+    expect(testState.getArtifact).toHaveBeenCalledTimes(1)
+    expect(dashboard.data.value?.timingAnalysis?.overview).toMatchObject({
+      corners: [expect.objectContaining({ corner: 'post_synthesis', missing: false })],
+      worstSetup: { corner: 'post_synthesis', wns: 18.452 },
+      worstHold: { corner: 'post_synthesis', wns: -0.038 },
+    })
+  })
+
   it.each(['succeeded', 'skipped'] as const)(
     'keeps stale artifacts and Checklist until the current Step is %s',
     async (state) => {
