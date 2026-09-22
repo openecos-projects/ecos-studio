@@ -200,6 +200,7 @@ export type { EccRuntimeOperation }
 export interface RefreshConfigRequest {
   designTool?: DesignTool
   directory: string
+  force?: boolean
   workspaceHandle?: string
   workspace_handle?: string
 }
@@ -214,6 +215,7 @@ export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
   return getDesktopApi()
     .runtime.workspace.refreshConfig({
       designTool: designToolFromData(data),
+      ...(data.force === true ? { force: true } : {}),
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then((result) =>

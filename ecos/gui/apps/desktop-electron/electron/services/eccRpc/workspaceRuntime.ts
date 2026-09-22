@@ -32,6 +32,7 @@ import type {
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
+  EccWorkspaceRefreshConfigRequest,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationUpdateRequest,
@@ -478,7 +479,7 @@ export class EccWorkspaceRuntime {
   }
 
   async refreshConfig(
-    request: EccWorkspaceHandleRequest,
+    request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     const result = await this.commands.refreshConfig(request)
     this.cachedSnapshot = null

@@ -23,6 +23,7 @@ import {
   type DesignRuntimeWorkspaceHandleRequest,
   type DesignRuntimeWorkspaceInfoRequest,
   type DesignRuntimeWorkspaceOpenRequest,
+  type DesignRuntimeWorkspaceRefreshConfigRequest,
   type DesignRuntimeWorkspaceStepOutputsRequest,
   type DesignTool,
   type DesktopDirectoryDialogOptions,
@@ -2623,7 +2624,7 @@ export function registerIpc(
   handle(
     desktopApiIpcChannels.designRuntimeWorkspaceRefreshConfig,
     async (_event, request) => {
-      const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+      const runtimeRequest = request as DesignRuntimeWorkspaceRefreshConfigRequest
       return requireDesignTool(runtimeRequest.designTool) === 'frontend'
         ? await services.frontendRpcRuntimeService.refreshConfig(
             runtimeRequest.workspaceHandle,

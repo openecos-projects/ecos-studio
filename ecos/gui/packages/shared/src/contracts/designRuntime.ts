@@ -60,6 +60,10 @@ export interface DesignRuntimeWorkspaceHandleRequest extends DesignRuntimeTarget
   workspaceHandle: string
 }
 
+export interface DesignRuntimeWorkspaceRefreshConfigRequest extends DesignRuntimeWorkspaceHandleRequest {
+  force?: boolean
+}
+
 export interface DesignRuntimeWorkspaceInfoRequest extends DesignRuntimeWorkspaceHandleRequest {
   id: string
   step: string
@@ -121,7 +125,7 @@ export interface DesignRuntimeApi {
     ): Promise<EccWorkspaceStepOutputsResult>
     open(request: DesignRuntimeWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult>
     refreshConfig(
-      request: DesignRuntimeWorkspaceHandleRequest,
+      request: DesignRuntimeWorkspaceRefreshConfigRequest,
     ): Promise<EccWorkspaceRefreshConfigResult>
     resetFlow(
       request: DesignRuntimeWorkspaceHandleRequest,

@@ -32,6 +32,7 @@ import type {
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
+  EccWorkspaceRefreshConfigRequest,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceRuntimeSnapshot,
@@ -446,7 +447,7 @@ export class EccRpcRuntimeService {
   }
 
   async refreshConfig(
-    request: EccWorkspaceHandleRequest,
+    request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     return this.runtimeForHandle(request.workspaceHandle).refreshConfig(request)
   }

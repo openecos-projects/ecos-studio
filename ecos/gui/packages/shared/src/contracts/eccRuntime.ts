@@ -105,6 +105,10 @@ export interface EccWorkspaceHandleRequest {
   expectedWorkspaceRevision?: number
 }
 
+export interface EccWorkspaceRefreshConfigRequest extends EccWorkspaceHandleRequest {
+  force?: boolean
+}
+
 export interface EccWorkspaceStepOutputArtifact {
   exists: boolean
   path: string

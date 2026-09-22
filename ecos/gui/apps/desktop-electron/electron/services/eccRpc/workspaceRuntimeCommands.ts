@@ -23,6 +23,7 @@ import type {
   EccWorkspaceInfoResult,
   EccWorkspaceOpenRequest,
   EccWorkspaceOpenResult,
+  EccWorkspaceRefreshConfigRequest,
   EccWorkspaceRefreshConfigResult,
   EccWorkspaceResetFlowResult,
   EccWorkspaceStepConfigurationUpdateRequest,
@@ -313,10 +314,11 @@ export class WorkspaceRuntimeCommands {
   }
 
   refreshConfig(
-    request: EccWorkspaceHandleRequest,
+    request: EccWorkspaceRefreshConfigRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
     return this.workspaceCall('workspace.refresh_config', request, (workspaceId) => ({
       workspaceId,
+      ...(request.force === true ? { force: true } : {}),
     }))
   }
 

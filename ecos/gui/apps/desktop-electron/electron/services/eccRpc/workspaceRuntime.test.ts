@@ -551,7 +551,10 @@ describe('EccWorkspaceRuntime', () => {
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await service.workspaceSnapshot({ workspaceHandle: workspace.workspaceHandle })
 
-    await service.refreshConfig({ workspaceHandle: workspace.workspaceHandle })
+    await service.refreshConfig({
+      force: true,
+      workspaceHandle: workspace.workspaceHandle,
+    })
     const snapshot = await service.workspaceSnapshot({
       workspaceHandle: workspace.workspaceHandle,
     })
@@ -563,6 +566,12 @@ describe('EccWorkspaceRuntime', () => {
     expect(
       client.calls.filter((call) => call.method === 'workspace.snapshot'),
     ).toHaveLength(2)
+    expect(
+      client.calls.find((call) => call.method === 'workspace.refresh_config'),
+    ).toEqual({
+      method: 'workspace.refresh_config',
+      params: { force: true, workspaceId: 'workspace-1' },
+    })
   })
 
   it('maps protocol notifications to the matching GUI workspace handle', async () => {
