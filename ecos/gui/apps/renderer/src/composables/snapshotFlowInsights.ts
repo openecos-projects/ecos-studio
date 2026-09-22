@@ -5,6 +5,7 @@ import type {
   WorkspaceFlowInsightsSummary,
   WorkspaceOverviewCore,
   WorkspaceStaInsights,
+  WorkspaceTimingSummaryDetail,
 } from '@ecos-studio/shared'
 import {
   buildDrcRelatedMetrics,
@@ -38,6 +39,7 @@ export interface FlowInsightsData {
   drcRelated: DrcRelatedMetrics
   sta: StaOverviewModel | null
   staCriticalPaths: StaCriticalPathsModel | null
+  timingArtifacts: WorkspaceArtifactDescriptor[]
 }
 
 function trendRows(
@@ -196,6 +198,93 @@ export function staOverviewFromSnapshot(
   }
 }
 
+export function mergeStaTimingSummaries(
+  overview: StaOverviewModel | null,
+  summaries: readonly WorkspaceTimingSummaryDetail[],
+): StaOverviewModel | null {
+  if (!summaries.length && !overview) return null
+  if (!summaries.length) return overview
+
+  const existing = new Map(
+    (overview?.corners ?? []).map((corner) => [corner.corner, corner]),
+  )
+  const corners: StaCornerRowModel[] = summaries.map((summary) => {
+    const previous = existing.get(summary.corner)
+    const setup = {
+      wns: summary.setup.wns,
+      tns: summary.setup.tns,
+      nvp: summary.setup.violationCount,
+      frequencyMhz: summary.setup.frequencyMhz,
+    }
+    const hold = {
+      wns: summary.hold.wns,
+      tns: summary.hold.tns,
+      nvp: summary.hold.violationCount,
+    }
+    return {
+      corner: summary.corner,
+      availability: 'available',
+      missing: false,
+      setup,
+      hold,
+      summary: { setup, hold },
+      groups: previous?.groups ?? {},
+      firstPath: previous?.firstPath ?? null,
+    }
+  })
+  const summaryCorners = new Set(summaries.map((summary) => summary.corner))
+  for (const corner of overview?.corners ?? []) {
+    if (corner.missing && !summaryCorners.has(corner.corner)) corners.push(corner)
+  }
+
+  const setupEntries = corners.flatMap((corner) =>
+    corner.setup?.wns === null || corner.setup?.wns === undefined
+      ? []
+      : [{ corner: corner.corner, wns: corner.setup.wns }],
+  )
+  const holdEntries = corners.flatMap((corner) =>
+    corner.hold?.wns === null || corner.hold?.wns === undefined
+      ? []
+      : [{ corner: corner.corner, wns: corner.hold.wns }],
+  )
+  const worstSetup = setupEntries.sort((left, right) => left.wns - right.wns)[0] ?? null
+  const worstHold = holdEntries.sort((left, right) => left.wns - right.wns)[0] ?? null
+  const frequencies = corners.flatMap((corner) =>
+    corner.setup?.frequencyMhz === null || corner.setup?.frequencyMhz === undefined
+      ? []
+      : [corner.setup.frequencyMhz],
+  )
+  const setupCounts = corners.map((corner) => corner.setup?.nvp)
+  const holdCounts = corners.map((corner) => corner.hold?.nvp)
+  const setupViolationCount = setupCounts.every(
+    (value) => value !== null && value !== undefined,
+  )
+    ? setupCounts.reduce((total, value) => total + (value ?? 0), 0)
+    : (overview?.setupViolationCount ?? null)
+  const holdViolationCount = holdCounts.every(
+    (value) => value !== null && value !== undefined,
+  )
+    ? holdCounts.reduce((total, value) => total + (value ?? 0), 0)
+    : (overview?.holdViolationCount ?? null)
+
+  return {
+    corners,
+    pathGroups: overview?.pathGroups ?? [],
+    selectedPathGroup: overview?.selectedPathGroup ?? 'summary',
+    worstSetup,
+    worstHold,
+    frequencyMhz: frequencies.length
+      ? Math.min(...frequencies)
+      : (overview?.frequencyMhz ?? null),
+    setupViolationCount,
+    holdViolationCount,
+    allCornersMet:
+      worstSetup && worstHold
+        ? worstSetup.wns >= 0 && worstHold.wns >= 0
+        : (overview?.allCornersMet ?? null),
+  }
+}
+
 export function staCriticalPathsFromSnapshot(
   sta: WorkspaceStaInsights | null,
 ): StaCriticalPathsModel | null {
@@ -324,5 +413,14 @@ export function buildSnapshotFlowInsights(
     }),
     sta: staOverviewFromSnapshot(insights.data.sta),
     staCriticalPaths: staCriticalPathsFromSnapshot(insights.data.sta),
+    timingArtifacts:
+      artifacts?.status === 'ready' || artifacts?.status === 'partial'
+        ? artifacts.data.items.filter(
+            (artifact) =>
+              artifact.stepId?.trim().toLowerCase() === 'sta' &&
+              artifact.availability === 'available' &&
+              (artifact.kind === 'timing_summary' || artifact.kind === 'timing_paths'),
+          )
+        : [],
   }
 }

@@ -163,4 +163,118 @@ describe('useFlowInsights', () => {
     })
     scope.stop()
   })
+
+  it('loads all STA summaries and only the selected corner timing paths', async () => {
+    testState.session!.projection.data.artifacts.data.items = [
+      {
+        artifactId: 'timing-summary-max',
+        availability: 'available',
+        kind: 'timing_summary',
+        name: 'MAX_125/Cworst/qor_summary.json',
+        stepId: 'sta',
+        timingCorner: 'MAX_125/Cworst',
+        sourceRevision: 8,
+      },
+      {
+        artifactId: 'timing-summary-ml',
+        availability: 'available',
+        kind: 'timing_summary',
+        name: 'ML_125/Cbest/qor_summary.json',
+        stepId: 'sta',
+        timingCorner: 'ML_125/Cbest',
+      },
+      {
+        artifactId: 'timing-paths-max',
+        availability: 'available',
+        kind: 'timing_paths',
+        name: 'MAX_125/Cworst/timing_paths.json',
+        stepId: 'sta',
+        timingCorner: 'MAX_125/Cworst',
+      },
+      {
+        artifactId: 'timing-paths-ml',
+        availability: 'available',
+        kind: 'timing_paths',
+        name: 'ML_125/Cbest/timing_paths.json',
+        stepId: 'sta',
+        timingCorner: 'ML_125/Cbest',
+      },
+    ]
+    testState.session!.projection.data.flowInsights.data.sta = {
+      corners: [
+        {
+          corner: 'MAX_125/Cworst',
+          availability: 'available',
+          setupWns: 18,
+          setupTns: 0,
+          setupViolationCount: 0,
+          frequencyMhz: 515,
+          holdWns: -0.02,
+          holdTns: 0,
+          holdViolationCount: 1,
+        },
+      ],
+      criticalPaths: [],
+      worstSetup: { corner: 'MAX_125/Cworst', wns: 18 },
+      worstHold: { corner: 'MAX_125/Cworst', wns: -0.02 },
+      frequencyMhz: 515,
+      setupViolationCount: 0,
+      holdViolationCount: 1,
+      allCornersMet: false,
+    }
+    testState.getArtifact.mockImplementation(
+      async ({ artifactId, workspaceRevision }) => ({
+        artifact: {
+          status: 'ready',
+          issues: [],
+          data: {
+            artifactId,
+            kind: artifactId.includes('paths') ? 'timing_paths' : 'timing_summary',
+            mimeType: 'application/json',
+            name: `${artifactId}.json`,
+            ...(artifactId.includes('paths')
+              ? {
+                  timingPaths: {
+                    corner: artifactId.includes('ml') ? 'ML_125/Cbest' : 'MAX_125/Cworst',
+                    pathLimit: 20,
+                    paths: [],
+                  },
+                }
+              : {
+                  timingSummary: {
+                    corner: artifactId.includes('ml') ? 'ML_125/Cbest' : 'MAX_125/Cworst',
+                    meetsTiming: false,
+                    setup: { wns: 18, tns: 0, violationCount: 0, frequencyMhz: 515 },
+                    hold: { wns: -0.02, tns: 0, violationCount: 1 },
+                  },
+                }),
+          },
+        },
+        generation: 0,
+        workspaceContextId: 'context-a',
+        workspaceRevision,
+      }),
+    )
+
+    const scope = effectScope()
+    const insights = scope.run(() => useFlowInsights())!
+    await insights.loadTiming()
+
+    expect(insights.sta.value?.corners).toHaveLength(2)
+    expect(insights.timingSelectedCorner.value).toBe('MAX_125/Cworst')
+    expect(insights.timingPathsByCorner.value).toEqual([
+      { corner: 'MAX_125/Cworst', paths: [] },
+    ])
+    expect(testState.getArtifact).toHaveBeenCalledTimes(3)
+    expect(testState.getArtifact).toHaveBeenCalledWith({
+      artifactId: 'timing-summary-max',
+      workspaceContextId: 'context-a',
+      workspaceRevision: 8,
+    })
+
+    await insights.loadTimingCorner('ML_125/Cbest')
+    expect(insights.timingPathsByCorner.value).toHaveLength(2)
+    expect(testState.getArtifact).toHaveBeenCalledTimes(4)
+    scope.stop()
+  })
 })

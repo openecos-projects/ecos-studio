@@ -60,6 +60,12 @@
           :model="sta"
           :critical-paths="staCriticalPaths"
           :convergence="staConvergence"
+          :paths-by-corner="timingPathsByCorner"
+          :run-info="timingRunInfo"
+          :selected-corner="timingSelectedCorner"
+          :detail-loading="timingDetailLoading"
+          :detail-error="timingDetailError"
+          @select-corner="loadTimingCorner"
         />
       </div>
     </Dialog>
@@ -84,6 +90,7 @@ import type {
   InstanceCompositionModel,
   StaConvergenceModel,
   StaCriticalPathsModel,
+  StaCriticalPath,
   StaOverviewModel,
   StepResourcesModel,
 } from './flowInsightsData'
@@ -103,8 +110,15 @@ const props = defineProps<{
   sta: StaOverviewModel | null
   staCriticalPaths?: StaCriticalPathsModel | null
   staConvergence?: StaConvergenceModel | null
+  timingPathsByCorner?: Array<{ corner: string; paths: StaCriticalPath[] }> | null
+  timingRunInfo?: Array<{ id: string; label: string; value: string }>
+  timingSelectedCorner?: string | null
+  timingDetailLoading?: string[]
+  timingDetailError?: string | null
   loading?: boolean
   loadCongestion?: () => void | Promise<void>
+  loadTiming?: () => void | Promise<void>
+  loadTimingCorner?: (corner: string | null) => void | Promise<void>
 }>()
 
 const DATA_SNAPSHOT_ROWS = 4
@@ -141,6 +155,7 @@ function openModule(moduleId: string): void {
   dialogMaximized.value = false
   dialogVisible.value = true
   if (moduleId === 'congestion') void props.loadCongestion?.()
+  if (moduleId === 'timing') void props.loadTiming?.()
 }
 </script>
 

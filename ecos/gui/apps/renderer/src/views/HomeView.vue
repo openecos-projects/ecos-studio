@@ -380,6 +380,17 @@
               :sta="flowInsightSta"
               :sta-critical-paths="flowInsightStaPaths"
               :sta-convergence="flowInsightStaConvergence"
+              :timing-paths-by-corner="flowInsightTimingPaths"
+              :timing-run-info="flowInsightTimingRunInfo"
+              :timing-selected-corner="flowInsightTimingCorner"
+              :timing-detail-loading="flowInsightTimingLoading"
+              :timing-detail-error="
+                flowInsightTimingCorner
+                  ? (flowInsightTimingErrors[flowInsightTimingCorner] ?? null)
+                  : null
+              "
+              :load-timing="loadFlowInsightTiming"
+              :load-timing-corner="loadFlowInsightTimingCorner"
               :loading="flowInsightsLoading"
               :load-congestion="loadFlowInsightCongestion"
             />
@@ -575,6 +586,13 @@ const {
   drcRelated: flowInsightDrcRelated,
   sta: flowInsightSta,
   staCriticalPaths: flowInsightStaPaths,
+  timingPathsByCorner: flowInsightTimingPaths,
+  timingRunInfo: flowInsightTimingRunInfo,
+  timingSelectedCorner: flowInsightTimingCorner,
+  timingDetailLoading: flowInsightTimingLoading,
+  timingDetailErrors: flowInsightTimingErrors,
+  loadTiming: loadFlowInsightTiming,
+  loadTimingCorner: loadFlowInsightTimingCorner,
   loading: flowInsightsLoading,
   loadCongestion: loadFlowInsightCongestion,
 } = useFlowInsights()

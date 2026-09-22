@@ -29,6 +29,7 @@ describe('FlowInsightsPanel', () => {
       stats: { max: 3, total: 6, hotspotCount: 2 },
     }
     const loadCongestion = vi.fn()
+    const loadTiming = vi.fn()
     const wrapper = mount(FlowInsightsPanel, {
       props: {
         steps: [step],
@@ -46,6 +47,7 @@ describe('FlowInsightsPanel', () => {
         drc: null,
         sta: null,
         loadCongestion,
+        loadTiming,
       },
       global: {
         stubs: {
@@ -68,5 +70,11 @@ describe('FlowInsightsPanel', () => {
     await congestion?.trigger('click')
 
     expect(loadCongestion).toHaveBeenCalledOnce()
+
+    const timing = wrapper
+      .findAll<HTMLButtonElement>('.data-snapshot-tile')
+      .find((button) => button.text().includes('Timing'))
+    await timing?.trigger('click')
+    expect(loadTiming).toHaveBeenCalledOnce()
   })
 })

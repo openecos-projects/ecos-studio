@@ -1,7 +1,9 @@
 import type { WorkspaceOverviewCore } from '@ecos-studio/shared'
+import type { WorkspaceTimingSummaryDetail } from '@ecos-studio/shared'
 import { describe, expect, it } from 'vitest'
 import {
   buildSnapshotFlowInsights,
+  mergeStaTimingSummaries,
   staCriticalPathsFromSnapshot,
   staOverviewFromSnapshot,
 } from './snapshotFlowInsights'
@@ -216,5 +218,80 @@ describe('buildSnapshotFlowInsights', () => {
 
     expect(result?.setup.map((path) => path.slackNs)).toEqual([-1, -0.5, 0, 0.5, 1])
     expect(result?.bestSetup.map((path) => path.slackNs)).toEqual([2, 1, 0.5, 0, -0.5])
+  })
+
+  it('merges all timing summary artifacts into the STA corner overview', () => {
+    const initial = staOverviewFromSnapshot({
+      corners: [
+        {
+          corner: 'all_configured_corners',
+          role: '',
+          process: '',
+          voltageV: null,
+          temperatureC: null,
+          rcCorner: '',
+          availability: 'available',
+          setupWns: null,
+          setupTns: null,
+          setupViolationCount: 0,
+          frequencyMhz: null,
+          holdWns: null,
+          holdTns: null,
+          holdViolationCount: 193,
+        },
+        {
+          corner: 'MAX_125/Cworst',
+          role: 'MAX',
+          process: 'SS',
+          voltageV: 1.08,
+          temperatureC: 125,
+          rcCorner: 'Cworst',
+          availability: 'available',
+          setupWns: 18.057,
+          setupTns: 0,
+          setupViolationCount: null,
+          frequencyMhz: 515,
+          holdWns: null,
+          holdTns: null,
+          holdViolationCount: null,
+        },
+      ],
+      criticalPaths: [],
+      worstSetup: { corner: 'MAX_125/Cworst', wns: 18.057 },
+      worstHold: { corner: 'ML_125/Cbest', wns: -0.084 },
+      frequencyMhz: 515,
+      setupViolationCount: 0,
+      holdViolationCount: 193,
+      allCornersMet: false,
+    })
+    const summaries: WorkspaceTimingSummaryDetail[] = [
+      'MAX_125/Cworst',
+      'MAX_125/RCworst',
+      'MIN_m40/Cbest',
+      'MIN_m40/Cworst',
+      'MIN_m40/RCbest',
+      'MIN_m40/RCworst',
+      'ML_125/Cbest',
+      'ML_125/Cworst',
+      'ML_125/RCbest',
+      'ML_125/RCworst',
+      'TYP_25/TYPICAL',
+      'WCL_m40/Cworst',
+      'WCL_m40/RCworst',
+    ].map((corner, index) => ({
+      corner,
+      meetsTiming: index === 0,
+      setup: { wns: 18 + index, tns: 0, violationCount: 0, frequencyMhz: 515 + index },
+      hold: { wns: index === 6 ? -0.084 : -0.02, tns: 0, violationCount: index },
+    }))
+
+    const merged = mergeStaTimingSummaries(initial, summaries)
+
+    expect(merged?.corners).toHaveLength(13)
+    expect(merged?.corners.map((corner) => corner.corner)).toEqual(
+      summaries.map((summary) => summary.corner),
+    )
+    expect(merged?.holdViolationCount).toBe(78)
+    expect(merged?.worstHold).toEqual({ corner: 'ML_125/Cbest', wns: -0.084 })
   })
 })

@@ -34,6 +34,7 @@ import {
 import {
   congestionTilesFromArtifacts,
   drcSummaryFromSnapshot,
+  mergeStaTimingSummaries,
   staCriticalPathsFromSnapshot,
   staOverviewFromSnapshot,
 } from './snapshotFlowInsights'
@@ -446,9 +447,11 @@ export function applyTimingArtifacts(
   summaries: WorkspaceTimingSummaryDetail[],
   pathDetails: WorkspaceTimingPathsDetail[],
 ): void {
-  const overview =
+  const overview = mergeStaTimingSummaries(
     data.timingAnalysis?.overview ??
-    (summaries.length === 1 ? overviewFromTimingSummary(summaries[0]) : null)
+      (summaries.length === 1 ? overviewFromTimingSummary(summaries[0]) : null),
+    summaries,
+  )
   if (!overview && !pathDetails.length) return
   const pathsByCorner = pathDetails.map((detail) => ({
     corner: detail.corner,

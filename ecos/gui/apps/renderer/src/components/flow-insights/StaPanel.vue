@@ -3,7 +3,13 @@
     <TimingAnalysisPanel
       :overview="model"
       :critical-paths="criticalPaths"
+      :paths-by-corner="pathsByCorner"
+      :run-info="runInfo"
+      :selected-corner="selectedCorner"
+      :detail-loading="selectedCorner ? detailLoading?.includes(selectedCorner) : false"
+      :detail-error="detailError"
       empty-hint="Waiting for STA corners…"
+      @select-corner="emit('select-corner', $event)"
     />
 
     <section v-if="hasCorners && convergence" class="sta-card">
@@ -34,12 +40,22 @@ import type {
   StaConvergenceModel,
   StaCriticalPathsModel,
   StaOverviewModel,
+  StaCriticalPath,
 } from './flowInsightsData'
 
 const props = defineProps<{
   model: StaOverviewModel | null
   criticalPaths?: StaCriticalPathsModel | null
   convergence?: StaConvergenceModel | null
+  pathsByCorner?: Array<{ corner: string; paths: StaCriticalPath[] }> | null
+  runInfo?: Array<{ id: string; label: string; value: string }>
+  selectedCorner?: string | null
+  detailLoading?: string[]
+  detailError?: string | null
+}>()
+
+const emit = defineEmits<{
+  'select-corner': [corner: string | null]
 }>()
 
 const hasCorners = computed(() => Boolean(props.model?.corners.length))
