@@ -232,6 +232,10 @@ export interface ChipViewerOpenResult {
   editCommandDirectory?: string
   editResultDirectory?: string
   geometryManifestPath: string
+  macroStaging?: {
+    enabled: boolean
+    warning?: string
+  }
   workspaceStepDirectory: string
   spawned: boolean
 }

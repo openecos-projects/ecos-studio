@@ -1254,7 +1254,7 @@ const { openReport, reportDialog } = useStepReportDialog(
   currentStep,
   computed(() => data.value?.step),
 )
-const { currentProject } = useWorkspace()
+const { currentProject, showToast } = useWorkspace()
 const { flowStages } = useBackendFlowStages()
 const { state: qorComparisonState } = useBackendWorkspaceQor()
 const {
@@ -1628,9 +1628,19 @@ async function openChipViewer(mode: 'view' | 'edit' = 'view'): Promise<void> {
   const busy = mode === 'edit' ? chipViewerEditBusy : chipViewerBusy
   busy.value = true
   try {
-    await getDesktopApi().chipViewer.open(
+    const result = await getDesktopApi().chipViewer.open(
       buildChipViewerOpenRequest(projectPath, step, mode),
     )
+    if (mode === 'edit' && result.macroStaging && !result.macroStaging.enabled) {
+      showToast({
+        severity: 'warn',
+        summary: 'Macro placement staging unavailable',
+        detail:
+          result.macroStaging.warning ??
+          'The Chip Viewer opened in move-only mode; unplaced macros cannot be staged.',
+        life: 8000,
+      })
+    }
   } catch (cause) {
     console.error('Failed to open Chip Viewer from step dashboard:', cause)
   } finally {

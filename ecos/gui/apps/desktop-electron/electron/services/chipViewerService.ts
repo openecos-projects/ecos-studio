@@ -246,6 +246,8 @@ interface SnapshotInputs {
 
 type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
 
+type MacroStagingResult = { path: string } | { warning: string }
+
 interface SnapshotSourcePath {
   label: string
   path: string
@@ -664,6 +666,7 @@ export class ChipViewerService {
     let editResultDirectory: string | undefined
     let layoutEdit: LayoutEditContext | undefined
     let macroStagingPath: string | undefined
+    let macroStagingWarning: string | undefined
     let viewerSnapshotInputs = snapshotInputs
     if (mode === 'edit') {
       layoutEdit = await this.beginLayoutEdit(projectPath, request.step)
@@ -687,10 +690,9 @@ export class ChipViewerService {
       editCommandDirectory = viewerSnapshotInputs.editCommandDirectory
       editResultDirectory = viewerSnapshotInputs.editResultDirectory
       if (isMacroPlacementStep(request.step)) {
-        macroStagingPath = await this.prepareMacroStaging(
-          viewerSnapshotInputs,
-          layoutEdit,
-        )
+        const staging = await this.prepareMacroStaging(viewerSnapshotInputs, layoutEdit)
+        if ('path' in staging) macroStagingPath = staging.path
+        else macroStagingWarning = staging.warning
       }
     }
 
@@ -744,6 +746,18 @@ export class ChipViewerService {
       editCommandDirectory,
       editResultDirectory,
       geometryManifestPath: viewerManifestPath,
+      ...(mode === 'edit' && isMacroPlacementStep(request.step)
+        ? {
+            macroStaging: macroStagingPath
+              ? { enabled: true }
+              : {
+                  enabled: false,
+                  warning:
+                    macroStagingWarning ??
+                    'Macro placement data could not be prepared; the viewer opened in move-only mode.',
+                },
+          }
+        : {}),
       spawned: true,
       workspaceStepDirectory: snapshotInputs.workspaceStepDirectory,
     }
@@ -1044,14 +1058,14 @@ export class ChipViewerService {
 
   /**
    * Builds the macro staging manifest for a macro-placement edit session and
-   * publishes it into the bridge command directory. Returns undefined (and
-   * keeps the session non-macro) when the DEF or master metadata cannot be
-   * parsed, so the viewer still opens in move-only edit mode.
+   * publishes it into the bridge command directory. A staging failure keeps
+   * the viewer usable in move-only edit mode while returning the reason to the
+   * renderer for an explicit warning.
    */
   private async prepareMacroStaging(
     snapshotInputs: SnapshotInputs,
     layoutEdit: LayoutEditContext,
-  ): Promise<string | undefined> {
+  ): Promise<MacroStagingResult> {
     try {
       const manifestValues = parseGeometryManifestText(
         await this.readTextFile(layoutEdit.geometryManifestPath),
@@ -1074,11 +1088,13 @@ export class ChipViewerService {
       await this.writeTextFile(temporaryPath, serializeMacroStagingManifest(manifest))
       await this.renameFile(temporaryPath, stagingPath)
       layoutEdit.macroPlacement = true
-      return stagingPath
+      return { path: stagingPath }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`chip viewer macro staging unavailable: ${message}`)
-      return undefined
+      return {
+        warning: `Macro placement data could not be prepared (${message}); the viewer opened in move-only mode.`,
+      }
     }
   }
 
