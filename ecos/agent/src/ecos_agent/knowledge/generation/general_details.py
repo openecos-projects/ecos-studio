@@ -331,9 +331,10 @@ CONGESTION_REGRESSION_CASES = (
         "required_text": "increase_cell_padding",
     },
     {
-        "id": "strategy-narrow-channel",
+        "id": "strategy-coarse-area-relief",
+        "question": "Routed overflow and detailed-route violations are positive. What bounded area or padding action is available without claiming a spatial cause?",
         "entity_id": "strategy.congestion.macro_or_narrow_channel.v1",
-        "required_text": "macro or narrow channel",
+        "required_text": "inflate_cells_in_hotspot",
     },
     {
         "id": "strategy-unbound-timing",
@@ -348,12 +349,6 @@ WIRELENGTH_REGRESSION_CASES = (
         "question": "Placement HPWL improved, but routed wirelength has not been validated through route. What should happen next?",
         "entity_id": "strategy.wirelength.validate_route_after_proxy_gain.v1",
         "required_text": "validate_routed_wirelength_after_proxy_gain",
-    },
-    {
-        "id": "wirelength-hpwl-flute-disagreement",
-        "question": "Placement HPWL cannot distinguish candidate topology, or HPWL and FLUTE rank candidates differently. Which place-stage proxy should be checked?",
-        "entity_id": "strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1",
-        "required_text": "use_flute_as_secondary_wirelength_proxy",
     },
     {
         "id": "wirelength-clean-congestion-reduce-spreading",

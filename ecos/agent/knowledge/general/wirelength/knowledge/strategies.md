@@ -31,39 +31,6 @@
 
 **Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**
 
-<a id="strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1"></a>
-## strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1
-
-**Topic:** wirelength strategy.
-
-**Objective metric:** route_wirelength.
-
-**Proxy scope:** wirelength corpus labels are not substitutes for the route-level objective.
-
-**Applies to steps:** place.
-
-**Condition:** FLUTE is not an agent-visible metric in the frozen 190-key epsilon inventory. Do not invent or treat a missing FLUTE value as routed wirelength; use place_hpwl only as an intermediate proxy and require route_wirelength for objective validation.
-
-**Diagnosis:** unavailable flute proxy requires route validation.
-
-**Required evidence:** place_hpwl, route_wirelength.
-
-**Action intent:** use flute as secondary wirelength proxy (`use_flute_as_secondary_wirelength_proxy`).
-
-**Effects:** route_wirelength may_decrease.
-
-**Anti-conditions:** .
-
-**ECOS analog:** No authorized knob. Do not invent one.
-
-**Binding limits:** No authorized knob. Do not invent one.
-
-**Review status:** source_grounded.
-
-**Evidence sources:** paper.wirelength.wot_the_l.2018, paper.wirelength.autodmp.2023.
-
-**Source evidence:** **general.wirelength.statements**, **general.wirelength.bindings**
-
 <a id="strategy.wirelength.reduce_excessive_place_spreading.v1"></a>
 ## strategy.wirelength.reduce_excessive_place_spreading.v1
 

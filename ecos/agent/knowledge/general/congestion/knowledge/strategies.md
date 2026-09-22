@@ -9,7 +9,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** The agent-visible evidence shows both placement EGR overflow and routed local overflow, but scalar metrics cannot establish whether the cause is local cell demand or through-traffic demand. Do not claim a spatial diagnosis from map presence alone.
+**Condition:** Routed overflow is positive, but scalar metrics cannot establish whether the cause is local cell demand or through-traffic demand. Do not claim a spatial diagnosis.
 
 **Diagnosis:** unresolved scalar congestion diagnosis.
 
@@ -42,7 +42,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Placement EGR overflow and routed overflow are both positive. Without a consumable hotspot matrix, use the coarse legal spreading analog only as a bounded trial, not as proof that a particular local cell cluster caused the overflow.
+**Condition:** Routed overflow and routed wirelength are both positive. Use the coarse legal spreading analog only as a bounded trial; scalar evidence does not identify a particular local cell cluster.
 
 **Diagnosis:** coarse placement spreading under route overflow.
 
@@ -108,7 +108,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Placement EGR overflow and routed overflow are positive while routability optimization is disabled. Enable the legal area-adjust/padding analog as a bounded trial; scalar evidence does not identify a local hotspot.
+**Condition:** Routed overflow and detailed-route violations are positive while place.routability_opt is false. Enable the legal area-adjust/padding analog as a bounded trial; scalar evidence does not identify a local hotspot.
 
 **Diagnosis:** coarse area adjust under route overflow.
 
@@ -141,7 +141,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Routed and placement overflow are positive and the agent-visible LUT-RUDY utilization maximum is available. Treat this as an aggregate pin/routability-pressure signal; do not infer a particular 2-D bin. The source case is a hotspot with high pin density, not only high cell density; the agent receives only aggregate scalar pressure.
+**Condition:** Routed overflow and detailed-route violations are positive. Treat this as aggregate routability pressure and use padding only as a bounded trial; do not infer a spatial cause.
 
 **Diagnosis:** aggregate routability pressure.
 
@@ -240,7 +240,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** The deterministic congested branch sees positive routed and placement overflow and a legal global padding value. Increasing place.cell_padding_x is only a coarse analog of hotspot padding.
+**Condition:** Routed overflow is positive and a legal global padding value is configured. Increasing place.cell_padding_x is only a coarse spreading analog.
 
 **Diagnosis:** global padding as congestion relief.
 
@@ -273,7 +273,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Aggregate placement overflow and LUT-RUDY pressure are positive. Use the available aggregate indicators to constrain a padding trial, but do not claim that unavailable neighborhood features selected a hotspot.
+**Condition:** Routed overflow and detailed-route violations are positive. Use the available aggregate scalar evidence to constrain a padding trial; do not claim that unavailable spatial features selected a hotspot.
 
 **Diagnosis:** aggregate features for padding trial.
 
@@ -306,7 +306,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Placement and routed overflow are clean while positive global padding remains configured. Reduce padding only as a controlled wirelength trial; no spatial claim about cells leaving a hotspot is available.
+**Condition:** Routed overflow is clean while positive global padding remains configured. Reduce padding only as a controlled wirelength trial; no spatial claim is available.
 
 **Diagnosis:** padding reduction after clean route.
 
@@ -339,7 +339,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Placement EGR overflow remains positive while routed overflow is clean and padding is already configured. Avoid escalating a coarse relief signal without terminal route evidence.
+**Condition:** Routed overflow is clean while padding is configured. Keep this no-action guard to prevent escalating over-padding without terminal route evidence of a need for more relief.
 
 **Diagnosis:** coarse relief without routed overflow.
 
@@ -405,7 +405,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** The deterministic congested branch sees positive routed and placement overflow while place.routability_opt is false. Enable congestion-guided area adjustment as a bounded legal trial and validate route-level overflow afterward.
+**Condition:** Routed overflow is positive while place.routability_opt is false. Enable congestion-guided area adjustment as a bounded legal trial and validate route-level overflow afterward.
 
 **Diagnosis:** routability area adjust under route overflow.
 
@@ -471,7 +471,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** Placement EGR overflow, routed overflow, and routed wirelength are all positive. Compare terminal scalar outcomes instead of claiming that two unexposed spatial estimators disagree.
+**Condition:** Routed overflow and routed wirelength are positive. Compare terminal scalar outcomes instead of claiming unobserved spatial demand models.
 
 **Diagnosis:** placement proxy vs route scalar gap.
 
@@ -504,7 +504,7 @@
 
 **Applies to steps:** place, floorplan.
 
-**Condition:** Routed and placement overflow are positive and the aggregate RUDY utilization maximum is available. Use area/padding relief only as a coarse trial; macro-edge or narrow-channel localization is not exposed to the agent. Macro or narrow channel is a source-level hypothesis only; the agent-visible scalar metrics do not expose macro-boundary localization. Narrow channels between macros cause routing overflow in the source example. The source describes a macro or narrow channel, but this is not an agent-visible spatial predicate.
+**Condition:** Routed overflow and detailed-route violations are positive. Use area/padding relief only as a coarse trial; scalar metrics do not localize the cause.
 
 **Diagnosis:** aggregate area pressure without spatial localization.
 
@@ -570,7 +570,7 @@
 
 **Applies to steps:** place.
 
-**Condition:** The deterministic congested branch sees positive routed and placement overflow while a legal target density is configured. Decrease target density as a coarse packing-relief trial and validate route-level overflow.
+**Condition:** Routed overflow is positive while a legal target density is configured. Decrease target density as a coarse packing-relief trial and validate route-level overflow.
 
 **Diagnosis:** lower packing under route overflow.
 

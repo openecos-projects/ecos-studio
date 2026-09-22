@@ -72,7 +72,7 @@ def test_general_bundles_keep_congestion_and_wirelength_separate() -> None:
     assert congestion_catalog["publication"]["metrics"] == ["congestion"]
     assert wirelength_catalog["publication"]["metrics"] == ["wirelength"]
     assert len(congestion.entities) == 25
-    assert len(wirelength.entities) == 12
+    assert len(wirelength.entities) == 11
     assert all(entity_id.startswith("strategy.congestion.") for entity_id in congestion.entity_ids)
     assert all(entity_id.startswith("strategy.wirelength.") for entity_id in wirelength.entity_ids)
     assert not (CONGESTION_ROOT / "regression" / "wirelength_questions.jsonl").exists()
@@ -97,7 +97,7 @@ def test_general_bundles_publish_hash_locked_claim_action_support() -> None:
         item for item in catalog.bindings if item.claim_id == spreading.claim_ref.entity_id
     )
 
-    assert len(catalog.claims) == 37
+    assert len(catalog.claims) == 36
     assert spreading.claim_sha256.startswith("sha256:")
     assert spreading.required_evidence == ("route_la_total_overflow", "place.target_density")
     assert spreading.action_intents == ("decrease_packing_density",)
@@ -190,7 +190,6 @@ def test_wirelength_bindings_expose_only_the_authorized_place_knobs() -> None:
     }
     wirelength_intents = {
         "validate_routed_wirelength_after_proxy_gain",
-        "use_flute_as_secondary_wirelength_proxy",
         "reduce_excessive_place_spreading",
         "reject_wirelength_guardrail_regression",
         "reject_post_legalization_rebound",
@@ -257,14 +256,14 @@ def test_congestion_questions_retrieve_step_scoped_strategy_cards() -> None:
             "redistribute_global_routing_demand",
         ),
         (
-            "A hotspot has high pin density, not only high cell density",
+            "Routed overflow and detailed-route violations are positive; which bounded action uses aggregate routability pressure?",
             "strategy.congestion.pin_density_with_overflow.v1",
             "increase_cell_padding",
         ),
         (
-            "narrow channels between macros cause routing overflow",
+            "Routed overflow and detailed-route violations are positive; what bounded area or padding action is available without claiming a spatial cause?",
             "strategy.congestion.macro_or_narrow_channel.v1",
-            "macro or narrow channel",
+            "inflate_cells_in_hotspot",
         ),
     )
     for question, entity_id, required in distinctive:
@@ -287,7 +286,6 @@ def test_wirelength_questions_retrieve_step_scoped_strategy_cards() -> None:
 
     assert {case["id"] for case in regression} == {
         "wirelength-proxy-route-validation",
-        "wirelength-hpwl-flute-disagreement",
         "wirelength-clean-congestion-reduce-spreading",
         "wirelength-timing-veto",
         "wirelength-macro-hpwl-veto",
@@ -306,7 +304,7 @@ def test_default_provider_loads_general_without_adding_a_stage() -> None:
     assert "general" not in provider.knowledge_retriever.stage_ids
     assert set(provider.knowledge_retriever.stage_ids) == {spec.slug for spec in STEP_KNOWLEDGE_SPECS}
     answer = provider.knowledge_retriever.reply_for_stages(
-        "HPWL and FLUTE rank placement candidates differently", ("place",)
+        "Placement HPWL improves, but routed wirelength and routed overflow worsen", ("place",)
     )
     assert answer is not None
-    assert "strategy.wirelength.use_flute_when_hpwl_is_ambiguous.v1" in answer.entity_ids
+    assert "strategy.wirelength.reject_macro_hpwl_only_gain.v1" in answer.entity_ids
