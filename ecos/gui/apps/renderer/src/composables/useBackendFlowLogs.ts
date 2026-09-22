@@ -6,6 +6,7 @@ import {
   backendRuntimeEventPayload,
   backendRuntimeEventState,
   backendRuntimeEventStep,
+  backendRuntimeEventTerminalState,
 } from '@/api/backendRuntimeEvents'
 import { readOptionalProjectTextFileChunk } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
@@ -22,6 +23,7 @@ export interface FlowLogSegment {
   failed: boolean
   missing: boolean
   live?: boolean
+  startedAtMs?: number
   truncated?: boolean
   totalSize?: number
   lastReadOffsetBytes?: number
@@ -126,6 +128,7 @@ function upsertRuntimeSegment(input: {
   state: string
   live: boolean
   failed?: boolean
+  startedAtMs?: number | null
 }): FlowLogSegment {
   const index = flowLogSegmentsState.value.findIndex((segment) =>
     sameSegment(segment, input.stepName, input.tool),
@@ -144,6 +147,14 @@ function upsertRuntimeSegment(input: {
     state: input.state,
     stepName: input.stepName,
     tool: input.tool || previous?.tool || '',
+  }
+  if (input.startedAtMs === null) {
+    delete next.startedAtMs
+  } else if (typeof input.startedAtMs === 'number') {
+    next.startedAtMs = input.startedAtMs
+    delete next.runtime
+  } else if (input.live && typeof next.startedAtMs !== 'number') {
+    next.startedAtMs = Date.now()
   }
   const segments = flowLogSegmentsState.value.map((segment, candidateIndex) =>
     candidateIndex === index
@@ -234,6 +245,21 @@ export function useBackendFlowLogs() {
     }
     const record = backendRuntimeEventPayload(event)
     const protocolType = backendRuntimeEventKind(event)
+    const terminalState = backendRuntimeEventTerminalState(event)
+    if (
+      terminalState &&
+      terminalState !== 'succeeded' &&
+      protocolType !== 'step.completed'
+    ) {
+      flowLogSegmentsState.value = flowLogSegmentsState.value.map((segment) => {
+        if (!segment.live) return segment
+        const next = { ...segment, live: false }
+        delete next.startedAtMs
+        return next
+      })
+      void refreshFlowLogs()
+      return
+    }
     const stepName = backendRuntimeEventStep(event) ?? ''
     const tool = typeof record.tool === 'string' ? record.tool : ''
     if (!stepName || isObsoleteBackendFlowStep(stepName)) return
@@ -241,6 +267,7 @@ export function useBackendFlowLogs() {
     if (protocolType === 'step.started') {
       const segment = upsertRuntimeSegment({
         live: true,
+        startedAtMs: Date.now(),
         state: backendRuntimeEventState(event) ?? 'Ongoing',
         stepName,
         tool,
@@ -280,6 +307,7 @@ export function useBackendFlowLogs() {
       const segment = upsertRuntimeSegment({
         failed: isFailedState(state),
         live: false,
+        startedAtMs: null,
         state,
         stepName,
         tool,
@@ -300,6 +328,9 @@ export function useBackendFlowLogs() {
       }
       flowLogStepNameState.value = stepName
       flowLogErrorState.value = null
+      // ECC persists the final step.runtime to flow.json before emitting
+      // step.completed, so refresh to replace the live ticker's estimate.
+      void refreshFlowLogs()
     }
   }
 
